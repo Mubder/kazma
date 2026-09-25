@@ -296,6 +296,8 @@ class ArtifactStore:
         info = self.resolve_proposal(ref, tenant_id=tenant_id)
         if not info or len(info.get("items") or []) != 1:
             return None
+        if info["items"][0].get("used_via") == "discarded":
+            return None  # retired on purpose; restore it before publishing
         text = str((info.get("texts") or [""])[0] or "").strip()
         return text or None
 
@@ -338,13 +340,18 @@ class ArtifactStore:
         tenant_id: str = "default",
         limit: int = 50,
         include_posted: bool = False,
+        only_discarded: bool = False,
     ) -> list[dict[str, Any]]:
         """Newest outbound drafts, flattened to one row per item.
 
         X Studio lists these so a saved proposal survives trim and is still
         approvable from the composer. Used items stay out unless asked, and
         that is decided per ITEM: posting draft 1 of a set leaves 2..N here.
+        ``only_discarded`` returns just the drafts retired with
+        :meth:`discard_proposal` (X Studio's "Show dismissed").
         """
+        if only_discarded:
+            include_posted = True
         kinds = ("proposal", "proposal_posted") if include_posted else ("proposal",)
         bounded = max(1, min(int(limit or 50), 200))
         out: list[dict[str, Any]] = []
@@ -360,6 +367,8 @@ class ArtifactStore:
                     continue
                 used = self._item_used(item, kind)
                 if used and not include_posted:
+                    continue
+                if only_discarded and item.get("used_via") != "discarded":
                     continue
                 out.append(
                     {
@@ -534,6 +543,85 @@ class ArtifactStore:
             )
         return marked
 
+    def discard_proposal(
+        self,
+        ref: str,
+        *,
+        tenant_id: str = "default",
+        restore: bool = False,
+    ) -> dict[str, int]:
+        """Retire the unused draft(s) *ref* names — or bring discarded ones back.
+
+        A discarded draft is marked like a used one (``used_via="discarded"``),
+        so it leaves every "what is left" list and a set whose drafts are all
+        posted or discarded ages out on the spent-set clock. Posted and
+        scheduled drafts are never discarded: that would rewrite what went
+        out. ``restore=True`` clears only ``discarded`` marks.
+
+        Returns ``{"changed": n, "skipped_used": m}`` (m = drafts already
+        posted/scheduled, which a discard leaves alone).
+        """
+        parsed = self._parse_ref(ref)
+        if parsed is None:
+            return {"changed": 0, "skipped_used": 0}
+        key, item_no = parsed
+        tenant = tenant_id or "default"
+        now = time.time()
+        report = {"changed": 0, "skipped_used": 0}
+        with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT thread_id, value FROM agent_artifacts
+                WHERE key = ? AND tenant_id = ?
+                ORDER BY updated_at DESC LIMIT 1
+                """,
+                (key, tenant),
+            ).fetchone()
+            if row is None:
+                return report
+            thread_id, value = row
+            try:
+                payload = json.loads(str(value))
+            except (TypeError, ValueError, AttributeError):
+                return report
+            items = [i for i in (payload.get("items") or []) if isinstance(i, dict)]
+            for item in items:
+                if not self._item_matches(item, item_no):
+                    continue
+                discarded = item.get("used_via") == "discarded"
+                if restore:
+                    if discarded:
+                        for field in ("used_at", "used_via", "used_ref"):
+                            item.pop(field, None)
+                        report["changed"] += 1
+                    continue
+                if item.get("used_at"):
+                    if not discarded:
+                        report["skipped_used"] += 1
+                    continue
+                item["used_at"] = now
+                item["used_via"] = "discarded"
+                report["changed"] += 1
+            if not report["changed"]:
+                return report
+            payload["items"] = items
+            new_value = json.dumps(payload, ensure_ascii=False)
+            kind = (
+                "proposal_posted"
+                if items and all(i.get("used_at") for i in items)
+                else "proposal"
+            )
+            conn.execute(
+                """
+                UPDATE agent_artifacts
+                SET value = ?, kind = ?, updated_at = ?, content_hash = ?
+                WHERE tenant_id = ? AND thread_id = ? AND key = ?
+                """,
+                (new_value, kind, now, _content_hash(new_value), tenant, thread_id, key),
+            )
+        return report
+
     def legacy_posted_count(self) -> int:
         """Sets stamped used as a whole, with no per-item state (pre-2026-09-25)."""
         n = 0
@@ -681,6 +769,8 @@ def _item_state(item: dict[str, Any]) -> str:
         return f"posted {at}" + (f" (tweet {ref})" if ref else "")
     if via in _SCHEDULED_VIA:
         return f"scheduled {at}" + (f" (booking #{ref})" if ref else "")
+    if via == "discarded":
+        return f"discarded {at} (restore with discard_proposal restore=True)"
     return f"used {at}" + (f" via {via}" if via else "")
 
 

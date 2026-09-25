@@ -145,6 +145,10 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 ### Danger tools (require approval unless YOLO)
 Typical list: `file_write`, `file_apply_patch_set`, `file_delete`, `shell_exec`, `code_exec` / `python_exec`, `email_send`, `email_delete`, `email_categorize`. Swarm also treats spawn/schedule tools as extended danger. After approval, `python_exec` runs in Docker when `KAZMA_CODE_EXEC_DOCKER=force` (no network, fail-closed if Docker is missing). Under that same force, host `shell_exec` is **disabled** unless `KAZMA_HOST_SHELL=1`. `file_apply_patch_set` runs nearby pytest after apply (`verify=true`).
 
+### Saved drafts and Kazma's own stores
+- Drafts saved with `save_proposal` are read back with **`list_proposals`** — exact text, item ids, and whether each draft is unused, posted (tweet id) or scheduled (booking id). Retire superseded drafts with **`discard_proposal`** (reversible with `restore=True`; posted/scheduled drafts are never touched; a discarded draft cannot be published until restored).
+- Kazma's own databases (`kazma-data/*.db`) are refused to the SQL, file and exec tools; the refusal names the tool that reads each one. Never byte-dump or grep them — use the named tool. `x_status(recent=N)` lists recent posts; `x_list_scheduled` the booking queue.
+
 ### Approval-card delivery (facts — never invent throttles)
 - Web chat approval cards have **no rate limit**: every gate surfaces immediately, however many in a batch.
 - Distinct outbound posts (`x_post` / `x_schedule_post` with a `proposal_id`) **always** surface their card on every path — web and platform.

@@ -48,6 +48,13 @@ class XDeleteBody(BaseModel):
     tweet_id: str = Field(..., min_length=1)
 
 
+class XDraftDiscardBody(BaseModel):
+    #: A draft's item id (``prop_x:3``) or a set id; restore brings back
+    #: drafts that were dismissed, never touching posted/scheduled ones.
+    id: str = Field(..., min_length=1, max_length=200)
+    restore: bool = Field(default=False)
+
+
 def _is_production() -> bool:
     return (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
         "1", "true", "on", "yes",
@@ -174,7 +181,7 @@ def _status_payload() -> dict[str, Any]:
 
 
 @router.get("/status")
-async def x_status() -> JSONResponse:
+def x_status() -> JSONResponse:
     try:
         return JSONResponse(_status_payload())
     except Exception as exc:
@@ -210,28 +217,47 @@ async def x_preview(body: XPreviewBody) -> JSONResponse:
 
 
 @router.get("/drafts")
-async def x_drafts(limit: int = 50) -> JSONResponse:
-    """Flattened save_proposal items for the X Studio inbox."""
+def x_drafts(limit: int = 50, dismissed: bool = False) -> JSONResponse:
+    """Flattened save_proposal items for the X Studio inbox.
+
+    ``dismissed=true`` lists only drafts retired with Dismiss (so they can be
+    restored). A plain ``def``: the store is sync SQLite, and FastAPI runs a
+    sync handler in its threadpool instead of on the event loop.
+    """
     try:
         from kazma_core.agent.artifacts import get_artifact_store
 
-        tenant_id = "default"
-        try:
-            from kazma_core.tenant_isolation import require_tenant_id
-
-            tenant_id = require_tenant_id() or "default"
-        except Exception:
-            pass
         items = get_artifact_store().list_proposals(
-            tenant_id=tenant_id, limit=max(1, min(int(limit or 50), 200))
+            tenant_id=_tenant_id(),
+            limit=max(1, min(int(limit or 50), 200)),
+            only_discarded=bool(dismissed),
         )
         return JSONResponse({"ok": True, "count": len(items), "drafts": items})
     except Exception as exc:
         return _safe_error(exc)
 
 
+@protected_router.post("/drafts/discard", dependencies=[Depends(_verify_same_origin)])
+def x_drafts_discard(body: XDraftDiscardBody) -> JSONResponse:
+    """Dismiss an unused draft from the inbox, or restore a dismissed one.
+
+    The same store operation as the agent's ``discard_proposal`` tool: posted
+    and scheduled drafts are never touched, and a dismissed draft cannot be
+    published until it is restored.
+    """
+    try:
+        from kazma_core.agent.artifacts import get_artifact_store
+
+        report = get_artifact_store().discard_proposal(
+            body.id, tenant_id=_tenant_id(), restore=body.restore
+        )
+        return JSONResponse({"ok": True, **report})
+    except Exception as exc:
+        return _safe_error(exc)
+
+
 @router.get("/audit")
-async def x_audit(limit: int = 50, action: str | None = None) -> JSONResponse:
+def x_audit(limit: int = 50, action: str | None = None) -> JSONResponse:
     """Recent X-integration audit entries (append-only x_audit.db).
 
     Every API call — post/reply/delete/verify, success, HTTP error, and
@@ -258,7 +284,11 @@ async def x_post_now(body: XPostBody) -> JSONResponse:
         from kazma_core.x_api.booking import publish_x_post
 
         try:
-            text, proposal_ref = _bind_proposal(body.text, body.proposal_id)
+            # Saved-drafts SQLite off the event loop (the publish itself is
+            # the only awaited network call in this route).
+            text, proposal_ref = await asyncio.to_thread(
+                _bind_proposal, body.text, body.proposal_id
+            )
         except ValueError as exc:
             return JSONResponse(
                 {"ok": False, "posted": False, "error": str(exc)},
@@ -269,7 +299,8 @@ async def x_post_now(body: XPostBody) -> JSONResponse:
         )
         payload["ok"] = ok
         if ok:
-            _mark_proposal_posted(
+            await asyncio.to_thread(
+                _mark_proposal_posted,
                 proposal_ref,
                 via="x_studio_post",
                 used_ref=str(payload.get("tweet_id") or ""),
@@ -296,7 +327,7 @@ async def x_delete_now(body: XDeleteBody) -> JSONResponse:
 
 
 @protected_router.post("/credentials", dependencies=[Depends(_verify_same_origin)])
-async def x_save_credentials(body: XCredentialsBody) -> JSONResponse:
+def x_save_credentials(body: XCredentialsBody) -> JSONResponse:
     try:
         from kazma_core.config_store import get_config_store
 
@@ -368,7 +399,7 @@ async def x_test() -> JSONResponse:
 
 
 @protected_router.post("/disconnect", dependencies=[Depends(_verify_same_origin)])
-async def x_disconnect() -> JSONResponse:
+def x_disconnect() -> JSONResponse:
     try:
         from kazma_core.config_store import get_config_store
         from kazma_core.x_api.config import CREDENTIAL_KEYS

@@ -139,6 +139,34 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "استخدام",
         "en": "Use",
     },
+    "x_studio.dismiss": {
+        "ar": "استبعاد",
+        "en": "Dismiss",
+    },
+    "x_studio.restore": {
+        "ar": "استعادة",
+        "en": "Restore",
+    },
+    "x_studio.show_dismissed": {
+        "ar": "عرض المستبعدة",
+        "en": "Show dismissed",
+    },
+    "x_studio.empty_dismissed": {
+        "ar": "لا مسودات مستبعدة.",
+        "en": "No dismissed drafts.",
+    },
+    "x_studio.draft_dismissed": {
+        "ar": "استُبعدت المسودة ولن تُقترح مجددًا. استعدها من «عرض المستبعدة».",
+        "en": "Draft dismissed — it will not be offered again. Restore it under Show dismissed.",
+    },
+    "x_studio.draft_restored": {
+        "ar": "استُعيدت المسودة.",
+        "en": "Draft restored.",
+    },
+    "x_studio.draft_unchanged": {
+        "ar": "لم يتغير شيء — المسودة منشورة أو مجدولة أو مستبعدة مسبقًا.",
+        "en": "Nothing changed — that draft was already posted, scheduled or dismissed.",
+    },
     "x_studio.thread_on": {
         "ar": "سلسلة",
         "en": "Thread",

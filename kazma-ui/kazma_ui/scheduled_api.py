@@ -272,9 +272,14 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     # ── Scheduled X post CRUD ─────────────────────────────────────────
+    # Plain ``def`` routes: every call below is synchronous SQLite (the
+    # schedule store, the saved-drafts store, the post ledger via booking)
+    # and none awaits anything. FastAPI runs a sync handler in its thread
+    # pool, so the event loop that serves every SSE/WS stream never waits
+    # on them (AGENTS §35). They were ``async def`` until 2026-09-25.
 
     @protected.post("/api/scheduled/x", dependencies=[Depends(_verify_same_origin)])
-    async def create_x(body: XScheduleBody) -> JSONResponse:
+    def create_x(body: XScheduleBody) -> JSONResponse:
         from kazma_core.x_api.booking import book_x_post
 
         tenant = _tenant_id()
@@ -322,7 +327,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
         return JSONResponse({"ok": ok, **payload}, status_code=200 if ok else 400)
 
     @protected.put("/api/scheduled/x/{post_id}", dependencies=[Depends(_verify_same_origin)])
-    async def edit_x(post_id: int, body: XRescheduleBody) -> JSONResponse:
+    def edit_x(post_id: int, body: XRescheduleBody) -> JSONResponse:
         from kazma_core.cron.scheduler import parse_timing
         from kazma_core.x_api.schedule import get_x_scheduled_store
         import time as _time
@@ -346,7 +351,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
         return JSONResponse({"ok": True, "id": post_id, "fire_at": _iso(new_fire)})
 
     @protected.delete("/api/scheduled/x/{post_id}", dependencies=[Depends(_verify_same_origin)])
-    async def delete_x(post_id: int) -> JSONResponse:
+    def delete_x(post_id: int) -> JSONResponse:
         from kazma_core.x_api.schedule import get_x_scheduled_store
 
         store = get_x_scheduled_store()

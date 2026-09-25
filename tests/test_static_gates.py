@@ -890,6 +890,13 @@ _LOOP_STALL_HELPERS = frozenset({
     "get_session_payload", "run_weekly_sweep", "build_report", "scan_log",
     "mirror_drift_summary", "purge_completed_tasks", "expire_due_gates",
     "check_database", "perform_universal_backup",
+    # The saved-drafts store (agent/artifacts.py): each call opens SQLite,
+    # several take BEGIN IMMEDIATE. X Studio's drafts route ran it on the
+    # loop until 2026-09-25; the rest were found by adding these names.
+    "save_proposal", "resolve_proposal", "stored_text_for", "list_proposals",
+    "list_proposal_sets", "proposal_set", "proposal_posted", "discard_proposal",
+    "list_scratchpad", "put_scratchpad", "heal_legacy_posted",
+    "mark_proposals_posted", "_bind_proposal", "_mark_proposal_posted",
 })
 
 

@@ -1107,6 +1107,15 @@ def _resolve_proposal_backed_post(profile, tool_name, args, *, audit, thread_id,
             "save_proposal(kind, items) and retry with the fresh id.",
             profile, audit,
         )
+    if any(str(i.get("used_via") or "") == "discarded" for i in info.get("items") or []):
+        # A retired draft stays resolvable for audit, but publishing it would
+        # leave its record saying "discarded" while the tweet is live.
+        return EffectDecision(
+            "deny",
+            f"draft {ref!r} was discarded. Restore it first with "
+            f"discard_proposal(proposal_id={ref!r}, restore=True), or save a new draft.",
+            profile, audit,
+        )
     texts = list(info["texts"])
     if len(texts) != 1:
         return EffectDecision(
