@@ -21,7 +21,11 @@ def test_detect_short_english_after_session_flip():
 def test_lock_english_forbids_arabic():
     msg = language_lock_message("What is the status of memory?")
     assert "ENGLISH" in msg
-    assert "MUST reply in English" in msg
+    # 2026-09-25: "MUST reply in English" became "MUST write your reply in
+    # English only" when quoted material was exempted -- the lock governs the
+    # words the model writes, not stored drafts it reproduces
+    # (tests/test_language_lock_quoting.py).
+    assert "MUST write your reply in English only" in msg
     assert "Kazma" in msg
     assert "HISTORY OVERRIDE" in msg
     assert "latest" in msg.lower() or "LATEST" in msg
