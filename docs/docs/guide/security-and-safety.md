@@ -345,6 +345,7 @@ These sit **beside** HITL, not inside it.
 | Unclassified tool is gated | `requires_approval()` → `TOOL_TIERS` (deny wins) |
 | Allowlisting a binary is not allowlisting what it runs | `shell_exec` `_EXEC_CAPABLE_ARGS` (`find -exec`, `git -c`, …) |
 | Secret masking recurses | `settings.mask_deep()` — lists and JSON strings too |
+| A password inside a URL is a secret | masked by value on every way out (`security/url_credentials.py`), whatever the setting is called; memory-backend URLs with a password go to the vault |
 | CSRF | `csrf.py`: non-GET `/api/*` mismatched Origin/Referer host → 403. Use `request.url.hostname` (Starlette has no `.host`) |
 | `/health/details` is sensitive | L-1; `/health/live` and `/health/ready` stay public |
 | SSRF pin-IP | `validate_url` returns public IPs; `PinHostAsyncTransport` when no proxy; `assert_peer_public` after each hop |

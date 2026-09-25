@@ -39,7 +39,7 @@ Chat turn
 6. **Memory admin (`/memory`)** — graph + entities/beliefs (below).  
 7. **Smoke** — `pwsh -File scripts/memory_smoke.ps1` · [Smoke matrix](../ops/smoke-matrix) · [Recent features](./recent-features)  
 8. **Optional Neo4j** — only if you want graph dual-write (below).  
-9. **Scale** — set `KAZMA_DATABASE_URL` and `CREATE EXTENSION vector`. pgvector becomes the dense engine automatically (`KAZMA_PGVECTOR=0` keeps sqlite-vec). Do **not** set `KAZMA_MEMORY_STATE_ROLE=primary` until `python scripts/reconcile_memory_mirror.py --dry-run` is clean.
+9. **Scale** — set `KAZMA_DATABASE_URL` on a Postgres that ships pgvector (`pgvector/pgvector:pg16`, not `postgres:16-alpine`). pgvector becomes the dense engine automatically; Settings → Memory says if the server cannot hold vectors (`KAZMA_PGVECTOR=0` keeps sqlite-vec). Do **not** set `KAZMA_MEMORY_STATE_ROLE=primary` until `python scripts/reconcile_memory_mirror.py --dry-run` is clean.
 
 ## Memory admin page (`/memory`)
 

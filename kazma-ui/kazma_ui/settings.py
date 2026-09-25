@@ -135,14 +135,21 @@ def mask_deep(node: Any, _depth: int = 0) -> Any:
     if isinstance(node, str) and node.strip():
         # Config values are often JSON-encoded; mask inside, then re-encode so
         # the wire shape is unchanged.
+        # A password inside a URL is a secret whatever the key is called:
+        # memory.backends.state.url held the live Postgres DSN (2026-09-25).
+        from kazma_core.security.url_credentials import (
+            mask_url_credentials,
+            mask_urls_in_text,
+        )
+
         stripped = node.strip()
         if stripped[0] in "{[":
             try:
                 decoded = json.loads(stripped)
             except (json.JSONDecodeError, TypeError, ValueError):
-                return node
+                return mask_urls_in_text(node)
             return json.dumps(mask_deep(decoded, _depth + 1))
-        return node
+        return mask_url_credentials(node)
 
     return node
 

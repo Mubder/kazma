@@ -232,7 +232,7 @@ Provider-enforced JSON for a **non-tool** reply (`response_format` `json_schema`
 Per-thread inspect-then-propose (`/plan on`). Write/exec tools are stripped via `read_only` hard_constraints. `/plan go` or **Proceed** executes the plan; HITL still applies. Kill-switch: `KAZMA_PLAN_MODE=0`.
 
 **pgvector**
-Postgres extension for vector search. When Kazma already has a Postgres DSN, V2 dense recall auto-selects pgvector (`kazma_memory_vectors`, cosine / HNSW). sqlite-vec remains the one-node default. Kill-switch: `KAZMA_PGVECTOR=0`.
+Postgres extension for vector search. When Kazma already has a Postgres DSN, V2 dense recall auto-selects pgvector (table `kazma_memory`, cosine / HNSW) — if that server ships the extension; otherwise it stays on sqlite-vec and says why in Settings → Memory. sqlite-vec remains the one-node default. Kill-switch: `KAZMA_PGVECTOR=0`.
 
 **sqlite-vec**
 A SQLite extension for vector search. In V2 it backs `memory/vector_engine.py` (native sqlite-vec with a guarded NumPy fallback) for episode dense-vector recall on a single node. Declared in the `[rag]` optional extra (`sqlite-vec>=0.1.6`).

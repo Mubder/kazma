@@ -76,6 +76,13 @@ logger = logging.getLogger(__name__)
 #:   for chat and another for background work (flagged every boot until
 #:   2026-09-25). The install copy is the one mail code uses, so the GLOBAL
 #:   copy wins.
+#: * Memory backend secrets (``memory.backends.*``: the Postgres state DSN,
+#:   the vector/graph URLs and passwords, the embedder key): one backend per
+#:   process serves every tenant, and the memory worker reads them with no
+#:   tenant bound. The state DSN sat in plaintext in the settings table until
+#:   2026-09-25 because no rule knew ``state.url`` held a credential; moving
+#:   it to the vault under a request's tenant would have hidden it from that
+#:   worker. Operator saves, so the NEWEST copy wins.
 #:
 #: Not here on purpose: X connector credentials (``cfg:connectors.x.*``). The
 #: X code reads them as tenant ``default``, and moving an account the agent
@@ -86,6 +93,7 @@ INSTALL_SCOPED_SECRETS: tuple[tuple[str, str], ...] = (
     ("cfg:llm.api_key", "newest"),  # the legacy single-provider key
     ("email.", "global"),  # mail OAuth clients, tokens, scopes, IMAP/POP passwords
     ("calendar.", "global"),  # calendar tokens, written through the mail helper
+    ("cfg:memory.backends.", "newest"),  # state DSN, vector/graph secrets, embedder key
 )
 
 

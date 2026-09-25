@@ -22,16 +22,43 @@ SQLite remains the default when no database URL is set (tests, local single-node
 ### Memory search (pgvector)
 
 Setting `KAZMA_DATABASE_URL` also promotes **V2 dense recall** from sqlite-vec
-to **pgvector** in the same database (table `kazma_memory_vectors`, cosine,
-HNSW when the extension allows it). The cognitive store (`memory_state.db`)
-stays SQLite until you set `KAZMA_MEMORY_STATE_ROLE=primary`.
+to **pgvector** in the same database (table `kazma_memory` — the
+`memory.backends.vector.collection` setting — cosine, HNSW index), **if that
+Postgres can hold vectors**. The cognitive store (`memory_state.db`) stays
+SQLite until you set `KAZMA_MEMORY_STATE_ROLE=primary`.
 
-1. `CREATE EXTENSION IF NOT EXISTS vector;` on the Kazma database (superuser
-   or an allowed extension list on managed Postgres).
-2. Restart Kazma. Kill-switch: `KAZMA_PGVECTOR=0`.
+The server must ship the extension. `postgres:16-alpine` — the image in
+`docker-compose.postgres.yml` and `docker-compose.ha.yml` — does **not**; use
+`pgvector/pgvector:pg16` (or a managed Postgres that offers pgvector).
+
+1. Kazma creates the extension and table on first use when its role may.
+   Otherwise, as a superuser: `CREATE EXTENSION IF NOT EXISTS vector;` in the
+   Kazma database, and grant the role `CREATE` on its schema.
+2. Kazma checks at boot and on every memory search (cached one minute):
+   - pgvector picked **automatically** (no explicit choice) on a Postgres
+     without the extension: one INFO line, memory stays on sqlite-vec, and
+     Settings → Memory shows *Vector: full (local)* with the reason.
+   - pgvector **chosen** in Settings but unusable (no extension, role may not
+     create it, table of another vector size, server down): one WARNING
+     naming the fix, and the Settings banner says the same.
+   - **Test vector** in Settings → Memory runs the same check on demand.
 3. Rebuild embeddings once if you already have history:
    Settings → Memory → Rebuild embeddings (upserts into pgvector).
-4. Explicit Qdrant in Settings is never overridden.
+4. Changing embedder size: the table is sized by the embedder and never
+   resized. Point `memory.backends.vector.collection` at a new name, then
+   rebuild embeddings.
+5. Kill-switch: `KAZMA_PGVECTOR=0` (sqlite-vec on purpose, no check). Explicit
+   Qdrant in Settings is never overridden.
+
+**Moving an existing `postgres:16-alpine` database to `pgvector/pgvector:pg16`:**
+dump and restore, do not just swap the image on the same volume. Alpine uses
+musl and the pgvector image glibc; text indexes built under one collation are
+out of order under the other. With Kazma stopped, dump the whole database
+from the old container (`pg_dump -Fc`), restore it with `pg_restore` into a
+pgvector container on a **new** volume, point `KAZMA_DATABASE_URL` at it and
+start Kazma. Keep the old volume until the new one has run for a while.
+(`scripts/pg_backup.py` dumps only Kazma's own tables — right for a shared
+database, not for moving a whole one.)
 
 Postgres-primary recall (`state.role=primary`) is **ILIKE + pgvector RRF**,
 not ILIKE-only.

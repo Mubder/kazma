@@ -678,7 +678,11 @@ _REDACT_KEYS = {"api_key", "token", "secret", "password", "stt_api_key", "bot_to
 
 
 def _redact_secrets(obj: Any) -> Any:
-    """Recursively redact sensitive keys in a nested dict/list."""
+    """Recursively redact sensitive keys in a nested dict/list.
+
+    Leaves keep their value with any URL password masked: a key rule cannot
+    see the password inside a DSN or a token URL.
+    """
     if isinstance(obj, dict):
         return {
             k: ("***REDACTED***" if k.lower() in _REDACT_KEYS and v else _redact_secrets(v))
@@ -686,7 +690,9 @@ def _redact_secrets(obj: Any) -> Any:
         }
     if isinstance(obj, list):
         return [_redact_secrets(item) for item in obj]
-    return obj
+    from kazma_core.security.url_credentials import mask_url_credentials_deep
+
+    return mask_url_credentials_deep(obj)
 
 
 def _config_usage() -> str:

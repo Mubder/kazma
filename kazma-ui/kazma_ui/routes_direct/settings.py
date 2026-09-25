@@ -94,8 +94,13 @@ def register_settings_routes(self: Any) -> None:
             return {"ok": True}
         except Exception as exc:
             return {"ok": False, "error": safe_error(exc)}
+    # The memory-backend routes below that never await are plain ``def``s:
+    # they read config, open databases and probe remote servers, and FastAPI
+    # runs a ``def`` in its threadpool instead of on the loop that serves
+    # every SSE/WS stream (AGENTS §35). The two that read a request body
+    # await it, then run the blocking call in ``asyncio.to_thread``.
     @self.app.get("/api/settings/memory/backends")
-    async def _settings_memory_backends_get():
+    def _settings_memory_backends_get():
         from kazma_core.memory.backends import (
             get_backends_cfg,
             mask_backends_cfg,
@@ -126,30 +131,28 @@ def register_settings_routes(self: Any) -> None:
         except Exception:
             return {"ok": False, "error": "invalid JSON"}
         try:
+            import asyncio
+
             from kazma_core.memory.backends import save_backends_cfg
 
-            masked = save_backends_cfg(body if isinstance(body, dict) else {})
+            masked = await asyncio.to_thread(
+                save_backends_cfg, body if isinstance(body, dict) else {}
+            )
             return {"ok": True, "backends": masked}
         except Exception as exc:
             return {"ok": False, "error": safe_error(exc)}
     @self.app.post("/api/settings/memory/backends/test-embed")
-    async def _settings_memory_test_embed():
+    def _settings_memory_test_embed():
         from kazma_core.memory.backends import test_embedder_backend
 
         return test_embedder_backend()
     @self.app.post("/api/settings/memory/backends/test-vector")
-    async def _settings_memory_test_vector():
+    def _settings_memory_test_vector():
         from kazma_core.memory.backends import test_vector_backend
 
         return test_vector_backend()
-    @self.app.post("/api/settings/memory/backends/test-neo4j")
-    async def _settings_memory_test_neo4j(request: Request):
-        """Probe Neo4j using saved config, or optional body override before save."""
-        body = {}
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
+    def _probe_neo4j(body: Any) -> dict[str, Any]:
+        """Neo4j probe with saved config, or the body's unsaved values (blocking)."""
         from kazma_core.memory.backends import get_backends_cfg
         from kazma_core.memory.graph_backend import test_neo4j_connection
 
@@ -186,14 +189,25 @@ def register_settings_routes(self: Any) -> None:
             g["provider"] = "neo4j"
             cfg = {**cfg, "graph": g}
         return test_neo4j_connection(cfg)
+    @self.app.post("/api/settings/memory/backends/test-neo4j")
+    async def _settings_memory_test_neo4j(request: Request):
+        """Probe Neo4j using saved config, or optional body override before save."""
+        body = {}
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        import asyncio
+
+        return await asyncio.to_thread(_probe_neo4j, body)
     @self.app.post("/api/settings/memory/backends/sync-neo4j", dependencies=[Depends(rate_limit("admin_ops", 10))])
-    async def _settings_memory_sync_neo4j():
+    def _settings_memory_sync_neo4j():
         """Backfill active SQLite beliefs into Neo4j (needed once after enabling)."""
         from kazma_core.memory.graph_backend import sync_beliefs_to_neo4j
 
         return sync_beliefs_to_neo4j(tenant_id="default", limit=1000)
     @self.app.post("/api/settings/memory/backends/sync-postgres", dependencies=[Depends(rate_limit("admin_ops", 10))])
-    async def _settings_memory_sync_postgres():
+    def _settings_memory_sync_postgres():
         """Backfill existing SQLite beliefs + episodes into the Postgres state mirror.
 
         The dual-mirror is write-forward only; this one-shot copies existing rows
@@ -203,7 +217,7 @@ def register_settings_routes(self: Any) -> None:
 
         return backfill_state_mirror(tenant_id="default")
     @self.app.post("/api/settings/memory/backends/reset-local")
-    async def _settings_memory_reset_local():
+    def _settings_memory_reset_local():
         from kazma_core.memory.backends import reset_backends_to_local
 
         return {"ok": True, "backends": reset_backends_to_local()}
@@ -220,7 +234,7 @@ def register_settings_routes(self: Any) -> None:
         except Exception as exc:
             return {"ok": False, "error": safe_error(exc)}
     @self.app.get("/api/settings/memory/backends/rebuild/status")
-    async def _settings_memory_rebuild_status():
+    def _settings_memory_rebuild_status():
         from kazma_core.memory.reembed import get_rebuild_status
 
         return get_rebuild_status()

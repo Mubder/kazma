@@ -34,6 +34,11 @@ if TYPE_CHECKING:
 import yaml
 
 from kazma_core.diagnostic_scope import refuse_write, writes_suppressed
+from kazma_core.security.url_credentials import (
+    mask_urls_in_text,
+    url_has_credentials,
+    url_password_is_masked,
+)
 
 __all__ = ["CONFIG_STORE_MIGRATIONS", "ConfigStore", "ConfigStoreProtocol", "Migration", "MigrationRunner", "apply_sqlite_pragmas", "apply_sqlite_pragmas_async", "get_config_store", "get_kazma_secret", "get_or_create_disclosure_key", "get_validated_config", "is_masked_secret_placeholder", "is_sensitive_config_key", "is_vault_ref", "reset_config_store", "run_config_store_migrations", "set_config_store"]
 
@@ -203,7 +208,32 @@ def is_masked_secret_placeholder(value: Any) -> bool:
     if value in ("***", "****", "********"):
         return True
     # e.g. ****abcd or sk-****1234
-    return "****" in value
+    if "****" in value:
+        return True
+    # A URL shown with its password masked (``postgresql://u:***@h/db``) and
+    # posted back: writing it would store the stars as the password.
+    return url_password_is_masked(value)
+
+
+def _is_sensitive_config_value(key: str, value: Any) -> bool:
+    """True when *value*, stored under *key*, belongs in the vault.
+
+    A key named like a credential always does (:func:`is_sensitive_config_key`).
+    So does a URL carrying a password, whatever the key is called --
+    ``memory.backends.state.url`` held the live Postgres DSN in plaintext
+    (2026-09-25) -- when every reader will find it there: its vault name is
+    install-scoped (``INSTALL_SCOPED_SECRETS``). Under any other name the copy
+    would sit under the saving request's tenant, invisible to background
+    readers (AGENTS §38), so it stays where it is; it is masked on every way
+    out all the same (``security/url_credentials.py``).
+    """
+    if is_sensitive_config_key(key):
+        return True
+    if not url_has_credentials(value):
+        return False
+    from kazma_core.security.vault import is_install_scoped_secret
+
+    return is_install_scoped_secret(_vault_secret_name(key))
 
 
 def _vault_secret_name(key: str) -> str:
@@ -258,7 +288,8 @@ def _try_get_vault():
 def _redact_for_log(key: str, value: Any) -> str:
     if is_sensitive_config_key(key) or is_vault_ref(value):
         return "****"
-    s = repr(value)
+    # A DSN is shorter than the cut below: its password went out whole.
+    s = mask_urls_in_text(repr(value))
     return s if len(s) < 80 else s[:77] + "..."
 
 
@@ -1187,7 +1218,7 @@ class ConfigStore:
         if (
             migrate
             and not writes_suppressed()
-            and is_sensitive_config_key(key)
+            and _is_sensitive_config_value(key, val)
             and isinstance(val, str)
             and val
             and not is_masked_secret_placeholder(val)
@@ -1443,7 +1474,7 @@ class ConfigStore:
             # UI re-saved a masked field — keep existing secret untouched.
             return _VETO_MASKED
 
-        if not is_sensitive_config_key(key):
+        if not _is_sensitive_config_value(key, value):
             if isinstance(value, (dict, list)):
                 return self._encrypt_nested_sensitive(
                     value, key, self._stored_raw(key)
