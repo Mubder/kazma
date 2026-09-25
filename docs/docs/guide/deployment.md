@@ -167,6 +167,16 @@ code — restart `KazmaAgent` once (`schtasks /End` then `/Run KazmaAgent`
 on Windows). `--status` shows whether the watcher and `/health/ready`
 agree. `--install` registers the OS task (`install_service.py`).
 
+**PATH changes.** Windows hands a process its parent's environment, and the
+guard runs from one boot to the next, so a tool installed (or put back on
+PATH) while it runs used to stay invisible until `KazmaAgent` restarted. The
+server now appends the PATH entries the OS settings gained since then, and
+logs them (`[env] PATH gained N entries from the OS settings …`), so
+`--reload` is enough. It only appends: an entry removed from the settings
+stays until the task restarts. Other variables set in System Properties
+still need that restart; Kazma's own settings belong in `.env`, which every
+boot re-reads.
+
 On Windows, start via `kazma serve` or the guard — not `python -m uvicorn`.
 Uvicorn 0.36+ hardcodes `ProactorEventLoop`, and psycopg-async then cannot
 open the Postgres checkpointer.

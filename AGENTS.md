@@ -1022,7 +1022,9 @@ by `kazma_core.docker_cli.find_docker_cli()` (`KAZMA_DOCKER_BIN`, PATH,
 Docker's install folders), never `shutil.which("docker")` alone
 (`tests/test_docker_cli_discovery.py` gates it). Boot checks the tool
 (`pg_dump_tool_problem`, ops alert `backup.pg_tools`), and a failed dump's
-alert carries its reason (`last_pg_backup_failure`), redacted.
+alert carries its reason (`last_pg_backup_failure`), redacted. Putting the
+folder back on PATH then needs only `kazma_guard.py --reload`: the server
+adopts PATH entries the OS settings gained since the guard started (§38).
 
 **F. Universal backup — "never left anything behind"**
 (`kazma_core/backup/universal.py`). One unified backup that backs up
@@ -1958,6 +1960,18 @@ Read the named test before changing the code it guards.
   (`tests/test_date_guard_word_match.py`).
 - **Async routes that never await are plain `def`s** (§35); the debt ratchet
   counts the rest (`async_route_never_awaits`), and it only goes down.
+- **A reload adopts the PATH the OS settings have now**
+  (`kazma_core/path_refresh.py`). Windows gives a process its parent's
+  environment, and the guard lives from boot to boot, so the operator fixed
+  PATH, reloaded, and the server still could not find Docker. The server
+  appends the entries it is missing from the machine + user PATH,
+  in `KazmaAppBuilder._adopt_process_environment`, straight after
+  `setup_logging` (before any tool can spawn; the line lands in kazma.log,
+  as does the `.env` ladder line that used to be logged before logging
+  existed). Append only: never reorder (a venv stays first), never remove.
+  Other OS-level variables still need a `KazmaAgent` restart; Kazma's own
+  belong in `.env`, re-read every boot. Gate: `tests/test_path_refresh.py`
+  (runs the real app factory; order check with a negative control).
 
 ## UI Conventions (Web)
 
@@ -2005,6 +2019,10 @@ cd 'G:\GitHubRepos\kazma'
 & '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --reload
 & '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --status
 ```
+
+`--reload` also picks up a tool added to PATH while Kazma ran (§38). A
+new *guard* (its own code, or other OS-level variables) still needs the
+`KazmaAgent` task restarted.
 
 ## Testing & Validation
 

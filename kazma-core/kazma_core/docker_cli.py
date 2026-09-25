@@ -13,7 +13,9 @@ only the lookup was wrong.
 Lookup order: ``KAZMA_DOCKER_BIN`` (an explicit path), then PATH, then the
 places Docker installs itself on each OS. A CLI found off PATH is used, and
 said once, so the operator can put it back on PATH instead of depending on
-the fallback without knowing it.
+the fallback without knowing it. A reload is then enough: the server adopts
+PATH entries the OS settings gained since its supervisor started
+(:mod:`kazma_core.path_refresh`).
 """
 
 from __future__ import annotations
@@ -80,7 +82,8 @@ def find_docker_cli() -> str | None:
             _say_once(
                 f"found:{candidate}",
                 "[docker] the docker CLI is not on PATH; using %s. Docker Desktop "
-                "updates can drop it from PATH -- add its folder back, or set %s.",
+                "updates can drop it from PATH -- add its folder back and reload "
+                "Kazma (the server re-reads PATH from the OS settings), or set %s.",
                 candidate, _ENV,
             )
             return str(candidate)
