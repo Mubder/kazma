@@ -181,6 +181,13 @@ than a day, same pattern — nothing else). The database user needs `CREATEDB`
 with that grant, never a failed backup. Size the server for a second copy of
 the Kazma tables while it runs.
 
+To see it work without waiting for the weekly pass, run the deep drill now
+(it includes the rehearsal when it is on):
+
+```powershell
+& '.venv\Scripts\python.exe' -m kazma_core.backup.restore_drill --deep
+```
+
 > **A drill that has never run proves nothing.** Do not describe backups as
 > verified until a drill *result* appears in the log — the presence of a
 > scheduler in the code is not evidence. The resilience manifest marks this

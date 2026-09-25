@@ -176,6 +176,26 @@ def test_the_cli_exits_nonzero_on_a_bad_backup(tmp_path, monkeypatch):
     assert main(["--backup", str(good)]) == 0
 
 
+def test_the_cli_can_run_the_deep_drill_now(monkeypatch, capsys):
+    """The restore rehearsal lives in the weekly deep drill; --deep runs it on demand."""
+    from kazma_core.backup import restore_drill
+
+    ran = []
+
+    def deep(pg_dump=None):
+        ran.append("deep")
+        res = restore_drill.DrillResult(backup_dir="(deep)")
+        res.add("postgres:restore", True, "restored into a scratch database and dropped it")
+        return res
+
+    monkeypatch.setattr(restore_drill, "run_deep_drill", deep)
+    monkeypatch.setattr(restore_drill, "run_drill",
+                        lambda *_: pytest.fail("--deep must not run the daily drill"))
+    assert restore_drill.main(["--deep"]) == 0
+    assert ran == ["deep"]
+    assert "postgres:restore" in capsys.readouterr().out
+
+
 # ── the containerised deployment shape ────────────────────────────────
 
 

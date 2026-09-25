@@ -1011,10 +1011,18 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Verify a Kazma backup is readable.")
     ap.add_argument("--backup", default=None,
                     help="backup directory (default: the newest one)")
+    ap.add_argument("--deep", action="store_true",
+                    help="run the weekly deep drill now instead: read every data "
+                         "block of the newest Postgres dump, and -- when "
+                         "backups.pg.restore_rehearsal / KAZMA_PG_RESTORE_REHEARSAL=1 "
+                         "is on -- restore it into a scratch database, check it, "
+                         "drop it")
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    res = run_drill(args.backup)
+    # The deep drill otherwise only runs on its weekly cadence, so switching
+    # the restore rehearsal on had no way to be seen working until then.
+    res = run_deep_drill() if args.deep else run_drill(args.backup)
     for c in res.checks:
         mark = c["status"].upper()
         detail = f" -- {c['detail']}" if c["detail"] else ""

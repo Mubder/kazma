@@ -354,8 +354,12 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
   §31. It changes GitHub settings, so it is not done here.
 - **The shared-store peer registry is advisory.** It names installs; it does
   not stop one from writing. An acknowledged id silences only that id.
-- **The restore rehearsal needs `CREATEDB` and is off by default.** Until it
-  is turned on, "the dump restores" is still inferred from "the dump reads".
+- **The restore rehearsal is off by default.** Until it is turned on
+  (`KAZMA_PG_RESTORE_REHEARSAL=1` or `backups.pg.restore_rehearsal`), "the
+  dump restores" is still inferred from "the dump reads". It needs
+  `CREATEDB`; the live install's role has it (checked read-only 2026-09-25).
+  `python -m kazma_core.backup.restore_drill --deep` runs the weekly deep
+  drill — the rehearsal included, when on — on demand.
 - **The `python_exec` denylist sees literals only.** A path or command built
   at run time goes to the card, which is the control for it.
 
@@ -648,10 +652,16 @@ all predating that work.
 * Not the chunk context: running the exact four files that open chunk 00 in
   ONE process gives 64 passed in 20.3s on Windows. No hang.
 
-**Next step for whoever can run Linux:** reproduce with those four files, in
-that order, in one process, on Linux with `KAZMA_DB_BACKEND=sqlite`. That is a
-20-second experiment there and it is the whole remaining question. If it does
-not reproduce, widen to chunk 00's first ten files.
+**2026-09-25: not reproducible, and not recurring.** The experiment above ran
+on Linux (`python:3.11-slim`, `KAZMA_DB_BACKEND=sqlite`, `--timeout-method=thread`,
+one process): the four files 3 runs out of 3 (64 passed, ~4 s each) and chunk
+00's first ten files 2 out of 2 (111 passed, ~5.5 s). In the 20 CI runs from
+2026-09-24 14:06 to 2026-09-25 14:08 every chunk death was
+`tests/test_document_layout.py` — the Arabic reshaper, fixed that morning, with
+no death since — and none was in this file. The mock added for
+`get_app_installation_token` is the likeliest fix, but that is inference, not
+a demonstration. If it comes back, the runner names the file and prints the
+thread dump; run the experiment again with those files.
 
 **The cost is now bounded.** The runner re-runs the chunk minus the suspect as
 one process plus the suspect alone, instead of ~160 per-file runs — measured
