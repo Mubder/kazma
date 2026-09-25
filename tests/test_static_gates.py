@@ -897,6 +897,9 @@ _LOOP_STALL_HELPERS = frozenset({
     "list_proposal_sets", "proposal_set", "proposal_posted", "discard_proposal",
     "list_scratchpad", "put_scratchpad", "heal_legacy_posted",
     "mark_proposals_posted", "_bind_proposal", "_mark_proposal_posted",
+    # Shared-store peer registry: a Postgres round trip plus a file write.
+    # Boot calls it through to_thread; the names keep the next caller honest.
+    "check_shared_store_peers", "recent_peers",
 })
 
 

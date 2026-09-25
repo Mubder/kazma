@@ -29,12 +29,11 @@ __all__ = ["WorkspaceStore", "get_workspace_store", "reset_workspace_store"]
 logger = logging.getLogger(__name__)
 
 def _get_default_db_path() -> str:
-    try:
-        from kazma_core.paths import settings_db
+    # Same file as ConfigStore's default, resolved the same way — and with no
+    # CWD fallback, for the same reason (see config_store._get_default_db_path).
+    from kazma_core.paths import settings_db
 
-        return settings_db()
-    except Exception:
-        return str((Path.cwd() / "kazma-data" / "settings.db").resolve())
+    return settings_db()
 
 
 _DEFAULT_DB = _get_default_db_path()
@@ -106,12 +105,9 @@ class WorkspaceStore:
             try:
                 row = conn.execute("SELECT COUNT(*) as count FROM workspaces").fetchone()
                 cwd = Path.cwd().resolve()
-                try:
-                    from kazma_core.workspace.binding import default_sandbox_root
+                from kazma_core.workspace.binding import default_sandbox_root
 
-                    sandbox = default_sandbox_root().resolve()
-                except Exception:
-                    sandbox = (cwd / "kazma-data" / "workspace").resolve()
+                sandbox = default_sandbox_root().resolve()
 
                 if row and row["count"] == 0:
                     # Prefer CWD if CWD is a real project directory (contains files or .git)

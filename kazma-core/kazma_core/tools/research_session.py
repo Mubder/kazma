@@ -90,14 +90,9 @@ class ResearchSession:
 
 
 def _db_path() -> Path:
-    try:
-        from kazma_core.paths import data_dir
+    from kazma_core.paths import data_dir
 
-        root = Path(data_dir())
-    except Exception:
-        root = Path.cwd() / "kazma-data"
-    root.mkdir(parents=True, exist_ok=True)
-    return root / "research_sessions.db"
+    return data_dir() / "research_sessions.db"
 
 
 def _conn() -> sqlite3.Connection:

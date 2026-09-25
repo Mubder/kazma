@@ -318,12 +318,13 @@ async def apply_sqlite_pragmas_async(conn: Any, *, busy_timeout: int = 5000) -> 
         logger.warning("[SQLite] Failed to apply async pragmas: %s", exc)
 
 def _get_default_db_path() -> str:
-    try:
-        from kazma_core.paths import settings_db
+    # No CWD fallback. `settings_db()` fails only when the data dir cannot be
+    # created, and the old `Path.cwd() / "kazma-data"` answer then opened a
+    # SECOND settings.db wherever the process started — a store backup and
+    # migration never see, holding settings nobody else reads.
+    from kazma_core.paths import settings_db
 
-        return settings_db()
-    except Exception:
-        return str((Path.cwd() / "kazma-data" / "settings.db").resolve())
+    return settings_db()
 
 
 _DEFAULT_DB = _get_default_db_path()

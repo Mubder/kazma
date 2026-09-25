@@ -106,6 +106,8 @@ class SecretVault:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
 
         self._lock = threading.Lock()
+        # Names already reported by _note_scoped_miss: once per name per process.
+        self._scoped_miss_warned: set[str] = set()
         self._conn = sqlite3.connect(
             self._db_path, check_same_thread=False, isolation_level=None
         )
@@ -263,7 +265,52 @@ class SecretVault:
                 ).fetchone()
                 if row:
                     return self._decrypt(row["encrypted_value"], row["nonce"])
+            self._note_scoped_miss(name, tid)
         return None
+
+    def _note_scoped_miss(self, name: str, tid: str | None) -> None:
+        """Say once when a miss is really a missing tenant context.
+
+        ``None`` from :meth:`retrieve` reads as "not configured", so a caller
+        that forgot to bind a tenant fails silently and gets diagnosed wrong.
+        It shipped three times, each found by a symptom far from the cause:
+        09:00 reminders failing ``no usable API key``, a DeepSeek key read as
+        absent and Z.AI substituted, and ``kazma doctor`` blaming another
+        install's vault for a key that decrypted fine. A static list of entry
+        points is the gate that let all of those through; the miss is where
+        every caller passes.
+
+        Only a read with NO tenant bound is reported. A caller that has its
+        own tenant and misses another tenant's secret is isolation working,
+        not a bug. Once per name per process, tenant names capped, never a
+        value. The probe is one indexed query and runs only on a miss.
+        Caller holds ``self._lock``.
+
+        (First landed 2026-09-17 and reverted when CI hung — wrongly: the hang
+        was ``DocumentWorker.stop()``'s unbounded wait, found and fixed
+        2026-09-20.)
+        """
+        if tid or name in self._scoped_miss_warned:
+            return
+        try:
+            rows = self._conn.execute(
+                "SELECT DISTINCT tenant_id FROM secrets WHERE name = ? AND tenant_id IS NOT NULL",
+                (name,),
+            ).fetchall()
+        except sqlite3.Error:
+            return
+        scopes = sorted(r["tenant_id"] for r in rows)
+        if not scopes:
+            return
+        self._scoped_miss_warned.add(name)
+        shown = ", ".join(scopes[:3]) + (f" (+{len(scopes) - 3} more)" if len(scopes) > 3 else "")
+        logger.warning(
+            "[Vault] '%s' was read with no tenant bound and is not stored globally, "
+            "but it is stored for tenant(s): %s. This None means 'not visible from "
+            "this scope', not 'not configured' — bind the tenant with "
+            "tenant_scope(...) or read through retrieve_scoped().",
+            name, shown,
+        )
 
     def describe_secret(self, name: str) -> list[dict[str, Any]]:
         """Per-scope facts about `name` WITHOUT returning the secret.

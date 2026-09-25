@@ -81,6 +81,35 @@ def _diagnose_vault_pointer(ptr: str) -> str:
     )
 
 
+def _shared_store_lines(cs: object) -> list[tuple[str, str]]:
+    """Name every other install recently booted against this Postgres store.
+
+    The 2026-09-16 outage was two installs on one settings store, and this
+    command gave different answers on the two boxes without saying why.
+    Read-only: the server records boots (``check_shared_store_peers``); this
+    only reads them, and never mints an install id.
+    """
+    from kazma_core.db import shared_store_peers as ssp
+
+    try:
+        me = ssp.install_id(create=False)
+        peers: list[ssp.InstallRecord] = ssp.recent_peers(cs, me)
+        _known, unknown = ssp.split_acknowledged(cs, peers)
+    except ssp.store_errors() as exc:
+        return [_line(WARN, "could not read which installs share this store", str(exc)[:160])]
+    if not peers:
+        return [_line(OK, "no other install has booted against this store recently")]
+    if not unknown:
+        return [_line(OK, f"shared with {len(peers)} acknowledged install(s)",
+                      "; ".join(p.describe() for p in peers))]
+    return [_line(
+        WARN, f"this settings store is ALSO used by {len(unknown)} other install(s)",
+        "; ".join(p.describe() for p in unknown)
+        + f". Settings and vault:// pointers written by one are read by all. "
+        f"Replicas on purpose: list their ids under {ssp.ACK_KEY}.",
+    )]
+
+
 def collect() -> list[tuple[str, str]]:
     """Return [(status, rendered_line)] — the whole report, no printing."""
     out: list[tuple[str, str]] = []
@@ -106,6 +135,8 @@ def collect() -> list[tuple[str, str]]:
         "a leftover kazma-data/settings.db is NOT read when postgres is live"
         if backend == "postgres" else "",
     ))
+    if backend == "postgres":
+        out.extend(_shared_store_lines(cs))
 
     # ── the model that will actually be used ────────────────────────────
     model = str(cs.get("registry.active_model") or cs.get("registry.active_chat_model") or "")

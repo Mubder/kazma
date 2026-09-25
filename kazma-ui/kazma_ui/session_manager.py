@@ -1364,12 +1364,9 @@ def reset_session_manager() -> SessionManager:
         #
         # The pid suffix makes concurrent chunks disjoint; honouring data_dir
         # keeps KAZMA_DATA_DIR isolation working for callers that set it.
-        try:
-            from kazma_core.paths import data_dir
+        from kazma_core.paths import data_dir
 
-            _test_dir = str(data_dir())
-        except Exception:
-            _test_dir = "kazma-data"
+        _test_dir = str(data_dir())
         db_path = os.path.join(_test_dir, f"chat_sessions_test_{os.getpid()}.db")
         from kazma_ui.session_spool import spool_path_for
 

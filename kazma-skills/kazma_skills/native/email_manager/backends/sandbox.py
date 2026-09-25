@@ -40,12 +40,12 @@ CREATE INDEX IF NOT EXISTS idx_email_unread ON messages(unread);
 
 
 def _default_db_path() -> Path:
-    try:
-        from kazma_core.paths import data_dir
+    # No CWD-relative fallback: `Path("kazma-data")` wrote a second mailbox
+    # wherever the process happened to start (the class store_registry's
+    # CWD gate exists for). kazma-core is a hard dependency of this package.
+    from kazma_core.paths import data_dir
 
-        return data_dir() / "sandbox_emails.db"
-    except Exception:
-        return Path("kazma-data") / "sandbox_emails.db"
+    return data_dir() / "sandbox_emails.db"
 
 
 def _seed_path() -> Path:

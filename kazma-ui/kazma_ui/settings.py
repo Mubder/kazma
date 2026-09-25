@@ -971,8 +971,12 @@ class SettingsRouterBuilder:
                     from kazma_core.paths import data_dir
 
                     log_path = data_dir() / "restart.log"
-                except (ImportError, OSError):
-                    log_path = Path.cwd() / "kazma-data" / "restart.log"
+                except OSError:
+                    # A restart must not fail on where its log goes. The temp
+                    # dir is writable and is not a Kazma store.
+                    import tempfile
+
+                    log_path = Path(tempfile.gettempdir()) / "kazma-restart.log"
                 log_path.parent.mkdir(parents=True, exist_ok=True)
                 logf = open(log_path, "ab")
                 kwargs = dict(

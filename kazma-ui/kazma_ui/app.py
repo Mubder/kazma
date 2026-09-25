@@ -1767,6 +1767,21 @@ class KazmaAppBuilder:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[PG-BACKUP] boot schema verification failed: %s", exc)
 
+            # ── Who else writes this Postgres settings store ──────────
+            # KAZMA_DATA_DIR does not isolate a Postgres ConfigStore, and a
+            # second checkout with the same KAZMA_DATABASE_URL relocates
+            # nothing at all — the dev clone shared the live store for days
+            # that way (2026-09-16). Each boot records itself and names the
+            # other installs seen recently. Off the loop; never blocks boot.
+            try:
+                import asyncio as _aio
+
+                from kazma_core.db.shared_store_peers import check_shared_store_peers
+
+                await _aio.to_thread(check_shared_store_peers)
+            except Exception:  # noqa: BLE001 — a diagnostic must never fail boot
+                logger.warning("[SharedStore] boot peer check failed", exc_info=True)
+
             from kazma_ui.dashboard import set_dashboard_context
 
             set_dashboard_context(checkpoint_manager=self._checkpointer)
