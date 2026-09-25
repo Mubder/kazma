@@ -83,6 +83,14 @@ class KazmaAppBuilder:
         self._setup_gateway_and_bus()
         self._setup_routers()
         self._setup_lifecycle_and_errors()
+        # Added last, so it is the OUTERMOST layer: it records the TCP peer and
+        # then applies forwarded headers from the declared proxies, which the
+        # server used to do before the app could see the peer. Every other
+        # middleware sees the same client and scheme as before; see
+        # kazma_ui.proxy_headers.
+        from kazma_ui.proxy_headers import ForwardedHeadersMiddleware
+
+        self.app.add_middleware(ForwardedHeadersMiddleware)
         return self.app
 
     def _bootstrap_environment(self) -> None:
@@ -2722,9 +2730,12 @@ def main() -> None:
     # reaping is suppressed for that thread. Values match the websockets-lib
     # default (~40s worst case); PINNED so an upstream default flip cannot
     # silently regress it.
+    # proxy_headers=False: the app applies KAZMA_TRUSTED_PROXIES itself
+    # (kazma_ui.proxy_headers); uvicorn's default trusts 127.0.0.1 and hides
+    # the TCP peer from the undeclared-proxy check.
     uvicorn.run(app, host=host, port=args.port, log_level="info",
                 ws_ping_interval=20.0, ws_ping_timeout=20.0,
-                loop=uvicorn_loop_factory())
+                loop=uvicorn_loop_factory(), proxy_headers=False)
 
 
 if __name__ == "__main__":

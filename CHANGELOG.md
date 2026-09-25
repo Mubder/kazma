@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## No more false "undeclared proxy" alarm behind Cloudflare Tunnel (2026-09-25)
+
+Since 2026-09-23 the first request through the Cloudflare Tunnel after every
+boot logged `[SECURITY] x-forwarded-for/x-forwarded-proto arrived from peer
+46.186.228.227 ... Set KAZMA_TRUSTED_PROXIES=46.186.228.227`. The tunnel
+(`cloudflared` on 127.0.0.1) was declared correctly; the server listens on
+127.0.0.1 only. uvicorn, told to honour the declared proxy's forwarded
+headers, replaced the connection's address with the visitor's before Kazma's
+check ran, so the check mistook the visitor for an undeclared proxy — and
+advised trusting the visitor's address, which would have let that client set
+its own apparent IP.
+
+**Now:** the app applies forwarded headers itself, after recording the real
+connection address; every launcher starts uvicorn with `proxy_headers=False`.
+Pages and APIs see the same visitor address and `https` scheme as before, the
+check sees the proxy, and a genuinely undeclared proxy is still caught — with
+advice that names the proxy. If you launch uvicorn yourself, pass
+`--no-proxy-headers`.
+
 ## Your provider key is used, and a model fallback is never silent (2026-09-25)
 
 **What was happening.** Every boot since at least 2026-09-16 logged

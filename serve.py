@@ -68,23 +68,22 @@ def _bootstrap_bind_and_secret() -> str:
     return host
 
 
-def _proxy_args() -> list[str]:
-    """uvicorn flags so forwarded headers are parsed from declared proxies only.
+def _note_proxies() -> None:
+    """Say which peers may speak for a client via forwarded headers.
 
-    Without these, ``request.client.host`` is the proxy for every request and
-    the app cannot tell an internet visitor from the local operator (audit
-    F-01). ``KAZMA_TRUSTED_PROXIES`` is the single source of truth: unset means
-    no proxy, and uvicorn is told to trust nothing.
+    ``KAZMA_TRUSTED_PROXIES`` is the single source of truth (audit F-01), and
+    the APP applies it (``kazma_ui.proxy_headers``), not uvicorn: uvicorn
+    replaced the client address before the app could see the TCP peer, and
+    the undeclared-proxy check then flagged Cloudflare Tunnel's own visitors
+    on every boot. So uvicorn is always started with ``proxy_headers=False``.
     """
     proxies = [
         h.strip()
         for h in (os.environ.get("KAZMA_TRUSTED_PROXIES") or "").split(",")
         if h.strip()
     ]
-    if not proxies:
-        return ["--no-proxy-headers"]
-    print(f"  [proxy] trusting forwarded headers from: {', '.join(proxies)}")
-    return ["--proxy-headers", "--forwarded-allow-ips", ",".join(proxies)]
+    if proxies:
+        print(f"  [proxy] trusting forwarded headers from: {', '.join(proxies)}")
 
 
 host = _bootstrap_bind_and_secret()
@@ -100,14 +99,7 @@ try:
 
     import uvicorn
 
-    proxy = _proxy_args()
-    forwarded = None
-    proxy_headers = "--proxy-headers" in proxy
-    if proxy_headers:
-        for i, arg in enumerate(proxy):
-            if arg == "--forwarded-allow-ips" and i + 1 < len(proxy):
-                forwarded = proxy[i + 1]
-                break
+    _note_proxies()
 
     loop_factory = uvicorn_loop_factory()
     config_kwargs: dict = {
@@ -115,13 +107,12 @@ try:
         "factory": True,
         "host": host,
         "port": 9090,
-        "proxy_headers": proxy_headers,
+        # The app applies forwarded headers itself (see _note_proxies).
+        "proxy_headers": False,
         "ws_ping_interval": 20.0,
         "ws_ping_timeout": 20.0,
         "timeout_graceful_shutdown": 15,
     }
-    if forwarded:
-        config_kwargs["forwarded_allow_ips"] = forwarded
     if loop_factory is not None:
         config_kwargs["loop"] = loop_factory
 

@@ -101,8 +101,9 @@ KAZMA_TRUSTED_PROXIES=127.0.0.1
 
 Your proxy must send the forwarded headers and must *overwrite* rather than
 append a client-supplied value; the shipped `deploy/nginx-ha.conf` already
-does. `serve.py` passes `--proxy-headers --forwarded-allow-ips` to uvicorn
-from this variable automatically.
+does. Kazma applies this variable itself (an in-app middleware), and every
+launcher starts uvicorn with `proxy_headers=False`; launch it yourself with
+`--no-proxy-headers`.
 
 Under **Docker** this is the proxy container's bridge address (often
 `172.17.0.1` or the compose network gateway), not `127.0.0.1`. Getting it

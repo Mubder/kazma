@@ -102,7 +102,7 @@ kazma serve
 > proxy_set_header X-Forwarded-Proto $scheme;
 > ```
 >
-> `serve.py` passes `--proxy-headers --forwarded-allow-ips` to uvicorn automatically from this variable. If you launch uvicorn yourself, pass them too.
+> Kazma applies this variable itself, in the app, so uvicorn must **not** rewrite forwarded headers: `serve.py`, `kazma serve` and `kazma-web` start it with `proxy_headers=False`. If you launch uvicorn yourself, pass `--no-proxy-headers` — its default trusts `127.0.0.1` and hides the proxy's address from Kazma's undeclared-proxy check, which then raises a false alarm naming your visitor's IP (seen live behind Cloudflare Tunnel, 2026-09-23 to 2026-09-25).
 
 ---
 

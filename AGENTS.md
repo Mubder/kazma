@@ -1269,6 +1269,18 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   process. `proxy_health()` surfaces the state on `/api/auth/status`.
   The latch never clears at runtime — it may only close doors, never open
   them, which is also why spoofing the header gains an attacker nothing.
+- **The app applies forwarded headers, not uvicorn**
+  (`kazma_ui/proxy_headers.py`, the OUTERMOST middleware): it records the
+  TCP peer (`auth.TCP_PEER_SCOPE_KEY`, read by `_peer_host`), then runs
+  uvicorn's own `ProxyHeadersMiddleware` for the declared proxies, so routes
+  see the same client and scheme as before. Every launcher passes
+  `proxy_headers=False`. With uvicorn rewriting first, `_peer_host` read the
+  forwarded client as the peer: behind Cloudflare Tunnel (declared
+  `127.0.0.1`) the detector flagged the tunnel's own visitors on every boot
+  (2026-09-23 to 2026-09-25) and advised trusting a visitor's IP, and
+  `_peer_trust_allowed` saw the visitor instead of the proxy. Gate:
+  `tests/test_forwarded_headers_peer.py` (real ASGI layers — fake requests
+  whose `client` is the peer are why the unit tests never saw it).
 
 **B. HITL default-denies.**
 - `requires_approval()` ends on the `TOOL_TIERS` classification, not on a
