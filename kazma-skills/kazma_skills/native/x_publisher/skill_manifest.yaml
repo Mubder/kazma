@@ -13,9 +13,11 @@ tools:
     arabic_name: "حالة إكس"
     description: >
       Read-only X connector status: configured?, handle, remaining Kazma
-      caps, last posts. Never returns secrets. If unconfigured, tell the
-      operator to open Settings → X (not chat) and paste the four OAuth 1.0a
-      keys with Read + Write app permissions.
+      caps, and the latest posts. Args: recent (how many latest posts to
+      list, 1-50, default 5) — this is how to read Kazma's post history;
+      its database is not queryable directly. Never returns secrets. If
+      unconfigured, tell the operator to open Settings → X (not chat) and
+      paste the four OAuth 1.0a keys with Read + Write app permissions.
     category: social
     prompt_chain:
       - "ما حالة نشر إكس؟"
@@ -67,7 +69,8 @@ tools:
     arabic_name: "عرض التغريدات المجدولة"
     description: >
       List scheduled X posts with their status (pending, fired, cancelled,
-      failed), text and fire time. Read-only.
+      failed), text and fire time. Read-only. Saved drafts that were never
+      posted or booked are read with list_proposals.
     category: social
     prompt_chain:
       - "اعرض التغريدات المجدولة"

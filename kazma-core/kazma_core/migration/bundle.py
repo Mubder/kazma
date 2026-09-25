@@ -13,10 +13,10 @@ Bundle layout (all paths relative to the archive root)::
     config.yaml            # ConfigStore.export_yaml() (secrets are vault refs, not plaintext)
     vault.db               # encrypted secrets store — travels WITH KAZMA_VAULT_KEY
     data/
-      settings.db, workspaces.db, chat_sessions.db, cron.db,
-      checkpoints.db, snapshots.db, memory_state.db, memory_ops.db,
-      sessions.db, swarm_tasks.db, sandbox_emails.db, research_sessions.db,
-      pipeline_logs.db, knowledge_graph.db
+      settings.db, workspaces.db, and every store
+      kazma_core.store_registry.STORES marks "bundle" (chat_sessions.db,
+      checkpoints.db and checkpoints_<tenant>.db, memory_state.db,
+      agent_artifacts.db, x_scheduled.db, hitl_gates.db, …)
     assets/                # binary artifacts with no embedded paths (copied verbatim)
       attachments/ documents/ exports/ images/ fonts/
     pathmap.json           # source workspace root + data dir (for path translation on import)

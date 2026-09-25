@@ -81,6 +81,33 @@ _MD_PLAN_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _LIST_ITEM_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+\S")
+# An UNLABELLED fence at the very start of the reply.
+_BARE_LEAD_OPEN_RE = re.compile(r"\A(\s*)```[ \t]*\n")
+
+
+def _label_bare_plan_fence(s: str) -> str:
+    """Relabel a leading unlabelled fence that holds only a list as ```plan.
+
+    It is the plan the model forgot to label. Live 2026-09-24 (turn
+    44df5ea332b8): deepseek wrote its plan under a bare ``` and glued the
+    closer onto the answer (````Here's ...``). Every rule below knew only
+    ```plan, so nothing split the closer, the fence never closed, and the
+    whole reply rendered as one code block. A real code block, a fence later
+    in the text and a labelled fence are left alone. Mirrored exactly by
+    chat.js ``_labelBarePlanFence``; both read
+    tests/fixtures/plan_fence/bare_leading_fence.json.
+    """
+    opened = _BARE_LEAD_OPEN_RE.match(s)
+    if not opened:
+        return s
+    rest = s[opened.end() :]
+    close = rest.find("```")
+    if close < 0:
+        return s
+    lines = [ln for ln in rest[:close].split("\n") if ln.strip()]
+    if not lines or not all(_LIST_ITEM_RE.match(ln) for ln in lines):
+        return s
+    return opened.group(1) + "```plan\n" + rest
 
 
 def split_plan_and_prose(text: str | None) -> tuple[str, str]:
@@ -90,7 +117,7 @@ def split_plan_and_prose(text: str | None) -> tuple[str, str]:
     the user should read. A glued closer (````Saved.``) is split: the
     ticks close the fence, ``Saved.`` is prose.
     """
-    s = str(text or "")
+    s = _label_bare_plan_fence(str(text or ""))
     if not s.strip():
         return "", ""
 

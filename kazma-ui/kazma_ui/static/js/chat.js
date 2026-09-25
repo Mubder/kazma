@@ -111,6 +111,35 @@
     return s;
   }
 
+  /** CLDR plural category: the same rule as i18n.get_arabic_plural_form /
+   *  t_plural (six forms for Arabic, one/other for everything else). */
+  function _pluralCategory(n) {
+    var lang = String(document.documentElement.getAttribute('lang') || 'en')
+      .slice(0, 2).toLowerCase();
+    var x = Math.abs(Number(n) || 0);
+    if (lang !== 'ar') return x === 1 ? 'one' : 'other';
+    if (x === 0) return 'zero';
+    if (x === 1) return 'one';
+    if (x === 2) return 'two';
+    var mod100 = Math.floor(x) % 100;
+    if (mod100 >= 3 && mod100 <= 10) return 'few';
+    if (mod100 >= 11 && mod100 <= 99) return 'many';
+    return 'other';
+  }
+
+  /** A count with its noun, in the page language: "1 tool", "10 tools",
+   *  Arabic dual and plural forms. THE way to print a count -- the forms
+   *  come from the catalog (chat.<base>.<category>) via CHAT_I18N.plural.
+   *  Hand-built "n + ' ' + noun" labels printed "1 approvals", "3 3 tools"
+   *  and, through the wrong key, "1 step" for one tool (2026-09-24);
+   *  tests/test_count_labels.py keeps them from coming back. */
+  function tiCount(base, n, oneEn, otherEn) {
+    var forms = (((window.CHAT_I18N || {}).plural) || {})[base] || {};
+    var cat = _pluralCategory(n);
+    var s = forms[cat] || forms.other || (Number(n) === 1 ? oneEn : otherEn);
+    return String(s).replace(/\{n\}/g, String(n));
+  }
+
   function generateSessionId() {
     try {
       if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -3500,18 +3529,35 @@
     }
   }
 
+  /** Tools whose row may carry a file chip, and the verb it says. Every
+   *  entry is a WRITE_FS tool in the server's side-effect registry
+   *  (safety/side_effects.py; tests/test_file_chip.py checks the parity).
+   *  A tool not listed gets no chip. Guessing from the name and from any
+   *  slash in the result put "WROTE Asia/Kuwait" on x_list_scheduled -- a
+   *  read whose output held a timezone (2026-09-24). */
+  var _FILE_CHIP_OPS = {
+    file_write: 'wrote',
+    file_append: 'wrote',
+    file_apply_patch: 'patched',
+    file_apply_patch_set: 'patched',
+    file_delete: 'deleted',
+    generate_pdf: 'wrote',
+    generate_docx: 'wrote',
+    generate_xlsx: 'wrote'
+  };
+
+  function _fileChipOp(toolName) {
+    var n = String(toolName || '').toLowerCase().trim();
+    return Object.prototype.hasOwnProperty.call(_FILE_CHIP_OPS, n) ? _FILE_CHIP_OPS[n] : '';
+  }
+
   function _extractPathFromTool(toolName, detail) {
-    var n = String(toolName || '').toLowerCase();
-    if (n.indexOf('file_write') < 0 && n.indexOf('file_delete') < 0 &&
-        n.indexOf('write') < 0 && n.indexOf('delete') < 0) {
-      // still try path-like detail for shell redirects etc.
-      if (!detail || detail.indexOf('/') < 0 && detail.indexOf('\\') < 0) return '';
-    }
+    if (!_fileChipOp(toolName)) return '';
     var s = String(detail || '');
-    // JSON {"path": "..."}
-    var m = s.match(/"path"\s*:\s*"([^"]+)"/);
+    // JSON {"path": "..."} (arguments) first, then the file the result names.
+    var m = s.match(/"(?:path|file_path|output_path)"\s*:\s*"([^"]+)"/);
     if (m) return m[1];
-    m = s.match(/'path'\s*:\s*'([^']+)'/);
+    m = s.match(/'(?:path|file_path|output_path)'\s*:\s*'([^']+)'/);
     if (m) return m[1];
     // Bare path-ish token
     m = s.match(/(?:^|[\s"'])([A-Za-z]:\\[^\s"']+|\/[\w.\-\/]+|[\w.\-]+\/[\w.\-\/]+)/);
@@ -3589,7 +3635,7 @@
    * glued closer (```Saved.) that CommonMark never closes.
    */
   function splitPlanAndProse(text) {
-    var s = String(text || '');
+    var s = _labelBarePlanFence(String(text || ''));
     if (!s.trim()) return { plan: '', prose: '' };
     // ALL ```plan fences are workbench scaffolding, never content. Later
     // fences WIN — the model re-plans mid-turn, and a reply carrying five
@@ -3636,6 +3682,26 @@
       return { plan: mdSplit.plan, prose: mdSplit.prose };
     }
     return { plan: '', prose: s.trim() };
+  }
+
+  /** Relabel a leading unlabelled fence that holds only a list as ```plan.
+   *  It is the plan the model forgot to label: live 2026-09-24 a bare ```
+   *  plan with its closer glued to the answer (```Here's ...) never closed,
+   *  and the whole reply rendered as one code block. Mirrors
+   *  plan_fence._label_bare_plan_fence exactly; both read
+   *  tests/fixtures/plan_fence/bare_leading_fence.json. */
+  function _labelBarePlanFence(s) {
+    var open = /^(\s*)```[ \t]*\n/.exec(s);
+    if (!open) return s;
+    var rest = s.slice(open[0].length);
+    var close = rest.indexOf('```');
+    if (close < 0) return s;
+    var lines = rest.slice(0, close).split('\n').filter(function (l) { return l.trim(); });
+    if (!lines.length) return s;
+    for (var i = 0; i < lines.length; i++) {
+      if (!/^\s*(?:[-*]|\d+[.)])\s+\S/.test(lines[i])) return s;
+    }
+    return open[1] + '```plan\n' + rest;
   }
 
   function _splitListThenProse(body) {
@@ -3994,8 +4060,7 @@
         fileChip =
           '<div class="file-diff-chip" title="' + escapeHtml(pathGuess) + '">' +
             '<span class="file-diff-op">' +
-              (state === 'failed' ? 'failed'
-                : (rawTitle.toLowerCase().indexOf('delete') >= 0 ? 'deleted' : 'wrote')) +
+              (state === 'failed' ? 'failed' : _fileChipOp(rawTitle)) +
             '</span> ' +
             '<code class="file-diff-path">' + escapeHtml(pathGuess) + '</code>' +
           '</div>';
@@ -4110,11 +4175,10 @@
         // One line that stays readable when the panel is collapsed.
         var parts = [ti('done', 'Done')];
         if (_progressToolCount > 0) {
-          parts.push(_progressToolCount + ' ' + tiFmt('summary_tools', '{n} tools', { n: _progressToolCount }));
+          parts.push(tiCount('count_tools', _progressToolCount, '{n} tool', '{n} tools'));
         }
         if (_progressStepCount > 0) {
-          parts.push(_progressStepCount + ' ' + (_progressStepCount === 1
-            ? ti('step', 'step') : ti('steps', 'steps')));
+          parts.push(tiCount('count_steps', _progressStepCount, '{n} step', '{n} steps'));
         }
         if (elapsed) parts.push(elapsed);
         if (_lastTurnStats) {
@@ -4226,12 +4290,23 @@
     }
   }
 
-  /** The ONE place a disclosure preference is written: a reader gesture. */
+  /** The ONE place a disclosure preference is written, and only from a
+   *  reader gesture (AGENTS.md section 31). Callers: _toggleActivityFold
+   *  (the thoughts fold) and a decided approval card's header click.
+   *  tests/test_turn_ledger_abc.py counts the setExpanded call sites.
+   *  Returns false when there is no store (blocked site data). */
+  function _writeFoldPreference(turnId, name, open) {
+    var prefs = _turnPrefs();
+    if (!prefs) return false;
+    prefs.setExpanded(String(turnId || ''), name, !!open);
+    return true;
+  }
+
   function _toggleActivityFold(panel, turnId) {
     var prefs = _turnPrefs();
     var open = !panel.classList.contains('is-collapsed');
     var next = !open;
-    if (prefs) prefs.setExpanded(String(turnId || ''), 'activity', next);
+    _writeFoldPreference(turnId, 'activity', next);
     _applyActivityFold(panel, turnId);
     if (!prefs) {
       // No store (blocked site data): honour the click for this paint at
@@ -4254,14 +4329,13 @@
     }
     var stepCount = (rows.match(/<li /g) || []).length;
     var toolCount = (rows.match(/data-kind="tool"/g) || []).length;
-    var stepWord = stepCount === 1 ? ti('step', 'step') : ti('steps', 'steps');
     _panelSeq += 1;
     var bodyId = 'agent-progress-body-' + _panelSeq;
     // Header mirrors the live summary bar shape: "N tools · M steps" (+usage
     // when the server stamped per-turn tokens/cost on the message).
     var headBits = [];
-    if (toolCount) headBits.push(toolCount + ' ' + tiFmt('summary_tools', '{n} tools', { n: toolCount }));
-    headBits.push(stepCount + ' ' + stepWord);
+    if (toolCount) headBits.push(tiCount('count_tools', toolCount, '{n} tool', '{n} tools'));
+    headBits.push(tiCount('count_steps', stepCount, '{n} step', '{n} steps'));
     panel.innerHTML =
       '<div class="agent-progress-header" role="button" tabindex="0" title="' + escapeHtml(ti('cot_title', 'Thinking & Activity')) + '"' +
         ' aria-expanded="false" aria-controls="' + bodyId + '">' +
@@ -5209,11 +5283,43 @@
     }
   }
 
-  /** Collapse a claimed card to a one-line CoT-style bar (click to expand).
+  /** Which gate a card's fold preference is stored under. */
+  function _hitlFoldKey(card) {
+    try {
+      return String(card.getAttribute('data-interrupt-id') ||
+        card.getAttribute('data-gate-key') || '');
+    } catch (e) { return ''; }
+  }
+
+  /** Is this decided card open? The reader decides; collapsed by default. */
+  function _hitlCardOpen(card) {
+    if (card.__hitlOpen != null) return !!card.__hitlOpen;
+    var key = _hitlFoldKey(card);
+    var prefs = _turnPrefs();
+    return !!(key && prefs && prefs.isExpanded('', 'hitl:' + key, false));
+  }
+
+  function _syncHitlFold(card, header) {
+    var open = _hitlCardOpen(card);
+    card.classList.toggle('hitl-collapsed', !open);
+    var ch = header.querySelector('.hitl-collapse-chevron');
+    if (ch) ch.textContent = open ? '▾' : '▸';
+    header.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  /** Fold a decided card to a one-line CoT-style bar; the header toggles it.
    *  Keeps the decision visible in the timeline without a full card body
    *  sitting between the CoT and the streamed reply. The header chip is
    *  re-synced on every call so later state changes ("Resolving…" →
-   *  "Approved") stay visible while collapsed. */
+   *  "Approved") stay visible while collapsed.
+   *
+   *  The fold belongs to the reader (AGENTS.md §31): collapsed by default,
+   *  then only a click changes it, stored in turn_preferences like the
+   *  thoughts fold. This used to ADD hitl-collapsed on every call, and the
+   *  painter calls it on every state change -- so a card opened while it
+   *  read "Approved — running…" snapped shut when the tools finished, and
+   *  an open card offered no chevron or cursor to close it again
+   *  (reported 2026-09-24). */
   function _collapseClaimedHitlCard(card) {
     if (!card) return;
     var header = card.querySelector('.hitl-approval-header');
@@ -5231,25 +5337,29 @@
       if (chip.textContent !== txt) chip.textContent = txt;
       chip.className = 'hitl-collapse-chip ' + cls;
     }
-    if (card.classList.contains('hitl-collapsed')) return;
-    card.classList.add('hitl-collapsed');
+    // Re-added on every call: the painter assigns className wholesale.
+    card.classList.add('hitl-collapsible');
     if (!header.querySelector('.hitl-collapse-chevron')) {
       var chev = document.createElement('span');
       chev.className = 'hitl-collapse-chevron';
       chev.setAttribute('aria-hidden', 'true');
-      chev.textContent = '▸';
       header.appendChild(chev);
     }
+    // Wired before anything can return early: a card that arrived already
+    // carrying hitl-collapsed used to skip this and never open at all.
     if (!card.__hitlCollapseWired) {
       card.__hitlCollapseWired = true;
       header.addEventListener('click', function (e) {
         if (e.target.closest('button')) return;
-        var nowCollapsed = card.classList.toggle('hitl-collapsed');
-        var ch = header.querySelector('.hitl-collapse-chevron');
-        if (ch) ch.textContent = nowCollapsed ? '▸' : '▾';
+        var next = !_hitlCardOpen(card);
+        card.__hitlOpen = next;
+        var key = _hitlFoldKey(card);
+        if (key) _writeFoldPreference('', 'hitl:' + key, next);
+        _syncHitlFold(card, header);
         e.stopPropagation();
       });
     }
+    _syncHitlFold(card, header);
   }
 
   /** A pending approval card must be SEEN, not just rendered: if the
@@ -7054,15 +7164,13 @@
     var bits = [];
     var c = model.counts;
     if (c.tools) {
-      bits.push(c.tools + ' ' + (c.tools === 1
-        ? ti('step', 'tool')
-        : tiFmt('summary_tools', '{n} tools', { n: c.tools }).replace(/^\d+\s*/, '')));
+      bits.push(tiCount('count_tools', c.tools, '{n} tool', '{n} tools'));
     }
     if (c.pending) {
       bits.push(tiFmt('awaiting_decisions', '{n} awaiting your decision',
         { n: c.pending }));
     } else if (c.gates) {
-      bits.push(c.gates + ' ' + ti('approvals', 'approvals'));
+      bits.push(tiCount('count_approvals', c.gates, '{n} approval', '{n} approvals'));
     }
     return bits.join(' \u00B7 ');
   }
@@ -7293,11 +7401,9 @@
       var bits = [];
       if (thoughtN) bits.push(ti('thoughts', 'Thoughts'));
       if (_progressToolCount) {
-        bits.push(_progressToolCount + ' ' +
-          (_progressToolCount === 1 ? ti('step', 'tool') : ti('summary_tools', 'tools').replace('{n} ', '')));
+        bits.push(tiCount('count_tools', _progressToolCount, '{n} tool', '{n} tools'));
       }
-      bits.push(_progressStepCount + ' ' +
-        (_progressStepCount === 1 ? ti('step', 'step') : ti('steps', 'steps')));
+      bits.push(tiCount('count_steps', _progressStepCount, '{n} step', '{n} steps'));
       countEl.textContent = bits.join(' \u00B7 ');
     }
   }
@@ -7424,9 +7530,7 @@
     var title = ti('approvals', 'Approvals');
     if (titleEl && titleEl.textContent !== title) titleEl.textContent = title;
     var bits = [];
-    bits.push(total === 1
-      ? ti('one_request', '1 request')
-      : tiFmt('n_requests', '{n} requests', { n: total }));
+    bits.push(tiCount('count_requests', total, '{n} request', '{n} requests'));
     if (pending) {
       bits.push(tiFmt('awaiting_decisions', '{n} awaiting your decision',
         { n: pending }));

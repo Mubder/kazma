@@ -274,18 +274,18 @@ def register_external_tools(registry: Any) -> None:
     try:
         async def save_proposal(kind: str, items: list) -> str:
             """Persist outbound drafts durably; returns stable proposal IDs."""
+            import asyncio
+
             from kazma_core.agent.artifacts import get_artifact_store as _gas
             from kazma_core.safety.hitl import (
                 get_current_tenant_id as _tenant,
                 get_current_thread_id as _thread,
             )
 
+            tenant, thread = _tenant() or "default", _thread() or ""
             try:
-                payload = _gas().save_proposal(
-                    _tenant() or "default",
-                    _thread() or "",
-                    kind,
-                    items,
+                payload = await asyncio.to_thread(
+                    lambda: _gas().save_proposal(tenant, thread, kind, items)
                 )
             except ValueError as ve:
                 return f"Error: {ve}"
@@ -294,7 +294,8 @@ def register_external_tools(registry: Any) -> None:
                 lines.append(f"  - {i['id']}: {str(i['text'])[:80]}")
             lines.append(
                 "IDs survive context trim, restarts, and thread switches. Reference "
-                "proposal_id when posting — posting tools refuse without it."
+                "proposal_id when posting — posting tools refuse without it. Read "
+                "the drafts back any time with list_proposals."
             )
             return "\n".join(lines)
 
@@ -313,6 +314,82 @@ def register_external_tools(registry: Any) -> None:
         )
     except Exception as e:
         logger.error("Failed to register save_proposal: %s", e, exc_info=True)
+    # The reader for the store above. Until 2026-09-25 the model could save
+    # drafts but not read them back: asked to "list the remaining posts", it
+    # spent 67 tool calls and an approved python_exec byte-dumping
+    # agent_artifacts.db, because every direct route to its own store is
+    # refused. Every tool that writes Kazma state declares its reader
+    # (kazma_core.store_registry.TOOL_WRITES, gated in tests).
+    try:
+        async def list_proposals(
+            proposal_id: str = "",
+            include_used: bool = False,
+            limit: int = 20,
+        ) -> str:
+            """Read saved outbound drafts: ids, per-draft state, exact text."""
+            import asyncio
+
+            from kazma_core.agent.artifacts import (
+                describe_proposals,
+                get_artifact_store as _gas,
+            )
+            from kazma_core.safety.hitl import get_current_tenant_id as _tenant
+            from kazma_core.safety.prompt_fence import fence_untrusted
+
+            tenant = _tenant() or "default"
+            ref = str(proposal_id or "").strip()
+            if ref:
+                one = await asyncio.to_thread(
+                    lambda: _gas().proposal_set(ref, tenant_id=tenant)
+                )
+                if one is None:
+                    return (
+                        f"proposal_id {ref!r} does not match a saved draft. Unused "
+                        "drafts are kept 90 days and fully used sets 14 days; call "
+                        "list_proposals() without proposal_id to see what exists."
+                    )
+                sets, show_used = [one], True
+            else:
+                sets = await asyncio.to_thread(
+                    lambda: _gas().list_proposal_sets(
+                        tenant_id=tenant,
+                        include_used=bool(include_used),
+                        limit_sets=max(1, min(int(limit or 20), 100)),
+                    )
+                )
+                show_used = bool(include_used)
+                if not sets:
+                    return (
+                        "No saved drafts"
+                        + ("" if include_used else " left unused")
+                        + ". Drafts are saved with save_proposal(kind, items)."
+                    )
+            unused = sum(s["unused"] for s in sets)
+            header = (
+                f"Saved drafts: {unused} unused across {len(sets)} set(s), newest "
+                "first. The text is the exact stored draft; to publish one, pass "
+                "its [item id] as proposal_id."
+            )
+            body = describe_proposals(sets, include_used=show_used)
+            return header + "\n\n" + fence_untrusted(body, source="saved_proposals")
+
+        registry.register_function(
+            "list_proposals",
+            list_proposals,
+            description=(
+                "Read your SAVED outbound drafts (from save_proposal): each "
+                "draft's item id, whether it is unused / posted / scheduled "
+                "(with the tweet or booking id), and its exact stored text. Use "
+                "this for 'list/show my drafts', 'what is left to post', 'show "
+                "proposal X' — never query Kazma's databases or data files "
+                "directly (those routes are refused). Args: proposal_id (a set "
+                "or item id; empty = all sets), include_used=False (only unused "
+                "drafts), limit=20 (sets)."
+            ),
+            category="memory",
+        )
+    except Exception as e:
+        logger.error("Failed to register list_proposals: %s", e, exc_info=True)
     # Task Ledger — the durable task-state object the user's short
     # continuations ("proceed"/"next") resolve against. The deterministic
     # extractor maintains plan/next_action automatically; THIS tool lets the

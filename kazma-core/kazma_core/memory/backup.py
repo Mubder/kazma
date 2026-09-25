@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
+from contextlib import closing
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -46,8 +47,17 @@ def _backup_one(src_path: Path, dest_path: Path) -> bool:
     :func:`backup_one`.
     """
     try:
-        with sqlite3.connect(str(src_path)) as src, sqlite3.connect(str(dest_path)) as dst:
+        # closing(), not a bare ``with sqlite3.connect()``: that block commits
+        # and does NOT close, and a Connection sits in a reference cycle with
+        # its statement cache, so the file stays open until a GC pass. On
+        # Windows an open file cannot be renamed — every ``kazma migrate
+        # import`` died at its first ``os.replace(swap_tmp, dest)`` with
+        # WinError 32 (measured 3/3, 2026-09-25).
+        with closing(sqlite3.connect(str(src_path))) as src, closing(
+            sqlite3.connect(str(dest_path))
+        ) as dst:
             src.backup(dst, pages=100, sleep=0.01)
+            dst.commit()
         return True
     except Exception as exc:
         logger.warning("[backup] failed for %s → %s: %s", src_path, dest_path, exc)

@@ -1,0 +1,177 @@
+{
+  "_doc": "One way to print a count, in both languages. Live 2026-09-24 the turn header read \"10 tools · 1 approvals\"; the thoughts header printed \"3 3 tools\"; a single tool rendered as \"1 step\" through the wrong i18n key. Python t_plural and chat.js tiCount must pick the same CLDR form (tests/test_count_labels.py, tests/js/test_count_labels.js).",
+  "forms": {
+    "en": {
+      "count_tools": {
+        "zero": "{n} tools",
+        "one": "{n} tool",
+        "two": "{n} tools",
+        "few": "{n} tools",
+        "many": "{n} tools",
+        "other": "{n} tools"
+      },
+      "count_steps": {
+        "zero": "{n} steps",
+        "one": "{n} step",
+        "two": "{n} steps",
+        "few": "{n} steps",
+        "many": "{n} steps",
+        "other": "{n} steps"
+      },
+      "count_approvals": {
+        "zero": "{n} approvals",
+        "one": "{n} approval",
+        "two": "{n} approvals",
+        "few": "{n} approvals",
+        "many": "{n} approvals",
+        "other": "{n} approvals"
+      },
+      "count_requests": {
+        "zero": "{n} requests",
+        "one": "{n} request",
+        "two": "{n} requests",
+        "few": "{n} requests",
+        "many": "{n} requests",
+        "other": "{n} requests"
+      }
+    },
+    "ar": {
+      "count_tools": {
+        "zero": "لا أدوات",
+        "one": "أداة واحدة",
+        "two": "أداتان",
+        "few": "{n} أدوات",
+        "many": "{n} أداةً",
+        "other": "{n} أداة"
+      },
+      "count_steps": {
+        "zero": "لا خطوات",
+        "one": "خطوة واحدة",
+        "two": "خطوتان",
+        "few": "{n} خطوات",
+        "many": "{n} خطوةً",
+        "other": "{n} خطوة"
+      },
+      "count_approvals": {
+        "zero": "لا موافقات",
+        "one": "موافقة واحدة",
+        "two": "موافقتان",
+        "few": "{n} موافقات",
+        "many": "{n} موافقةً",
+        "other": "{n} موافقة"
+      },
+      "count_requests": {
+        "zero": "لا طلبات",
+        "one": "طلب واحد",
+        "two": "طلبان",
+        "few": "{n} طلبات",
+        "many": "{n} طلبًا",
+        "other": "{n} طلب"
+      }
+    }
+  },
+  "cases": [
+    {
+      "lang": "en",
+      "base": "count_tools",
+      "n": 1,
+      "expect": "1 tool"
+    },
+    {
+      "lang": "en",
+      "base": "count_tools",
+      "n": 10,
+      "expect": "10 tools"
+    },
+    {
+      "lang": "en",
+      "base": "count_tools",
+      "n": 0,
+      "expect": "0 tools"
+    },
+    {
+      "lang": "en",
+      "base": "count_approvals",
+      "n": 1,
+      "expect": "1 approval"
+    },
+    {
+      "lang": "en",
+      "base": "count_approvals",
+      "n": 3,
+      "expect": "3 approvals"
+    },
+    {
+      "lang": "en",
+      "base": "count_requests",
+      "n": 1,
+      "expect": "1 request"
+    },
+    {
+      "lang": "en",
+      "base": "count_steps",
+      "n": 2,
+      "expect": "2 steps"
+    },
+    {
+      "lang": "ar",
+      "base": "count_tools",
+      "n": 0,
+      "expect": "لا أدوات"
+    },
+    {
+      "lang": "ar",
+      "base": "count_tools",
+      "n": 1,
+      "expect": "أداة واحدة"
+    },
+    {
+      "lang": "ar",
+      "base": "count_tools",
+      "n": 2,
+      "expect": "أداتان"
+    },
+    {
+      "lang": "ar",
+      "base": "count_tools",
+      "n": 3,
+      "expect": "3 أدوات"
+    },
+    {
+      "lang": "ar",
+      "base": "count_tools",
+      "n": 11,
+      "expect": "11 أداةً"
+    },
+    {
+      "lang": "ar",
+      "base": "count_tools",
+      "n": 100,
+      "expect": "100 أداة"
+    },
+    {
+      "lang": "ar",
+      "base": "count_tools",
+      "n": 103,
+      "expect": "103 أدوات"
+    },
+    {
+      "lang": "ar",
+      "base": "count_approvals",
+      "n": 1,
+      "expect": "موافقة واحدة"
+    },
+    {
+      "lang": "ar",
+      "base": "count_steps",
+      "n": 12,
+      "expect": "12 خطوةً"
+    },
+    {
+      "lang": "ar",
+      "base": "count_requests",
+      "n": 2,
+      "expect": "طلبان"
+    }
+  ]
+}

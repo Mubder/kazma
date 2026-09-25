@@ -118,6 +118,12 @@ class EventBridge:
                         data={
                             "status": "tool_running",
                             "tool_name": ev_name,
+                            # The model's own tool_call_id (llm_stream.
+                            # emit_tool_activity sends it as run_id). Without
+                            # it the WS activity row had no identity, so its
+                            # running and done stamps never merged -- a
+                            # "Running..." row stuck beside the finished one.
+                            "tool_call_id": str(ev.get("run_id") or ""),
                             "inputs": inputs if isinstance(inputs, dict) else {"args": str(inputs)},
                         },
                         thread_id=thread_id,
@@ -130,6 +136,7 @@ class EventBridge:
                         data={
                             "status": "tool_completed",
                             "tool_name": ev_name,
+                            "tool_call_id": str(ev.get("run_id") or ""),
                             "result": str(output),
                         },
                         thread_id=thread_id,
@@ -142,6 +149,7 @@ class EventBridge:
                         data={
                             "status": "tool_failed",
                             "tool_name": ev_name,
+                            "tool_call_id": str(ev.get("run_id") or ""),
                             "error": str(err),
                         },
                         thread_id=thread_id,

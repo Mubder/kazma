@@ -237,6 +237,9 @@ def register_filesystem_tools(registry: Any) -> None:
 
         # Already allowed?
         existing = check_path_access(path, mode_n)
+        if existing.via == "store":
+            # No grant opens a Kazma store; granting one would change nothing.
+            return f"Error: {existing.reason}"
         if existing.allowed and existing.via != "absolute":
             return (
                 f"Already allowed via {existing.via}: {existing.grant_path or existing.resolved} "

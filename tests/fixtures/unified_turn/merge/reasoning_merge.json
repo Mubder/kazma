@@ -1,0 +1,48 @@
+{
+  "_doc": "merge_reasoning_part(old, new) -> text, in BOTH languages (kazma_ui/turn_document.py and static/js/modules/turn_document.js). Live 2026-09-24, turn e99d06a0b33f: a durable checkpoint had stored a 4,419-char cut of the post-approval narration; the full 4,661-char narration then arrived and, because the whole old text (pre-approval notes + the cut) was not contained in it, the rule APPENDED it. Thoughts showed the notes twice, the first copy stopping mid-sentence. A later snapshot of the same narration replaces its own earlier cut; unrelated notes still append. Overlaps under 64 characters never merge, so a coincidence is not mistaken for a continuation.",
+  "min_overlap": 64,
+  "cases": [
+    {
+      "name": "live shape: an earlier cut of the same narration is replaced, not repeated",
+      "old": "```plan\n- Re-check X connector + live caps after your code fix\n- Re-fire the four drafts\n```\n\nRetrying now: status check plus the four posts.\n\n```plan\n- Re-check X connector + live caps after your code fix\n- Re-fire the four drafts\n```\n\nThe fix worked: all four landed. Live on @KazmaAI, English first, then the Arabic mirr",
+      "new": "```plan\n- Re-check X connector + live caps after your code fix\n- Re-fire the four drafts\n```\n\nThe fix worked: all four landed. Live on @KazmaAI, English first, then the Arabic mirrors. Caps after this batch: 4/16 today.",
+      "expect": "```plan\n- Re-check X connector + live caps after your code fix\n- Re-fire the four drafts\n```\n\nRetrying now: status check plus the four posts.\n\n```plan\n- Re-check X connector + live caps after your code fix\n- Re-fire the four drafts\n```\n\nThe fix worked: all four landed. Live on @KazmaAI, English first, then the Arabic mirrors. Caps after this batch: 4/16 today."
+    },
+    {
+      "name": "the old text is contained in the new: the new wins",
+      "old": "Checking the connector before posting anything at all today.",
+      "new": "Checking the connector before posting anything at all today. It is healthy.",
+      "expect": "Checking the connector before posting anything at all today. It is healthy."
+    },
+    {
+      "name": "the new text is contained in the old: the old stays",
+      "old": "Checking the connector before posting anything at all today. It is healthy.",
+      "new": "It is healthy.",
+      "expect": "Checking the connector before posting anything at all today. It is healthy."
+    },
+    {
+      "name": "unrelated notes still append",
+      "old": "First hop: reading the workspace layout.",
+      "new": "Second hop: the tests pass, writing the summary.",
+      "expect": "First hop: reading the workspace layout.\n\nSecond hop: the tests pass, writing the summary."
+    },
+    {
+      "name": "a short coincidental overlap does not merge",
+      "old": "Done with the first part.\n\nOK",
+      "new": "OK, moving to the second part now.",
+      "expect": "Done with the first part.\n\nOK\n\nOK, moving to the second part now."
+    },
+    {
+      "name": "an empty new keeps the old",
+      "old": "Some notes.",
+      "new": "",
+      "expect": "Some notes."
+    },
+    {
+      "name": "an empty old takes the new",
+      "old": "",
+      "new": "Some notes.",
+      "expect": "Some notes."
+    }
+  ]
+}

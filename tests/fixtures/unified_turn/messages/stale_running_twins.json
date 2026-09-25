@@ -1,0 +1,108 @@
+{
+  "name": "stale_running_twins",
+  "why": "Live 2026-09-24 (turn e99d06a0b33f): two activity producers dropped the tool call id, so a call's running and done stamps were keyed name + state + text and never merged -- \"Running...\" stuck beside the finished row. The producers carry the id now; the projection hides a KEY-LESS running part when a later stamp of the same tool finished, so rows already stored that way read right.",
+  "message": {
+    "role": "assistant",
+    "turn_id": "utb-fixture-stale-twins",
+    "content": "Posted.",
+    "parts": [
+      {
+        "type": "tool",
+        "name": "x_status",
+        "state": "running",
+        "result": "{}",
+        "ts": "2026-09-24T14:08:23.104209+00:00"
+      },
+      {
+        "type": "tool",
+        "name": "x_status",
+        "state": "done",
+        "result": "{\"can_post\": true}",
+        "ts": "2026-09-24T14:08:23.129762+00:00"
+      },
+      {
+        "type": "tool",
+        "name": "x_post",
+        "state": "running",
+        "result": "{\"proposal_id\": \"prop_003dd7eec788:1\"}",
+        "ts": "2026-09-24T14:08:23.143797+00:00"
+      },
+      {
+        "type": "tool",
+        "name": "x_post",
+        "call_id": "call_02",
+        "state": "done",
+        "result": "{\"posted\": true}"
+      },
+      {
+        "type": "tool",
+        "name": "file_read",
+        "state": "running",
+        "result": "README.md"
+      },
+      {
+        "type": "tool",
+        "name": "x_status",
+        "call_id": "call_05",
+        "state": "running",
+        "result": ""
+      },
+      {
+        "type": "text",
+        "text": "Posted."
+      }
+    ]
+  },
+  "expect": {
+    "turn_id": "utb-fixture-stale-twins",
+    "text": "Posted.",
+    "part_keys": [
+      "tool:x_status:running:{}",
+      "tool:x_status:done:{\"can_post\": true}",
+      "tool:x_post:running:{\"proposal_id\": \"prop_003dd7eec788:1\"}",
+      "tool#call_02",
+      "tool:file_read:running:README.md",
+      "tool#call_05",
+      "text"
+    ],
+    "gates": [],
+    "activity": [
+      {
+        "id": "tool:x_status:done:{\"can_post\": true}",
+        "kind": "tool",
+        "title": "x_status",
+        "detail": "{\"can_post\": true}",
+        "state": "done",
+        "ts": "2026-09-24T14:08:23.129762+00:00"
+      },
+      {
+        "id": "tool#call_02",
+        "kind": "tool",
+        "title": "x_post",
+        "detail": "{\"posted\": true}",
+        "state": "done"
+      },
+      {
+        "id": "tool:file_read:running:README.md",
+        "kind": "tool",
+        "title": "file_read",
+        "detail": "README.md",
+        "state": "running"
+      },
+      {
+        "id": "tool#call_05",
+        "kind": "tool",
+        "title": "x_status",
+        "detail": "",
+        "state": "running"
+      }
+    ]
+  },
+  "notes": [
+    "x_status (running, key-less) is hidden: a later x_status finished.",
+    "x_post (running, key-less) is hidden: a later KEYED x_post finished.",
+    "file_read (running, key-less) stays: nothing later says it is over.",
+    "x_status call_05 (running, keyed) stays: keyed stamps merge by id, never by twin.",
+    "part_keys keep every part -- only the activity projection changes."
+  ]
+}

@@ -1009,8 +1009,14 @@ def create_sse_chat_router(
             def _record_activity(ev_type: str, data: dict[str, Any]) -> None:
                 """Append a workbench row for a tool/status frame (deduped)."""
                 try:
+                    # Both frames carry tool_call_id; keyed by it, a call's
+                    # running and done rows are ONE part. This dropped it,
+                    # so the stored row keyed on name + state + text and
+                    # "Running..." stuck beside "Done" (2026-09-24).
+                    _cid = str(data.get("tool_call_id") or "")
                     if ev_type == "tool_call":
                         activity_log.append({
+                            **({"id": "tool#" + _cid} if _cid else {}),
                             "kind": "tool",
                             "title": str(data.get("tool_name") or "tool"),
                             "detail": str(data.get("inputs") or ""),
@@ -1019,6 +1025,7 @@ def create_sse_chat_router(
                         })
                     elif ev_type == "tool_result":
                         activity_log.append({
+                            **({"id": "tool#" + _cid} if _cid else {}),
                             "kind": "tool",
                             "title": str(data.get("tool_name") or "tool"),
                             "detail": str(data.get("result") or ""),

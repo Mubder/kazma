@@ -47,46 +47,22 @@ def _is_path_allowed(path_str: str) -> bool:
         return False
 
 
-_INTERNAL_DB_NAMES = frozenset(
-    {
-        "vault.db",
-        "settings.db",
-        "checkpoints.db",
-        "memory_state.db",
-        "memory_ops.db",
-        "memory.db",
-        "hitl_gates.db",
-        "snapshots.db",
-        "cron.db",
-        "chat_sessions.db",
-        "documents.db",
-        "swarm_tasks.db",
-        "agent_artifacts.db",
-        "audit.db",
-        "llm_calls.db",
-    }
-)
-
-
 def _quote_ident(name: str) -> str:
     """Quote a SQLite identifier. Never interpolate raw table names."""
     return '"' + str(name).replace('"', '""') + '"'
 
 
 def _is_internal_kazma_db(path: Path) -> bool:
-    """True for Kazma's own SQLite files (conversation/secrets/state)."""
-    name = path.name.lower()
-    if name in {"vault.db", "hitl_gates.db"}:
-        return True
-    if name not in _INTERNAL_DB_NAMES:
-        return False
-    try:
-        from kazma_core.paths import data_dir
+    """True for Kazma's own SQLite files (conversation/secrets/state).
 
-        path.resolve().relative_to(data_dir().resolve())
-        return True
-    except (ValueError, OSError, Exception):
-        return False
+    The one predicate every door shares (``kazma_core.store_registry``).
+    This used to be a hand-kept list of 15 names; ``x_posts.db``,
+    ``x_scheduled.db`` and ``kazma.db`` were not on it, and the model read
+    them raw on 2026-09-25 while hunting for its own drafts.
+    """
+    from kazma_core.store_registry import is_kazma_store
+
+    return is_kazma_store(path)
 
 
 def _deny_internal(db_uri: str) -> str | None:
@@ -97,10 +73,12 @@ def _deny_internal(db_uri: str) -> str | None:
     except Exception:
         return None
     if _is_internal_kazma_db(p):
-        return (
-            f"Error: querying Kazma internal database {p.name!r} is not allowed. "
-            "Pass a workspace SQLite file."
-        )
+        from kazma_core.store_registry import store_refusal
+
+        # "Pass a workspace SQLite file" was the whole message; it named no
+        # way to the data, and the model went looking through file_read and
+        # an approved python_exec instead.
+        return "Error: " + store_refusal(p, door="the SQL tools")
     return None
 
 

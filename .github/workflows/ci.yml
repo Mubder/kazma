@@ -442,7 +442,8 @@ jobs:
             tests/e2e/test_delivery_v2_e2e.py \
             tests/e2e/test_e2e_playwright.py \
             tests/e2e/test_memory_playwright.py \
-            tests/e2e/test_step_detail_clamp.py
+            tests/e2e/test_step_detail_clamp.py \
+            tests/e2e/test_session_switch_resume.py
         env:
           KAZMA_DB_BACKEND: sqlite
 

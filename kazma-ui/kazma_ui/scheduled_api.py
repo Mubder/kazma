@@ -291,7 +291,10 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
                 stored = None
             if not stored:
                 return JSONResponse(
-                    {"ok": False, "error": "proposal_id did not resolve"},
+                    {
+                        "ok": False,
+                        "error": "proposal_id did not resolve to a single saved draft",
+                    },
                     status_code=400,
                 )
             text = stored
@@ -307,7 +310,12 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             try:
                 from kazma_core.agent.artifacts import get_artifact_store
 
-                get_artifact_store().proposal_posted(proposal_ref, tenant_id=tenant)
+                get_artifact_store().proposal_posted(
+                    proposal_ref,
+                    tenant_id=tenant,
+                    via="x_studio_schedule",
+                    used_ref=str(payload.get("id") or ""),
+                )
             except Exception:
                 logger.debug("[scheduled] proposal_posted failed", exc_info=True)
             payload["proposal_id"] = proposal_ref

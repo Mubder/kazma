@@ -114,17 +114,20 @@ def _bind_proposal(text: str, proposal_id: str) -> tuple[str, str]:
 
     stored = get_artifact_store().stored_text_for(ref, tenant_id=_tenant_id())
     if not stored:
-        raise ValueError("proposal_id did not resolve")
+        raise ValueError("proposal_id did not resolve to a single saved draft")
     return stored, ref
 
 
-def _mark_proposal_posted(ref: str) -> None:
+def _mark_proposal_posted(ref: str, *, via: str, used_ref: str = "") -> None:
+    """Mark the ONE draft *ref* names as used (never its whole set)."""
     if not ref:
         return
     try:
         from kazma_core.agent.artifacts import get_artifact_store
 
-        get_artifact_store().proposal_posted(ref, tenant_id=_tenant_id())
+        get_artifact_store().proposal_posted(
+            ref, tenant_id=_tenant_id(), via=via, used_ref=used_ref
+        )
     except Exception:
         logger.debug("[x_api] proposal_posted failed for %s", ref, exc_info=True)
 
@@ -266,7 +269,11 @@ async def x_post_now(body: XPostBody) -> JSONResponse:
         )
         payload["ok"] = ok
         if ok:
-            _mark_proposal_posted(proposal_ref)
+            _mark_proposal_posted(
+                proposal_ref,
+                via="x_studio_post",
+                used_ref=str(payload.get("tweet_id") or ""),
+            )
             if proposal_ref:
                 payload["proposal_id"] = proposal_ref
         status = 200 if ok else 400

@@ -49,13 +49,13 @@ The Web operator surface for posting. Alpine page `xStudioPage()` (`static/js/x_
 - **Post now** → `publish_x_post` (`POST /api/x/post`). Your click is the approval.
 - **Schedule** → `book_x_post` (`POST /api/scheduled/x`). Caps and the 30-day duplicate hash are reserved at booking.
 - **Reply-to** accepts a tweet id or an `x.com/…/status/…` URL. After a successful Post now, the composer hops onto the new tweet id so the next send is a thread hop. **Clear thread** drops it.
-- **Use** on a saved `save_proposal` draft stamps `proposal_id`. On post or schedule the **stored** text wins over whatever is in the box; the proposal is then marked posted. Editing the box after Use clears the id on the client so a later type-in is not rewritten. An unknown id returns **400**.
+- **Use** on a saved `save_proposal` draft stamps `proposal_id`. On post or schedule the **stored** text wins over whatever is in the box; then **that draft** is marked used (posted or scheduled, with the tweet or booking id). Its siblings in the same set stay in **Drafts** — until 2026-09-25 posting one draft hid the whole set, and a partly posted set aged out on the 14-day clock meant for spent ones. Editing the box after Use clears the id on the client so a later type-in is not rewritten. An id that does not name exactly one saved draft (unknown, or a bare id of a multi-draft set) returns **400** — one post, one draft, the same rule the chat gate applies.
 
 **Planner (X-only)**
 
 - Upcoming X posts with a datetime-local field + **Reschedule** (`PUT /api/scheduled/x/{id}`) and **Cancel**.
 - **Posted** rows: open on X, **Reply** (loads the id into the composer), **Delete** (`POST /api/x/delete` — confirm first). Chat `x_delete_post` is still always-HITL.
-- **Drafts** from `GET /api/x/drafts` (artifact store `list_proposals`).
+- **Drafts** from `GET /api/x/drafts` (artifact store `list_proposals`). The agent reads the same drafts with the `list_proposals` tool (read-tier, no approval), which also shows which drafts went out and how.
 - **Audit** from `GET /api/x/audit` (`x_audit.db`).
 - **All clocks** → `/scheduled` (cron + X together). The Studio queue stays X-only so a reminder job does not sit next to a tweet.
 

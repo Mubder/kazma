@@ -887,7 +887,11 @@ def register_system_routes(self: Any) -> None:
             # Online restore: open the live DB and restore from the backup file.
             conn = sqlite3.connect(str(dest))
             try:
-                with sqlite3.connect(str(src)) as bkp:
+                # closing(): a bare ``with sqlite3.connect()`` never closes,
+                # and the backup file then stays locked on Windows.
+                from contextlib import closing
+
+                with closing(sqlite3.connect(str(src))) as bkp:
                     bkp.backup(conn, pages=100, sleep=0.01)
                 conn.commit()
             finally:

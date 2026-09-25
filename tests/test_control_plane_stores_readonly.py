@@ -29,9 +29,15 @@ evaluated after "under active workspace -> allow" is decoration.
 fail-closed wrapper around it, and ``file_write`` / ``file_apply_patch`` /
 ``file_read`` call it directly.
 
-Reads are deliberately still allowed. Blocking them would break legitimate
-self-audit, and the sensitive one — ``vault.db`` — is encrypted at rest, so
-a read yields ciphertext. The severe failures here are write failures.
+Reads were left open here until 2026-09-25, on the grounds that a read
+cannot damage anything and ``vault.db`` is ciphertext at rest. Both true,
+and beside the point: raw SQLite bytes are noise to the model, every other
+door (the SQL tools, ``python_exec``, ``shell_exec``) already refused these
+files, and ``file_read`` on ``agent_artifacts.db`` / ``chat_sessions.db``
+became one leg of a 67-call dig for saved drafts the model had no tool to
+read. Reads are now refused too, and the refusal names the tool that reads
+the store (``kazma_core.store_registry``). The user's own databases in the
+sandbox stay readable and writable.
 """
 
 from __future__ import annotations
@@ -190,21 +196,35 @@ def test_shell_and_python_refuse_a_named_control_plane_store(tmp_path, monkeypat
     assert store.read_bytes() == b""
 
 
-def test_reads_are_still_allowed(tmp_path) -> None:
-    """Self-audit must keep working; the severe failures here are writes."""
+def test_reads_are_refused_and_name_the_reader(tmp_path) -> None:
+    """A raw read of a store is refused, and the refusal points at its reader.
+
+    Was ``test_reads_are_still_allowed`` (see the module docstring for why it
+    flipped). The user's own sandbox database must stay readable.
+    """
     out = _run_probe(
         """
-        t = DATA / "hitl_gates.db"
+        from kazma_core.workspace.path_policy import denied_message
+        t = DATA / "agent_artifacts.db"
         t.write_bytes(b"")
         r = check_path_access(t.resolve(), "read")
-        print("ALLOWED" if r.allowed else "DENIED", r.reason)
+        print("ALLOWED" if r.allowed else "DENIED", r.via)
+        print(denied_message(str(t), "read", result=r))
+        u = DATA / "workspace" / "project.db"
+        u.write_bytes(b"")
+        print("USER", "ALLOWED" if check_path_access(u.resolve(), "read").allowed else "DENIED")
         """,
         tmp_path,
     )
-    assert out.startswith("ALLOWED"), (
-        "reads were caught too; that blocks legitimate self-inspection for no "
-        "safety gain, since the sensitive store is encrypted at rest"
+    assert out.startswith("DENIED store"), out
+    assert "list_proposals" in out, (
+        "the refusal must name the tool that reads saved drafts — a bare "
+        "'no' is what sent the model digging"
     )
+    assert "request_path_access" not in out, (
+        "a path grant cannot open a store; offering one buys a useless approval"
+    )
+    assert "USER ALLOWED" in out, "the user's own sandbox database became unreadable"
 
 
 def test_allow_absolute_escape_hatch_cannot_reach_them(tmp_path) -> None:

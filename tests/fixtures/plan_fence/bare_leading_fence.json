@@ -1,0 +1,47 @@
+{
+  "_doc": "A reply that OPENS with an unlabelled ``` fence holding only list items is a plan fence the model forgot to label. Live 2026-09-24 (turn 44df5ea332b8): deepseek wrote the plan under a bare ``` and glued the closer onto the answer (```Here's ...); the plan rules only knew ```plan, so the fence never closed and the whole reply rendered as one code block. ONE fixture, read by tests/test_plan_fence.py (plan_fence.split_plan_and_prose) and tests/js/test_plan_render.js (chat.js splitPlanAndProse). Compare trimmed strings.",
+  "cases": [
+    {
+      "name": "live shape: unlabelled plan fence, closer glued to the answer",
+      "input": "```\n- Locate the stored proposal `prop_003dd7eec788` in `kazma-data/agent_artifacts.db`\n- Pull the exact stored text for each item\n```Here's the full inventory of **unpublished** drafts.\n\n## A) Saved proposal",
+      "plan": "- Locate the stored proposal `prop_003dd7eec788` in `kazma-data/agent_artifacts.db`\n- Pull the exact stored text for each item",
+      "prose": "Here's the full inventory of **unpublished** drafts.\n\n## A) Saved proposal"
+    },
+    {
+      "name": "unlabelled plan fence, closer on its own line",
+      "input": "```\n- Check the connector\n- Post the drafts\n```\n\nDone. Four posts are live.",
+      "plan": "- Check the connector\n- Post the drafts",
+      "prose": "Done. Four posts are live."
+    },
+    {
+      "name": "numbered items count as a list",
+      "input": "```\n1. Read the file\n2) Summarise it\n```\nSummary: fine.",
+      "plan": "1. Read the file\n2) Summarise it",
+      "prose": "Summary: fine."
+    },
+    {
+      "name": "a real code block at the start is not a plan",
+      "input": "```\nprint('hi')\n```\nThat prints hi.",
+      "plan": "",
+      "prose": "```\nprint('hi')\n```\nThat prints hi."
+    },
+    {
+      "name": "a list fence that is not at the start stays content",
+      "input": "Steps:\n```\n- a\n- b\n```\nok",
+      "plan": "",
+      "prose": "Steps:\n```\n- a\n- b\n```\nok"
+    },
+    {
+      "name": "a labelled fence is not relabelled",
+      "input": "```bash\n- not a plan\n```\nok",
+      "plan": "",
+      "prose": "```bash\n- not a plan\n```\nok"
+    },
+    {
+      "name": "mixed list and prose inside the fence is not a plan",
+      "input": "```\n- one item\nsome code here\n```\nafter",
+      "plan": "",
+      "prose": "```\n- one item\nsome code here\n```\nafter"
+    }
+  ]
+}

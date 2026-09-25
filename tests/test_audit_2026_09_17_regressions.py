@@ -206,7 +206,12 @@ async def test_sqlite_query_requires_path_and_denies_internal(tmp_path):
     vault.write_bytes(b"")
     denied = _deny_internal(str(vault))
     assert denied is not None
-    assert "internal database" in denied.lower()
+    # Refused by the shared store predicate (kazma_core.store_registry), and
+    # the refusal says what the store is and which tool reads it — "not
+    # allowed, pass a workspace file" alone sent the model digging (2026-09-25).
+    assert denied.startswith("Error:")
+    assert "one of kazma's own stores" in denied.lower()
+    assert "vault_list" in denied
 
 
 def test_remote_db_host_denied_without_allowlist(monkeypatch):

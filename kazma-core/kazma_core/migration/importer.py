@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from kazma_core.migration.bundle import KazmaBundle, parse_meta_env
+from kazma_core.migration.exporter import _DATA_DIR_DBS as _EXPORTED_DATA_DIR_DBS
 from kazma_core.migration.path_rewrite import PathMap, build_path_map, rewrite_paths_in_sqlite
 from kazma_core.migration.vault_pairing import VaultKeyStatus, check_vault_key, sync_vault_key
 
@@ -69,6 +70,15 @@ _PATH_REWRITE_TARGETS: list[tuple[str, list[tuple[str, str]]]] = [
     ]),
     # cron.db — prompt text may reference file paths.
     ("cron.db", [("cron_jobs", "prompt")]),
+    # agent_artifacts.db — scratchpad findings and drafts can cite files.
+    ("agent_artifacts.db", [("agent_artifacts", "value")]),
+    # task_ledgers.db — goals, steps and findings name files being worked on.
+    ("task_ledgers.db", [
+        ("task_ledgers", "goal"),
+        ("task_ledgers", "next_action"),
+        ("task_ledgers", "steps"),
+        ("task_ledgers", "findings"),
+    ]),
 ]
 
 # The SQLite data files the bundle may contain, mapped to their destination
@@ -81,7 +91,12 @@ _PATH_REWRITE_TARGETS: list[tuple[str, list[tuple[str, str]]]] = [
 # onto the live settings.db (that would clobber the target's config + the
 # already-merged workspaces table). It is consumed merge-only by
 # ``_merge_kb_into_settings`` in step 7c, which reads it directly from staging.
-_BUNDLE_DB_TO_DEST_RESOLVER = {
+#
+# The plain data_dir joins come from the exporter's list, which comes from
+# ``kazma_core.store_registry`` — one list, so a store the exporter carries
+# is a store the importer restores. (Both used to be hand-kept, and both
+# lacked agent_artifacts.db, x_scheduled.db, hitl_gates.db and five more.)
+_BUNDLE_DB_TO_DEST_RESOLVER: dict[str, str | None] = {
     "snapshots.db": "snapshots_db",
     "memory_state.db": "primary_memory_db",
     "memory_ops.db": "memory_ops_db",
@@ -89,14 +104,23 @@ _BUNDLE_DB_TO_DEST_RESOLVER = {
     "checkpoints.db": "checkpoints_db",
     "knowledge_graph.db": "knowledge_graph_db",
     "vault.db": "vault_db_path",
-    "chat_sessions.db": None,  # plain data_dir join
-    "chat_sessions_spool.db": None,
-    "cron.db": None,
-    "sessions.db": None,
-    "sandbox_emails.db": None,
-    "research_sessions.db": None,
-    "pipeline_logs.db": None,
+    **{name: None for name in _EXPORTED_DATA_DIR_DBS},  # plain data_dir join
 }
+
+
+def _dest_map_for(staged_data: Path) -> dict[str, str | None]:
+    """The static map plus declared families present in this bundle.
+
+    Family members (``checkpoints_<tenant>.db``) are named at runtime, so
+    the bundle — not a list — says which exist.
+    """
+    from kazma_core.store_registry import bundle_family_patterns
+
+    dest = dict(_BUNDLE_DB_TO_DEST_RESOLVER)
+    for pattern in bundle_family_patterns():
+        for staged in staged_data.glob(pattern):
+            dest.setdefault(staged.name, None)
+    return dest
 
 
 @dataclass
@@ -350,7 +374,7 @@ def import_bundle(
     report.backup_path = str(backup_dir)
     _log(f"Backing up live DBs to {backup_dir.name}/…")
 
-    for arc_name, resolver_name in _BUNDLE_DB_TO_DEST_RESOLVER.items():
+    for arc_name, resolver_name in _dest_map_for(staged_data).items():
         src_staged = staged_data / arc_name
         if not src_staged.exists():
             continue
@@ -385,7 +409,7 @@ def import_bundle(
 
     swapped: list[str] = []
     install_failures: list[str] = []
-    for arc_name, resolver_name in _BUNDLE_DB_TO_DEST_RESOLVER.items():
+    for arc_name, resolver_name in _dest_map_for(staged_data).items():
         src_staged = staged_data / arc_name
         if not src_staged.exists():
             continue

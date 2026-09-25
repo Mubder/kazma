@@ -1923,11 +1923,25 @@ tbody tr:last-child td {
   color: var(--text-muted);
   font-size: 0.75rem;
 }
-/* Chip + chevron only exist visually in the collapsed bar — never cram
-   them into the full card's header (the overlap, 2026-09-03). */
+/* The chip only exists in the collapsed bar — never cram it into the full
+   card's header (the overlap, 2026-09-03). */
 .hitl-approval-card:not(.hitl-collapsed) .hitl-collapse-chip,
 .hitl-approval-card:not(.hitl-collapsed) .hitl-collapse-chevron {
   display: none;
+}
+/* A decided card's header is its toggle in BOTH directions, so an open
+   one keeps the chevron (▾) and the pointer. Without them an expanded card
+   looked final and could not be closed again (reported 2026-09-24). */
+.hitl-approval-card.hitl-collapsible .hitl-approval-header {
+  cursor: pointer;
+}
+.hitl-approval-card.hitl-collapsible:not(.hitl-collapsed) .hitl-approval-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hitl-approval-card.hitl-collapsible:not(.hitl-collapsed) .hitl-collapse-chevron {
+  display: inline;
 }
 
 /* Old opaque top-bar .chat-model-bar / .chat-input-area rules removed —
