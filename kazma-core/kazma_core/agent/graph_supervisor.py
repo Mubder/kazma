@@ -737,9 +737,12 @@ async def supervisor_node(
     try:
         from kazma_core.agent.artifacts import get_artifact_store
 
-        _store_pad = get_artifact_store().list_scratchpad(
-            str(state.get("thread_id") or ""),
-            tenant_id=str(state.get("tenant_id") or "default"),
+        _pad_thread = str(state.get("thread_id") or "")
+        _pad_tenant = str(state.get("tenant_id") or "default")
+        # SQLite (and, on the first call, the store's schema + legacy repair)
+        # off the loop: every SSE/WS stream waits on this node.
+        _store_pad = await asyncio.to_thread(
+            lambda: get_artifact_store().list_scratchpad(_pad_thread, tenant_id=_pad_tenant)
         )
         if _store_pad:
             _scratch = {**_store_pad, **_scratch}

@@ -38,11 +38,14 @@ def _resolve_workspace_root() -> Path:
         root = resolve_active_root()
         root.mkdir(parents=True, exist_ok=True)
         return root
-    except Exception as exc:
-        logger.debug("[workspace_api] resolve_active_root failed: %s", exc)
-        root = (Path.cwd() / "kazma-data" / "workspace").resolve()
-        root.mkdir(parents=True, exist_ok=True)
-        return root
+    except OSError as exc:
+        # The active row names a root that cannot be created (an unplugged
+        # drive, a deleted repo). Show the canonical sandbox rather than a
+        # 500 -- never a CWD-relative "kazma-data" the tools do not use.
+        from kazma_core.workspace.binding import default_sandbox_root
+
+        logger.warning("[workspace_api] active workspace root unusable (%s); showing the default sandbox", exc)
+        return default_sandbox_root()
 
 
 def _is_within_workspace(target: Path, workspace: Path) -> bool:

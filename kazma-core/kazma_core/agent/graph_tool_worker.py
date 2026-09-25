@@ -1138,7 +1138,10 @@ async def tool_worker_node(
                     _ref = str((_tcd.get("args") or {}).get("proposal_id") or "").strip()
                     if not _ref:
                         continue
-                    _p = _gas().resolve_proposal(_ref, tenant_id=_tenant)
+                    # SQLite off the loop — the approval card waits on this.
+                    _p = await asyncio.to_thread(
+                        lambda r=_ref, t=_tenant: _gas().resolve_proposal(r, tenant_id=t)
+                    )
                     if _p:
                         _tcd["proposal"] = {
                             "proposal_id": _p.get("proposal_id"),
@@ -1336,8 +1339,14 @@ async def tool_worker_node(
                     logger.info("[ToolWorker] HITL denied: %s", tc["name"])
                     results.append(_denied_result(tc))
 
-        # S1-3 audit trail: mark proposals consumed by SUCCESSFUL posts.
-        mark_proposals_posted(safe_tools + danger_tools, results, str(state.get("tenant_id") or "default"))
+        # S1-3 audit trail: mark the drafts consumed by SUCCESSFUL posts
+        # (SQLite read-modify-write under BEGIN IMMEDIATE — off the loop).
+        await asyncio.to_thread(
+            mark_proposals_posted,
+            safe_tools + danger_tools,
+            results,
+            str(state.get("tenant_id") or "default"),
+        )
 
         # ── Tool-loop breaker (typed outcomes, per-round credit) ─────
         # Policy / HITL deny / empty results do not trip. Parallel hard

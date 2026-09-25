@@ -11,6 +11,12 @@ from unittest.mock import patch
 from kazma_core.migration.bundle import BUNDLE_VERSION, KazmaBundle, Manifest
 from kazma_core.migration.importer import import_bundle
 
+import pytest
+
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 
 def _write_pg_bundle(path: Path, *, dump_bytes: bytes = b"not-a-real-pg-dump") -> Path:
     files: dict[str, bytes | str] = {

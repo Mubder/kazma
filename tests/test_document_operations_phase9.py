@@ -31,6 +31,19 @@ from kazma_core.documents.repository import DocumentRepository
 from kazma_core.documents.retention import DocumentGarbageCollector
 from kazma_core.documents.storage import ContentAddressedStorage
 
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
+
+def _on_postgres() -> bool:
+    from kazma_core.db.backend import is_postgres
+
+    return is_postgres()
+
+
+_ON_POSTGRES = _on_postgres()
+
 
 # ── Fixtures / helpers ───────────────────────────────────────────────────
 
@@ -615,6 +628,10 @@ def test_pg_expired_lease_recovered_once():
     assert back.state in (DocumentJobState.RETRY_WAIT, DocumentJobState.PARSING)
 
 
+# Asserts single-replica metadata, which is the truthful answer only while
+# document metadata is on SQLite. Under a real Postgres the metadata backend
+# follows it (KAZMA_DOCUMENTS_METADATA_BACKEND=auto) and multi-replica is true.
+@pytest.mark.skipif(_ON_POSTGRES, reason="SQLite-shaped assertion; see the comment above")
 def test_pg_readiness_is_truthful():
     from kazma_core.documents.jobs_pg import document_storage_readiness
 

@@ -19,6 +19,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from tests._module_stubs import stub_modules
 from kazma_core.tools.vision_analyze import (
     DEFAULT_QUESTION,
     MAX_DOWNLOAD_BYTES,
@@ -259,7 +261,7 @@ class TestUrlImage:
 
         mock_provider = _mock_llm_provider("A 16x16 red square from the web.")
 
-        with patch.dict("sys.modules", {"httpx": mock_httpx}), \
+        with stub_modules({"httpx": mock_httpx}), \
              patch("kazma_core.http_pool.get_http_client", return_value=mock_client), \
              patch(
                 "kazma_core.tools.vision_analyze._get_llm_provider",
@@ -289,7 +291,7 @@ class TestUrlImage:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_httpx.AsyncClient.return_value = mock_client
 
-        with patch.dict("sys.modules", {"httpx": mock_httpx}), \
+        with stub_modules({"httpx": mock_httpx}), \
              patch("kazma_core.http_pool.get_http_client", return_value=mock_client):
             # Patch the real httpx classes used in the except blocks
             with patch("kazma_core.tools.vision_analyze.httpx", mock_httpx, create=True):

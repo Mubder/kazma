@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any
 
 __all__ = ["synthesize_from_digests"]
 
@@ -23,12 +22,12 @@ def _env_int(name: str, default: int, *, lo: int, hi: int) -> int:
 
 
 def _workspace_root() -> Path:
-    try:
-        from kazma_core.tools.file_write import _get_workspace
+    # The binding ladder ends in the default sandbox under data_dir() and does
+    # not raise short of an unwritable data dir; the old CWD-relative
+    # fallback only ever fired then, and pointed somewhere else entirely.
+    from kazma_core.tools.file_write import _get_workspace
 
-        return _get_workspace().resolve()
-    except Exception:
-        return (Path.cwd() / "kazma-data" / "workspace").resolve()
+    return _get_workspace().resolve()
 
 
 def _resolve_under_workspace(path: str) -> Path | str:

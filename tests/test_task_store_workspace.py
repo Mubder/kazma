@@ -5,6 +5,12 @@ from __future__ import annotations
 from kazma_core.swarm.task import SwarmTask, TaskStatus, TaskType
 from kazma_core.swarm.task_store import TaskStore
 
+import pytest
+
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 
 def test_workspace_id_survives_save_load(tmp_path) -> None:
     store = TaskStore(db_path=str(tmp_path / "swarm_tasks.db"))

@@ -10,7 +10,6 @@ This module is pure geometry + text joining — no I/O, no OCR.
 
 from __future__ import annotations
 
-import re
 from typing import Any, Mapping, MutableMapping, Sequence
 
 __all__ = [
@@ -20,21 +19,22 @@ __all__ = [
     "reading_order_text",
 ]
 
-_AR_RE = re.compile(
-    r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]"
-)
 
 TextBlock = MutableMapping[str, Any]
 
 
 def is_rtl_dominant(text: str, *, threshold: float = 0.35) -> bool:
-    """True when enough letters are Arabic script to prefer RTL column order."""
+    """True when enough letters are RTL to prefer RTL column order.
 
-    letters = [ch for ch in text if ch.isalpha()]
-    if not letters:
-        return bool(_AR_RE.search(text[:200]))
-    arabic = sum(1 for ch in letters if _AR_RE.fullmatch(ch))
-    return (arabic / len(letters)) >= threshold or bool(_AR_RE.search(text[:200]))
+    Delegates to :func:`kazma_core.documents.arabic.is_rtl_dominant`, the one
+    home for direction (AGENTS §19H). This copy kept the codepoint-block
+    regex AND the "any Arabic character in the first 200" escape hatch §19H
+    removed from the original — the clause that made the threshold dead code
+    and flipped English documents to right-to-left column order.
+    """
+    from kazma_core.documents.arabic import is_rtl_dominant as _is_rtl_dominant
+
+    return _is_rtl_dominant(text, threshold=threshold)
 
 
 def blocks_from_pymupdf_dict(data: Mapping[str, Any]) -> list[dict[str, Any]]:

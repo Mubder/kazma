@@ -20,9 +20,11 @@ import logging
 import sqlite3
 import time
 import uuid
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
+from kazma_core.db.sqlite_session import committed_and_closed
 from kazma_core.paths import memory_ops_db
 
 logger = logging.getLogger(__name__)
@@ -158,7 +160,8 @@ CREATE INDEX IF NOT EXISTS idx_commitment_events_cid ON commitment_events(commit
 """
 
 
-def _connect() -> sqlite3.Connection:
+def _open() -> sqlite3.Connection:
+    """A raw connection — the caller closes it (only the schema routine)."""
     conn = sqlite3.connect(memory_ops_db(), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -166,11 +169,20 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def _connect() -> AbstractContextManager[sqlite3.Connection]:
+    """One short-lived connection that commits AND closes on exit.
+
+    ``with _connect() as conn:`` used to commit and leave the handle open
+    until a GC pass (kazma_core.db.sqlite_session).
+    """
+    return committed_and_closed(_open())
+
+
 def ensure_commitment_schema(conn: sqlite3.Connection | None = None) -> None:
     """Create the commitments tables if absent. Idempotent."""
     own = conn is None
     if own:
-        conn = _connect()
+        conn = _open()
     try:
         conn.executescript(_SCHEMA)
         conn.commit()

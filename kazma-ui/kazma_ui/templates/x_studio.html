@@ -27,6 +27,7 @@
   .xs-row .txt { width: 100%; overflow: hidden; max-height: 4.6em; word-break: break-word; unicode-bidi: isolate; text-align: start; }
   .xs-row .kicker { font-size: .68rem; color: var(--text-muted); margin-bottom: 2px; }
   .xs-row .when { font-size: .72rem; color: var(--text-muted); white-space: nowrap; }
+  .xs-draft-actions { display: flex; flex-direction: column; gap: .3rem; flex-shrink: 0; }
   .xs-row .acts { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; align-items: center; }
   .xs-row .acts input { width: 11.5rem; box-sizing: border-box; padding: 4px 6px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-primary); font-size: .72rem; }
   .xs-thread { display: flex; gap: .5rem; align-items: end; margin-bottom: .75rem; flex-wrap: wrap; }
@@ -150,8 +151,15 @@
   <div class="two-col-grid" style="margin-top:1rem;"
        x-show="tab === 'studio'" x-cloak>
     <div class="xs-card">
-      <h2>{{ t('x_studio.drafts') }}</h2>
-      <div class="xs-empty" x-show="!drafts.length" x-cloak>{{ t('x_studio.empty_drafts') }}</div>
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:.75rem;flex-wrap:wrap;">
+        <h2 style="margin:0 0 .75rem;">{{ t('x_studio.drafts') }}</h2>
+        <label style="font-size:.72rem;color:var(--text-muted);display:flex;gap:.35rem;align-items:center;">
+          <input type="checkbox" x-model="showDismissed" @change="loadDrafts()">
+          {{ t('x_studio.show_dismissed') }}
+        </label>
+      </div>
+      <div class="xs-empty" x-show="!drafts.length && !showDismissed" x-cloak>{{ t('x_studio.empty_drafts') }}</div>
+      <div class="xs-empty" x-show="!drafts.length && showDismissed" x-cloak>{{ t('x_studio.empty_dismissed') }}</div>
       <template x-for="d in drafts" :key="d.id">
         <div class="xs-row" x-effect="stampAr($el, displayBody(d.text))">
           <div class="xs-body">
@@ -159,7 +167,16 @@
                  x-text="displayKicker(d.text)"></div>
             <div class="txt" x-text="displayBody(d.text)"></div>
           </div>
-          <button class="btn btn-secondary btn-sm" @click="useDraft(d)">{{ t('x_studio.use') }}</button>
+          <div class="xs-draft-actions">
+            <button class="btn btn-secondary btn-sm" x-show="!showDismissed" x-cloak
+                    @click="useDraft(d)">{{ t('x_studio.use') }}</button>
+            <button class="btn btn-ghost btn-sm" x-show="!showDismissed" x-cloak
+                    :disabled="draftBusy === d.id"
+                    @click="setDraftDismissed(d, true)">{{ t('x_studio.dismiss') }}</button>
+            <button class="btn btn-secondary btn-sm" x-show="showDismissed" x-cloak
+                    :disabled="draftBusy === d.id"
+                    @click="setDraftDismissed(d, false)">{{ t('x_studio.restore') }}</button>
+          </div>
         </div>
       </template>
     </div>

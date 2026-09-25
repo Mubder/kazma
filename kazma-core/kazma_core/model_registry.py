@@ -1414,7 +1414,13 @@ class ModelRegistry:
 
         stored = self._load_providers()
         stored, changed = seed_missing_presets(stored)
-        if changed:
+        # Bookkeeping, so a diagnostic (kazma doctor, /health/*) that happens
+        # to build the registry first skips it rather than being refused:
+        # list_providers() merges the presets in memory either way, and the
+        # next non-diagnostic initialisation seeds them.
+        from kazma_core.diagnostic_scope import writes_suppressed
+
+        if changed and not writes_suppressed():
             self._save_providers(stored)
 
     def _normalize_provider_entry(self, provider: dict[str, Any]) -> dict[str, Any]:

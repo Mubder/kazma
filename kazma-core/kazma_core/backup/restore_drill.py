@@ -778,6 +778,17 @@ def run_deep_drill(pg_dump: str | Path | None = None) -> DrillResult:
             res.add("postgres:configuration", None, "could not determine whether PostgreSQL verification is required")
     else:
         _check_pg_data_section(dump, res)
+        # Reading every block is not restoring. The rehearsal restores into a
+        # scratch database -- opt-in, off by default, see restore_rehearsal.py.
+        # Only worth doing on an archive that just read back cleanly.
+        from kazma_core.backup.restore_rehearsal import rehearsal_enabled, rehearse_pg_restore
+
+        if res.checks and res.checks[-1]["status"] == "passed" and rehearsal_enabled():
+            from kazma_core.db.backend import get_database_url
+
+            dsn = get_database_url()
+            if dsn:
+                rehearse_pg_restore(dump, dsn, res)
     _check_restic_data(res)
 
     try:

@@ -455,6 +455,12 @@ def register_misc_routes(self: Any) -> None:
 
     @self.app.get("/health")
     async def health_check(request: Request) -> dict[str, Any]:
+        from kazma_core.diagnostic_scope import read_only_diagnostic
+
+        with read_only_diagnostic("/health"):
+            return _health_body(request)
+
+    def _health_body(request: Request) -> dict[str, Any]:
         if not _is_caller_admin(request):
             return {"status": "ok"}
         if self.gateway is None:

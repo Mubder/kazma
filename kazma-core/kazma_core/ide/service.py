@@ -49,13 +49,12 @@ def _resolve_workspace_root() -> Path:
     Never invent a parallel precedence that can re-pin IDE to KAZMA_WORKSPACE
     while chat tools use ShipX after Switch Repo.
     """
-    try:
-        from kazma_core.tools.file_write import _get_workspace
+    # No CWD fallback: the ladder ends in the data-dir sandbox, and a
+    # `Path.cwd() / "kazma-data"` answer gave the IDE a different root from
+    # the chat tools whenever it fired.
+    from kazma_core.tools.file_write import _get_workspace
 
-        return _get_workspace().resolve()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("[IdeService] file_write workspace lookup failed: %s", exc)
-        return (Path.cwd() / "kazma-data" / "workspace").resolve()
+    return _get_workspace().resolve()
 
 
 def _lang_for_path(path: Path) -> str:

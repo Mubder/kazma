@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from kazma_core.config_store import ConfigStore
 
+import pytest
+
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 
 class TestConfigStoreInit:
     def test_default_init(self) -> None:

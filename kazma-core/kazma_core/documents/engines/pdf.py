@@ -235,10 +235,9 @@ class PdfEngine:
 
         # Reshaping library availability warning (only matters when shaping).
         if self.shape_ar:
-            try:
-                import arabic_reshaper  # noqa: F401
-                from bidi.algorithm import get_display  # noqa: F401
-            except ImportError:
+            from kazma_core.documents.arabic import shaping_available
+
+            if not shaping_available():
                 self.warnings.append(
                     "arabic_reshaper/python-bidi not installed — Arabic letters may appear "
                     "disconnected or reversed in PDF"

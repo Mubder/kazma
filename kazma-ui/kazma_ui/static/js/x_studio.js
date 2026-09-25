@@ -11,6 +11,8 @@ function xStudioPage() {
     preview: { chars: 0, max_chars: 280, allow: true, mentions: [], hashtags: [], cashtags: [], reason: '' },
     queue: [],
     drafts: [],
+    showDismissed: false,
+    draftBusy: '',
     audit: [],
     week: [],
     busy: false,
@@ -231,10 +233,40 @@ function xStudioPage() {
 
     async loadDrafts() {
       try {
-        const resp = await fetch('/api/x/drafts', { credentials: 'same-origin' });
+        const url = '/api/x/drafts' + (this.showDismissed ? '?dismissed=true' : '');
+        const resp = await fetch(url, { credentials: 'same-origin' });
         const data = await resp.json();
         this.drafts = (data && data.drafts) || [];
       } catch (_e) { this.drafts = []; }
+    },
+
+    // Dismiss retires an unused draft (it stops being offered here and to
+    // the agent's list_proposals); Restore brings a dismissed one back. The
+    // server never touches a posted or scheduled draft, so "changed: 0" is
+    // reported as-is rather than as success.
+    async setDraftDismissed(d, dismissed) {
+      const id = d && d.id;
+      if (!id || this.draftBusy) return;
+      this.draftBusy = id;
+      try {
+        const resp = await this._mutating('POST', '/api/x/drafts/discard', { id: id, restore: !dismissed });
+        const data = await resp.json().catch(function () { return {}; });
+        if (resp.ok && data.ok !== false && data.changed) {
+          window.showToast(this.t(dismissed ? 'x_studio.draft_dismissed' : 'x_studio.draft_restored'), 'success');
+          if (dismissed && this.proposalId === id) {
+            // The composer must not stay bound to a draft that can no longer be published.
+            this.proposalId = '';
+            this._draftText = '';
+          }
+        } else {
+          window.showToast(data.error || this.t('x_studio.draft_unchanged'), 'error');
+        }
+      } catch (e) {
+        window.showToast(String(e.message || e), 'error');
+      } finally {
+        this.draftBusy = '';
+      }
+      await this.loadDrafts();
     },
 
     async loadAudit() {

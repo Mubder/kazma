@@ -15,6 +15,10 @@ from kazma_core.db.backend import DatabaseBackend, get_backend
 from kazma_core.swarm.task import SwarmTask, TaskStatus, TaskType
 from kazma_core.swarm.task_store import TaskStore
 
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 
 def test_backend_default_sqlite(monkeypatch):
     monkeypatch.delenv("KAZMA_DATABASE_URL", raising=False)

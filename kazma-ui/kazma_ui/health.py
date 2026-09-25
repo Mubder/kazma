@@ -14,6 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from kazma_core.diagnostic_scope import read_only_diagnostic
 
 logger = logging.getLogger(__name__)
 
@@ -351,11 +352,23 @@ async def liveness():
     Python process is running and can respond to HTTP requests.
     Used by multi-replica load balancers / Kubernetes.
     """
-    return {"status": "alive", "timestamp": time.time(), "build": get_build_info()}
+    with read_only_diagnostic("/health/live"):
+        return {"status": "alive", "timestamp": time.time(), "build": get_build_info()}
+
+
+# Every /health route runs inside read_only_diagnostic: a probe that writes
+# can change -- or destroy -- what it is probing (kazma_core.diagnostic_scope).
+# tests/test_diagnostics_are_read_only.py enforces it for each route here.
 
 
 @router.get("/health/ready")
 async def readiness():
+    """Readiness probe; the checks are in :func:`_readiness`."""
+    with read_only_diagnostic("/health/ready"):
+        return await _readiness()
+
+
+async def _readiness():
     """Readiness probe - returns 200 if all critical dependencies are healthy.
     
     Checks:
@@ -428,8 +441,17 @@ async def readiness():
 
 
 @router.get("/health/details")
-async def health_details():
-    """Detailed health information for debugging."""
+def health_details():
+    """Detailed health information for debugging.
+
+    A plain ``def`` (threadpooled): every check below is synchronous, and as
+    ``async def`` with no await they all ran on the event loop (AGENTS §35).
+    """
+    with read_only_diagnostic("/health/details"):
+        return _health_details()
+
+
+def _health_details():
     checks = {}
 
     checks["config_store"] = check_config_store()
@@ -493,11 +515,14 @@ _DEEP_TTL_S = 30.0
 _deep_cache: dict[str, Any] = {"ts": 0.0, "payload": None}
 
 
+_CANARY_KEY = "system.canary.config_roundtrip"
+
+
 def _check_config_roundtrip() -> dict[str, Any]:
     """Write → read → delete one ConfigStore key (catches read-only / locked
     / corrupted-settings breakage the plain read check misses)."""
     t0 = time.perf_counter()
-    key = "system.canary.config_roundtrip"
+    key = _CANARY_KEY
     try:
         from kazma_core.config_store import get_config_store
 
@@ -701,14 +726,18 @@ async def deep_canary() -> JSONResponse:
         "brain_imports",
         "database",
     )
-    results = await asyncio.gather(
-        asyncio.to_thread(_check_config_roundtrip),
-        _check_memory_recall(),
-        asyncio.to_thread(_check_workspace_binding),
-        asyncio.to_thread(_check_research_stack),
-        asyncio.to_thread(_check_brain_imports),
-        asyncio.to_thread(check_database),
-    )
+    # Read-only, except the one key whose write->read->delete IS the check.
+    # The scope is a ContextVar, so it follows each to_thread below; without
+    # it the real recall() bumped access counts on every poll.
+    with read_only_diagnostic("/health/deep", allow=(_CANARY_KEY,)):
+        results = await asyncio.gather(
+            asyncio.to_thread(_check_config_roundtrip),
+            _check_memory_recall(),
+            asyncio.to_thread(_check_workspace_binding),
+            asyncio.to_thread(_check_research_stack),
+            asyncio.to_thread(_check_brain_imports),
+            asyncio.to_thread(check_database),
+        )
     checks: dict[str, Any] = dict(zip(keys, results))
 
     failed = [n for n, c in checks.items() if c.get("status") == "failed"]

@@ -1,38 +1,30 @@
 """Live-Postgres regressions: job enqueue idempotency + storage accounting SQL.
 
-Requires KAZMA_DATABASE_URL (loaded from .env). Skips when no pool is
+Requires a Postgres DSN in the ENVIRONMENT (KAZMA_DATABASE_URL, plus
+KAZMA_TEST_ALLOW_REAL_DB=1 for the conftest guard) -- the CI Postgres job, or
+a deliberate local run against a throwaway container. Skips when no pool is
 available, so these are inert on SQLite-only machines.
+
+It used to parse the working directory's `.env` into os.environ, permanently.
+On the dev box that flipped KAZMA_DB_BACKEND to sqlite for every later test in
+the process (found 2026-09-25 when the Postgres job's order changed); on a box
+whose `.env` names a live database it would have pointed the suite at it.
+tests/test_postgres_suite.py now refuses any test that reads the real `.env`.
 """
 
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 import pytest
 
-
-def _load_env() -> None:
-    # tests/conftest.py stubs dotenv.load_dotenv to a no-op (tests must not
-    # load the real .env), so parse the DSN manually. These PG tests are
-    # opt-in: they only run when a local .env carries KAZMA_DATABASE_URL.
-    env_path = Path.cwd() / ".env"
-    if not env_path.is_file():
-        return
-    for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key in ("KAZMA_DATABASE_URL", "KAZMA_DB_BACKEND") and value:
-            os.environ[key] = value
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
 
 
 @pytest.fixture(scope="module")
 def pg_pool():
-    _load_env()
     try:
         from kazma_core.db.postgres_pool import get_postgres_pool, reset_postgres_pool
 

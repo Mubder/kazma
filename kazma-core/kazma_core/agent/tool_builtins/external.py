@@ -388,8 +388,56 @@ def register_external_tools(registry: Any) -> None:
             ),
             category="memory",
         )
+
+        # Retiring drafts. Without it every superseded copy, test draft and old
+        # version stays "unused" in every answer to "what is left to post" until
+        # its set is 90 days old (2026-09-25: 28 of 35 listed drafts were junk).
+        async def discard_proposal(proposal_id: str, restore: bool = False) -> str:
+            """Retire unused saved drafts, or restore discarded ones."""
+            import asyncio
+
+            from kazma_core.agent.artifacts import get_artifact_store as _gas
+            from kazma_core.safety.hitl import get_current_tenant_id as _tenant
+
+            ref = str(proposal_id or "").strip()
+            if not ref:
+                return "Error: proposal_id is required (a set id or one draft's item id)."
+            tenant = _tenant() or "default"
+            report = await asyncio.to_thread(
+                lambda: _gas().discard_proposal(ref, tenant_id=tenant, restore=bool(restore))
+            )
+            n, used = report["changed"], report["skipped_used"]
+            if restore:
+                if not n:
+                    return f"Nothing to restore: {ref!r} has no discarded drafts (or does not exist)."
+                return f"Restored {n} draft(s) from {ref}; list_proposals shows them as unused again."
+            if not n:
+                why = (
+                    f"its {used} draft(s) were already posted or scheduled and stay as they are"
+                    if used else "it names no unused draft (unknown id, or already discarded)"
+                )
+                return f"Nothing discarded: {why}."
+            tail = f" {used} already posted/scheduled draft(s) were left as they are." if used else ""
+            return (
+                f"Discarded {n} draft(s) from {ref}; they no longer appear in list_proposals."
+                f"{tail} Undo with discard_proposal(proposal_id={ref!r}, restore=True)."
+            )
+
+        registry.register_function(
+            "discard_proposal",
+            discard_proposal,
+            description=(
+                "Retire saved drafts that should not be posted (superseded copies, "
+                "tests, rejected versions) so they stop appearing as unused in "
+                "list_proposals. Posted/scheduled drafts are never touched. "
+                "Reversible: restore=True brings discarded drafts back. Args: "
+                "proposal_id (a set id or one item id), restore=False. Use it only "
+                "when the user asks to drop or clean up drafts."
+            ),
+            category="memory",
+        )
     except Exception as e:
-        logger.error("Failed to register list_proposals: %s", e, exc_info=True)
+        logger.error("Failed to register the saved-draft readers: %s", e, exc_info=True)
     # Task Ledger — the durable task-state object the user's short
     # continuations ("proceed"/"next") resolve against. The deterministic
     # extractor maintains plan/next_action automatically; THIS tool lets the

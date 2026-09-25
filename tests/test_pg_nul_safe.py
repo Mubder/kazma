@@ -20,6 +20,12 @@ import logging
 from kazma_core.db.pg_helpers import json_dumps, strip_nul
 from kazma_core.db.postgres_pool import _without_nul
 
+import pytest
+
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 NUL = chr(0)
 REPLACEMENT = chr(0xFFFD)
 ESCAPED_NUL = "\\" + "u0000"

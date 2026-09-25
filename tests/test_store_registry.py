@@ -435,7 +435,8 @@ def _cwd_relative_store_paths(sources: dict[str, str]) -> list[str]:
     The same bug was fixed one file at a time (knowledge, bookmarks,
     checkpoints, documents) and survived in the per-tenant checkpoints: a
     process started elsewhere wrote the store where backup and migration never
-    look. A fallback inside ``except`` (data_dir() itself failed) is allowed.
+    look. Paths inside an ``except`` are gate 8's
+    (:func:`_data_dir_rederived_in_except`), which is stricter.
     """
     problems: list[str] = []
 
@@ -546,6 +547,106 @@ def test_unclosed_sqlite_with_blocks_are_caught():
     assert _unclosed_sqlite_with_blocks(planted) == ["x.py:5"]
 
 
+def _returns_raw_connection(fn: ast.AST) -> bool:
+    """True when *fn* returns ``sqlite3.connect(...)``'s result unwrapped."""
+    raw_names: set[str] = set()
+    for node in ast.walk(fn):
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and node.value.func.attr == "connect"
+            and isinstance(node.value.func.value, ast.Name)
+            and node.value.func.value.id == "sqlite3"
+        ):
+            raw_names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Return) and node.value is not None:
+            v = node.value
+            if isinstance(v, ast.Name) and v.id in raw_names:
+                return True
+            if (
+                isinstance(v, ast.Call) and isinstance(v.func, ast.Attribute)
+                and v.func.attr == "connect" and isinstance(v.func.value, ast.Name)
+                and v.func.value.id == "sqlite3"
+            ):
+                return True
+    return False
+
+
+def _raw_connections_used_as_context(sources: dict[str, str]) -> list[str]:
+    """``with self._connect() as conn:`` where ``_connect`` returns a raw
+    connection — the same commit-but-never-close as ``with sqlite3.connect()``,
+    one call away. Checked per module (openers are private to their store)."""
+    problems: list[str] = []
+    for rel, text in sources.items():
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        openers = {
+            node.name for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and _returns_raw_connection(node)
+        }
+        if not openers:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.With, ast.AsyncWith)):
+                continue
+            for item in node.items:
+                call = item.context_expr
+                if not isinstance(call, ast.Call):
+                    continue
+                name = call.func.attr if isinstance(call.func, ast.Attribute) else getattr(call.func, "id", "")
+                if name in openers:
+                    problems.append(f"{rel}:{node.lineno} with {name}()")
+                    break
+    return problems
+
+
+def test_no_raw_connection_opener_is_used_as_a_context():
+    problems = _raw_connections_used_as_context(_product_sources())
+    assert not problems, (
+        "A function returning a raw sqlite3 connection is used in a `with`\n"
+        "block, which commits and never closes. Return\n"
+        "kazma_core.db.sqlite_session.committed_and_closed(conn) instead:\n  "
+        + "\n  ".join(problems)
+    )
+
+
+def test_a_raw_connection_opener_used_as_a_context_is_caught():
+    """Negative control: the pre-2026-09-25 store shape, and its fix."""
+    planted = {
+        "bad.py": textwrap.dedent(
+            """
+            import sqlite3
+            class Store:
+                def _connect(self):
+                    conn = sqlite3.connect(self.path)
+                    return conn
+                def read(self):
+                    with self._connect() as conn:
+                        return conn.execute("select 1").fetchone()
+            """
+        ),
+        "good.py": textwrap.dedent(
+            """
+            import sqlite3
+            from kazma_core.db.sqlite_session import committed_and_closed
+            class Store:
+                def _connect(self):
+                    conn = sqlite3.connect(self.path)
+                    return committed_and_closed(conn)
+                def read(self):
+                    with self._connect() as conn:
+                        return conn.execute("select 1").fetchone()
+            """
+        ),
+    }
+    assert _raw_connections_used_as_context(planted) == ["bad.py:8 with _connect()"]
+
+
 def test_cwd_relative_store_paths_are_caught():
     """Negative control: the per-tenant checkpoint line, and its fallback form."""
     planted = {
@@ -568,3 +669,89 @@ def test_cwd_relative_store_paths_are_caught():
     assert "x.py:4" in problems, problems
     assert "x.py:11" in problems, problems
     assert not any(p.endswith(":10") for p in problems), "an except-fallback was flagged"
+    # ...which is the next gate's job, not this one's.
+    assert _data_dir_rederived_in_except(planted) == ["x.py:9"]
+
+
+# ── 8. no except-branch re-derives the data dir from the CWD ─────────────
+
+#: Files allowed to keep one, and why. Keep it this short.
+_EXCEPT_FALLBACK_ALLOWED = {
+    # The updater replaces the package it runs from; mid-update kazma_core may
+    # not import. Its `cwd` argument is the checkout being updated, so the
+    # fallback names that install's own kazma-data, not wherever it started.
+    "kazma-cli/kazma_cli/update.py",
+}
+
+
+def _data_dir_rederived_in_except(sources: dict[str, str]) -> list[str]:
+    """``except: return Path.cwd() / "kazma-data" / ...`` — any path, any store.
+
+    Gate 7 exempted these as "the data dir itself failed". Swept 2026-09-25:
+    there were sixteen, and not one was a real fallback. ``data_dir()`` fails
+    only when it cannot create the directory. The literal then resolved
+    against the process CWD, so it named a DIFFERENT place: a second
+    ``settings.db`` (ConfigStore and WorkspaceStore), a document store the
+    backup never copies, a research-session DB, a workspace sandbox the IDE
+    used while the chat tools used another, a sandbox mailbox, and in the
+    database client a CWD-relative root added to a path ALLOWLIST on the
+    error path. The honest behaviour is to raise, deny, or fall back to
+    something that is not a store (a restart log goes to the temp dir).
+    """
+    problems: list[str] = []
+    for rel, text in sources.items():
+        if rel.replace("\\", "/") in _EXCEPT_FALLBACK_ALLOWED:
+            continue
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        for handler in ast.walk(tree):
+            if not isinstance(handler, ast.ExceptHandler):
+                continue
+            if any(
+                isinstance(n, ast.Constant) and isinstance(n.value, str)
+                and n.value.replace("\\", "/").split("/", 1)[0] == "kazma-data"
+                for n in ast.walk(handler)
+            ):
+                problems.append(f"{rel}:{handler.lineno}")
+    return sorted(set(problems))
+
+
+def test_no_except_branch_rederives_the_data_dir():
+    problems = _data_dir_rederived_in_except(_product_sources())
+    assert not problems, (
+        "An except-branch builds a path from the literal 'kazma-data', relative to\n"
+        "wherever the process started. When data_dir() fails that is a different\n"
+        "directory, not a fallback: raise, deny, or use a non-store location.\n  "
+        + "\n  ".join(problems)
+    )
+
+
+def test_except_rederivation_is_caught_and_the_allowlist_is_honoured():
+    """Negative control, plus: the one allowed file is really exempt."""
+    planted = {
+        "a.py": textwrap.dedent(
+            """
+            from pathlib import Path
+            def root():
+                try:
+                    from kazma_core.paths import data_dir
+                    return data_dir() / "workspace"
+                except OSError:
+                    return Path.cwd() / "kazma-data" / "workspace"
+            """
+        ),
+        "kazma-cli/kazma_cli/update.py": textwrap.dedent(
+            """
+            from pathlib import Path
+            def state(cwd):
+                try:
+                    from kazma_core.paths import data_dir
+                    return data_dir()
+                except ImportError:
+                    return Path(cwd) / "kazma-data"
+            """
+        ),
+    }
+    assert _data_dir_rederived_in_except(planted) == ["a.py:7"]

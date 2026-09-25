@@ -41,6 +41,7 @@ halves, which are engine-independent.
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 import unicodedata
@@ -63,6 +64,7 @@ __all__ = [
     "strip_bidi_controls",
     "shape_spans",
     "shape_text",
+    "shaping_available",
     "to_arabic_numerals",
     "PRESENTATION_FORMS_RE",
 ]
@@ -324,19 +326,49 @@ def _reorder_l2(segments: list[ShapedSegment]) -> list[ShapedSegment]:
     return ordered
 
 
+def shaping_available() -> bool:
+    """True when the libraries a visual engine needs for Arabic are installed.
+
+    The one place that knows which libraries those are — engines ask here
+    instead of importing ``arabic_reshaper`` / ``bidi`` themselves.
+    """
+    try:
+        import arabic_reshaper  # noqa: F401
+        from bidi.algorithm import get_display  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+@functools.lru_cache(maxsize=1)
+def _shared_reshaper() -> Any:
+    """The one ``ArabicReshaper`` for the process.
+
+    Building one reads its configuration and, on first use, compiles a
+    regex over every ligature. ``_reshape`` used to build a fresh reshaper
+    per call, and line wrapping shapes each candidate line: 130,123
+    constructions were 96% of ``tests/test_document_layout.py``'s 112s, and
+    on the slower CI runner one PDF test outlived its 120s timeout
+    (2026-09-25). ``reshape`` keeps no per-call state, so one instance
+    serves every thread.
+    """
+    import arabic_reshaper
+
+    return arabic_reshaper.ArabicReshaper(
+        configuration={"delete_harakat": False, "support_ligatures": True}
+    )
+
+
 def _reshape(text: str) -> str:
     """Apply Arabic joining forms (no bidi reordering)."""
     if not text or not has_rtl(text):
         return text
     try:
-        import arabic_reshaper
+        import arabic_reshaper  # noqa: F401 — availability probe
     except ImportError:
         return text
     try:
-        reshaper = arabic_reshaper.ArabicReshaper(
-            configuration={"delete_harakat": False, "support_ligatures": True}
-        )
-        return reshaper.reshape(text)
+        return _shared_reshaper().reshape(text)
     except Exception:  # pragma: no cover - defensive
         logger.debug("[arabic] reshape failed", exc_info=True)
         return text

@@ -228,7 +228,9 @@ async def test_network_error_audited(audit_db: Path, fake_http) -> None:
 # ── Settings viewer endpoint ──────────────────────────────────────────
 
 
-async def test_audit_endpoint_serves_entries(monkeypatch):
+def test_audit_endpoint_serves_entries(monkeypatch):
+    # A plain `def` route since 2026-09-25 (AGENTS §35: it never awaited, so
+    # its SQLite read ran on the event loop); called directly, not awaited.
     """GET /api/x/audit backs the Settings → X connector audit table."""
     import kazma_core.x_api.audit as audit_mod
     from kazma_ui.x_api import x_audit
@@ -242,7 +244,7 @@ async def test_audit_endpoint_serves_entries(monkeypatch):
          "request_body": None, "response_body": None},
     ]
     monkeypatch.setattr(audit_mod, "query_x_audit", lambda **k: rows)
-    out = await x_audit(limit=10)
+    out = x_audit(limit=10)
     import json as _json
     payload = _json.loads(out.body)
     assert payload["ok"] is True and payload["count"] == 2
@@ -269,7 +271,7 @@ def test_public_audit_entry_keeps_text_drops_bodies():
     assert "response_body" not in out
 
 
-async def test_audit_endpoint_bounds_limit(monkeypatch):
+def test_audit_endpoint_bounds_limit(monkeypatch):
     import kazma_core.x_api.audit as audit_mod
     from kazma_ui.x_api import x_audit
 
@@ -281,7 +283,7 @@ async def test_audit_endpoint_bounds_limit(monkeypatch):
 
     monkeypatch.setattr(audit_mod, "query_x_audit", fake)
     import json as _json
-    payload = _json.loads((await x_audit(limit=9999)).body)
+    payload = _json.loads(x_audit(limit=9999).body)
     assert payload["ok"] is True and seen["limit"] == 500
 
 

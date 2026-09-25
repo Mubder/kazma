@@ -857,12 +857,15 @@ class TelegramAdapter(BaseAdapter):
         @router.get("/health")
         async def webhook_health() -> dict[str, Any]:
             """Health check for the webhook endpoint."""
-            return {
-                "status": "ok",
-                "adapter": self.name,
-                "queue_initialized": self._queue is not None,
-                "queue_size": self._queue.qsize() if self._queue else 0,
-            }
+            from kazma_core.diagnostic_scope import read_only_diagnostic
+
+            with read_only_diagnostic("telegram webhook /health"):
+                return {
+                    "status": "ok",
+                    "adapter": self.name,
+                    "queue_initialized": self._queue is not None,
+                    "queue_size": self._queue.qsize() if self._queue else 0,
+                }
 
         return router
 

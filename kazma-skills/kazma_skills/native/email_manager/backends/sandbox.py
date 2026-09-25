@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -39,12 +40,12 @@ CREATE INDEX IF NOT EXISTS idx_email_unread ON messages(unread);
 
 
 def _default_db_path() -> Path:
-    try:
-        from kazma_core.paths import data_dir
+    # No CWD-relative fallback: `Path("kazma-data")` wrote a second mailbox
+    # wherever the process happened to start (the class store_registry's
+    # CWD gate exists for). kazma-core is a hard dependency of this package.
+    from kazma_core.paths import data_dir
 
-        return data_dir() / "sandbox_emails.db"
-    except Exception:
-        return Path("kazma-data") / "sandbox_emails.db"
+    return data_dir() / "sandbox_emails.db"
 
 
 def _seed_path() -> Path:
@@ -59,11 +60,14 @@ class SandboxBackend:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self) -> AbstractContextManager[sqlite3.Connection]:
+        """One short-lived connection that commits AND closes on exit."""
+        from kazma_core.db.sqlite_session import committed_and_closed
+
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        return committed_and_closed(conn)
 
     def _init_db(self) -> None:
         with self._connect() as conn:

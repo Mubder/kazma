@@ -33,6 +33,7 @@ from kazma_core.documents.arabic import (
     has_rtl,
     iter_style_runs,
     shape_spans,
+    shape_text,
 )
 from kazma_core.documents.profile import (  # noqa: F401 (re-exported)
     arabic_ratio,
@@ -67,22 +68,17 @@ _TABLE_SEP_RE = re.compile(r"^\|[\s:\-|]+\|$")
 
 
 def shape_for_pdf(text: str) -> str:
-    """Reshape + BiDi-reorder for ReportLab (LTR drawing engine)."""
-    if not text or not _AR_RE.search(text):
+    """Reshape + BiDi-reorder for ReportLab (LTR drawing engine).
+
+    Delegates to :func:`kazma_core.documents.arabic.shape_text`, the one
+    shaping pass (AGENTS §19H). This used to build its own reshaper per call
+    and gate on a codepoint-block regex — a second shaping routine beside the
+    one ``arabic.py`` owns. ``tests/test_arabic_text.py`` pins that
+    ``shape_text`` matches python-bidi's reference output for RTL text.
+    """
+    if not text or not has_rtl(text):
         return text
-    try:
-        import arabic_reshaper
-        from bidi.algorithm import get_display
-    except ImportError:
-        return text
-    try:
-        reshaper = arabic_reshaper.ArabicReshaper(
-            configuration={"delete_harakat": False, "support_ligatures": True}
-        )
-        base = "R" if is_arabic_dominant(text) else None
-        return get_display(reshaper.reshape(text), base_dir=base)
-    except Exception:
-        return text
+    return shape_text(text, base_dir="rtl" if is_arabic_dominant(text) else None)
 
 
 # Safety margin (in points) subtracted from the column width when measuring a

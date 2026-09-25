@@ -971,8 +971,12 @@ class SettingsRouterBuilder:
                     from kazma_core.paths import data_dir
 
                     log_path = data_dir() / "restart.log"
-                except (ImportError, OSError):
-                    log_path = Path.cwd() / "kazma-data" / "restart.log"
+                except OSError:
+                    # A restart must not fail on where its log goes. The temp
+                    # dir is writable and is not a Kazma store.
+                    import tempfile
+
+                    log_path = Path(tempfile.gettempdir()) / "kazma-restart.log"
                 log_path.parent.mkdir(parents=True, exist_ok=True)
                 logf = open(log_path, "ab")
                 kwargs = dict(
@@ -1400,9 +1404,17 @@ class SettingsRouterBuilder:
             return {"status": "ok", "restored": str(count)}
 
         @router.get("/api/settings/system/diagnostics")
-        async def api_diagnostics() -> dict[str, Any]:
-            """Get system diagnostics."""
-            return _get_sm().get_diagnostics()
+        def api_diagnostics() -> dict[str, Any]:
+            """Get system diagnostics.
+
+            A plain ``def`` (threadpooled): ``psutil.cpu_percent(interval=0.1)``
+            sleeps 100 ms, and as ``async def`` that sleep ran on the event loop
+            serving every SSE stream (AGENTS §35).
+            """
+            from kazma_core.diagnostic_scope import read_only_diagnostic
+
+            with read_only_diagnostic("/api/settings/system/diagnostics"):
+                return _get_sm().get_diagnostics()
 
         @router.get("/api/security/hardening")
         async def api_security_hardening() -> dict[str, Any]:

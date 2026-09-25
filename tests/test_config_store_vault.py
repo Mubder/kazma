@@ -30,6 +30,7 @@ def vault_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("KAZMA_VAULT_KEY", raising=False)
 
 
+@pytest.mark.postgres
 def test_is_sensitive_config_key():
     assert is_sensitive_config_key("llm.api_key") is True
     assert is_sensitive_config_key("connectors.telegram.token") is True
@@ -57,6 +58,7 @@ def test_sensitive_set_stores_vault_ref(vault_env, tmp_path: Path):
         store.close()
 
 
+@pytest.mark.postgres
 def test_masked_placeholder_does_not_overwrite(vault_env, tmp_path: Path):
     store = ConfigStore(db_path=str(tmp_path / "settings.db"), yaml_path=str(tmp_path / "missing.yaml"))
     try:
@@ -84,6 +86,7 @@ def test_plaintext_fallback_without_vault(tmp_path: Path, monkeypatch: pytest.Mo
         store.close()
 
 
+@pytest.mark.postgres
 def test_retrieve_prefers_newest_duplicate_row(vault_env):
     """A rotated credential must win over a stale duplicate row.
 
@@ -107,6 +110,7 @@ def test_retrieve_prefers_newest_duplicate_row(vault_env):
     assert v.retrieve("email.gmail.client_secret") == "NEW-SECRET"
 
 
+@pytest.mark.postgres
 def test_retrieve_tenant_isolation(vault_env):
     v = vault_env
     v.store("email.gmail.client_secret", "GLOBAL", category="email")
@@ -116,6 +120,7 @@ def test_retrieve_tenant_isolation(vault_env):
     assert v.retrieve("email.gmail.client_secret", tenant_id="default") == "TENANT"
 
 
+@pytest.mark.postgres
 def test_email_creds_vault_store_forces_global_scope(vault_env):
     """Email/OAuth creds are installation-level — a tenant-scoped request
     must still write them to the global scope (the scope background paths

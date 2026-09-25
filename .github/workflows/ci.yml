@@ -178,8 +178,8 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Install deps
         run: pip install -e ".[test,postgres]"
-      - name: Run the Postgres-specific suites against a real Postgres
-        # Named files rather than a broad `-k`: a keyword sweep drags in
+      - name: Run the Postgres-marked tests against a real Postgres
+        # Marked tests rather than a broad `-k`: a keyword sweep drags in
         # SQLite-shaped tests that fail for reasons that are not the backend,
         # and a job that is red on day one gets ignored, which is how we got
         # here. This is a tripwire for the pg code paths, NOT parity with the
@@ -220,27 +220,23 @@ jobs:
         # Postgres genuinely refuses is spooled, survives a restart and is
         # written through once the database accepts it (9 passed there; its
         # genuine-refusal test skips on SQLite, so this job is where it runs).
-        run: |
-          python -m pytest -q --timeout=300 \
-            tests/test_pg_backup.py \
-            tests/test_pg_store_dual_backend.py \
-            tests/test_pg_dump_reported_not_assumed.py \
-            tests/test_pg_bridge_docker_env.py \
-            tests/test_document_jobs_pg_idempotency.py \
-            tests/test_document_repository_pg_quota.py \
-            tests/test_memory_pgvector.py \
-            tests/test_db_backend.py \
-            tests/test_config_store.py \
-            tests/test_config_store_stale_shadow.py \
-            tests/test_stale_settings_db_notice.py \
-            tests/test_data_dir_does_not_isolate_postgres.py \
-            tests/test_atomic_update_does_not_deadlock.py \
-            tests/test_importer_atomicity.py \
-            tests/test_memory_mirror.py \
-            tests/test_task_store_workspace.py \
-            tests/test_pg_nul_safe.py \
-            tests/test_session_spool.py \
-            tests/test_audit_2026_09_17_regressions.py
+        #
+        # test_diagnostics_are_read_only.py (2026-09-25), same throwaway
+        # postgres:16 (26 passed). It carries the Postgres half of the lazy
+        # plaintext->vault migration: `_write_db_value` opened SQLite
+        # unconditionally, raised under Postgres inside a debug-logged except,
+        # and left the plaintext row in place. Measured on the prior code:
+        # RuntimeError there, and atomic_update(secret, lambda _: None) wrote
+        # null over the vault pointer on BOTH backends.
+        #
+        # 2026-09-25: the list moved out of this file and into the tests.
+        # A test verified against a real Postgres carries
+        # `@pytest.mark.postgres` (or `pytestmark = pytest.mark.postgres`),
+        # and scripts/postgres_suite.py runs exactly those -- so a file can
+        # opt in test by test instead of all or nothing, which is how the
+        # Postgres-safe tests in the four rejected files above got in.
+        # tests/test_postgres_suite.py keeps this step on the script.
+        run: python scripts/postgres_suite.py
         env:
           KAZMA_DB_BACKEND: postgres
           KAZMA_DATABASE_URL: postgresql://kazma:kazma@localhost:5432/kazma_test
@@ -515,27 +511,33 @@ jobs:
         #
         # 2026-09-17: kazma-cli / kazma-skills / kazma-tui were never scanned
         # at all. They are clean at this threshold, so they join the gate.
+        #
+        # 2026-09-25: tests/ and scripts/ join too. Their three findings were
+        # fixed rather than waived: vendor_codemirror.py resolves npm/npx with
+        # shutil.which instead of shell=True, the template-compile test builds
+        # its Jinja environment with autoescape on like the app does, and the
+        # FTP backup tests carry the same justified `# nosec B402` as the
+        # backend they test. tests/test_security_scan_scope.py keeps both
+        # directories in this step and every nosec naming a rule and a reason.
         run: |
           bandit -r kazma-core/kazma_core kazma-gateway/kazma_gateway kazma-ui/kazma_ui \
             kazma-cli/kazma_cli kazma-skills/kazma_skills kazma-tui/kazma_tui \
+            tests scripts \
             -lll -ii
       - name: Bandit B613 trojansource (GATE — every directory)
-        # Narrow gate, widest scope, and the only check applied to tests and
-        # scripts. A source file holding live bidi controls renders differently
-        # from how it compiles (CVE-2021-42574); a test file does that just as
-        # well as product code, and `tests/` is not in the gate above.
+        # Narrow gate, widest scope. A source file holding live bidi controls
+        # renders differently from how it compiles (CVE-2021-42574); a test
+        # file does that just as well as product code. B613 is HIGH/MEDIUM,
+        # so since tests/ and scripts/ joined the gate above this step is a
+        # subset of it -- kept so a trojansource hit is labelled as one.
         #
         # Not hypothetical: this fired twice on 2026-09-17 — once in the HITL
         # card's own invisible-character table, and once in
         # test_arabic_text.py, which had been carrying literal LRM/RLM in a
         # directory nothing scanned.
         #
-        # The rest of tests/ and scripts/ stays out of the gate deliberately:
-        # the findings there are a test importing ftplib to test FTP backup, a
-        # jinja2 fixture with autoescape off, and npm shelling on Windows.
-        # Gating those makes a job that is red on day one, which is a job
-        # everybody learns to ignore — exactly how the `|| true` gap opened.
-        # They are in the artifact above. See docs/KNOWN_GAPS.md.
+        # Everything else in tests/ and scripts/ is in the HIGH gate above as
+        # of 2026-09-25; the artifact still carries the lower severities.
         run: |
           bandit -r kazma-core/kazma_core kazma-gateway/kazma_gateway kazma-ui/kazma_ui \
             kazma-cli/kazma_cli kazma-skills/kazma_skills kazma-tui/kazma_tui \

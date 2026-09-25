@@ -925,7 +925,10 @@ def _update_state_path(cwd: str) -> Path:
         from kazma_core.paths import data_dir
 
         root = data_dir()
-    except Exception:
+    except (ImportError, OSError):
+        # The updater must still run when the package it is replacing cannot
+        # import mid-update. `cwd` is the checkout being updated, not the
+        # process CWD, so this names the same kazma-data the install uses.
         root = Path(cwd) / "kazma-data"
     root.mkdir(parents=True, exist_ok=True)
     return root / "update-state.json"

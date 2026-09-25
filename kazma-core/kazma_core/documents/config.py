@@ -139,16 +139,12 @@ class DocumentRollout:
 
 
 def _default_storage_root() -> Path:
-    try:
-        from kazma_core.paths import data_dir
+    # No CWD fallback: a document store under `Path.cwd() / "kazma-data"` is
+    # one the universal backup and the migration bundle never copy, holding
+    # blobs the metadata DB (under the real data dir) points at.
+    from kazma_core.paths import data_dir
 
-        return cast(Path, data_dir() / "document-store")
-    except Exception as exc:
-        logger.warning(
-            "[documents.config] Failed to resolve Kazma data directory; using local fallback: %s",
-            exc,
-        )
-        return (Path.cwd() / "kazma-data" / "document-store").resolve()
+    return cast(Path, data_dir() / "document-store")
 
 
 def _coerce_bool(value: Any) -> bool:

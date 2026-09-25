@@ -207,6 +207,7 @@ markers = [
     "commitment: Commitment Layer tests (gate, resolvers, store, scope, soul)",
     "eval: Industry eval pack (golden trajectories, no live LLM)",
     "e2e: Browser smoke (Playwright; separate CI job)",
+    "postgres: Verified against a real Postgres; the CI Postgres job runs these (scripts/postgres_suite.py)",
 ]
 
 [tool.coverage.run]

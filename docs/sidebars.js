@@ -59,6 +59,7 @@ const sidebars = {
         'reference/llm-providers',
         'reference/slash-commands',
         'reference/environment-variables',
+        'reference/environment-variables-index',
         'reference/api-routes',
         'reference/skill-manifest',
         'reference/system-map',

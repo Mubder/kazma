@@ -28,6 +28,18 @@ _name_ar = (
     "Never write كازما."
 )
 
+# The lock governs the language of the reply's OWN words. It must never make
+# the model withhold, translate or paraphrase stored content: on 2026-09-25 an
+# English "list the posts we did not send" came back with every Arabic draft
+# replaced by "I'm not printing the Arabic script this turn because the
+# language lock ... is English-only". The operator's own drafts are data.
+_QUOTED_MATERIAL = (
+    "QUOTED MATERIAL IS EXEMPT: saved drafts, file contents, tool results, "
+    "names and titles are reproduced exactly as stored, in their original "
+    "script — never withheld, translated or paraphrased because of this lock. "
+    "The lock applies to the words you write yourself."
+)
+
 
 def detect_user_language(text: str) -> str:
     """Return ``'ar'``, ``'en'``, ``'mixed'``, or ``'unknown'``.
@@ -60,10 +72,11 @@ def language_lock_message(user_text: str) -> str:
     if lang == "en":
         return (
             "LANGUAGE LOCK (this turn ONLY): The user's LATEST message is ENGLISH. "
-            "You MUST reply in English only. Do NOT use Arabic script. "
-            "Do NOT greet in Arabic. Cultural context and agent.language do NOT override this. "
+            "You MUST write your reply in English only: no Arabic sentences, no "
+            "Arabic greetings. Cultural context and agent.language do NOT override this. "
             f"{_HISTORY_OVERRIDE} "
             "Code, paths, and tool names stay as-is. "
+            f"{_QUOTED_MATERIAL} "
             "Your English product name is Kazma."
         )
     if lang == "ar":
@@ -71,6 +84,7 @@ def language_lock_message(user_text: str) -> str:
             "LANGUAGE LOCK (this turn ONLY): The user's LATEST message is ARABIC. "
             "You MUST reply in Arabic. English only for code/paths/identifiers. "
             f"{_HISTORY_OVERRIDE} "
+            f"{_QUOTED_MATERIAL} "
             f"{_name_ar}"
         )
     if lang == "mixed":
@@ -79,6 +93,7 @@ def language_lock_message(user_text: str) -> str:
             "in their LATEST message. Mirror their mix; default the bulk of the "
             "reply to the language they used more. Do not force pure Arabic or pure English. "
             f"{_HISTORY_OVERRIDE} "
+            f"{_QUOTED_MATERIAL} "
             f"{_name_ar}"
         )
     # Unclear script (emoji, numbers only): do NOT inherit session language —
@@ -88,5 +103,6 @@ def language_lock_message(user_text: str) -> str:
         "LANGUAGE LOCK (this turn ONLY): User language is unclear from this message. "
         "Reply in English (short). Do not continue a previous Arabic (or other) "
         "session language just because history was Arabic. "
-        f"{_HISTORY_OVERRIDE}"
+        f"{_HISTORY_OVERRIDE} "
+        f"{_QUOTED_MATERIAL}"
     )

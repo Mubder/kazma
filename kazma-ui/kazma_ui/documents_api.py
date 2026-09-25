@@ -59,6 +59,7 @@ from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from kazma_ui.rate_limit import rate_limit
+from kazma_core.diagnostic_scope import read_only_diagnostic
 from kazma_core.errors import safe_error
 
 logger = logging.getLogger(__name__)
@@ -543,7 +544,8 @@ def create_documents_router() -> APIRouter:
         if svc is None:
             return _unavailable()
         try:
-            return {"ok": True, "health": svc.health()}
+            with read_only_diagnostic("/api/documents/health"):
+                return {"ok": True, "health": svc.health()}
         except Exception as exc:  # noqa: BLE001
             logger.warning("[documents_api] health failed type=%s", type(exc).__name__)
             return JSONResponse(
@@ -833,7 +835,8 @@ def create_documents_router() -> APIRouter:
         if svc is None:
             return _unavailable()
         try:
-            return {"ok": True, "readiness": svc.readiness()}
+            with read_only_diagnostic("/api/documents/ops/readiness"):
+                return {"ok": True, "readiness": svc.readiness()}
         except Exception as exc:  # noqa: BLE001
             logger.warning("[documents_api] readiness failed type=%s", type(exc).__name__)
             return JSONResponse(

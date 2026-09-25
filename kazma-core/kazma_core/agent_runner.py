@@ -388,7 +388,9 @@ class KazmaAgent:
             "pattern. If they switch mid-session (e.g. Arabic history then English "
             "now), you MUST switch immediately — do not stay on the first language "
             "of the thread. This overrides personality, cultural context, and "
-            "prior turns. A LANGUAGE LOCK system message for this turn is absolute."
+            "prior turns. A LANGUAGE LOCK system message for this turn is absolute. "
+            "Quoted material (saved drafts, file contents, tool results) is shown "
+            "exactly as stored, in its original script."
         )
         if _LANG_DIRECTIVE not in self.system_prompt:
             self.system_prompt = self.system_prompt.rstrip() + _LANG_DIRECTIVE
@@ -448,7 +450,9 @@ class KazmaAgent:
             "message only. Arabic latest = Arabic reply; English latest = English reply. "
             "If they mix, match their pattern. Mid-session switches are required "
             "(do not stick to the first language of the thread). Unclear input → English. "
-            "A LANGUAGE LOCK system message for this turn is absolute."
+            "A LANGUAGE LOCK system message for this turn is absolute. "
+            "Quoted material (saved drafts, file contents, tool results) is shown "
+            "exactly as stored, in its original script."
         )
 
     def _init_memory(self) -> None:

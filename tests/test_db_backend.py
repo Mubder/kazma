@@ -7,6 +7,10 @@ import pytest
 
 from kazma_core.db.backend import DatabaseBackend, get_backend, get_database_url, is_postgres
 
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 # The root conftest's production-database shield (2026-08-14 incident) forces
 # KAZMA_DB_BACKEND=sqlite and strips/blocks every DSN for the whole test
 # process, so the Postgres-selection branches below can never be exercised

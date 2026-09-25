@@ -57,13 +57,14 @@ def default_sandbox_root() -> Path:
     Prefer ``paths.data_dir()/workspace`` so default native tools and a
     workspace-bound MCP filesystem share the same empty sandbox on first
     boot — not the monorepo CWD.
-    """
-    try:
-        from kazma_core.paths import data_dir
 
-        root = data_dir() / "workspace"
-    except Exception:
-        root = Path.cwd() / "kazma-data" / "workspace"
+    No CWD fallback: ``data_dir()`` fails only when the data dir cannot be
+    created, and ``Path.cwd() / "kazma-data" / "workspace"`` then handed the
+    agent a sandbox that depended on where the process was started.
+    """
+    from kazma_core.paths import data_dir
+
+    root = data_dir() / "workspace"
     root.mkdir(parents=True, exist_ok=True)
     return root.resolve()
 
