@@ -162,3 +162,54 @@ def test_the_env_gate_sees_each_shape():
         "t.py:6 Path.cwd() / '.env'",
         "t.py:8 load_dotenv(...)",
     ]
+
+
+# ── 3. a test reaches psycopg only through importorskip ───────────────────
+
+
+def _bare_psycopg_imports(sources: dict[str, str]) -> list[str]:
+    """``import psycopg`` in a test: the main Tests job installs ``.[test]``,
+    which does not include psycopg, so the test errors there instead of
+    skipping (CI 2026-09-25, two restore-rehearsal tests)."""
+    hits: list[str] = []
+    for rel, text in sources.items():
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            names: list[str] = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module]
+            if any(n == "psycopg" or n.startswith("psycopg.") for n in names):
+                hits.append(f"{rel}:{node.lineno}")
+    return sorted(hits)
+
+
+def test_tests_import_psycopg_only_through_importorskip():
+    hits = _bare_psycopg_imports(_test_sources())
+    assert not hits, (
+        "A test imports psycopg directly. The main Tests job does not install it,\n"
+        "so the test ERRORS there; use `psycopg = pytest.importorskip(\"psycopg\")`\n"
+        "(and @pytest.mark.postgres if it should run in the Postgres job):\n  "
+        + "\n  ".join(hits)
+    )
+
+
+def test_the_psycopg_gate_sees_both_import_forms():
+    planted = {
+        "t.py": textwrap.dedent(
+            '''
+            import pytest
+            def a():
+                import psycopg
+            def b():
+                from psycopg import sql
+            def fine():
+                psycopg = pytest.importorskip("psycopg")
+            '''
+        )
+    }
+    assert _bare_psycopg_imports(planted) == ["t.py:4", "t.py:6"]

@@ -104,7 +104,12 @@ class _Conn:
         return _R()
 
 
+# The next two need psycopg (its sql module builds the statements) but no
+# database: they run in the Postgres job, which installs it, and skip where it
+# is absent -- the main Tests job installs `.[test]` only (CI 2026-09-25).
+@pytest.mark.postgres
 def test_stale_cleanup_drops_only_old_rehearsal_databases():
+    pytest.importorskip("psycopg")
     old = rr._scratch_name(NOW - 3 * 86400)
     fresh = rr._scratch_name(NOW - 60)
     conn = _Conn(["kazma", old, fresh, "kazma_restore_rehearsal_x", "other_app"])
@@ -121,8 +126,9 @@ def test_the_scratch_dsn_changes_only_the_database():
     assert rr._dbname(dsn) == "kazma"
 
 
+@pytest.mark.postgres
 def test_missing_createdb_is_unverified_not_a_failed_backup(monkeypatch, tmp_path):
-    import psycopg
+    psycopg = pytest.importorskip("psycopg")
     from contextlib import contextmanager
 
     class _Denied(_Conn):
@@ -221,7 +227,7 @@ def test_a_real_dump_restores_into_scratch_and_the_scratch_is_dropped(tmp_path):
 @pytest.mark.postgres
 def test_a_leftover_scratch_database_is_removed_and_nothing_else():
     dsn = _live_dsn()
-    from psycopg import sql
+    sql = pytest.importorskip("psycopg.sql")
 
     old = rr._scratch_name(time.time() - 3 * 86400)
     bystander = "kazma_rehearsal_bystander_" + os.urandom(3).hex()
