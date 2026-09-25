@@ -162,9 +162,24 @@ consequence:
 
 | Check | What it would catch |
 |---|---|
-| the Postgres dump streamed through `pg_restore --file=-` | a dump whose *data* sections are damaged behind an intact TOC. A full restore rehearsal that needs no database |
+| the Postgres dump streamed through `pg_restore --file=-` | a dump whose *data* sections are damaged behind an intact TOC. Every block is read — but nothing is loaded, so this proves the archive reads, not that it restores |
+| **opt-in:** the dump restored into a scratch database, checked, dropped | a dump that reads back but does not restore: a schema that will not recreate, rows that will not load, Kazma's tables missing, an empty `kazma_settings`. Off by default — see below |
 | `restic check --read-data-subset=5%` | bit rot inside the repository's packs |
 | a `HEAD` read-back of the offsite object, comparing stored size to uploaded size | a truncated upload. A short object and a complete one look identical from the sending side, which returns 200 for both |
+
+**The restore rehearsal** (`kazma_core.backup.restore_rehearsal`) is the only
+backup check that writes to the database server, so it is **off unless you
+turn it on**: set `backups.pg.restore_rehearsal` to `true`, or
+`KAZMA_PG_RESTORE_REHEARSAL=1` (`=0` vetoes the setting). When on, the weekly
+pass creates `kazma_restore_rehearsal_<epoch>` on the same server, restores the
+newest dump into it with `pg_restore`, checks that Kazma's tables came back and
+`kazma_settings` is not empty, and drops it. Every `CREATE`/`DROP` re-checks the
+name against that exact pattern and refuses the live database's own name; a
+crash between the two leaves a scratch database the next run removes (older
+than a day, same pattern — nothing else). The database user needs `CREATEDB`
+(`ALTER ROLE <user> CREATEDB`); without it the check reports **UNVERIFIED**
+with that grant, never a failed backup. Size the server for a second copy of
+the Kazma tables while it runs.
 
 > **A drill that has never run proves nothing.** Do not describe backups as
 > verified until a drill *result* appears in the log — the presence of a

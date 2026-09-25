@@ -1582,6 +1582,9 @@ class ConfigStore:
         Sensitive keys are written to the encrypted vault when
         ``KAZMA_VAULT_KEY`` is set; the DB only stores a pointer.
         Masked placeholders from the UI are ignored (no overwrite).
+        Inside a read-only diagnostic every mutator of this class raises
+        ``DiagnosticWriteRefused`` unless the key is on the scope's allow list
+        (kazma_core.diagnostic_scope).
         """
         refuse_write("config", key)
         if value is None:

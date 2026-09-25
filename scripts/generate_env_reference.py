@@ -48,9 +48,13 @@ class EnvVar:
 
 
 def _product_sources(root: Path) -> dict[str, str]:
+    # Tracked AND untracked-but-not-ignored: a module added in the working
+    # tree reads variables too, and an index regenerated before `git add`
+    # must not silently leave it out.
     try:
         listed = subprocess.run(
-            ["git", "ls-files", *(f"{p}/*.py" for p in _PACKAGES), *(f"{p}/**/*.py" for p in _PACKAGES)],
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard",
+             *(f"{p}/*.py" for p in _PACKAGES), *(f"{p}/**/*.py" for p in _PACKAGES)],
             cwd=root, capture_output=True, text=True, check=True,
         ).stdout.split()
     except (OSError, subprocess.CalledProcessError):

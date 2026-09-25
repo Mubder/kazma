@@ -145,6 +145,7 @@ curl -s https://your.domain/api/auth/status
 | `KAZMA_PG_POOL_MIN` | `1` | Optional | Minimum connections in the psycopg pool. |
 | `KAZMA_PG_POOL_MAX` | `10` | Optional | Maximum connections in the psycopg pool. |
 | `KAZMA_PG_POOL_TIMEOUT` | `5` | Optional | Seconds a caller waits for a free pool connection. A hang here used to freeze `/health/ready` on the event loop. |
+| `KAZMA_PG_RESTORE_REHEARSAL` | unset (off) | Optional | `1` turns ON the weekly restore rehearsal: the newest `pg_dump` is restored into a scratch database `kazma_restore_rehearsal_<epoch>` on the SAME server, checked (Kazma's tables present, `kazma_settings` not empty) and dropped. `0` vetoes the setting `backups.pg.restore_rehearsal`. The user needs `CREATEDB`; without it the drill reports UNVERIFIED with the grant to add. Leftover scratch databases older than a day are removed by the next run; nothing else is ever created or dropped. |
 
 ---
 

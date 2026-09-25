@@ -1496,9 +1496,10 @@ def _bump_access(
     "in use" (never archived) and penalised it in real ranking for being
     surfaced so often. The canary must not change what it measures.
     """
-    from kazma_core.diagnostic_scope import writes_suppressed
+    from kazma_core.diagnostic_scope import active_diagnostic, writes_suppressed
 
     if writes_suppressed():
+        logger.debug("[recall] access bump skipped inside %s", active_diagnostic())
         return
     try:
         from kazma_core.memory.config import read_memory_cfg
