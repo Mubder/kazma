@@ -252,11 +252,18 @@ def register_memory_routes(self: Any) -> None:
             },
         )
     @self.app.get("/api/memory/v2/health")
-    async def _memory_v2_health():
-        """V2 cognitive-engine health snapshot (beliefs, episodes, queue)."""
+    def _memory_v2_health():
+        """V2 cognitive-engine health snapshot (beliefs, episodes, queue).
+
+        A plain ``def``: the snapshot is SQLite reads over the memory DBs,
+        and as ``async def`` with no await they ran on the event loop
+        (AGENTS §35). Read-only by scope, like every probe.
+        """
+        from kazma_core.diagnostic_scope import read_only_diagnostic
         from kazma_core.memory.v2_health import build_v2_health
 
-        return build_v2_health()
+        with read_only_diagnostic("/api/memory/v2/health"):
+            return build_v2_health()
     @self.app.post("/api/memory/v2/federated-search")
     async def _memory_v2_federated_search(request: Request):
         """Federated search: cognitive memory + Knowledge Library (labeled, not merged)."""

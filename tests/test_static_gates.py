@@ -2078,13 +2078,19 @@ def test_the_write_veto_is_checked_by_every_caller():
     no guard, because the log says it worked.
 
     That instance was fixed on 2026-09-14. The class was not: a sentinel
-    return is only as good as the callers that check it, and ``KNOWN_GAPS``
-    records that nothing lints for the ones that do not.
+    return is only as good as the callers that check it.
 
     So: every call must be followed immediately by a test of what came back —
-    either ``is None`` directly, or ``_refused_the_write``, which exists to
-    make the same decision in the two places that need to unwind a
+    ``isinstance(x, _Veto)`` directly, or ``_refused_the_write``, which exists
+    to make the same decision in the two places that need to unwind a
     transaction first. Five call sites today, all five compliant.
+
+    Since 2026-09-25 the veto is a ``_Veto``, not ``None``: it cannot be
+    serialized, so a caller that slips past this gate raises instead of
+    writing. ``None`` had also been a legitimate value -- ``atomic_update``
+    could not tell "the guard said no" from "the updater asked for null",
+    chose null, and wrote it over a stored secret (measured on both
+    backends; ``tests/test_diagnostics_are_read_only.py``).
     """
     path = REPO_ROOT / _CONFIG_STORE
     tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
@@ -2135,7 +2141,7 @@ def test_the_write_veto_is_checked_by_every_caller():
         "writes the refusal itself to the database — that is how "
         "atomic_update once stored the string 'null' over a secret it had "
         "just declined to blank, while logging that it had declined.\n"
-        "Fix: follow the call with `if x is None:` or "
+        "Fix: follow the call with `if isinstance(x, _Veto):` or "
         "`if self._refused_the_write(...)`.\n  " + "\n  ".join(offenders)
     )
 

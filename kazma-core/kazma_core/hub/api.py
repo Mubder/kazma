@@ -218,7 +218,10 @@ def _get_api() -> KazmaHubAPI:
 @app.get("/api/v1/health")
 async def health():
     """Health check endpoint for liveness/readiness probes."""
-    return {"status": "ok", "version": "0.2.0"}
+    from kazma_core.diagnostic_scope import read_only_diagnostic
+
+    with read_only_diagnostic("hub /api/v1/health"):
+        return {"status": "ok", "version": "0.2.0"}
 
 
 # ---------------------------------------------------------------------------

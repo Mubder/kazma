@@ -220,6 +220,14 @@ jobs:
         # Postgres genuinely refuses is spooled, survives a restart and is
         # written through once the database accepts it (9 passed there; its
         # genuine-refusal test skips on SQLite, so this job is where it runs).
+        #
+        # test_diagnostics_are_read_only.py (2026-09-25), same throwaway
+        # postgres:16 (26 passed). It carries the Postgres half of the lazy
+        # plaintext->vault migration: `_write_db_value` opened SQLite
+        # unconditionally, raised under Postgres inside a debug-logged except,
+        # and left the plaintext row in place. Measured on the prior code:
+        # RuntimeError there, and atomic_update(secret, lambda _: None) wrote
+        # null over the vault pointer on BOTH backends.
         run: |
           python -m pytest -q --timeout=300 \
             tests/test_pg_backup.py \
@@ -240,7 +248,8 @@ jobs:
             tests/test_task_store_workspace.py \
             tests/test_pg_nul_safe.py \
             tests/test_session_spool.py \
-            tests/test_audit_2026_09_17_regressions.py
+            tests/test_audit_2026_09_17_regressions.py \
+            tests/test_diagnostics_are_read_only.py
         env:
           KAZMA_DB_BACKEND: postgres
           KAZMA_DATABASE_URL: postgresql://kazma:kazma@localhost:5432/kazma_test

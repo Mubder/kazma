@@ -1490,7 +1490,16 @@ def _bump_access(
 
     Without this, macro_sleep promotion (access >= 2) never fires and
     retention scoring stays stale. Best-effort — never raises to caller.
+
+    Skipped inside a diagnostic: ``/health/deep`` runs a real recall every
+    30s, and bumping what it returns kept one arbitrary memory permanently
+    "in use" (never archived) and penalised it in real ranking for being
+    surfaced so often. The canary must not change what it measures.
     """
+    from kazma_core.diagnostic_scope import writes_suppressed
+
+    if writes_suppressed():
+        return
     try:
         from kazma_core.memory.config import read_memory_cfg
 

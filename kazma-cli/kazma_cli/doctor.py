@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import json
 
+from kazma_core.diagnostic_scope import read_only_diagnostic
+
 OK = "ok"
 WARN = "warn"
 BAD = "bad"
@@ -111,7 +113,18 @@ def _shared_store_lines(cs: object) -> list[tuple[str, str]]:
 
 
 def collect() -> list[tuple[str, str]]:
-    """Return [(status, rendered_line)] — the whole report, no printing."""
+    """Return [(status, rendered_line)] — the whole report, no printing.
+
+    Runs as a read-only diagnostic: the module docstring's promise that this
+    command "writes no settings" is enforced at the stores, not trusted. It
+    asks the registry to build a client, and the registry's own paths can
+    write -- a lazy secret migration on read, a provider health stamp.
+    """
+    with read_only_diagnostic("kazma doctor"):
+        return _collect()
+
+
+def _collect() -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
 
     try:

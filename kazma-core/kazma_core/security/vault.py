@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.config_store import apply_sqlite_pragmas
+from kazma_core.diagnostic_scope import refuse_write
 from kazma_core.tenant_context import get_current_tenant_id
 
 __all__ = [
@@ -192,6 +193,7 @@ class SecretVault:
         Returns:
             The secret ID.
         """
+        refuse_write("vault", name)
         ct, nonce = self._encrypt(value)
         tid = self._tenant_filter(tenant_id)
         now = datetime.now(UTC).isoformat()
@@ -436,6 +438,7 @@ class SecretVault:
 
     def delete(self, name: str, tenant_id: str | None = None) -> bool:
         """Delete a secret. Returns True if a row was deleted."""
+        refuse_write("vault", name)
         tid = self._tenant_filter(tenant_id)
         with self._lock:
             cur = self._conn.execute(

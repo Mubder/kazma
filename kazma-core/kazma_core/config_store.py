@@ -33,9 +33,42 @@ if TYPE_CHECKING:
 
 import yaml
 
+from kazma_core.diagnostic_scope import refuse_write, writes_suppressed
+
 __all__ = ["CONFIG_STORE_MIGRATIONS", "ConfigStore", "ConfigStoreProtocol", "Migration", "MigrationRunner", "apply_sqlite_pragmas", "apply_sqlite_pragmas_async", "get_config_store", "get_kazma_secret", "get_or_create_disclosure_key", "get_validated_config", "is_masked_secret_placeholder", "is_sensitive_config_key", "is_vault_ref", "reset_config_store", "run_config_store_migrations", "set_config_store"]
 
 logger = logging.getLogger(__name__)
+
+# ── Write vetoes ──────────────────────────────────────────────────────
+
+
+class _Veto:
+    """Why ``_prepare_value_for_storage`` declined a write. Not a value.
+
+    The veto used to be ``None`` -- which is also a value.
+    ``atomic_update`` passed it to ``json.dumps`` and wrote ``"null"`` over
+    the secret it had just refused to blank, while logging that it had
+    refused (2026-09-14). A gate now checks that every caller tests the
+    result, but a sentinel that can be serialized is still one missed check
+    away from writing itself to the database. This one cannot:
+    ``json.dumps`` raises ``TypeError`` on it, so a caller that forgets to
+    test fails loudly instead of storing the refusal.
+    """
+
+    __slots__ = ("reason",)
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+
+    def __repr__(self) -> str:
+        return f"<write vetoed: {self.reason}>"
+
+
+#: The UI re-saved a masked field (``****1234``): keep the stored secret.
+_VETO_MASKED = _Veto("masked placeholder -- the stored secret is unchanged")
+#: An empty value over a stored secret: what an undecryptable read looks like.
+_VETO_BLANKING = _Veto("empty value over a stored secret -- delete() clears one")
+
 
 # ── Vault-backed secrets ──────────────────────────────────────────────
 # When KAZMA_VAULT_KEY is set, sensitive keys are stored encrypted in the
@@ -577,6 +610,7 @@ class _InMemoryStore:
             return self._data.get(key, default)
     
     def set(self, key: str, value: Any, category: str = "general") -> None:
+        refuse_write("config", key)
         with self._lock:
             self._evict_expired()
             if len(self._data) >= self._max_entries:
@@ -585,6 +619,7 @@ class _InMemoryStore:
             self._timestamps[key] = time.monotonic()
 
     def set_if_absent(self, key: str, value: Any, ttl: float | None = None, category: str = "general") -> bool:
+        refuse_write("config", key)
         with self._lock:
             self._evict_expired()
             now = time.time()
@@ -615,6 +650,8 @@ class _InMemoryStore:
             return True
     
     def batch_set(self, items: list[tuple[str, Any, str]]) -> int:
+        for key, _value, _category in items:
+            refuse_write("config", key)
         with self._lock:
             self._evict_expired()
             for key, value, _category in items:
@@ -632,6 +669,7 @@ class _InMemoryStore:
         shared-approvals) got AttributeError and silently degraded to
         per-process coordination.
         """
+        refuse_write("config", key)
         with self._lock:
             self._evict_expired()
             curr = self._data.get(key)
@@ -676,6 +714,7 @@ class _InMemoryStore:
             return {"general": dict(self._data)}
     
     def delete(self, key: str) -> bool:
+        refuse_write("config", key)
         with self._lock:
             if key in self._data:
                 self._data.pop(key)
@@ -707,6 +746,7 @@ class _InMemoryStore:
         return 0
     
     def reset_all(self) -> int:
+        refuse_write("config", "<every setting>")
         with self._lock:
             count = len(self._data)
             self._data.clear()
@@ -1115,6 +1155,7 @@ class ConfigStore:
         # pass migrate=False — do not invent sibling keys for JSON blobs.
         if (
             migrate
+            and not writes_suppressed()
             and is_sensitive_config_key(key)
             and isinstance(val, str)
             and val
@@ -1141,8 +1182,38 @@ class ConfigStore:
         return val
 
     def _write_db_value(self, key: str, value: Any, category: str = "general") -> None:
-        """Low-level DB write under the store lock (pointer updates after vault store)."""
+        """Low-level row write under the store lock (pointer updates after vault store).
+
+        Backend-aware. It used to open the SQLite connection unconditionally,
+        which raises on a Postgres install -- inside the lazy migration's
+        ``except Exception: logger.debug(...)`` -- so a plaintext secret found
+        in the Postgres store was copied into the vault on first read and its
+        row never became a pointer: the plaintext stayed where it was, and
+        nothing above DEBUG said so.
+        """
+        refuse_write("config", key)
         now = datetime.now(UTC).isoformat()
+        if self._use_postgres():
+            with self._lock:
+                pool = self._pg_pool()
+                if pool is None:
+                    raise RuntimeError("Postgres pool unavailable")
+                with pool.connection() as pg_conn:
+                    with pg_conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            INSERT INTO kazma_settings (key, value, category, updated_at)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (key) DO UPDATE SET
+                              value = EXCLUDED.value,
+                              category = EXCLUDED.category,
+                              updated_at = EXCLUDED.updated_at
+                            """,
+                            (key, json.dumps(value), category, now),
+                        )
+                    pg_conn.commit()
+                self._clear_cache()
+            return
         with self._lock:
             conn = self._get_conn()
             conn.execute("BEGIN")
@@ -1308,25 +1379,19 @@ class ConfigStore:
     def _refused_the_write(self, key: str, new_val: Any, to_store: Any) -> bool:
         """True when `_prepare_value_for_storage` vetoed this write.
 
-        It signals a veto by returning None -- for a masked placeholder from
-        the UI, or for an empty value that would erase a stored secret.
-        `set()` has always honoured that. `atomic_update` did not: it fed the
-        None straight into `json.dumps`, wrote the string "null" over the
-        row, and left a WARNING in the log saying it had refused.
-
-        That is the same defect the guard was built to stop, one layer up --
-        a check that fires, logs, and is then ignored by its own caller.
-
-        The test is `to_store is None` AND `new_val is not None`, not just the
-        first: an updater returning None for a non-sensitive key means
-        "store null", and prepare passes that through unchanged. Only a
-        value that went in real and came back None was actually vetoed.
+        It signals a veto with a :class:`_Veto` -- for a masked placeholder
+        from the UI, an empty value that would erase a stored secret, or
+        ``None``. `atomic_update` once fed the veto (then ``None``) straight
+        into `json.dumps`, wrote the string "null" over the row, and left a
+        WARNING saying it had refused: a check that fires, logs, and is then
+        ignored by its own caller. A `_Veto` cannot be serialized, so that
+        mistake now raises instead of writing.
         """
-        if to_store is not None or new_val is None:
+        if not isinstance(to_store, _Veto):
             return False
         logger.warning(
-            "[ConfigStore] atomic_update on %s was vetoed by the write guard; the stored value is left as it was.",
-            key,
+            "[ConfigStore] atomic_update on %s was vetoed (%s); the stored value is left as it was.",
+            key, to_store.reason,
         )
         return True
 
@@ -1339,15 +1404,17 @@ class ConfigStore:
             return True
         return isinstance(existing, str) and bool(existing.strip())
 
-    def _prepare_value_for_storage(self, key: str, value: Any) -> Any | None:
-        """Return value to persist, or None to skip write (masked placeholder).
+    def _prepare_value_for_storage(self, key: str, value: Any) -> Any:
+        """Return the value to persist, or a :class:`_Veto` saying why not.
 
         Sensitive values go to the vault when available; DB stores vault:// ref.
         Sensitive values NESTED in dicts/lists are encrypted too (M-P1).
+        Every caller must test ``isinstance(result, _Veto)`` before writing
+        (``test_the_write_veto_is_checked_by_every_caller``).
         """
         if is_masked_secret_placeholder(value):
             # UI re-saved a masked field — keep existing secret untouched.
-            return None
+            return _VETO_MASKED
 
         if not is_sensitive_config_key(key):
             if isinstance(value, (dict, list)):
@@ -1357,7 +1424,10 @@ class ConfigStore:
             return value
 
         if value is None or value == "":
-            # An empty write must not erase a stored secret.
+            # An empty write must not erase a stored secret. None included:
+            # while the veto was itself None, `atomic_update(key, lambda _:
+            # None)` on a secret could not be told apart from a refusal and
+            # wrote "null" over the vault pointer.
             #
             # This is the shape that destroyed every provider API key on a live
             # install (2026-09-13): a vault pointer that cannot be decrypted
@@ -1379,7 +1449,7 @@ class ConfigStore:
                     "vault read looks like. Use delete() to clear it.",
                     key,
                 )
-                return None
+                return _VETO_BLANKING
             return value
 
         if is_vault_ref(value):
@@ -1513,11 +1583,15 @@ class ConfigStore:
         ``KAZMA_VAULT_KEY`` is set; the DB only stores a pointer.
         Masked placeholders from the UI are ignored (no overwrite).
         """
+        refuse_write("config", key)
+        if value is None:
+            # A no-op, as it always was: a stored JSON null would shadow the
+            # YAML default get() falls back to. delete() clears a key.
+            logger.debug("Setting skip (None): %s (category=%s)", key, category)
+            return
         to_store = self._prepare_value_for_storage(key, value)
-        if to_store is None:
-            logger.debug(
-                "Setting skip (masked placeholder): %s (category=%s)", key, category
-            )
+        if isinstance(to_store, _Veto):
+            logger.debug("Setting skip (%s): %s (category=%s)", to_store.reason, key, category)
             return
         now = datetime.now(UTC).isoformat()
         with self._lock:
@@ -1582,8 +1656,11 @@ class ConfigStore:
         Returns:
             True if the lease/key was acquired and set, False otherwise.
         """
+        refuse_write("config", key)
+        if value is None:
+            return False
         to_store = self._prepare_value_for_storage(key, value)
-        if to_store is None:
+        if isinstance(to_store, _Veto):
             return False
 
         now_sec = time.time()
@@ -1703,6 +1780,7 @@ class ConfigStore:
         Uses BEGIN IMMEDIATE on SQLite or FOR UPDATE on Postgres to prevent
         lost updates across concurrent workers/replicas (audit L11).
         """
+        refuse_write("config", key)
         now_iso = datetime.now(UTC).isoformat()
         with self._lock:
             if self._use_postgres():
@@ -1802,10 +1880,14 @@ class ConfigStore:
         """
         if not items:
             return 0
+        for key, _value, _category in items:
+            refuse_write("config", key)
         prepared: list[tuple[str, Any, str]] = []
         for key, value, category in items:
+            if value is None:
+                continue  # as in set(): None is never stored by a set
             to_store = self._prepare_value_for_storage(key, value)
-            if to_store is None:
+            if isinstance(to_store, _Veto):
                 continue
             prepared.append((key, to_store, category))
         if not prepared:
@@ -1863,6 +1945,7 @@ class ConfigStore:
                 conn.execute("INSERT ...", ...)
                 conn.execute("UPDATE ...", ...)
         """
+        refuse_write("config", "<raw transaction>")
         with self._lock:
             conn = self._get_conn()
             conn.execute("BEGIN")
@@ -1947,6 +2030,7 @@ class ConfigStore:
 
         Also removes the vault copy for sensitive keys when present.
         """
+        refuse_write("config", key)
         deleted = False
         with self._lock:
             if self._use_postgres():
@@ -2152,6 +2236,7 @@ class ConfigStore:
 
     def reset_all(self) -> int:
         """Delete all DB settings (reverts to YAML defaults). Returns count deleted."""
+        refuse_write("config", "<every setting>")
         with self._lock:
             if self._use_postgres():
                 pool = self._pg_pool()

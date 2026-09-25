@@ -1404,9 +1404,17 @@ class SettingsRouterBuilder:
             return {"status": "ok", "restored": str(count)}
 
         @router.get("/api/settings/system/diagnostics")
-        async def api_diagnostics() -> dict[str, Any]:
-            """Get system diagnostics."""
-            return _get_sm().get_diagnostics()
+        def api_diagnostics() -> dict[str, Any]:
+            """Get system diagnostics.
+
+            A plain ``def`` (threadpooled): ``psutil.cpu_percent(interval=0.1)``
+            sleeps 100 ms, and as ``async def`` that sleep ran on the event loop
+            serving every SSE stream (AGENTS §35).
+            """
+            from kazma_core.diagnostic_scope import read_only_diagnostic
+
+            with read_only_diagnostic("/api/settings/system/diagnostics"):
+                return _get_sm().get_diagnostics()
 
         @router.get("/api/security/hardening")
         async def api_security_hardening() -> dict[str, Any]:
