@@ -886,6 +886,12 @@ _EXEC_DENYLIST = [
     ),
 ]
 
+#: The two target rules python_exec's AST check borrows (python_denylist.py),
+#: so a Python delete/chmod target is judged exactly as a shell one is.
+#: Bound by position; tests/test_python_exec_denylist.py pins which is which.
+_RM_CATASTROPHIC = _EXEC_DENYLIST[0]
+_CHMOD_SYSTEM = _EXEC_DENYLIST[-1]
+
 # Protected config keys — mutating these could DISABLE the safety layer itself.
 # (A self-protection measure: the agent can't turn off its own gates via config.)
 _CONFIG_PROTECTED_PREFIXES = (
@@ -957,6 +963,27 @@ def _resolve_exec_act(profile, tool_name, args, *, audit, thread_id, tenant_id, 
             cid = create_commitment(c, cfg=cfg)
             logger.warning("[commitment] DENY exec — catastrophic pattern matched: %s", command[:80])
             return EffectDecision("deny", "exec denylist: catastrophic pattern in command",
+                                  profile, audit, commitment_id=cid)
+    # 1a. python_exec carries its program in `code`, which step 1 never read:
+    #     shutil.rmtree("/") and os.system("rm -rf /") reached the card
+    #     unvetted. Same floor, same target rules, read from the AST.
+    _code = args.get("code")
+    if isinstance(_code, str) and _code.strip():
+        from .python_denylist import catastrophic_python
+
+        _why = catastrophic_python(
+            _code, shell_denylist=_EXEC_DENYLIST,
+            rm_target=_RM_CATASTROPHIC, chmod_target=_CHMOD_SYSTEM,
+        )
+        if _why:
+            c = Commitment(thread_id=thread_id or "", act="exec", tool_name=tool_name,
+                           goal_text=_code[:200], args_digest=_args_digest(args),
+                           request_at=time.time(), tenant_id=tenant_id,
+                           slots={"code": _code[:500], "why": _why}, confidence=0.0)
+            c.status = "aborted"; c.policy_decision = "deny"
+            cid = create_commitment(c, cfg=cfg)
+            logger.warning("[commitment] DENY python exec — %s", _why)
+            return EffectDecision("deny", f"exec denylist: {_why}",
                                   profile, audit, commitment_id=cid)
     # 1b. Kazma's own stores. python_exec / shell_exec refuse to open them
     #     (their own backstops) — but only AFTER the approval card, so the
