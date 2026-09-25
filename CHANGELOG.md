@@ -15,7 +15,10 @@ Docker's standard install folders, and a CLI found off PATH is named once in
 the log. The same lookup serves the `python_exec` Docker jail, which would
 otherwise have fallen back to the host (auto mode) or refused. The dump alert
 says WHY it failed, and boot checks that `pg_dump` can run instead of the
-first dump finding out up to six hours later. The shared error redactor now
+first dump finding out up to six hours later. A restart also takes a dump
+right away when the newest one is stale — the boot sweep used to be skipped
+whenever the (docker-free) universal backup was fresh, which would have held
+the first dump after the fix back another six hours. The shared error redactor now
 also strips a password inside a connection string, and stopped mangling
 `https://` URLs into `http<redacted>` (its Windows-path rule matched the
 `s://`).

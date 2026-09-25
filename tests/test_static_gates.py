@@ -903,7 +903,7 @@ _LOOP_STALL_HELPERS = frozenset({
     # pg tool discovery runs `docker exec ... which pg_dump` (15 s timeout),
     # and the dump itself is a subprocess: never on the loop.
     "pg_dump_tool_problem", "resolve_pg_dump", "resolve_pg_restore",
-    "perform_pg_backup",
+    "perform_pg_backup", "_pg_dump_is_stale",
 })
 
 

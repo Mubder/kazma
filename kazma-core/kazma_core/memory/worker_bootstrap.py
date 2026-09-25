@@ -686,6 +686,21 @@ def _start_backup_export_scheduler() -> None:
                 "the boot sweep, next run on the normal schedule",
                 _FRESH_BACKUP_HOURS,
             )
+            # ...except the Postgres dump, when IT is the stale one. The
+            # universal backup does not need docker, so it stayed fresh while
+            # every pg dump failed (2026-09-25: last good dump 20:27Z, the
+            # boot after the fix would otherwise have waited another 6 h).
+            try:
+                if await asyncio.to_thread(_pg_dump_is_stale):
+                    from kazma_core.memory.task_queue import enqueue_task
+
+                    await asyncio.to_thread(enqueue_task, "native_pg_backup", {})
+                    logger.info(
+                        "[memory_worker] the Postgres dump is older than %.0fh -- "
+                        "taking one now", _FRESH_BACKUP_HOURS,
+                    )
+            except (OSError, RuntimeError, ValueError):
+                logger.warning("[memory_worker] pg dump freshness check failed", exc_info=True)
             await asyncio.sleep(_BACKUP_EXPORT_INTERVAL_HOURS * 3600)
         while True:
             try:
@@ -908,6 +923,25 @@ def _start_reconsolidation_scheduler() -> None:
 
 # A backup younger than this makes the boot-time sweep redundant.
 _FRESH_BACKUP_HOURS = 6.0
+
+
+def _pg_dump_is_stale() -> bool:
+    """True when Postgres backups are on and the newest dump is missing or old.
+
+    Separate from :func:`_backup_ran_recently` on purpose: that one reads the
+    universal backup, which keeps succeeding when only the dump is broken.
+    Blocking-free apart from a directory listing.
+    """
+    import time as _time
+
+    from kazma_core.db.pg_backup import latest_pg_backup, pg_backup_enabled
+
+    if not pg_backup_enabled():
+        return False
+    newest = latest_pg_backup()
+    if newest is None:
+        return True
+    return (_time.time() - newest.stat().st_mtime) >= _FRESH_BACKUP_HOURS * 3600
 
 
 def _backup_ran_recently() -> bool:

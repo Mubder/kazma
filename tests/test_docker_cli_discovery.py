@@ -235,3 +235,42 @@ def test_the_docker_lookup_gate_sees_a_path_only_call():
             return shutil.which("docker")
     ''')}
     assert _which_docker_calls(planted) == ["x.py:4"]
+
+
+# ── a restart catches up on a stale dump ──────────────────────────────────
+
+
+def test_a_stale_pg_dump_is_caught_up_even_when_the_boot_sweep_is_skipped(tmp_path, monkeypatch):
+    """The universal backup kept succeeding while every pg dump failed, so the
+    boot sweep's "a backup is fresh" skip would have postponed the first dump
+    after the fix by another six hours."""
+    import os
+    import time
+
+    from kazma_core.memory import worker_bootstrap as wb
+
+    dumps = tmp_path / "pg"
+    dumps.mkdir()
+    monkeypatch.setattr(pg_backup, "pg_backup_dir", lambda: dumps)
+    monkeypatch.setattr(pg_backup, "pg_backup_enabled", lambda: True)
+
+    assert wb._pg_dump_is_stale() is True, "no dump at all"
+    old = dumps / "pg_shared_1790281654.dump"
+    old.write_bytes(b"PGDMP")
+    stale = time.time() - 14 * 3600
+    os.utime(old, (stale, stale))
+    assert wb._pg_dump_is_stale() is True, "14 hours old"
+    fresh = dumps / "pg_shared_1790330000.dump"
+    fresh.write_bytes(b"PGDMP")
+    assert wb._pg_dump_is_stale() is False
+
+    monkeypatch.setattr(pg_backup, "pg_backup_enabled", lambda: False)
+    assert wb._pg_dump_is_stale() is False, "SQLite installs never ask"
+
+
+def test_the_boot_sweep_enqueues_the_dump_when_it_is_stale():
+    src = (REPO / "kazma-core" / "kazma_core" / "memory" / "worker_bootstrap.py").read_text(encoding="utf-8")
+    skip = src.split("skipping \"\n", 1)[1] if 'skipping "\n' in src else src.split("skipping ", 1)[1]
+    block = skip.split("while True:", 1)[0]
+    assert "await asyncio.to_thread(_pg_dump_is_stale)" in block
+    assert '"native_pg_backup"' in block
