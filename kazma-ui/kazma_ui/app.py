@@ -72,6 +72,8 @@ class KazmaAppBuilder:
         self._current_lang = None
         self._documents = None
         self._documents_maintenance = None
+        self._env_files_loaded: list[str] = []
+        self._env_load_error = ""
 
     def build(self) -> FastAPI:
         """Execute all phases of application construction and return the FastAPI instance."""
@@ -96,6 +98,8 @@ class KazmaAppBuilder:
             self._load_env_files()
         except Exception as e:
             logger.debug("[env] Failed to load .env: %s", e)
+            # Logging has no file yet; _adopt_process_environment repeats it.
+            self._env_load_error = f"{type(e).__name__}: {e}"[:300]
         self._bootstrap_services()
 
     @staticmethod
@@ -114,7 +118,37 @@ class KazmaAppBuilder:
         """
         from kazma_core.env_files import load_env_files
 
-        load_env_files()
+        self._env_files_loaded = load_env_files()
+
+    def _adopt_process_environment(self) -> None:
+        """Log the ``.env`` files loaded; adopt PATH entries the OS gained.
+
+        Runs straight after ``setup_logging``. ``_load_env_files`` must run
+        before logging exists (logging reads env), so the loader's own
+        "[env] Loaded" line went to an unconfigured root logger and never
+        reached kazma.log: the line added to make an unexpected ``.env``
+        visible was itself invisible. It is repeated here, where it lands.
+
+        The PATH refresh lives here, not in one launcher, so every way of
+        serving the app gets it, and it runs before anything that spawns a
+        tool (MCP servers connect at startup, long after this). It is what
+        lets ``kazma_guard.py --reload`` pass on a PATH the operator fixed
+        while the guard was running (see :mod:`kazma_core.path_refresh`).
+        """
+        if self._env_load_error:
+            # Everything configured in .env (the database URL among it) is
+            # missing from this boot; that used to be said at DEBUG, unlogged.
+            logger.warning("[env] .env files were NOT loaded: %s", self._env_load_error)
+        elif self._env_files_loaded:
+            logger.info(
+                "[env] Loaded (lowest->highest precedence): %s",
+                " -> ".join(self._env_files_loaded),
+            )
+        else:
+            logger.info("[env] No .env file found on the ladder")
+        from kazma_core.path_refresh import refresh_path_from_os
+
+        refresh_path_from_os()
 
     def _bootstrap_services(self) -> None:
         """Logging, config store, agent, registry, secret, workspace, FastAPI app.
@@ -131,6 +165,7 @@ class KazmaAppBuilder:
             setup_logging()
         except Exception as e:
             logger.warning("[App] Failed to setup logging configurations: %s", e)
+        self._adopt_process_environment()
 
         from kazma_core.agent import KazmaAgent, load_config
         from kazma_core.config_store import ConfigStore, set_config_store

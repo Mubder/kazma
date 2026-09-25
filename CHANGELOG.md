@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## A reload picks up a PATH fixed while Kazma was running (2026-09-25)
+
+After the Docker fix below, the operator put Docker's folder back on the
+system PATH (`where.exe docker` found it at once) and restarted Kazma — and
+the new server still logged "the docker CLI is not on PATH". Windows gives a
+process its parent's environment, not the registry's, and the guard had been
+running since 04:25 with the 04:25 PATH. `--reload` could not pass the fix
+on; only restarting the `KazmaAgent` task or the machine could. The same
+applied to any tool installed while Kazma ran.
+
+**Now:** while it builds itself, the server appends the PATH entries the OS
+settings (machine, then user) have and it lacks, and logs them. Nothing is
+reordered or removed. The `.env` ladder line (`[env] Loaded …`) now reaches
+kazma.log too: it had been logged before logging was configured, so the line
+added to expose an unexpected `.env` never appeared.
+
 ## Postgres backups survive Docker leaving PATH (2026-09-25)
 
 **The alert.** "[Ops] Postgres dump failed — native_pg_backup produced no
