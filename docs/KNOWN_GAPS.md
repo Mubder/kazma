@@ -279,8 +279,27 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
 | The 2026-09-21 deep restore drill failure could not be diagnosed | Re-run on 2026-09-23: 4/4 passed (1.9 GB Postgres stream, 5% of local and offsite restic packs re-read, offsite object present). Transient; the next failure names its check |
 | The guard counted "this machine has no free port" as "Kazma is unhealthy" | `health.probe_unrunnable` does not count toward a restart and pages once after ~5 min; `tests/test_guard_port_exhaustion.py` |
 
+### Found on 2026-09-25 from a 67-call dig for saved drafts, and fixed
+
+| Closed | Gate |
+|---|---|
+| The model could save drafts but not read them: "list the remaining posts" took 67 tool calls and an approved `python_exec` byte-dumping `agent_artifacts.db` | `list_proposals`; `test_every_state_changing_tool_declares_its_readback` + `test_every_write_to_a_kazma_store_has_a_no_approval_reader` (per writer — a per-store rule passed, because the scratchpad feed read the same file) |
+| Posting one draft marked its whole set posted: 7 of 11 hidden and on the 14-day spent-set age-out (live: restored by the startup repair from the X ledger) | `tests/test_saved_drafts_readback.py` (per-item state, GC keeps a partly used set, repair never guesses) |
+| A refused X post (`{"ok": false}`) counted as success and marked its draft used | `test_ok_false_json_is_classified_as_an_error`; `test_refused_post_marks_nothing` |
+| Five hand-kept answers to "is this a Kazma store?"; `x_posts.db` / `x_scheduled.db` / `kazma.db` readable raw by SQL, every store readable raw by `file_read`, `agent_artifacts.db` unknown to the `python_exec` refusal | `test_every_door_refuses_every_store_and_names_its_reader`; `test_every_database_named_in_the_code_is_declared` |
+| The migration bundle dropped 8 stores (saved drafts, booked X posts, the post ledger, gate decisions, ledgers, RBAC, audit, LLM calls) and per-tenant checkpoints | `test_every_bundle_store_is_exported_and_restored`; `test_a_migration_carries_the_stores_it_used_to_drop` (real export→import) |
+| `kazma migrate import` failed on Windows at its first file swap, every time: `with sqlite3.connect()` never closes | `test_no_sqlite_connection_is_left_open_by_a_with_block` (also fixed the universal backup's copier) |
+| Per-tenant gateway checkpoints written relative to the process CWD | `test_no_store_path_is_built_from_the_working_directory` |
+
 **Still open — honest list:**
 
+- **Stores open a connection per call and leave it to the GC.** The house
+  `with self._connect() as conn:` pattern (24 sites) commits but does not
+  close, like the copier did; harmless while the server owns its files, and
+  the reason a live store cannot be swapped on Windows without a restart.
+- **The tools catalog generator is stale.** It still scans the pre-split
+  `tool_builtins.py` and finds 1 built-in tool; the catalog is maintained by
+  hand until it reads the real registry.
 - **Port exhaustion: real, machine-wide, not Kazma — culprit unnamed.**
   Windows' own log (System, Tcpip) has 11 × 4231 (TCP port space full),
   17 × 4227 (TIME_WAIT reuse) and 11 × 4266 (UDP port space full) in the

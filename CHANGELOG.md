@@ -1,5 +1,47 @@
 # CHANGELOG
 
+## Kazma can read back what it saves, and its stores are one list (2026-09-25)
+
+**The incident.** Asked "list me all remaining posts", the agent spent 67
+tool calls and an approved `python_exec` byte-dumping `agent_artifacts.db`.
+It could save drafts (`save_proposal`) but had no tool to read them, and
+every direct route to its own database is refused — the SQL tool with a
+message that named no way in, while `file_read` handed back raw SQLite bytes
+and `python_exec`'s store list had never heard of the file.
+
+**Drafts.** New read-tier tool `list_proposals`: every saved draft's id,
+exact text, and whether it was posted or scheduled (with the tweet or booking
+id). Posting ONE draft used to stamp its whole set posted — 7 of an 11-draft
+set vanished from X Studio and sat on the 14-day age-out for spent sets.
+State is now per draft; a startup repair re-derives old sets from Kazma's own
+X records (the post ledger and schedule), and leaves a set with no evidence
+alone. A refused post (`{"ok": false}`) no longer counts as a success — it
+had been marking its draft used. A bare multi-draft id no longer posts draft
+1 from X Studio (400, like the chat gate). `x_status(recent=N)` lists up to 50
+recent posts.
+
+**One registry of stores** (`kazma_core/store_registry.py`, AGENTS §37).
+"Is this one of Kazma's stores?" had five hand-kept answers. Now: one
+declaration per database (what it holds, how it migrates) and one per
+state-changing tool (where it writes, which tool reads it back). The SQL
+tools, file tools (reads too), `python_exec`, `shell_exec`, the commitment
+exec check — now before the approval card — and the card disclosure share one
+predicate, and every refusal names the reader.
+
+**Migration.** The bundle left `agent_artifacts.db`, `x_scheduled.db`
+(booked posts would never fire), `x_posts.db` (duplicate rule and caps
+reset), `hitl_gates.db`, `task_ledgers.db`, `rbac.db`, `audit.db`,
+`llm_calls.db` and per-tenant checkpoints behind; its lists now come from
+the registry. `kazma migrate import` failed on Windows at its first swap
+(3 of 3): the copier's `with sqlite3.connect()` commits but never closes. Per-tenant
+gateway checkpoints were written relative to the process CWD.
+
+**Gates** (`tests/test_store_registry.py`, each with a negative control):
+every DB name in the code declared; every writer declares its readback and a
+store write has a no-approval reader; every door refuses every store and
+names the reader; the bundle carries every "bundle" store both ways (a real
+export→import); no store path from the CWD; no `with sqlite3.connect()`.
+
 ## An audit closed class by class, and a week of reports that were wrong (2026-09-22/23)
 
 **The audit (2026-09-22).** Every finding was a correct fix in one sibling and
