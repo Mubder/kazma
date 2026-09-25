@@ -569,7 +569,7 @@ class KazmaAppBuilder:
         # already matches their choice on every device (no dark flash, and
         # no dependence on browser localStorage / device preference). The
         # frontend makes this same value authoritative after JS boot.
-        def _dynamic_theme() -> str:
+        def _read_theme() -> str:
             # Read via the same SettingsManager path as /api/settings/appearance
             # so SSR and the API always agree (stored choice wins; else default).
             # 'auto' is resolved to a concrete light/dark here so SSR always
@@ -588,6 +588,46 @@ class KazmaAppBuilder:
                 return "light"
             except Exception:
                 return "light"
+
+        _theme_cache: dict[str, Any] = {"value": None, "at": 0.0, "refreshing": False}
+
+        def _dynamic_theme() -> str:
+            """The theme for server-side rendering, never re-read on the event loop.
+
+            A template global runs while an async route renders, on the loop,
+            and reading the stored choice is a database read on a Postgres
+            install: stall-20260915-064317 caught the login page there for
+            15.9s. Served from a copy that a worker thread refreshes every
+            15s; only the first render of a process reads it inline.
+            """
+            now = time.monotonic()
+            value = _theme_cache["value"]
+            if value is not None and now - _theme_cache["at"] < 15.0:
+                return value
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:  # rendering in a worker thread: read it here
+                value = _read_theme()
+                _theme_cache.update(value=value, at=now)
+                return value
+            if value is None:  # first render of this process
+                value = _read_theme()
+                _theme_cache.update(value=value, at=now)
+                return value
+            if not _theme_cache["refreshing"]:
+                _theme_cache["refreshing"] = True
+
+                async def _refresh() -> None:
+                    try:
+                        fresh = await asyncio.to_thread(_read_theme)
+                        _theme_cache.update(value=fresh, at=time.monotonic())
+                    finally:
+                        _theme_cache["refreshing"] = False
+
+                from kazma_core.background import spawn_background
+
+                spawn_background(_refresh(), name="ssr-theme-refresh")
+            return value
 
         # Inject the full translation dict as JSON so Alpine.js expressions
         # can call a client-side t() — server-side t() only covers Jinja2.

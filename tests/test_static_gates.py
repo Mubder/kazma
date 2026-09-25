@@ -904,6 +904,20 @@ _LOOP_STALL_HELPERS = frozenset({
     # and the dump itself is a subprocess: never on the loop.
     "pg_dump_tool_problem", "resolve_pg_dump", "resolve_pg_restore",
     "perform_pg_backup", "_pg_dump_is_stale",
+    # Second pass (2026-09-26), 50 dumps since 09-10. The auth middleware was
+    # the top one: 8 dumps of a per-request user-store / session read on the
+    # loop (extract_provided_credential -> use_opaque_sessions ->
+    # multi_user_enabled; is_authenticated -> validate_session), one of them
+    # after the first pass. Then the MCP server list read by the reconnect
+    # sweeper (49.7 s, 28.5 s), the readiness probe's ConfigStore and
+    # provider checks, and the appearance read behind every page render.
+    "multi_user_enabled", "_load_users_from_store", "use_opaque_sessions",
+    "validate_session", "is_authenticated", "extract_provided_credential",
+    "get_request_principal", "_should_auto_issue_cookie", "_mint_auth_cookie",
+    "verify_api_token", "create_session",
+    "get_mcp_servers_config", "list_mcp_servers",
+    "check_config_store", "check_llm_provider",
+    "get_appearance", "mint_soul_commitment", "apply_agent_mutation",
 })
 
 

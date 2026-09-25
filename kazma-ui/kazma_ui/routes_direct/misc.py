@@ -514,7 +514,7 @@ def register_misc_routes(self: Any) -> None:
         from kazma_ui.auth import get_kazma_secret, is_authenticated
 
         _secret = get_kazma_secret()
-        if _secret and not is_authenticated(request, _secret):
+        if _secret and not await asyncio.to_thread(is_authenticated, request, _secret):
             return _JSONResponse({"error": "Unauthorized"}, status_code=401)
 
         try:
@@ -1116,7 +1116,7 @@ def register_misc_routes(self: Any) -> None:
         from kazma_ui.auth import get_kazma_secret, is_authenticated
 
         _secret = get_kazma_secret()
-        if _secret and not is_authenticated(request, _secret):
+        if _secret and not await asyncio.to_thread(is_authenticated, request, _secret):
             return _JSONResponse({"error": "Unauthorized"}, status_code=401)
         if not _is_caller_admin(request):
             return _JSONResponse({"error": "Admin role required"}, status_code=403)

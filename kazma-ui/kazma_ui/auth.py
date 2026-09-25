@@ -23,6 +23,7 @@ Usage (in ``app.py``)::
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 import os
@@ -1291,29 +1292,31 @@ def create_auth_middleware(
         # (never mint auth cookie for anonymous remote visitors — C2 fix).
         if is_always_open(path):
             response = await call_next(request)
-            if expected and _should_auto_issue_cookie(request, expected):
-                _mint_auth_cookie(response, request, expected)
+            if expected and await asyncio.to_thread(_should_auto_issue_cookie, request, expected):
+                await asyncio.to_thread(_mint_auth_cookie, response, request, expected)
             return response
 
         # 2. Only sensitive paths are gated (default-deny /api/* + admin shells).
         # Static assets and non-admin HTML remain open for soft-nav shells.
         if not is_sensitive_path(path):
             response = await call_next(request)
-            if expected and _should_auto_issue_cookie(request, expected):
-                _mint_auth_cookie(response, request, expected)
+            if expected and await asyncio.to_thread(_should_auto_issue_cookie, request, expected):
+                await asyncio.to_thread(_mint_auth_cookie, response, request, expected)
             return response
 
         # 3. No secret configured → open mode UNLESS the caller presented an
         #    Account API token (still validate those when present).
-        provided = extract_provided_credential(request)
+        provided = await asyncio.to_thread(extract_provided_credential, request)
         if not expected:
             # Open mode: still accept valid API tokens; otherwise pass through.
-            if provided and provided.startswith("kazma_") and not verify_api_token(provided):
+            if provided and provided.startswith("kazma_") and not await asyncio.to_thread(
+                verify_api_token, provided
+            ):
                 return _unauthorized_response(request)
             return await call_next(request)
 
         # 4. Verify KAZMA_SECRET / opaque session / Account API token.
-        if not is_authenticated(request, expected):
+        if not await asyncio.to_thread(is_authenticated, request, expected):
             return _unauthorized_response(request)
 
         # 4b. Platform RBAC (Phase 4.4) when multi-user is enabled.
@@ -1322,7 +1325,7 @@ def create_auth_middleware(
         try:
             from kazma_core.security.platform_rbac import multi_user_enabled
 
-            _multi_user = bool(multi_user_enabled())
+            _multi_user = bool(await asyncio.to_thread(multi_user_enabled))
         except Exception as exc:
             if (os.environ.get("KAZMA_MULTI_USER") or "").strip().lower() in (
                 "1", "true", "on", "yes",
@@ -1338,7 +1341,7 @@ def create_auth_middleware(
             try:
                 from kazma_core.security.platform_rbac import role_allows
 
-                principal = get_request_principal(request)
+                principal = await asyncio.to_thread(get_request_principal, request)
                 role = (principal or {}).get("role") or "viewer"
                 # Shared-secret and admin still full access
                 if (principal or {}).get("source") != "secret" and role != "admin":
@@ -1366,7 +1369,7 @@ def create_auth_middleware(
         # Refresh cookie only for secret-header auth (not API tokens)
         if expected and provided and not provided.startswith("session:") and not provided.startswith("kazma_"):
             if verify_secret(provided, expected):
-                _mint_auth_cookie(response, request, expected)
+                await asyncio.to_thread(_mint_auth_cookie, response, request, expected)
         return response
 
     return auth_middleware_with_gate
@@ -1441,7 +1444,7 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
         # Opaque session / principal may carry tenant (multi-user)
         if not tenant_id:
             try:
-                principal = get_request_principal(request)
+                principal = await asyncio.to_thread(get_request_principal, request)
                 tenant_id = principal_tenant_id(principal)
                 if tenant_id:
                     explicit_tenant = True

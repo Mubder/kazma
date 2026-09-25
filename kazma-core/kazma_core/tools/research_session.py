@@ -450,21 +450,26 @@ async def start_deep_research(
     max_sources: int = 8,
     export_docx: bool = False,
 ) -> ResearchSession:
-    """Create session and run pipeline in background task."""
-    sess = create_session(topic, depth=depth, max_sources=max_sources)
+    """Create session and run pipeline in background task.
+
+    Every session-store call and the report scoring run in a worker
+    thread: this runs on the event loop, and the progress callback fires
+    for every pipeline message (AGENTS §35).
+    """
+    sess = await asyncio.to_thread(create_session, topic, depth=depth, max_sources=max_sources)
     if not sess.topic:
-        update_session(sess.id, status="error", error="topic required", stage="error")
-        return get_session(sess.id) or sess
+        await asyncio.to_thread(update_session, sess.id, status="error", error="topic required", stage="error")
+        return await asyncio.to_thread(get_session, sess.id) or sess
 
     async def _run() -> None:
-        update_session(
+        await asyncio.to_thread(update_session,
             sess.id, status="running", stage="start", message="Starting pipeline…"
         )
 
         import re
 
         async def progress_cb(stage: str, message: str) -> None:
-            s = get_session(sess.id)
+            s = await asyncio.to_thread(get_session, sess.id)
             log = list(s.log) if s else []
             log.append(f"[{stage}] {message}")
             fields: dict[str, Any] = {
@@ -481,7 +486,7 @@ async def start_deep_research(
             src_m = re.search(r"(\d+)\s+sources", message or "", re.I)
             if src_m:
                 fields["sources"] = int(src_m.group(1))
-            update_session(sess.id, **fields)
+            await asyncio.to_thread(update_session, sess.id, **fields)
 
         try:
             from kazma_core.tools.research_pipeline import run_research_pipeline
@@ -501,7 +506,7 @@ async def start_deep_research(
             m2 = re.search(r"\*\*Sources acquired:\*\*\s*(\d+)", result or "")
             if m2:
                 sources = int(m2.group(1))
-            cur = get_session(sess.id)
+            cur = await asyncio.to_thread(get_session, sess.id)
             if not report_path and cur and cur.report_path:
                 report_path = cur.report_path
             if not sources and cur and cur.sources:
@@ -529,12 +534,12 @@ async def start_deep_research(
                     scored = None
                     rp = Path(report_path)
                     if rp.is_file():
-                        scored = score_report_file(rp)
+                        scored = await asyncio.to_thread(score_report_file, rp)
                     else:
                         for root in _candidate_report_roots():
                             cand = (root / report_path).resolve()
                             if cand.is_file():
-                                scored = score_report_file(cand)
+                                scored = await asyncio.to_thread(score_report_file, cand)
                                 break
                     if scored is not None:
                         rubric_score = float(scored.score)
@@ -546,7 +551,7 @@ async def start_deep_research(
             if (result or "").startswith("Error:"):
                 log = list(cur.log) if cur else []
                 log.append(result[:500])
-                update_session(
+                await asyncio.to_thread(update_session,
                     sess.id,
                     status="error",
                     stage="error",
@@ -558,7 +563,7 @@ async def start_deep_research(
                     rubric_ok=rubric_ok,
                 )
             else:
-                update_session(
+                await asyncio.to_thread(update_session,
                     sess.id,
                     status="done",
                     stage="done",
@@ -569,7 +574,7 @@ async def start_deep_research(
                     rubric_score=rubric_score,
                     rubric_ok=rubric_ok,
                 )
-            final = get_session(sess.id)
+            final = await asyncio.to_thread(get_session, sess.id)
             for q in list(_SUBS.get(sess.id, [])):
                 try:
                     q.put_nowait(
@@ -583,9 +588,9 @@ async def start_deep_research(
                 except Exception:
                     pass
         except asyncio.CancelledError:
-            cur = get_session(sess.id)
+            cur = await asyncio.to_thread(get_session, sess.id)
             if cur and cur.status != "cancelled":
-                update_session(
+                await asyncio.to_thread(update_session,
                     sess.id,
                     status="cancelled",
                     stage="cancelled",
@@ -598,14 +603,14 @@ async def start_deep_research(
             brief = str(exc)[:200]
             if "Error:" in brief:
                 brief = brief.split("Error:", 1)[-1].strip()[:200]
-            update_session(
+            await asyncio.to_thread(update_session,
                 sess.id,
                 status="error",
                 stage="error",
                 error=str(exc)[:2000],
                 message=f"Failed: {brief}" if brief else "Pipeline failed",
             )
-            err_sess = get_session(sess.id)
+            err_sess = await asyncio.to_thread(get_session, sess.id)
             for q in list(_SUBS.get(sess.id, [])):
                 try:
                     q.put_nowait(

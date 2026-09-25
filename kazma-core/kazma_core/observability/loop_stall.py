@@ -30,8 +30,10 @@ from __future__ import annotations
 import asyncio
 import faulthandler
 import logging
+import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -64,16 +66,41 @@ def stall_dump_dir() -> Path:
     return d
 
 
-def _write_dump(lag_s: float, tag: str) -> Path | None:
-    """Dump every thread's stack. Never raises -- this runs during an incident."""
+def _loop_thread_stack(loop_thread_id: int | None) -> str:
+    """The event-loop thread's stack, most recent call first; "" if unknown.
+
+    Written before faulthandler's all-threads dump, which stops at 100
+    threads: on 2026-09-25 the database hung, threads piled up past 100, and
+    all eleven dumps of that night -- one of them a 318s stall -- lacked the
+    one stack that mattered.
+    """
+    if loop_thread_id is None:
+        return ""
+    frame = sys._current_frames().get(loop_thread_id)
+    if frame is None:
+        return ""
+    lines = [f"Event-loop thread 0x{loop_thread_id:08x} (most recent call first):"]
+    for entry in reversed(traceback.extract_stack(frame)):
+        lines.append(f'  File "{entry.filename}", line {entry.lineno} in {entry.name}')
+    return "\n".join(lines) + "\n\n"
+
+
+def _write_dump(lag_s: float, tag: str, loop_thread_id: int | None = None) -> Path | None:
+    """Dump every thread's stack, the loop's first. Never raises -- this runs during an incident."""
     try:
         path = stall_dump_dir() / f"stall-{tag}.txt"
         with path.open("w", encoding="utf-8") as fh:
             fh.write(
                 f"event loop unresponsive for {lag_s:.1f}s\n"
                 f"written {time.strftime('%Y-%m-%dT%H:%M:%S')}\n"
+                f"threads alive: {threading.active_count()}\n"
                 f"{'=' * 70}\n"
             )
+            try:
+                fh.write(_loop_thread_stack(loop_thread_id))
+            except (RuntimeError, ValueError, AttributeError, OSError):
+                # The all-threads dump below still follows.
+                logger.debug("[loop-stall] loop thread stack unavailable", exc_info=True)
             fh.flush()
             # all_threads: the blocked one is the point, and it is not this one.
             faulthandler.dump_traceback(file=fh, all_threads=True)
@@ -118,6 +145,8 @@ def start_stall_watchdog(
         return None
 
     state = {"last_beat": time.monotonic()}
+    # Called on the loop's own thread: this is the stack every dump leads with.
+    loop_thread_id = threading.get_ident()
     # Cancelling the heartbeat must also stop the watcher. Without this the
     # thread outlives the task, sees a heartbeat that will never be refreshed
     # again, and reports an ever-growing "stall" every 30s for the life of the
@@ -144,7 +173,7 @@ def start_stall_watchdog(
                 continue
             last_dump = now
             tag = time.strftime("%Y%m%d-%H%M%S")
-            path = _write_dump(lag, tag)
+            path = _write_dump(lag, tag, loop_thread_id)
             # CRITICAL, and emitted from a thread that is NOT blocked, so it
             # actually reaches the log the frozen loop cannot write to.
             logger.critical(

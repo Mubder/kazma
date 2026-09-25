@@ -177,12 +177,21 @@ def test_every_session_mint_states_its_authority():
 
     routes = ui / "routes_direct" / "auth.py"
     tree = ast.parse(routes.read_text(encoding="utf-8"))
-    mints = [
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "create_session"
-    ]
+
+    def _is_mint(node: ast.Call) -> bool:
+        if isinstance(node.func, ast.Name) and node.func.id == "create_session":
+            return True
+        # Minted off the event loop (2026-09-26):
+        # asyncio.to_thread(create_session, actor=..., role=...)
+        return (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "to_thread"
+            and bool(node.args)
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id == "create_session"
+        )
+
+    mints = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and _is_mint(node)]
     assert mints, "no create_session calls found — did the import move?"
     for call in mints:
         kwargs = {kw.arg for kw in call.keywords}

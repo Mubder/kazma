@@ -22,7 +22,7 @@ __all__ = ["register_auth_routes"]
 def register_auth_routes(self: Any) -> None:
     """Register the auth routes onto ``self.app``."""
     @self.app.get("/api/auth/status")
-    async def _auth_status(request: Request) -> dict[str, Any]:
+    def _auth_status(request: Request) -> dict[str, Any]:
         """Whether auth is enabled and whether this request is authenticated."""
         from kazma_ui.auth import (
             _is_loopback_client,
@@ -193,9 +193,12 @@ def register_auth_routes(self: Any) -> None:
         })
         # Always mint an opaque session — never put KAZMA_SECRET in a cookie.
         try:
+            import asyncio as _asyncio
+
             from kazma_core.security.web_sessions import SESSION_COOKIE, create_session
 
-            sid = create_session(
+            sid = await _asyncio.to_thread(
+                create_session,
                 actor="login",
                 username=session_user,
                 role=session_role,
@@ -253,12 +256,15 @@ def register_auth_routes(self: Any) -> None:
             from kazma_core.security.web_sessions import create_session, use_opaque_sessions
 
             result = await exchange_code(code, state)
-            if not use_opaque_sessions():
+            import asyncio as _asyncio
+
+            if not await _asyncio.to_thread(use_opaque_sessions):
                 return _JSONResponse(
                     {"error": "Opaque sessions required for OIDC"},
                     status_code=500,
                 )
-            sid = create_session(
+            sid = await _asyncio.to_thread(
+                create_session,
                 actor="oidc",
                 username=result.get("username"),
                 role=result.get("role") or "operator",
@@ -280,7 +286,7 @@ def register_auth_routes(self: Any) -> None:
             logger.exception("[oidc] callback failed")
             return _JSONResponse({"error": safe_error(exc)}, status_code=400)
     @self.app.get("/api/auth/me")
-    async def _auth_me(request: Request) -> Response:
+    def _auth_me(request: Request) -> Response:
         """Return current principal (role/username) for UI chrome."""
         import os as _os
 

@@ -539,7 +539,8 @@ class KazmaAgent:
         Returns:
             Total number of tools registered.
         """
-        servers = self.get_mcp_servers_config()
+        # A settings read plus a YAML file: off the loop (loop-stall dumps).
+        servers = await asyncio.to_thread(self.get_mcp_servers_config)
         total = 0
         for server_cfg in servers:
             if not server_cfg.get("enabled", True):
