@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -115,15 +114,28 @@ JS_FILES = [
 ]
 
 
+def _node_tool(name: str) -> str | None:
+    """Absolute path to a Node CLI, or None when it is not installed.
+
+    On Windows ``npm``/``npx`` are ``.cmd`` shims that CreateProcess cannot
+    find by bare name, which is why this script used ``shell=True`` there.
+    Given the full path it runs them directly, so no shell is involved and
+    nothing in an argument can reach ``cmd.exe`` (bandit B602).
+    """
+    return shutil.which(name)
+
+
 def _fetch(workdir: Path) -> Path:
     """npm pack the pinned version and return the extracted package dir."""
     print(f"npm pack codemirror@{CM_VERSION} ...")
+    npm = _node_tool("npm")
+    if npm is None:
+        raise SystemExit("npm not found on PATH -- install Node.js to vendor CodeMirror")
     proc = subprocess.run(
-        ["npm", "pack", f"codemirror@{CM_VERSION}", "--silent"],
+        [npm, "pack", f"codemirror@{CM_VERSION}", "--silent"],
         cwd=str(workdir),
         capture_output=True,
         text=True,
-        shell=(sys.platform == "win32"),
         check=False,
     )
     if proc.returncode != 0:
@@ -149,11 +161,14 @@ def _minify_js(text: str, workdir: Path) -> str:
     src = workdir / "bundle.js"
     src.write_text(text, encoding="utf-8")
     out = workdir / "bundle.min.js"
+    npx = _node_tool("npx")
+    if npx is None:
+        print("  npx not found — shipping unminified")
+        return text
     proc = subprocess.run(
-        ["npx", "--yes", "terser@5", str(src), "-c", "-m", "-o", str(out)],
+        [npx, "--yes", "terser@5", str(src), "-c", "-m", "-o", str(out)],
         capture_output=True,
         text=True,
-        shell=(sys.platform == "win32"),
         check=False,
     )
     if proc.returncode != 0 or not out.is_file():

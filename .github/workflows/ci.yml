@@ -524,27 +524,33 @@ jobs:
         #
         # 2026-09-17: kazma-cli / kazma-skills / kazma-tui were never scanned
         # at all. They are clean at this threshold, so they join the gate.
+        #
+        # 2026-09-25: tests/ and scripts/ join too. Their three findings were
+        # fixed rather than waived: vendor_codemirror.py resolves npm/npx with
+        # shutil.which instead of shell=True, the template-compile test builds
+        # its Jinja environment with autoescape on like the app does, and the
+        # FTP backup tests carry the same justified `# nosec B402` as the
+        # backend they test. tests/test_security_scan_scope.py keeps both
+        # directories in this step and every nosec naming a rule and a reason.
         run: |
           bandit -r kazma-core/kazma_core kazma-gateway/kazma_gateway kazma-ui/kazma_ui \
             kazma-cli/kazma_cli kazma-skills/kazma_skills kazma-tui/kazma_tui \
+            tests scripts \
             -lll -ii
       - name: Bandit B613 trojansource (GATE — every directory)
-        # Narrow gate, widest scope, and the only check applied to tests and
-        # scripts. A source file holding live bidi controls renders differently
-        # from how it compiles (CVE-2021-42574); a test file does that just as
-        # well as product code, and `tests/` is not in the gate above.
+        # Narrow gate, widest scope. A source file holding live bidi controls
+        # renders differently from how it compiles (CVE-2021-42574); a test
+        # file does that just as well as product code. B613 is HIGH/MEDIUM,
+        # so since tests/ and scripts/ joined the gate above this step is a
+        # subset of it -- kept so a trojansource hit is labelled as one.
         #
         # Not hypothetical: this fired twice on 2026-09-17 — once in the HITL
         # card's own invisible-character table, and once in
         # test_arabic_text.py, which had been carrying literal LRM/RLM in a
         # directory nothing scanned.
         #
-        # The rest of tests/ and scripts/ stays out of the gate deliberately:
-        # the findings there are a test importing ftplib to test FTP backup, a
-        # jinja2 fixture with autoescape off, and npm shelling on Windows.
-        # Gating those makes a job that is red on day one, which is a job
-        # everybody learns to ignore — exactly how the `|| true` gap opened.
-        # They are in the artifact above. See docs/KNOWN_GAPS.md.
+        # Everything else in tests/ and scripts/ is in the HIGH gate above as
+        # of 2026-09-25; the artifact still carries the lower severities.
         run: |
           bandit -r kazma-core/kazma_core kazma-gateway/kazma_gateway kazma-ui/kazma_ui \
             kazma-cli/kazma_cli kazma-skills/kazma_skills kazma-tui/kazma_tui \

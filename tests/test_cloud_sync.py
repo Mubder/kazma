@@ -9,7 +9,7 @@ Includes a real WebDAV round-trip against a threaded local HTTP server.
 from __future__ import annotations
 
 import asyncio
-import ftplib
+import ftplib  # nosec B402 - tests the FTP backup backend against a fake FTP class; no network
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -698,7 +698,7 @@ class _FakeFTP:
 @pytest.fixture
 def fake_ftplib(monkeypatch: pytest.MonkeyPatch):
     """Route cloud_sync's local `import ftplib` to the fake class."""
-    import ftplib as real_ftplib
+    import ftplib as real_ftplib  # nosec B402 - patched to a fake below; no network
 
     _FakeFTP.instances.clear()
     monkeypatch.setattr(real_ftplib, "FTP", _FakeFTP)

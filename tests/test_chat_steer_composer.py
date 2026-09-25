@@ -1555,7 +1555,9 @@ def test_templates_parse_as_jinja() -> None:
         Path(__file__).resolve().parent.parent
         / "kazma-ui" / "kazma_ui" / "templates"
     )
-    env = Environment(loader=FileSystemLoader(str(root)))
+    # autoescape on, as the app's Jinja2Templates has it for .html: the check
+    # compiles the templates the product renders, so it builds them the same way.
+    env = Environment(loader=FileSystemLoader(str(root)), autoescape=True)
     env.globals["t"] = lambda key, **kw: key
     env.globals["js_version"] = lambda: "1"
     env.globals["css_version"] = lambda: "1"
