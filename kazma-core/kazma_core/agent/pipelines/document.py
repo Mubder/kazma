@@ -606,9 +606,10 @@ def _resolve_platform_chat_id(platform: str) -> str:
 def _read_pdf(path: Path) -> str:
     """Read PDF text content with proper Arabic handling.
 
-    Raw fitz.get_text() returns Arabic in VISUAL order (reversed, isolated
-    forms) and reads table PDFs column-by-column. The documents service
-    handles Arabic correctly and produces better structured output.
+    The documents service is primary: it handles tables and reading order
+    and repairs legacy visual-order PDFs. The fitz fallback returns what the
+    PDF holds — logical order for a Unicode PDF, presentation forms for a
+    legacy one — and ``arabic.to_logical`` folds the latter back.
     """
     # Primary: the documents service (proper Arabic + table handling)
     try:
@@ -623,24 +624,24 @@ def _read_pdf(path: Path) -> str:
     except Exception as exc:
         logger.debug("[document_pipeline] documents service failed: %s", exc)
 
-    # Fallback: fitz with Arabic bidi correction
+    # Fallback: fitz, repaired to logical text by the one Arabic home.
+    #
+    # This ran python-bidi's get_display(base_dir="R") on every page, on the
+    # theory that fitz returns Arabic reversed. A Unicode PDF comes back in
+    # LOGICAL order, so that reversed its Arabic into visual order before the
+    # model read it — and pushed an English page's trailing punctuation to
+    # the front. arabic.to_logical() is what the primary parser applies:
+    # presentation forms fold back to base letters, logical text is untouched
+    # (AGENTS §19H).
     try:
         import fitz
+
+        from kazma_core.documents.arabic import to_logical
 
         doc = fitz.open(str(path))
         text_parts = []
         for page in doc:
-            page_text = page.get_text()
-            # fitz returns Arabic in visual order (reversed). Apply bidi
-            # to convert back to logical order so downstream processing
-            # (reshaping, rendering) works correctly.
-            try:
-                from bidi.algorithm import get_display
-
-                page_text = get_display(page_text, base_dir="R")
-            except ImportError:
-                pass  # python-bidi not installed — use raw text
-            text_parts.append(page_text)
+            text_parts.append(to_logical(page.get_text()))
         doc.close()
         return "\n\n".join(text_parts)
     except Exception as exc:
