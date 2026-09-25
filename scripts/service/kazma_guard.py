@@ -332,6 +332,40 @@ class GuardLog:
 # -- notifier (must not depend on Kazma being alive) ------------------
 
 
+#: Run by :meth:`Notifier._from_config_store` in a child process, in the
+#: install folder, with the interpreter that runs the server.
+_NOTIFY_LOOKUP = r"""
+import json
+from kazma_core.env_files import load_env_files
+load_env_files()
+from kazma_core.config_store import get_config_store
+from kazma_core.diagnostic_scope import read_only_diagnostic
+with read_only_diagnostic("guard.notifier"):
+    cs = get_config_store()
+    token = str(cs.get("connectors.telegram.token", "") or "").strip()
+    chat = (str(cs.get("guard.telegram.chat_id", "") or "")
+            or str(cs.get("swarm.group_chat_id", "") or "")).strip()
+print("KAZMA_GUARD_NOTIFY " + json.dumps({"token": token, "chat": chat}))
+"""
+_NOTIFY_LOOKUP_MARK = "KAZMA_GUARD_NOTIFY "
+_NOTIFY_LOOKUP_TIMEOUT_S = 90.0
+#: A lookup that found nothing is tried again when a page is due, at most
+#: this often.
+_NOTIFY_RELOOKUP_S = 600.0
+
+
+def _settings_lookup_allowed() -> bool:
+    """False under pytest: the lookup child reads a real ``.env`` and vault.
+
+    A test that let it run could message the operator's real chat -- the
+    integration tests blank the Telegram variables for exactly that, and the
+    child would find the token anyway -- and would break "no test reads a
+    real .env" (AGENTS §38). A guard started by a test inherits the marker.
+    Tests of the lookup patch this and ``subprocess.run``.
+    """
+    return not os.environ.get("PYTEST_CURRENT_TEST")
+
+
 class Notifier:
     """Best-effort out-of-band alerting. Never raises, never blocks long.
 
@@ -343,15 +377,22 @@ class Notifier:
        encrypted vault (``connectors.telegram.token``)
 
     Step 3 is the only place the guard reaches into the application, and it
-    is deliberately last and fully guarded. The supervision loop stays
-    standard-library-only: if the venv is too broken to import kazma_core,
-    the guard loses ALERTING but never loses SUPERVISION. That is the right
-    way round -- a supervisor that dies because its notifier could not load
-    is worse than one that restarts silently.
+    does so in a CHILD process, so the guard itself never imports the app.
+    The supervision loop stays standard-library-only: if the venv is too
+    broken to import kazma_core, the guard loses ALERTING but never loses
+    SUPERVISION. That is the right way round -- a supervisor that dies
+    because its notifier could not load is worse than one that restarts
+    silently.
     """
 
-    def __init__(self, log: GuardLog) -> None:
+    def __init__(
+        self, log: GuardLog, *, cwd: Path | None = None, python: str | None = None
+    ) -> None:
         self._log = log
+        self._cwd = Path(cwd) if cwd is not None else REPO_ROOT
+        self._python = python or sys.executable
+        self._looked_up_at: float | None = None
+        self._lookup_error = ""
         # ENV ONLY here. Resolving from the vault means importing
         # kazma_core, which is a heavy application import -- and this
         # constructor runs before supervision begins. When that import was
@@ -370,13 +411,21 @@ class Notifier:
             or ""
         ).strip()
         self._source = "env" if (self.token and self.chat) else "unresolved"
-        self._resolved = bool(self.token and self.chat)
 
     def _resolve(self) -> None:
-        """Fill in missing credentials from the vault. Once, lazily."""
-        if self._resolved:
+        """Fill in missing credentials from the app's settings. Lazily, retried.
+
+        Resolved once and never again used to mean one failed lookup -- the
+        database still starting, say -- kept the guard silent until the guard
+        itself restarted. A lookup that found nothing is tried again when a
+        page is due, at most every ``_NOTIFY_RELOOKUP_S``.
+        """
+        if self.token and self.chat:
             return
-        self._resolved = True
+        now = time.monotonic()
+        if self._looked_up_at is not None and now - self._looked_up_at < _NOTIFY_RELOOKUP_S:
+            return
+        self._looked_up_at = now
         v_token, v_chat = self._from_config_store()
         self.token = self.token or v_token
         self.chat = self.chat or v_chat
@@ -384,21 +433,46 @@ class Notifier:
             self._source = "vault"
 
     def _from_config_store(self) -> tuple[str, str]:
-        """Resolve token + chat from the app's config store. Never raises."""
-        try:
-            from kazma_core.config_store import get_config_store
+        """Resolve token + chat from the app's settings, in a child. Never raises.
 
-            cs = get_config_store()
-            token = str(cs.get("connectors.telegram.token", "") or "")
-            chat = (
-                str(cs.get("guard.telegram.chat_id", "") or "")
-                or str(cs.get("swarm.group_chat_id", "") or "")
-            )
-            return token.strip(), chat.strip()
-        except Exception as exc:
-            self._log("info", "notify.config_store_unavailable",
-                      error=str(exc)[:120])
+        In a child process that loads the install's ``.env`` the way the
+        server does. Since 2026-09-22 importing kazma_core no longer loads a
+        ``.env`` (entry points do), and this lookup used to import it into
+        the guard: it ran with no vault key and no database URL, and from the
+        guard restart of 2026-09-24 22:30 every page -- a restart among them
+        -- was "not configured" for a day. Loading ``.env`` into the guard
+        instead would leak Kazma's variables into the environment every
+        server inherits from it, so a line removed from ``.env`` would
+        outlive the edit until the guard restarts.
+        """
+        if not _settings_lookup_allowed():
+            self._lookup_error = "skipped under pytest"
             return "", ""
+        extra: dict = {}
+        if os.name == "nt":
+            # A background helper: never a console window on the desktop.
+            extra["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            proc = subprocess.run(
+                [self._python, "-c", _NOTIFY_LOOKUP],
+                cwd=str(self._cwd), capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
+                timeout=_NOTIFY_LOOKUP_TIMEOUT_S, check=False, **extra,
+            )
+            for line in reversed((proc.stdout or "").splitlines()):
+                if line.startswith(_NOTIFY_LOOKUP_MARK):
+                    data = json.loads(line[len(_NOTIFY_LOOKUP_MARK):])
+                    self._lookup_error = ""
+                    return (str(data.get("token") or "").strip(),
+                            str(data.get("chat") or "").strip())
+            tail = (proc.stderr or "").strip().splitlines()
+            self._lookup_error = (
+                f"exit {proc.returncode}: {tail[-1][:160] if tail else 'no output'}"
+            )
+        except Exception as exc:
+            self._lookup_error = f"{type(exc).__name__}: {str(exc)[:120]}"
+        self._log("info", "notify.config_store_unavailable", error=self._lookup_error)
+        return "", ""
 
     @property
     def configured(self) -> bool:
@@ -409,6 +483,8 @@ class Notifier:
         """Safe-to-log description. Never includes the token."""
         self._resolve()
         if not self.configured:
+            if self._lookup_error:
+                return f"not configured (settings lookup failed: {self._lookup_error})"
             return "not configured"
         return f"telegram via {self._source} -> chat {self.chat}"
 
@@ -1038,9 +1114,15 @@ def stop_child(proc: subprocess.Popen, log: GuardLog) -> None:
 class Guard:
     def __init__(self, *, once: bool = False) -> None:
         self.log = GuardLog(_default_log_path())
-        self.notify = Notifier(self.log)
         self.cmd = build_command()
         self.cwd = Path(os.environ.get("KAZMA_GUARD_CWD") or REPO_ROOT)
+        # The notifier's settings lookup runs where, and with what, the
+        # server runs: its folder, and its interpreter when the command names
+        # one (KAZMA_GUARD_CMD may point at a different Python than ours).
+        server_python = (
+            self.cmd[0] if self.cmd and "python" in Path(self.cmd[0]).name.lower() else None
+        )
+        self.notify = Notifier(self.log, cwd=self.cwd, python=server_python)
         self.health_url = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
         self.once = once
         self.proc: subprocess.Popen | None = None

@@ -1025,8 +1025,8 @@ not "all present".
 **D. Operator CLI (`scripts/pg_backup.py`).**
 `backup` (one-shot dump now), `restore --latest|--file <name> [--dry-run]`
 (via `pg_bridge.restore_database`, `--clean --if-exists` — only the dumped
-tables are touched), `list`. Loads `.env` from CWD; never prints the DSN
-userinfo.
+tables are touched), `list`. Loads the `.env` python-dotenv finds walking up
+from the script's folder (not the CWD); never prints the DSN userinfo.
 
 **E. Config is live-read, never raises** (mirrors `get_hitl_config`):
 ConfigStore keys `backups.pg.enabled` / `backups.pg.retention`; env
@@ -1749,6 +1749,18 @@ httpx `>=0.27`.
 Model fallbacks (§38) ride the second row plus the web banner
 (`AlertDispatcher.post_banner`, banner only) — not a fourth notifier.
 
+**The guard's credentials come from a child process.** `Notifier` reads
+env first, then Kazma's settings — through `_NOTIFY_LOOKUP`, run with the
+server's interpreter in the install folder, which loads the install's `.env`
+the way the server does. It used to import kazma_core in-process; once
+importing stopped loading `.env` (2026-09-22) that lookup had no vault key
+and no DSN, and the pager skipped every page for a day (from 2026-09-24
+22:30). Never import the app into the guard, never load `.env` into the
+guard's own environment (every server inherits it), and never let a test
+run the real lookup (`_settings_lookup_allowed` is False under pytest). The
+daily digest counts `notify.skipped`/`notify.failed`, so a silent pager shows
+up through the app's channel.
+
 Cooldown default 900s per key (`KAZMA_OPS_ALERT_COOLDOWN_S`). Never raises.
 Kill-switch `KAZMA_OPS_ALERTS=0` (does not mute lifecycle). Mute theorem:
 60 identical messages = the channel is ignored.
@@ -1805,7 +1817,11 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   (fail-closed; wrappers keep their response shape). Thread ownership:
   `kazma_ui.thread_ownership` (fail-closed, off the loop). `.env` loading:
   `kazma_core.env_files.load_env_files`, called by entry points, never on
-  import. Untrusted XML: `kazma_core.security.safe_xml`. Child rlimits:
+  import — and a program under `scripts/` that imports Kazma is an entry
+  point too (`tests/test_env_loading.py` enumerates them: load it, or be
+  declared env-free or own-env with the reason; the gate once saw only the
+  packages, and eleven scripts plus the guard's pager lost the vault key and
+  the DSN). Untrusted XML: `kazma_core.security.safe_xml`. Child rlimits:
   `kazma_core.security.rlimits` (no `preexec_fn`). UI writes:
   `window.kazmaSave` (never discard an awaited `fetch`).
 - **Every thread-taking route declares its rule** in

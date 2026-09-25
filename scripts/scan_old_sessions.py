@@ -462,4 +462,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # An entry point loads the install's .env itself (since 2026-09-22
+    # importing kazma_core does not): without it this ran against the
+    # stale SQLite settings and no vault key.
+    from kazma_core.env_files import load_env_files
+
+    load_env_files()
     main()

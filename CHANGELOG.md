@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## The guard can page you again (2026-09-25)
+
+The guard — the process that restarts Kazma and messages you on Telegram when
+Kazma cannot — had been unable to find its Telegram credentials since it
+restarted on 2026-09-24 22:30 UTC. It skipped all 16 pages since then,
+including a "Kazma stopped: never became healthy", and said so only in its
+own log at INFO.
+
+The cause: on 2026-09-22 Kazma stopped loading `.env` as a side effect of
+being imported; each program now loads it itself. The guard looked its
+credentials up through Kazma without loading `.env`, so it had no vault key
+and no database address, and found nothing.
+
+- The guard now looks its credentials up in a short child process that loads
+  the install's `.env` exactly as the server does. The guard itself still
+  imports nothing from Kazma, and its own environment is untouched.
+- A lookup that finds nothing is retried when a page is due (every 10
+  minutes at most), instead of never.
+- The daily digest now lists guard alerts that were not delivered, so a pager
+  that cannot page shows up through Kazma's own channel within a day.
+- Eleven operator scripts had the same problem and ran against the stale
+  local settings instead of your database: `reembed.py`,
+  `restore_rehearsal.py`, `scan_old_sessions.py`, the provider and injection
+  studies, the migration and smoke scripts. They load `.env` again, and the
+  check that every program loads `.env` now covers `scripts/`.
+
+**Restart `KazmaAgent` once** after updating (`schtasks /End /TN KazmaAgent`,
+then `schtasks /Run /TN KazmaAgent`): `--reload` restarts the server, not the
+guard. `kazma_guard.py --status` should then show
+`telegram via vault -> chat …`.
+
 ## A password inside a URL is treated as a secret (2026-09-25)
 
 The Postgres address used for the memory mirror (`memory.backends.state.url`)
