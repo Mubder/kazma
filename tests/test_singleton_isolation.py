@@ -13,6 +13,7 @@ using public helpers only:
 - ``kazma_ui.delivery.reset_turn_broker``
 - ``kazma_ui.active_turns.reset_active_turns``   (new tiny helper)
 - ``observability.alerts.AlertDispatcher.reset_state``  (new tiny helper)
+- ``observability.model_fallback.reset_fallback_state`` (open fallback episodes)
 - ``session_manager.set_session_manager``        (new tiny helper) installing
   a per-test SessionManager instead of the SHARED real
   ``chat_sessions_test.db`` file concurrent chunk processes race on.
@@ -151,6 +152,29 @@ class TestAlertDispatcherReset:
         # 'inf' stamp from the polluter would suppress Memory subsystem
         # alerts for the whole remaining process lifetime (300s window).
         assert AlertDispatcher._last_dispatch.get("memory:error") != float("inf")
+
+
+# ── model_fallback open episodes ────────────────────────────────────────
+
+
+class TestModelFallbackReset:
+    def test_polluter_opens_a_fallback_episode(self, monkeypatch):
+        monkeypatch.setattr(
+            "kazma_core.observability.ops_alerts.alert", lambda *a, **k: False,
+        )
+        from kazma_core.observability import model_fallback
+
+        model_fallback.report_substitution(
+            provider="bleed", model="m", used_provider="other", used_model="n",
+        )
+        assert model_fallback._active_fallbacks()
+
+    def test_victim_sees_no_open_episode(self):
+        from kazma_core.observability import model_fallback
+
+        # An open episode would make the next test's first fallback a repeat:
+        # no page, no banner.
+        assert model_fallback._active_fallbacks() == [], "a fallback episode bled across tests"
 
 
 # ── active_turns registry ────────────────────────────────────────────────

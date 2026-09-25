@@ -39,6 +39,9 @@ V2 memory lives in `kazma_core.memory`).
   Anthropic-native (`/messages`), Azure (`api-key` header + `api-version`),
   or Bedrock (SigV4). Adding a non-Bearer provider means a new class +
   a branch in all three sites (mirror the Google case), not just a preset.
+- A provider with no usable key is replaced by one that has a key in
+  `get_client()` — and that is announced, never silent; provider keys are
+  install-scoped so it does not happen for a key that is there. Both in §38.
 
 ### 2. Platform Isolation (`kazma-gateway/kazma_gateway/agent_handler.py`)
 - The LangGraph state NEVER contains `chat_id`, `user_id`, or `message_id`
@@ -1701,6 +1704,9 @@ httpx `>=0.27`.
 | `observability/ops_alerts.alert()` | Inside Kazma | Backup/offsite/restic/MCP/persist/turn-fail | Fan-out bus + Telegram-direct fallback |
 | `lifecycle_notifier` | App boot/shutdown | starting / started / restarted / shutting_down | Same bus, filtered by `notifications.ops.channels` |
 
+Model fallbacks (§38) ride the second row plus the web banner
+(`AlertDispatcher.post_banner`, banner only) — not a fourth notifier.
+
 Cooldown default 900s per key (`KAZMA_OPS_ALERT_COOLDOWN_S`). Never raises.
 Kill-switch `KAZMA_OPS_ALERTS=0` (does not mute lifecycle). Mute theorem:
 60 identical messages = the channel is ignored.
@@ -1972,6 +1978,34 @@ Read the named test before changing the code it guards.
   Other OS-level variables still need a `KazmaAgent` restart; Kazma's own
   belong in `.env`, re-read every boot. Gate: `tests/test_path_refresh.py`
   (runs the real app factory; order check with a negative control).
+- **Provider keys belong to the install** (`security/vault.py:
+  INSTALL_SCOPED_CONFIG_SECRETS`). ConfigStore has no tenant, but
+  `vault.store` takes the request's, so a key saved in Settings sat under
+  tenant `default`; the registry reads with no tenant bound, the `default`
+  rung is closed under `KAZMA_PRODUCTION=1`, and every live boot from
+  2026-09-16 to 2026-09-25 built the agent on Z.AI with the DeepSeek key
+  right there (chat escaped only through `resolve_live_client`'s tenant).
+  ConfigStore writes go through `config_store._store_config_secret`:
+  install-scoped names are stored globally and every tenant copy rewritten
+  to match (`store_install_scoped`, never deletes); boot runs
+  `consolidate_install_scoped_secrets()` before `initialize_model_registry`
+  (newest copy wins). Do NOT fix a context-less miss by opening the posture
+  gate: it is closed in production because an OIDC install can have other
+  tenants. Connector credentials (X, mail) stay out of the list — an account
+  the agent acts as is an authorization question. Gate:
+  `tests/test_provider_key_install_scope.py` (the live shape in production
+  posture, with the substitution as its negative control).
+- **No model fallback is silent** (`observability/model_fallback.py`). The
+  registry's substitution (reported by `get_client` after the lock is
+  released) and both failover chains (supervisor, `resilient_chat`) report
+  there: an `ops_alerts` page (substitution: twice a day while it lasts;
+  failover: 15 min) and `AlertDispatcher.post_banner` (web banner only, with
+  a local-path link, e.g. Open Providers). The configured model serving
+  again clears the banner; an announced substitution also says "resolved".
+  Quiet inside a read-only diagnostic. Gate:
+  `tests/test_model_fallback_notice.py::test_every_model_swap_is_reported`
+  (every swap log line's class/function must report; negative control), and
+  `tests/js/test_alert_banner_link.js` (off-site links are dropped).
 
 ## UI Conventions (Web)
 

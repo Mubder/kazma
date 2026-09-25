@@ -117,6 +117,11 @@ def _record(**kwargs: Any) -> None:
         pass
 
 
+def _primary_name(client: Any, model: str | None) -> str:
+    """The model the primary call asked for: the override, else the client's own."""
+    return str(model or getattr(getattr(client, "config", None), "model", "") or "")
+
+
 async def resilient_chat(
     client: Any,
     *,
@@ -179,6 +184,10 @@ async def resilient_chat(
                 duration_ms=(time.monotonic() - start) * 1000,
                 status="ok",
             )
+            # The primary answered: a failover it was under is over.
+            from kazma_core.observability.model_fallback import report_model_served
+
+            report_model_served(_primary_name(client, model))
             return response
         except retryable as exc:
             last_exc = exc
@@ -254,6 +263,12 @@ async def resilient_chat(
                         duration_ms=(time.monotonic() - start) * 1000,
                         status="ok",
                         failover_from=str(model or ""),
+                    )
+                    from kazma_core.observability.model_fallback import report_failover
+
+                    report_failover(
+                        model=_primary_name(client, model), used_model=fb_model,
+                        reason=str(getattr(last_exc, "kind", "") or type(last_exc).__name__),
                     )
                     return response
                 except Exception as fb_exc:
