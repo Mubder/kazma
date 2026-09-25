@@ -42,8 +42,9 @@ tree. Assume the same class exists elsewhere.
 **Still open from that audit:**
 
 - **Postgres has one CI job, not coverage.** The job runs every test marked
-  `@pytest.mark.postgres` (`scripts/postgres_suite.py`): 282 tests in 31 files
-  on 2026-09-25 (evening), each file passing twice on a throwaway Postgres
+  `@pytest.mark.postgres` (`scripts/postgres_suite.py`): 287 tests in 32 files
+  on 2026-09-25 (night; 5 skip on a plain `postgres:16` — one needs
+  pgvector), each file passing twice on a throwaway Postgres
   before it was marked — up from seven named files at the start. The newest,
   `test_task_store_backends.py`, pins where the two backends' SQL differs
   (worker/metadata/tenant filters, counts, metrics, prune, orphan requeue) and
@@ -429,6 +430,44 @@ Writing each of the 148 undescribed variables from its call site:
   0 keeps all) is applied by the 15-minute maintenance sweep, which now counts
   timed-out tasks as finished too. `tests/test_swarm_task_retention.py`
   checks the sweep is on the cadence the server starts.
+
+### Found in the live Postgres log (2026-09-25), and fixed
+
+The live database runs `postgres:16-alpine`, which has no pgvector. Kazma
+picked pgvector anyway (a Postgres DSN was set) and its probe was `SELECT 1`,
+so every memory search, upsert and delete sent a statement Postgres refused —
+142 `CREATE TABLE`s and 63 `DELETE`s in a week, at DEBUG — while Settings said
+"search + upsert enabled (URL configured)". Nothing was lost: recall fell back
+to sqlite-vec each time, and the 321 live beliefs are under the 400-row local
+candidate cap. Replaying that traffic against a plain `postgres:16`: the old
+code logs 140 server errors for 80 calls, the new code none.
+
+| Closed | Gate |
+|---|---|
+| The probe tested connectivity, not the extension; search, upsert and delete ran against a server that could not hold vectors | `tests/test_vector_store_probe.py` (catalog states; no statement past the probe; a real Postgres both with and without pgvector) |
+| Settings, the memory health check and the dashboard reported a remote store "ready" from its URL alone | the `vector_capability` tests there (last probe only, never probes on the loop; the DSN never in the text) |
+| The Settings **Test vector** button sent an HTTP GET to the `postgresql://` DSN, and passed Qdrant on a refused key (`401 < 500`) | `test_the_test_button_probes_postgres_not_http`, the Qdrant state table |
+| A refused `CREATE EXTENSION` or HNSW index aborted the transaction and rolled the `CREATE TABLE` back with it, so every later call failed the same way; the DDL ran on every call | `test_a_refused_index_keeps_the_table`, `test_a_refused_extension_marks_the_store_not_permitted`, `test_the_table_is_ensured_once_per_process` |
+| The pgvector (and Qdrant) table was sized by `memory.backends.vector.dimension`, a setting in no form, not by the embedder; an existing table of another size refused every write | `test_the_remote_table_is_sized_by_the_embedder`, `test_a_table_of_another_vector_size_is_not_used` (and its real-Postgres twin) |
+| The Qdrant probe cache was per instance, and instances are built per call | `test_qdrant_probe_is_cached_across_instances` |
+| Nine memory-backend Settings routes ran database and network work on the event loop (seven are plain `def`s now; the two that read a body await it, then `to_thread`) | `test_the_settings_routes_report_the_probe_off_the_loop`; the debt ratchet (`async_route_never_awaits` 267 → 260) |
+
+**Still open from those:**
+
+- **The shipped compose files still run `postgres:16-alpine`** (no pgvector),
+  so a compose install gets sqlite-vec plus one INFO line at boot. Switching
+  the default image is not a one-line change: a volume initialised on Alpine
+  (musl) has text indexes ordered by musl's collation, and the pgvector image
+  is glibc — an existing install must dump and restore, not swap the image
+  (`docs/docs/ops/postgres-and-saas.md`). The owner decides.
+- **A Postgres DSN with its password is kept as a plain setting and echoed.**
+  `memory.backends.state.url` holds the live DSN in plaintext in
+  `kazma_settings`, and `GET /api/settings/memory/backends` returns it — and
+  the auto-filled `vector.url` — unmasked: `mask_backends_cfg` and
+  `settings.mask_deep` mask by key name, and neither treats a password inside
+  a URL as a secret. Fixing it means masking URL userinfo on the way out,
+  keeping the stored password when the form posts a masked one back, and
+  storing the value in the vault install-scoped (§38) — next change.
 
 ## Prompt injection
 

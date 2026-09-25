@@ -2196,6 +2196,26 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "اسم المستخدم",
         "en": "Username",
     },
+    "settings.vector_status_checking": {
+        "ar": "المتجهات: لم يُفحص المخزن بعد",
+        "en": "Vector: not checked yet",
+    },
+    "settings.vector_status_full": {
+        "ar": "المتجهات: كاملة (محلية)",
+        "en": "Vector: full (local)",
+    },
+    "settings.vector_status_needs_setup": {
+        "ar": "المتجهات: تحتاج إلى إعداد",
+        "en": "Vector: needs setup",
+    },
+    "settings.vector_status_remote_ready": {
+        "ar": "المتجهات: بحث وكتابة عن بُعد",
+        "en": "Vector: remote search + write",
+    },
+    "settings.vector_status_unreachable": {
+        "ar": "المتجهات: المخزن البعيد لا يستجيب",
+        "en": "Vector: remote store not answering",
+    },
     "settings.web": {
         "ar": "ويب",
         "en": "Web",

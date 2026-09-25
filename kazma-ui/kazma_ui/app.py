@@ -1862,6 +1862,19 @@ class KazmaAppBuilder:
             except Exception:  # noqa: BLE001 — a diagnostic must never fail boot
                 logger.warning("[SharedStore] boot peer check failed", exc_info=True)
 
+            # ── Can the remote vector store hold vectors? ─────────────
+            # pgvector is auto-selected from the Postgres DSN. The live
+            # database ran an image without the extension for weeks and every
+            # vector call failed at DEBUG (2026-09-25). The probe WARNs once
+            # when the store is unusable and fills the state Settings reads.
+            # In the background: an unreachable server must not delay boot.
+            import asyncio as _aio
+
+            from kazma_core.background import spawn_background
+            from kazma_core.memory.backends import probe_vector_backend
+
+            spawn_background(_aio.to_thread(probe_vector_backend), name="vector-store-probe")
+
             from kazma_ui.dashboard import set_dashboard_context
 
             set_dashboard_context(checkpoint_manager=self._checkpointer)

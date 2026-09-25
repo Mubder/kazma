@@ -87,11 +87,13 @@ Legacy deep-links: `?tab=embedder` → Memory (scroll to embedder); `?tab=connec
 
 **Dense engine:** sqlite-vec while you stay on one SQLite node. When the
 process already has a Postgres DSN, recall uses **pgvector** (hybrid
-dual-write, or remote-first if `KAZMA_MEMORY_STATE_ROLE=primary`).
+dual-write, or remote-first if `KAZMA_MEMORY_STATE_ROLE=primary`) — if that
+Postgres ships the extension. `postgres:16-alpine` does not; Kazma then
+stays on sqlite-vec, says so once at boot, and Settings → Memory shows why
+([Postgres & SaaS](../ops/postgres-and-saas) has the states and the fix).
 Postgres-primary is **ILIKE sparse + pgvector dense, RRF-fused** — not
 ILIKE-only. Explicit Qdrant in Settings is never overridden.
-Kill-switch: `KAZMA_PGVECTOR=0`. Enable `CREATE EXTENSION vector` on the
-database.
+Kill-switch: `KAZMA_PGVECTOR=0`.
 
 ### Post-turn
 

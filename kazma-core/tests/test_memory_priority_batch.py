@@ -46,7 +46,10 @@ def test_vector_backend_local_search(mem_db, monkeypatch):
     )
 
 
-def test_vector_capability_remote_ready_with_url(monkeypatch):
+def test_vector_capability_remote_ready_after_a_probe(monkeypatch):
+    """A URL alone is not readiness: the last probe decides (2026-09-25)."""
+    import time
+
     from kazma_core.memory import backends as b
 
     monkeypatch.setattr(
@@ -59,6 +62,13 @@ def test_vector_capability_remote_ready_with_url(monkeypatch):
             "graph": {},
             "failover": {"on_remote_error": "local", "timeout_ms": 1000},
         },
+    )
+    monkeypatch.delitem(b._REMOTE_VECTOR_STATE, ("qdrant", "http://x"), raising=False)
+    cap = b.vector_capability()
+    assert cap["vector_write_ready"] is False
+    assert cap["vector_status"] == "unchecked"
+    monkeypatch.setitem(
+        b._REMOTE_VECTOR_STATE, ("qdrant", "http://x"), (time.monotonic(), "reachable")
     )
     cap = b.vector_capability()
     assert cap["vector_write_ready"] is True

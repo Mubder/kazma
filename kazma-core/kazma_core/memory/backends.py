@@ -13,14 +13,161 @@ Never break chat: remote failures fall back per ``failover.on_remote_error``.
 
 from __future__ import annotations
 
+import functools
+import importlib
 import logging
+import threading
 import time
-
-# Liveness-probe cache TTL for remote vector backends' `available` property.
-_READY_PROBE_TTL = 60.0
 from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
+
+# Liveness-probe cache TTL for remote vector backends' `available` property.
+_READY_PROBE_TTL = 60.0
+
+#: Last probe of each remote vector store, keyed ``(provider, target)``:
+#: ``(checked_at, state)``. Shared by every backend instance — they are built
+#: per call, so a per-instance cache probed on every search. A probe opens a
+#: connection; :func:`vector_capability` only READS this (routes call it on
+#: the event loop), and :func:`probe_vector_backend` fills it at boot.
+_REMOTE_VECTOR_STATE: dict[tuple[str, str], tuple[float, str]] = {}
+
+#: Probe states in which a remote vector store takes searches and writes.
+#: The others: ``missing`` (no pgvector on that Postgres), ``not_permitted``
+#: (the role may not create the extension or the table),
+#: ``dimension_mismatch`` (the table holds another vector size),
+#: ``unauthorized`` (Qdrant refused the key), ``unreachable``.
+_USABLE_REMOTE_STATES = frozenset({"installed", "installable", "reachable"})
+#: Probes run on worker threads; one transition, one log line.
+_REMOTE_VECTOR_LOCK = threading.Lock()
+
+#: ``(dsn, table)`` pairs whose extension, table and index this process has
+#: created or found. Dropped when an operation on the table fails, so a table
+#: removed underneath (the 2026-08-14 shared-database incident) is recreated.
+_PGVECTOR_TABLES_READY: set[tuple[str, str]] = set()
+_PGVECTOR_INDEX_WARNED: set[tuple[str, str]] = set()
+
+#: Read-only: the extension, whether the table exists or may be created,
+#: and the existing table's vector size (``atttypmod`` is the dimension for
+#: ``vector(n)``, -1 for an unsized column). Both parameters are the table.
+_PGVECTOR_STATE_SQL = """
+    SELECT
+      EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector'),
+      EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'vector'),
+      COALESCE(has_schema_privilege(current_schema(), 'CREATE'), false),
+      (SELECT a.atttypmod FROM pg_attribute a
+        WHERE a.attrelid = to_regclass(%s) AND a.attname = 'embedding'
+          AND NOT a.attisdropped),
+      to_regclass(%s) IS NOT NULL
+"""
+
+
+def _remote_state_detail(provider: str, state: str, *, auto: bool = False) -> str:
+    """What a probe state means for memory and what fixes it.
+
+    Shared by the log line, Settings and the Test button, so they cannot say
+    different things. Never names the URL or DSN: a DSN carries a password.
+    ``auto``: Kazma picked pgvector from the DSN; the operator did not.
+    """
+    if state == "unchecked":
+        return "configured, not checked yet (checked at boot and by every memory search)."
+    if provider == "pgvector" and auto and state == "missing":
+        return (
+            "not used: this Postgres has no 'vector' extension, so memory vectors stay "
+            "in local sqlite-vec (pgvector is picked automatically when a Postgres DSN "
+            "is set). For vectors in Postgres, run an image that ships pgvector (e.g. "
+            "pgvector/pgvector:pg16); KAZMA_PGVECTOR=0 skips this check."
+        )
+    if provider == "pgvector":
+        return {
+            "installed": "search + upsert enabled (the 'vector' extension is installed).",
+            "installable": "search + upsert enabled (the 'vector' extension is created on first use).",
+            "missing": (
+                "this Postgres has no 'vector' extension, so remote vector search and "
+                "writes are off and memory vectors stay in local sqlite-vec. Run a Postgres "
+                "image that ships pgvector (e.g. pgvector/pgvector:pg16), or set "
+                "KAZMA_PGVECTOR=0 to choose sqlite-vec on purpose."
+            ),
+            "not_permitted": (
+                "this Postgres ships the 'vector' extension but Kazma's database role may "
+                "not create the extension or its vector table, so remote vector search and "
+                "writes are off. As a superuser, run CREATE EXTENSION vector; in this "
+                "database and grant the role CREATE on its schema (Kazma re-checks within "
+                "a minute), or set KAZMA_PGVECTOR=0."
+            ),
+            "dimension_mismatch": (
+                "the vector table holds a different vector size than the embedder makes, "
+                "so remote vector search and writes are off. Point "
+                "memory.backends.vector.collection at a new table name and run Settings → "
+                "Memory → Rebuild embeddings, or set KAZMA_PGVECTOR=0."
+            ),
+            "unreachable": (
+                "Postgres did not answer the last check, so remote vector search and "
+                "writes are off until it does."
+            ),
+        }.get(state, f"unexpected probe state {state!r}.")
+    return {
+        "reachable": "search + upsert enabled (the server answered).",
+        "unauthorized": (
+            "the server refused the API key, so remote vector search and writes are "
+            "off until the key in Settings → Memory is fixed."
+        ),
+        "unreachable": (
+            "the server did not answer the last check, so remote vector search and "
+            "writes are off until it does."
+        ),
+    }.get(state, f"unexpected probe state {state!r}.")
+
+
+def _record_remote_state(
+    provider: str, target: str, state: str, note: str = "", *, auto: bool = False
+) -> str:
+    """Store a probe result, and say so when a store stops or starts working.
+
+    A WARNING on each change into an unusable state — at boot, that is the
+    one line naming a misconfigured store — and an INFO when it recovers.
+    ``note`` adds specifics (never a URL or DSN). An auto-selected pgvector
+    on a Postgres without the extension is the expected fallback, not a
+    fault: that one is said at INFO.
+    """
+    key = (provider, target)
+    with _REMOTE_VECTOR_LOCK:
+        previous = _REMOTE_VECTOR_STATE.get(key)
+        _REMOTE_VECTOR_STATE[key] = (time.monotonic(), state)
+    before = previous[1] if previous else None
+    if state != before:
+        if state not in _USABLE_REMOTE_STATES:
+            detail = _remote_state_detail(provider, state, auto=auto)
+            level = logging.INFO if auto and state == "missing" else logging.WARNING
+            logger.log(level, "[%s] %s%s", provider, detail, f" ({note})" if note else "")
+        elif before is not None and before not in _USABLE_REMOTE_STATES:
+            logger.info(
+                "[%s] vector store usable again: %s",
+                provider,
+                _remote_state_detail(provider, state),
+            )
+    return state
+
+
+def _first_line(exc: BaseException) -> str:
+    text = str(exc).strip()
+    return text.splitlines()[0][:200] if text else type(exc).__name__
+
+
+@functools.lru_cache(maxsize=1)
+def _pg_driver_errors() -> tuple[type[BaseException], ...]:
+    """The ``Error`` base of each importable Postgres driver.
+
+    Cached: a failed import is not remembered by Python, and retrying the
+    one that is absent would search ``sys.path`` on every probe.
+    """
+    found: list[type[BaseException]] = []
+    for name in ("psycopg", "psycopg2"):
+        try:
+            found.append(importlib.import_module(name).Error)
+        except ImportError:
+            continue
+    return tuple(found)
 
 __all__ = [
     "DEFAULT_BACKENDS_CFG",
@@ -225,8 +372,6 @@ class QdrantVectorBackend:
         self._collection = collection or "kazma_memory"
         self._dim = int(dimension or 1024)
         self._timeout = max(0.5, float(timeout_s))
-        self._ready: bool | None = None
-        self._ready_at: float = 0.0
 
     def _headers(self) -> dict[str, str]:
         h = {"Content-Type": "application/json"}
@@ -234,34 +379,39 @@ class QdrantVectorBackend:
             h["api-key"] = self._api_key
         return h
 
-    @property
-    def available(self) -> bool:
-        # TTL-cache the liveness probe (audit finding): a once-set _ready was
-        # never re-probed, so a backend that went down after a successful boot
-        # probe kept reporting available forever (search then failed silently)
-        # and a boot-time outage stuck until restart.
-        if self._ready is not None and (time.monotonic() - self._ready_at) < _READY_PROBE_TTL:
-            return self._ready
-        if not self._url:
-            self._ready = False
-            self._ready_at = time.monotonic()
-            return False
-        try:
-            import httpx
+    def probe(self, *, force: bool = False) -> str:
+        """``reachable`` / ``unauthorized`` / ``unreachable``, cached 60 s per URL.
 
+        TTL-cached (audit finding): a once-set result was never re-probed, so
+        a server that went down after boot stayed "available" forever. A 401 or
+        403 used to count as up (``< 500``), and every call after it failed
+        on the same refused key.
+        """
+        import httpx
+
+        key = ("qdrant", self._url)
+        hit = _REMOTE_VECTOR_STATE.get(key)
+        if not force and hit is not None and (time.monotonic() - hit[0]) < _READY_PROBE_TTL:
+            return hit[1]
+        state = "unreachable"
+        try:
             with httpx.Client(timeout=self._timeout) as client:
                 r = client.get(
                     f"{self._url}/collections/{self._collection}",
                     headers=self._headers(),
                 )
-                # 404 = collection missing but server up → still usable
-                self._ready = r.status_code < 500
-                self._ready_at = time.monotonic()
-                return self._ready
-        except Exception:
-            self._ready = False
-            self._ready_at = time.monotonic()
-            return False
+            # 404 = collection missing but server up → the first upsert makes it
+            if r.status_code in (401, 403):
+                state = "unauthorized"
+            elif r.status_code < 500:
+                state = "reachable"
+        except (httpx.HTTPError, httpx.InvalidURL, OSError):
+            logger.debug("[qdrant] probe failed", exc_info=True)
+        return _record_remote_state("qdrant", self._url, state)
+
+    @property
+    def available(self) -> bool:
+        return bool(self._url) and self.probe() in _USABLE_REMOTE_STATES
 
     def _ensure_collection(self, client: Any) -> None:
         r = client.get(
@@ -429,13 +579,14 @@ class PgvectorBackend:
         collection: str = "kazma_memory_vectors",
         dimension: int = 1024,
         timeout_s: float = 5.0,
+        auto: bool = False,
     ) -> None:
         self._dsn = dsn or ""
+        # Auto-selected from the DSN rather than chosen (see vector_auto).
+        self._auto = auto
         self._table = "".join(c for c in (collection or "kazma_memory_vectors") if c.isalnum() or c == "_") or "kazma_memory_vectors"
         self._dim = int(dimension or 1024)
         self._timeout = max(0.5, float(timeout_s))
-        self._ready: bool | None = None
-        self._ready_at: float = 0.0
 
     def _connect(self) -> Any:
         try:
@@ -447,60 +598,132 @@ class PgvectorBackend:
 
             return psycopg2.connect(self._dsn, connect_timeout=int(self._timeout))
 
-    @property
-    def available(self) -> bool:
-        # TTL-cache the liveness probe (audit finding): see QdrantVectorBackend.
-        if self._ready is not None and (time.monotonic() - self._ready_at) < _READY_PROBE_TTL:
-            return self._ready
-        if not self._dsn:
-            self._ready = False
-            self._ready_at = time.monotonic()
-            return False
+    def probe(self, *, force: bool = False) -> str:
+        """Whether this Postgres can hold vectors: cached 60 s, or fresh with ``force``.
+
+        ``installed`` / ``installable`` (``CREATE EXTENSION`` will find it) /
+        ``missing`` / ``not_permitted`` (this role may not create the
+        extension or the table) / ``dimension_mismatch`` (the table holds
+        another vector size) / ``unreachable``. Read-only: catalog queries,
+        no DDL.
+
+        The probe used to be ``SELECT 1``, which a Postgres without pgvector
+        passes. The live install ran ``postgres:16-alpine``; pgvector was
+        auto-selected from the DSN, and every search, upsert and delete paid
+        a connection and a refused statement, logged only at DEBUG — 142
+        ``CREATE TABLE``s and 63 ``DELETE``s a week — while Settings said
+        "search + upsert enabled". Recall kept working only because it fell
+        back to sqlite-vec (2026-09-25).
+        """
+        key = ("pgvector", self._dsn)
+        hit = _REMOTE_VECTOR_STATE.get(key)
+        if not force and hit is not None and (time.monotonic() - hit[0]) < _READY_PROBE_TTL:
+            return hit[1]
+        state, note = "unreachable", ""
         try:
             conn = self._connect()
             try:
                 cur = conn.cursor()
-                cur.execute("SELECT 1")
+                cur.execute(_PGVECTOR_STATE_SQL, (self._table, self._table))
+                installed, installable, may_create, table_dim, table_exists = cur.fetchone()
                 cur.close()
             finally:
                 conn.close()
-            self._ready = True
-            self._ready_at = time.monotonic()
-            return True
-        except Exception:
-            self._ready = False
-            self._ready_at = time.monotonic()
-            return False
+            if not installed and not installable:
+                state = "missing"
+            elif table_exists and table_dim not in (None, -1) and int(table_dim) != self._dim:
+                # CREATE TABLE IF NOT EXISTS never alters it: every write
+                # would be refused for its size.
+                state = "dimension_mismatch"
+                note = f"table {self._table} holds {table_dim}, the embedder makes {self._dim}"
+            elif not table_exists and not may_create:
+                state = "not_permitted"
+                note = f"no CREATE on the schema for table {self._table}"
+            else:
+                state = "installed" if installed else "installable"
+        except Exception:  # noqa: BLE001 — on recall's path; see below
+            # Broad on purpose: ``available`` is read inside every recall, and
+            # a driver can fail outside its own hierarchy (psycopg2 raises
+            # UnicodeDecodeError on a localized server's messages). Any
+            # failure means "not usable now"; the state says so.
+            logger.debug("[pgvector] extension probe failed", exc_info=True)
+        # Creating the extension already failed for this role. The catalog
+        # still says "installable"; only a superuser's CREATE EXTENSION (then
+        # it says "installed") changes the answer, so do not retry each probe.
+        if state == "installable" and hit is not None and hit[1] == "not_permitted":
+            state = "not_permitted"
+        return _record_remote_state("pgvector", self._dsn, state, note, auto=self._auto)
+
+    @property
+    def available(self) -> bool:
+        """True only when this Postgres has, or can create, the extension."""
+        return bool(self._dsn) and self.probe() in _USABLE_REMOTE_STATES
+
+    def _table_failed(self) -> None:
+        """Forget that the table is ready: the next call re-creates what is gone."""
+        _PGVECTOR_TABLES_READY.discard((self._dsn, self._table))
 
     def _ensure_table(self, conn: Any) -> None:
+        """Extension, table and index — checked once per process per table.
+
+        Each statement commits or rolls back on its own. In one transaction a
+        refused ``CREATE EXTENSION`` (the role may not) or ``CREATE INDEX``
+        (HNSW stops at 2000 dimensions) aborted the block and took the
+        ``CREATE TABLE`` down with it, so every later call failed the same way.
+        """
+        key = (self._dsn, self._table)
+        if key in _PGVECTOR_TABLES_READY:
+            return
+        errors = _pg_driver_errors()
         cur = conn.cursor()
         try:
-            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
-        except Exception:
-            pass
-        cur.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self._table} (
-              id TEXT PRIMARY KEY,
-              tenant_id TEXT NOT NULL,
-              tier TEXT,
-              embedding vector({self._dim}),
-              meta JSONB DEFAULT '{{}}'::jsonb
-            )
-            """
-        )
-        try:
+            try:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+                conn.commit()
+            except errors:
+                conn.rollback()
+                # A concurrent CREATE can lose the race and still leave it there.
+                cur.execute(
+                    "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')"
+                )
+                if not cur.fetchone()[0]:
+                    _record_remote_state(
+                        "pgvector", self._dsn, "not_permitted", "CREATE EXTENSION was refused"
+                    )
+                    raise
             cur.execute(
                 f"""
-                CREATE INDEX IF NOT EXISTS {self._table}_hnsw
-                ON {self._table}
-                USING hnsw (embedding vector_cosine_ops)
+                CREATE TABLE IF NOT EXISTS {self._table} (
+                  id TEXT PRIMARY KEY,
+                  tenant_id TEXT NOT NULL,
+                  tier TEXT,
+                  embedding vector({self._dim}),
+                  meta JSONB DEFAULT '{{}}'::jsonb
+                )
                 """
             )
-        except Exception:
-            logger.debug("[pgvector] HNSW index skipped", exc_info=True)
-        conn.commit()
-        cur.close()
+            conn.commit()
+            try:
+                cur.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS {self._table}_hnsw
+                    ON {self._table}
+                    USING hnsw (embedding vector_cosine_ops)
+                    """
+                )
+                conn.commit()
+            except errors as exc:
+                conn.rollback()
+                if key not in _PGVECTOR_INDEX_WARNED:
+                    _PGVECTOR_INDEX_WARNED.add(key)
+                    logger.warning(
+                        "[pgvector] no HNSW index on %s (%s); vector search scans the table",
+                        self._table,
+                        _first_line(exc),
+                    )
+        finally:
+            cur.close()
+        _PGVECTOR_TABLES_READY.add(key)
 
     def search(
         self,
@@ -511,7 +734,7 @@ class PgvectorBackend:
         limit: int = 10,
         kind: str | None = None,
     ) -> list[tuple[str, float]]:
-        if not query_vec or not self._dsn:
+        if not query_vec or not self._dsn or not self.available:
             return []
         try:
             conn = self._connect()
@@ -564,6 +787,7 @@ class PgvectorBackend:
             finally:
                 conn.close()
         except Exception:
+            self._table_failed()
             logger.debug("[pgvector] search failed", exc_info=True)
             return []
 
@@ -575,7 +799,9 @@ class PgvectorBackend:
         tenant_id: str = "default",
         meta: dict[str, Any] | None = None,
     ) -> bool:
-        if not item_id or not vec or not self._dsn:
+        # The hybrid backend writes here on every upsert; on a Postgres with no
+        # pgvector that was a refused CREATE TABLE each time.
+        if not item_id or not vec or not self._dsn or not self.available:
             return False
         try:
             from kazma_core.db.pg_helpers import json_dumps as _pg_json
@@ -610,16 +836,21 @@ class PgvectorBackend:
             finally:
                 conn.close()
         except Exception:
+            self._table_failed()
             logger.debug("[pgvector] upsert failed", exc_info=True)
             return False
 
     def delete(self, item_id: str, *, tenant_id: str = "default") -> bool:
         del tenant_id
-        if not item_id or not self._dsn:
+        # No extension, no table: the DELETE could only fail (63 a week live).
+        if not item_id or not self._dsn or not self.available:
             return False
         try:
             conn = self._connect()
             try:
+                # Like search/upsert: the table may not exist yet on a server
+                # where pgvector is installable but nothing has written.
+                self._ensure_table(conn)
                 cur = conn.cursor()
                 cur.execute(f"DELETE FROM {self._table} WHERE id = %s", (item_id,))
                 conn.commit()
@@ -628,6 +859,8 @@ class PgvectorBackend:
             finally:
                 conn.close()
         except Exception:
+            self._table_failed()
+            logger.debug("[pgvector] delete failed", exc_info=True)
             return False
 
 
@@ -696,6 +929,24 @@ class HybridVectorBackend:
         return bool(a or b)
 
 
+def _embedding_dimension(vec: dict[str, Any]) -> int:
+    """The vector size the embedder makes — the size the local sqlite-vec table uses.
+
+    ``memory.backends.vector.dimension`` (default 1024, in no Settings form)
+    used to size the remote table on its own, so an embedder of any other
+    size had every pgvector write refused. It is now only the fallback.
+    """
+    try:
+        from kazma_core.memory.embedder import get_embedding_dim
+
+        dim = int(get_embedding_dim())
+        if dim > 0:
+            return dim
+    except (ImportError, TypeError, ValueError):
+        logger.debug("[backends] embedding dimension unreadable", exc_info=True)
+    return int(vec.get("dimension") or 1024)
+
+
 def _build_remote_backend(cfg: dict[str, Any]) -> Any | None:
     """Construct Qdrant or pgvector backend from config, or None."""
     vec = cfg.get("vector") or {}
@@ -705,7 +956,7 @@ def _build_remote_backend(cfg: dict[str, Any]) -> Any | None:
         return None
     timeout_ms = int((cfg.get("failover") or {}).get("timeout_ms") or 5000)
     timeout_s = max(0.5, timeout_ms / 1000.0)
-    dim = int(vec.get("dimension") or 1024)
+    dim = _embedding_dimension(vec)
     collection = str(vec.get("collection") or "kazma_memory")
     api_key = str(vec.get("api_key") or "")
     if provider == "qdrant":
@@ -722,28 +973,49 @@ def _build_remote_backend(cfg: dict[str, Any]) -> Any | None:
             collection=collection,
             dimension=dim,
             timeout_s=timeout_s,
+            auto=bool(cfg.get("vector_auto")),
         )
     return None
 
 
 def vector_capability(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Honest capability matrix for Settings / Dashboard."""
+    """Honest capability matrix for Settings / Dashboard.
+
+    A remote store is reported from its last probe, never from its URL alone
+    — "search + upsert enabled (URL configured)" is what Settings said for
+    weeks about a Postgres with no pgvector. Never probes: routes call this
+    on the event loop. Boot and every memory search keep the probe fresh.
+    """
     c = cfg or get_backends_cfg()
     provider = str((c.get("vector") or {}).get("provider") or "sqlite_vec")
     mode = c.get("mode") or "local"
     url = str((c.get("vector") or {}).get("url") or "").strip()
-    if provider in _LOCAL_VECTOR or mode == "local":
+    remote_state: str | None = None
+    # A remote provider is used even when mode was left at "local"
+    # (get_vector_backend), so the provider decides, not the mode.
+    if provider in _LOCAL_VECTOR:
         status = "full"
         write_ready = True
         search_ready = True
         detail = "Local sqlite-vec: search + write"
     elif provider in _REMOTE_VECTOR and url:
-        # Remote write path is implemented; actual connectivity is separate
-        status = "remote_ready"
-        write_ready = True
-        search_ready = True
+        hit = _REMOTE_VECTOR_STATE.get((provider, url))
+        remote_state = hit[1] if hit else "unchecked"
+        auto = bool(c.get("vector_auto"))
+        write_ready = search_ready = remote_state in _USABLE_REMOTE_STATES
+        if write_ready:
+            status = "remote_ready"
+        elif auto and remote_state == "missing":
+            # Nobody asked for pgvector and it is not there: local sqlite-vec
+            # serves every search and write, which is what "full" means.
+            status = "full"
+            write_ready = search_ready = True
+        elif remote_state == "missing":
+            status = "extension_missing"
+        else:
+            status = remote_state
         detail = (
-            f"{provider}: search + upsert enabled (URL configured). "
+            f"{provider}: {_remote_state_detail(provider, remote_state, auto=auto)} "
             f"Mode={mode}; failover={(c.get('failover') or {}).get('on_remote_error', 'local')}"
         )
     elif provider in _REMOTE_VECTOR:
@@ -763,9 +1035,25 @@ def vector_capability(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         "vector_search_ready": search_ready,
         "vector_status": status,
         "vector_status_detail": detail,
+        # The raw probe state (None for local stores), for callers that
+        # need more than the status word.
+        "vector_remote_state": remote_state,
         "embedder_provider": (c.get("embedder") or {}).get("provider") or "local",
         "failover": dict(c.get("failover") or {}),
     }
+
+
+def probe_vector_backend() -> str | None:
+    """Probe the configured remote vector store now; None when vectors are local.
+
+    Blocking — call it off the event loop. Boot runs it so a store that
+    cannot hold vectors is named in the log at startup, not at the first
+    memory search, and Settings shows the real state from the first page.
+    """
+    remote = _build_remote_backend(get_backends_cfg())
+    if remote is None:
+        return None
+    return remote.probe(force=True)
 
 
 def get_vector_backend(conn: Any | None = None) -> Any:
@@ -930,6 +1218,11 @@ def _apply_pgvector_scale_defaults(out: dict[str, Any]) -> None:
         return
     if provider not in _LOCAL_VECTOR and provider not in ("", "pgvector"):
         return
+    if provider != "pgvector":
+        # Kazma chose it, not the operator: a Postgres without the extension
+        # then means "stay local", not "misconfigured". Top level, so the
+        # Settings form never saves it back as a choice.
+        out["vector_auto"] = True
     vec["provider"] = "pgvector"
     if not str(vec.get("url") or "").strip():
         vec["url"] = dsn
@@ -1177,27 +1470,33 @@ def test_vector_backend(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
                 }
             finally:
                 conn.close()
-        # Remote providers: connectivity check only (no hard dep)
-        url = (c.get("vector") or {}).get("url") or ""
-        if not url:
+        # Remote providers: the backend's own probe, run fresh. This used to
+        # GET "<url>/collections" for every provider, which cannot reach a
+        # postgresql:// DSN, and passed Qdrant on a refused key (401 < 500).
+        remote = _build_remote_backend(c)
+        if remote is None:
             return {
                 "ok": False,
-                "error": f"{provider} requires a connection URL",
+                "error": (
+                    f"{provider} requires a connection URL"
+                    if provider in _REMOTE_VECTOR
+                    else f"Unknown vector provider {provider!r}"
+                ),
                 "latency_ms": 0,
             }
-        # Lightweight TCP/HTTP reachability without importing heavy clients
-        import httpx
-
-        with httpx.Client(timeout=5.0) as client:
-            # Qdrant / generic health
-            r = client.get(url.rstrip("/") + "/collections")
-            ms = (time.perf_counter() - t0) * 1000
-            return {
-                "ok": r.status_code < 500,
-                "provider": provider,
-                "status_code": r.status_code,
-                "latency_ms": round(ms, 1),
-            }
+        state = remote.probe(force=True)
+        ms = (time.perf_counter() - t0) * 1000
+        result: dict[str, Any] = {
+            "ok": state in _USABLE_REMOTE_STATES,
+            "provider": provider,
+            "state": state,
+            "latency_ms": round(ms, 1),
+            # The probe just refreshed what the Settings banner reads.
+            "capability": vector_capability(c),
+        }
+        if not result["ok"]:
+            result["error"] = _remote_state_detail(provider, state)
+        return result
     except Exception as exc:
         ms = (time.perf_counter() - t0) * 1000
         failover = (c.get("failover") or {}).get("on_remote_error", "local")

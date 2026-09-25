@@ -11,7 +11,11 @@ import pytest
 
 
 def test_qdrant_backend_search_parses_mock(monkeypatch):
+    from kazma_core.memory import backends
     from kazma_core.memory.backends import QdrantVectorBackend
+
+    # The probe result is shared by URL across instances; start from none.
+    monkeypatch.setattr(backends, "_REMOTE_VECTOR_STATE", {})
 
     class _Resp:
         def __init__(self, code, body):

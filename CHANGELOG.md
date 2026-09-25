@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## Memory uses pgvector only when the database can hold vectors (2026-09-25)
+
+When a Postgres URL is set, Kazma picks pgvector for memory vectors. It now
+checks that the server actually has the `vector` extension (and can create
+the table, and that an existing table fits the embedder) before using it.
+
+- **pgvector picked automatically, extension absent** (the stock
+  `postgres:16-alpine`, as on the live install): memory stays on sqlite-vec,
+  one INFO line at boot says why, and Settings → Memory shows
+  *Vector: full (local)* with the reason. Before, every memory search, save and
+  delete sent Postgres a statement it refused (142 `CREATE TABLE`s and 63
+  `DELETE`s a week on live, logged at DEBUG) while Settings said
+  "search + upsert enabled". Recall worked throughout, from sqlite-vec.
+- **pgvector chosen but unusable** — no extension, the role may not create
+  it or the table, a table of another vector size, server down: one WARNING
+  with the fix, the same words in the Settings banner and the memory health
+  check. It re-checks every minute and says when the store works again.
+- **Test vector** (Settings → Memory) probes Postgres properly; it used to
+  send an HTTP request to the `postgresql://` URL. Qdrant's check no longer
+  counts a refused API key as up.
+- The pgvector table is sized by the embedder, like the local store (it was a
+  separate setting nobody could see), and a refused extension or index no
+  longer rolls back the table with it.
+
+To use pgvector on an existing Alpine database, dump and restore into
+`pgvector/pgvector:pg16` — do not swap the image on the same volume
+(`docs/docs/ops/postgres-and-saas.md`). `KAZMA_PGVECTOR=0` keeps sqlite-vec
+without checking.
+
 ## Swarm task history is kept for 30 days, and you can change it (2026-09-25)
 
 Finished swarm tasks (completed, failed, cancelled, timed out) older than

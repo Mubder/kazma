@@ -2051,6 +2051,20 @@ Read the named test before changing the code it guards.
   `tests/test_model_fallback_notice.py::test_every_model_swap_is_reported`
   (every swap log line's class/function must report; negative control), and
   `tests/js/test_alert_banner_link.js` (off-site links are dropped).
+- **A remote vector store is used, and reported, from a probe of what it can
+  hold** (`memory/backends.py`). pgvector's probe reads the catalog (extension
+  installed / installable, may the role create the table, the existing
+  table's vector size), never `SELECT 1` — a Postgres without pgvector passes
+  that, and the live one did for weeks, refusing every vector statement at
+  DEBUG. The result is cached per target in `_REMOTE_VECTOR_STATE` (60 s,
+  shared by every instance); search/upsert/delete stop at it;
+  `vector_capability` only READS it (routes call it on the loop); boot fills
+  it (`probe_vector_backend`). Auto-selected pgvector on a server without the
+  extension is the expected fallback (INFO, "full (local)"); a chosen one is a
+  WARNING. The table is sized by the embedder (`get_embedding_dim`, the
+  sqlite-vec source), and each DDL statement commits alone. Gate:
+  `tests/test_vector_store_probe.py` (fakes for every state; a real Postgres
+  with and without pgvector).
 
 ## UI Conventions (Web)
 

@@ -276,9 +276,18 @@ def test_pgvector_search_filters_kind(monkeypatch) -> None:
         def close(self):
             return None
 
-    be = PgvectorBackend(dsn="postgresql://localhost/kazma", dimension=3)
+    import time
+
+    from kazma_core.memory import backends
+
+    dsn = "postgresql://localhost/kazma"
+    be = PgvectorBackend(dsn=dsn, dimension=3)
     monkeypatch.setattr(be, "_connect", lambda: _Conn())
     monkeypatch.setattr(be, "_ensure_table", lambda conn: None)
+    # search asks the extension probe first (tests/test_vector_store_probe.py)
+    monkeypatch.setitem(
+        backends._REMOTE_VECTOR_STATE, ("pgvector", dsn), (time.monotonic(), "installed")
+    )
     hits = be.search([0.1, 0.2, 0.3], tenant_id="default", tier=None, kind="belief", limit=5)
     assert hits == [("b-1", 0.8)]
     assert "meta->>'kind'" in captured["sql"]

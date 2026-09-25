@@ -283,6 +283,12 @@
                 this.memoryBackendsStatus = data.ok
                     ? ('Vector OK · ' + (data.provider || '') + ' · ' + (data.latency_ms || 0) + 'ms')
                     : ('Vector failed: ' + (data.error || 'unknown'));
+                // A remote test re-probes the store; the banner reads that probe.
+                if (data.capability) {
+                    this.memoryBackendsCapability = Object.assign(
+                        {}, this.memoryBackendsCapability, data.capability
+                    );
+                }
             } catch (e) {
                 this.memoryBackendsStatus = 'Vector test error';
             }
