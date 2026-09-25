@@ -7,6 +7,12 @@ Each tool returns a string or dict — the registry normalizes results into
 {"content": ..., "is_error": ...} for the LangGraph tool_worker node.
 """
 
+# NAME CLASH: each import below rebinds a submodule's name (read_url,
+# file_read, web_search, ...) to the function of the same name, so
+# `import kazma_core.tools.read_url as m` gives the FUNCTION, and pytest's
+# monkeypatch.setattr("kazma_core.tools.read_url.X", ...) raises AttributeError
+# on it (mock.patch, which imports, does reach the module). For the module use
+# importlib.import_module("kazma_core.tools.read_url") or monkeypatch.setattr(module, "X", ...).
 from kazma_core.tools.code_exec import python_exec
 from kazma_core.tools.context_cmd import context_cmd
 from kazma_core.tools.export_session import export_session
