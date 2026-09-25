@@ -82,7 +82,14 @@ def test_an_unreadable_value_falls_back_with_one_warning(settings, caplog):
     with caplog.at_level(logging.WARNING, logger="kazma_core.swarm.task_store"):
         assert task_retention_days() == 30
         assert task_retention_days() == 30
-    assert sum("forever" in r.getMessage() for r in caplog.records) == 1
+    # Only the retention warning counts: the settings store logs its own INFO
+    # "Setting updated: ... = 'forever'" for the write above, which reaches
+    # caplog whenever an earlier test has lowered that logger's level.
+    hits = [
+        r.getMessage() for r in caplog.records
+        if r.name == "kazma_core.swarm.task_store" and r.levelno >= logging.WARNING
+    ]
+    assert len(hits) == 1 and "forever" in hits[0], hits
 
 
 # ── what it deletes ───────────────────────────────────────────────────
