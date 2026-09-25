@@ -274,9 +274,13 @@ def _run_serve(port: int) -> None:
         # kazma_ui/app.py main() for rationale. ~40s worst-case death
         # detection for black-holed sockets; keeps broker registry + orphan
         # TTL semantics truthful.
+        # proxy_headers=False: the app applies KAZMA_TRUSTED_PROXIES itself
+        # (kazma_ui.proxy_headers); uvicorn's default trusts 127.0.0.1 and
+        # hides the TCP peer from the undeclared-proxy check.
         uvicorn.run(app, host=host, port=port, log_level="info",
                     ws_ping_interval=20.0, ws_ping_timeout=20.0,
-                    timeout_graceful_shutdown=15, loop=uvicorn_loop_factory())
+                    timeout_graceful_shutdown=15, loop=uvicorn_loop_factory(),
+                    proxy_headers=False)
     except OSError as exc:
         # Windows: port often "busy" via WSL/Docker portproxy (svchost), not another Kazma.
         err = str(exc).lower()

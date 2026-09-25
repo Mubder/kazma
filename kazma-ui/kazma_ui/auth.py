@@ -90,6 +90,12 @@ def _is_https(request: Request) -> bool:
 #: TCP peer is the client and ``X-Forwarded-For`` is ignored entirely.
 TRUSTED_PROXIES_ENV_VAR = "KAZMA_TRUSTED_PROXIES"
 
+#: Where :class:`kazma_ui.proxy_headers.ForwardedHeadersMiddleware` records the
+#: TCP peer before it applies forwarded headers -- after which
+#: ``request.client`` is the forwarded client, not the peer. Read it through
+#: :func:`_peer_host`.
+TCP_PEER_SCOPE_KEY = "kazma.tcp_peer"
+
 
 def trusted_proxies() -> frozenset[str]:
     """Peer addresses allowed to speak for a client via ``X-Forwarded-For``.
@@ -193,7 +199,16 @@ def _peer_host(request: Request) -> str:
     peer cannot be loopback, so it grants nothing -- and it keeps a missing
     attribute from raising out of the authentication path, which would turn
     an unusual connection into a 500 rather than a refusal.
+
+    Behind a declared proxy ``request.client`` is the FORWARDED client once
+    forwarded headers are applied, so the peer recorded before that
+    (:data:`TCP_PEER_SCOPE_KEY`) wins. Reading ``client`` there made the
+    detector below flag Cloudflare Tunnel's own visitors as an undeclared
+    proxy on every boot (2026-09-23 to 2026-09-25).
     """
+    scope = getattr(request, "scope", None)
+    if isinstance(scope, dict) and TCP_PEER_SCOPE_KEY in scope:
+        return (scope[TCP_PEER_SCOPE_KEY] or "").strip().lower()
     client = getattr(request, "client", None)
     if client is None:
         return ""

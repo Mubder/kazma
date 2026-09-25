@@ -22,4 +22,4 @@ USER kazma
 
 EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "kazma_ui.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "15"]
+CMD ["python", "-m", "uvicorn", "kazma_ui.app:create_app", "--factory", "--no-proxy-headers", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "15"]

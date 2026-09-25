@@ -44,8 +44,12 @@ alike. This was audit finding F-01 (2026-08-29), reproduced end to end.
 With the variable set, Kazma reads the real client from `X-Forwarded-For`
 (honoured only from the declared addresses, so a spoofed header from a direct
 client is ignored) and stops treating peer address as a credential at all.
-`serve.py` passes the matching `--proxy-headers --forwarded-allow-ips` to
-uvicorn automatically.
+Kazma applies the variable itself, in the app (`kazma_ui/proxy_headers.py`),
+after recording the TCP peer; every launcher starts uvicorn with
+`proxy_headers=False`, and a uvicorn you launch yourself needs
+`--no-proxy-headers`. When uvicorn rewrote the client first, the
+undeclared-proxy check saw the visitor instead of the proxy and raised a false
+alarm on the first tunnelled request of every boot.
 
 Your proxy must send the forwarded headers and must *overwrite* rather than
 append a client-supplied value. The shipped `deploy/nginx-ha.conf` already
