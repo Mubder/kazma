@@ -12,6 +12,19 @@ import pathlib
 
 import pytest
 
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
+
+def _on_postgres() -> bool:
+    from kazma_core.db.backend import is_postgres
+
+    return is_postgres()
+
+
+_ON_POSTGRES = _on_postgres()
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
@@ -68,6 +81,9 @@ def test_start_background_loops_is_called_from_startup():
     )
 
 
+# Pins KAZMA_DB_BACKEND=sqlite for a fresh store; under the Postgres job the
+# process-wide store is already the Postgres one, so the pin cannot take.
+@pytest.mark.skipif(_ON_POSTGRES, reason="SQLite-shaped assertion; see the comment above")
 @pytest.mark.asyncio
 async def test_heartbeat_actually_writes_the_key(tmp_path, monkeypatch):
     """The migrate-import interlock reads this key. It must get written."""

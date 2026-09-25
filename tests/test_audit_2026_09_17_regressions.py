@@ -13,6 +13,10 @@ import pathlib
 
 import pytest
 
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 

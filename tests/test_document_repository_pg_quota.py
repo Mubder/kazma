@@ -1,31 +1,27 @@
-"""Regression: Postgres metadata quota checks must not raise IndeterminateDatatype."""
+"""Regression: Postgres metadata quota checks must not raise IndeterminateDatatype.
+
+Runs only when the ENVIRONMENT supplies a Postgres DSN (the CI Postgres job,
+or a deliberate run against a throwaway container). It used to load the
+working directory's `.env` and then the operator's LIVE install `.env`
+(a hard-coded C:/Users/... path) with override=True -- the root conftest's
+load_dotenv stub is all that kept it off the live database.
+tests/test_postgres_suite.py now refuses any test that loads a real `.env`.
+"""
 
 from __future__ import annotations
 
 import io
-import os
 from pathlib import Path
 
 import pytest
 
-
-def _load_env() -> None:
-    try:
-        from dotenv import load_dotenv
-
-        cwd_env = Path.cwd() / ".env"
-        user_env = Path(os.environ.get("KAZMA_WORKSPACE", "C:/Users/balfa/kazma")) / ".env"
-        if cwd_env.is_file():
-            load_dotenv(dotenv_path=cwd_env, override=True)
-        if user_env.is_file() and user_env.resolve() != cwd_env.resolve():
-            load_dotenv(dotenv_path=user_env, override=True)
-    except Exception:
-        pass
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
 
 
 @pytest.fixture(scope="module")
 def pg_pool():
-    _load_env()
     try:
         from kazma_core.db.postgres_pool import get_postgres_pool, reset_postgres_pool
 

@@ -26,6 +26,10 @@ import threading
 
 import pytest
 
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 _DEADLINE_S = 20.0
 
 

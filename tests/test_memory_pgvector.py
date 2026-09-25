@@ -18,6 +18,10 @@ from kazma_core.memory.backends import (
 )
 from kazma_core.memory.recall import RecallHit, _rrf_fuse, recall
 
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 
 def _cfg(**kwargs: Any) -> dict[str, Any]:
     base: dict[str, Any] = {

@@ -29,6 +29,10 @@ import sqlite3
 import pytest
 from kazma_core.config_store import ConfigStore
 
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 
 def _seed_sqlite(path, rows: int) -> None:
     conn = sqlite3.connect(str(path))

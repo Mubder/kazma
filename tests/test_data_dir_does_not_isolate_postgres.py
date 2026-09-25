@@ -32,6 +32,10 @@ import pytest
 
 from kazma_core.config_store import ConfigStore
 
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 
 class _Recorder(logging.Handler):
     def __init__(self) -> None:

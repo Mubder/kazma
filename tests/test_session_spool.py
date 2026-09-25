@@ -22,6 +22,10 @@ import pytest
 from kazma_ui.session_manager import SessionManager
 from kazma_ui.session_spool import SessionSpool, merge_spooled, spool_path_for
 
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 ANSWER = "the finished answer the user must not lose"
 
 

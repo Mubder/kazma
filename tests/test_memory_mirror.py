@@ -16,6 +16,10 @@ import pytest
 
 from kazma_core.memory import state_backend as sb
 
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 
 class _RecordingBackend:
     """Stands in for PostgresStateBackend; records what reaches the mirror."""

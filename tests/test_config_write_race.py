@@ -39,6 +39,7 @@ def _isolated_store(tmp_path) -> ConfigStore:
 # ══════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.postgres
 class TestSaveConfigRoutesThroughConfigStore:
     def test_save_config_does_not_open_yaml_for_writing(self, tmp_path, monkeypatch):
         """_save_config must NOT call ``open(kazma.yaml, 'w')``."""
@@ -109,6 +110,7 @@ class TestSaveConfigRoutesThroughConfigStore:
 # ══════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.postgres
 class TestConcurrentConfigWrites:
     def test_ten_concurrent_writes_all_visible(self, tmp_path, monkeypatch):
         """N parallel _save_config calls must all persist (no lost updates)."""
@@ -169,6 +171,7 @@ def isolated_store_for_slash(tmp_path, monkeypatch):
     store.close()
 
 
+@pytest.mark.postgres
 class TestSlashConfigStillFunctions:
     def test_config_model_uses_configstore(self, isolated_store_for_slash):
         """/config model routes its save through ConfigStore."""
@@ -204,6 +207,7 @@ class TestSlashConfigStillFunctions:
 # ══════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.postgres
 class TestBatchSetAtomicity:
     """batch_set() must write all keys or none (atomic)."""
 
@@ -267,6 +271,7 @@ class TestTransactionContextManager:
         finally:
             store.close()
 
+    @pytest.mark.postgres
     def test_transaction_rolls_back_on_exception(self, tmp_path):
         store = _isolated_store(tmp_path)
         try:
@@ -283,6 +288,7 @@ class TestTransactionContextManager:
             store.close()
 
 
+@pytest.mark.postgres
 class TestSingleton:
     """get_config_store() returns the shared singleton."""
 
@@ -305,6 +311,7 @@ class TestSingleton:
         custom.close()
 
 
+@pytest.mark.postgres
 class TestConcurrentCrossInstanceWrites:
     """Multiple ConfigStore instances on the same DB file coordinate via WAL."""
 
@@ -381,6 +388,7 @@ class TestReconcileFromYaml:
         finally:
             store.close()
 
+    @pytest.mark.postgres
     def test_does_not_clobber_existing_db_keys(self, tmp_path):
         """User-changed DB keys must NOT be overwritten by YAML values."""
         yaml_path = tmp_path / "kazma.yaml"
@@ -423,6 +431,7 @@ class TestReconcileFromYaml:
         finally:
             store.close()
 
+    @pytest.mark.postgres
     def test_no_yaml_file_returns_zero(self, tmp_path):
         """No kazma.yaml → nothing to reconcile."""
         store = ConfigStore(

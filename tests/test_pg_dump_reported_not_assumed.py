@@ -25,6 +25,10 @@ from kazma_core.backup import universal
 
 from tests._module_source import module_source
 
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 
 @pytest.fixture
 def pg_dir(tmp_path, monkeypatch):

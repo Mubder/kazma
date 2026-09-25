@@ -13,6 +13,10 @@ import pytest
 
 from kazma_core.db import pg_backup
 
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 
 class _NoConfigStore:
     """ConfigStore stub — unit tests must never touch the real settings store

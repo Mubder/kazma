@@ -8,6 +8,12 @@ from kazma_core.migration.pg_bridge import (
     _with_docker_pgpassword,
 )
 
+import pytest
+
+# Verified against a real Postgres; the CI Postgres job runs every test
+# carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 
 def test_docker_exec_injects_pgpassword() -> None:
     parts = _DsnParts(
