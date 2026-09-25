@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import json
-import sys
 from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests._module_stubs import stub_modules
+
 # Imported for its SIDE EFFECT on sys.modules, not for its API.
 #
-# Four tests in this file use `patch.dict(sys.modules, {...})`. That helper
-# snapshots the dict on entry and, on exit, CLEARS it and restores the
-# snapshot — so any module first imported *inside* one of those blocks is
-# wiped when the block ends, because it was never in the snapshot.
+# Four tests in this file used `patch.dict` over sys.modules (now
+# `stub_modules`, tests/_module_stubs.py). That helper snapshots the dict on
+# entry and, on exit, CLEARS it and restores the snapshot — so any module
+# first imported *inside* one of those blocks is wiped when the block ends,
+# because it was never in the snapshot. The import below was the first fix;
+# stub_modules is the class fix, and tests/test_module_stubs.py bans the
+# pattern suite-wide. Kept because it costs nothing.
 #
 # `read_url` imports `kazma_core.security.ssrf` lazily, inside the function.
 # If the first such import happens inside a patch.dict block, the module is
@@ -117,7 +121,7 @@ class TestWebSearch:
         with ExitStack() as stack:
             for p in _patch_backends_off():
                 stack.enter_context(p)
-            stack.enter_context(patch.dict(sys.modules, {"duckduckgo_search": fake_mod}))
+            stack.enter_context(stub_modules({"duckduckgo_search": fake_mod}))
             from kazma_core.tools.web_search import web_search
 
             result = await web_search("test query", max_results=2)
@@ -141,7 +145,7 @@ class TestWebSearch:
         with ExitStack() as stack:
             for p in _patch_backends_off():
                 stack.enter_context(p)
-            stack.enter_context(patch.dict(sys.modules, {"duckduckgo_search": fake_mod}))
+            stack.enter_context(stub_modules({"duckduckgo_search": fake_mod}))
             from kazma_core.tools.web_search import web_search
 
             result = await web_search("nonexistent query xyz")
@@ -178,7 +182,7 @@ class TestReadUrl:
 
         fake_trafilatura = _make_mock_trafilatura("Hello World")
         with (
-            patch.dict(sys.modules, {"trafilatura": fake_trafilatura}),
+            stub_modules({"trafilatura": fake_trafilatura}),
             patch(
                 "kazma_core.tools.read_url._fetch_via_optional_backends",
                 new=AsyncMock(return_value=None),
@@ -521,7 +525,7 @@ class TestReadUrlEdgeCases:
         fake_trafilatura = _make_mock_trafilatura(None)
         with (
             patch("httpx.AsyncClient", return_value=mock_client),
-            patch.dict(sys.modules, {"trafilatura": fake_trafilatura}),
+            stub_modules({"trafilatura": fake_trafilatura}),
         ):
             from kazma_core.tools.read_url import read_url
 

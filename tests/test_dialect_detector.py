@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
+
+from tests._module_stubs import stub_modules
 from kazma_core.dialect_detector import (
     DialectDetector,
     DialectResult,
@@ -139,7 +141,7 @@ class TestDialectDetector:
 
     def test_fasttext_fallback(self):
         """When fasttext model fails to load, falls back to rule-based."""
-        with patch.dict("sys.modules", {"fasttext": None}):
+        with stub_modules({"fasttext": None}):
             d = DialectDetector(model_path="/nonexistent/model.bin")
             result = d.detect("شلونك")
             # Should still work via rule-based fallback

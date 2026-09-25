@@ -12,9 +12,11 @@ Covers:
 from __future__ import annotations
 
 import urllib.parse
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+from tests._module_stubs import stub_modules
 from kazma_core.tools.image_gen import (
     MAX_HEIGHT,
     MAX_PROMPT_CHARS,
@@ -44,7 +46,7 @@ def mock_httpx():
     mock_client.__aenter__.return_value.get.return_value = mock_response
     mock_httpx_mod.AsyncClient.return_value = mock_client
 
-    with patch.dict("sys.modules", {"httpx": mock_httpx_mod}):
+    with stub_modules({"httpx": mock_httpx_mod}):
         yield mock_httpx_mod
 
 
