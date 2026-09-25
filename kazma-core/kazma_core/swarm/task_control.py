@@ -6,7 +6,7 @@ import logging
 import threading
 from typing import Any
 
-from kazma_core.swarm.task import SwarmTask
+from kazma_core.swarm.task import SwarmTask, TaskStatus
 from kazma_core.swarm.task_lifecycle import get_task as _hist_get_task
 
 __all__ = ["build_retry_task", "cancel_active_task"]
@@ -20,8 +20,10 @@ def cancel_active_task(
     active_tasks: dict[str, SwarmTask],
     task_handles: dict[str, Any],
     finalize: Any,
+    history: dict[str, SwarmTask] | None = None,
+    history_lock: threading.Lock | None = None,
 ) -> bool:
-    """Cancel an in-flight task.
+    """Cancel an in-flight task, or a paused one restored after a restart.
 
     ``finalize`` is a callable matching ``SwarmEngine._finalize_task`` kwargs
     (task=, status=, worker_results=, error=, duration_seconds=).
@@ -30,9 +32,32 @@ def cancel_active_task(
     ``dispatch``'s ``CancelledError`` path finalizes once (audit H7). When no
     live handle exists, finalize immediately.
 
+    A pipeline paused at a checkpoint before a restart comes back in
+    ``history`` only (``restore_paused_tasks``), never in ``active_tasks``.
+    The panel offers Cancel on every paused task, and on those it used to
+    answer "not active". Pass ``history`` so they cancel too.
+
     Returns True if cancelled, False if not active.
     """
     if task_id not in active_tasks:
+        restored = (
+            _hist_get_task(history, history_lock or threading.Lock(), task_id)
+            if history is not None
+            else None
+        )
+        if restored is not None and restored.status == TaskStatus.PAUSED:
+            finalize(
+                task=restored,
+                status="cancelled",
+                worker_results=[],
+                error="Cancelled by user",
+                duration_seconds=0.0,
+            )
+            logger.info(
+                "[task_control] paused task '%s' cancelled (restored after a restart)",
+                task_id,
+            )
+            return True
         logger.warning("[task_control] cancel: '%s' not in active tasks", task_id)
         return False
 

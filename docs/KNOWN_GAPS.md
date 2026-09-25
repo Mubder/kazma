@@ -374,6 +374,7 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
 | uvicorn replaced the client address before the undeclared-proxy check read it: every boot behind Cloudflare Tunnel logged a false `[SECURITY]` alarm advising to trust a visitor's IP | `tests/test_forwarded_headers_peer.py` (real ASGI layers; every launcher leaves forwarded headers to the app) |
 | Mail secrets split across scopes: `email.gmail.scopes` differed between chat and background work (the backup token refresh and the agent's secret tool wrote under the request's tenant) | `tests/test_mail_secrets_install_scope.py` (the vault keeps `email.*`/`calendar.*` install-wide for every writer) |
 | `KAZMA_TRUSTED_PROXIES` ranges were honoured by uvicorn and not by Kazma's checks | the range tests in `tests/test_forwarded_headers_peer.py` (`_is_trusted_proxy` is the one answer) |
+| Rejecting a pipeline paused before a restart answered 200 and was never saved, so it came back paused at every boot; Cancel answered "not active" for it; a paused task with no checkpoint answered "not found"; a cancel left the checkpoint open (Approve still offered, timer running, gate row pending) | `tests/test_swarm_paused_task_endings.py` (restarts over a real task store; the three routes; only declared code ends a task outside `_finalize_task`, with a negative control) |
 
 The proxy fix was confirmed live on a page load through the tunnel
 (2026-09-25 14:19 UTC): no alarm.

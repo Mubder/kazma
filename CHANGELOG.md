@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Rejecting or cancelling a paused pipeline sticks (2026-09-25)
+
+Four swarm pipelines paused at a checkpoint were rejected, each answered
+`200 Checkpoint rejected, pipeline aborted`, and all four were still paused
+after the next boot. After a restart a paused pipeline is restored into the
+task history, and the checkpoint handler marks that same task failed while
+rejecting it; the engine then asked "was this task already finished?", saw
+its own change, and skipped the save. Cancel had the same blind spot from the
+other side: it looked only at tasks in flight, so it answered "not active"
+for any pipeline paused before a restart. A fifth task, paused with no
+checkpoint at all (a test row from 2026-08-14), answered "not found" to both
+Approve and Reject.
+
+**Now:** a reject is saved whether or not the server restarted; Cancel works
+on every paused pipeline the panel shows; Reject closes a paused task that
+has no checkpoint, and Approve says there is nothing to approve. Every way a
+pipeline can end (approve, reject, timeout, cancel, the stale-task reaper)
+closes its checkpoint — a cancel used to leave Approve offered on the
+cancelled task, its auto-reject timer running, and its approval row pending.
+Startup names any paused task that has no checkpoint.
+
 ## One copy of every mail token; proxy ranges work (2026-09-25)
 
 **Mail.** Every boot warned that `email.gmail.scopes` held one value for chat

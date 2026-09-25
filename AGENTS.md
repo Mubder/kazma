@@ -169,6 +169,17 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
 
 **C. Pipeline checkpoints — swarm PIPELINE tasks** (separate from A and B)
 - `engine.py:_handle_pipeline_checkpoint` + `approve_checkpoint`
+- Every ending of a task goes through `SwarmEngine._finalize_task`: it saves
+  the task, tells the panel, and (`_close_open_checkpoint`) closes a paused
+  pipeline's checkpoint — entry, auto-reject timer, gate row. Cancel skipped
+  the close and left Approve on cancelled tasks. Code that sets a terminal
+  status itself must be declared in `tests/test_swarm_paused_task_endings.py`
+  with how it covers those three.
+- A pipeline paused before a restart is restored into history only, never
+  `_active_tasks`; reject and cancel reach it there. `reject_checkpoint`
+  decides "already finished?" BEFORE the handler runs — the handler marks the
+  shared task failed, and judging after it left restored rejects unsaved
+  (2026-09-25: four `200`s, still paused at the next boot).
 
 **Danger tool list SoT (must stay one list):**
 - **Canonical:** `kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS`

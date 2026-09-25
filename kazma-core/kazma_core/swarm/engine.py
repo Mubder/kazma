@@ -573,6 +573,11 @@ class SwarmEngine:
                         timeout,
                         step_budget,
                     )
+                    # _finalize_task also closes a paused pipeline's checkpoint:
+                    # left open, the panel kept offering Approve on a task
+                    # already finalized TIMEOUT, and a late approve re-ran the
+                    # remaining steps only for the terminal-state guard to
+                    # discard the result (audit M-S1).
                     self._finalize_task(
                         t,
                         worker_results=[],
@@ -584,15 +589,6 @@ class SwarmEngine:
                         duration_seconds=elapsed,
                     )
                     reaped += 1
-                    # Drop any dangling checkpoint pause entry: without this
-                    # the panel kept offering Approve on a task that was
-                    # already finalized TIMEOUT, and a late approve would
-                    # re-execute the remaining steps only for the result to
-                    # be discarded by the terminal-state guard (audit M-S1).
-                    try:
-                        self._checkpoint_handler._paused.pop(tid, None)
-                    except Exception:
-                        pass
             except Exception as exc:
                 logger.debug("[SwarmEngine] Error checking task age for %s: %s", tid, exc)
         return reaped
@@ -761,13 +757,16 @@ class SwarmEngine:
         the SwarmTask with CANCELLED status.
 
         Returns True if the task was found and cancelled, False if not
-        found or already terminal.
+        found or already terminal. A paused pipeline restored after a
+        restart is in history only, and cancels too.
         """
         return _cancel_active_task(
             task_id=task_id,
             active_tasks=self._active_tasks,
             task_handles=self._task_handles,
             finalize=self._finalize_task,
+            history=self._task_history,
+            history_lock=self._task_lock,
         )
 
     async def retry_task(self, task_id: str) -> SwarmTask | None:
@@ -1156,6 +1155,7 @@ class SwarmEngine:
         if task.status != TaskStatus.PAUSED:
             self._active_tasks.pop(task.id, None)
             self._task_handles.pop(task.id, None)
+            self._close_open_checkpoint(task.id)
 
         # Record per-worker metrics for any worker results not yet recorded.
         for wr in worker_results:
@@ -1211,6 +1211,37 @@ class SwarmEngine:
                 )
 
         return result
+
+    def _close_open_checkpoint(self, task_id: str) -> None:
+        """Close the checkpoint of a paused pipeline that ended another way.
+
+        Approve and reject close their own checkpoint. Cancel and the
+        stale-task reaper end a paused pipeline too, and until 2026-09-25
+        cancel left the checkpoint open: the panel kept offering Approve on
+        a finished task, its auto-reject timer kept running, and its gate
+        row stayed pending on the approvals list (the reaper dropped the
+        entry but never settled the row). Every terminal finalize comes
+        through here, so no ending can leave one behind.
+        """
+        if self._checkpoint_handler.close(task_id) is None:
+            return
+        logger.info(
+            "[SwarmEngine] closed the open checkpoint of finished task '%s'", task_id
+        )
+        from kazma_core.swarm.checkpoint_manager import _gate_settle_pipeline
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No loop in this thread, so there is nothing to block.
+            _gate_settle_pipeline(task_id, "deny")
+            return
+        from kazma_core.background import spawn_background
+
+        spawn_background(
+            asyncio.to_thread(_gate_settle_pipeline, task_id, "deny"),
+            name=f"swarm-gate-settle:{task_id}",
+        )
 
     @staticmethod
     def _build_handoff_context(
@@ -1323,7 +1354,7 @@ class SwarmEngine:
                 "[SwarmEngine] approve_checkpoint refused for terminal task %s "
                 "(status=%s) — stale card", task_id, existing.status,
             )
-            self._checkpoint_handler._paused.pop(task_id, None)
+            self._close_open_checkpoint(task_id)
             return existing.result if getattr(existing, "result", None) is not None else None
 
         entry = self._checkpoint_handler.try_claim(task_id, "approving")
@@ -1402,9 +1433,45 @@ class SwarmEngine:
         """Reject a paused HITL checkpoint and abort the pipeline.
 
         Returns the finalized ``TaskResult`` with ``status="failed"``, or
-        ``None`` if no active checkpoint exists for *task_id*.
+        ``None`` if *task_id* is neither at a checkpoint nor paused. A paused
+        task with no checkpoint pending is closed the same way.
         """
+        # "Already terminally finalized" is decided BEFORE the handler runs.
+        # ``_checkpoint_handler.reject`` marks the shared task object failed
+        # and gives it a result, and judging afterwards took this reject's own
+        # change for an earlier terminal record: a pipeline restored after a
+        # restart (in history, not in _active_tasks) was never saved as
+        # rejected, and came back paused at every boot. Live 2026-09-25: four
+        # rejected with 200s, still ``paused`` in Postgres.
+        _terminal = {
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+            TaskStatus.TIMEOUT,
+        }
+        _before = _hist_get_task(self._task_history, self._task_lock, task_id)
+        _already_final = (
+            _before is not None
+            and getattr(_before, "status", None) in _terminal
+            and getattr(_before, "result", None) is not None
+        )
         result = await self._checkpoint_handler.reject(task_id, reason=reason)
+        if (
+            result is None
+            and _before is not None
+            and getattr(_before, "status", None) == TaskStatus.PAUSED
+        ):
+            # Paused with no checkpoint pending: nothing can approve or resume
+            # it. Product code only pauses a pipeline together with its
+            # checkpoint (CheckpointManager.handle_pipeline_checkpoint); the
+            # live store had one such row, left by a 2026-08-14 test run.
+            # Rejecting closes it, where the route used to answer "not found"
+            # for a task that exists.
+            result = TaskResult(
+                task_id=task_id,
+                status="failed",
+                error=f"{reason} (no checkpoint was pending)",
+            )
         if result is not None:
             # Gate registry (P4): record the rejection. Best-effort.
             try:
@@ -1430,26 +1497,16 @@ class SwarmEngine:
                 )
             else:
                 # Update task history with the failed result — unless the
-                # task already carries a terminal record (reaped/cancelled
-                # while paused): overwriting would persist a SECOND terminal
-                # result for the same task (deep-audit 2026-08-19).
-                _terminal = {
-                    TaskStatus.COMPLETED,
-                    TaskStatus.FAILED,
-                    TaskStatus.CANCELLED,
-                    TaskStatus.TIMEOUT,
-                }
-                _existing = _hist_get_task(self._task_history, self._task_lock, task_id)
-                if (
-                    _existing is not None
-                    and getattr(_existing, "status", None) in _terminal
-                    and getattr(_existing, "result", None) is not None
-                ):
+                # task already carried a terminal record BEFORE this reject
+                # (reaped/cancelled while paused): overwriting would persist a
+                # SECOND terminal result for the same task (deep-audit
+                # 2026-08-19). See _already_final above for why "before".
+                if _already_final:
                     logger.debug(
                         "[SwarmEngine] reject_checkpoint('%s'): task already "
                         "terminally finalized (status=%s) — skipping duplicate persist",
                         task_id,
-                        getattr(_existing, "status", None),
+                        getattr(_before, "status", None),
                     )
                 else:
                     def _mark_failed(task: SwarmTask) -> None:

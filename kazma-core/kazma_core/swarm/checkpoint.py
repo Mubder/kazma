@@ -192,11 +192,22 @@ class HITLCheckpointHandler:
             # Clean up.
             self._paused.pop(task_id, None)
 
-    def cleanup(self, task_id: str) -> None:
-        """Remove a paused pipeline entry (cleanup on error/completion)."""
+    def close(self, task_id: str) -> _PausedPipeline | None:
+        """Close the checkpoint of a pipeline that ended without a decision.
+
+        Approve and reject close their own checkpoint. Cancel and the
+        stale-task reaper also end a paused pipeline, and they call this so
+        the checkpoint stops offering Approve and its auto-reject timer
+        stops. Returns the closed entry, or ``None`` when none was open.
+        """
         entry = self._paused.pop(task_id, None)
-        if entry and entry.timeout_task is not None and not entry.timeout_task.done():
-            entry.timeout_task.cancel()
+        if entry is None:
+            return None
+        self._cancel_timeout_if_foreign(entry)
+        entry.checkpoint.status = "rejected"
+        entry.checkpoint.needs_approval = False
+        entry.completion_event.set()
+        return entry
 
     @property
     def active_checkpoint_count(self) -> int:

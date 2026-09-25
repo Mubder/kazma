@@ -327,6 +327,19 @@ class CheckpointManager:
         if self._task_store is None:
             return []
         paused_tasks = self._task_store.get_paused_tasks()
+        # Every pause writes hitl_checkpoint before it is persisted, so a
+        # paused row without one did not come from a pause (the live store
+        # had one from a 2026-08-14 test run). Nothing can approve it; say so
+        # rather than restore it silently as a normal pause.
+        no_checkpoint = [t.id for t in paused_tasks if not t.metadata.get("hitl_checkpoint")]
+        if no_checkpoint:
+            logger.warning(
+                "[CheckpointManager] %d paused task(s) have no checkpoint to "
+                "resume from, so nothing can approve them; Reject or Cancel "
+                "closes each: %s",
+                len(no_checkpoint),
+                ", ".join(no_checkpoint),
+            )
         for task in paused_tasks:
             # Restore into shared history under the engine lock (avoids racing
             # a concurrent list_tasks / _finalize_task).

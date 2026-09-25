@@ -695,9 +695,13 @@ def register_tasks_routes(
 
         checkpoint_info = engine.get_checkpoint_info(task_id) if hasattr(engine, "get_checkpoint_info") else None
         if checkpoint_info is None:
-            # Check if the task exists but is not paused.
             task_obj = engine.get_task(task_id)
-            if task_obj is not None and task_obj.status != "paused":
+            if task_obj is None:
+                return JSONResponse(
+                    {"status": "error", "message": f"Task '{task_id}' not found"},
+                    status_code=404,
+                )
+            if task_obj.status != "paused":
                 return JSONResponse(
                     {
                         "status": "error",
@@ -705,9 +709,17 @@ def register_tasks_routes(
                     },
                     status_code=409,
                 )
+            # The task exists and is paused, but no checkpoint is waiting on
+            # it, so there is nothing to approve and nothing to resume.
             return JSONResponse(
-                {"status": "error", "message": f"Task '{task_id}' not found"},
-                status_code=404,
+                {
+                    "status": "error",
+                    "message": (
+                        f"Task '{task_id}' is paused with no checkpoint pending; "
+                        "there is nothing to approve. Reject it to close it."
+                    ),
+                },
+                status_code=409,
             )
 
         result = await engine.approve_checkpoint(task_id)
@@ -729,10 +741,10 @@ def register_tasks_routes(
 
     @router.post("/api/swarm/tasks/{task_id}/reject")
     async def swarm_reject_checkpoint(task_id: str, request: Request) -> JSONResponse:
+        """Reject an HITL checkpoint and abort the pipeline."""
         _denied = _require_admin(request)
         if _denied is not None:
             return _denied
-        """Reject an HITL checkpoint and abort the pipeline."""
         engine = _current_engine()
         svc = get_swarm_service()
         if not svc.has_swarm_core() or engine is None:
@@ -744,7 +756,12 @@ def register_tasks_routes(
         checkpoint_info = engine.get_checkpoint_info(task_id) if hasattr(engine, "get_checkpoint_info") else None
         if checkpoint_info is None:
             task_obj = engine.get_task(task_id)
-            if task_obj is not None and task_obj.status != "paused":
+            if task_obj is None:
+                return JSONResponse(
+                    {"status": "error", "message": f"Task '{task_id}' not found"},
+                    status_code=404,
+                )
+            if task_obj.status != "paused":
                 return JSONResponse(
                     {
                         "status": "error",
@@ -752,10 +769,8 @@ def register_tasks_routes(
                     },
                     status_code=409,
                 )
-            return JSONResponse(
-                {"status": "error", "message": f"Task '{task_id}' not found"},
-                status_code=404,
-            )
+            # Paused with no checkpoint pending: nothing can approve it, so
+            # rejecting is the only way to close it (reject_checkpoint does).
 
         result = await engine.reject_checkpoint(task_id)
         if result is None:
@@ -776,23 +791,26 @@ def register_tasks_routes(
 
     @router.post("/api/swarm/tasks/{task_id}/cancel")
     async def swarm_cancel_task(task_id: str, request: Request) -> JSONResponse:
+        """Cancel a running or paused task."""
         _denied = _require_admin(request)
         if _denied is not None:
             return _denied
-        """Cancel a running task."""
         engine = _current_engine()
         if engine is None:
             return JSONResponse(
                 {"status": "error", "message": "Swarm engine not available"},
                 status_code=503,
             )
-        # Check the task is active
+        # A task in flight, or a pipeline paused before a restart: that one is
+        # restored into history only, and the panel offers Cancel on it too.
         active = engine.get_active_task(task_id) if hasattr(engine, "get_active_task") else getattr(engine, "_active_tasks", {}).get(task_id)
         if active is None:
-            return JSONResponse(
-                {"status": "error", "message": f"Task '{task_id}' is not active (already completed or not found)"},
-                status_code=404,
-            )
+            task_obj = engine.get_task(task_id)
+            if task_obj is None or task_obj.status != "paused":
+                return JSONResponse(
+                    {"status": "error", "message": f"Task '{task_id}' is not active (already completed or not found)"},
+                    status_code=404,
+                )
         cancelled = await engine.cancel_task(task_id)
         if cancelled:
             return JSONResponse(
