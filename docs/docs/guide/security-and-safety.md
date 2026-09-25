@@ -210,11 +210,11 @@ exempt. YOLO windows also default to **1 hour** (was 4) —
 
 Code fallback if unset: `DEFAULT_DANGER_TOOLS = ["file_write", "file_delete", "shell_exec", "vault_retrieve", "vault_delete"]` (`safety/hitl.py:41`). The vault tools protect secret retrieval/deletion.
 
-> **Narrowing guard (2026-08-19):** the effective list can drift below the
-> canonical set via Settings/YAML — a warning repeats every 15 minutes
-> naming the drifted tools. Strict deployments can enforce
-> `KAZMA_HITL_CANONICAL_FLOOR=1`, which unions the canonical danger tools
-> back into the effective list so narrowing below them is impossible.
+> **Narrowing guard:** the canonical danger tools are always part of the
+> effective list — the floor has been on by default since audit 2026-09-16
+> F-5 — so Settings/YAML cannot narrow below them.
+> `KAZMA_HITL_CANONICAL_FLOOR=0` opts out, with a warning, and a drift
+> warning then repeats every 15 minutes naming the tools left out.
 
 ### 5.2 Path B (swarm bus) — `_EXTENDED_DANGER`
 
@@ -329,7 +329,7 @@ SQLite `kazma-data/disclosure.db` enforces the transition chain `submitted → a
 7. **Run as the non-root `kazma` user** in Docker (the Dockerfile already does this).
 8. **Bind `127.0.0.1`** unless you have a reverse proxy + `KAZMA_SECRET` in place.
 9. **Multi-operator: set platform allowlists + `KAZMA_GATEWAY_STRICT_ALLOWLIST=1`** (2026-08-19) — by default the Telegram/Discord/Slack adapters run allow-all for backward compatibility with single-operator installs; strict mode fails closed on an empty allowlist.
-10. **Set `KAZMA_HITL_CANONICAL_FLOOR=1`** on strict deployments so the danger-tool approval list cannot be narrowed below the canonical set.
+10. **Leave `KAZMA_HITL_CANONICAL_FLOOR` unset** — the floor is on by default, and `0` would let the danger-tool approval list be narrowed below the canonical set.
 11. **Set `KAZMA_TRUSTED_PROXIES`** when behind nginx/Caddy/Docker. Peer `127.0.0.1` is not a credential.
 12. **Do not pin scraping through `proxy=`.** Direct hops use `PinHostAsyncTransport`; peer-private abort always.
 13. **If you connect MCP servers, approve each call or name the tool in `KAZMA_MCP_SAFE_ALLOWLIST`.** The server supplies the tool name. `get_file`, `read_env`, `get_ssh_key` and `list_env_vars` still classify `safe`, and that label does not skip the gate. `read_env` is the one to think about: `env` is deliberately absent from the `shell_exec` allowlist precisely so a single approval cannot become a credential dump. `KAZMA_PRODUCTION=1` does not allow these names.

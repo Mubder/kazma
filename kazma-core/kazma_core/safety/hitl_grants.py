@@ -29,10 +29,14 @@ _DEFAULT_GRANT_TTL = 30 * 60  # 30 minutes — shorter than YOLO default
 
 
 def _ttl_seconds() -> int:
+    """Grant lifetime. A number is seconds, at least 60 — so ``0`` is 60,
+    not "forever": for an approval dial the safe reading of zero is the
+    shortest window. Only the words ``off`` / ``none`` / ``infinite`` mean no
+    expiry (``tests/test_ttl_env_parsing.py``)."""
     raw = (os.environ.get("KAZMA_HITL_GRANT_TTL_SECONDS") or "").strip()
     if raw.isdigit():
         return max(60, int(raw))
-    if raw in ("0", "off", "none", "infinite"):
+    if raw in ("off", "none", "infinite"):
         return 0
     return _DEFAULT_GRANT_TTL
 

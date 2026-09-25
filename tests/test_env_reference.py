@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import functools
 import importlib.util
+import re
 import sys
 import textwrap
 from pathlib import Path
@@ -19,9 +20,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 
 #: Variables read by the code that environment-variables.md does not describe.
-#: Lower it when you document some; never raise it to make room for a new
-#: variable -- describe the new one instead.
-UNDOCUMENTED_BASELINE = 148
+#: Zero since 2026-09-25, when every one of the 148 was read at its call site
+#: and written up. Never raise it to make room for a new variable -- describe
+#: the new one instead (and if it turns a protection off, put it in the
+#: security table: tests/test_static_gates.py::SECURITY_ENV_NAMES).
+UNDOCUMENTED_BASELINE = 0
 
 
 @functools.lru_cache(maxsize=1)
@@ -100,3 +103,73 @@ def test_the_scanner_finds_reads_and_skips_what_is_not_a_variable():
 def test_the_index_is_in_the_docs_sidebar():
     sidebars = (REPO / "docs" / "sidebars.js").read_text(encoding="utf-8")
     assert "'reference/environment-variables-index'" in sidebars
+
+
+# ── A documented default is the code's default ────────────────────────
+#
+# The curated page said KAZMA_TOOL_RESULT_MAX_CHARS was 4000 and the research
+# cap 16000; the code had 100000 and 200000. It also said the canonical HITL
+# floor was off unless set, when it had been on by default since 2026-09-16.
+# A description can only be checked by reading it, but a stated default can be
+# checked against the literal the code falls back to.
+
+_DOCUMENTED_DEFAULT = re.compile(
+    r"^\|\s*`(KAZMA_[A-Z0-9_]+)`\s*\|\s*`([^`|]+)`[^|]*\|"
+)
+
+
+def documented_defaults(curated: str) -> dict[str, str]:
+    """Variable -> default, for rows whose default cell starts with one literal."""
+    out: dict[str, str] = {}
+    for line in curated.splitlines():
+        m = _DOCUMENTED_DEFAULT.match(line.strip())
+        if m:
+            out[m.group(1)] = m.group(2).strip()
+    return out
+
+
+def default_drift(found: dict, curated: str) -> list[str]:
+    """Rows whose stated default is not the literal the code falls back to.
+
+    Only variables whose code states literal defaults are checked, and an
+    empty-string default is skipped: it means "unset", and the effective
+    default then comes from somewhere else (``KAZMA_TZ`` falls back to UTC).
+    """
+    drift = []
+    for name, doc in documented_defaults(curated).items():
+        var = found.get(name)
+        if var is None:
+            continue
+        code = {d.strip('"') for d in var.defaults} - {""}
+        if code and doc not in code:
+            drift.append(f"{name}: page says {doc!r}, code falls back to {sorted(code)}")
+    return drift
+
+
+def test_documented_defaults_match_the_code():
+    _text, found, _missing = _built()
+    curated = _generator().CURATED.read_text(encoding="utf-8")
+    drift = default_drift(found, curated)
+    assert not drift, (
+        "docs/docs/reference/environment-variables.md states defaults the code "
+        "does not use — fix the page (or the code, if the page was the intent):\n  "
+        + "\n  ".join(drift)
+    )
+
+
+def test_the_default_check_sees_a_wrong_default():
+    """Negative control."""
+    gen = _generator()
+    found = gen.collect({
+        "kazma-core/kazma_core/planted.py":
+            'import os\nCAP = os.environ.get("KAZMA_PLANTED_CAP", "100000")\n'
+            'TZ = os.environ.get("KAZMA_PLANTED_TZ", "")\n',
+    })
+    page = (
+        "| `KAZMA_PLANTED_CAP` | `4000` | stale |\n"
+        "| `KAZMA_PLANTED_TZ` | `UTC` | effective default, not the literal |\n"
+    )
+    assert default_drift(found, page) == [
+        "KAZMA_PLANTED_CAP: page says '4000', code falls back to ['100000']"
+    ]
+    assert default_drift(found, page.replace("`4000`", "`100000`")) == []

@@ -63,9 +63,36 @@ async def test_division_fail_open_without_context(monkeypatch):
     from kazma_core.division_runtime import check_division_tool, reset_division_runtime
 
     monkeypatch.delenv("KAZMA_DIVISION", raising=False)
-    monkeypatch.delenv("KAZMA_DIVISION_ENFORCE", raising=False)
     reset_division_runtime()
     assert await check_division_tool("mcp__tourism-booking-api__book") is None
+
+
+@pytest.mark.asyncio
+async def test_division_status_reports_what_the_check_does(monkeypatch, tmp_path):
+    """Settings reads ``division_enforcement_on()``; the tool gate reads the
+    division context. A ``KAZMA_DIVISION_ENFORCE=1`` switch used to set the
+    first without the second, so the status said "enforced" while every tool
+    passed. The two must agree whatever the environment holds."""
+    from kazma_core.division_runtime import (
+        check_division_tool,
+        division_enforcement_on,
+        reset_division_runtime,
+    )
+    from kazma_core.rbac import RBACEngine
+    import kazma_core.division_runtime as dr
+
+    tool = "mcp__tourism-booking-api__book"
+    monkeypatch.delenv("KAZMA_DIVISION", raising=False)
+    monkeypatch.setenv("KAZMA_DIVISION_ENFORCE", "1")  # the retired switch
+    reset_division_runtime()
+    assert await check_division_tool(tool) is None
+    assert division_enforcement_on() is False, "reports enforcement nobody gets"
+
+    monkeypatch.setenv("KAZMA_DIVISION", "gas_oil")
+    reset_division_runtime()
+    dr._rbac = RBACEngine(db_path=str(tmp_path / "rbac.db"))
+    assert await check_division_tool(tool) is not None
+    assert division_enforcement_on() is True
 
 
 @pytest.mark.asyncio

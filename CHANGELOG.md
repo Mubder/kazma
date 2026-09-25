@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## Every environment variable is described, and the page is checked (2026-09-25)
+
+The reference page (`docs/docs/reference/environment-variables.md`) now
+describes all 262 `KAZMA_*` variables the code reads — the 148 that were
+missing were each written from the code that reads them. New sections cover
+the agent loop, MCP, paths, backups, cron, logging and the CLI.
+
+Reading them found things the page and the code had wrong:
+
+- **Twenty-one switches that turn a protection off** were not in the security
+  table, because the gate recognised such switches by name fragments
+  (`BYPASS`, `ALLOW_LOCAL`, …). Among them: `KAZMA_WS_ORIGIN_CHECK=0`
+  (cross-site WebSocket hijacking), `KAZMA_TENANT_FILTER=0`,
+  `KAZMA_MCP_INHERIT_ENV=1` (hands every MCP server your vault key),
+  `KAZMA_SEMANTIC_CACHE=true` (one user can get another's answer), and the
+  commitment layer's kill-switch. Each now says what it turns off and when it
+  is safe, in the table and in `.env.example`, and the gate lists them.
+- **The page taught the canonical HITL floor as off unless set to `1`.** It
+  has been on by default since 2026-09-16; `0` is the opt-out. Fixed there,
+  in the security guide, the production checklist and AGENTS.md. Two
+  truncation caps were documented as 4000 and 16000 characters; the code uses
+  100000 and 200000. A new test compares every stated default with the code.
+- **`KAZMA_CALENDAR_PROVIDER=google` with no Google token answered from the
+  sandbox**, because "explicit" was judged from the call argument only. It
+  now fails closed like `provider="google"`.
+- **`KAZMA_DIVISION_ENFORCE=1` made Settings report division enforcement
+  while no tool was checked.** The check only ever looked for a configured
+  division; the switch is removed.
+- **The YOLO, per-tool grant and `/long` time limits said `0` meant "no
+  expiry"**, but `0` always gave the one-minute minimum. For approval windows
+  the short reading is the safe one, so it stays, and the code now says so;
+  `off` means no expiry.
+
 ## Rejecting or cancelling a paused pipeline sticks (2026-09-25)
 
 Four swarm pipelines paused at a checkpoint were rejected, each answered

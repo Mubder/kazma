@@ -152,10 +152,11 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
 - `tool_registry.py:execute()` calls `safety.check()` (async) for danger tools
 - `check_sync()` is **fail-closed** (default): blocks danger tools when no real
   bus adapter is present. `allow_headless_danger=True` is the test/dev escape hatch
-- Optional canonical floor (deep-audit 2026-08-19): `KAZMA_HITL_CANONICAL_FLOOR=1`
-  unions CANONICAL back into the effective `require_approval_for`, so
-  Settings/YAML narrowing below CANONICAL is capped back up (strict
-  multi-operator deployments). The drift warning repeats every 15 min either way.
+- Canonical floor, ON by default since audit 2026-09-16 F-5: CANONICAL is always
+  unioned into the effective `require_approval_for`, so Settings/YAML cannot
+  narrow below it. `KAZMA_HITL_CANONICAL_FLOOR=0` is the warned opt-out. (It
+  was an opt-in `=1` from 2026-08-19; docs describing it that way are stale.)
+  The drift warning repeats every 15 min either way.
 - Bus adapters: `TelegramBusAdapter`, `DiscordBusAdapter`, `SlackBusAdapter`
 - App wiring: **one** adapter if only one platform; **`FanOutBusAdapter`** when
   multiple are configured. Swarm fan-out is **tri-state** (Wave 6 H-12): `True`
@@ -1760,8 +1761,10 @@ in the vault and does **not** automatically feed Calendar.
   be sent to Calendar. `google_access_token()` reuses the Gmail grant only
   when `email.gmail.scopes` includes Calendar.
 - Explicit `provider=google` / `outlook` **fails closed**
-  (`CalendarNotConnectedError`) — never silent sandbox. Sandbox is auto
-  fallback only when no account is connected.
+  (`CalendarNotConnectedError`) — never silent sandbox — whether it is named
+  in the call or by `KAZMA_CALENDAR_PROVIDER` (the env value was judged
+  non-explicit until 2026-09-25). Sandbox is auto fallback only when no
+  account is connected.
 - Connect with Google requests Calendar as a **soft** extra (like
   `drive.file`): Gmail connect still succeeds if Calendar API is off.
   Settings → Email → **Connect Calendar** is the dedicated grant (same
@@ -1973,9 +1976,15 @@ Read the named test before changing the code it guards.
   `tests/test_postgres_suite.py`.
 - **Every `KAZMA_*` variable is inventoried** in the generated
   `docs/docs/reference/environment-variables-index.md`
-  (`scripts/generate_env_reference.py`); the number the curated page does not
-  describe is on a ratchet (`tests/test_env_reference.py`). A new variable
-  means a row on the curated page.
+  (`scripts/generate_env_reference.py`) **and described** on the curated page:
+  the ratchet in `tests/test_env_reference.py` is at 0, so a new variable
+  means a row, written from its call site. A backticked default on that page
+  must be the literal the code falls back to
+  (`test_documented_defaults_match_the_code` — the page had two caps 25× and
+  12× too low). A variable any value of which turns a protection off also
+  goes in the security table and `.env.example`, and into
+  `SECURITY_ENV_NAMES` (`tests/test_static_gates.py`) unless its name carries
+  a marker; the name net alone had missed twenty-one.
 - **Bandit's HIGH gate covers `tests/` and `scripts/`; every `# nosec` names
   its rule and a reason** (`tests/test_security_scan_scope.py`).
 - **`python_exec`/`code_exec` get the exec denylist's deny-before-card

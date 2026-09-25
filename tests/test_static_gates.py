@@ -1615,6 +1615,35 @@ SECURITY_ENV_MARKERS = (
     "DISABLE_COST_BREAKER", "YOLO_TTL", "SAFE_ALLOWLIST",
 )
 
+#: Security switches whose names carry none of the fragments above. Reading
+#: every variable on 2026-09-25 found twenty-one the name net had missed — the
+#: WebSocket Origin check, the tenant filter, the commitment layer's own
+#: kill-switch among them. A switch is here when some value of it turns a
+#: protection off or widens who or what is trusted.
+SECURITY_ENV_NAMES = (
+    "KAZMA_WS_ORIGIN_CHECK", "KAZMA_WS_EXTRA_ORIGINS", "KAZMA_OPAQUE_SESSIONS",
+    "KAZMA_RATE_LIMIT_ENABLED", "KAZMA_TENANT_FILTER", "KAZMA_SESSION_OPEN_TAKEOVER",
+    "KAZMA_SEMANTIC_CACHE", "KAZMA_MCP_INHERIT_ENV", "KAZMA_ALLOW_PRIVATE_LLM",
+    "KAZMA_DB_CLIENT_ALLOWED_HOSTS", "KAZMA_CLONE_HOSTS", "KAZMA_UPDATE_REMOTE_ALLOWLIST",
+    "KAZMA_HITL_GRANT_TTL_SECONDS", "KAZMA_UNRESTRICTED_TTL_SECONDS", "KAZMA_SHELL_STRICT",
+    "KAZMA_SHELL_ALLOW_ARCHIVE", "KAZMA_GATE_REGISTRY", "KAZMA_COMMITMENT_ENABLED",
+    "KAZMA_COMMITMENT_MODE", "KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE",
+    "KAZMA_COMMITMENT_SOUL_REQUIRES_CONFIRM",
+)
+
+
+def _security_env_names(names: set[str]) -> set[str]:
+    """Which of *names* are security switches: marked by name, or listed."""
+    return {
+        n for n in names
+        if n in SECURITY_ENV_NAMES or any(marker in n for marker in SECURITY_ENV_MARKERS)
+    }
+
+
+def _mentions(text: str, name: str) -> bool:
+    """*name* appears as a whole variable name, not as the start of a longer one."""
+    return re.search(rf"(?<![A-Z0-9_]){re.escape(name)}(?![A-Z0-9_])", text) is not None
+
 
 #: Operator-facing documentation for security switches. BOTH are required.
 #:
@@ -1647,16 +1676,21 @@ def test_security_env_vars_are_documented():
         rel: (REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace")
         for rel in SECURITY_ENV_DOC_SURFACES
     }
-    found: set[str] = set()
+    read: set[str] = set()
     for path in _product_files():
         src = path.read_text(encoding="utf-8", errors="replace")
-        for name in re.findall(r"KAZMA_[A-Z0-9_]+", src):
-            if any(marker in name for marker in SECURITY_ENV_MARKERS):
-                found.add(name)
+        read.update(re.findall(r"KAZMA_[A-Z0-9_]+", src))
+    found = _security_env_names(read)
+
+    stale = sorted(set(SECURITY_ENV_NAMES) - read)
+    assert not stale, (
+        f"SECURITY_ENV_NAMES lists {stale}, which no product code reads any more. "
+        "Drop them from the list (and from both surfaces if the switch is gone)."
+    )
 
     missing: list[str] = []
     for name in sorted(found):
-        absent = [rel for rel, text in surfaces.items() if name not in text]
+        absent = [rel for rel, text in surfaces.items() if not _mentions(text, name)]
         if absent:
             missing.append(f"{name}  (missing from: {', '.join(absent)})")
 
@@ -1667,6 +1701,18 @@ def test_security_env_vars_are_documented():
         "OFF — not just what it does — and when it is safe to set.\n  "
         + "\n  ".join(missing)
     )
+
+
+def test_the_security_switch_net_catches_listed_and_marked_names():
+    """Negative control for the gate above: listed names and marked names are
+    caught, an ordinary variable is not, and a longer name that merely starts
+    with a switch's name does not document the switch."""
+    assert _security_env_names(
+        {"KAZMA_WS_ORIGIN_CHECK", "KAZMA_NEW_BYPASS", "KAZMA_LOG_LEVEL"}
+    ) == {"KAZMA_WS_ORIGIN_CHECK", "KAZMA_NEW_BYPASS"}
+    page = "| `KAZMA_SEMANTIC_CACHE_TTL_SECONDS` | `86400` | ... |"
+    assert not _mentions(page, "KAZMA_SEMANTIC_CACHE")
+    assert _mentions(page, "KAZMA_SEMANTIC_CACHE_TTL_SECONDS")
 
 
 def test_every_websocket_endpoint_authenticates():

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_TTL_SECONDS = 3600  # 1 hour — was 4h; a stale YOLO window let a
 # misread intent run an unprompted git commit (2026-08-27). Raise via
-# KAZMA_YOLO_TTL_SECONDS (0/off = no expiry) if you truly need longer.
+# KAZMA_YOLO_TTL_SECONDS if you truly need longer (`off` = no expiry).
 
 
 class YoloDisabledError(PermissionError):
@@ -81,11 +81,15 @@ def try_enable_yolo(thread_id: str, *, actor: str = "unknown") -> dict[str, Any]
 
 
 def _ttl_seconds() -> int:
+    """YOLO window. A number is seconds, at least 60 — so ``0`` is 60, not
+    "forever": this comment used to promise the opposite, but digits were
+    always matched first. For a window in which danger tools skip approval,
+    the shortest reading of zero is the safe one. Only ``off`` / ``none`` /
+    ``infinite`` mean no expiry (``tests/test_ttl_env_parsing.py``)."""
     raw = (os.environ.get("KAZMA_YOLO_TTL_SECONDS") or "").strip()
     if raw.isdigit():
         return max(60, int(raw))  # minimum 1 minute
-    # 0 or "off" = no expiry
-    if raw in ("0", "off", "none", "infinite"):
+    if raw in ("off", "none", "infinite"):
         return 0
     return _DEFAULT_TTL_SECONDS
 

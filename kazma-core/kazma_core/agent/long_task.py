@@ -110,10 +110,14 @@ def derive_recursion_limit(max_iterations: int) -> int:
 
 
 def _ttl_seconds() -> int:
+    """``/long`` lifetime. A number is seconds, at least 60 (``0`` is 60);
+    ``off`` / ``none`` / ``infinite`` mean no expiry. Unlike
+    :func:`unrestricted_ttl_seconds`, where ``0`` is documented to the user
+    as "until /unrestricted off" (``tests/test_ttl_env_parsing.py``)."""
     raw = (os.environ.get("KAZMA_LONG_TASK_TTL_SECONDS") or "").strip()
     if raw.isdigit():
         return max(60, int(raw))
-    if raw in ("0", "off", "none", "infinite"):
+    if raw in ("off", "none", "infinite"):
         return 0
     return _DEFAULT_TTL_SECONDS
 

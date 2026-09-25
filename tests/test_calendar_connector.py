@@ -92,6 +92,36 @@ def test_auto_without_token_uses_sandbox(monkeypatch: pytest.MonkeyPatch) -> Non
     assert backend.name == "sandbox"
 
 
+@pytest.mark.parametrize(
+    ("forced", "provider"),
+    [("google", "google"), ("outlook", "outlook"), ("microsoft", "outlook")],
+)
+def test_a_provider_forced_by_the_environment_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, forced: str, provider: str
+) -> None:
+    """``KAZMA_CALENDAR_PROVIDER`` names a provider as explicitly as an
+    argument does. Judged from the argument alone, a forced provider with no
+    token answered from the sandbox — the 2026-09-08 shape."""
+    from kazma_skills.native.calendar import credentials as creds
+    from kazma_skills.native.calendar import router as cal_router
+
+    for name in ("google_access_token", "google_refresh_token",
+                 "microsoft_access_token", "microsoft_refresh_token"):
+        monkeypatch.setattr(creds, name, lambda: "")
+    monkeypatch.setattr(creds, "google_connected", lambda: False)
+    monkeypatch.setattr(creds, "microsoft_connected", lambda: False)
+    cal_router._sandbox_instance = None
+
+    monkeypatch.setenv("KAZMA_CALENDAR_PROVIDER", forced)
+    with pytest.raises(cal_router.CalendarNotConnectedError) as exc:
+        cal_router.get_backend()
+    assert exc.value.provider == provider
+
+    # Negative control: the same call with nothing forced still falls back.
+    monkeypatch.delenv("KAZMA_CALENDAR_PROVIDER")
+    assert cal_router.get_backend().name == "sandbox"
+
+
 def test_vault_google_token_selects_google(monkeypatch: pytest.MonkeyPatch) -> None:
     from kazma_skills.native.calendar import credentials as creds
     from kazma_skills.native.calendar.router import get_backend

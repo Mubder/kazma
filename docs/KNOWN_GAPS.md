@@ -72,13 +72,11 @@ tree. Assume the same class exists elsewhere.
   the same database in the last 14 days, which also catches the second
   checkout that relocates nothing (the 2026-09-16 shape). `kazma doctor`
   shows the same.
-- **148 of 262 `KAZMA_*` variables are not yet described** (2026-09-25; the
-  audit counted 229 of 272). All of them are now INVENTORIED: the generated
-  `docs/docs/reference/environment-variables-index.md` lists every variable
-  the code reads, where, and its default, and `tests/test_env_reference.py`
-  fails when it is stale and holds the undescribed count on a ratchet. The
-  sixteen that weaken a security default are in `.env.example` and gated by
-  `test_security_env_vars_are_documented`.
+- **~~148 of 262 `KAZMA_*` variables are not yet described~~** Closed
+  2026-09-25: every variable the code reads is described on the curated page,
+  each written from its call site, and the ratchet in
+  `tests/test_env_reference.py` is at 0. What reading them turned up is in
+  "Found while describing every variable" below.
 - **175 public symbols have no reference outside their own module** (a
   broader count, which includes helpers used only inside their module, is now
   on the `module_local_public_symbols` ratchet in `tests/test_debt_ratchet.py`
@@ -385,6 +383,32 @@ The proxy fix was confirmed live on a page load through the tunnel
   keys, mail and calendar are install-scoped; X stays per tenant, because
   moving an account the agent posts as is an authorization question, not a
   storage fix.
+
+### Found while describing every variable (2026-09-25), and fixed
+
+Writing each of the 148 undescribed variables from its call site:
+
+| Closed | Gate |
+|---|---|
+| `KAZMA_CALENDAR_PROVIDER=google` with no Google token was answered from the sandbox: "explicit" was judged from the call argument only — the §34 incident shape | `test_calendar_connector.py::test_a_provider_forced_by_the_environment_fails_closed` (unset variable as the control) |
+| `KAZMA_DIVISION_ENFORCE=1` made Settings report division enforcement while no tool was checked; the 2026-09-21 verification cited it as a second way to enforce. Removed | `test_still_not_doing.py::test_division_status_reports_what_the_check_does` |
+| The reference page taught the canonical HITL floor as off-unless-`1`; it has been on by default since 2026-09-16 (also fixed in AGENTS.md §7B, the security guide and the production checklist). It gave the tool-result caps as 4000 / 16000 against 100000 / 200000 | `test_env_reference.py::test_documented_defaults_match_the_code` checks every stated literal default against the code's (it catches the two caps on the old page); an on/off meaning is only caught by reading |
+| Twenty-one switches that turn a protection off — the WebSocket Origin check, the tenant filter, the commitment layer's kill-switch, `KAZMA_MCP_INHERIT_ENV` among them — were invisible to the name-based security gate | `test_static_gates.py::SECURITY_ENV_NAMES`: listed, on both surfaces, and still read |
+| The YOLO, grant and `/long` TTL parsers promised "0 = no expiry" but always clamped 0 to 60 s. The short reading is the safe one for approval dials, so the behaviour stays and the code now says it | `tests/test_ttl_env_parsing.py` (every knob with a no-expiry word pins what 0 means) |
+
+**Still open from those:**
+
+- **Email does not fail closed the way Calendar does.** An explicitly named
+  email provider or account that is not connected is answered by the sandbox
+  mailbox. The result says so ("Sandbox sent to …"), so it is not silent, but
+  the call does not fail the way §34 makes Calendar fail.
+- **`KAZMA_CHECKPOINT_RETENTION_DAYS` is only an on/off switch.** Its value is
+  never used as days; the policy (200 per thread, 10 after 30 idle days) is
+  fixed. Documented as such rather than given a meaning, because a new
+  meaning would change what gets deleted.
+- **`KAZMA_MEMORY_CONFLICT_POLICY=origin_wins` and `fail_closed` behave the
+  same** (both skip a write to a row another region owns; only the logged
+  reason differs).
 
 ## Prompt injection
 
