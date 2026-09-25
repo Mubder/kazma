@@ -104,13 +104,15 @@ tree. Assume the same class exists elsewhere.
   secret the UI holds — and `None` is indistinguishable from "not configured",
   so the failure is silent and the diagnosis is wrong.
 
-  **This has now shipped three times, each fixed at one call site:**
+  **This has now shipped four times; the first three were fixed at one call
+  site each, the fourth at the storage:**
 
   | Where | Symptom | Fixed |
   |---|---|---|
   | cron scheduler | two 09:00 reminders failed `HTTP 401: no usable API key`, paging the operator twice | 2026-09-12 |
   | the agent turn (`resolve_live_client`) | the operator's DeepSeek key read as absent → registry substituted Z.AI → Telegram answered with Z.AI's `{"code":"1211","message":"Unknown Model"}` for a DeepSeek model id | 2026-09-17 |
   | `kazma_cli.main` | `kazma doctor` reported the key unreadable and blamed another install's vault, while it sat in that same vault decrypting fine | 2026-09-17 |
+  | boot and every tenant-less caller of the registry | under `KAZMA_PRODUCTION=1` the `default` rung is closed, so every boot built the agent on Z.AI with the DeepSeek key in the vault | 2026-09-25: provider keys are install-scoped (`INSTALL_SCOPED_CONFIG_SECRETS`), and a fallback is announced |
 
   The third is the one worth staring at: the **diagnostic** had the bug it was
   built to diagnose, so it confidently sent the operator to re-enter a key that
@@ -356,6 +358,29 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
   is turned on, "the dump restores" is still inferred from "the dump reads".
 - **The `python_exec` denylist sees literals only.** A path or command built
   at run time goes to the card, which is the control for it.
+
+### Found on the live install on 2026-09-25, after the hardening pass, and fixed
+
+| Closed | Gate |
+|---|---|
+| A Docker Desktop update dropped the CLI from PATH; every Postgres dump failed ("produced no dump") with Docker and the container fine, and the alert gave no reason | `tests/test_docker_cli_discovery.py` (lookup order, the alert carries the reason, boot tool check, no bare `shutil.which("docker")`) |
+| A restart skipped the dump when the universal backup was fresh, holding the first dump after a fix back six hours | the stale-dump catch-up tests in the same file |
+| The guard hands every server its boot-time environment, so a PATH the operator fixed never reached a `--reload`; the `.env` ladder line was logged before logging existed | `tests/test_path_refresh.py` (real app factory; order check with a negative control) |
+| A provider key saved in Settings sat under tenant `default`; the registry reads with no tenant and the `default` rung is closed in production, so every boot from 2026-09-16 substituted Z.AI for DeepSeek — the fourth shipment of the tenant-context class below — and said so only in a WARNING | `tests/test_provider_key_install_scope.py` (provider keys install-scoped; boot consolidation); `tests/test_model_fallback_notice.py` (every model swap pages and shows a banner) |
+| uvicorn replaced the client address before the undeclared-proxy check read it: every boot behind Cloudflare Tunnel logged a false `[SECURITY]` alarm advising to trust a visitor's IP | `tests/test_forwarded_headers_peer.py` (real ASGI layers; every launcher leaves forwarded headers to the app) |
+
+**Still open from those:**
+
+- **The proxy fix is not yet confirmed by a live page load.** Only API polls
+  came through the tunnel after the deploy; the alarm used to fire on a page
+  load (`GET /chat`).
+- **Connector credentials (X, mail) still need a tenant bound to read.**
+  Only provider keys moved to install scope, because only the registry is one
+  per process and shared by every tenant. Moving an account the agent acts as
+  is an authorization question, not a storage fix.
+- **`KAZMA_TRUSTED_PROXIES` is matched exactly by Kazma but uvicorn accepts
+  CIDR ranges.** A CIDR entry is honoured for the rewrite and not for the
+  peer checks, so it still trips the detector. Declare exact addresses.
 
 ## Prompt injection
 
