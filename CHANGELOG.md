@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## Your provider key is used, and a model fallback is never silent (2026-09-25)
+
+**What was happening.** Every boot since at least 2026-09-16 logged
+"Profile provider=deepseek model=deepseek-flash has no usable API key; using
+Z.AI/glm-5.3-flash" and built the agent on Z.AI, while the DeepSeek key sat
+in the vault. Settings saved it under the tenant of the request that saved
+it (`default`); the model registry reads its keys with no tenant bound, and
+on an install with `KAZMA_PRODUCTION=1` that read may not fall back to
+`default` (on an OIDC install it could be someone else's). Chat turns
+escaped because they bind the tenant per call — every chat since 09-19 went
+to DeepSeek — but the agent's base client and anything without a tenant ran
+on Z.AI. The only sign was one WARNING line per boot.
+
+**Now:** provider keys belong to the install. A save in Settings stores the
+key for the whole install and brings any per-tenant copy up to date, and
+startup copies keys saved the old way to install scope (newest save wins,
+nothing is deleted) before the registry builds its first client. The
+production posture gate is unchanged; connector credentials keep their
+per-tenant scope.
+
+Any model fallback is now announced: when a provider is substituted for a
+missing key, or a failover model answers for a failing one, your chat
+platforms get a message and the web UI shows a banner (with **Open
+Providers** for a missing key). It repeats at most twice a day while it
+lasts, clears when the configured model serves again, and says "resolved"
+when the key is fixed.
+
 ## A reload picks up a PATH fixed while Kazma was running (2026-09-25)
 
 After the Docker fix below, the operator put Docker's folder back on the

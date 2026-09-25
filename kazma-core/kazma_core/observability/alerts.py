@@ -6,6 +6,7 @@ import abc
 import asyncio
 from dataclasses import asdict, dataclass
 import logging
+import threading
 import time
 from typing import Any
 
@@ -148,6 +149,10 @@ class AlertDispatcher:
     # spam when the same subsystem degrades repeatedly (audit M3).
     _last_dispatch: dict[str, float] = {}
     _DEDUP_WINDOW_SECONDS = 300.0  # same subsystem re-alerts at most every 5 min
+    #: Guards ``_recent_alerts``: post_banner is called from worker threads
+    #: (the model registry builds clients in ``to_thread``), not only the loop.
+    _buffer_lock = threading.Lock()
+    _BUFFER_MAX = 50
 
     @classmethod
     def _init_default_channels(cls) -> None:
@@ -173,12 +178,14 @@ class AlertDispatcher:
     @classmethod
     def get_recent_alerts(cls) -> list[AlertPayload]:
         """Return recently broadcasted alerts."""
-        return list(cls._recent_alerts)
+        with cls._buffer_lock:
+            return list(cls._recent_alerts)
 
     @classmethod
     def clear_alerts(cls) -> None:
         """Clear the in-memory alerts buffer."""
-        cls._recent_alerts.clear()
+        with cls._buffer_lock:
+            cls._recent_alerts.clear()
 
     @classmethod
     def reset_state(cls) -> None:
@@ -190,14 +197,65 @@ class AlertDispatcher:
         process lifetime (order-dependent flake channel). Mirrors
         ``reset_config_store`` / ``reset_turn_broker`` test-reset pattern.
         """
-        cls._recent_alerts.clear()
+        with cls._buffer_lock:
+            cls._recent_alerts.clear()
         cls._last_dispatch.clear()
 
     @classmethod
     def resolve_alerts_for_subsystem(cls, subsystem: str) -> None:
         """Clear alerts for a specific subsystem once it is resolved."""
         cls._init_default_channels()
-        cls._recent_alerts = [a for a in cls._recent_alerts if a.subsystem.lower() != subsystem.lower()]
+        with cls._buffer_lock:
+            cls._recent_alerts = [
+                a for a in cls._recent_alerts if a.subsystem.lower() != subsystem.lower()
+            ]
+
+    @classmethod
+    def post_banner(
+        cls,
+        *,
+        subsystem: str,
+        title: str,
+        reason: str,
+        severity: str = "WARNING",
+        status: str = "DEGRADED",
+        since: float | None = None,
+        link: str = "",
+        link_text: str = "",
+    ) -> AlertPayload:
+        """Show *title* on the web banner, replacing *subsystem*'s previous one.
+
+        Banner only: for callers that already reach the chat platforms through
+        ``ops_alerts`` -- :meth:`broadcast_alert` would send it there a second
+        time. Synchronous and thread-safe, so code off the event loop can
+        call it. *since* (the condition's start) keeps the id stable while the
+        condition lasts, so a banner the operator dismissed stays dismissed
+        until the condition ends and comes back. Clear it with
+        :meth:`resolve_alerts_for_subsystem`. *link* adds a button to one of
+        this site's own pages (a path starting ``/``); anything else is dropped.
+        """
+        now = time.time()
+        if link and not (link.startswith("/") and not link.startswith("//")):
+            logger.warning("[AlertDispatcher] banner link %r is not a local path; dropped", link)
+            link = ""
+        payload = AlertPayload(
+            id=f"alert-{int(since or now)}-{subsystem.lower()}",
+            title=title,
+            subsystem=subsystem,
+            status=status,
+            reason=reason,
+            callback_id=f"link:{link}" if link else "",
+            button_text=(link_text or "Open") if link else "",
+            timestamp=now,
+            severity=severity,
+        )
+        with cls._buffer_lock:
+            cls._recent_alerts = [
+                a for a in cls._recent_alerts if a.subsystem.lower() != subsystem.lower()
+            ]
+            cls._recent_alerts.append(payload)
+            del cls._recent_alerts[:-cls._BUFFER_MAX]
+        return payload
 
     @classmethod
     def get_channels(cls) -> list[AlertChannel]:
@@ -283,9 +341,9 @@ class AlertDispatcher:
         )
 
         # Keep in-memory ring-buffer (max 50 alerts)
-        cls._recent_alerts.append(alert_payload)
-        if len(cls._recent_alerts) > 50:
-            cls._recent_alerts.pop(0)
+        with cls._buffer_lock:
+            cls._recent_alerts.append(alert_payload)
+            del cls._recent_alerts[:-cls._BUFFER_MAX]
 
         tasks = []
         for channel in cls._channels:

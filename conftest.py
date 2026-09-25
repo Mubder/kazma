@@ -381,6 +381,13 @@ def _isolate_process_singletons(tmp_path):
     except Exception:
         pass
 
+    try:
+        from kazma_core.observability.model_fallback import reset_fallback_state
+
+        reset_fallback_state()
+    except Exception:
+        pass
+
     # SafetyMiddleware: restore whatever was active BEFORE the test — tests
     # may have swapped it via set_safety(); don't let that swap leak.
     try:

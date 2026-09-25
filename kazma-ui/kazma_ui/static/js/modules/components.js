@@ -440,6 +440,17 @@ export function systemAlertsBanner() {
             }
         },
 
+        // A banner may point at the page that fixes it (a model fallback ->
+        // Settings -> Providers). Only this site's own paths: the server drops
+        // anything else, and so does this, in case a payload ever carries one.
+        alertLink() {
+            const id = this.activeAlert && this.activeAlert.callback_id;
+            if (typeof id !== 'string' || !id.startsWith('link:/') || id.startsWith('link://')) {
+                return '';
+            }
+            return id.slice(5);
+        },
+
         async installMl() {
             if (this.installing) return;
             this.installing = true;

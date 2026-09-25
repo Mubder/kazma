@@ -457,6 +457,11 @@ class ModelRegistry:
         ``mimo-v2.5-pro`` to DeepSeek.  This guard fires both when
         *model* is None (using the active model) and when it is passed
         as an override.
+
+        When the configured provider has no usable key another one is
+        substituted, and the operator is told -- in chat and on the web banner
+        (:mod:`kazma_core.observability.model_fallback`), after the registry
+        lock is released. It used to be one WARNING line per build.
         """
         # Per-turn pin (SSE/WS body.model) is an implicit override — same
         # as passing model= — so we never persist it onto the active profile.
@@ -470,6 +475,26 @@ class ModelRegistry:
             except Exception:
                 pass
 
+        client, outcome = self._build_client(model)
+        from kazma_core.observability import model_fallback
+
+        if outcome[0] == "substituted":
+            model_fallback.report_substitution(
+                provider=outcome[1], model=outcome[2],
+                used_provider=outcome[3], used_model=outcome[4],
+            )
+        elif outcome[0] == "usable":
+            model_fallback.report_provider_usable(outcome[1])
+        return client
+
+    def _build_client(self, model: str | None) -> tuple[LLMProvider, tuple[str, ...]]:
+        """:meth:`get_client`'s body, under the registry lock.
+
+        Returns the client and what became of the provider asked for:
+        ``("usable", provider)``, ``("substituted", provider, model,
+        used_provider, used_model)``, or ``("unusable",)`` when there was no
+        key and nothing to substitute (that call fails loudly on its own).
+        """
         with self._lock:
             provider_name = self._active_provider or "custom"
             effective_model = model or self._active_model
@@ -522,7 +547,7 @@ class ModelRegistry:
                 # Returning it forever is the self-improvement 401 after a
                 # working chat hop (2026-09-11). Rebuild from the store.
                 if self._key_is_usable(cached_key) or self._url_is_local(cached_url):
-                    return cached
+                    return cached, ("usable", provider_name)
                 logger.warning(
                     "Dropping cached client for %s — unusable key against %s",
                     provider_name,
@@ -539,7 +564,9 @@ class ModelRegistry:
             # even after the operator only configured DeepSeek. Sending that
             # to a keyless cloud URL is a 401. If this profile has no key and
             # is not local, use a provider that actually has one.
+            outcome: tuple[str, ...] = ("usable", provider_name)
             if not self._key_is_usable(api_key) and not self._url_is_local(base_url):
+                outcome = ("unusable",)
                 ready = self._first_ready_provider(exclude=provider_name)
                 if ready is not None:
                     ready_name, ready_url, ready_key, ready_model = ready
@@ -550,6 +577,10 @@ class ModelRegistry:
                         effective_model,
                         ready_name,
                         ready_model,
+                    )
+                    outcome = (
+                        "substituted", provider_name, str(effective_model or ""),
+                        ready_name, str(ready_model or effective_model or ""),
                     )
                     provider_name, base_url, api_key = ready_name, ready_url, ready_key
                     effective_model = ready_model or effective_model
@@ -587,7 +618,7 @@ class ModelRegistry:
                 self._clients[provider_name] = client
 
             self._track(client)
-            return client
+            return client, outcome
 
     def get_model(self, model_id: str) -> LLMProvider:
         """Return a pre-configured ``LLMProvider`` for a specific model ID.

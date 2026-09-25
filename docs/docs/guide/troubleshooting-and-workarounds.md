@@ -156,6 +156,16 @@ Verify persistence via `get_config_store().get("registry.active_provider")` / `.
 3. Mutate **through the registry** (`set_active_provider` / `set_active_model`), not via a bare `cs.set()` on unrelated keys — the registry owns the active profile and client-cache invalidation.
 4. To revert a key to its YAML default: `get_config_store().delete("registry.active_model")`. To force a full reset: delete `kazma-data/settings.db` (loses **all** runtime settings) and restart.
 
+### 1.10 "Model fallback: &lt;provider&gt; has no usable API key"
+
+**Symptom:** a warning banner in the web UI (with an **Open Providers** button), and the same message on your chat platforms: Kazma is answering with a different provider's model than the one you configured. The failover variant reads "Model failover: &lt;model&gt; failed, &lt;backup&gt; answered".
+
+**Cause:** the configured provider has no key Kazma can use, so the model registry switched to a provider that has one. Or, with `agent.nonstop.failover` on, the primary model kept failing and the failover chain answered. Until 2026-09-25 a provider key saved in Settings was stored under the tenant of the request that saved it, and on an install with `KAZMA_PRODUCTION=1` startup could not read it: every boot switched providers while the key was right there. Provider keys are now stored for the whole install, and keys saved the old way are brought up to install scope at startup.
+
+**Fix:** open Settings → Providers & Connectors → LLM Providers, enter (or re-enter) the key and press Test. The banner clears on the next request that uses the configured provider, and the chat platforms get a "resolved" message. `kazma doctor` shows which provider the registry would use.
+
+While a fallback lasts, the chat message repeats at most twice a day (a failover: every 15 minutes). `KAZMA_OPS_ALERTS=0` silences the chat messages; the banner stays.
+
 ---
 
 ## 2. Memory & RAG issues

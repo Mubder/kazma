@@ -40,8 +40,11 @@ from kazma_core.diagnostic_scope import refuse_write
 from kazma_core.tenant_context import get_current_tenant_id
 
 __all__ = [
+    "INSTALL_SCOPED_CONFIG_SECRETS",
     "SecretVault",
+    "consolidate_install_scoped_secrets",
     "get_vault",
+    "is_install_scoped_secret",
     "reset_posture_cache",
     "reset_vault",
     "retrieve_scoped",
@@ -49,6 +52,33 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+#: ConfigStore secrets that belong to the install, not to the tenant whose
+#: request happened to save them. The test for membership: the component that
+#: reads the secret is one per process and shared by every tenant. The model
+#: registry is: it caches one client per provider for all callers, and code
+#: with no tenant bound (boot, the agent's base client, background work) builds
+#: those clients. A provider key stored under tenant ``default`` was invisible
+#: to that code on an install labelled production, so every boot replaced the
+#: configured provider with another one that had a key (live, 2026-09-16 to
+#: 2026-09-25). Entries are exact vault names, or prefixes ending in ``.``.
+#:
+#: Not here on purpose: connector credentials (X, mail). An account the agent
+#: acts AS is closer to a tenant's than to the install's, and moving it would
+#: let every tenant's requests act with it -- an authorization change, not a
+#: storage fix.
+INSTALL_SCOPED_CONFIG_SECRETS: tuple[str, ...] = (
+    "cfg:providers.list.",  # providers.list[<name>].api_key and its siblings
+    "cfg:llm.api_key",  # the legacy single-provider key
+)
+
+
+def is_install_scoped_secret(name: str) -> bool:
+    """True if *name* (a vault name) is one of :data:`INSTALL_SCOPED_CONFIG_SECRETS`."""
+    return any(
+        name.startswith(entry) if entry.endswith(".") else name == entry
+        for entry in INSTALL_SCOPED_CONFIG_SECRETS
+    )
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
@@ -220,6 +250,120 @@ class SecretVault:
                 raise
         logger.info("[Vault] Stored secret '%s' (category=%s, tenant=%s)", name, category, tid or "global")
         return sid
+
+    def store_install_scoped(
+        self, name: str, value: str, category: str = "general",
+    ) -> int:
+        """Store *name* for the whole install. Returns the rows written (0 = unchanged).
+
+        Writes the global row, and rewrites every tenant-scoped copy of the same
+        name to the same value, in one transaction: a reader with a tenant sees
+        its copy first (see :meth:`retrieve`), so a copy left behind would keep
+        serving the old value to exactly the callers that have a tenant.
+        Nothing is deleted; a copy already equal to *value* is left alone, so
+        re-saving an unchanged setting writes nothing.
+
+        For :data:`INSTALL_SCOPED_CONFIG_SECRETS` only -- secrets of a component
+        that is one per process and shared by every tenant.
+        """
+        from cryptography.exceptions import InvalidTag
+
+        refuse_write("vault", name)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT tenant_id, encrypted_value, nonce FROM secrets "
+                "WHERE name = ? ORDER BY rowid DESC",
+                (name,),
+            ).fetchall()
+            newest: dict[str | None, str | None] = {}
+            for row in rows:
+                if row["tenant_id"] in newest:
+                    continue
+                try:
+                    newest[row["tenant_id"]] = self._decrypt(
+                        row["encrypted_value"], row["nonce"],
+                    )
+                except (InvalidTag, ValueError):
+                    newest[row["tenant_id"]] = None  # unreadable: rewrite it
+            scopes = [None, *sorted(t for t in newest if t is not None)]
+            stale = [s for s in scopes if s not in newest or newest[s] != value]
+            if not stale:
+                return 0
+            now = datetime.now(UTC).isoformat()
+            self._conn.execute("BEGIN")
+            committed = False
+            try:
+                for scope in stale:
+                    ct, nonce = self._encrypt(value)
+                    self._conn.execute(
+                        "DELETE FROM secrets WHERE name = ? AND "
+                        "COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__')",
+                        (name, scope),
+                    )
+                    self._conn.execute(
+                        """INSERT INTO secrets (id, name, encrypted_value, nonce, category, metadata, tenant_id, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (_secrets.token_hex(16), name, ct, nonce, category, "{}",
+                         scope, now, now),
+                    )
+                self._conn.execute("COMMIT")
+                committed = True
+            finally:
+                if not committed:
+                    self._conn.execute("ROLLBACK")
+        logger.info(
+            "[Vault] Stored secret '%s' at install scope (%d row(s) written: %s)",
+            name, len(stale), ", ".join(s or "global" for s in stale),
+        )
+        return len(stale)
+
+    def consolidate_install_scoped(self) -> list[str]:
+        """Bring install-scoped secrets saved under a tenant up to install scope.
+
+        Until 2026-09-25 a provider key saved through Settings was stored under
+        the tenant of the request that saved it. The model registry reads it
+        with no tenant bound, and on an install labelled production that read
+        may not fall back to tenant ``default`` (it cannot tell ``default`` is
+        the operator), so every boot substituted another provider for the
+        configured one. For each install-scoped name with a tenant-scoped row,
+        the NEWEST row in any scope is the operator's latest save; it is stored
+        at install scope with :meth:`store_install_scoped`. Returns the names
+        changed. Idempotent: once every copy agrees there is nothing to do.
+        """
+        from cryptography.exceptions import InvalidTag
+
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT rowid, name, tenant_id, category, updated_at, "
+                "encrypted_value, nonce FROM secrets WHERE name LIKE 'cfg:%'"
+            ).fetchall()
+        by_name: dict[str, list[Any]] = {}
+        for row in rows:
+            if is_install_scoped_secret(row["name"]):
+                by_name.setdefault(row["name"], []).append(row)
+        changed: list[str] = []
+        for name, group in sorted(by_name.items()):
+            if all(r["tenant_id"] is None for r in group):
+                continue
+            latest = max(group, key=lambda r: (r["updated_at"] or "", r["rowid"]))
+            try:
+                value = self._decrypt(latest["encrypted_value"], latest["nonce"])
+            except (InvalidTag, ValueError):
+                logger.warning(
+                    "[Vault] '%s': the newest copy does not decrypt with this "
+                    "KAZMA_VAULT_KEY -- left as it is; re-save it in Settings",
+                    name,
+                )
+                continue
+            if self.store_install_scoped(name, value, category=latest["category"] or "config"):
+                changed.append(name)
+        if changed:
+            logger.info(
+                "[Vault] %d provider key(s) saved under a tenant are now "
+                "install-scoped, so code with no tenant bound can read them: %s",
+                len(changed), ", ".join(changed),
+            )
+        return changed
 
     def retrieve(self, name: str, tenant_id: str | None = None) -> str | None:
         """Retrieve and decrypt a secret by name.
@@ -658,3 +802,15 @@ def reset_vault() -> None:
         _vault.close()
     _vault = None
     _vault_init_attempted = False
+
+
+def consolidate_install_scoped_secrets() -> list[str]:
+    """Run :meth:`SecretVault.consolidate_install_scoped` on the shared vault.
+
+    Called once at server boot, before the model registry builds its first
+    client. Returns the names changed; empty when the vault is disabled.
+    """
+    vault = get_vault()
+    if vault is None:
+        return []
+    return vault.consolidate_install_scoped()

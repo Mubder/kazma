@@ -278,7 +278,24 @@ class KazmaAppBuilder:
                 logger.info("[App] Aligned ConfigStore with active workspace root: %s", active_ws["root_path"])
         except Exception as e:
             logger.warning("[App] Failed to align active workspace on boot: %s", e)
-        
+
+        # Before the registry builds its first client: a provider key saved
+        # under a tenant is invisible to it (it reads with no tenant bound),
+        # so every boot used to substitute another provider for the
+        # configured one. See INSTALL_SCOPED_CONFIG_SECRETS. Idempotent.
+        import sqlite3 as _sqlite3
+
+        try:
+            from kazma_core.security.vault import consolidate_install_scoped_secrets
+
+            consolidate_install_scoped_secrets()
+        except (_sqlite3.Error, OSError, ValueError) as e:
+            logger.warning(
+                "[Vault] Could not move provider keys to install scope (%s); "
+                "the registry may substitute a provider until they are re-saved",
+                e,
+            )
+
         self.registry = initialize_model_registry(self.config_store)
 
         # ── Env-var override: KAZMA_PROVIDER / KAZMA_MODEL / *_API_KEY ──

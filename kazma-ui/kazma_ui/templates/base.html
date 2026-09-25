@@ -81,6 +81,10 @@
             <span x-text="installing ? 'Installing...' : (activeAlert ? activeAlert.button_text : 'Resolve')"></span>
         </button>
                     </template>
+                    <!-- Link to the page that fixes it (e.g. Settings -> Providers) -->
+                    <template x-if="alertLink()">
+        <a :href="alertLink()" x-text="activeAlert.button_text || 'Open'" style="background: var(--warning); border: 1px solid var(--warning); color: #000; font-weight: 600; padding: 6px 12px; font-size: 0.8rem; border-radius: 4px; text-decoration: none;"></a>
+                    </template>
                     <!-- Close button -->
                     <button type="button" @click="dismissAlert()" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 4px;" title="Dismiss">
                         <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">

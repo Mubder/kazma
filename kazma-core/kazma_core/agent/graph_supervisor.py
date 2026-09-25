@@ -1618,6 +1618,12 @@ async def supervisor_node(
                         fb_model,
                     )
                     _served_by.append(fb_model)
+                    from kazma_core.observability.model_fallback import report_failover
+
+                    report_failover(
+                        model=_primary_model_name(), used_model=fb_model,
+                        reason=str(getattr(last_exc, "kind", "") or type(last_exc).__name__),
+                    )
                     return response
                 except Exception as fb_exc:
                     _failover_cooldowns[fb_model] = now + ns.failover.cooldown_seconds
@@ -1629,14 +1635,26 @@ async def supervisor_node(
                     )
             return None
 
+        def _primary_model_name() -> str:
+            return str(
+                routed_model
+                or getattr(getattr(turn_llm, "config", None), "model", "")
+                or ""
+            )
+
         async def _call_llm_resilient() -> Any:
             try:
-                return await _call_llm_with_retry()
+                primary = await _call_llm_with_retry()
             except Exception as primary_exc:
                 fb = await _try_failover_models(primary_exc)
                 if fb is not None:
                     return fb
                 raise
+            # The primary answered: a failover it was under is over.
+            from kazma_core.observability.model_fallback import report_model_served
+
+            report_model_served(_primary_model_name())
+            return primary
 
         response = await _call_llm_resilient()
     except Exception as exc:

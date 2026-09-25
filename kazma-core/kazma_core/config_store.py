@@ -214,6 +214,37 @@ def _vault_ref_for_key(key: str) -> str:
     return f"{_VAULT_REF_PREFIX}{_vault_secret_name(key)}"
 
 
+def _store_config_secret(vault: Any, vname: str, value: str) -> bool:
+    """Put a ConfigStore secret in the vault. True if the vault changed.
+
+    The one way this module writes a secret. ConfigStore has no tenant
+    dimension, but the vault does, and ``vault.store`` takes the tenant from
+    the request: a key saved through Settings landed under tenant ``default``.
+    For a provider key that hid it from every caller with no tenant bound (see
+    :data:`kazma_core.security.vault.INSTALL_SCOPED_CONFIG_SECRETS`), so those
+    names are stored at install scope whatever tenant the request carries.
+    Every other name keeps the caller's tenant, as before. Unchanged values
+    are not rewritten.
+    """
+    from kazma_core.security.vault import SecretVault, is_install_scoped_secret
+
+    if is_install_scoped_secret(vname):
+        if isinstance(vault, SecretVault):
+            return vault.store_install_scoped(vname, value, category="config") > 0
+        # A stand-in vault (tests): still keep the write out of the caller's tenant.
+        from kazma_core.tenant_context import tenant_scope
+
+        with tenant_scope(None):
+            if vault.retrieve(vname) == value:
+                return False
+            vault.store(vname, value, category="config")
+        return True
+    if vault.retrieve(vname) == value:
+        return False
+    vault.store(vname, value, category="config")
+    return True
+
+
 def _try_get_vault():
     """Best-effort vault handle; None if disabled or unavailable."""
     try:
@@ -1165,12 +1196,10 @@ class ConfigStore:
             if vault is not None:
                 try:
                     vname = _vault_secret_name(key)
-                    # Check if vault already has this exact value — skip the
-                    # store + DB write if so (prevents the 3-second flood loop
-                    # when the workspace page polls /api/github/status).
-                    existing = vault.retrieve(vname)
-                    if existing != val:
-                        vault.store(vname, val, category="config")
+                    # Skip the store + DB write when the vault already has this
+                    # exact value (prevents the 3-second flood loop when the
+                    # workspace page polls /api/github/status).
+                    if _store_config_secret(vault, vname, val):
                         ref = _vault_ref_for_key(key)
                         self._write_db_value(key, ref, category="security")
                         logger.info(
@@ -1318,9 +1347,7 @@ class ConfigStore:
             self._note_plaintext_fallback(path, vault_off=True)
             return value
         try:
-            vname = _vault_secret_name(path)
-            if vault.retrieve(vname) != value:
-                vault.store(vname, value, category="config")
+            _store_config_secret(vault, _vault_secret_name(path), value)
             return _vault_ref_for_key(path)
         except Exception as exc:
             self._note_plaintext_fallback(path, vault_off=False, exc=exc)
@@ -1470,8 +1497,7 @@ class ConfigStore:
             return value  # plaintext fallback when vault disabled
 
         try:
-            vname = _vault_secret_name(key)
-            vault.store(vname, value, category="config")
+            _store_config_secret(vault, _vault_secret_name(key), value)
             return _vault_ref_for_key(key)
         except Exception as exc:
             self._note_plaintext_fallback(key, vault_off=False, exc=exc)
