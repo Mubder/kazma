@@ -1348,27 +1348,36 @@ class SettingsManager:
 
     @staticmethod
     def _mask_secrets_in_dict(data: dict) -> None:
-        """Recursively replace values whose key looks like a secret with '***'."""
+        """Replace values whose key looks like a secret with '***', in place.
+
+        Every other value keeps its shape with URL passwords masked: a key
+        rule cannot see the Postgres DSN in ``memory.backends.state.url``,
+        and the masked export shipped it whole (2026-09-25).
+        """
+        from kazma_core.security.url_credentials import mask_url_credentials_deep
+
         _SENSITIVE = ("api_key", "token", "secret", "password", "passphrase")
         for category, settings_dict in data.items():
             if not isinstance(settings_dict, dict):
                 continue
             for key in list(settings_dict.keys()):
-                if any(frag in key.lower() for frag in _SENSITIVE):
-                    raw = settings_dict[key]
-                    if isinstance(raw, str) and raw.strip():
-                        try:
-                            import json as _json
-                            parsed = _json.loads(raw)
-                            if isinstance(parsed, dict):
-                                for sub_k in list(parsed.keys()):
-                                    if isinstance(parsed[sub_k], str) and parsed[sub_k].strip():
-                                        parsed[sub_k] = "***"
-                                settings_dict[key] = _json.dumps(parsed)
-                                continue
-                        except (ValueError, TypeError):
-                            pass
-                        settings_dict[key] = "***"
+                raw = settings_dict[key]
+                if not any(frag in key.lower() for frag in _SENSITIVE):
+                    settings_dict[key] = mask_url_credentials_deep(raw)
+                    continue
+                if isinstance(raw, str) and raw.strip():
+                    try:
+                        import json as _json
+                        parsed = _json.loads(raw)
+                        if isinstance(parsed, dict):
+                            for sub_k in list(parsed.keys()):
+                                if isinstance(parsed[sub_k], str) and parsed[sub_k].strip():
+                                    parsed[sub_k] = "***"
+                            settings_dict[key] = _json.dumps(parsed)
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+                    settings_dict[key] = "***"
 
     def import_config(self, data: str, fmt: str = "yaml", selective: bool = False, sections: list[str] | None = None) -> int:
         """Import configuration from YAML or JSON string."""

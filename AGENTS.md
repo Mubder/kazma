@@ -1325,6 +1325,17 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   live API keys in the clear (F-02). Key matching is on `.`/`_` token
   boundaries — a substring test made `pat` match `selected_path`.
 - New API surfaces that echo config must go through `mask_deep`.
+- **Masking is by key AND by value.** A password inside a URL is a secret
+  whatever the key is called (`kazma_core/security/url_credentials.py`, the
+  one home): `memory.backends.state.url` held the live Postgres DSN in
+  plaintext and the Settings API returned it (2026-09-25), because every
+  masker decided by key name. Every function named mask*/redact* that decides
+  by key is found from the source and fed a URL password by
+  `tests/test_url_credentials.py::test_every_key_name_masker_also_masks_url_passwords`;
+  a new one needs a probe there. The mask is `****`, which
+  `is_masked_secret_placeholder` refuses to write back, so a form can round-trip
+  it — but only where the save refuses it: provider/profile/connector displays
+  are listed as open until their saves restore a masked URL.
 
 **E. Nothing blocking on the event loop; nothing fire-and-forget.**
 - A sync `sqlite3.connect` inside `async def` pins the loop that serves
@@ -2018,7 +2029,9 @@ Read the named test before changing the code it guards.
   belong in `.env`, re-read every boot. Gate: `tests/test_path_refresh.py`
   (runs the real app factory; order check with a negative control).
 - **Some secrets belong to the install** (`security/vault.py:
-  INSTALL_SCOPED_SECRETS`: provider keys, `email.*`, `calendar.*`), and the
+  INSTALL_SCOPED_SECRETS`: provider keys, `email.*`, `calendar.*`,
+  `cfg:memory.backends.*` — and a credential URL moves into the vault only
+  under such a name, or its background readers lose it), and the
   VAULT enforces it: `SecretVault.store` writes those names globally and
   rewrites every tenant copy to match, whatever tenant the caller names
   (`store_install_scoped`, never deletes); `delete` removes every copy.

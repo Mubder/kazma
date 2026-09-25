@@ -1326,8 +1326,17 @@ def _apply_neo4j_env_defaults(out: dict[str, Any]) -> None:
 
 
 def mask_backends_cfg(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Return config with secrets masked for API responses."""
+    """Return config with secrets masked for API responses.
+
+    By key (``api_key``/``password``/``token``/``secret``) and by value: a
+    password inside a URL becomes ``****`` and the rest stays readable.
+    ``state.url`` holds the Postgres DSN, and ``vector.url`` borrows it when
+    pgvector is picked automatically; both went to the browser whole
+    (2026-09-25).
+    """
     import copy
+
+    from kazma_core.security.url_credentials import mask_url_credentials
 
     c = copy.deepcopy(cfg if cfg is not None else get_backends_cfg())
     for section in ("vector", "embedder", "graph", "state"):
@@ -1335,36 +1344,53 @@ def mask_backends_cfg(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         for k, v in list(sec.items()):
             if is_sensitive_backend_key(k) and v:
                 sec[k] = "***"
+            else:
+                sec[k] = mask_url_credentials(v)
         c[section] = sec
     return c
 
 
 def save_backends_cfg(payload: dict[str, Any]) -> dict[str, Any]:
-    """Persist backends profile via batch_set. Never writes ``***`` as a secret."""
-    from kazma_core.config_store import get_config_store
+    """Persist backends profile via batch_set. Never writes ``***`` as a secret.
+
+    Only what the operator changed is saved. The form posts back every field
+    GET showed, and GET shows what Kazma filled in itself: pgvector picked
+    from the Postgres DSN, the DSN it borrowed, the mode that goes with it,
+    env defaults. Saving those turned an automatic choice into an explicit
+    one — ``KAZMA_PGVECTOR=0`` no longer undid it — and would have copied the
+    DSN into the settings table. A field equal to what GET showed, when the
+    store does not hold that value, is left alone.
+    """
+    from kazma_core.config_store import get_config_store, is_masked_secret_placeholder
+    from kazma_core.security.url_credentials import mask_url_credentials
 
     store = get_config_store()
+    shown = mask_backends_cfg(get_backends_cfg())
+
+    def _filled_in(key: str, value: Any, shown_value: Any) -> bool:
+        return value == shown_value and mask_url_credentials(store.get(key)) != shown_value
+
     pairs: list[tuple[str, Any]] = []
     mode = str(payload.get("mode") or "local").strip().lower()
     if mode not in ("local", "hybrid", "remote"):
         mode = "local"
-    pairs.append(("memory.backends.mode", mode))
+    if not _filled_in("memory.backends.mode", mode, shown.get("mode")):
+        pairs.append(("memory.backends.mode", mode))
 
     for section in ("vector", "embedder", "graph", "state", "failover"):
         sec = payload.get(section) or {}
         if not isinstance(sec, dict):
             continue
         for k, v in sec.items():
+            key = f"memory.backends.{section}.{k}"
+            if is_masked_secret_placeholder(v):
+                continue  # shown masked, posted back: keep what is stored
             if is_sensitive_backend_key(str(k)):
-                try:
-                    from kazma_core.config_store import is_masked_secret_placeholder
-
-                    if v is None or is_masked_secret_placeholder(v) or str(v).strip() == "":
-                        continue  # keep existing secret
-                except Exception:
-                    if v is None or str(v).strip() in ("", "***"):
-                        continue
-            pairs.append((f"memory.backends.{section}.{k}", v))
+                if v is None or str(v).strip() == "":
+                    continue  # keep existing secret
+            elif _filled_in(key, v, (shown.get(section) or {}).get(k)):
+                continue
+            pairs.append((key, v))
 
     # Mirror embedder into embedding.* so get_embedder() sees the change
     emb = payload.get("embedder") or {}

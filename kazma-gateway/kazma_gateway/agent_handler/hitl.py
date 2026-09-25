@@ -521,7 +521,11 @@ def _build_approval_prompt(
             }
         if isinstance(obj, list):
             return [_redact(x) for x in obj]
-        return obj
+        # A key rule cannot see the token in `git clone https://u:TOKEN@…`
+        # or a DSN in a command: mask the URL password in every leaf.
+        from kazma_core.security.url_credentials import mask_url_credentials_deep
+
+        return mask_url_credentials_deep(obj)
 
     args_str = _format_args_for_approval(tool, _redact(args))
     tools = payload.get("tools") or []

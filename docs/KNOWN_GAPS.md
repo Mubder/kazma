@@ -460,14 +460,36 @@ code logs 140 server errors for 80 calls, the new code none.
   (musl) has text indexes ordered by musl's collation, and the pgvector image
   is glibc — an existing install must dump and restore, not swap the image
   (`docs/docs/ops/postgres-and-saas.md`). The owner decides.
-- **A Postgres DSN with its password is kept as a plain setting and echoed.**
-  `memory.backends.state.url` holds the live DSN in plaintext in
-  `kazma_settings`, and `GET /api/settings/memory/backends` returns it — and
-  the auto-filled `vector.url` — unmasked: `mask_backends_cfg` and
-  `settings.mask_deep` mask by key name, and neither treats a password inside
-  a URL as a secret. Fixing it means masking URL userinfo on the way out,
-  keeping the stored password when the form posts a masked one back, and
-  storing the value in the vault install-scoped (§38) — next change.
+- **~~A Postgres DSN with its password is kept as a plain setting and
+  echoed.~~** Closed 2026-09-25, next section.
+
+### A password inside a URL (2026-09-25), and fixed
+
+`memory.backends.state.url` held the live Postgres DSN, password included, in
+plaintext in `kazma_settings`, and `GET /api/settings/memory/backends` sent it
+— and the `vector.url` Kazma borrows from it — to the browser. Every guard
+decided by KEY name, and no rule knew `state.url` held a credential. The live
+logs were checked, rotations included: the DSN was never written there.
+
+| Closed | Gate |
+|---|---|
+| The memory-backend Settings API, `GET /api/settings` (`mask_deep`), the masked settings export, `/config export` in chat, gateway approval cards (a token in `git clone https://u:TOKEN@…`) and the `Setting updated` log line all masked by key name only | `tests/test_url_credentials.py::test_every_key_name_masker_also_masks_url_passwords` — every function named mask*/redact* that decides by key, found from the source, gets a URL password and must not return it (negative control: a planted masker is found) |
+| The DSN sat in plaintext: moving it into the vault under the saving request's tenant would have hidden it from the memory worker in production (§38) | `cfg:memory.backends.` is install-scoped; a credential URL there goes to the vault on write and on first read (`test_the_live_shape_on_a_real_postgres`, Postgres-marked) |
+| A masked URL posted back would have stored the stars as the password | `is_masked_secret_placeholder` knows a masked URL password; the backends form skips it (`test_a_masked_url_posted_back_keeps_the_stored_one`) |
+| The Memory form saved what Kazma had filled in — an auto-selected pgvector, the DSN it borrowed, its mode — as the operator's choice, after which `KAZMA_PGVECTOR=0` no longer undid it | `test_the_form_posted_back_saves_only_what_the_operator_changed` |
+
+**Still open from those:**
+
+- **Provider, model-profile and connector displays mask the key, not a
+  password in their URLs.** Their saves restore a masked `api_key` from the
+  stored entry but not a masked `base_url`, so masking the URL first would let
+  a save store the stars. Provider URLs carrying a password are rare; the
+  three are named in the gate's `NOT_PROBED` until the saves learn to restore.
+- **A credential URL under a name that is not install-scoped stays in
+  plaintext** (masked on every way out). Vaulting it would put it under the
+  saving request's tenant, where background readers cannot see it.
+- **The Web approval card shows tool arguments raw** — by design, to the
+  operator's own authenticated session (chat-platform cards are redacted).
 
 ## Prompt injection
 

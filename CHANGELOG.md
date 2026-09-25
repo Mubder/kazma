@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## A password inside a URL is treated as a secret (2026-09-25)
+
+The Postgres address used for the memory mirror (`memory.backends.state.url`)
+includes the database password. It was stored as plain text in the settings
+table and shown in full on Settings → Memory, because every rule that hides
+secrets looked at the setting's NAME, and nothing about "state.url" says
+password.
+
+- Settings pages, the settings export, `/config export` in chat, approval
+  cards on Telegram/Discord/Slack and the settings log now show such URLs as
+  `postgresql://user:****@host/db`, whatever the setting is called.
+- Memory-backend secrets are kept for the whole install, and a URL with a
+  password there moves into the vault. On an existing install that happens the
+  first time the setting is read after the update, with one log line
+  (`Migrated sensitive key memory.backends.state.url into vault`).
+- Saving the Memory form no longer stores what Kazma filled in itself — an
+  automatically chosen pgvector, the database address it borrowed — as if you
+  had chosen it.
+
+Nothing to do after updating. The live logs were checked: the password was
+never written to them.
+
 ## Memory uses pgvector only when the database can hold vectors (2026-09-25)
 
 When a Postgres URL is set, Kazma picks pgvector for memory vectors. It now
