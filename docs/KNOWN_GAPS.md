@@ -290,6 +290,7 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
 | The migration bundle dropped 8 stores (saved drafts, booked X posts, the post ledger, gate decisions, ledgers, RBAC, audit, LLM calls) and per-tenant checkpoints | `test_every_bundle_store_is_exported_and_restored`; `test_a_migration_carries_the_stores_it_used_to_drop` (real export→import) |
 | `kazma migrate import` failed on Windows at its first file swap, every time: `with sqlite3.connect()` never closes | `test_no_sqlite_connection_is_left_open_by_a_with_block` (also fixed the universal backup's copier) |
 | Per-tenant gateway checkpoints written relative to the process CWD | `test_no_store_path_is_built_from_the_working_directory` |
+| The tools catalog generator scanned the pre-split `tool_builtins.py` and found 1 built-in tool; the hand-kept catalog lacked 20 registered tools and called 31 approval-gated tools (`x_post`, `send_file`, `git_push`, the memory deletions…) "safe/read" | The generator reads the live registry; `tests/test_tools_catalog.py` (every registered tool listed once; every danger label checked against `requires_approval`) |
 
 **Still open — honest list:**
 
@@ -297,9 +298,6 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
   `with self._connect() as conn:` pattern (24 sites) commits but does not
   close, like the copier did; harmless while the server owns its files, and
   the reason a live store cannot be swapped on Windows without a restart.
-- **The tools catalog generator is stale.** It still scans the pre-split
-  `tool_builtins.py` and finds 1 built-in tool; the catalog is maintained by
-  hand until it reads the real registry.
 - **Port exhaustion: real, machine-wide, not Kazma — culprit unnamed.**
   Windows' own log (System, Tcpip) has 11 × 4231 (TCP port space full),
   17 × 4227 (TIME_WAIT reuse) and 11 × 4266 (UDP port space full) in the

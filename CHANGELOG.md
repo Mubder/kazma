@@ -42,6 +42,14 @@ store write has a no-approval reader; every door refuses every store and
 names the reader; the bundle carries every "bundle" store both ways (a real
 export→import); no store path from the CWD; no `with sqlite3.connect()`.
 
+**Tools catalog.** `scripts/generate_tools_catalog.py` still grepped the
+pre-split `tool_builtins.py` and found 1 built-in tool, so the catalog had
+been hand-kept: 20 registered tools were missing and 31 approval-gated tools
+(`x_post`, `send_file`, `git_push`, the memory deletions…) read "safe/read".
+It now reads the live registry; `tests/test_tools_catalog.py` checks every
+registered tool is listed once and every danger label against
+`requires_approval`.
+
 ## An audit closed class by class, and a week of reports that were wrong (2026-09-22/23)
 
 **The audit (2026-09-22).** Every finding was a correct fix in one sibling and
