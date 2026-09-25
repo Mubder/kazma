@@ -181,7 +181,9 @@ class MCPReconnector:
         """One pass. Returns how many servers came back. Never raises."""
         recovered = 0
         try:
-            configured = list(self._config() or [])
+            # A settings read plus a YAML file: stall-20260920-221210 (49.7s)
+            # and stall-20260923-171300 (28.5s) caught it here on the loop.
+            configured = list(await asyncio.to_thread(self._config) or [])
         except Exception as exc:  # noqa: BLE001
             logger.debug("[MCP-reconnect] config unavailable: %s", exc)
             return 0

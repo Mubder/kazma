@@ -215,16 +215,17 @@ def test_kb_smart_reindex_unchanged_industry():
     assert n2 == 0 and s2 >= 1
 
 
-def test_research_session_cancel_and_routes():
+def test_research_session_cancel_and_routes(monkeypatch, tmp_path):
     from kazma_ui.research_panel.routes import create_research_router
     from kazma_core.tools import research_session as rs
-    import tempfile
-    from pathlib import Path
 
-    data = Path(tempfile.mkdtemp())
+    data = tmp_path
     rs._SUBS.clear()
     rs._RUNNING.clear()
-    rs._db_path = lambda: data / "research_sessions.db"  # type: ignore
+    # monkeypatch, not an assignment: the bare `rs._db_path = ...` outlived
+    # this test and hid test_no_cwd_data_dir_fallback's check whenever the
+    # two shared a process (found 2026-09-26 when a new file shifted chunks).
+    monkeypatch.setattr(rs, "_db_path", lambda: data / "research_sessions.db")
     s = rs.create_session("t")
     rs.update_session(s.id, status="running", stage="plan")
     out = rs.cancel_session(s.id)

@@ -1853,7 +1853,15 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   `_LOOP_STALL_HELPERS` in `tests/test_static_gates.py` and every async call
   site must then use `to_thread` (`test_loop_stall_helpers_are_not_called_on_the_loop`).
   The first pass (2026-09-23) found 12 helpers from 70 dumps, and 17 more
-  call sites of them nobody had caught yet.
+  call sites of them nobody had caught yet. The second (2026-09-26, 50
+  dumps) was led by the auth middleware -- 8 dumps of a per-request
+  user-store/session read on the loop, one AFTER the first pass -- then the
+  MCP reconnect sweeper (49.7 s) and the readiness probe; 18 names added,
+  5 more callers found by the gate itself. Rank the dumps by the first frame
+  ABOVE the storage layer (the caller that ran it on the loop is the news,
+  not `postgres_pool.execute`). Every dump now leads with the loop thread's
+  stack: faulthandler stops at 100 threads, and the eleven dumps of the
+  2026-09-25 database hang (one a 318 s stall) had none.
 
 ### 36. A chat save the database refuses is spooled, never held only in memory
 
@@ -2000,6 +2008,11 @@ Read the named test before changing the code it guards.
   backend-aware (the lazy migration never landed on Postgres).
 - **Tests stub modules with `tests._module_stubs.stub_modules`**, never
   `patch.dict(sys.modules)` (it evicts every module imported inside it).
+  **Tests patch attributes with `monkeypatch.setattr`, never `mod.attr =
+  fake`**: nothing restores the assignment, and a later test in the same
+  process inherits it (`rs._db_path = ...` hid another file's check once a
+  new file shifted fast_test's chunks, 2026-09-26). The debt ratchet counts
+  them (`bare_module_attr_assignments`), and the count only goes down.
   **No test reads a real `.env`** — two Postgres tests did, one the LIVE
   install's by hard-coded path. **`@pytest.mark.postgres` is the Postgres
   job's list** (`scripts/postgres_suite.py`), per test, verified on a real

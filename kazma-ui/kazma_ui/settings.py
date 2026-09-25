@@ -240,7 +240,7 @@ class SettingsRouterBuilder:
         templates = self.templates
 
         @router.get("/settings", response_class=HTMLResponse)
-        async def settings_page(request: Request) -> HTMLResponse:
+        def settings_page(request: Request) -> HTMLResponse:
             """Render the settings page."""
             # Use the agent's facade method to avoid direct llm_config access.
             llm_cfg = agent.get_llm_config()
@@ -311,7 +311,7 @@ class SettingsRouterBuilder:
             return data
 
         @router.get("/api/settings/vault/status")
-        async def api_vault_status() -> dict[str, Any]:
+        def api_vault_status() -> dict[str, Any]:
             """Check if the encrypted secret vault is enabled."""
             from kazma_core.security.vault import get_vault
             vault = get_vault()
@@ -321,7 +321,7 @@ class SettingsRouterBuilder:
             }
 
         @router.get("/api/notifications/turn-complete")
-        async def api_get_turn_notify() -> dict[str, Any]:
+        def api_get_turn_notify() -> dict[str, Any]:
             """Task-completion desktop-notification gate (Turn Delivery V2 P4).
 
             Live-read, never raises (mirrors get_lifecycle_config). The chat
@@ -341,7 +341,7 @@ class SettingsRouterBuilder:
             return {"enabled": bool(enabled)}
 
         @router.get("/api/push/vapid-public-key")
-        async def api_push_vapid_key() -> dict[str, Any]:
+        def api_push_vapid_key() -> dict[str, Any]:
             """VAPID application server key for Web Push subscription (P5)."""
             from kazma_ui.push import get_vapid_public_key, push_available
 
@@ -375,7 +375,7 @@ class SettingsRouterBuilder:
             return unsubscribe(str((body.get("endpoint")) or ""))
 
         @router.get("/sw.js")
-        async def api_service_worker() -> Response:
+        def api_service_worker() -> Response:
             """Serve the Web Push service worker at ROOT scope.
 
             Service worker scope = script URL directory, so /static/sw.js
@@ -394,7 +394,7 @@ class SettingsRouterBuilder:
             )
 
         @router.get("/api/settings/export")
-        async def api_export_yaml(fmt: str = Query("yaml", alias="format")) -> Response:
+        def api_export_yaml(fmt: str = Query("yaml", alias="format")) -> Response:
             """Export settings as YAML or JSON file download (secrets masked)."""
             sm = _get_sm()
             try:
@@ -411,14 +411,14 @@ class SettingsRouterBuilder:
                 return Response(content="Error: Unable to export settings", media_type="text/plain", status_code=500)
 
         @router.put("/api/settings")
-        async def api_update_settings(updates: list[SettingsUpdate]) -> dict[str, str]:
+        def api_update_settings(updates: list[SettingsUpdate]) -> dict[str, str]:
             """Update multiple settings at once (atomic batch)."""
             items = [(u.key, u.value, u.category) for u in updates]
             count = config_store.batch_set(items)
             return {"status": "ok", "updated": str(count)}
 
         @router.put("/api/settings/single")
-        async def api_update_single(setting: SettingsUpdate) -> dict[str, str]:
+        def api_update_single(setting: SettingsUpdate) -> dict[str, str]:
             """Update a single setting."""
             # cron.timezone is validated at save time: get_cron_timezone()
             # falls back to UTC with only a warn-once on unresolvable names,
@@ -469,7 +469,7 @@ class SettingsRouterBuilder:
             }
 
         @router.get("/api/settings/cron-timezone")
-        async def api_get_cron_timezone() -> dict[str, str]:
+        def api_get_cron_timezone() -> dict[str, str]:
             """Current operator timezone for scheduled tasks (name + source).
 
             Reads through THIS router's config store first (the builder may
@@ -488,7 +488,7 @@ class SettingsRouterBuilder:
             return {"timezone": zone_name, "source": source}
 
         @router.get("/api/settings/backup/offsite")
-        async def api_get_offsite_config() -> dict[str, Any]:
+        def api_get_offsite_config() -> dict[str, Any]:
             """Get the current offsite backup configuration + provider statuses."""
             from kazma_core.config_store import get_config_store as _gcs
             store = _gcs()
@@ -662,7 +662,7 @@ class SettingsRouterBuilder:
                 store.set("backups.offsite.rclone_remote", rclone, category="backups")
 
         @router.put("/api/settings/backup/offsite")
-        async def api_set_offsite_config(req: dict[str, Any]) -> dict[str, str]:
+        def api_set_offsite_config(req: dict[str, Any]) -> dict[str, str]:
             """Configure the offsite backup provider."""
             _apply_offsite_payload(req)
             return {"status": "ok"}
@@ -706,14 +706,14 @@ class SettingsRouterBuilder:
                 return {"ok": False, "error": safe_error(exc)}
 
         @router.get("/api/settings/backup/retention")
-        async def api_get_backup_retention() -> dict[str, Any]:
+        def api_get_backup_retention() -> dict[str, Any]:
             """Effective universal-backup retention (env override wins)."""
             from kazma_core.backup.universal import _read_retention
 
             return {"retention": _read_retention()}
 
         @router.put("/api/settings/backup/retention")
-        async def api_set_backup_retention(req: dict[str, Any]) -> dict[str, str]:
+        def api_set_backup_retention(req: dict[str, Any]) -> dict[str, str]:
             """Persist backups.retention (number of local backups to keep)."""
             from kazma_core.config_store import get_config_store as _gcs
 
@@ -725,12 +725,12 @@ class SettingsRouterBuilder:
             return {"status": "ok"}
 
         @router.get("/api/settings/agent")
-        async def api_get_agent() -> dict[str, Any]:
+        def api_get_agent() -> dict[str, Any]:
             """Get agent configuration (name, language, max tool rounds, …)."""
             return _get_sm().get_agent_config()
 
         @router.put("/api/settings/agent")
-        async def api_update_agent(req: AgentConfigUpdate) -> dict[str, str]:
+        def api_update_agent(req: AgentConfigUpdate) -> dict[str, str]:
             """Update agent configuration."""
             sm = _get_sm()
             data = {k: v for k, v in req.model_dump().items() if v is not None}
@@ -738,28 +738,28 @@ class SettingsRouterBuilder:
             return {"status": "ok"}
 
         @router.get("/api/settings/agent/personalities")
-        async def api_get_personalities() -> list[dict[str, Any]]:
+        def api_get_personalities() -> list[dict[str, Any]]:
             """List available personality templates."""
             return _get_sm().get_personalities()
 
         @router.put("/api/settings/agent/safety")
-        async def api_save_safety(req: dict[str, Any]) -> dict[str, str]:
+        def api_save_safety(req: dict[str, Any]) -> dict[str, str]:
             """Save safety/HITL settings."""
             _get_sm().save_safety_settings(req)
             return {"status": "ok"}
 
         @router.get("/api/settings/agent/safety")
-        async def api_get_safety() -> dict[str, Any]:
+        def api_get_safety() -> dict[str, Any]:
             """Get HITL safety settings (short keys for JS model)."""
             return _get_sm().get_safety_settings()
 
         @router.get("/api/settings/system/logging")
-        async def api_get_logging() -> dict[str, Any]:
+        def api_get_logging() -> dict[str, Any]:
             """Get logging settings (level, format, rotation retention)."""
             return _get_sm().get_logging_settings()
 
         @router.put("/api/settings/system/logging")
-        async def api_save_logging(req: dict[str, Any]) -> dict[str, str]:
+        def api_save_logging(req: dict[str, Any]) -> dict[str, str]:
             """Save logging settings.
 
             Level hot-applies; rotation/retention changes take effect on next
@@ -769,12 +769,12 @@ class SettingsRouterBuilder:
             return {"status": "ok"}
 
         @router.get("/api/settings/proxy")
-        async def api_get_proxy() -> dict[str, Any]:
+        def api_get_proxy() -> dict[str, Any]:
             """Get proxy provider config (opt-in scraping resilience addon)."""
             return _get_sm().get_proxy_settings()
 
         @router.put("/api/settings/proxy")
-        async def api_save_proxy(req: dict[str, Any]) -> dict[str, str]:
+        def api_save_proxy(req: dict[str, Any]) -> dict[str, str]:
             """Save proxy provider config. Password auto-vault-encrypts."""
             _get_sm().save_proxy_settings(req)
             return {"status": "ok"}
@@ -789,7 +789,7 @@ class SettingsRouterBuilder:
         # ══════════════════════════════════════════════════════════════
 
         @router.get("/api/settings/embedder")
-        async def api_get_embedder() -> dict[str, Any]:
+        def api_get_embedder() -> dict[str, Any]:
             """Get embedder status: effective config, persisted override,
             live singleton state, DB vector-space composition, presets."""
             from kazma_core.memory.embedder import get_embedder_status
@@ -821,7 +821,7 @@ class SettingsRouterBuilder:
             }
 
         @router.put("/api/settings/embedder")
-        async def api_save_embedder(req: dict[str, Any]) -> dict[str, Any]:
+        def api_save_embedder(req: dict[str, Any]) -> dict[str, Any]:
             """Persist the embedder override (takes effect after restart)."""
             try:
                 _get_sm().save_embedder_settings(req)
@@ -920,7 +920,7 @@ class SettingsRouterBuilder:
             return {"status": "ok", "model": model}
 
         @router.get("/api/settings/embedder/rebuild")
-        async def api_get_embedder_rebuild() -> dict[str, Any]:
+        def api_get_embedder_rebuild() -> dict[str, Any]:
             """Poll the background rebuild status."""
             from kazma_core.memory.reembed import get_rebuild_status
 
@@ -931,7 +931,7 @@ class SettingsRouterBuilder:
         # ══════════════════════════════════════════════════════════════
 
         @router.get("/api/settings/time_travel")
-        async def api_get_time_travel() -> dict[str, Any]:
+        def api_get_time_travel() -> dict[str, Any]:
             """Get the time-travel override plus the LIVE recorder cap.
 
             ``effective`` is what the running SnapshotRecorder was built
@@ -959,7 +959,7 @@ class SettingsRouterBuilder:
             return {"store": store, "effective": effective}
 
         @router.put("/api/settings/time_travel")
-        async def api_save_time_travel(req: dict[str, Any]) -> dict[str, Any]:
+        def api_save_time_travel(req: dict[str, Any]) -> dict[str, Any]:
             """Persist the time-travel override (takes effect after restart)."""
             try:
                 _get_sm().save_time_travel_settings(req)
@@ -1059,30 +1059,30 @@ class SettingsRouterBuilder:
                 return {"status": "error", "detail": f"Restart failed: {exc}"}
 
         @router.put("/api/settings/agent/context")
-        async def api_save_context(req: dict[str, Any]) -> dict[str, str]:
+        def api_save_context(req: dict[str, Any]) -> dict[str, str]:
             """Save context window settings."""
             _get_sm().save_context_settings(req)
             return {"status": "ok"}
 
         @router.get("/api/settings/agent/context")
-        async def api_get_context() -> dict[str, Any]:
+        def api_get_context() -> dict[str, Any]:
             """Get context window settings (short keys for JS model)."""
             return _get_sm().get_context_settings()
 
         @router.get("/api/settings/agent/nonstop")
-        async def api_get_nonstop() -> dict[str, Any]:
+        def api_get_nonstop() -> dict[str, Any]:
             """Get non-stop / self-healing settings (agent.nonstop.*)."""
             return _get_sm().get_nonstop_settings()
 
         @router.put("/api/settings/agent/nonstop")
-        async def api_save_nonstop(req: dict[str, Any]) -> dict[str, str]:
+        def api_save_nonstop(req: dict[str, Any]) -> dict[str, str]:
             """Save non-stop / self-healing settings. Live-re-read by the
             supervisor path (get_nonstop_config) — no restart needed."""
             _get_sm().save_nonstop_settings(req)
             return {"status": "ok"}
 
         @router.get("/api/settings/voice")
-        async def api_get_voice_settings() -> dict[str, Any]:
+        def api_get_voice_settings() -> dict[str, Any]:
             """Get voice subsystem settings."""
             def _get_val(key: str, default: str) -> str:
                 v = config_store.get(key)
@@ -1129,7 +1129,7 @@ class SettingsRouterBuilder:
             }
 
         @router.put("/api/settings/voice")
-        async def api_save_voice_settings(req: VoiceSettingsUpdate) -> dict[str, str]:
+        def api_save_voice_settings(req: VoiceSettingsUpdate) -> dict[str, str]:
             """Save voice subsystem settings."""
             config_store.set("voice.enabled", req.enabled, category="voice")
             config_store.set("voice.tts_reply", req.tts_reply, category="voice")
@@ -1159,7 +1159,7 @@ class SettingsRouterBuilder:
             return {"status": "ok"}
 
         @router.get("/api/settings/documents")
-        async def api_get_document_settings() -> dict[str, Any]:
+        def api_get_document_settings() -> dict[str, Any]:
             """Live Document Intelligence settings (ConfigStore-backed)."""
             try:
                 from kazma_core.documents.config import get_document_config, get_document_rollout
@@ -1189,7 +1189,7 @@ class SettingsRouterBuilder:
                 return {"error": safe_error(exc)}
 
         @router.put("/api/settings/documents")
-        async def api_save_document_settings(req: dict[str, Any]) -> dict[str, str]:
+        def api_save_document_settings(req: dict[str, Any]) -> dict[str, str]:
             """Persist document platform keys (nested ConfigStore primary keys)."""
             mapping = {
                 "enabled": ("documents.enabled", "documents"),
@@ -1222,7 +1222,7 @@ class SettingsRouterBuilder:
             return {"status": "ok", "updated": str(len(items))}
 
         @router.get("/api/voice/providers")
-        async def api_get_voice_providers() -> dict[str, list[str]]:
+        def api_get_voice_providers() -> dict[str, list[str]]:
             """Get available voice providers for STT and TTS."""
             return {
                 "stt": ["openai", "groq", "cohere", "nvidia", "faster-whisper"],
@@ -1275,12 +1275,12 @@ class SettingsRouterBuilder:
 
 
         @router.get("/api/settings/connectors")
-        async def api_get_connectors() -> dict[str, Any]:
+        def api_get_connectors() -> dict[str, Any]:
             """Get all connector configurations."""
             return _get_sm().get_connectors()
 
         @router.put("/api/settings/connectors")
-        async def api_save_connector(req: ConnectorConfigUpdate) -> dict[str, str]:
+        def api_save_connector(req: ConnectorConfigUpdate) -> dict[str, str]:
             """Save a connector's configuration."""
             _get_sm().save_connector(req.platform, req.settings)
             return {"status": "ok"}
@@ -1291,36 +1291,36 @@ class SettingsRouterBuilder:
             return await _get_sm().test_connector(req.platform)
 
         @router.get("/api/settings/skills")
-        async def api_get_skills() -> list[dict[str, Any]]:
+        def api_get_skills() -> list[dict[str, Any]]:
             """List installed skills."""
             return _get_sm().get_installed_skills()
 
         @router.put("/api/settings/skills/{skill_id}/toggle")
-        async def api_toggle_skill(skill_id: str, req: dict[str, Any]) -> dict[str, str]:
+        def api_toggle_skill(skill_id: str, req: dict[str, Any]) -> dict[str, str]:
             """Toggle skill enabled/disabled."""
             _get_sm().toggle_skill(skill_id, req.get("enabled", True))
             return {"status": "ok"}
 
         @router.delete("/api/settings/skills/{skill_id}")
-        async def api_uninstall_skill(skill_id: str) -> dict[str, str]:
+        def api_uninstall_skill(skill_id: str) -> dict[str, str]:
             """Uninstall a skill."""
             _get_sm().uninstall_skill(skill_id)
             return {"status": "ok"}
 
         @router.get("/api/settings/appearance")
-        async def api_get_appearance() -> dict[str, Any]:
+        def api_get_appearance() -> dict[str, Any]:
             """Get appearance settings."""
             return _get_sm().get_appearance()
 
         @router.put("/api/settings/appearance")
-        async def api_save_appearance(req: AppearanceUpdate) -> dict[str, str]:
+        def api_save_appearance(req: AppearanceUpdate) -> dict[str, str]:
             """Save appearance settings."""
             data = {k: v for k, v in req.model_dump().items() if v is not None}
             _get_sm().save_appearance(data)
             return {"status": "ok"}
 
         @router.get("/api/settings/shortcuts")
-        async def api_get_shortcuts() -> dict[str, str]:
+        def api_get_shortcuts() -> dict[str, str]:
             """Get all keyboard shortcuts."""
             sm = _get_sm()
             shortcuts = sm.get_shortcuts()
@@ -1328,19 +1328,19 @@ class SettingsRouterBuilder:
             return shortcuts
 
         @router.put("/api/settings/shortcuts")
-        async def api_save_shortcut(req: ShortcutUpdate) -> dict[str, str]:
+        def api_save_shortcut(req: ShortcutUpdate) -> dict[str, str]:
             """Update a single shortcut."""
             _get_sm().save_shortcut(req.action, req.keys)
             return {"status": "ok"}
 
         @router.post("/api/settings/shortcuts/reset")
-        async def api_reset_shortcuts() -> dict[str, str]:
+        def api_reset_shortcuts() -> dict[str, str]:
             """Reset shortcuts to defaults."""
             _get_sm().reset_shortcuts()
             return {"status": "ok"}
 
         @router.put("/api/settings/account/password")
-        async def api_change_password(req: PasswordChange, request: Request) -> Response:
+        def api_change_password(req: PasswordChange, request: Request) -> Response:
             """Change account password."""
             from fastapi.responses import JSONResponse
             result = _get_sm().change_password(req.old_password, req.new_password)
@@ -1349,17 +1349,17 @@ class SettingsRouterBuilder:
             return JSONResponse(result)
 
         @router.get("/api/settings/account/tokens")
-        async def api_get_tokens() -> list[dict[str, Any]]:
+        def api_get_tokens() -> list[dict[str, Any]]:
             """List API tokens."""
             return _get_sm().get_api_tokens()
 
         @router.post("/api/settings/account/tokens")
-        async def api_create_token(req: dict[str, Any]) -> dict[str, Any]:
+        def api_create_token(req: dict[str, Any]) -> dict[str, Any]:
             """Create an API token."""
             return _get_sm().create_api_token(req.get("name", "unnamed"))
 
         @router.delete("/api/settings/account/tokens/{token_id}")
-        async def api_revoke_token(token_id: str) -> dict[str, Any]:
+        def api_revoke_token(token_id: str) -> dict[str, Any]:
             """Revoke an API token."""
             removed = _get_sm().revoke_api_token(token_id)
             if not removed:
@@ -1369,12 +1369,12 @@ class SettingsRouterBuilder:
             return {"status": "ok", "removed": True, "id": token_id}
 
         @router.get("/api/settings/account/sessions")
-        async def api_get_sessions() -> list[dict[str, Any]]:
+        def api_get_sessions() -> list[dict[str, Any]]:
             """List active sessions."""
             return _get_sm().get_sessions()
 
         @router.get("/api/settings/tools")
-        async def api_get_tools(request: Request) -> list[dict[str, Any]]:
+        def api_get_tools(request: Request) -> list[dict[str, Any]]:
             """List all registered tools with UI-language descriptions."""
             tools = _get_sm().get_tool_registry()
             lang = request.cookies.get("kazma-lang") or "en"
@@ -1395,7 +1395,7 @@ class SettingsRouterBuilder:
             return tools
 
         @router.put("/api/settings/tools/{tool_name}/toggle")
-        async def api_toggle_tool(tool_name: str, req: dict[str, Any]) -> dict[str, str]:
+        def api_toggle_tool(tool_name: str, req: dict[str, Any]) -> dict[str, str]:
             """Toggle a tool enabled/disabled."""
             _get_sm().toggle_tool(tool_name, req.get("enabled", True))
             return {"status": "ok"}
@@ -1481,7 +1481,7 @@ class SettingsRouterBuilder:
             }
 
         @router.get("/api/divisions/status")
-        async def api_division_status() -> dict[str, Any]:
+        def api_division_status() -> dict[str, Any]:
             from kazma_core.division_runtime import (
                 current_division_context,
                 division_enforcement_on,
@@ -1499,7 +1499,7 @@ class SettingsRouterBuilder:
             }
 
         @router.get("/api/divisions/requests")
-        async def api_division_requests() -> list[dict[str, Any]]:
+        def api_division_requests() -> list[dict[str, Any]]:
             from kazma_core.division_runtime import list_auth_requests
 
             return list_auth_requests()
@@ -1593,7 +1593,7 @@ class SettingsRouterBuilder:
             return await asyncio.to_thread(_get_sm().check_updates)
 
         @router.post("/api/settings/import")
-        async def api_import_config(req: ImportConfigRequest) -> dict[str, str]:
+        def api_import_config(req: ImportConfigRequest) -> dict[str, str]:
             """Import configuration."""
             count = _get_sm().import_config(req.data, req.format, req.selective, req.sections)
             return {"status": "ok", "imported": str(count)}
@@ -1676,28 +1676,28 @@ class SettingsRouterBuilder:
                 return {"success": False, "error": "Connection test failed unexpectedly"}
 
         @router.get("/api/settings/models/registry")
-        async def api_model_registry() -> list[dict[str, Any]]:
+        def api_model_registry() -> list[dict[str, Any]]:
             """Get model registry."""
             return _get_sm().get_model_registry()
 
         @router.get("/api/settings/models/options")
-        async def api_model_options() -> dict[str, Any]:
+        def api_model_options() -> dict[str, Any]:
             """Get unified model/provider/profile options."""
             return _get_sm().get_unified_model_options()
 
         @router.get("/api/settings/models/defaults")
-        async def api_model_defaults() -> dict[str, str]:
+        def api_model_defaults() -> dict[str, str]:
             """Get default models per task type."""
             return _get_sm().get_model_defaults()
 
         @router.put("/api/settings/models/defaults")
-        async def api_set_model_default(req: ModelDefaultUpdate) -> dict[str, str]:
+        def api_set_model_default(req: ModelDefaultUpdate) -> dict[str, str]:
             """Set default model for a task type."""
             _get_sm().set_default_model(req.task_type, req.model_name)
             return {"status": "ok"}
 
         @router.get("/api/settings/models/usage")
-        async def api_model_usage() -> dict[str, Any]:
+        def api_model_usage() -> dict[str, Any]:
             """Get token usage stats per model."""
             return _get_sm().get_model_usage()
 
@@ -1763,7 +1763,7 @@ class SettingsRouterBuilder:
                 }
 
         @router.post("/api/settings/memory/clean")
-        async def api_clean_memory() -> dict[str, Any]:
+        def api_clean_memory() -> dict[str, Any]:
             """Purge backfill garbage, SoulEvolution noise, and scan chunks."""
             try:
                 from kazma_core.memory.backfill_v2 import cleanup_polluted_backfill
@@ -1780,17 +1780,17 @@ class SettingsRouterBuilder:
         config_store = self.config_store
 
         @router.get("/api/settings/mcp")
-        async def api_get_mcp() -> list[dict[str, Any]]:
+        def api_get_mcp() -> list[dict[str, Any]]:
             """List all MCP servers."""
             return _get_sm().get_mcp_servers()
 
         @router.post("/api/settings/mcp")
-        async def api_add_mcp(req: MCPServerAddRequest) -> dict[str, Any]:
+        def api_add_mcp(req: MCPServerAddRequest) -> dict[str, Any]:
             """Add an MCP server."""
             return _get_sm().add_mcp_server(req.model_dump())
 
         @router.delete("/api/settings/mcp/{name}")
-        async def api_delete_mcp(name: str) -> dict[str, str]:
+        def api_delete_mcp(name: str) -> dict[str, str]:
             """Delete an MCP server."""
             from fastapi.responses import JSONResponse
 
@@ -1803,7 +1803,7 @@ class SettingsRouterBuilder:
             return {"status": "ok"}
 
         @router.put("/api/settings/mcp/{name}/toggle")
-        async def api_toggle_mcp(name: str, req: MCPServerToggleRequest) -> dict[str, str]:
+        def api_toggle_mcp(name: str, req: MCPServerToggleRequest) -> dict[str, str]:
             """Toggle MCP server enabled/disabled."""
             _get_sm().toggle_mcp_server(name, req.enabled)
             return {"status": "ok"}
@@ -1817,7 +1817,7 @@ class SettingsRouterBuilder:
         # otherwise it matches paths like /api/settings/account/tokens/{id}
         # before the specific handler can fire.
         @router.delete("/api/settings/{key:path}")
-        async def api_delete_setting(key: str) -> dict[str, str]:
+        def api_delete_setting(key: str) -> dict[str, str]:
             """Delete a setting (reverts to YAML default)."""
             config_store.delete(key)
             return {"status": "ok"}

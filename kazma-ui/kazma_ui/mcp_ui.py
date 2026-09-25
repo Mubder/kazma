@@ -6,6 +6,7 @@ start, stop, test connections, and view available tools.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -131,7 +132,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         """
         from kazma_core.mcp.oauth import MCPOAuthError, start_oauth_flow
 
-        servers = agent.get_mcp_servers_config()
+        servers = await asyncio.to_thread(agent.get_mcp_servers_config)
         server_cfg = next((s for s in servers if s.get("name") == name), None)
         if not server_cfg:
             return {"status": "error", "error": f"Server '{name}' not found"}
@@ -211,7 +212,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
     @router.post("/api/mcp/servers/{name}/start")
     async def api_start_server(name: str) -> dict[str, Any]:
         """Start/connect an MCP server."""
-        servers = agent.get_mcp_servers_config()
+        servers = await asyncio.to_thread(agent.get_mcp_servers_config)
         server_cfg = None
         for s in servers:
             if s.get("name") == name:
@@ -266,7 +267,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         """
         from kazma_core.mcp_client import MCPClient, MCPServerConfig
 
-        servers = agent.get_mcp_servers_config()
+        servers = await asyncio.to_thread(agent.get_mcp_servers_config)
         server_cfg = None
         for s in servers:
             if s.get("name") == name:

@@ -127,6 +127,10 @@ class XClient:
         action = audit_action or _default_audit_action(method, path)
         started = time.monotonic()
         url = f"{API_HOST}{path}"
+        # user_agent() reads installed-package metadata on its first call
+        # (then it is cached): stall-20260923-041456 caught that on the loop
+        # for 45.6s. Warm it in a worker; later calls are a cache hit.
+        await asyncio.to_thread(user_agent)
         headers = self._headers(method, url)
         if json_body is not None:
             headers["Content-Type"] = "application/json; charset=utf-8"

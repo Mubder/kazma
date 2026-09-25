@@ -35,6 +35,12 @@ riskier than the debt — but which nothing stopped from growing:
 * ``sleep_then_assert`` — a test that sleeps under two seconds and asserts
   within the next few statements: a bet on timing (both flakes fixed that
   day were this shape). Some are correct; each one needs reading.
+* ``bare_module_attr_assignments`` (2026-09-26) -- a test that sets an
+  attribute of something imported from Kazma by plain assignment. Nothing
+  restores it, so every later test in the process sees the fake:
+  ``rs._db_path = ...`` hid another file's check once a new test shifted the
+  chunk boundaries. Some restore it in ``finally``; ``monkeypatch.setattr``
+  is the fix either way.
 """
 
 from __future__ import annotations
@@ -56,10 +62,11 @@ BASELINE = {
 
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
 STRUCTURAL_BASELINE = {
-    "async_route_never_awaits": 260,
+    "async_route_never_awaits": 189,
     "module_local_public_symbols": 604,
     "patched_value_imports": 82,
     "sleep_then_assert": 53,
+    "bare_module_attr_assignments": 140,
 }
 
 
@@ -278,6 +285,54 @@ def sleep_then_assert(tests: dict[str, str]) -> list[str]:
     return found
 
 
+def _kazma_aliases(nodes) -> set[str]:
+    """Names bound by importing from a Kazma package."""
+    out: set[str] = set()
+    for node in nodes:
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("kazma_"):
+            out.update(a.asname or a.name for a in node.names)
+        elif isinstance(node, ast.Import):
+            out.update(
+                a.asname or a.name.split(".")[0]
+                for a in node.names
+                if a.name.startswith("kazma_")
+            )
+    return out
+
+
+def bare_module_attr_assignments(tests: dict[str, str]) -> list[str]:
+    """``alias.attr = value`` on something imported from Kazma, inside a test.
+
+    Nothing restores it: the fake outlives the test, and every later test in
+    the process sees it. ``rs._db_path = lambda: ...`` in the industry smoke
+    matrix hid test_no_cwd_data_dir_fallback's check whenever one chunk ran
+    both -- found 2026-09-26, when a new file shifted the chunk boundaries.
+    The fix is ``monkeypatch.setattr``.
+    """
+    found: set[str] = set()
+    for rel, text in tests.items():
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        module_level = _kazma_aliases(tree.body)
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            aliases = module_level | _kazma_aliases(ast.walk(fn))
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.Assign):
+                    continue
+                for tgt in node.targets:
+                    if (
+                        isinstance(tgt, ast.Attribute)
+                        and isinstance(tgt.value, ast.Name)
+                        and tgt.value.id in aliases
+                    ):
+                        found.add(f"{rel}:{node.lineno} {tgt.value.id}.{tgt.attr}")
+    return sorted(found)
+
+
 def _tracked(patterns: list[str]) -> dict[str, str]:
     files = subprocess.run(
         ["git", "ls-files", *patterns],
@@ -310,6 +365,7 @@ def structural_debt() -> dict[str, list[str]]:
         "module_local_public_symbols": module_local_public_symbols(product, elsewhere),
         "patched_value_imports": patched_value_imports(product, tests),
         "sleep_then_assert": sleep_then_assert(tests),
+        "bare_module_attr_assignments": bare_module_attr_assignments(tests),
     }
 
 
@@ -366,3 +422,16 @@ def test_structural_scanners_count_what_they_say():
         )
     }
     assert sleep_then_assert(sleepy) == ["tests/test_s.py:3", "tests/test_s.py:6"]
+
+    leaky = {
+        "tests/test_l.py": (
+            "from kazma_core.tools import research_session as rs\n"
+            "def test_a():\n    rs._db_path = lambda: 1\n"
+            "def test_b(monkeypatch):\n    monkeypatch.setattr(rs, '_db_path', lambda: 1)\n"
+            "def test_c():\n    import kazma_core.paths as paths\n    paths.data_dir = None\n"
+            "def test_d():\n    local = object()\n    local.x = 1\n"
+        )
+    }
+    assert bare_module_attr_assignments(leaky) == [
+        "tests/test_l.py:3 rs._db_path", "tests/test_l.py:8 paths.data_dir",
+    ]

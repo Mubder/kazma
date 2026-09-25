@@ -63,10 +63,12 @@ def register_system_tools(registry: Any) -> None:
     )
     async def mcp_test_server(name: str) -> str:
         try:
+            import asyncio
+
             from kazma_core.mcp.manager import AsyncMCPManager
             from kazma_core.mcp_servers_store import list_mcp_servers
 
-            servers = list_mcp_servers()
+            servers = await asyncio.to_thread(list_mcp_servers)
             target = None
             for s in servers:
                 if str(s.get("name", "")).lower() == (name or "").strip().lower():

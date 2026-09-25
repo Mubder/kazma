@@ -68,7 +68,11 @@ def create_commitment_router() -> APIRouter:
         applied = False
         try:
             if agent_id:
-                applied = apply_agent_mutation(agent_id, delta, commitment_id=commitment_id)
+                import asyncio
+
+                applied = await asyncio.to_thread(
+                    apply_agent_mutation, agent_id, delta, commitment_id=commitment_id
+                )
             elif worker_name:
                 si = get_self_improvement()
                 if si is not None:

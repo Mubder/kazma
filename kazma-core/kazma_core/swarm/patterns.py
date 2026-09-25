@@ -203,7 +203,9 @@ async def _run_self_improvement(
             )
             if analysis.get("action") == "mutate":
                 _delta = analysis["delta"]
-                _cid = mint_soul_commitment(_delta, worker_name=res.worker)
+                _cid = await asyncio.to_thread(
+                    mint_soul_commitment, _delta, worker_name=res.worker
+                )
                 await si.apply_mutation(res.worker, _delta, commitment_id=_cid)
     except Exception as exc:
         logger.warning("[SwarmPatterns] Self-improvement hook failed: %s", exc)

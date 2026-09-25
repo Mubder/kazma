@@ -368,6 +368,23 @@ async def readiness():
         return await _readiness()
 
 
+async def _offloaded_check(check: Any, component: str, timeout_s: float) -> dict[str, Any]:
+    """Run a check that can reach a database or the network off the loop, capped.
+
+    The guard probes readiness every 30s, and a probe that blocks the loop
+    freezes every stream while it waits -- then fails, and gets Kazma killed.
+    Timing out is an answer: the component did not respond in time.
+    """
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(check), timeout=timeout_s)
+    except TimeoutError:
+        return {
+            "status": "failed",
+            "component": component,
+            "error": f"timed out ({timeout_s:.0f}s)",
+        }
+
+
 async def _readiness():
     """Readiness probe - returns 200 if all critical dependencies are healthy.
     
@@ -387,8 +404,10 @@ async def _readiness():
     # them: live stall-20260831-181156.txt shows ``async def readiness``
     # blocked in ``pool.execute_one`` → ``psycopg_pool.getconn`` on the
     # event loop, so SSE / Telegram acks / the stall heartbeat all froze
-    # and the guard killed the child. Offload + 3s cap.
-    checks["config_store"] = check_config_store()
+    # and the guard killed the child. Offload + 3s cap. The ConfigStore
+    # check is a database read on a Postgres install too, and
+    # stall-20260915-064232 caught it here on the loop: same treatment.
+    checks["config_store"] = await _offloaded_check(check_config_store, "config_store", 3.0)
     try:
         checks["database"] = await asyncio.wait_for(
             asyncio.to_thread(check_database), timeout=3.0
@@ -407,7 +426,9 @@ async def _readiness():
     checks["mcp"] = check_mcp()
     checks["cron"] = check_cron()
     checks["schedulers"] = check_schedulers()
-    checks["llm_provider"] = check_llm_provider()
+    # Resolving the active provider can read settings and probe the machine
+    # for a GCP project (stall-20260922-231218: 15s on the loop).
+    checks["llm_provider"] = await _offloaded_check(check_llm_provider, "llm_provider", 5.0)
     
     # Determine overall status — database + config_store are critical
     critical_failed = [

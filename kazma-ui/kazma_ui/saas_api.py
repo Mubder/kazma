@@ -29,7 +29,7 @@ def create_saas_router() -> APIRouter:
         return JSONResponse({"error": "Admin role required"}, status_code=403)
 
     @router.get("/status")
-    async def saas_status(request: Request) -> JSONResponse:
+    def saas_status(request: Request) -> JSONResponse:
         denied = _require_admin(request)
         if denied:
             return denied
@@ -116,7 +116,7 @@ def create_saas_router() -> APIRouter:
             return JSONResponse({"error": str(exc)}, status_code=500)
 
     @router.delete("/users/{username}")
-    async def delete_platform_user(username: str, request: Request) -> JSONResponse:
+    def delete_platform_user(username: str, request: Request) -> JSONResponse:
         denied = _require_admin(request)
         if denied:
             return denied
@@ -139,6 +139,12 @@ def create_saas_router() -> APIRouter:
             body = await request.json()
         except Exception:
             body = {}
+        import asyncio
+
+        # The user store round trip and the password hash stay off the loop.
+        return await asyncio.to_thread(_patch_user, username, body)
+
+    def _patch_user(username: str, body: dict[str, Any]) -> JSONResponse:
         from kazma_core.security.platform_rbac import (
             _load_users_from_store,
             _save_users_to_store,

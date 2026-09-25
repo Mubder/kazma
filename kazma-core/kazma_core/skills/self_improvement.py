@@ -362,8 +362,8 @@ Output ONLY the delta text, no preamble."""
         # Same soul-confirm gate as apply_agent_mutation (mint + hold if needed).
         if _soul_requires_confirm():
             if not commitment_id:
-                commitment_id = mint_soul_commitment(
-                    delta, worker_name=worker_name,
+                commitment_id = await asyncio.to_thread(
+                    mint_soul_commitment, delta, worker_name=worker_name,
                 )
             if not commitment_id or not _soul_commitment_confirmed(commitment_id):
                 logger.info(
@@ -847,8 +847,9 @@ async def analyze_and_apply_chat_turn(
     # Phase 7: mint a needs_confirm commitment so the delta is held until
     # confirmed via the HITL bus (when soul_requires_confirm is on). No-op
     # (returns None) when the flag is off → apply_agent_mutation ignores it.
-    cid = mint_soul_commitment(delta, agent_id=agent_id)
-    ok = apply_agent_mutation(agent_id, delta, commitment_id=cid)
+    # Both write the settings store (a database on Postgres): off the loop.
+    cid = await asyncio.to_thread(mint_soul_commitment, delta, agent_id=agent_id)
+    ok = await asyncio.to_thread(apply_agent_mutation, agent_id, delta, commitment_id=cid)
     analysis["applied"] = ok
     analysis["agent_id"] = agent_id
     return analysis

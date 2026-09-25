@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## Fewer freezes when the database is slow (2026-09-26)
+
+Kazma serves every chat stream, approval card and health check from one event
+loop, and anything slow run directly on it freezes all of them at once. It
+records a stack dump each time that happens. The 50 dumps since 2026-09-10
+named what did it:
+
+- **Every request checked your login and the user list on the loop** (8
+  dumps). When the database was slow, the whole UI and every chat stream
+  stopped with it. The checks now run in a worker thread.
+- **The MCP reconnect sweep** read the server list on the loop (stalls of 49.7
+  and 28.5 seconds), and so did the MCP settings routes.
+- **The readiness probe** — which the guard calls every 30 seconds, and
+  restarts Kazma when it fails — checked the settings store and the model
+  provider on the loop. Both now run in a thread with a time limit; a slow
+  answer reports "not ready" instead of freezing everything.
+- The page theme, the login and session routes, the user admin API and the
+  deep-research progress updates stopped reading the database on the loop.
+- 71 settings, auth and admin routes that never needed the loop no longer
+  run on it.
+- The stall dumps themselves: they stopped at 100 threads, so on 2026-09-25,
+  when the database hung and threads piled up, none of the eleven dumps showed
+  the frozen loop. Every dump now starts with the loop's own stack.
+
 ## The guard can page you again (2026-09-25)
 
 The guard — the process that restarts Kazma and messages you on Telegram when
