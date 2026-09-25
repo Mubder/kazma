@@ -29,6 +29,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import AbstractContextManager
 from typing import Any, Callable
 
 __all__ = [
@@ -84,16 +85,15 @@ class ArtifactStore:
 
     # ── internals ────────────────────────────────────────────────────
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self) -> AbstractContextManager[sqlite3.Connection]:
+        """One short-lived connection that commits AND closes on exit."""
+        from kazma_core.config_store import apply_sqlite_pragmas
+        from kazma_core.db.sqlite_session import committed_and_closed
+
         os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
         conn = sqlite3.connect(self._db_path, timeout=10.0)
-        try:
-            from kazma_core.config_store import apply_sqlite_pragmas
-
-            apply_sqlite_pragmas(conn)
-        except Exception:  # pragma: no cover - helper always present in prod
-            pass
-        return conn
+        apply_sqlite_pragmas(conn)
+        return committed_and_closed(conn)
 
     def _ensure_schema(self) -> None:
         with self._lock, self._connect() as conn:

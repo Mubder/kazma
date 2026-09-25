@@ -546,6 +546,106 @@ def test_unclosed_sqlite_with_blocks_are_caught():
     assert _unclosed_sqlite_with_blocks(planted) == ["x.py:5"]
 
 
+def _returns_raw_connection(fn: ast.AST) -> bool:
+    """True when *fn* returns ``sqlite3.connect(...)``'s result unwrapped."""
+    raw_names: set[str] = set()
+    for node in ast.walk(fn):
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and node.value.func.attr == "connect"
+            and isinstance(node.value.func.value, ast.Name)
+            and node.value.func.value.id == "sqlite3"
+        ):
+            raw_names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Return) and node.value is not None:
+            v = node.value
+            if isinstance(v, ast.Name) and v.id in raw_names:
+                return True
+            if (
+                isinstance(v, ast.Call) and isinstance(v.func, ast.Attribute)
+                and v.func.attr == "connect" and isinstance(v.func.value, ast.Name)
+                and v.func.value.id == "sqlite3"
+            ):
+                return True
+    return False
+
+
+def _raw_connections_used_as_context(sources: dict[str, str]) -> list[str]:
+    """``with self._connect() as conn:`` where ``_connect`` returns a raw
+    connection — the same commit-but-never-close as ``with sqlite3.connect()``,
+    one call away. Checked per module (openers are private to their store)."""
+    problems: list[str] = []
+    for rel, text in sources.items():
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        openers = {
+            node.name for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and _returns_raw_connection(node)
+        }
+        if not openers:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.With, ast.AsyncWith)):
+                continue
+            for item in node.items:
+                call = item.context_expr
+                if not isinstance(call, ast.Call):
+                    continue
+                name = call.func.attr if isinstance(call.func, ast.Attribute) else getattr(call.func, "id", "")
+                if name in openers:
+                    problems.append(f"{rel}:{node.lineno} with {name}()")
+                    break
+    return problems
+
+
+def test_no_raw_connection_opener_is_used_as_a_context():
+    problems = _raw_connections_used_as_context(_product_sources())
+    assert not problems, (
+        "A function returning a raw sqlite3 connection is used in a `with`\n"
+        "block, which commits and never closes. Return\n"
+        "kazma_core.db.sqlite_session.committed_and_closed(conn) instead:\n  "
+        + "\n  ".join(problems)
+    )
+
+
+def test_a_raw_connection_opener_used_as_a_context_is_caught():
+    """Negative control: the pre-2026-09-25 store shape, and its fix."""
+    planted = {
+        "bad.py": textwrap.dedent(
+            """
+            import sqlite3
+            class Store:
+                def _connect(self):
+                    conn = sqlite3.connect(self.path)
+                    return conn
+                def read(self):
+                    with self._connect() as conn:
+                        return conn.execute("select 1").fetchone()
+            """
+        ),
+        "good.py": textwrap.dedent(
+            """
+            import sqlite3
+            from kazma_core.db.sqlite_session import committed_and_closed
+            class Store:
+                def _connect(self):
+                    conn = sqlite3.connect(self.path)
+                    return committed_and_closed(conn)
+                def read(self):
+                    with self._connect() as conn:
+                        return conn.execute("select 1").fetchone()
+            """
+        ),
+    }
+    assert _raw_connections_used_as_context(planted) == ["bad.py:8 with _connect()"]
+
+
 def test_cwd_relative_store_paths_are_caught():
     """Negative control: the per-tenant checkpoint line, and its fallback form."""
     planted = {

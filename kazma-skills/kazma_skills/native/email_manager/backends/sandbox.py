@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -59,11 +60,14 @@ class SandboxBackend:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self) -> AbstractContextManager[sqlite3.Connection]:
+        """One short-lived connection that commits AND closes on exit."""
+        from kazma_core.db.sqlite_session import committed_and_closed
+
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        return committed_and_closed(conn)
 
     def _init_db(self) -> None:
         with self._connect() as conn:
