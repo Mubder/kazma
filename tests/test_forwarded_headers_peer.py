@@ -139,6 +139,68 @@ def test_websockets_get_the_same_treatment(monkeypatch):
     assert (seen["client"], seen["scheme"], seen["peer"]) == (VISITOR, "wss", "127.0.0.1")
 
 
+# -- a declared range means the same thing to both layers ---------------------
+
+
+def test_a_declared_range_is_honoured_by_the_rewrite_and_the_checks(monkeypatch):
+    """Docker's bridge range: uvicorn accepted it and the checks did not."""
+    monkeypatch.setenv("KAZMA_TRUSTED_PROXIES", "172.17.0.0/16")
+    app = ForwardedHeadersMiddleware(_probe_app())
+    seen = TestClient(app, client=("172.17.0.5", 40000)).get(
+        "/probe", headers=FORWARDED).json()
+
+    assert seen["client"] == VISITOR, "the rewrite honoured the range"
+    assert seen["peer"] == "172.17.0.5"
+    assert auth.undeclared_proxy_detected() is False, "and so did the check"
+    assert seen["peer_trust"] is False
+
+
+def test_a_peer_outside_the_range_is_still_caught(monkeypatch):
+    monkeypatch.setenv("KAZMA_TRUSTED_PROXIES", "172.17.0.0/16")
+    app = ForwardedHeadersMiddleware(_probe_app())
+    TestClient(app, client=("172.18.0.5", 40000)).get("/probe", headers=FORWARDED)
+    assert auth.undeclared_proxy_detected() is True
+
+
+def test_a_wildcard_trusts_nobody_in_either_layer(monkeypatch, caplog):
+    """'*' would let any client choose the address it is limited and audited as."""
+    monkeypatch.setenv("KAZMA_TRUSTED_PROXIES", "*")
+    app = ForwardedHeadersMiddleware(_probe_app())
+    seen = TestClient(app, client=("198.51.100.7", 40000)).get(
+        "/probe", headers=FORWARDED).json()
+
+    assert seen["client"] == "198.51.100.7", "uvicorn was not handed the wildcard"
+    assert auth.undeclared_proxy_detected() is True
+    assert "contains '*'" in caplog.text
+
+
+@pytest.mark.parametrize("declared, host, expected", [
+    ("127.0.0.1", "127.0.0.1", True),
+    ("10.0.0.0/8", "10.20.30.40", True),
+    ("10.0.0.0/8", "11.0.0.1", False),
+    ("fd00::/8", "fd00::5", True),
+    ("10.0.0.0/8", "::ffff:10.1.2.3", True),  # IPv4-mapped IPv6
+    ("10.0.0.0/8", "not-an-address", False),
+    ("127.0.0.1,172.17.0.0/16", "172.17.9.9", True),
+    ("not/a-range", "10.0.0.1", False),
+    ("", "127.0.0.1", False),
+])
+def test_one_answer_to_is_this_a_declared_proxy(monkeypatch, declared, host, expected):
+    monkeypatch.setenv("KAZMA_TRUSTED_PROXIES", declared)
+    assert auth._is_trusted_proxy(host) is expected
+
+
+def test_trusted_hops_inside_a_range_are_skipped_for_the_client(monkeypatch):
+    """Rightmost untrusted hop, with the range applied to every hop."""
+    monkeypatch.setenv("KAZMA_TRUSTED_PROXIES", "172.17.0.0/16")
+    request = Request({
+        "type": "http", "method": "GET", "path": "/", "query_string": b"",
+        "client": ("172.17.0.5", 1),
+        "headers": [(b"x-forwarded-for", b"203.0.113.9, 172.17.0.9")],
+    })
+    assert auth._client_host(request) == "203.0.113.9"
+
+
 # -- wiring: the real app, and every way of serving it ------------------------
 
 

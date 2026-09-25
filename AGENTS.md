@@ -1281,6 +1281,9 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   `_peer_trust_allowed` saw the visitor instead of the proxy. Gate:
   `tests/test_forwarded_headers_peer.py` (real ASGI layers — fake requests
   whose `client` is the peer are why the unit tests never saw it).
+  Entries may be CIDR ranges; `auth._is_trusted_proxy` is the ONE answer to
+  "is this peer a declared proxy" (every check asks it, never set
+  membership), and `*` is dropped so neither layer trusts every peer.
 
 **B. HITL default-denies.**
 - `requires_approval()` ends on the `TOOL_TIERS` classification, not on a
@@ -1990,23 +1993,29 @@ Read the named test before changing the code it guards.
   Other OS-level variables still need a `KazmaAgent` restart; Kazma's own
   belong in `.env`, re-read every boot. Gate: `tests/test_path_refresh.py`
   (runs the real app factory; order check with a negative control).
-- **Provider keys belong to the install** (`security/vault.py:
-  INSTALL_SCOPED_CONFIG_SECRETS`). ConfigStore has no tenant, but
-  `vault.store` takes the request's, so a key saved in Settings sat under
-  tenant `default`; the registry reads with no tenant bound, the `default`
-  rung is closed under `KAZMA_PRODUCTION=1`, and every live boot from
-  2026-09-16 to 2026-09-25 built the agent on Z.AI with the DeepSeek key
-  right there (chat escaped only through `resolve_live_client`'s tenant).
-  ConfigStore writes go through `config_store._store_config_secret`:
-  install-scoped names are stored globally and every tenant copy rewritten
-  to match (`store_install_scoped`, never deletes); boot runs
-  `consolidate_install_scoped_secrets()` before `initialize_model_registry`
-  (newest copy wins). Do NOT fix a context-less miss by opening the posture
-  gate: it is closed in production because an OIDC install can have other
-  tenants. Connector credentials (X, mail) stay out of the list — an account
-  the agent acts as is an authorization question. Gate:
-  `tests/test_provider_key_install_scope.py` (the live shape in production
-  posture, with the substitution as its negative control).
+- **Some secrets belong to the install** (`security/vault.py:
+  INSTALL_SCOPED_SECRETS`: provider keys, `email.*`, `calendar.*`), and the
+  VAULT enforces it: `SecretVault.store` writes those names globally and
+  rewrites every tenant copy to match, whatever tenant the caller names
+  (`store_install_scoped`, never deletes); `delete` removes every copy.
+  ConfigStore has no tenant, but `vault.store` took the request's, so a
+  provider key saved in Settings sat under tenant `default`; the registry
+  reads with no tenant bound, the `default` rung is closed under
+  `KAZMA_PRODUCTION=1`, and every live boot from 2026-09-16 to 2026-09-25
+  built the agent on Z.AI with the DeepSeek key right there. Mail had the
+  same split from writers that bypassed `email_manager.credentials`
+  (`backup/cloud_sync._write_vault`, the agent's secret tool):
+  `email.gmail.scopes` held one value for chat and another for background
+  work, flagged every boot. Boot runs `consolidate_install_scoped_secrets()`
+  before `initialize_model_registry`: provider keys take the NEWEST copy
+  (the operator's saves), mail/calendar the GLOBAL one (what mail code
+  reads). Do NOT fix a context-less miss by opening the posture gate: it is
+  closed in production because an OIDC install can have other tenants. X
+  credentials (`cfg:connectors.x.*`) stay per tenant — an account the agent
+  posts as is an authorization question. Gates:
+  `tests/test_provider_key_install_scope.py`,
+  `tests/test_mail_secrets_install_scope.py` (live shapes, negative
+  controls, every writer).
 - **No model fallback is silent** (`observability/model_fallback.py`). The
   registry's substitution (reported by `get_client` after the lock is
   released) and both failover chains (supervisor, `resilient_chat`) report

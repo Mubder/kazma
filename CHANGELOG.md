@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## One copy of every mail token; proxy ranges work (2026-09-25)
+
+**Mail.** Every boot warned that `email.gmail.scopes` held one value for chat
+and another for background work. The Gmail reconnect of 2026-09-25 wrote the
+install-wide copy; a tenant copy from 2026-09-12 lingered, and a caller with
+a tenant reads its tenant's copy first. Mail code has kept these secrets
+install-wide since August, but the backup token refresh and the agent's
+secret tool wrote under the request's tenant. The vault now keeps mail and
+calendar secrets (and provider keys) install-wide for every writer, deletes
+every copy on disconnect, and at startup reconciles old copies — for mail,
+the install-wide copy wins, because it is the one mail code uses.
+
+**Proxies.** `KAZMA_TRUSTED_PROXIES` accepts CIDR ranges (a Docker bridge
+range such as `172.17.0.0/16`): uvicorn already honoured them for the
+address rewrite, while Kazma's checks matched exactly and raised a false
+undeclared-proxy alarm. `*` is ignored by both.
+
 ## No more false "undeclared proxy" alarm behind Cloudflare Tunnel (2026-09-25)
 
 Since 2026-09-23 the first request through the Cloudflare Tunnel after every
@@ -36,7 +53,7 @@ on Z.AI. The only sign was one WARNING line per boot.
 key for the whole install and brings any per-tenant copy up to date, and
 startup copies keys saved the old way to install scope (newest save wins,
 nothing is deleted) before the registry builds its first client. The
-production posture gate is unchanged; connector credentials keep their
+production posture gate is unchanged; X connector credentials keep their
 per-tenant scope.
 
 Any model fallback is now announced: when a provider is substituted for a

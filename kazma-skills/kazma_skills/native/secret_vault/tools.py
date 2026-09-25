@@ -20,7 +20,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from kazma_core.security.vault import get_vault
+# The module, not the function: a name bound at import keeps whatever
+# ``get_vault`` was when this file was first imported, so a replacement
+# (tests, a reset vault) never reaches these tools.
+from kazma_core.security import vault as _vault
 
 
 async def vault_store(
@@ -40,7 +43,7 @@ async def vault_store(
     Returns:
         Success confirmation or error message.
     """
-    vault = get_vault()
+    vault = _vault.get_vault()
     if vault is None:
         return "Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable."
     try:
@@ -71,7 +74,7 @@ async def vault_retrieve(name: str) -> str:
     Returns:
         The decrypted secret value, or an error/not-found message.
     """
-    vault = get_vault()
+    vault = _vault.get_vault()
     if vault is None:
         return "Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable."
     # `retrieve_scoped`, not `vault.retrieve`. A bare retrieve resolves the
@@ -101,7 +104,7 @@ async def vault_list() -> str:
     Returns:
         JSON array of secret metadata, or an error message.
     """
-    vault = get_vault()
+    vault = _vault.get_vault()
     if vault is None:
         return "Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable."
     items = vault.list_secrets()
@@ -121,7 +124,7 @@ async def vault_delete(name: str) -> str:
     Returns:
         Success or error message.
     """
-    vault = get_vault()
+    vault = _vault.get_vault()
     if vault is None:
         return "Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable."
     deleted = vault.delete(name)

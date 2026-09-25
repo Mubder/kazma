@@ -104,13 +104,15 @@ tree. Assume the same class exists elsewhere.
   secret the UI holds — and `None` is indistinguishable from "not configured",
   so the failure is silent and the diagnosis is wrong.
 
-  **This has now shipped three times, each fixed at one call site:**
+  **This has now shipped four times; the first three were fixed at one call
+  site each, the fourth at the storage:**
 
   | Where | Symptom | Fixed |
   |---|---|---|
   | cron scheduler | two 09:00 reminders failed `HTTP 401: no usable API key`, paging the operator twice | 2026-09-12 |
   | the agent turn (`resolve_live_client`) | the operator's DeepSeek key read as absent → registry substituted Z.AI → Telegram answered with Z.AI's `{"code":"1211","message":"Unknown Model"}` for a DeepSeek model id | 2026-09-17 |
   | `kazma_cli.main` | `kazma doctor` reported the key unreadable and blamed another install's vault, while it sat in that same vault decrypting fine | 2026-09-17 |
+  | boot and every tenant-less caller of the registry | under `KAZMA_PRODUCTION=1` the `default` rung is closed, so every boot built the agent on Z.AI with the DeepSeek key in the vault | 2026-09-25: provider keys are install-scoped (`INSTALL_SCOPED_SECRETS`), and a fallback is announced |
 
   The third is the one worth staring at: the **diagnostic** had the bug it was
   built to diagnose, so it confidently sent the operator to re-enter a key that
@@ -352,10 +354,36 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
   §31. It changes GitHub settings, so it is not done here.
 - **The shared-store peer registry is advisory.** It names installs; it does
   not stop one from writing. An acknowledged id silences only that id.
-- **The restore rehearsal needs `CREATEDB` and is off by default.** Until it
-  is turned on, "the dump restores" is still inferred from "the dump reads".
+- **The restore rehearsal is off by default.** Until it is turned on
+  (`KAZMA_PG_RESTORE_REHEARSAL=1` or `backups.pg.restore_rehearsal`), "the
+  dump restores" is still inferred from "the dump reads". It needs
+  `CREATEDB`; the live install's role has it (checked read-only 2026-09-25).
+  `python -m kazma_core.backup.restore_drill --deep` runs the weekly deep
+  drill — the rehearsal included, when on — on demand.
 - **The `python_exec` denylist sees literals only.** A path or command built
   at run time goes to the card, which is the control for it.
+
+### Found on the live install on 2026-09-25, after the hardening pass, and fixed
+
+| Closed | Gate |
+|---|---|
+| A Docker Desktop update dropped the CLI from PATH; every Postgres dump failed ("produced no dump") with Docker and the container fine, and the alert gave no reason | `tests/test_docker_cli_discovery.py` (lookup order, the alert carries the reason, boot tool check, no bare `shutil.which("docker")`) |
+| A restart skipped the dump when the universal backup was fresh, holding the first dump after a fix back six hours | the stale-dump catch-up tests in the same file |
+| The guard hands every server its boot-time environment, so a PATH the operator fixed never reached a `--reload`; the `.env` ladder line was logged before logging existed | `tests/test_path_refresh.py` (real app factory; order check with a negative control) |
+| A provider key saved in Settings sat under tenant `default`; the registry reads with no tenant and the `default` rung is closed in production, so every boot from 2026-09-16 substituted Z.AI for DeepSeek — the fourth shipment of the tenant-context class below — and said so only in a WARNING | `tests/test_provider_key_install_scope.py` (provider keys install-scoped; boot consolidation); `tests/test_model_fallback_notice.py` (every model swap pages and shows a banner) |
+| uvicorn replaced the client address before the undeclared-proxy check read it: every boot behind Cloudflare Tunnel logged a false `[SECURITY]` alarm advising to trust a visitor's IP | `tests/test_forwarded_headers_peer.py` (real ASGI layers; every launcher leaves forwarded headers to the app) |
+| Mail secrets split across scopes: `email.gmail.scopes` differed between chat and background work (the backup token refresh and the agent's secret tool wrote under the request's tenant) | `tests/test_mail_secrets_install_scope.py` (the vault keeps `email.*`/`calendar.*` install-wide for every writer) |
+| `KAZMA_TRUSTED_PROXIES` ranges were honoured by uvicorn and not by Kazma's checks | the range tests in `tests/test_forwarded_headers_peer.py` (`_is_trusted_proxy` is the one answer) |
+
+The proxy fix was confirmed live on a page load through the tunnel
+(2026-09-25 14:19 UTC): no alarm.
+
+**Still open from those:**
+
+- **X connector credentials still need a tenant bound to read.** Provider
+  keys, mail and calendar are install-scoped; X stays per tenant, because
+  moving an account the agent posts as is an authorization question, not a
+  storage fix.
 
 ## Prompt injection
 
@@ -624,10 +652,16 @@ all predating that work.
 * Not the chunk context: running the exact four files that open chunk 00 in
   ONE process gives 64 passed in 20.3s on Windows. No hang.
 
-**Next step for whoever can run Linux:** reproduce with those four files, in
-that order, in one process, on Linux with `KAZMA_DB_BACKEND=sqlite`. That is a
-20-second experiment there and it is the whole remaining question. If it does
-not reproduce, widen to chunk 00's first ten files.
+**2026-09-25: not reproducible, and not recurring.** The experiment above ran
+on Linux (`python:3.11-slim`, `KAZMA_DB_BACKEND=sqlite`, `--timeout-method=thread`,
+one process): the four files 3 runs out of 3 (64 passed, ~4 s each) and chunk
+00's first ten files 2 out of 2 (111 passed, ~5.5 s). In the 20 CI runs from
+2026-09-24 14:06 to 2026-09-25 14:08 every chunk death was
+`tests/test_document_layout.py` — the Arabic reshaper, fixed that morning, with
+no death since — and none was in this file. The mock added for
+`get_app_installation_token` is the likeliest fix, but that is inference, not
+a demonstration. If it comes back, the runner names the file and prints the
+thread dump; run the experiment again with those files.
 
 **The cost is now bounded.** The runner re-runs the chunk minus the suspect as
 one process plus the suspect alone, instead of ~160 per-file runs — measured

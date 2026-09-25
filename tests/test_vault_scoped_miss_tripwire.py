@@ -26,7 +26,10 @@ from kazma_core.security import vault as vault_mod
 from kazma_core.security.vault import SecretVault
 from kazma_core.tenant_context import tenant_scope
 
-NAME = "cfg:providers.list.deepseek.api_key"
+# A per-tenant name. Provider keys and mail tokens are install-scoped since
+# 2026-09-25 (INSTALL_SCOPED_SECRETS): the vault never stores them per tenant,
+# so they cannot be the example of a tenant-scoped miss any more.
+NAME = "cfg:connectors.x.api_key"
 SECRET = "sk-tripwire-not-a-real-key-4242"
 
 
@@ -64,7 +67,7 @@ def test_a_contextless_miss_on_a_tenant_scoped_name_is_named_once(vault, caplog)
 
 
 def test_each_name_is_reported_on_its_own(vault, caplog):
-    other = "cfg:providers.list.zai.api_key"
+    other = "cfg:connectors.x.api_secret"
     with tenant_scope("default"):
         vault.store(NAME, SECRET)
         vault.store(other, SECRET + "-2")

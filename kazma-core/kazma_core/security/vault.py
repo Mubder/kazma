@@ -40,7 +40,7 @@ from kazma_core.diagnostic_scope import refuse_write
 from kazma_core.tenant_context import get_current_tenant_id
 
 __all__ = [
-    "INSTALL_SCOPED_CONFIG_SECRETS",
+    "INSTALL_SCOPED_SECRETS",
     "SecretVault",
     "consolidate_install_scoped_secrets",
     "get_vault",
@@ -53,32 +53,53 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-#: ConfigStore secrets that belong to the install, not to the tenant whose
-#: request happened to save them. The test for membership: the component that
-#: reads the secret is one per process and shared by every tenant. The model
-#: registry is: it caches one client per provider for all callers, and code
-#: with no tenant bound (boot, the agent's base client, background work) builds
-#: those clients. A provider key stored under tenant ``default`` was invisible
-#: to that code on an install labelled production, so every boot replaced the
-#: configured provider with another one that had a key (live, 2026-09-16 to
-#: 2026-09-25). Entries are exact vault names, or prefixes ending in ``.``.
+#: Vault names that belong to the install, not to the tenant whose request
+#: happened to write them -- and, for copies written before this rule, which
+#: copy wins when they disagree. The test for membership: the code that reads
+#: the secret is one per process and shared by every tenant. :meth:`SecretVault.store`
+#: and :meth:`SecretVault.delete` enforce it for EVERY writer, so no caller can
+#: leave a stray per-tenant copy that shadows the install's for callers that
+#: have a tenant (``retrieve`` reads the tenant's copy first). Entries are exact
+#: names, or prefixes ending in ``.``.
 #:
-#: Not here on purpose: connector credentials (X, mail). An account the agent
-#: acts AS is closer to a tenant's than to the install's, and moving it would
-#: let every tenant's requests act with it -- an authorization change, not a
-#: storage fix.
-INSTALL_SCOPED_CONFIG_SECRETS: tuple[str, ...] = (
-    "cfg:providers.list.",  # providers.list[<name>].api_key and its siblings
-    "cfg:llm.api_key",  # the legacy single-provider key
+#: * Provider keys: the model registry caches one client per provider for all
+#:   callers, and code with no tenant bound builds them. Settings stored the
+#:   keys under tenant ``default``, invisible to that code on an install
+#:   labelled production, so every boot replaced the configured provider with
+#:   another one that had a key (live, 2026-09-16 to 2026-09-25). Those copies
+#:   were the operator's saves, so the NEWEST copy wins.
+#: * Mail and calendar OAuth clients and tokens: ``email_manager.credentials``
+#:   has read and written them in the install scope since 2026-08-16 (an old
+#:   tenant copy of a rotated OAuth secret failed every refresh). Other writers
+#:   did not: the backup token refresh and the agent's secret tool wrote under
+#:   the request's tenant, which is how ``email.gmail.scopes`` held one value
+#:   for chat and another for background work (flagged every boot until
+#:   2026-09-25). The install copy is the one mail code uses, so the GLOBAL
+#:   copy wins.
+#:
+#: Not here on purpose: X connector credentials (``cfg:connectors.x.*``). The
+#: X code reads them as tenant ``default``, and moving an account the agent
+#: posts as to the install would let every tenant's requests post with it --
+#: an authorization change, not a storage fix.
+INSTALL_SCOPED_SECRETS: tuple[tuple[str, str], ...] = (
+    ("cfg:providers.list.", "newest"),  # providers.list[<name>].api_key and siblings
+    ("cfg:llm.api_key", "newest"),  # the legacy single-provider key
+    ("email.", "global"),  # mail OAuth clients, tokens, scopes, IMAP/POP passwords
+    ("calendar.", "global"),  # calendar tokens, written through the mail helper
 )
 
 
+def _install_scope_rule(name: str) -> str | None:
+    """Which copy wins for *name* (``"newest"``/``"global"``), or ``None`` if per-tenant."""
+    for entry, authority in INSTALL_SCOPED_SECRETS:
+        if name.startswith(entry) if entry.endswith(".") else name == entry:
+            return authority
+    return None
+
+
 def is_install_scoped_secret(name: str) -> bool:
-    """True if *name* (a vault name) is one of :data:`INSTALL_SCOPED_CONFIG_SECRETS`."""
-    return any(
-        name.startswith(entry) if entry.endswith(".") else name == entry
-        for entry in INSTALL_SCOPED_CONFIG_SECRETS
-    )
+    """True if *name* (a vault name) belongs to the install: :data:`INSTALL_SCOPED_SECRETS`."""
+    return _install_scope_rule(name) is not None
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
@@ -222,8 +243,16 @@ class SecretVault:
 
         Returns:
             The secret ID.
+
+        A name in :data:`INSTALL_SCOPED_SECRETS` is stored for the whole
+        install whatever *tenant_id* or the request says (see
+        :meth:`store_install_scoped`): the backup token refresh and the agent's
+        secret tool wrote mail tokens under the request's tenant, and that
+        stray copy is what ``retrieve`` hands a caller that has a tenant.
         """
         refuse_write("vault", name)
+        if is_install_scoped_secret(name):
+            return self._write_install_scoped(name, value, category, metadata)[1]
         ct, nonce = self._encrypt(value)
         tid = self._tenant_filter(tenant_id)
         now = datetime.now(UTC).isoformat()
@@ -263,22 +292,30 @@ class SecretVault:
         Nothing is deleted; a copy already equal to *value* is left alone, so
         re-saving an unchanged setting writes nothing.
 
-        For :data:`INSTALL_SCOPED_CONFIG_SECRETS` only -- secrets of a component
-        that is one per process and shared by every tenant.
+        :meth:`store` routes every :data:`INSTALL_SCOPED_SECRETS` name here.
         """
+        refuse_write("vault", name)
+        return self._write_install_scoped(name, value, category, None)[0]
+
+    def _write_install_scoped(
+        self, name: str, value: str, category: str, metadata: dict[str, Any] | None,
+    ) -> tuple[int, str]:
+        """(rows written, id of the global row) -- see :meth:`store_install_scoped`."""
         from cryptography.exceptions import InvalidTag
 
-        refuse_write("vault", name)
+        meta = json.dumps(metadata or {})
         with self._lock:
             rows = self._conn.execute(
-                "SELECT tenant_id, encrypted_value, nonce FROM secrets "
+                "SELECT id, tenant_id, encrypted_value, nonce FROM secrets "
                 "WHERE name = ? ORDER BY rowid DESC",
                 (name,),
             ).fetchall()
             newest: dict[str | None, str | None] = {}
+            ids: dict[str | None, str] = {}
             for row in rows:
                 if row["tenant_id"] in newest:
                     continue
+                ids[row["tenant_id"]] = row["id"]
                 try:
                     newest[row["tenant_id"]] = self._decrypt(
                         row["encrypted_value"], row["nonce"],
@@ -288,13 +325,14 @@ class SecretVault:
             scopes = [None, *sorted(t for t in newest if t is not None)]
             stale = [s for s in scopes if s not in newest or newest[s] != value]
             if not stale:
-                return 0
+                return 0, ids[None]
             now = datetime.now(UTC).isoformat()
             self._conn.execute("BEGIN")
             committed = False
             try:
                 for scope in stale:
                     ct, nonce = self._encrypt(value)
+                    ids[scope] = _secrets.token_hex(16)
                     self._conn.execute(
                         "DELETE FROM secrets WHERE name = ? AND "
                         "COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__')",
@@ -303,8 +341,7 @@ class SecretVault:
                     self._conn.execute(
                         """INSERT INTO secrets (id, name, encrypted_value, nonce, category, metadata, tenant_id, created_at, updated_at)
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (_secrets.token_hex(16), name, ct, nonce, category, "{}",
-                         scope, now, now),
+                        (ids[scope], name, ct, nonce, category, meta, scope, now, now),
                     )
                 self._conn.execute("COMMIT")
                 committed = True
@@ -315,27 +352,30 @@ class SecretVault:
             "[Vault] Stored secret '%s' at install scope (%d row(s) written: %s)",
             name, len(stale), ", ".join(s or "global" for s in stale),
         )
-        return len(stale)
+        return len(stale), ids[None]
 
     def consolidate_install_scoped(self) -> list[str]:
-        """Bring install-scoped secrets saved under a tenant up to install scope.
+        """Bring install-scoped secrets written under a tenant up to install scope.
 
         Until 2026-09-25 a provider key saved through Settings was stored under
         the tenant of the request that saved it. The model registry reads it
         with no tenant bound, and on an install labelled production that read
         may not fall back to tenant ``default`` (it cannot tell ``default`` is
         the operator), so every boot substituted another provider for the
-        configured one. For each install-scoped name with a tenant-scoped row,
-        the NEWEST row in any scope is the operator's latest save; it is stored
-        at install scope with :meth:`store_install_scoped`. Returns the names
-        changed. Idempotent: once every copy agrees there is nothing to do.
+        configured one. Mail tokens gained stray tenant copies the same way.
+
+        For each install-scoped name with a tenant-scoped row, the winning copy
+        (per :data:`INSTALL_SCOPED_SECRETS`: the NEWEST in any scope, or the
+        GLOBAL one when there is one) is stored at install scope with
+        :meth:`store_install_scoped`. Returns the names changed. Idempotent:
+        once every copy agrees there is nothing to do.
         """
         from cryptography.exceptions import InvalidTag
 
         with self._lock:
             rows = self._conn.execute(
                 "SELECT rowid, name, tenant_id, category, updated_at, "
-                "encrypted_value, nonce FROM secrets WHERE name LIKE 'cfg:%'"
+                "encrypted_value, nonce FROM secrets"
             ).fetchall()
         by_name: dict[str, list[Any]] = {}
         for row in rows:
@@ -345,13 +385,17 @@ class SecretVault:
         for name, group in sorted(by_name.items()):
             if all(r["tenant_id"] is None for r in group):
                 continue
-            latest = max(group, key=lambda r: (r["updated_at"] or "", r["rowid"]))
+            pool = group
+            if _install_scope_rule(name) == "global":
+                pool = [r for r in group if r["tenant_id"] is None] or group
+            latest = max(pool, key=lambda r: (r["updated_at"] or "", r["rowid"]))
             try:
                 value = self._decrypt(latest["encrypted_value"], latest["nonce"])
             except (InvalidTag, ValueError):
                 logger.warning(
-                    "[Vault] '%s': the newest copy does not decrypt with this "
-                    "KAZMA_VAULT_KEY -- left as it is; re-save it in Settings",
+                    "[Vault] '%s': the winning copy does not decrypt with this "
+                    "KAZMA_VAULT_KEY -- left as it is; save it again (Settings, "
+                    "or reconnect the account)",
                     name,
                 )
                 continue
@@ -359,8 +403,8 @@ class SecretVault:
                 changed.append(name)
         if changed:
             logger.info(
-                "[Vault] %d provider key(s) saved under a tenant are now "
-                "install-scoped, so code with no tenant bound can read them: %s",
+                "[Vault] %d secret(s) stored under a tenant are now "
+                "install-scoped, so every caller reads the same copy: %s",
                 len(changed), ", ".join(changed),
             )
         return changed
@@ -581,8 +625,22 @@ class SecretVault:
             ]
 
     def delete(self, name: str, tenant_id: str | None = None) -> bool:
-        """Delete a secret. Returns True if a row was deleted."""
+        """Delete a secret. Returns True if a row was deleted.
+
+        A name in :data:`INSTALL_SCOPED_SECRETS` is deleted in EVERY scope:
+        disconnecting an account removes its tokens globally, and a tenant copy
+        left behind would keep the account looking connected to any caller
+        that has a tenant.
+        """
         refuse_write("vault", name)
+        if is_install_scoped_secret(name):
+            with self._lock:
+                cur = self._conn.execute("DELETE FROM secrets WHERE name = ?", (name,))
+            if cur.rowcount > 0:
+                logger.info(
+                    "[Vault] Deleted secret '%s' in every scope (%d row(s))", name, cur.rowcount,
+                )
+            return cur.rowcount > 0
         tid = self._tenant_filter(tenant_id)
         with self._lock:
             cur = self._conn.execute(

@@ -28,6 +28,7 @@ import logging
 import os
 import socket
 from collections.abc import Awaitable, Callable
+from functools import lru_cache
 from typing import Any
 
 from fastapi import Header, HTTPException, Request, Response, status
@@ -80,7 +81,7 @@ def _is_https(request: Request) -> bool:
     """
     if request.url.scheme == "https":
         return True
-    if _peer_host(request) not in trusted_proxies():
+    if not _is_trusted_proxy(_peer_host(request)):
         return False
     return (request.headers.get("x-forwarded-proto") or "").strip().lower() == "https"
 
@@ -103,9 +104,74 @@ def trusted_proxies() -> frozenset[str]:
     Read live (not cached) so tests and Settings changes take effect without a
     restart. Only these peers may rewrite the apparent client address — a
     client-supplied ``X-Forwarded-For`` from anywhere else is ignored.
+
+    Entries are addresses or CIDR ranges (``172.17.0.0/16``) -- ask
+    :func:`_is_trusted_proxy`, never test membership in this set. ``*`` is
+    dropped: it would trust every peer to name its own address.
     """
     raw = os.environ.get(TRUSTED_PROXIES_ENV_VAR, "")
-    return frozenset(h.strip().lower() for h in raw.split(",") if h.strip())
+    entries = frozenset(h.strip().lower() for h in raw.split(",") if h.strip())
+    if "*" in entries:
+        _warn_wildcard_once()
+    return entries - {"*"}
+
+
+_wildcard_warned: list[bool] = [False]
+
+
+def _warn_wildcard_once() -> None:
+    if not _wildcard_warned[0]:
+        _wildcard_warned[0] = True
+        logger.warning(
+            "[SECURITY] %s contains '*' -- ignored: trusting every peer would let "
+            "any client choose the address it is rate-limited and audited under. "
+            "List the proxy's address or range.",
+            TRUSTED_PROXIES_ENV_VAR,
+        )
+
+
+@lru_cache(maxsize=16)
+def _networks(entries: frozenset[str]) -> tuple[Any, ...]:
+    import ipaddress
+
+    nets = []
+    for entry in entries:
+        if "/" in entry:
+            try:
+                nets.append(ipaddress.ip_network(entry, strict=False))
+            except ValueError:
+                logger.warning("[auth] %s entry %r is not a valid range; ignored",
+                               TRUSTED_PROXIES_ENV_VAR, entry)
+    return tuple(nets)
+
+
+def _is_trusted_proxy(host: str) -> bool:
+    """Whether *host* is a declared proxy: listed, or inside a listed range.
+
+    The one answer to "is this peer a declared proxy". uvicorn's
+    ``ProxyHeadersMiddleware`` (which :mod:`kazma_ui.proxy_headers` runs with
+    the same list) accepts ranges, and these checks used exact matches, so a
+    range was honoured for the rewrite and not by the checks -- the
+    undeclared-proxy alarm then fired for a proxy that was declared.
+    """
+    host = (host or "").strip().lower()
+    if not host:
+        return False
+    entries = trusted_proxies()
+    if host in entries:
+        return True
+    nets = _networks(entries)
+    if not nets:
+        return False
+    import ipaddress
+
+    try:
+        ip = ipaddress.ip_address(host.split("%")[0])
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return any(ip.version == net.version and ip in net for net in nets)
 
 
 def behind_proxy() -> bool:
@@ -160,7 +226,7 @@ def _note_forwarded_headers(request: Request) -> None:
     if _undeclared_proxy["seen"]:
         return
     peer = _peer_host(request)
-    if not peer or peer in trusted_proxies():
+    if not peer or _is_trusted_proxy(peer):
         return
     try:
         headers = request.headers
@@ -235,15 +301,14 @@ def _client_host(request: Request) -> str:
     address the proxies did not write.
     """
     peer = _peer_host(request)
-    if not peer or peer not in trusted_proxies():
+    if not peer or not _is_trusted_proxy(peer):
         return peer
     raw = (request.headers.get("x-forwarded-for") or "").strip()
     if not raw:
         return peer
     entries = [e.strip().lower() for e in raw.split(",") if e.strip()]
-    trusted = trusted_proxies()
     for entry in reversed(entries):
-        if entry in trusted:
+        if _is_trusted_proxy(entry):
             continue
         return entry
     # Every entry was a trusted proxy — the chain gives us nothing new.
@@ -407,7 +472,7 @@ def _peer_trust_allowed(request: Request) -> bool:
         return True
     # A proxy is declared: trust the peer only when it is NOT the proxy, i.e.
     # a real direct-to-app connection that bypassed the proxy entirely.
-    return _peer_host(request) not in trusted_proxies()
+    return not _is_trusted_proxy(_peer_host(request))
 
 
 _AUTOLOGIN_EXTRA_HOSTS_ENV_VAR = "KAZMA_AUTOLOGIN_HOSTS"

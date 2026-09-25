@@ -7,7 +7,7 @@ Kazma replaces the model under the operator in three places, and until
   configured one has no usable API key. Live, every boot from 2026-09-16 to
   2026-09-25 built the agent on Z.AI while the operator's DeepSeek key sat in
   the vault, one tenant scope away (see
-  :data:`kazma_core.security.vault.INSTALL_SCOPED_CONFIG_SECRETS`).
+  :data:`kazma_core.security.vault.INSTALL_SCOPED_SECRETS`).
 * the supervisor's failover chain, and
 * ``resilient_chat``'s failover chain answer with a backup model when the
   primary keeps failing (``agent.nonstop.failover``, opt-in).

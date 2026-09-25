@@ -33,7 +33,12 @@ import pytest
 from kazma_core.security.vault import SecretVault
 from kazma_core.tenant_context import reset_current_tenant_id, set_current_tenant_id
 
-NAME = "cfg:providers.list.deepseek.api_key"
+# The incident above was a provider key; provider keys and mail tokens are
+# install-scoped since 2026-09-25 (INSTALL_SCOPED_SECRETS, tested in
+# test_provider_key_install_scope.py), so the vault no longer stores them per
+# tenant. The mechanism here still guards every per-tenant secret, such as
+# the X connector credentials.
+NAME = "cfg:connectors.x.api_key"
 SECRET = "sk-not-a-real-key-0000"
 
 
