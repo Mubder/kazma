@@ -112,7 +112,7 @@ tree. Assume the same class exists elsewhere.
   | cron scheduler | two 09:00 reminders failed `HTTP 401: no usable API key`, paging the operator twice | 2026-09-12 |
   | the agent turn (`resolve_live_client`) | the operator's DeepSeek key read as absent → registry substituted Z.AI → Telegram answered with Z.AI's `{"code":"1211","message":"Unknown Model"}` for a DeepSeek model id | 2026-09-17 |
   | `kazma_cli.main` | `kazma doctor` reported the key unreadable and blamed another install's vault, while it sat in that same vault decrypting fine | 2026-09-17 |
-  | boot and every tenant-less caller of the registry | under `KAZMA_PRODUCTION=1` the `default` rung is closed, so every boot built the agent on Z.AI with the DeepSeek key in the vault | 2026-09-25: provider keys are install-scoped (`INSTALL_SCOPED_CONFIG_SECRETS`), and a fallback is announced |
+  | boot and every tenant-less caller of the registry | under `KAZMA_PRODUCTION=1` the `default` rung is closed, so every boot built the agent on Z.AI with the DeepSeek key in the vault | 2026-09-25: provider keys are install-scoped (`INSTALL_SCOPED_SECRETS`), and a fallback is announced |
 
   The third is the one worth staring at: the **diagnostic** had the bug it was
   built to diagnose, so it confidently sent the operator to re-enter a key that
@@ -368,19 +368,18 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
 | The guard hands every server its boot-time environment, so a PATH the operator fixed never reached a `--reload`; the `.env` ladder line was logged before logging existed | `tests/test_path_refresh.py` (real app factory; order check with a negative control) |
 | A provider key saved in Settings sat under tenant `default`; the registry reads with no tenant and the `default` rung is closed in production, so every boot from 2026-09-16 substituted Z.AI for DeepSeek — the fourth shipment of the tenant-context class below — and said so only in a WARNING | `tests/test_provider_key_install_scope.py` (provider keys install-scoped; boot consolidation); `tests/test_model_fallback_notice.py` (every model swap pages and shows a banner) |
 | uvicorn replaced the client address before the undeclared-proxy check read it: every boot behind Cloudflare Tunnel logged a false `[SECURITY]` alarm advising to trust a visitor's IP | `tests/test_forwarded_headers_peer.py` (real ASGI layers; every launcher leaves forwarded headers to the app) |
+| Mail secrets split across scopes: `email.gmail.scopes` differed between chat and background work (the backup token refresh and the agent's secret tool wrote under the request's tenant) | `tests/test_mail_secrets_install_scope.py` (the vault keeps `email.*`/`calendar.*` install-wide for every writer) |
+| `KAZMA_TRUSTED_PROXIES` ranges were honoured by uvicorn and not by Kazma's checks | the range tests in `tests/test_forwarded_headers_peer.py` (`_is_trusted_proxy` is the one answer) |
+
+The proxy fix was confirmed live on a page load through the tunnel
+(2026-09-25 14:19 UTC): no alarm.
 
 **Still open from those:**
 
-- **The proxy fix is not yet confirmed by a live page load.** Only API polls
-  came through the tunnel after the deploy; the alarm used to fire on a page
-  load (`GET /chat`).
-- **Connector credentials (X, mail) still need a tenant bound to read.**
-  Only provider keys moved to install scope, because only the registry is one
-  per process and shared by every tenant. Moving an account the agent acts as
-  is an authorization question, not a storage fix.
-- **`KAZMA_TRUSTED_PROXIES` is matched exactly by Kazma but uvicorn accepts
-  CIDR ranges.** A CIDR entry is honoured for the rewrite and not for the
-  peer checks, so it still trips the detector. Declare exact addresses.
+- **X connector credentials still need a tenant bound to read.** Provider
+  keys, mail and calendar are install-scoped; X stays per tenant, because
+  moving an account the agent posts as is an authorization question, not a
+  storage fix.
 
 ## Prompt injection
 

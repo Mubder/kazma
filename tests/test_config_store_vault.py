@@ -113,11 +113,13 @@ def test_retrieve_prefers_newest_duplicate_row(vault_env):
 @pytest.mark.postgres
 def test_retrieve_tenant_isolation(vault_env):
     v = vault_env
-    v.store("email.gmail.client_secret", "GLOBAL", category="email")
-    v.store("email.gmail.client_secret", "TENANT", category="email", tenant_id="default")
+    # A per-tenant name: mail secrets are install-scoped (INSTALL_SCOPED_SECRETS),
+    # so the vault stores one copy of them whatever tenant a caller names.
+    v.store("svc.api_token", "GLOBAL", category="svc")
+    v.store("svc.api_token", "TENANT", category="svc", tenant_id="default")
     # Global reads must not leak the tenant-scoped row, and vice versa
-    assert v.retrieve("email.gmail.client_secret") == "GLOBAL"
-    assert v.retrieve("email.gmail.client_secret", tenant_id="default") == "TENANT"
+    assert v.retrieve("svc.api_token") == "GLOBAL"
+    assert v.retrieve("svc.api_token", tenant_id="default") == "TENANT"
 
 
 @pytest.mark.postgres

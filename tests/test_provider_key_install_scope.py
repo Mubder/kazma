@@ -14,7 +14,7 @@ but it is closed when ``KAZMA_PRODUCTION=1`` -- deliberately, since an OIDC
 install can have other tenants -- and the live install sets it. Chat turns
 escaped only because ``resolve_live_client`` binds ``default`` per call.
 
-Fixed at the storage: provider keys (``INSTALL_SCOPED_CONFIG_SECRETS``) are
+Fixed at the storage: provider keys (``INSTALL_SCOPED_SECRETS``) are
 written at install scope, and boot brings keys saved the old way up to it
 before the registry builds a client. The posture gate is untouched.
 """
@@ -82,6 +82,22 @@ def _store_as(v, tenant, name, value):
         v.store(name, value)
 
 
+def _legacy_row(v, tenant, name, value, stamp="2026-09-12T16:18:08+00:00"):
+    """A row as a writer before 2026-09-25 left it: under whatever tenant it had.
+
+    ``store`` no longer writes an install-scoped name per tenant, so the
+    shapes this migration exists for are built by hand.
+    """
+    import secrets as _secrets
+
+    ct, nonce = v._encrypt(value)
+    v._conn.execute(
+        "INSERT INTO secrets (id, name, encrypted_value, nonce, category, metadata, "
+        "tenant_id, created_at, updated_at) VALUES (?, ?, ?, ?, 'config', '{}', ?, ?, ?)",
+        (_secrets.token_hex(16), name, ct, nonce, tenant, stamp, stamp),
+    )
+
+
 def _registry(store):
     from kazma_core.model_registry import ModelRegistry
 
@@ -109,7 +125,7 @@ def test_a_key_saved_the_old_way_is_consolidated_before_boot(
     """The live vault: the key under tenant 'default' only, the setting a pointer."""
     registry = _registry(store)
     _providers(registry, f"vault://{NAME}")
-    _store_as(vault, "default", NAME, "sk-deepseek")
+    _legacy_row(vault, "default", NAME, "sk-deepseek")
 
     # Negative control: the incident, reproduced -- a boot-time build with no
     # tenant bound cannot see the key and substitutes Z.AI.
@@ -139,7 +155,7 @@ def test_a_settings_save_now_stores_the_key_for_the_install(vault, store, produc
 
 def test_a_resave_rewrites_the_old_tenant_copy(vault, store, production, pages):
     """A copy left under the tenant would shadow the new key for chat turns."""
-    _store_as(vault, "default", NAME, "sk-old")
+    _legacy_row(vault, "default", NAME, "sk-old")
     registry = _registry(store)
     with tenant_scope("default"):
         _providers(registry, "sk-new")
@@ -169,8 +185,8 @@ def test_other_config_secrets_keep_the_saving_tenant(vault, store, production):
 
 
 def test_store_install_scoped_syncs_every_copy_and_skips_an_unchanged_value(vault):
-    _store_as(vault, "default", NAME, "old")
-    _store_as(vault, "acme", NAME, "older")
+    _legacy_row(vault, "default", NAME, "old")
+    _legacy_row(vault, "acme", NAME, "older")
 
     assert vault.store_install_scoped(NAME, "new") == 3  # global + two tenants
     for tenant in (None, "default", "acme"):
@@ -179,21 +195,12 @@ def test_store_install_scoped_syncs_every_copy_and_skips_an_unchanged_value(vaul
     assert vault.store_install_scoped(NAME, "new") == 0
 
 
-def _age(vault, tenant, stamp):
-    vault._conn.execute(
-        "UPDATE secrets SET updated_at = ? WHERE name = ? AND "
-        "COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__')",
-        (stamp, NAME, tenant),
-    )
-
-
 @pytest.mark.parametrize("newer, value", [("default", "tenant-save"), (None, "global-save")])
 def test_consolidation_keeps_the_newest_save(vault, newer, value):
-    _store_as(vault, None, NAME, "global-save")
-    _store_as(vault, "default", NAME, "tenant-save")
-    older = "default" if newer is None else None
-    _age(vault, older, "2026-09-01T00:00:00+00:00")
-    _age(vault, newer, "2026-09-20T00:00:00+00:00")
+    """Provider keys: the operator's latest save wins, in whichever scope it landed."""
+    early, late = "2026-09-01T00:00:00+00:00", "2026-09-20T00:00:00+00:00"
+    _legacy_row(vault, None, NAME, "global-save", late if newer is None else early)
+    _legacy_row(vault, "default", NAME, "tenant-save", late if newer == "default" else early)
 
     assert vault.consolidate_install_scoped() == [NAME]
     for tenant in (None, "default"):
@@ -202,7 +209,7 @@ def test_consolidation_keeps_the_newest_save(vault, newer, value):
 
 
 def test_an_undecryptable_newest_copy_is_left_alone(vault, caplog):
-    _store_as(vault, "default", NAME, "sk-real")
+    _legacy_row(vault, "default", NAME, "sk-real")
     vault._conn.execute(
         "INSERT INTO secrets (id, name, encrypted_value, nonce, category, metadata, "
         "tenant_id, created_at, updated_at) VALUES "
@@ -212,6 +219,18 @@ def test_an_undecryptable_newest_copy_is_left_alone(vault, caplog):
     assert vault.consolidate_install_scoped() == []
     assert "does not decrypt" in caplog.text
     assert vault.retrieve(NAME) is None, "nothing was guessed into the global row"
+
+
+def test_every_writer_stores_a_provider_key_for_the_install(vault):
+    """Not only ConfigStore: the vault itself refuses a per-tenant copy."""
+    vault.store(NAME, "explicit", tenant_id="default")
+    assert vault.retrieve(NAME) == "explicit"
+    with tenant_scope("default"):
+        vault.store(NAME, "ambient")
+    for tenant in (None, "default", "acme"):
+        with tenant_scope(tenant):
+            assert vault.retrieve(NAME) == "ambient"
+    assert vault.find_divergent_duplicates() == []
 
 
 def test_a_diagnostic_cannot_write_install_scope(vault):

@@ -221,7 +221,7 @@ def _store_config_secret(vault: Any, vname: str, value: str) -> bool:
     dimension, but the vault does, and ``vault.store`` takes the tenant from
     the request: a key saved through Settings landed under tenant ``default``.
     For a provider key that hid it from every caller with no tenant bound (see
-    :data:`kazma_core.security.vault.INSTALL_SCOPED_CONFIG_SECRETS`), so those
+    :data:`kazma_core.security.vault.INSTALL_SCOPED_SECRETS`), so those
     names are stored at install scope whatever tenant the request carries.
     Every other name keeps the caller's tenant, as before. Unchanged values
     are not rewritten.

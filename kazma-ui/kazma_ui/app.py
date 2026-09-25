@@ -290,7 +290,7 @@ class KazmaAppBuilder:
         # Before the registry builds its first client: a provider key saved
         # under a tenant is invisible to it (it reads with no tenant bound),
         # so every boot used to substitute another provider for the
-        # configured one. See INSTALL_SCOPED_CONFIG_SECRETS. Idempotent.
+        # configured one. See INSTALL_SCOPED_SECRETS. Idempotent.
         import sqlite3 as _sqlite3
 
         try:
