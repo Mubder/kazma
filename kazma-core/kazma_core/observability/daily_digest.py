@@ -45,6 +45,12 @@ _GUARD_EVENTS = {
     "guard.refused_to_start": "refused starts",
     "maintenance.active": "maintenance pauses",
     "child.foreign_server_holds_port": "port conflicts",
+    # The guard's pager is the one that must work when the app cannot. From
+    # 2026-09-24 22:30 it could not resolve its credentials and skipped every
+    # page, a restart among them, for a day -- logged only in guard.log, at
+    # INFO. The app's own digest is the other channel that can say so.
+    "notify.skipped": "guard alerts not delivered (no credentials)",
+    "notify.failed": "guard alerts that failed to send",
 }
 
 # Application log markers. Substring match on the message, because these
@@ -186,6 +192,8 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
         for label in (
             "failed starts", "crash loops", "refused starts",
             "MCP connection failures", "maintenance pauses",
+            "guard alerts not delivered (no credentials)",
+            "guard alerts that failed to send",
         )
     }
     problems = {k: v for k, v in problems.items() if v}

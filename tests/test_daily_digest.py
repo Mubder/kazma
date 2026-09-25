@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from kazma_core.observability import daily_digest, ops_alerts
@@ -79,6 +80,28 @@ def test_recoveries_are_separated_from_problems(tmp_path, monkeypatch):
     assert "orphans cleaned up: 1" in text
     assert "Needs attention:" in text
     assert "crash loops: 1" in text
+
+
+def test_guard_pages_that_never_left_need_attention(tmp_path, monkeypatch):
+    """The guard's pager must work when the app cannot. From 2026-09-24 22:30
+    it skipped every page for a day, recorded only in guard.log at INFO; the
+    digest is the app-side channel that can say so."""
+    monkeypatch.setenv("KAZMA_GUARD_LOG", str(_guard_log(
+        tmp_path, ["guard.restarting", "notify.skipped", "notify.skipped", "notify.failed"])))
+    monkeypatch.setenv("KAZMA_LOG_FILE", str(_app_log(tmp_path, [])))
+    text = daily_digest.build_digest(hours=24)
+    attention = text.split("Needs attention:", 1)[1]
+    assert "guard alerts not delivered (no credentials): 2" in attention
+    assert "guard alerts that failed to send: 1" in attention
+    assert "No failures" not in text
+
+
+def test_the_guard_events_the_digest_counts_are_ones_the_guard_emits():
+    """A label for an event the guard never logs would count nothing, forever."""
+    guard_src = (Path(__file__).resolve().parents[1] / "scripts" / "service"
+                 / "kazma_guard.py").read_text(encoding="utf-8")
+    missing = [e for e in daily_digest._GUARD_EVENTS if f'"{e}"' not in guard_src]
+    assert missing == []
 
 
 def test_events_outside_the_window_are_ignored(tmp_path, monkeypatch):

@@ -13,10 +13,12 @@ platform.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import io
 import json
 import os
+import subprocess
 import sys
 import time
 from email.message import Message
@@ -226,6 +228,8 @@ def test_notifier_is_optional_and_silent_when_unconfigured(monkeypatch, tmp_path
     for var in ("KAZMA_GUARD_TELEGRAM_TOKEN", "KAZMA_GUARD_TELEGRAM_CHAT",
                 "SWARM_BOT_TOKEN", "SWARM_CHAT_ID"):
         monkeypatch.delenv(var, raising=False)
+    # The real lookup runs a child that loads the install's .env: never in a test.
+    monkeypatch.setattr(guard.Notifier, "_from_config_store", lambda self: ("", ""))
     log = guard.GuardLog(tmp_path / "g.log")
     n = guard.Notifier(log)
     assert n.configured is False
@@ -384,26 +388,131 @@ def test_falls_back_to_the_vault(monkeypatch, tmp_path):
     assert n.token == "vault-token"
 
 
+def _completed(returncode=0, stdout="", stderr=""):
+    return subprocess.CompletedProcess(["python"], returncode, stdout=stdout, stderr=stderr)
+
+
 def test_broken_venv_loses_alerting_never_supervision(monkeypatch, tmp_path):
-    """The config-store import is the guard's ONLY reach into the app.
+    """The settings lookup is the guard's ONLY reach into the app.
 
     If kazma_core cannot be imported -- exactly the situation where the
     guard matters most -- resolution must degrade to "no alerts" rather
-    than raise and take the supervisor down with it.
+    than raise and take the supervisor down with it. The lookup runs in a
+    child, so a broken venv is a child that exits non-zero.
     """
     _clear_notifier_env(monkeypatch)
-
-    real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
-
-    def _explode(name, *a, **k):
-        if name.startswith("kazma_core"):
-            raise ImportError("simulated broken venv")
-        return real_import(name, *a, **k)
-
-    monkeypatch.setattr("builtins.__import__", _explode)
+    monkeypatch.setattr(guard, "_settings_lookup_allowed", lambda: True)
+    monkeypatch.setattr(
+        guard.subprocess, "run",
+        lambda *a, **k: _completed(1, stderr="Traceback ...\nModuleNotFoundError: No module named 'kazma_core'"),
+    )
     n = guard.Notifier(guard.GuardLog(tmp_path / "g.log"))
     assert n.configured is False
+    assert "ModuleNotFoundError" in n.describe()
     n.send("should be a no-op")  # must not raise
+
+
+def test_the_settings_lookup_runs_in_a_child_that_loads_the_install_env(monkeypatch, tmp_path):
+    """Since 2026-09-22 importing kazma_core does not load a .env; entry points
+    do. The in-process lookup then ran with no vault key and no database URL,
+    and the guard answered "not configured" to every page from 2026-09-24
+    22:30 -- a restart among them -- for a day."""
+    _clear_notifier_env(monkeypatch)
+    calls = []
+
+    def _run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return _completed(0, stdout=(
+            "[ConfigStore] using Postgres backend\n"
+            'KAZMA_GUARD_NOTIFY {"token": "t0k-secret", "chat": "42"}\n'
+        ))
+
+    monkeypatch.setattr(guard, "_settings_lookup_allowed", lambda: True)
+    monkeypatch.setattr(guard.subprocess, "run", _run)
+    before = dict(os.environ)
+    n = guard.Notifier(guard.GuardLog(tmp_path / "g.log"), cwd=tmp_path, python="srv-python")
+    assert n.configured is True
+    assert (n.token, n.chat) == ("t0k-secret", "42")
+    assert n.describe() == "telegram via vault -> chat 42"
+    (cmd, kwargs), = calls
+    assert cmd[0] == "srv-python" and cmd[1] == "-c"
+    assert "load_env_files()" in cmd[2] and "read_only_diagnostic" in cmd[2]
+    assert kwargs["cwd"] == str(tmp_path)
+    assert kwargs["timeout"] > 0
+    assert dict(os.environ) == before, "the guard's own environment must not change"
+
+
+def test_the_guard_uses_the_server_interpreter_for_the_lookup(monkeypatch, tmp_path):
+    monkeypatch.setenv("KAZMA_GUARD_CMD", json.dumps([r"C:\venvs\kazma\python.exe", "serve.py"]))
+    monkeypatch.setenv("KAZMA_GUARD_LOG", str(tmp_path / "g.log"))
+    g = guard.Guard(once=True)
+    assert g.notify._python == r"C:\venvs\kazma\python.exe"
+    assert g.notify._cwd == g.cwd
+
+
+def test_a_failed_lookup_is_retried_when_a_page_is_due(monkeypatch, tmp_path):
+    """Resolved once and never again: one failed lookup (the database still
+    starting) used to keep the guard silent until the guard itself restarted."""
+    _clear_notifier_env(monkeypatch)
+    answers = [("", ""), ("tok", "chat")]
+    monkeypatch.setattr(guard.Notifier, "_from_config_store", lambda self: answers.pop(0))
+    n = guard.Notifier(guard.GuardLog(tmp_path / "g.log"))
+    assert n.configured is False
+    assert n.configured is False and len(answers) == 1, "not retried inside the window"
+    n._looked_up_at -= guard._NOTIFY_RELOOKUP_S + 1
+    assert n.configured is True and n.token == "tok"
+
+
+def test_a_hung_lookup_costs_alerting_not_supervision(monkeypatch, tmp_path):
+    _clear_notifier_env(monkeypatch)
+
+    def _hang(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+
+    monkeypatch.setattr(guard, "_settings_lookup_allowed", lambda: True)
+    monkeypatch.setattr(guard.subprocess, "run", _hang)
+    n = guard.Notifier(guard.GuardLog(tmp_path / "g.log"))
+    assert n.configured is False
+    assert "TimeoutExpired" in n.describe()
+    n.send("no-op")
+
+
+def test_no_test_can_run_the_real_settings_lookup(monkeypatch, tmp_path):
+    """The child reads a real .env and vault: under pytest it must not start,
+    whatever a test forgets to patch."""
+    _clear_notifier_env(monkeypatch)
+
+    def _no_child(*a, **k):
+        raise AssertionError("a test started the real settings lookup")
+
+    monkeypatch.setattr(guard.subprocess, "run", _no_child)
+    n = guard.Notifier(guard.GuardLog(tmp_path / "g.log"))
+    assert n.configured is False
+    assert "pytest" in n.describe()
+
+
+def _app_imports(source: str) -> list[int]:
+    """Lines where *source* imports kazma_* (a string holding code is not an import)."""
+    hits = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import) and any(a.name.startswith("kazma_") for a in node.names):
+            hits.append(node.lineno)
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("kazma_"):
+            hits.append(node.lineno)
+    return hits
+
+
+def test_the_guard_never_imports_the_app():
+    """Supervision stays standard-library-only; the app is reached in a child."""
+    source = Path(guard.__file__).read_text(encoding="utf-8")
+    assert _app_imports(source) == []
+
+
+def test_the_app_import_check_sees_a_lazy_import():
+    """Negative control (§28)."""
+    planted = "def f():\n    from kazma_core.config_store import get_config_store\n" \
+              "LOOKUP = 'from kazma_core import x'\n"
+    assert _app_imports(planted) == [2]
 
 
 def test_describe_never_leaks_the_token(monkeypatch, tmp_path):

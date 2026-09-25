@@ -151,12 +151,57 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
         "stdio IDE server that runs shell commands for an external client; it "
         "never imported kazma_core at load, so it never had the secrets"
     ),
+    # Hermetic tooling under scripts/: the same answer on every machine, and
+    # no install's secrets or settings.
+    "scripts/check_docs_sync.py": "compares the docs with the code; reads no install",
+    "scripts/generate_tools_catalog.py": "generates the catalog from the code",
+    "scripts/injection_report.py": "scores the defenses offline against the fixture corpus",
+    "scripts/certify_documents.py": "bounded certification corpus: the same verdict everywhere",
+    "scripts/verify_documents.py": "verifies the document layer against built-in samples",
+    "scripts/verify_docx_rtl.py": "renders built-in RTL samples",
+    "scripts/smoke_topic_shift_p0.py": "pure intent-policy smoke; no server, no settings",
+}
+
+#: Scripts that load a `.env` their own way, on purpose, and why.
+OWN_ENV_SCRIPTS: dict[str, str] = {
+    "scripts/reconcile_memory_mirror.py": (
+        "loads THIS repo's .env, never the CWD's: a wrong-CWD .env once pointed "
+        "it at another database and it deleted 433 good mirror rows"
+    ),
+    "scripts/pg_backup.py": "loads the .env found from the script's folder before reading the DSN",
 }
 
 
+def _script_entry_points() -> set[str]:
+    """Programs under scripts/ that import Kazma.
+
+    The gate used to see only the packages, and the guard under
+    scripts/service/ lost its credentials without a test noticing: since
+    2026-09-22 importing kazma_core loads no .env, and it never loaded one
+    (its pager was silent from 2026-09-24 22:30). Eleven operator scripts --
+    reembed, restore rehearsal, the live injection study among them -- had
+    quietly switched to the stale SQLite settings the same way.
+    """
+    out: set[str] = set()
+    for path in (REPO_ROOT / "scripts").rglob("*.py"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if '__name__ == "__main__"' not in text:
+            continue
+        for node in ast.walk(ast.parse(text)):
+            names = (
+                [a.name for a in node.names] if isinstance(node, ast.Import)
+                else [node.module or ""] if isinstance(node, ast.ImportFrom) else []
+            )
+            if any(n.startswith("kazma_") for n in names):
+                out.add(path.relative_to(REPO_ROOT).as_posix())
+                break
+    return out
+
+
 def _entry_point_files() -> set[str]:
-    """Console scripts, `__main__.py` modules, `__main__` blocks, serve.py."""
-    out = {"serve.py"}
+    """Console scripts, `__main__.py` modules, `__main__` blocks, serve.py,
+    and the programs under scripts/ that import Kazma."""
+    out = {"serve.py"} | _script_entry_points()
     scripts = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     for target in scripts["project"]["scripts"].values():
         module = target.split(":", 1)[0]
@@ -198,6 +243,9 @@ def test_every_entry_point_declares_its_env_policy():
         text = (REPO_ROOT / rel).read_text(encoding="utf-8")
         if "load_env_files(" in text:
             continue
+        if rel in OWN_ENV_SCRIPTS:
+            assert "load_dotenv(" in text, f"{rel} is declared to load its own .env but does not"
+            continue
         target = _delegate_target(rel) if rel.endswith("__main__.py") else None
         if target and "load_env_files(" in (REPO_ROOT / target).read_text(encoding="utf-8"):
             continue
@@ -213,4 +261,15 @@ def test_every_entry_point_declares_its_env_policy():
 def test_entry_point_enumeration_is_not_blind():
     found = _entry_point_files()
     assert {"serve.py", "kazma-cli/kazma_cli/main.py", "kazma-ui/kazma_ui/app.py"} <= found
+    assert {"scripts/reembed.py", "scripts/restore_rehearsal.py", "scripts/injection_live.py"} <= found
     assert set(ENV_FREE_ENTRY_POINTS) <= found, set(ENV_FREE_ENTRY_POINTS) - found
+    assert set(OWN_ENV_SCRIPTS) <= found, set(OWN_ENV_SCRIPTS) - found
+
+
+def test_the_guard_is_not_an_env_loading_entry_point():
+    """The guard imports nothing from Kazma (its credential lookup runs in a
+    child that loads .env), so it is not in the list -- and must never load
+    .env into its own environment, which every server inherits."""
+    assert "scripts/service/kazma_guard.py" not in _script_entry_points()
+    guard_src = (REPO_ROOT / "scripts" / "service" / "kazma_guard.py").read_text(encoding="utf-8")
+    assert "load_dotenv(" not in guard_src
