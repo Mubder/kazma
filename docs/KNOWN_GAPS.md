@@ -42,9 +42,13 @@ tree. Assume the same class exists elsewhere.
 **Still open from that audit:**
 
 - **Postgres has one CI job, not coverage.** The job runs every test marked
-  `@pytest.mark.postgres` (`scripts/postgres_suite.py`): 274 tests in 30 files
+  `@pytest.mark.postgres` (`scripts/postgres_suite.py`): 282 tests in 31 files
   on 2026-09-25 (evening), each file passing twice on a throwaway Postgres
-  before it was marked — up from seven named files at the start. Marking is
+  before it was marked — up from seven named files at the start. The newest,
+  `test_task_store_backends.py`, pins where the two backends' SQL differs
+  (worker/metadata/tenant filters, counts, metrics, prune, orphan requeue) and
+  found that `TaskStore.prune_tasks` reported 0 deletions on Postgres whatever
+  it deleted (its `DELETE` had no `RETURNING`; fixed). Marking is
   per test, so a file whose other tests are SQLite-shaped still contributes
   the ones that are not. That is a tripwire for those code paths, not parity
   with the SQLite suite — everything unmarked still runs on SQLite only. A
@@ -420,6 +424,11 @@ Writing each of the 148 undescribed variables from its call site:
 - **`KAZMA_MEMORY_CONFLICT_POLICY=origin_wins` and `fail_closed` behave the
   same** (both skip a write to a row another region owns; only the logged
   reason differs).
+- **Swarm task history is never pruned.** `TaskStore.prune_tasks` (audit M3:
+  delete finished tasks older than 30 days) exists, is tested on both
+  backends, and nothing calls it — the routine-with-no-caller shape of §15.
+  Not wired, because doing so starts deleting task history on the next
+  reload: the owner decides the retention (a setting, or leave it unbounded).
 
 ## Prompt injection
 

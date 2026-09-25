@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Postgres runs more of the suite, and swarm pruning counts what it deletes (2026-09-25)
+
+The CI Postgres job now runs 282 tests in 31 files (from 250 in 26): today's
+paused-pipeline restart tests (the bug happened live on Postgres), four store
+suites that already held on Postgres, and a new
+`tests/test_task_store_backends.py` that pins the swarm task store where its
+SQLite and Postgres SQL differ — worker, metadata and tenant filters, counts,
+metrics, pruning, crash recovery.
+
+That file found one Postgres-only bug: `TaskStore.prune_tasks` reported 0
+deletions on Postgres however many rows it deleted. Fixed. It also found that
+nothing ever calls it, so swarm task history is never pruned; wiring that in
+would start deleting history, so it is left for the owner to decide (listed in
+`docs/KNOWN_GAPS.md`).
+
 ## Every environment variable is described, and the page is checked (2026-09-25)
 
 The reference page (`docs/docs/reference/environment-variables.md`) now

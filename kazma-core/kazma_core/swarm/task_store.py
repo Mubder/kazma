@@ -485,13 +485,17 @@ class TaskStore:
             if self._pg:
                 from kazma_core.db.pg_helpers import get_pool
 
+                # RETURNING is what makes the count: the pool hands back rows
+                # only for a statement that produces them, so without it a
+                # delete of any size came back as [] and this reported 0.
                 res = get_pool().execute(
                     """DELETE FROM kazma_swarm_tasks
                        WHERE status IN ('completed', 'failed', 'cancelled')
-                         AND COALESCE(sort_at, completed_at, created_at) < %s""",
+                         AND COALESCE(sort_at, completed_at, created_at) < %s
+                       RETURNING id""",
                     (cutoff,),
                 )
-                deleted = len(res) if isinstance(res, list) else 0
+                deleted = len(res)
                 if deleted:
                     logger.info("[TaskStore] pruned %d terminal tasks older than %d days", deleted, retention_days)
                 return deleted
