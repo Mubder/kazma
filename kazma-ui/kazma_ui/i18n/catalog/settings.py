@@ -1788,6 +1788,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "حفظ إعدادات الأمان",
         "en": "Save Safety Settings",
     },
+    "settings.save_swarm_retention": {
+        "ar": "حفظ مدة الاحتفاظ",
+        "en": "Save Retention",
+    },
     "settings.saved": {
         "ar": "تم الحفظ",
         "en": "Saved",
@@ -1879,6 +1883,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.summarize_old": {
         "ar": "تلخيص الرسائل القديمة",
         "en": "Summarize Old Messages",
+    },
+    "settings.swarm_retention_days": {
+        "ar": "الاحتفاظ بالمهام المنتهية (أيام)",
+        "en": "Keep finished tasks for (days)",
+    },
+    "settings.swarm_retention_hint": {
+        "ar": "تُحذف مهام السرب المكتملة والفاشلة والملغاة والمنتهية المهلة الأقدم من هذه المدة، وتتم المراجعة كل 15 دقيقة. المهام المتوقفة والجارية لا تُحذف أبدًا. القيمة 0 تحتفظ بكل المهام.",
+        "en": "Completed, failed, cancelled and timed-out swarm tasks older than this are deleted; the check runs every 15 minutes. Paused and running tasks are never deleted. 0 keeps every task.",
+    },
+    "settings.swarm_retention_saved": {
+        "ar": "تم حفظ مدة الاحتفاظ بمهام السرب",
+        "en": "Swarm task retention saved",
+    },
+    "settings.swarm_retention_title": {
+        "ar": "سجل مهام السرب",
+        "en": "Swarm task history",
     },
     "settings.system_diagnostics": {
         "ar": "تشخيص النظام",

@@ -111,10 +111,15 @@ def reset_division_runtime() -> None:
 
 
 def division_enforcement_on() -> bool:
-    raw = (os.environ.get("KAZMA_DIVISION_ENFORCE") or "").strip().lower()
-    if raw in ("1", "true", "yes", "on"):
-        return True
-    return bool(current_division_context())
+    """True exactly when :func:`check_division_tool` can block something.
+
+    That needs a division (``KAZMA_DIVISION`` or ``agent.division``); without
+    one every tool is allowed. A ``KAZMA_DIVISION_ENFORCE=1`` switch used to
+    turn this on with no division set, so Settings reported "enforced" while
+    nothing was — and a 2026-09-21 audit note cited it as a second way to
+    enforce. It was never read by the check itself, and is gone (2026-09-25).
+    """
+    return current_division_context() is not None
 
 
 def current_division_context() -> tuple[str, str] | None:

@@ -48,7 +48,7 @@ Use this before exposing Kazma beyond loopback. Aligns with
 - [ ] Workspace root confinement in production
 - [ ] Cron concurrency / stop / stale RUNNING handled
 - [ ] Multi-operator: platform allowlists set + `KAZMA_GATEWAY_STRICT_ALLOWLIST=1` (2026-08-19; adapters otherwise run allow-all for backward compat)
-- [ ] `KAZMA_HITL_CANONICAL_FLOOR=1` on strict deployments (danger list cannot narrow below canonical; 2026-08-19)
+- [ ] `KAZMA_HITL_CANONICAL_FLOOR` is not set to `0` (the floor is on by default since 2026-09-16: the danger list cannot narrow below canonical)
 - [ ] Offsite/cloud-sync backups verify TLS (WebDAV default ON since 2026-08-19; `backups.offsite.webdav.tls_verify=false` only for self-signed labs)
 - [ ] Offsite restic: **write probe** succeeds (`rclone:` and `s3:` — a read-only remote is a failed backup)
 - [ ] New tools have a **`TOOL_TIERS`** entry (`read` / `write` / `danger`); unclassified = gated

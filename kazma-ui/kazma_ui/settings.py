@@ -20,6 +20,13 @@ from kazma_ui.rate_limit import rate_limit
 from fastapi.templating import Jinja2Templates
 
 from kazma_core.errors import safe_error, validation_error
+from kazma_core.swarm.task_store import (
+    DEFAULT_TASK_RETENTION_DAYS,
+    MAX_TASK_RETENTION_DAYS,
+    TASK_RETENTION_KEY,
+    parse_task_retention_days,
+    task_retention_days,
+)
 from kazma_ui.models import (
     AgentConfigUpdate,
     AppearanceUpdate,
@@ -427,8 +434,32 @@ class SettingsRouterBuilder:
                                 "(e.g. 'Asia/Kuwait', 'Europe/London', 'UTC')."
                             ),
                         )
+            # Swarm task retention decides what the 15-minute sweep deletes,
+            # so a value it cannot read is refused here rather than quietly
+            # replaced by the default there.
+            if setting.key == TASK_RETENTION_KEY:
+                days = parse_task_retention_days(setting.value)
+                if days is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Swarm task retention must be a whole number of days "
+                            f"from 0 (keep every task) to {MAX_TASK_RETENTION_DAYS}."
+                        ),
+                    )
+                setting.value = days
+                setting.category = "swarm"
             config_store.set(setting.key, setting.value, category=setting.category)
             return {"status": "ok"}
+
+        @router.get("/api/settings/swarm/task-retention")
+        def api_get_swarm_task_retention() -> dict[str, int]:
+            """Days finished swarm tasks are kept (0 = every task), and the default."""
+            return {
+                "days": task_retention_days(config_store),
+                "default": DEFAULT_TASK_RETENTION_DAYS,
+                "max": MAX_TASK_RETENTION_DAYS,
+            }
 
         @router.get("/api/settings/cron-timezone")
         async def api_get_cron_timezone() -> dict[str, str]:

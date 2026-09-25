@@ -14,6 +14,10 @@ from starlette.requests import Request
 
 import kazma_ui.auth as auth
 
+# Verified against a real Postgres (throwaway postgres:16, twice); the CI
+# Postgres job runs every test carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 
 def _request() -> Request:
     return Request({"type": "http", "method": "GET", "path": "/api/x", "headers": []})

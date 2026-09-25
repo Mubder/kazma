@@ -11,67 +11,66 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**263** variables are read by the product code; **115** are described on the curated page and **148** are not yet (marked —). New variables must be described there:
+**262** variables are read by the product code; **262** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
 |----------|-----------------|---------|-----------|
-| `KAZMA_ALLOW_PRIVATE_LLM` | (none) | `kazma_core.models.discovery` | — |
+| `KAZMA_ALLOW_PRIVATE_LLM` | (none) | `kazma_core.models.discovery` | yes |
 | `KAZMA_ALLOW_YOLO` | (none) | `kazma_core.safety.yolo` | yes |
 | `KAZMA_API_KEY` | `""` | `kazma_core.llm_provider`, `kazma_core.model_registry`, `kazma_ui.app` | yes |
-| `KAZMA_ARTIFACTS_DB` | (none) | `kazma_core.agent.artifacts` | — |
+| `KAZMA_ARTIFACTS_DB` | (none) | `kazma_core.agent.artifacts` | yes |
 | `KAZMA_AUTH_DISABLED` | `""` | `kazma_core.config_store`, `kazma_core.security.boot_guard`, `kazma_ui.auth` | yes |
 | `KAZMA_AUTOLOGIN_HOSTS` | (none) | `kazma_ui.auth` | yes |
-| `KAZMA_AUTO_STORE_BELIEFS` | (none) | `kazma_core.memory.belief_extractor` | — |
-| `KAZMA_BACKUPS_DIR` | (none) | `kazma_core.paths` | — |
-| `KAZMA_BACKUP_RETENTION` | (none) | `kazma_core.backup.universal` | — |
-| `KAZMA_BASE_URL` | (none) | `kazma_core.ide.env_context`, `kazma_core.runtime.local_api` | — |
-| `KAZMA_BOT_EMAIL` | `""` | `kazma_core.git_identity` | — |
-| `KAZMA_BOT_NAME` | `""` | `kazma_core.git_identity` | — |
-| `KAZMA_BUS_BRIDGE` | (none) | `kazma_core.safety.bus_bridge` | — |
-| `KAZMA_CALENDAR_PROVIDER` | `"auto"` | `kazma_skills.native.calendar.router` | — |
+| `KAZMA_AUTO_STORE_BELIEFS` | (none) | `kazma_core.memory.belief_extractor` | yes |
+| `KAZMA_BACKUPS_DIR` | (none) | `kazma_core.paths` | yes |
+| `KAZMA_BACKUP_RETENTION` | (none) | `kazma_core.backup.universal` | yes |
+| `KAZMA_BASE_URL` | (none) | `kazma_core.ide.env_context`, `kazma_core.runtime.local_api` | yes |
+| `KAZMA_BOT_EMAIL` | `""` | `kazma_core.git_identity` | yes |
+| `KAZMA_BOT_NAME` | `""` | `kazma_core.git_identity` | yes |
+| `KAZMA_BUS_BRIDGE` | (none) | `kazma_core.safety.bus_bridge` | yes |
+| `KAZMA_CALENDAR_PROVIDER` | `"auto"` | `kazma_skills.native.calendar.router` | yes |
 | `KAZMA_CHAOS_ENABLED` | `""` | `kazma_core.chaos.__init__`, `kazma_ui.routes_chaos` | yes |
-| `KAZMA_CHECKPOINT_RETENTION_DAYS` | (none) | `kazma_core.checkpoint_retention` | — |
-| `KAZMA_CLONE_DIR` | `""` | `kazma_gateway.agent_handler.commands`, `kazma_gateway.routers.github`, `kazma_gateway.routers.workspaces` | — |
-| `KAZMA_CLONE_HOSTS` | `""` | `kazma_gateway.routers.github` | — |
+| `KAZMA_CHECKPOINT_RETENTION_DAYS` | (none) | `kazma_core.checkpoint_retention` | yes |
+| `KAZMA_CLONE_DIR` | `""` | `kazma_gateway.agent_handler.commands`, `kazma_gateway.routers.github`, `kazma_gateway.routers.workspaces` | yes |
+| `KAZMA_CLONE_HOSTS` | `""` | `kazma_gateway.routers.github` | yes |
 | `KAZMA_CODE_EXEC_ALLOW_LOCAL` | (none) | `kazma_core.tools.code_exec` | yes |
 | `KAZMA_CODE_EXEC_DOCKER` | (none) | `kazma_core.safety.post_hitl`, `kazma_core.tools.code_exec` | yes |
-| `KAZMA_CODE_EXEC_IMAGE` | (none) | `kazma_core.tools.code_exec` | — |
+| `KAZMA_CODE_EXEC_IMAGE` | (none) | `kazma_core.tools.code_exec` | yes |
 | `KAZMA_CODE_INDEX` | (none) | `kazma_core.code_index.indexer` | yes |
-| `KAZMA_COMMITMENT_ENABLED` | (none) | `kazma_core.safety.commitment.config` | — |
-| `KAZMA_COMMITMENT_MODE` | (none) | `kazma_core.safety.commitment.config` | — |
-| `KAZMA_COMMITMENT_SOUL_REQUIRES_CONFIRM` | (none) | `kazma_core.safety.commitment.config` | — |
-| `KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE` | (none) | `kazma_core.safety.commitment.config` | — |
-| `KAZMA_COMPACT_PRESERVE_TOOL_RESULTS` | `"12"` | `kazma_core.compaction` | — |
+| `KAZMA_COMMITMENT_ENABLED` | (none) | `kazma_core.safety.commitment.config` | yes |
+| `KAZMA_COMMITMENT_MODE` | (none) | `kazma_core.safety.commitment.config` | yes |
+| `KAZMA_COMMITMENT_SOUL_REQUIRES_CONFIRM` | (none) | `kazma_core.safety.commitment.config` | yes |
+| `KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE` | (none) | `kazma_core.safety.commitment.config` | yes |
+| `KAZMA_COMPACT_PRESERVE_TOOL_RESULTS` | `"12"` | `kazma_core.compaction` | yes |
 | `KAZMA_COMPUTER_USE` | `"1"` | `kazma_core.tools.computer_use` | yes |
 | `KAZMA_CORS_ORIGINS` | (none) | `kazma_ui.browser_origins` | yes |
 | `KAZMA_CRAWL_MAX_DEPTH` | `5` | `kazma_core.tools.web_research` | yes |
 | `KAZMA_CRAWL_MAX_PAGES` | `50` | `kazma_core.tools.web_research` | yes |
-| `KAZMA_CRAWL_RESPECT_ROBOTS` | `"0"` | `kazma_core.tools.web_research` | — |
-| `KAZMA_CRON_STALE_HOURS` | (none) | `kazma_core.cron.scheduler` | — |
+| `KAZMA_CRAWL_RESPECT_ROBOTS` | `"0"` | `kazma_core.tools.web_research` | yes |
+| `KAZMA_CRON_STALE_HOURS` | (none) | `kazma_core.cron.scheduler` | yes |
 | `KAZMA_CUA_PLANNER` | `"1"` | `kazma_core.tools.computer_use_planners` | yes |
-| `KAZMA_DAILY_DIGEST` | `""` | `kazma_core.observability.daily_digest` | — |
+| `KAZMA_DAILY_DIGEST` | `""` | `kazma_core.observability.daily_digest` | yes |
 | `KAZMA_DATABASE_URL` | (none) | `kazma_core.db.backend`, `kazma_core.memory.backends` | yes |
-| `KAZMA_DATA_DIR` | (none) | `kazma_core.config_store`, `kazma_core.paths` | — |
+| `KAZMA_DATA_DIR` | (none) | `kazma_core.config_store`, `kazma_core.paths` | yes |
 | `KAZMA_DB_BACKEND` | (none) | `kazma_core.db.backend` | yes |
-| `KAZMA_DB_BACKEND_SOURCE` | (none) | `kazma_core.migration.exporter` | — |
-| `KAZMA_DB_CLIENT_ALLOWED_HOSTS` | (none) | `kazma_skills.native.database_client.tools` | — |
+| `KAZMA_DB_BACKEND_SOURCE` | (none) | `kazma_core.migration.exporter` | yes |
+| `KAZMA_DB_CLIENT_ALLOWED_HOSTS` | (none) | `kazma_skills.native.database_client.tools` | yes |
 | `KAZMA_DB_CONTAINER` | `""` | `kazma_core.migration.pg_bridge` | yes |
 | `KAZMA_DB_INTERNAL_PORT` | `"5432"` | `kazma_core.migration.pg_bridge` | yes |
 | `KAZMA_DEMO_MODE` | `""` | `kazma_core.memory.belief_extractor`, `kazma_core.memory.health`, `kazma_core.security.boot_guard` +5 | yes |
-| `KAZMA_DETACHED_TTL_S` | `"300"` | `kazma_ui.active_turns` | — |
+| `KAZMA_DETACHED_TTL_S` | `"300"` | `kazma_ui.active_turns` | yes |
 | `KAZMA_DEV_WS_BYPASS` | `""` | `kazma_core.security.boot_guard`, `kazma_ui.app`, `kazma_ui.auth` | yes |
-| `KAZMA_DIGEST_INTERVAL_HOURS` | `"24"` | `kazma_core.observability.daily_digest` | — |
+| `KAZMA_DIGEST_INTERVAL_HOURS` | `"24"` | `kazma_core.observability.daily_digest` | yes |
 | `KAZMA_DISABLE_COST_BREAKER` | `"0"` | `kazma_core.cost_breaker` | yes |
 | `KAZMA_DISCLOSURE_KEY` | `""` | `kazma_core.config_store` | yes |
-| `KAZMA_DIVISION` | (none) | `kazma_core.division_runtime` | — |
-| `KAZMA_DIVISION_ENFORCE` | (none) | `kazma_core.division_runtime` | — |
-| `KAZMA_DIVISION_USER` | (none) | `kazma_core.division_runtime` | — |
+| `KAZMA_DIVISION` | (none) | `kazma_core.division_runtime` | yes |
+| `KAZMA_DIVISION_USER` | (none) | `kazma_core.division_runtime` | yes |
 | `KAZMA_DOCKER_BIN` | (none) | `kazma_core.docker_cli` | yes |
 | `KAZMA_DOCLING` | (none) | `kazma_core.documents.extract_salvage` | yes |
 | `KAZMA_DOCUMENTS_JOBS_BACKEND` | (none) | `kazma_core.documents.jobs_pg` | yes |
 | `KAZMA_DOCUMENTS_METADATA_BACKEND` | (none) | `kazma_core.documents.jobs_pg` | yes |
-| `KAZMA_DOCUMENT_FONT_DIR` | `""` | `kazma_core.documents.fonts` | — |
+| `KAZMA_DOCUMENT_FONT_DIR` | `""` | `kazma_core.documents.fonts` | yes |
 | `KAZMA_E2B` | (none) | `kazma_core.sandbox.e2b` | yes |
 | `KAZMA_E2B_API_KEY` | (none) | `kazma_core.sandbox.e2b` | yes |
 | `KAZMA_EMBED_ALLOW_DOWNLOAD` | `""` | `kazma_core.memory.embedder` | yes |
@@ -83,48 +82,48 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_EMBED_PROVIDER` | `""` | `kazma_core.memory.embedder`, `kazma_core.memory.health` | yes |
 | `KAZMA_ENV` | (none) | `kazma_ui.app` | yes |
 | `KAZMA_ENV_FILE` | (none) | `kazma_core.env_files` | yes |
-| `KAZMA_EXPORTS_DIR` | (none) | `kazma_core.paths` | — |
+| `KAZMA_EXPORTS_DIR` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_FETCH_BACKEND` | (none) | `kazma_core.tools.read_url` | yes |
-| `KAZMA_FETCH_MAX_BYTES` | `"5000000"` | `kazma_core.tools.read_url` | — |
-| `KAZMA_FILE_CHECKPOINTS_DB` | (none) | `kazma_core.ide.file_checkpoints` | — |
+| `KAZMA_FETCH_MAX_BYTES` | `"5000000"` | `kazma_core.tools.read_url` | yes |
+| `KAZMA_FILE_CHECKPOINTS_DB` | (none) | `kazma_core.ide.file_checkpoints` | yes |
 | `KAZMA_FIRECRAWL_API_KEY` | (none) | `kazma_core.stores.knowledge_ingest`, `kazma_core.tools.read_url`, `kazma_core.tools.research_readiness` | yes |
 | `KAZMA_FIRECRAWL_URL` | (none) | `kazma_core.stores.knowledge_ingest`, `kazma_core.tools.read_url` | yes |
-| `KAZMA_FTS5_PATH` | (none) | `kazma_core.paths` | — |
+| `KAZMA_FTS5_PATH` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_GATEWAY_ADMINS` | (none) | `kazma_gateway.allowlists` | yes |
 | `KAZMA_GATEWAY_STRICT_ALLOWLIST` | `""` | `kazma_ui.app` | yes |
-| `KAZMA_GATE_REGISTRY` | (none) | `kazma_core.safety.hitl_gates` | — |
-| `KAZMA_GITHUB_APP_ID` | (none) | `kazma_core.git_identity` | — |
-| `KAZMA_GITHUB_APP_INSTALLATION_ID` | (none) | `kazma_core.git_identity` | — |
-| `KAZMA_GITHUB_APP_PRIVATE_KEY` | (none) | `kazma_core.git_identity` | — |
-| `KAZMA_GITHUB_APP_PRIVATE_KEY_PATH` | (none) | `kazma_core.git_identity` | — |
-| `KAZMA_GITHUB_APP_SLUG` | (none) | `kazma_core.git_identity` | — |
-| `KAZMA_GIT_SHA` | (none) | `kazma_core.version` | — |
-| `KAZMA_GRAPH_PROVIDER` | (none) | `kazma_core.memory.backends` | — |
+| `KAZMA_GATE_REGISTRY` | (none) | `kazma_core.safety.hitl_gates` | yes |
+| `KAZMA_GITHUB_APP_ID` | (none) | `kazma_core.git_identity` | yes |
+| `KAZMA_GITHUB_APP_INSTALLATION_ID` | (none) | `kazma_core.git_identity` | yes |
+| `KAZMA_GITHUB_APP_PRIVATE_KEY` | (none) | `kazma_core.git_identity` | yes |
+| `KAZMA_GITHUB_APP_PRIVATE_KEY_PATH` | (none) | `kazma_core.git_identity` | yes |
+| `KAZMA_GITHUB_APP_SLUG` | (none) | `kazma_core.git_identity` | yes |
+| `KAZMA_GIT_SHA` | (none) | `kazma_core.version` | yes |
+| `KAZMA_GRAPH_PROVIDER` | (none) | `kazma_core.memory.backends` | yes |
 | `KAZMA_GUARD_LOG` | (none) | `kazma_core.observability.daily_digest` | yes |
-| `KAZMA_HARD_MAX_COST` | (none) | `kazma_core.cost_breaker` | — |
+| `KAZMA_HARD_MAX_COST` | (none) | `kazma_core.cost_breaker` | yes |
 | `KAZMA_HITL_CANONICAL_FLOOR` | `""` | `kazma_core.safety.hitl` | yes |
-| `KAZMA_HITL_GRANT_TTL_SECONDS` | (none) | `kazma_core.safety.hitl_grants` | — |
+| `KAZMA_HITL_GRANT_TTL_SECONDS` | (none) | `kazma_core.safety.hitl_grants` | yes |
 | `KAZMA_HOST` | `"127.0.0.1"` | `kazma_cli.main`, `kazma_gateway.routers.github`, `kazma_ui.app` +2 | yes |
 | `KAZMA_HOST_SHELL` | (none) | `kazma_core.safety.post_hitl` | yes |
-| `KAZMA_HUB_DB` | (none) | `kazma_core.hub.cli`, `kazma_core.paths` | — |
-| `KAZMA_HUB_URL` | (none) | `kazma_core.hub.cli` | — |
+| `KAZMA_HUB_DB` | (none) | `kazma_core.hub.cli`, `kazma_core.paths` | yes |
+| `KAZMA_HUB_URL` | (none) | `kazma_core.hub.cli` | yes |
 | `KAZMA_IDE_LSP` | (none) | `kazma_core.ide.lsp` | yes |
 | `KAZMA_IMAGE_PROVIDER` | `"auto"` | `kazma_core.tools.image_backends.router` | yes |
-| `KAZMA_INTENT_ENGINE` | (none) | `kazma_core.agent.intent.config` | — |
-| `KAZMA_INTENT_EXECUTE` | (none) | `kazma_core.agent.intent.config` | — |
-| `KAZMA_INTENT_TIER2` | (none) | `kazma_core.agent.intent.config` | — |
+| `KAZMA_INTENT_ENGINE` | (none) | `kazma_core.agent.intent.config` | yes |
+| `KAZMA_INTENT_EXECUTE` | (none) | `kazma_core.agent.intent.config` | yes |
+| `KAZMA_INTENT_TIER2` | (none) | `kazma_core.agent.intent.config` | yes |
 | `KAZMA_JINA_API_KEY` | (none) | `kazma_core.tools.read_url` | yes |
 | `KAZMA_JINA_READER` | (none) | `kazma_core.stores.knowledge_ingest`, `kazma_core.tools.read_url`, `kazma_core.tools.research_readiness` | yes |
 | `KAZMA_JWT_SECRET` | `""` | `kazma_ui.auth` | yes |
-| `KAZMA_KB_AUTO_INJECT` | (none) | `kazma_core.stores.knowledge_index` | — |
-| `KAZMA_KB_AUTO_INJECT_TOP_K` | (none) | `kazma_core.stores.knowledge_index` | — |
-| `KAZMA_KB_DELAY_MS` | `300` | `kazma_core.stores.knowledge_ingest` | — |
-| `KAZMA_KB_JINA_FALLBACK` | (none) | `kazma_core.stores.knowledge_ingest` | — |
-| `KAZMA_KB_MAX_DEPTH` | `10` | `kazma_core.stores.knowledge_ingest` | — |
-| `KAZMA_KB_MAX_PAGES` | `200` | `kazma_core.stores.knowledge_ingest` | — |
-| `KAZMA_KB_SCOPE_MODE` | (none) | `kazma_core.stores.knowledge_ingest` | — |
-| `KAZMA_KB_SMART_SEARCH` | (none) | `kazma_core.stores.knowledge_index` | — |
-| `KAZMA_KNOWLEDGE_GRAPH_DB` | (none) | `kazma_core.paths` | — |
+| `KAZMA_KB_AUTO_INJECT` | (none) | `kazma_core.stores.knowledge_index` | yes |
+| `KAZMA_KB_AUTO_INJECT_TOP_K` | (none) | `kazma_core.stores.knowledge_index` | yes |
+| `KAZMA_KB_DELAY_MS` | `300` | `kazma_core.stores.knowledge_ingest` | yes |
+| `KAZMA_KB_JINA_FALLBACK` | (none) | `kazma_core.stores.knowledge_ingest` | yes |
+| `KAZMA_KB_MAX_DEPTH` | `10` | `kazma_core.stores.knowledge_ingest` | yes |
+| `KAZMA_KB_MAX_PAGES` | `200` | `kazma_core.stores.knowledge_ingest` | yes |
+| `KAZMA_KB_SCOPE_MODE` | (none) | `kazma_core.stores.knowledge_ingest` | yes |
+| `KAZMA_KB_SMART_SEARCH` | (none) | `kazma_core.stores.knowledge_index` | yes |
+| `KAZMA_KNOWLEDGE_GRAPH_DB` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_LANGFUSE` | `""` | `kazma_core.tracing.langfuse_enable` | yes |
 | `KAZMA_LITELLM` | (none) | `kazma_core.llm_gateway` | yes |
 | `KAZMA_LITELLM_FALLBACK_DIRECT` | (none) | `kazma_core.llm_gateway` | yes |
@@ -132,60 +131,60 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_LITELLM_LOCAL` | (none) | `kazma_core.llm_gateway` | yes |
 | `KAZMA_LITELLM_URL` | (none) | `kazma_core.llm_gateway` | yes |
 | `KAZMA_LLM_STREAM` | (none) | `kazma_core.llm_stream` | yes |
-| `KAZMA_LOG_FILE` | (none) | `kazma_core.observability.daily_digest`, `kazma_core.paths`, `kazma_core.settings_manager` | — |
-| `KAZMA_LOG_FORMAT` | (none) | `kazma_core.logging_config` | — |
-| `KAZMA_LOG_LEVEL` | (none) | `kazma_core.logging_config` | — |
-| `KAZMA_LOG_RETENTION_DAYS` | (none) | `kazma_core.logging_config` | — |
-| `KAZMA_LONG_TASK_MAX_ITER` | (none) | `kazma_core.agent.long_task` | — |
-| `KAZMA_LONG_TASK_MAX_RECURSION` | (none) | `kazma_core.agent.long_task` | — |
-| `KAZMA_LONG_TASK_TTL_SECONDS` | (none) | `kazma_core.agent.long_task` | — |
+| `KAZMA_LOG_FILE` | (none) | `kazma_core.observability.daily_digest`, `kazma_core.paths`, `kazma_core.settings_manager` | yes |
+| `KAZMA_LOG_FORMAT` | (none) | `kazma_core.logging_config` | yes |
+| `KAZMA_LOG_LEVEL` | (none) | `kazma_core.logging_config` | yes |
+| `KAZMA_LOG_RETENTION_DAYS` | (none) | `kazma_core.logging_config` | yes |
+| `KAZMA_LONG_TASK_MAX_ITER` | (none) | `kazma_core.agent.long_task` | yes |
+| `KAZMA_LONG_TASK_MAX_RECURSION` | (none) | `kazma_core.agent.long_task` | yes |
+| `KAZMA_LONG_TASK_TTL_SECONDS` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_LOOPBACK_AUTOLOGIN` | (none) | `kazma_ui.auth` | yes |
-| `KAZMA_LOOP_STALL_WATCHDOG` | (none) | `kazma_core.observability.loop_stall` | — |
+| `KAZMA_LOOP_STALL_WATCHDOG` | (none) | `kazma_core.observability.loop_stall` | yes |
 | `KAZMA_MAX_COST` | (none) | `kazma_core.cost_breaker` | yes |
 | `KAZMA_MCP_ALLOW_UNGATED` | (none) | `kazma_core.mcp.server` | yes |
-| `KAZMA_MCP_IDE_ENABLED` | `"true"` | `kazma_gateway.mcp_server` | — |
-| `KAZMA_MCP_INHERIT_ENV` | (none) | `kazma_core.mcp.manager` | — |
+| `KAZMA_MCP_IDE_ENABLED` | `"true"` | `kazma_gateway.mcp_server` | yes |
+| `KAZMA_MCP_INHERIT_ENV` | (none) | `kazma_core.mcp.manager` | yes |
 | `KAZMA_MCP_SAFE_ALLOWLIST` | (none) | `kazma_core.mcp.manager` | yes |
 | `KAZMA_MCP_SAMPLING` | `"0"` | `kazma_core.mcp.spec_client` | yes |
 | `KAZMA_MCP_SAMPLING_TIMEOUT` | `"60"` | `kazma_core.mcp.spec_client` | yes |
 | `KAZMA_MCP_SCOPE_GUARD` | `"1"` | `kazma_core.mcp.manager` | yes |
-| `KAZMA_MCP_STDIO_LIMIT` | (none) | `kazma_core.mcp.manager` | — |
-| `KAZMA_MCP_TIMEOUT_MS` | (none) | `kazma_core.mcp.manager` | — |
-| `KAZMA_MCP_TOOLS` | (none) | `kazma_core.mcp.server` | — |
+| `KAZMA_MCP_STDIO_LIMIT` | (none) | `kazma_core.mcp.manager` | yes |
+| `KAZMA_MCP_TIMEOUT_MS` | (none) | `kazma_core.mcp.manager` | yes |
+| `KAZMA_MCP_TOOLS` | (none) | `kazma_core.mcp.server` | yes |
 | `KAZMA_MCP_TRUSTED_IN_PROD` | (none) | `kazma_core.mcp.manager` | yes |
-| `KAZMA_MEMORY_CONFLICT_POLICY` | (none) | `kazma_core.memory.backends` | — |
+| `KAZMA_MEMORY_CONFLICT_POLICY` | (none) | `kazma_core.memory.backends` | yes |
 | `KAZMA_MEMORY_ENFORCE_TENANT` | `""` | `kazma_ui.memory_api` | yes |
-| `KAZMA_MEMORY_OPS_DB` | (none) | `kazma_core.paths` | — |
-| `KAZMA_MEMORY_STATE_DB` | (none) | `kazma_core.paths` | — |
-| `KAZMA_MEMORY_STATE_REGION` | (none) | `kazma_core.memory.backends` | — |
+| `KAZMA_MEMORY_OPS_DB` | (none) | `kazma_core.paths` | yes |
+| `KAZMA_MEMORY_STATE_DB` | (none) | `kazma_core.paths` | yes |
+| `KAZMA_MEMORY_STATE_REGION` | (none) | `kazma_core.memory.backends` | yes |
 | `KAZMA_MEMORY_STATE_ROLE` | (none) | `kazma_core.memory.backends` | yes |
-| `KAZMA_MIGRATE_CHECK_PORT` | (none) | `kazma_core.migration.importer` | — |
-| `KAZMA_MISSION_MAX_ROUNDS` | (none) | `kazma_core.agent.long_task` | — |
-| `KAZMA_MISSION_RECURSION` | (none) | `kazma_core.agent.long_task` | — |
+| `KAZMA_MIGRATE_CHECK_PORT` | (none) | `kazma_core.migration.importer` | yes |
+| `KAZMA_MISSION_MAX_ROUNDS` | (none) | `kazma_core.agent.long_task` | yes |
+| `KAZMA_MISSION_RECURSION` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_MODEL` | `""` | `kazma_core.model_registry`, `kazma_ui.app` | yes |
-| `KAZMA_MULTI_USER` | (none) | `kazma_core.security.platform_rbac`, `kazma_ui.auth` | — |
-| `KAZMA_NEO4J_DEFAULT` | (none) | `kazma_core.memory.backends` | — |
-| `KAZMA_NEO4J_PASSWORD` | (none) | `kazma_core.memory.backends` | — |
-| `KAZMA_NEO4J_URL` | (none) | `kazma_core.memory.backends` | — |
-| `KAZMA_NEO4J_USER` | (none) | `kazma_core.memory.backends` | — |
-| `KAZMA_NO_TRUNCATE` | (none) | `kazma_core.agent.graph_helpers` | — |
+| `KAZMA_MULTI_USER` | (none) | `kazma_core.security.platform_rbac`, `kazma_ui.auth` | yes |
+| `KAZMA_NEO4J_DEFAULT` | (none) | `kazma_core.memory.backends` | yes |
+| `KAZMA_NEO4J_PASSWORD` | (none) | `kazma_core.memory.backends` | yes |
+| `KAZMA_NEO4J_URL` | (none) | `kazma_core.memory.backends` | yes |
+| `KAZMA_NEO4J_USER` | (none) | `kazma_core.memory.backends` | yes |
+| `KAZMA_NO_TRUNCATE` | (none) | `kazma_core.agent.graph_helpers` | yes |
 | `KAZMA_OIDC_CLIENT_ID` | (none) | `kazma_core.security.oidc` | yes |
 | `KAZMA_OIDC_CLIENT_SECRET` | (none) | `kazma_core.security.oidc` | yes |
-| `KAZMA_OIDC_DEFAULT_ROLE` | (none) | `kazma_core.security.oidc` | — |
+| `KAZMA_OIDC_DEFAULT_ROLE` | (none) | `kazma_core.security.oidc` | yes |
 | `KAZMA_OIDC_ISSUER` | (none) | `kazma_core.security.oidc` | yes |
-| `KAZMA_OIDC_REDIRECT_URI` | (none) | `kazma_core.security.oidc` | — |
-| `KAZMA_OIDC_ROLE_CLAIM` | (none) | `kazma_core.security.oidc` | — |
-| `KAZMA_OIDC_SCOPES` | (none) | `kazma_core.security.oidc` | — |
+| `KAZMA_OIDC_REDIRECT_URI` | (none) | `kazma_core.security.oidc` | yes |
+| `KAZMA_OIDC_ROLE_CLAIM` | (none) | `kazma_core.security.oidc` | yes |
+| `KAZMA_OIDC_SCOPES` | (none) | `kazma_core.security.oidc` | yes |
 | `KAZMA_OIDC_TENANT_CLAIM` | (none) | `kazma_core.security.oidc` | yes |
-| `KAZMA_OPAQUE_SESSIONS` | (none) | `kazma_core.security.web_sessions` | — |
-| `KAZMA_OPS_ALERTS` | `""` | `kazma_core.observability.ops_alerts` | — |
-| `KAZMA_OPS_ALERT_COOLDOWN_S` | `"900"` | `kazma_core.observability.ops_alerts` | — |
-| `KAZMA_OTLP_ENDPOINT` | (none) | `kazma_core.swarm.tracing` | — |
-| `KAZMA_PERMISSIONS_ENFORCE` | (none) | `kazma_core.permissions` | — |
-| `KAZMA_PERSONALITY` | (none) | `kazma_core.personalities` | — |
+| `KAZMA_OPAQUE_SESSIONS` | (none) | `kazma_core.security.web_sessions` | yes |
+| `KAZMA_OPS_ALERTS` | `""` | `kazma_core.observability.ops_alerts` | yes |
+| `KAZMA_OPS_ALERT_COOLDOWN_S` | `"900"` | `kazma_core.observability.ops_alerts` | yes |
+| `KAZMA_OTLP_ENDPOINT` | (none) | `kazma_core.swarm.tracing` | yes |
+| `KAZMA_PERMISSIONS_ENFORCE` | (none) | `kazma_core.permissions` | yes |
+| `KAZMA_PERSONALITY` | (none) | `kazma_core.personalities` | yes |
 | `KAZMA_PGVECTOR` | (none) | `kazma_core.memory.backends` | yes |
-| `KAZMA_PG_BACKUP_ENABLED` | (none) | `kazma_core.db.pg_backup` | — |
-| `KAZMA_PG_BACKUP_RETENTION` | (none) | `kazma_core.db.pg_backup` | — |
+| `KAZMA_PG_BACKUP_ENABLED` | (none) | `kazma_core.db.pg_backup` | yes |
+| `KAZMA_PG_BACKUP_RETENTION` | (none) | `kazma_core.db.pg_backup` | yes |
 | `KAZMA_PG_POOL_MAX` | `"10"` | `kazma_core.db.postgres_pool` | yes |
 | `KAZMA_PG_POOL_MIN` | `"1"` | `kazma_core.db.postgres_pool` | yes |
 | `KAZMA_PG_POOL_RETRIES` | `"5"` | `kazma_core.db.postgres_pool` | yes |
@@ -195,86 +194,86 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_PLAN_MODE` | (none) | `kazma_core.agent.plan_mode` | yes |
 | `KAZMA_PORT` | `"9090"` | `kazma_cli.gateway`, `kazma_cli.main`, `kazma_cli.update` +7 | yes |
 | `KAZMA_PRODUCTION` | `""` | `kazma_core.agent.tool_builtins.system`, `kazma_core.documents.config`, `kazma_core.mcp.manager` +10 | yes |
-| `KAZMA_PROJECT_ROOT` | (none) | `kazma_core.mcp.server`, `kazma_core.paths` | — |
-| `KAZMA_PROMPT_CACHE` | (none) | `kazma_core.prompt_cache` | — |
+| `KAZMA_PROJECT_ROOT` | (none) | `kazma_core.mcp.server`, `kazma_core.paths` | yes |
+| `KAZMA_PROMPT_CACHE` | (none) | `kazma_core.prompt_cache` | yes |
 | `KAZMA_PROVIDER` | `""` | `kazma_core.model_registry`, `kazma_ui.app` | yes |
 | `KAZMA_PUBLIC_URL` | (none) | `kazma_core.ide.env_context`, `kazma_core.migration.exporter`, `kazma_core.security.oidc` +4 | yes |
-| `KAZMA_RATE_LIMIT_ENABLED` | `""` | `kazma_ui.rate_limit` | — |
+| `KAZMA_RATE_LIMIT_ENABLED` | `""` | `kazma_ui.rate_limit` | yes |
 | `KAZMA_READ_URL_MAX_CHARS` | (none) | `kazma_core.tools.read_url` | yes |
 | `KAZMA_REMOTE_PARSE` | (none) | `kazma_core.documents.extract_salvage` | yes |
-| `KAZMA_REPLICA_AFFINITY` | (none) | `kazma_ui.replica_affinity` | — |
-| `KAZMA_REPLICA_ID` | (none) | `kazma_ui.replica_affinity` | — |
-| `KAZMA_RESEARCH_ALLOW_THIN` | (none) | `kazma_core.tools.research_pipeline` | — |
+| `KAZMA_REPLICA_AFFINITY` | (none) | `kazma_ui.replica_affinity` | yes |
+| `KAZMA_REPLICA_ID` | (none) | `kazma_ui.replica_affinity` | yes |
+| `KAZMA_RESEARCH_ALLOW_THIN` | (none) | `kazma_core.tools.research_pipeline` | yes |
 | `KAZMA_RESEARCH_DIGEST_MAX` | (none) | `kazma_core.tools.read_url` | yes |
 | `KAZMA_RESEARCH_DIR` | (none) | `kazma_core.tools.read_url` | yes |
-| `KAZMA_RESEARCH_EXPORT_DOCX` | (none) | `kazma_core.tools.research_pipeline` | — |
-| `KAZMA_RESEARCH_GAP_LOOP` | `True` | `kazma_core.tools.research_pipeline`, `kazma_core.tools.research_planner` | — |
-| `KAZMA_RESEARCH_LLM_CRITIC` | `True` | `kazma_core.tools.research_planner` | — |
-| `KAZMA_RESEARCH_LLM_PLANNER` | `True` | `kazma_core.tools.research_planner` | — |
-| `KAZMA_RESEARCH_MIN_SOURCES` | (none) | `kazma_core.agent.research_policy` | — |
-| `KAZMA_RESEARCH_PREFLIGHT_LIVE` | (none) | `kazma_core.tools.research_readiness` | — |
-| `KAZMA_RESEARCH_ROUTE` | (none) | `kazma_core.agent.research_policy` | — |
-| `KAZMA_RESEARCH_SOFT_NUDGE` | (none) | `kazma_core.agent.research_policy` | — |
-| `KAZMA_RESEARCH_SYNTH_MAX_IN` | `48000` | `kazma_core.tools.research_synthesize` | — |
-| `KAZMA_RESTIC_PASSWORD` | `""` | `kazma_core.backup.restic_repo` | — |
+| `KAZMA_RESEARCH_EXPORT_DOCX` | (none) | `kazma_core.tools.research_pipeline` | yes |
+| `KAZMA_RESEARCH_GAP_LOOP` | `True` | `kazma_core.tools.research_pipeline`, `kazma_core.tools.research_planner` | yes |
+| `KAZMA_RESEARCH_LLM_CRITIC` | `True` | `kazma_core.tools.research_planner` | yes |
+| `KAZMA_RESEARCH_LLM_PLANNER` | `True` | `kazma_core.tools.research_planner` | yes |
+| `KAZMA_RESEARCH_MIN_SOURCES` | (none) | `kazma_core.agent.research_policy` | yes |
+| `KAZMA_RESEARCH_PREFLIGHT_LIVE` | (none) | `kazma_core.tools.research_readiness` | yes |
+| `KAZMA_RESEARCH_ROUTE` | (none) | `kazma_core.agent.research_policy` | yes |
+| `KAZMA_RESEARCH_SOFT_NUDGE` | (none) | `kazma_core.agent.research_policy` | yes |
+| `KAZMA_RESEARCH_SYNTH_MAX_IN` | `48000` | `kazma_core.tools.research_synthesize` | yes |
+| `KAZMA_RESTIC_PASSWORD` | `""` | `kazma_core.backup.restic_repo` | yes |
 | `KAZMA_SEARXNG_URL` | (none) | `kazma_core.tools.research_readiness`, `kazma_core.tools.web_search` | yes |
 | `KAZMA_SECRET` | `""` | `kazma_cli.main`, `kazma_core.config_store`, `kazma_core.runtime.local_api` +3 | yes |
-| `KAZMA_SELF_IMPROVEMENT` | (none) | `kazma_core.skills.self_improvement` | — |
-| `KAZMA_SEMANTIC_CACHE` | `"false"` | `kazma_core.llm_provider` | — |
-| `KAZMA_SEMANTIC_CACHE_MAX_ROWS` | (none) | `kazma_core.swarm.semantic_cache` | — |
-| `KAZMA_SEMANTIC_CACHE_TTL_SECONDS` | (none) | `kazma_core.swarm.semantic_cache` | — |
-| `KAZMA_SEMANTIC_COMPACT` | (none) | `kazma_core.agent.semantic_compact` | — |
-| `KAZMA_SESSION_OPEN_TAKEOVER` | (none) | `kazma_core.sessions.directory` | — |
-| `KAZMA_SESSION_TTL_SECONDS` | (none) | `kazma_core.security.web_sessions` | — |
-| `KAZMA_SHARED_BREAKERS` | (none) | `kazma_core.swarm.reliability` | — |
-| `KAZMA_SHELL_ALLOW_ARCHIVE` | (none) | `kazma_core.safety.post_hitl` | — |
+| `KAZMA_SELF_IMPROVEMENT` | (none) | `kazma_core.skills.self_improvement` | yes |
+| `KAZMA_SEMANTIC_CACHE` | `"false"` | `kazma_core.llm_provider` | yes |
+| `KAZMA_SEMANTIC_CACHE_MAX_ROWS` | (none) | `kazma_core.swarm.semantic_cache` | yes |
+| `KAZMA_SEMANTIC_CACHE_TTL_SECONDS` | (none) | `kazma_core.swarm.semantic_cache` | yes |
+| `KAZMA_SEMANTIC_COMPACT` | (none) | `kazma_core.agent.semantic_compact` | yes |
+| `KAZMA_SESSION_OPEN_TAKEOVER` | (none) | `kazma_core.sessions.directory` | yes |
+| `KAZMA_SESSION_TTL_SECONDS` | (none) | `kazma_core.security.web_sessions` | yes |
+| `KAZMA_SHARED_BREAKERS` | (none) | `kazma_core.swarm.reliability` | yes |
+| `KAZMA_SHELL_ALLOW_ARCHIVE` | (none) | `kazma_core.safety.post_hitl` | yes |
 | `KAZMA_SHELL_ALLOW_MUTATE` | (none) | `kazma_core.safety.post_hitl` | yes |
-| `KAZMA_SHELL_STRICT` | (none) | `kazma_core.safety.post_hitl` | — |
+| `KAZMA_SHELL_STRICT` | (none) | `kazma_core.safety.post_hitl` | yes |
 | `KAZMA_SILENCE_WINDOW` | (none) | `kazma_core.cost_breaker` | yes |
 | `KAZMA_SILERO_VAD` | `""` | `kazma_core.voice.mode` | yes |
 | `KAZMA_STRICT_TOOLS` | (none) | `kazma_core.agent.tool_schema` | yes |
-| `KAZMA_SUMMARIES_MAX_ENTRIES` | `"500"` | `kazma_core.summarizer` | — |
-| `KAZMA_SWARM_MAX_ACTIVE` | (none) | `kazma_core.swarm.engine` | — |
+| `KAZMA_SUMMARIES_MAX_ENTRIES` | `"500"` | `kazma_core.summarizer` | yes |
+| `KAZMA_SWARM_MAX_ACTIVE` | (none) | `kazma_core.swarm.engine` | yes |
 | `KAZMA_TEMPORAL` | (none) | `kazma_core.swarm.durable` | yes |
 | `KAZMA_TEMPORAL_HOST` | (none) | `kazma_core.swarm.durable` | yes |
 | `KAZMA_TEMPORAL_NAMESPACE` | (none) | `kazma_core.swarm.durable` | yes |
 | `KAZMA_TEMPORAL_QUEUE` | (none) | `kazma_core.swarm.durable` | yes |
 | `KAZMA_TEMPORAL_REQUIRED` | (none) | `kazma_core.swarm.durable` | yes |
-| `KAZMA_TENANT_FILTER` | (none) | `kazma_core.stores.knowledge`, `kazma_core.swarm.task_store` | — |
-| `KAZMA_TENANT_ID` | (none) | `kazma_cli.main` | — |
-| `KAZMA_TEST_BACKGROUND_SCHEDULERS` | (none) | `kazma_core.memory.worker_bootstrap` | — |
+| `KAZMA_TENANT_FILTER` | (none) | `kazma_core.stores.knowledge`, `kazma_core.swarm.task_store` | yes |
+| `KAZMA_TENANT_ID` | (none) | `kazma_cli.main` | yes |
+| `KAZMA_TEST_BACKGROUND_SCHEDULERS` | (none) | `kazma_core.memory.worker_bootstrap` | yes |
 | `KAZMA_TEST_FORCE_OUTPUT_ROUTING` | (none) | `kazma_gateway.agent_handler.swarm_output` | yes |
 | `KAZMA_TOOL_HOOKS` | (none) | `kazma_core.agent.tool_hooks` | yes |
-| `KAZMA_TOOL_RESULT_FILE_MAX_CHARS` | `"32000"` | `kazma_core.agent.graph_helpers` | — |
+| `KAZMA_TOOL_RESULT_FILE_MAX_CHARS` | `"32000"` | `kazma_core.agent.graph_helpers` | yes |
 | `KAZMA_TOOL_RESULT_MAX_CHARS` | `"100000"` | `kazma_core.agent.graph_helpers` | yes |
 | `KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS` | `"200000"` | `kazma_core.agent.graph_helpers` | yes |
-| `KAZMA_TOOL_TIMEOUT_SECONDS` | (none) | `kazma_core.agent.graph_helpers` | — |
-| `KAZMA_TRANSCRIPT_RECALL` | (none) | `kazma_core.memory.transcript_recall` | — |
+| `KAZMA_TOOL_TIMEOUT_SECONDS` | (none) | `kazma_core.agent.graph_helpers` | yes |
+| `KAZMA_TRANSCRIPT_RECALL` | (none) | `kazma_core.memory.transcript_recall` | yes |
 | `KAZMA_TRUSTED_PROXIES` | (none) | `kazma_ui.auth` | yes |
 | `KAZMA_TRUST_LAN` | (none) | `kazma_ui.auth` | yes |
-| `KAZMA_TURN_DURABLE_CHARS` | `"600"` | `kazma_ui.sse_chat._streaming` | — |
-| `KAZMA_TURN_DURABLE_INTERVAL_S` | `"2.0"` | `kazma_ui.sse_chat._streaming` | — |
-| `KAZMA_TURN_LIVENESS_GRACE_S` | (none) | `kazma_ui.turn_liveness` | — |
-| `KAZMA_TURN_LIVENESS_HEAL` | (none) | `kazma_ui.turn_liveness` | — |
-| `KAZMA_TURN_TIMEOUT_SECONDS` | (none) | `kazma_core.agent.turn`, `kazma_core.agent_runner`, `kazma_ui.routes.ws_chat` | — |
-| `KAZMA_TZ` | `""` | `kazma_core.cron.scheduler` | — |
-| `KAZMA_UNRESTRICTED_TTL_SECONDS` | (none) | `kazma_core.agent.long_task` | — |
-| `KAZMA_UPDATE_REMOTE_ALLOWLIST` | `""` | `kazma_cli.update` | — |
-| `KAZMA_UPDATE_VERIFY_SIGNATURES` | `""` | `kazma_cli.update` | — |
-| `KAZMA_USER_HOME` | (none) | `kazma_core.paths` | — |
+| `KAZMA_TURN_DURABLE_CHARS` | `"600"` | `kazma_ui.sse_chat._streaming` | yes |
+| `KAZMA_TURN_DURABLE_INTERVAL_S` | `"2.0"` | `kazma_ui.sse_chat._streaming` | yes |
+| `KAZMA_TURN_LIVENESS_GRACE_S` | (none) | `kazma_ui.turn_liveness` | yes |
+| `KAZMA_TURN_LIVENESS_HEAL` | (none) | `kazma_ui.turn_liveness` | yes |
+| `KAZMA_TURN_TIMEOUT_SECONDS` | (none) | `kazma_core.agent.turn`, `kazma_core.agent_runner`, `kazma_ui.routes.ws_chat` | yes |
+| `KAZMA_TZ` | `""` | `kazma_core.cron.scheduler` | yes |
+| `KAZMA_UNRESTRICTED_TTL_SECONDS` | (none) | `kazma_core.agent.long_task` | yes |
+| `KAZMA_UPDATE_REMOTE_ALLOWLIST` | `""` | `kazma_cli.update` | yes |
+| `KAZMA_UPDATE_VERIFY_SIGNATURES` | `""` | `kazma_cli.update` | yes |
+| `KAZMA_USER_HOME` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_VAULT_KEY` | `""` | `kazma_core.backup.restore_drill`, `kazma_core.migration.bundle`, `kazma_core.migration.exporter` +4 | yes |
-| `KAZMA_VECTOR_DB` | (none) | `kazma_core.paths` | — |
+| `KAZMA_VECTOR_DB` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_VECTOR_MODEL` | `""` | `kazma_core.memory.embedder` | yes |
-| `KAZMA_VECTOR_PATH` | (none) | `kazma_core.paths` | — |
+| `KAZMA_VECTOR_PATH` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_VERBOSE_ERRORS` | (none) | `kazma_core.errors` | yes |
-| `KAZMA_VISION_MODELS` | `""` | `kazma_core.vision_capability` | — |
+| `KAZMA_VISION_MODELS` | `""` | `kazma_core.vision_capability` | yes |
 | `KAZMA_VOICE_DUPLEX` | (none) | `kazma_core.voice.livekit` | yes |
-| `KAZMA_WATCHER_STALE_SECONDS` | (none) | `kazma_core.safety.bus_bridge` | — |
+| `KAZMA_WATCHER_STALE_SECONDS` | (none) | `kazma_core.safety.bus_bridge` | yes |
 | `KAZMA_WORKSPACE` | `""` | `kazma_core.tools.research_pipeline`, `kazma_core.workspace.binding`, `kazma_ui.app` | yes |
-| `KAZMA_WORKSPACE_ROOT` | `""` | `kazma_gateway.routers.workspace`, `kazma_gateway.routers.workspaces` | — |
-| `KAZMA_WS_EXTRA_ORIGINS` | (none) | `kazma_ui.auth` | — |
+| `KAZMA_WORKSPACE_ROOT` | `""` | `kazma_gateway.routers.workspace`, `kazma_gateway.routers.workspaces` | yes |
+| `KAZMA_WS_EXTRA_ORIGINS` | (none) | `kazma_ui.auth` | yes |
 | `KAZMA_WS_GRAPH` | (none) | `kazma_ui.routes.ws_graph` | yes |
-| `KAZMA_WS_ORIGIN_CHECK` | `""` | `kazma_ui.auth` | — |
+| `KAZMA_WS_ORIGIN_CHECK` | `""` | `kazma_ui.auth` | yes |
 | `KAZMA_X_POST` | (none) | `kazma_core.x_api.config`, `kazma_core.x_api.schedule`, `kazma_core.x_api.stance` | yes |
 | `KAZMA_X_REPLY` | (none) | `kazma_core.x_api.stance` | yes |
 | `KAZMA_X_SCHEDULE` | (none) | `kazma_core.x_api.schedule` | yes |

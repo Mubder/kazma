@@ -62,8 +62,18 @@ def resolve_provider(provider: str | None = None) -> str:
 
 
 def get_backend(provider: str | None = None) -> Any:
-    """Return a calendar backend. Explicit providers fail closed."""
-    requested = (provider or "auto").strip().lower()
+    """Return a calendar backend. Explicit providers fail closed.
+
+    A provider named by ``KAZMA_CALENDAR_PROVIDER`` is as explicit as one
+    passed in: judged from the argument alone, ``KAZMA_CALENDAR_PROVIDER=google``
+    with no Google token quietly answered from the sandbox — the "Calendar:
+    sandbox, No events found" shape of the 2026-09-08 incident (AGENTS.md §34).
+    """
+    import os
+
+    requested = (
+        provider or os.getenv("KAZMA_CALENDAR_PROVIDER", "auto") or "auto"
+    ).strip().lower()
     explicit = requested not in ("", "auto")
     name = resolve_provider(provider)
 

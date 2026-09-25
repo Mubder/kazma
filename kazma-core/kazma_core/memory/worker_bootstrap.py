@@ -788,6 +788,77 @@ def _start_session_purge_scheduler() -> None:
         logger.debug("[memory_worker] could not start session purge scheduler", exc_info=True)
 
 
+def _gc_commitments() -> None:
+    from kazma_core.safety.commitment.store import run_gc_cycle
+
+    summary = run_gc_cycle()
+    if any(summary.values()):
+        logger.info("[memory_worker] commitment GC: %s", summary)
+
+
+def _gc_artifacts() -> None:
+    # S1-2: the durable turn-artifact store (scratchpad findings + proposals):
+    # per-thread cap + age-out. SQLite on both, so off the loop (a loop-stall
+    # dump caught gc_sweep's connect holding it, 2026-09-23).
+    from kazma_core.agent.artifacts import get_artifact_store
+
+    art = get_artifact_store().gc_sweep()
+    if art.get("evicted"):
+        logger.info("[memory_worker] artifact GC: %s", art)
+
+
+def _expire_gates() -> None:
+    # HITL gate registry TTL (docs/plans/HITL_GATE_REGISTRY_PLAN.md): expired
+    # live gates → `timeout` (auto-deny posture), emitted so every surface
+    # shows the card timing out at once.
+    from kazma_core.safety.hitl_gates import expire_due_gates, gate_registry_enabled
+
+    if gate_registry_enabled():
+        expired = expire_due_gates()
+        if expired:
+            logger.info("[memory_worker] gate TTL sweep: %d expired", len(expired))
+
+
+def _purge_task_queue() -> None:
+    # Memory task queue retention (audit M2): terminal rows older than 7 days.
+    from kazma_core.memory.task_queue import purge_completed_tasks
+
+    purged = purge_completed_tasks()
+    if purged:
+        logger.info("[memory_worker] task queue purge: %d deleted", purged)
+
+
+def _prune_swarm_tasks() -> None:
+    # Swarm task history, per Settings `swarm.task_retention_days` (default
+    # 30, 0 keeps everything). TaskStore logs what it deletes.
+    from kazma_core.swarm.task_store import prune_finished_tasks
+
+    prune_finished_tasks()
+
+
+#: Every sweep on the 15-minute maintenance cadence, in order. A cleanup that
+#: exists but is on no cadence never runs: that is how backups once went inert
+#: (§15) and how swarm task history went unpruned until 2026-09-25. Add a new
+#: one HERE rather than a new loop.
+_MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
+    ("commitment GC cycle", _gc_commitments),
+    ("artifact GC", _gc_artifacts),
+    ("gate TTL sweep", _expire_gates),
+    ("task queue purge", _purge_task_queue),
+    ("swarm task retention", _prune_swarm_tasks),
+)
+
+
+async def _run_maintenance_sweeps() -> None:
+    """One pass of every maintenance sweep, each in a thread and isolated:
+    one that fails is logged and the others still run."""
+    for label, sweep in _MAINTENANCE_SWEEPS:
+        try:
+            await asyncio.to_thread(sweep)
+        except Exception:
+            logger.debug("[memory_worker] %s failed", label, exc_info=True)
+
+
 def _start_commitment_gc_scheduler() -> None:
     """Run the commitment TTL/GC cycle every ~15 min (plan §3.9).
 
@@ -799,7 +870,7 @@ def _start_commitment_gc_scheduler() -> None:
     expired pending commitments would accumulate forever even though the sweep
     logic exists — the same "scheduler existed but nothing called it" gap that
     once left backups inert (AGENTS.md §15B). Failures are logged and the
-    cadence continues.
+    cadence continues. Every sweep on this cadence is in ``_MAINTENANCE_SWEEPS``.
     """
     try:
         import asyncio
@@ -812,56 +883,7 @@ def _start_commitment_gc_scheduler() -> None:
     async def _loop() -> None:
         await asyncio.sleep(90)  # first sweep shortly after boot
         while True:
-            try:
-                from kazma_core.safety.commitment.store import run_gc_cycle
-
-                summary = await asyncio.to_thread(run_gc_cycle)
-                if any(summary.values()):
-                    logger.info("[memory_worker] commitment GC: %s", summary)
-            except Exception:
-                logger.debug("[memory_worker] commitment GC cycle failed", exc_info=True)
-            # S1-2: the durable turn-artifact store (scratchpad findings +
-            # proposals) rides the SAME cadence — per-thread cap + age-out,
-            # no new sweeper loop (AGENTS.md §15A: a scheduler nobody starts
-            # is how backups once went inert).
-            try:
-                from kazma_core.agent.artifacts import get_artifact_store
-
-                # SQLite on both: off the loop (a loop-stall dump caught
-                # gc_sweep's connect holding it, 2026-09-23).
-                art = await asyncio.to_thread(lambda: get_artifact_store().gc_sweep())
-                if art.get("evicted"):
-                    logger.info("[memory_worker] artifact GC: %s", art)
-            except Exception:
-                logger.debug("[memory_worker] artifact GC failed", exc_info=True)
-            # HITL gate registry TTL sweep rides the SAME cadence (plan:
-            # docs/plans/HITL_GATE_REGISTRY_PLAN.md — no new sweeper loop).
-            # Expired live gates → `timeout` (auto-deny posture), emitted so
-            # every surface shows the card timing out at once.
-            try:
-                from kazma_core.safety.hitl_gates import (
-                    expire_due_gates,
-                    gate_registry_enabled,
-                )
-
-                if gate_registry_enabled():
-                    expired = await asyncio.to_thread(expire_due_gates)
-                    if expired:
-                        logger.info(
-                            "[memory_worker] gate TTL sweep: %d expired",
-                            len(expired),
-                        )
-            except Exception:
-                logger.debug("[memory_worker] gate TTL sweep failed", exc_info=True)
-            # Memory task queue retention sweep (audit M2): purge terminal rows (>7d)
-            try:
-                from kazma_core.memory.task_queue import purge_completed_tasks
-
-                purged = await asyncio.to_thread(purge_completed_tasks)
-                if purged:
-                    logger.info("[memory_worker] task queue purge: %d deleted", purged)
-            except Exception:
-                logger.debug("[memory_worker] task queue purge failed", exc_info=True)
+            await _run_maintenance_sweeps()
             await asyncio.sleep(_COMMITMENT_GC_INTERVAL_MINUTES * 60)
 
     try:

@@ -73,6 +73,13 @@ class PostgresPool:
             yield conn
 
     def execute(self, sql: str, params: tuple | list | dict | None = None) -> list[dict]:
+        """Run *sql* and commit; return its rows.
+
+        Only a statement that produces rows returns any: an ``UPDATE`` or
+        ``DELETE`` without ``RETURNING`` gives ``[]`` however many rows it
+        touched. To count what a write changed, add ``RETURNING`` and count
+        the rows (``TaskStore.prune_tasks`` reported 0 until it did).
+        """
         # Postgres text cannot hold NUL: one raw U+0000 in any string
         # parameter fails the whole statement. JSON parameters are cleaned
         # where they are encoded (pg_helpers.json_dumps).

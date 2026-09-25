@@ -49,7 +49,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 #: Lower these whenever the counts drop. Never raise them casually.
 BASELINE = {
     # except Exception / except BaseException / bare except, any body
-    "blind_except": 3826,
+    "blind_except": 3823,
     # ...whose body is only `pass` (or a docstring): the error vanishes
     "silent_except": 570,
 }

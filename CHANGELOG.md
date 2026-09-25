@@ -1,5 +1,65 @@
 # CHANGELOG
 
+## Swarm task history is kept for 30 days, and you can change it (2026-09-25)
+
+Finished swarm tasks (completed, failed, cancelled, timed out) older than
+**30 days** are now deleted, checked every 15 minutes. Change it in
+**Settings → System → Swarm task history**; **0** keeps every task. Paused,
+pending and running tasks are never deleted.
+
+Until now the pruning routine existed with nothing calling it, so history was
+never pruned at all. It now runs on the same 15-minute maintenance cadence as
+the other cleanups, which were rewritten to share one runner: a sweep that
+fails is logged and the others still run.
+
+## Postgres runs more of the suite, and swarm pruning counts what it deletes (2026-09-25)
+
+The CI Postgres job now runs 282 tests in 31 files (from 250 in 26): today's
+paused-pipeline restart tests (the bug happened live on Postgres), four store
+suites that already held on Postgres, and a new
+`tests/test_task_store_backends.py` that pins the swarm task store where its
+SQLite and Postgres SQL differ — worker, metadata and tenant filters, counts,
+metrics, pruning, crash recovery.
+
+That file found one Postgres-only bug: `TaskStore.prune_tasks` reported 0
+deletions on Postgres however many rows it deleted. Fixed. It also found that
+nothing ever calls it, so swarm task history is never pruned; wiring that in
+would start deleting history, so it is left for the owner to decide (listed in
+`docs/KNOWN_GAPS.md`).
+
+## Every environment variable is described, and the page is checked (2026-09-25)
+
+The reference page (`docs/docs/reference/environment-variables.md`) now
+describes all 262 `KAZMA_*` variables the code reads — the 148 that were
+missing were each written from the code that reads them. New sections cover
+the agent loop, MCP, paths, backups, cron, logging and the CLI.
+
+Reading them found things the page and the code had wrong:
+
+- **Twenty-one switches that turn a protection off** were not in the security
+  table, because the gate recognised such switches by name fragments
+  (`BYPASS`, `ALLOW_LOCAL`, …). Among them: `KAZMA_WS_ORIGIN_CHECK=0`
+  (cross-site WebSocket hijacking), `KAZMA_TENANT_FILTER=0`,
+  `KAZMA_MCP_INHERIT_ENV=1` (hands every MCP server your vault key),
+  `KAZMA_SEMANTIC_CACHE=true` (one user can get another's answer), and the
+  commitment layer's kill-switch. Each now says what it turns off and when it
+  is safe, in the table and in `.env.example`, and the gate lists them.
+- **The page taught the canonical HITL floor as off unless set to `1`.** It
+  has been on by default since 2026-09-16; `0` is the opt-out. Fixed there,
+  in the security guide, the production checklist and AGENTS.md. Two
+  truncation caps were documented as 4000 and 16000 characters; the code uses
+  100000 and 200000. A new test compares every stated default with the code.
+- **`KAZMA_CALENDAR_PROVIDER=google` with no Google token answered from the
+  sandbox**, because "explicit" was judged from the call argument only. It
+  now fails closed like `provider="google"`.
+- **`KAZMA_DIVISION_ENFORCE=1` made Settings report division enforcement
+  while no tool was checked.** The check only ever looked for a configured
+  division; the switch is removed.
+- **The YOLO, per-tool grant and `/long` time limits said `0` meant "no
+  expiry"**, but `0` always gave the one-minute minimum. For approval windows
+  the short reading is the safe one, so it stays, and the code now says so;
+  `off` means no expiry.
+
 ## Rejecting or cancelling a paused pipeline sticks (2026-09-25)
 
 Four swarm pipelines paused at a checkpoint were rejected, each answered
