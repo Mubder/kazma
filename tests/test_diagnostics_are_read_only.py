@@ -375,3 +375,23 @@ def test_atomic_update_cannot_null_a_stored_secret(store, vault):
     store.atomic_update("connectors.x.token", lambda _cur: None)
     assert store.get("connectors.x.token") == "tok-real-5678"
     assert is_vault_ref(store._db_get_raw("connectors.x.token"))
+
+
+def test_a_diagnostic_that_builds_the_registry_first_is_not_refused(store):
+    """kazma doctor may be the first to build the registry; seeding is skipped.
+
+    Seeding missing provider presets is bookkeeping, like recall's access bump:
+    refusing it would fail the registry's construction and leave it unseeded
+    for the rest of the process. list_providers() merges presets in memory.
+    """
+    from kazma_core.model_registry import ModelRegistry
+
+    registry = ModelRegistry(store)
+    with ds.read_only_diagnostic("kazma doctor"):
+        registry._seed_missing_presets()
+        names = {p.get("name") for p in registry.list_providers()}
+    assert "openai" in names, "presets still listed, from memory"
+    assert store._db_get_raw("providers.list") is _MISSING, "and nothing was written"
+
+    registry._seed_missing_presets()  # outside a diagnostic it seeds, as before
+    assert store._db_get_raw("providers.list") is not _MISSING
