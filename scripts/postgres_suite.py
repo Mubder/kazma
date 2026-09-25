@@ -83,7 +83,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     cmd = [sys.executable, "-m", "pytest", "-q", "--timeout=300", "-m", MARKER,
            *passthrough, *(str(f.relative_to(ROOT)) for f in files)]
-    print(f"[postgres-suite] {len(files)} files carry the marker")
+    print(f"[postgres-suite] {len(files)} files carry the marker", flush=True)
+    # pytest exits 5 when the marker selects nothing: that fails the job too.
     return subprocess.call(cmd, cwd=str(ROOT))
 
 

@@ -386,12 +386,21 @@ def test_a_diagnostic_that_builds_the_registry_first_is_not_refused(store):
     """
     from kazma_core.model_registry import ModelRegistry
 
+    def stored_names() -> set[str]:
+        raw = store._db_get_raw("providers.list")
+        return set() if raw is _MISSING else {str(p.get("name")) for p in raw}
+
     registry = ModelRegistry(store)
+    registry._seed_missing_presets()  # a seeded baseline, on either backend
+    # One preset missing from the store -- the state after an update adds one.
+    store.set("providers.list", [p for p in store._db_get_raw("providers.list")
+                                 if p.get("name") != "openai"], category="providers")
+
     with ds.read_only_diagnostic("kazma doctor"):
         registry._seed_missing_presets()
         names = {p.get("name") for p in registry.list_providers()}
     assert "openai" in names, "presets still listed, from memory"
-    assert store._db_get_raw("providers.list") is _MISSING, "and nothing was written"
+    assert "openai" not in stored_names(), "and nothing was written"
 
     registry._seed_missing_presets()  # outside a diagnostic it seeds, as before
-    assert store._db_get_raw("providers.list") is not _MISSING
+    assert "openai" in stored_names()
