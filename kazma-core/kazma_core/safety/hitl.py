@@ -135,6 +135,10 @@ TOOL_TIERS: dict[str, str] = {
     "memory_search": "read",
     "sqlite_query": "read",
     "current_datetime": "read",
+    # The reader of save_proposal's drafts. Read-tier on purpose: reading
+    # back what the agent itself saved must never cost an approval (the
+    # 2026-09-25 dump needed an approved python_exec to do it).
+    "list_proposals": "read",
     # Write — always allowed
     # (`send_message` moved to danger in the F-04 block below — it dispatches
     # to Telegram/Discord/Slack, which is an outbound side effect.)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any
@@ -415,18 +416,40 @@ def _commitment_resolve_gate(
     return pending, semantic_blocked
 
 
+def _confirmed_publish_ref(result: dict[str, Any]) -> str | None:
+    """The tweet / booking id when *result* PROVES the publish happened, else None.
+
+    The posting tools answer in JSON and report a refused or failed post as
+    ``{"ok": false, ...}`` — which the registry long classified as success,
+    so a draft whose post failed was marked used and dropped out of every
+    drafts list. Marking now requires the tool's own confirmation.
+    """
+    if not isinstance(result, dict) or result.get("is_error"):
+        return None
+    try:
+        payload = json.loads(str(result.get("content") or ""))
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        return None
+    if payload.get("posted") is False or payload.get("scheduled") is False:
+        return None
+    return str(payload.get("tweet_id") or payload.get("id") or payload.get("post_id") or "")
+
+
 def mark_proposals_posted(
     tool_calls: list[Any],
     results: list[Any],
     tenant_id: str = "default",
 ) -> int:
-    """S1-3 audit trail: mark proposals consumed by SUCCESSFUL posting calls.
+    """S1-3 audit trail: mark the drafts consumed by SUCCESSFUL posting calls.
 
-    A proposal whose drafts went out is kept with kind='proposal_posted'
-    (ages out faster), never deleted — posted-draft provenance must survive
-    for audit. Only non-error results of the posting tool class mark; a
-    failed post leaves the proposal resolvable for a retry.
-    Returns the number of proposals marked (0 when nothing matched or the
+    Marks exactly the item each call named (``proposal_id`` is an item id —
+    the commitment gate refuses a multi-item ref), with the tool that used it
+    and the resulting tweet or booking id. The set stays listed until its
+    last item is used, and is kept for audit afterwards, never deleted. A
+    failed or refused post marks nothing, so the draft stays available for a
+    retry. Returns the number of items marked (0 when nothing matched or the
     store is unavailable — marking must never break turn delivery).
     """
     try:
@@ -435,8 +458,8 @@ def mark_proposals_posted(
             _PROPOSAL_REQUIRED_TOOLS as _POST_TOOLS,
         )
 
-        ok_by_id = {
-            str(r.get("tool_call_id")): not bool(r.get("is_error"))
+        by_id = {
+            str(r.get("tool_call_id")): r
             for r in results
             if isinstance(r, dict)
         }
@@ -445,12 +468,17 @@ def mark_proposals_posted(
         for tc in tool_calls or []:
             if not isinstance(tc, dict) or tc.get("name") not in _POST_TOOLS:
                 continue
-            if not ok_by_id.get(str(tc.get("id") or ""), False):
+            used_ref = _confirmed_publish_ref(by_id.get(str(tc.get("id") or "")) or {})
+            if used_ref is None:
                 continue
             ref = str((tc.get("arguments") or {}).get("proposal_id") or "").strip()
             if ref:
-                store.proposal_posted(ref, tenant_id=tenant_id or "default")
-                marked += 1
+                marked += store.proposal_posted(
+                    ref,
+                    tenant_id=tenant_id or "default",
+                    via=str(tc.get("name") or ""),
+                    used_ref=used_ref,
+                )
         return marked
     except Exception:
         logger.debug("[ToolWorker] proposal_posted marking skipped", exc_info=True)
@@ -1160,12 +1188,21 @@ async def tool_worker_node(
                 # the middle of a long line, and hitl_gates.db is the record
                 # of what they themselves approved.
                 #
-                # Deliberately a disclosure and NOT a block. A command-string
-                # check is bypassable by a variable, an encoding or a python
-                # one-liner, so refusing here would buy a guarantee it cannot
-                # keep while breaking legitimate read-only inspection. The
-                # human is the control; this gives the human the fact.
+                # A disclosure, not the block. Exec calls that the tools would
+                # refuse to run are refused before this card by the
+                # commitment exec resolver (same rules as the tools, from
+                # kazma_core.store_registry); this names what is left — a
+                # store mentioned in arguments that no rule resolves as one,
+                # or any call made with the commitment layer off. A
+                # command-string check stays bypassable by a variable or an
+                # encoding; the human is the control, and this gives the
+                # human the fact — including that Kazma has a way to read the
+                # store that needs no approval at all.
                 try:
+                    from kazma_core.store_registry import (
+                        STORES,
+                        readers_for_store,
+                    )
                     from kazma_core.workspace.path_policy import (
                         control_plane_db_names,
                     )
@@ -1182,13 +1219,24 @@ async def tool_worker_node(
                             if _n2 in _blob and _n2 not in _hits:
                                 _hits.append(_n2)
                     if _hits:
-                        _notes.append(
-                            "This references Kazma's own store(s): "
-                            + ", ".join(sorted(_hits))
-                            + ". hitl_gates.db is the record of what you have "
-                            "approved; the others hold configuration, secrets, "
-                            "permissions, memory or the audit trail."
-                        )
+                        _described = [
+                            f"{_h} ({STORES[_h].holds})" if _h in STORES else _h
+                            for _h in sorted(_hits)
+                        ]
+                        _note = "This references Kazma's own store(s): " + "; ".join(_described) + "."
+                        if "hitl_gates.db" in _hits:
+                            _note += " hitl_gates.db is the record of what you have approved."
+                        _readable = [
+                            f"{_h} through {', '.join(r for r in readers_for_store(_h) if not r.startswith('context:'))}"
+                            for _h in sorted(_hits)
+                            if any(not r.startswith("context:") for r in readers_for_store(_h))
+                        ]
+                        if _readable:
+                            _note += (
+                                " Kazma can read " + "; ".join(_readable)
+                                + " without an approval — this call is not needed for that."
+                            )
+                        _notes.append(_note)
                 except Exception:  # noqa: BLE001 — a disclosure must not break the card
                     pass
 

@@ -893,6 +893,47 @@ _CONFIG_PROTECTED_PREFIXES = (
 )
 
 
+def _exec_names_kazma_store(args: dict, command: str) -> str | None:
+    """The Kazma store an exec call would open, by the same rules the exec
+    tools apply at run time (``path_policy``), or None.
+
+    Python source is checked as code; a shell command token by token,
+    including the value of ``--flag=value``, resolved against the call's
+    ``cwd`` or the active workspace.
+    """
+    try:
+        from pathlib import Path
+
+        from kazma_core.workspace.path_policy import (
+            code_mentions_control_plane,
+            control_plane_store_targeted,
+            resolve_active_root,
+        )
+
+        code = args.get("code")
+        if isinstance(code, str) and code.strip():
+            hit = code_mentions_control_plane(code)
+            if hit:
+                return hit
+        if not command.strip():
+            return None
+        try:
+            cwd = args.get("cwd") or str(resolve_active_root())
+        except (OSError, RuntimeError, ValueError, ImportError):
+            cwd = None  # no workspace bound: absolute paths still resolve
+        for raw in _re.findall(r"""'[^']*'|"[^"]*"|\S+""", command):
+            token = raw.strip("'\"")
+            for cand in (token, token.split("=", 1)[1] if "=" in token else ""):
+                if not cand or cand.startswith("-"):
+                    continue
+                hit = control_plane_store_targeted(cand, cwd=cwd)
+                if hit:
+                    return Path(hit).name
+    except Exception:  # noqa: BLE001 — the tools' own backstops still apply
+        logger.debug("[commitment] exec store check skipped", exc_info=True)
+    return None
+
+
 def _resolve_exec_act(profile, tool_name, args, *, audit, thread_id, tenant_id, cfg, source):
     """exec resolver (denylist + cwd pin, plan §5 / WS5)."""
     from .store import Commitment, create_commitment
@@ -917,6 +958,25 @@ def _resolve_exec_act(profile, tool_name, args, *, audit, thread_id, tenant_id, 
             logger.warning("[commitment] DENY exec — catastrophic pattern matched: %s", command[:80])
             return EffectDecision("deny", "exec denylist: catastrophic pattern in command",
                                   profile, audit, commitment_id=cid)
+    # 1b. Kazma's own stores. python_exec / shell_exec refuse to open them
+    #     (their own backstops) — but only AFTER the approval card, so the
+    #     operator was asked to approve a call that could never run, and on
+    #     2026-09-25 approved a python_exec that byte-dumped
+    #     agent_artifacts.db (its name was missing from the refusal list).
+    #     Refuse here, before any card, and name the tool that reads it.
+    _store = _exec_names_kazma_store(args, command)
+    if _store:
+        from kazma_core.store_registry import store_refusal
+
+        c = Commitment(thread_id=thread_id or "", act="exec", tool_name=tool_name,
+                       goal_text=command[:200] or str(args.get("code") or "")[:200],
+                       args_digest=_args_digest(args), request_at=time.time(),
+                       tenant_id=tenant_id, slots={"store": _store}, confidence=0.0)
+        c.status = "aborted"; c.policy_decision = "deny"
+        cid = create_commitment(c, cfg=cfg)
+        logger.warning("[commitment] DENY exec — opens Kazma store %s", _store)
+        return EffectDecision("deny", store_refusal(_store, door=tool_name),
+                              profile, audit, commitment_id=cid)
     # 2. cwd pin: if a cwd is provided, verify it's within the workspace root.
     cwd = args.get("cwd")
     if cwd:

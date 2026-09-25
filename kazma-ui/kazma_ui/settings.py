@@ -967,7 +967,12 @@ class SettingsRouterBuilder:
                     args = [sys.executable, "-m", "uvicorn", "kazma_ui.app:create_app", "--factory"]
                 args[0] = sys.executable
 
-                log_path = Path("kazma-data") / "restart.log"
+                try:
+                    from kazma_core.paths import data_dir
+
+                    log_path = data_dir() / "restart.log"
+                except (ImportError, OSError):
+                    log_path = Path.cwd() / "kazma-data" / "restart.log"
                 log_path.parent.mkdir(parents=True, exist_ok=True)
                 logf = open(log_path, "ab")
                 kwargs = dict(

@@ -151,6 +151,25 @@ class XPostLedger:
             finally:
                 conn.close()
 
+    def first_post_for(self, text: str) -> dict[str, Any] | None:
+        """The first ledger row whose text matches *text*, deleted or not.
+
+        Evidence that a saved draft went out (``ArtifactStore.
+        heal_legacy_posted``). A later delete does not un-send it.
+        """
+        h = text_hash(text)
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT tweet_id, created_at FROM x_posts WHERE text_hash = ? "
+                    "ORDER BY created_at ASC LIMIT 1",
+                    (h,),
+                ).fetchone()
+                return dict(row) if row is not None else None
+            finally:
+                conn.close()
+
     def recent(self, limit: int = 10) -> list[dict[str, Any]]:
         lim = max(1, min(50, int(limit)))
         with self._lock:

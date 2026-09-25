@@ -2,7 +2,8 @@
 
 ``check_path_access`` is the SoT for "may this resolved path be used?":
 
-0. Write to one of Kazma's own databases → deny, unconditionally
+0. Read or write of one of Kazma's own databases → deny, unconditionally,
+   naming the tool that reads it (``kazma_core.store_registry``)
 1. Under active workspace → allow
 2. Under durable ``workspace.extra_roots`` with sufficient mode → allow  
 3. Under session path grant for current thread → allow  
@@ -46,39 +47,29 @@ _DB_SIDECARS = ("-wal", "-shm", "-journal")
 
 
 def control_plane_db_names() -> frozenset[str]:
-    """Filenames of Kazma's own databases, lowercased.
+    """Filenames of Kazma's own databases that are safe to match by name.
 
     One list, so a guard and a disclosure cannot disagree about what counts.
-    Used by the write refusal below, and by the approval card, which warns a
-    human when a danger-tier command mentions one of these by name.
+    Used by the approval card, which warns a human when a danger-tier
+    command mentions one of these, and by the ``python_exec`` refusal.
 
-    Derived from ``kazma_core.paths`` rather than hardcoded, so a store added
-    there is covered without anyone remembering this function — the same
-    reason the refusal matches by suffix instead of by an enumerated list.
+    Delegates to :func:`kazma_core.store_registry.distinctive_store_names`:
+    every declared store plus anything resolved through ``kazma_core.paths``.
+    Until 2026-09-25 this was the ``paths`` list alone, which had never
+    heard of ``agent_artifacts.db`` — so ``python_exec`` let an
+    ``open('kazma-data/agent_artifacts.db', 'rb')`` through.
     """
-    names: set[str] = {"hitl_gates.db"}          # not exposed via paths
-    try:
-        from kazma_core import paths as _paths
+    from kazma_core.store_registry import distinctive_store_names
 
-        for helper in (
-            "vault_db_path", "checkpoints_db", "settings_db", "snapshots_db",
-            "swarm_tasks_db", "audit_db", "rbac_db", "hub_registry_db",
-            "primary_memory_db", "memory_ops_db", "knowledge_graph_db",
-        ):
-            fn = getattr(_paths, helper, None)
-            if fn is None:
-                continue
-            try:
-                names.add(Path(str(fn())).name.lower())
-            except Exception:  # noqa: BLE001 — a name we cannot resolve is skipped
-                continue
-    except Exception:  # noqa: BLE001
-        pass
-    return frozenset(n for n in names if n)
+    return distinctive_store_names()
 
 
 def _is_control_plane_store(resolved: Path) -> bool:
     """True if *resolved* is one of Kazma's own databases.
+
+    Delegates to :func:`kazma_core.store_registry.is_kazma_store`, the one
+    predicate every door shares. The history below is why it sits before
+    the allow ladder.
 
     The ladder below is an allowlist, so until 2026-09-21 the gate registry
     was safe only by POSITION: the default coding sandbox is
@@ -99,32 +90,13 @@ def _is_control_plane_store(resolved: Path) -> bool:
     Matched by suffix rather than by an enumerated list of filenames so a
     store added later is covered on the day it is added. Scoped to
     ``data_dir()`` and excluding the sandbox, so a user's own ``.db`` in
-    their project or scratch area is untouched.
+    their project or scratch area is untouched. If the data dir cannot be
+    resolved it answers False and the normal ladder applies — failing closed
+    would block a user's own project database over an unrelated error.
     """
-    try:
-        from kazma_core.paths import data_dir
+    from kazma_core.store_registry import is_kazma_store
 
-        root = data_dir().resolve()
-    except Exception:
-        # Cannot classify. Fall through to the normal ladder rather than
-        # denying: this is defence in depth on top of an already restrictive
-        # allowlist, and failing closed here would block a user's own project
-        # database because of an unrelated resolution error.
-        return False
-
-    if not path_under_root(resolved, root):
-        return False
-    # data_dir()/workspace is the default coding sandbox — the user's scratch
-    # area, not control plane. A database they create there is theirs.
-    if path_under_root(resolved, root / "workspace"):
-        return False
-
-    name = resolved.name.lower()
-    for sidecar in _DB_SIDECARS:
-        if name.endswith(sidecar):
-            name = name[: -len(sidecar)]
-            break
-    return name.endswith(_DB_SUFFIXES)
+    return is_kazma_store(resolved)
 
 
 def _strip_db_sidecars(name: str) -> str:
@@ -192,9 +164,13 @@ def code_mentions_control_plane(code: str) -> str | None:
     """Return the store name when *code* names a control-plane database.
 
     ``python_exec`` does not go through :func:`check_path_access`. A script
-    that opens ``hitl_gates.db`` by name is the same write the file tools
-    already refuse. Dynamic construction that never spells the filename
-    still gets through — that limit stays written down.
+    that opens ``hitl_gates.db`` by name is the same access the file tools
+    already refuse. Quoted paths count too — absolute, or relative to the
+    server's working directory or the active workspace — so
+    ``'kazma-data/agent_artifacts.db'`` (the 2026-09-25 dump) is caught even
+    for a store whose bare name is too generic to match. Dynamic
+    construction that never spells the filename still gets through — that
+    limit stays written down.
     """
     low = (code or "").lower()
     if not low:
@@ -202,13 +178,24 @@ def code_mentions_control_plane(code: str) -> str | None:
     for name in sorted(control_plane_db_names()):
         if name and name in low:
             return name
+    bases: list[Path] = [Path.cwd()]
+    try:
+        bases.append(Path(resolve_active_root()))
+    except (OSError, RuntimeError, ValueError, ImportError):
+        logger.debug("[path_policy] no active workspace; cwd only", exc_info=True)
     for token in re.findall(r"""['"]([^'"]+)['"]""", code):
-        if not (
-            token.startswith(("/", "\\"))
-            or (len(token) > 2 and token[1] == ":")
-        ):
+        absolute = token.startswith(("/", "\\")) or (
+            len(token) > 2 and token[1] == ":"
+        )
+        if absolute:
+            hit = control_plane_store_targeted(token)
+        elif _strip_db_sidecars(Path(token).name).endswith(_DB_SUFFIXES):
+            hit = next(
+                (h for h in (control_plane_store_targeted(token, cwd=b) for b in bases) if h),
+                None,
+            )
+        else:
             continue
-        hit = control_plane_store_targeted(token)
         if hit:
             return Path(hit).name
     return None
@@ -244,6 +231,11 @@ def denied_message(
 ) -> str:
     """Agent-facing denial with recovery instructions (smooth UX)."""
     res = result or check_path_access(path, mode)
+    if res.via == "store":
+        # A path grant cannot open a Kazma store (rule 0 sits before the
+        # grants), so offering request_path_access here would only buy a
+        # useless approval. Say what the store is and which tool reads it.
+        return f"Safety: {res.reason}"
     action = "read" if mode == "read" else "write/modify"
     return (
         f"Safety: {action} outside the active workspace is not allowed.\n"
@@ -277,15 +269,30 @@ def check_path_access(
             workspace=str(workspace),
         )
 
-    # 0) Kazma's own databases are never writable by file tools. Checked
+    # 0) Kazma's own databases are never opened by file tools. Checked
     #    BEFORE the allow ladder so no workspace, grant or escape hatch can
     #    reach them — see _is_control_plane_store.
-    if need == "write" and _is_control_plane_store(resolved):
+    #
+    #    Writes were refused from 2026-09-21. Reads were left open on the
+    #    grounds that they cannot damage anything — true, and beside the
+    #    point: raw SQLite bytes are noise to the model, every other door
+    #    (SQL tools, python_exec, shell_exec) already refused these files,
+    #    and on 2026-09-25 file_read on agent_artifacts.db and
+    #    chat_sessions.db was one leg of a 67-call dig for drafts the model
+    #    had no tool to read. The refusal names the tool that does read it.
+    if _is_control_plane_store(resolved):
+        from kazma_core.store_registry import store_refusal
+
         return PathAccessResult(
             allowed=False,
-            reason="Kazma control-plane store — never writable by file tools",
+            reason=(
+                "Kazma control-plane store — "
+                + ("never writable" if need == "write" else "not readable")
+                + " by file tools. "
+                + store_refusal(resolved, door="file tools")
+            ),
             mode=need,
-            via="denied",
+            via="store",
             resolved=str(resolved),
             workspace=str(workspace),
         )

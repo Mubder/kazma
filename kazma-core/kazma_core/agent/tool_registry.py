@@ -277,6 +277,22 @@ def _stop_procedural_worker(timeout: float = _PROCEDURAL_DRAIN_SECONDS) -> None:
 atexit.register(_stop_procedural_worker)
 
 
+def _json_reports_failure(content: str) -> bool:
+    """True when *content* is a JSON object whose own ``ok`` field is false.
+
+    Only an explicit boolean ``false`` counts: a payload without ``ok``, or
+    with ``"ok": "no"``, says nothing about the call and stays a success.
+    """
+    text = content.lstrip()
+    if not text.startswith("{"):
+        return False
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(payload, dict) and payload.get("ok") is False
+
+
 def _record_procedural_outcome(tool_name: str, arguments: dict[str, Any], *, success: bool) -> None:
     """Feed a tool-execution outcome into the V2 procedural DAG memory.
 
@@ -800,10 +816,18 @@ class LocalToolRegistry:
                 # success on the one row where the reader is relying on
                 # decision and execution being separate
                 # (UNIFIED_TURN_BLOCK.md §3 and §10, found 2026-09-20).
+                #
+                # JSON tools report the same thing as ``{"ok": false, ...}``
+                # (x_post, x_schedule_post, x_cancel_scheduled_post,
+                # schedule_task). That was classified as success too, so a
+                # refused X post showed as done in the turn and marked its
+                # saved draft used — the draft then vanished from every
+                # drafts list although it never went out (2026-09-25).
                 _is_err = (
                     content.startswith("Error:")
                     or content.startswith("⚠️")
                     or content.startswith("Safety:")
+                    or _json_reports_failure(content)
                 )
                 _record_procedural_outcome(tool_name, arguments, success=not _is_err)
                 return await _with_post({"content": content, "is_error": _is_err})

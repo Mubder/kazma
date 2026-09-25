@@ -69,18 +69,25 @@ _DATA_DBS: list[tuple[str, str]] = [
     ("vault_db_path", "vault.db"),
 ]
 
+def _data_dir_dbs() -> tuple[str, ...]:
+    """Every store the registry says a bundle carries, minus the resolver ones.
+
+    This was a hand-kept tuple of seven names. It had never been told about
+    agent_artifacts.db (saved drafts), x_scheduled.db (booked posts would
+    never fire on the new machine), x_posts.db (the 30-day duplicate rule
+    and post caps would reset), task_ledgers.db, hitl_gates.db, rbac.db,
+    audit.db or llm_calls.db — so a migration silently left all of them
+    behind. ``kazma_core.store_registry.STORES`` decides now, and
+    ``tests/test_store_registry.py`` fails on an undeclared store.
+    """
+    from kazma_core.store_registry import bundle_store_names
+
+    by_resolver = {arc for _, arc in _DATA_DBS}
+    return tuple(n for n in bundle_store_names() if n not in by_resolver)
+
+
 # SQLite data files resolved by a plain data_dir() join (no dedicated resolver).
-_DATA_DIR_DBS = (
-    "chat_sessions.db",
-    # Saves the primary store refused (kazma_ui/session_spool.py); a
-    # migration that left it behind would drop them.
-    "chat_sessions_spool.db",
-    "cron.db",
-    "sessions.db",
-    "sandbox_emails.db",
-    "research_sessions.db",
-    "pipeline_logs.db",
-)
+_DATA_DIR_DBS = _data_dir_dbs()
 
 # workspaces.db is actually a *table* inside settings.db (per
 # stores/workspaces.py). We export it as its own file for path-rewrite
@@ -185,8 +192,14 @@ def export_bundle(
         if _safe_copy(src, staging / "data" / arc_name):
             manifest.table_counts[arc_name] = _count_tables(src)
 
-    # 4. Data-dir DBs (no dedicated resolver).
-    for name in _DATA_DIR_DBS:
+    # 4. Data-dir DBs (no dedicated resolver), then declared families whose
+    #    file names are built at runtime (per-tenant checkpoints).
+    from kazma_core.store_registry import bundle_family_patterns
+
+    family_files = sorted(
+        {p.name for pattern in bundle_family_patterns() for p in data_dir.glob(pattern)}
+    )
+    for name in (*_DATA_DIR_DBS, *family_files):
         src = data_dir / name
         if src.exists():
             _log(f"Copying {name}…")

@@ -469,9 +469,12 @@ def register_system_tools(registry: Any) -> None:
 
                     targeted = control_plane_store_targeted(check, cwd=cwd_s)
                     if targeted:
+                        from kazma_core.store_registry import store_refusal
+
                         return (
-                            "Error: Kazma control-plane store — never writable "
-                            f"by shell_exec ({targeted})."
+                            "Error: Kazma control-plane store — shell_exec may "
+                            "not open it. "
+                            + store_refusal(targeted, door="shell_exec")
                         )
                     # Rough path detection
                     looks_path = (

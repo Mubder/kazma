@@ -909,6 +909,19 @@ class TestProposalMarking:
             ).fetchone()
         return row[0] if row else None
 
+    # What x_post really returns (x_publisher/tools.py -> booking.publish_x_post).
+    # This used to be the bare string "posted", which no tool ever returns; the
+    # fake hid that a REFUSED post ({"ok": false}) was also marked consumed.
+    @staticmethod
+    def _x_post_result(ok: bool, *, tweet_id: str = "1971", pid: str = "") -> str:
+        import json as _json
+
+        if ok:
+            return _json.dumps({"posted": True, "tweet_id": tweet_id,
+                                "ok": True, "proposal_id": pid})
+        return _json.dumps({"posted": False, "error": "duplicate within 30 days",
+                            "ok": False, "proposal_id": pid})
+
     def test_successful_post_marks_proposal_consumed(self, artifact_db):
         from kazma_core.agent.graph_tool_worker import mark_proposals_posted
 
@@ -921,13 +934,54 @@ class TestProposalMarking:
         marked = mark_proposals_posted(
             [{"id": "c1", "name": "x_post",
               "arguments": {"text": "draft one", "proposal_id": pid}}],
-            [{"tool_call_id": "c1", "content": "posted", "is_error": False}],
+            [{"tool_call_id": "c1", "content": self._x_post_result(True, pid=pid),
+              "is_error": False}],
             "default",
         )
         assert marked == 1
         assert self._store_kind(artifact_db, pid) == "proposal_posted"
-        # Provenance survives — the row still resolves for audit.
-        assert artifact_db.resolve_proposal(pid)["texts"] == ["draft one"]
+        # Provenance survives — the row still resolves for audit, and the item
+        # says how it went out.
+        info = artifact_db.resolve_proposal(pid)
+        assert info["texts"] == ["draft one"]
+        assert info["items"][0]["used_via"] == "x_post"
+        assert info["items"][0]["used_ref"] == "1971"
+
+    def test_refused_post_marks_nothing(self, artifact_db):
+        """{"ok": false} is a failed post even when no Error: prefix says so."""
+        from kazma_core.agent.graph_tool_worker import mark_proposals_posted
+
+        payload = artifact_db.save_proposal("default", "t-mark3", "tweets", ["draft one"])
+        pid = payload["proposal_id"]
+        marked = mark_proposals_posted(
+            [{"id": "c1", "name": "x_post",
+              "arguments": {"text": "draft one", "proposal_id": pid}}],
+            [{"tool_call_id": "c1", "content": self._x_post_result(False, pid=pid),
+              "is_error": False}],
+            "default",
+        )
+        assert marked == 0
+        assert self._store_kind(artifact_db, pid) == "proposal"
+        assert [r["id"] for r in artifact_db.list_proposals()] == [f"{pid}:1"]
+
+    def test_posting_one_item_leaves_its_siblings_listed(self, artifact_db):
+        """The 2026-09-24 set: 4 of 11 posted must leave 7 listed, not 0."""
+        from kazma_core.agent.graph_tool_worker import mark_proposals_posted
+
+        payload = artifact_db.save_proposal(
+            "default", "t-mark4", "tweets", [f"draft {n}" for n in range(1, 12)]
+        )
+        pid = payload["proposal_id"]
+        calls, results = [], []
+        for n in (1, 4, 7, 10):
+            calls.append({"id": f"c{n}", "name": "x_post",
+                          "arguments": {"text": "x", "proposal_id": f"{pid}:{n}"}})
+            results.append({"tool_call_id": f"c{n}", "is_error": False,
+                            "content": self._x_post_result(True, tweet_id=f"t{n}", pid=pid)})
+        assert mark_proposals_posted(calls, results, "default") == 4
+        assert self._store_kind(artifact_db, pid) == "proposal"
+        left = [r["id"].rsplit(":", 1)[1] for r in artifact_db.list_proposals()]
+        assert sorted(map(int, left)) == [2, 3, 5, 6, 8, 9, 11]
 
     def test_failed_post_leaves_proposal_resolvable(self, artifact_db):
         """A failed post must NOT consume the proposal — the retry needs it."""

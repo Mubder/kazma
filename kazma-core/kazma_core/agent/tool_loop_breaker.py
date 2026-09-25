@@ -96,9 +96,10 @@ def recovery_honest_message(probes: int) -> str:
         "query grows the history that caused the trim. Respond honestly NOW: "
         "(1) tell the user which earlier content you can no longer see (e.g. 'I can "
         "no longer see the 8 tweet drafts'), (2) ask ONE concrete question to "
-        "recover it (e.g. 'should I re-propose the English ones?'), and (3) check "
-        "the scratchpad / saved proposals first — durable copies may exist there. "
-        "Never guess or fabricate the missing content."
+        "recover it (e.g. 'should I re-propose the English ones?'), and (3) read "
+        "the durable copies first: list_proposals returns every saved draft "
+        "verbatim, and your scratchpad findings are already in your working "
+        "memory. Never guess or fabricate the missing content."
     )
 
 # Semantic stagnation: identical (tool, canonical-args) calls repeating without

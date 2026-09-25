@@ -18,16 +18,30 @@ def _json(obj: dict) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2)
 
 
-async def x_status() -> str:
-    """Read-only connector status. Never returns secret values."""
+async def x_status(recent: int = 5) -> str:
+    """Read-only connector status. Never returns secret values.
+
+    Args:
+        recent: How many of the latest posts to list (1-50, default 5). This
+            is the model's read path for the post ledger (``x_posts.db``);
+            the database itself is refused to the SQL, file and exec tools.
+    """
     try:
         cfg = await asyncio.to_thread(get_x_config)
         ledger = get_ledger()
         import time
 
-        day = ledger.count_since(time.time() - 86400)
-        month = ledger.count_since(time.time() - 30 * 86400)
-        recent = ledger.recent(5)
+        try:
+            n_recent = max(1, min(int(recent or 5), 50))
+        except (TypeError, ValueError):
+            n_recent = 5
+        day, month, recent_rows = await asyncio.to_thread(
+            lambda: (
+                ledger.count_since(time.time() - 86400),
+                ledger.count_since(time.time() - 30 * 86400),
+                ledger.recent(n_recent),
+            )
+        )
         payload = {
             "configured": cfg.credentials.complete(),
             "enabled": cfg.enabled,
@@ -54,7 +68,7 @@ async def x_status() -> str:
                     "created_at": r.get("created_at"),
                     "deleted": bool(r.get("deleted_at")),
                 }
-                for r in recent
+                for r in recent_rows
             ],
             "setup": (
                 "Open Settings → X. Create a Project + App at developer.x.com, "

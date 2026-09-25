@@ -96,7 +96,15 @@ class CheckpointManager(BaseCheckpointSaver):
 
         async with self._saver_lock:
             if tenant_id not in self._tenant_savers:
-                db_path = Path("kazma-data") / f"checkpoints_{safe_tenant}.db"
+                # Under data_dir(), not the literal "kazma-data" relative to
+                # the process CWD: started from another directory, a tenant's
+                # checkpoints landed where neither backup nor migration looks
+                # (the same bug already fixed for checkpoints.db below, and in
+                # knowledge / bookmarks / documents; now a gate in
+                # tests/test_store_registry.py).
+                from kazma_core.paths import data_dir
+
+                db_path = data_dir() / f"checkpoints_{safe_tenant}.db"
                 db_path.parent.mkdir(parents=True, exist_ok=True)
                 conn = await aiosqlite.connect(str(db_path))
                 await apply_sqlite_pragmas_async(conn)
