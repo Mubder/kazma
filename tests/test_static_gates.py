@@ -900,6 +900,10 @@ _LOOP_STALL_HELPERS = frozenset({
     # Shared-store peer registry: a Postgres round trip plus a file write.
     # Boot calls it through to_thread; the names keep the next caller honest.
     "check_shared_store_peers", "recent_peers",
+    # pg tool discovery runs `docker exec ... which pg_dump` (15 s timeout),
+    # and the dump itself is a subprocess: never on the loop.
+    "pg_dump_tool_problem", "resolve_pg_dump", "resolve_pg_restore",
+    "perform_pg_backup",
 })
 
 

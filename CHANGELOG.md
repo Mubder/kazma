@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## Postgres backups survive Docker leaving PATH (2026-09-25)
+
+**The alert.** "[Ops] Postgres dump failed — native_pg_backup produced no
+dump", 07:53 UTC. Docker Desktop had updated itself to 4.91.0 overnight and
+left its `resources\bin` folder off the system PATH. The KazmaAgent task, the
+guard and the server start from that environment, so the `docker` CLI could
+not be found and `pg_dump` (which runs inside the database container) could
+not be reached — with Docker and the container running fine. The last good
+dump was 2026-09-24 20:27 UTC.
+
+**Now:** the docker CLI is found through `KAZMA_DOCKER_BIN`, then PATH, then
+Docker's standard install folders, and a CLI found off PATH is named once in
+the log. The same lookup serves the `python_exec` Docker jail, which would
+otherwise have fallen back to the host (auto mode) or refused. The dump alert
+says WHY it failed, and boot checks that `pg_dump` can run instead of the
+first dump finding out up to six hours later. The shared error redactor now
+also strips a password inside a connection string, and stopped mangling
+`https://` URLs into `http<redacted>` (its Windows-path rule matched the
+`s://`).
+
 ## Retire drafts, read-only probes, and fourteen other classes closed in one pass (2026-09-25)
 
 **Drafts.** Saved drafts can be retired and restored — `discard_proposal` in

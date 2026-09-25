@@ -140,6 +140,7 @@ curl -s https://your.domain/api/auth/status
 | `KAZMA_DB_BACKEND` | auto | Optional | Force `postgres` / `sqlite`. |
 | `KAZMA_DB_CONTAINER` | `kazma-db` | Migration | Docker container name for `pg_dump` / `pg_restore` discovery during `kazma migrate`. See [Migration](../ops/migration). |
 | `KAZMA_DB_INTERNAL_PORT` | `5432` | Migration | Container-internal Postgres port when `pg_dump` / `pg_restore` run via `docker exec` (the host's forwarded port is unreachable from inside the container). |
+| `KAZMA_DOCKER_BIN` | unset | Optional | Absolute path of the `docker` CLI. Kazma looks for it here, then on `PATH`, then in Docker's standard install folders (e.g. `C:\Program Files\Docker\Docker\resources\bin`). Needed only when docker lives somewhere else: the Postgres dump (`pg_dump` via `docker exec`) and the `python_exec` Docker jail both use it. A Docker Desktop update that drops its folder from `PATH` no longer stops backups (2026-09-25). |
 | `KAZMA_PG_POOL_RETRIES` | `5` | Optional | Connection-pool creation retry count. Handles transient failures (Windows Docker-bridge, container mid-startup). |
 | `KAZMA_PG_POOL_RETRY_DELAY` | `1.0` | Optional | Seconds between pool-creation retries. |
 | `KAZMA_PG_POOL_MIN` | `1` | Optional | Minimum connections in the psycopg pool. |

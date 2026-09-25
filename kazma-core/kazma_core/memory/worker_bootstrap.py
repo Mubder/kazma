@@ -1268,14 +1268,20 @@ async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
                 _enqueue_pg_offsite_retry(path)
                 _alert_pg_offsite(failed)
         if path is None:
-            logger.warning("[memory_worker] native_pg_backup produced no dump")
+            from kazma_core.db.pg_backup import last_pg_backup_failure
+
+            reason = last_pg_backup_failure()
+            logger.warning("[memory_worker] native_pg_backup produced no dump: %s", reason)
             try:
                 from kazma_core.observability.ops_alerts import alert
 
+                # Say WHY. "produced no dump" alone sent the operator asking;
+                # the cause was one line in a traceback in kazma.log.
                 alert(
                     "backup.pg_dump",
                     "Postgres dump failed",
-                    "native_pg_backup produced no dump",
+                    "native_pg_backup produced no dump"
+                    + (f": {reason[:300]}" if reason else " (see kazma.log)"),
                     severity="critical",
                 )
             except Exception:

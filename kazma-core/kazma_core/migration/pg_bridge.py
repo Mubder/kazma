@@ -107,7 +107,13 @@ def _resolve_tool(tool: str) -> Sequence[str]:
     # (2) Docker container (the common Kazma deployment shape: the DB runs
     # in a container that HAS the client tools, even when the host doesn't).
     container = os.environ.get("KAZMA_DB_CONTAINER", "").strip() or "kazma-db"
-    docker = shutil.which("docker")
+    # Not shutil.which("docker"): a Docker Desktop update dropped the CLI from
+    # PATH on 2026-09-25 and every pg dump after it failed while docker and the
+    # container were fine. find_docker_cli() also checks KAZMA_DOCKER_BIN and
+    # Docker's own install folders.
+    from kazma_core.docker_cli import find_docker_cli
+
+    docker = find_docker_cli()
     if docker:
         # Verify the container is reachable before committing to it (avoids
         # a confusing "docker: not found" deep inside the dump call).
@@ -124,9 +130,12 @@ def _resolve_tool(tool: str) -> Sequence[str]:
     # (3) Neither — clear error.
     hint_path = f"install PostgreSQL client tools (so '{tool}' is on PATH)"
     hint_docker = (
-        f"or set KAZMA_DB_CONTAINER to a running container that has '{tool}'"
+        f"or set KAZMA_DB_CONTAINER to a running container that has '{tool}' "
+        f"(checked with {docker})"
         if docker
-        else "or install Docker so the DB container's client tools can be used"
+        else "or install Docker so the DB container's client tools can be used "
+        "(the docker CLI is not on PATH, not at KAZMA_DOCKER_BIN, and not in "
+        "Docker's standard install folders)"
     )
     raise PgToolNotFound(
         f"'{tool}' not found on PATH and not reachable via docker exec {container}. "

@@ -114,11 +114,16 @@ _docker_available: bool | None = None
 
 
 def _docker_cli() -> str | None:
-    return shutil.which("docker")
+    # PATH, KAZMA_DOCKER_BIN, then Docker's install folders: a Docker Desktop
+    # update that drops the CLI from PATH must not silently move the jail's
+    # code onto the host (auto mode) or refuse it (forced mode).
+    from kazma_core.docker_cli import find_docker_cli
+
+    return find_docker_cli()
 
 
 def docker_available() -> bool:
-    """True if the docker CLI is on PATH (does not pull images)."""
+    """True if the docker CLI can be found (does not pull images)."""
     global _docker_available
     if _docker_available is not None:
         return _docker_available

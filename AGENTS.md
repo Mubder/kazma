@@ -1014,6 +1014,16 @@ ConfigStore keys `backups.pg.enabled` / `backups.pg.retention`; env
 kill-switch `KAZMA_PG_BACKUP_ENABLED=0`. Tests:
 `python -m pytest tests/test_pg_backup.py`.
 
+**E2. The dump must find its tools without PATH's help.** `pg_dump` usually
+runs inside the DB container through `docker exec`, and a Docker Desktop
+update dropped the CLI from the system PATH on 2026-09-25 — every dump after
+it failed while Docker and the container were fine. The docker CLI is found
+by `kazma_core.docker_cli.find_docker_cli()` (`KAZMA_DOCKER_BIN`, PATH,
+Docker's install folders), never `shutil.which("docker")` alone
+(`tests/test_docker_cli_discovery.py` gates it). Boot checks the tool
+(`pg_dump_tool_problem`, ops alert `backup.pg_tools`), and a failed dump's
+alert carries its reason (`last_pg_backup_failure`), redacted.
+
 **F. Universal backup — "never left anything behind"**
 (`kazma_core/backup/universal.py`). One unified backup that backs up
 literally everything: every `*.db` in `kazma-data/` (WAL-safe via

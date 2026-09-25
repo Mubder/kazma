@@ -64,10 +64,11 @@ _CODES: tuple[tuple[type[BaseException], str], ...] = (
 #: Fragments that must never reach a client even in verbose mode.
 _REDACT = re.compile(
     r"""(
-        [A-Za-z]:[\\/][^\s'"]*        # Windows absolute paths
+        \b[A-Za-z]:[\\/](?![\\/])[^\s'"]*   # Windows absolute paths (not the "s://" of a URL)
       | /(?:home|Users|root|etc|var|opt)/[^\s'"]*   # POSIX absolute paths
       | (?:password|secret|token|api[_-]?key)\s*[=:]\s*\S+
       | \b(?:sk|xox[baprs]|ghp|gho|ghu|ghs|AIza)[-_][A-Za-z0-9_-]{8,}
+      | [a-z][a-z0-9+.-]*://[^/\s:@'"]+:[^@\s/'"]+@  # URL userinfo (a DSN's password)
     )""",
     re.IGNORECASE | re.VERBOSE,
 )

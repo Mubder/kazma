@@ -42,8 +42,10 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "KAZMA_PG_TABLES",
     "get_pg_backup_config",
+    "last_pg_backup_failure",
     "pg_backup_enabled",
     "pg_backup_dir",
+    "pg_dump_tool_problem",
     "perform_pg_backup",
     "prune_pg_backups",
     "latest_pg_backup",
@@ -91,6 +93,42 @@ KAZMA_PG_TABLES: list[str] = [
 _DEFAULT_RETENTION = 3
 
 _DUMP_MAGIC = b"PGDMP"
+
+#: Why the last :func:`perform_pg_backup` produced nothing, for the ops alert.
+#: The alert used to say only "native_pg_backup produced no dump" and the
+#: reason sat in a traceback in kazma.log (2026-09-25: the docker CLI had
+#: dropped off PATH after a Docker Desktop update).
+_last_failure: str | None = None
+
+
+def last_pg_backup_failure() -> str | None:
+    """The reason the most recent dump failed, or ``None`` after a success."""
+    return _last_failure
+
+
+def _record_failure(reason: str | None) -> None:
+    global _last_failure
+    _last_failure = reason
+
+
+def pg_dump_tool_problem() -> str | None:
+    """Why ``pg_dump`` cannot be run right now, or ``None`` when it can.
+
+    Boot calls this where Postgres backups are on, so a missing tool is said
+    when the server starts rather than at the first dump -- up to six hours
+    later, and after a boot sweep that is skipped when a backup is fresh.
+    Blocking (it may probe the database container): use ``to_thread``.
+    """
+    import subprocess
+
+    from kazma_core.errors import validation_error
+    from kazma_core.migration.pg_bridge import PgToolNotFound, resolve_pg_dump
+
+    try:
+        resolve_pg_dump()
+    except (PgToolNotFound, OSError, subprocess.SubprocessError) as exc:
+        return validation_error(exc)
+    return None
 
 
 def get_pg_backup_config() -> dict[str, Any]:
@@ -185,8 +223,10 @@ def perform_pg_backup(*, retention: int | None = None) -> Path | None:
         if not _is_valid_dump(tmp):
             tmp.unlink(missing_ok=True)
             logger.warning("[pg_backup] dump failed validation (bad magic) — discarded")
+            _record_failure("pg_dump wrote a file that is not a valid custom-format dump")
             return None
         tmp.replace(dest)
+        _record_failure(None)
         pruned = prune_pg_backups(retention=keep)
         size_mb = dest.stat().st_size / (1024 * 1024)
         logger.info(
@@ -194,8 +234,11 @@ def perform_pg_backup(*, retention: int | None = None) -> Path | None:
             dest.name, size_mb, len(KAZMA_PG_TABLES), pruned,
         )
         return dest
-    except Exception:
+    except Exception as exc:
         logger.warning("[pg_backup] pg_dump failed", exc_info=True)
+        from kazma_core.errors import validation_error
+
+        _record_failure(f"{type(exc).__name__}: {validation_error(exc)}")
         # Never leave a half-written dump behind.
         try:
             if "tmp" in locals():
