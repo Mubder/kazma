@@ -15,6 +15,10 @@ import pytest
 from kazma_core.config_store import get_config_store
 from kazma_core.security import web_sessions as ws
 
+# Verified against a real Postgres (throwaway postgres:16, twice); the CI
+# Postgres job runs every test carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 
 @pytest.fixture
 def reads(monkeypatch):

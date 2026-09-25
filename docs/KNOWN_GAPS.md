@@ -42,15 +42,26 @@ tree. Assume the same class exists elsewhere.
 **Still open from that audit:**
 
 - **Postgres has one CI job, not coverage.** The job runs every test marked
-  `@pytest.mark.postgres` (`scripts/postgres_suite.py`): 227 tests in 24 files
-  on 2026-09-25, each verified on a real Postgres before it was marked — up
-  from seven named files at the start. Marking is per test, so a file whose
-  other tests are SQLite-shaped still contributes the ones that are not.
-  That is a tripwire for those code paths, not parity with the SQLite suite —
-  everything unmarked still runs on SQLite only. A broad `-k` sweep was tried and
-  rejected: it drags in SQLite-shaped tests that fail for reasons unrelated to
-  the backend, and a job that is red on day one is a job everyone ignores,
-  which is how the gap opened in the first place.
+  `@pytest.mark.postgres` (`scripts/postgres_suite.py`): 274 tests in 30 files
+  on 2026-09-25 (evening), each file passing twice on a throwaway Postgres
+  before it was marked — up from seven named files at the start. Marking is
+  per test, so a file whose other tests are SQLite-shaped still contributes
+  the ones that are not. That is a tripwire for those code paths, not parity
+  with the SQLite suite — everything unmarked still runs on SQLite only. A
+  broad `-k` sweep was tried and rejected: it drags in SQLite-shaped tests
+  that fail for reasons unrelated to the backend, and a job that is red on day
+  one is a job everyone ignores, which is how the gap opened in the first
+  place. **Next candidates, and why they are not marked:**
+  `test_swarm_task_store.py`, `test_session_manager.py` and
+  `test_shared_store_peers.py` pass on SQLite and fail on Postgres only
+  because they assume an empty table per test (counts, a fixed session id
+  whose usage accumulates, `system.installs.*` rows from other tests, raw
+  `sqlite3` reads). None of the 25 failures there was a Postgres bug. Each
+  needs per-test isolation (unique ids, assertions about its own rows) before
+  it can join — the pattern `test_swarm_paused_task_endings.py` now uses.
+  `test_swarm_task_store.py` is also where the `task-hitl-1` / `task-paused-1`
+  rows in the live database came from (2026-08-14, before `conftest.py`
+  stripped DSNs).
 - **The suite can only reach a real Postgres through one deliberate switch.**
   `conftest.py` force-pins `KAZMA_DB_BACKEND=sqlite` and strips every DSN at
   import, with a guard that removes the DSN again if anything re-adds it — so

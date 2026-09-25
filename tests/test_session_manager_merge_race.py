@@ -34,6 +34,10 @@ import pytest
 
 from kazma_ui.session_manager import ChatSession, SessionManager
 
+# Verified against a real Postgres (throwaway postgres:16, twice); the CI
+# Postgres job runs every test carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 
 @pytest.fixture
 def manager(tmp_path):

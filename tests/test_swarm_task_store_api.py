@@ -17,6 +17,10 @@ from kazma_core.swarm import (
 from kazma_core.swarm.task_store import TaskStore
 from kazma_ui.swarm_panel import _reset_swarm_state, create_swarm_router
 
+# Verified against a real Postgres (throwaway postgres:16, twice); the CI
+# Postgres job runs every test carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
+
 
 @pytest.fixture(autouse=True)
 def _reset_engine() -> None:

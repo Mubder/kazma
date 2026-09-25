@@ -8,13 +8,18 @@ next boot -- the reject was never saved. Cancel on the same tasks answered
 found" to Approve and Reject alike.
 
 Most tests here restart the engine over a real task store, because the
-restart is where each of these went wrong.
+restart is where each of these went wrong. They run on SQLite locally and on
+Postgres in the CI Postgres job -- the live incident was on Postgres. That
+database is shared by the whole job, so every task id is unique, every
+assertion is about the test's own rows, and anything left paused is closed
+at teardown.
 """
 
 from __future__ import annotations
 
 import ast
 import asyncio
+import uuid
 from pathlib import Path
 
 import pytest
@@ -25,6 +30,10 @@ from kazma_core.swarm import SwarmConfig, SwarmTask, TaskStatus, TaskType
 from kazma_core.swarm.engine import SwarmEngine
 from kazma_core.swarm.task import TaskResult
 from kazma_core.swarm.task_store import TaskStore
+
+# Verified against a real Postgres (throwaway postgres:16); the CI Postgres
+# job runs every test carrying this marker (scripts/postgres_suite.py).
+pytestmark = pytest.mark.postgres
 
 _REPO = Path(__file__).resolve().parents[1]
 
@@ -48,9 +57,39 @@ def _paused(task_id: str, *, checkpoint: bool = True, timeout: float | None = No
     )
 
 
+def _finished(task_id: str, status: TaskStatus, result: TaskResult) -> SwarmTask:
+    task = _paused(task_id)
+    task.status = status
+    task.result = result
+    return task
+
+
 @pytest.fixture
 def db(tmp_path) -> str:
+    """The SQLite path; ignored when the store runs on Postgres."""
     return str(tmp_path / "swarm_tasks.db")
+
+
+@pytest.fixture
+def new_id(db):
+    """Unique task ids. Whatever a test leaves paused is cancelled at teardown,
+    so no later test in a shared database restores it."""
+    made: list[str] = []
+
+    def _new(label: str) -> str:
+        made.append(f"task-{label}-{uuid.uuid4().hex[:10]}")
+        return made[-1]
+
+    yield _new
+    store = TaskStore(db_path=db)
+    try:
+        for task_id in made:
+            task = store.get_task(task_id)
+            if task is not None and task.status == TaskStatus.PAUSED:
+                task.status = TaskStatus.CANCELLED
+                store.persist_task(task)
+    finally:
+        store.close()
 
 
 def _seed(db: str, *tasks: SwarmTask) -> None:
@@ -88,10 +127,11 @@ def _status_on_disk(db: str, task_id: str) -> str | None:
         store.close()
 
 
-def _paused_on_disk(db: str) -> list[str]:
+def _paused_on_disk(db: str) -> set[str]:
+    """Ids of every paused task in the store -- the set the next boot restores."""
     store = TaskStore(db_path=db)
     try:
-        return sorted(t.id for t in store.get_paused_tasks())
+        return {t.id for t in store.get_paused_tasks()}
     finally:
         store.close()
 
@@ -107,119 +147,122 @@ async def _background_gate_settles(task_id: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_reject_after_a_restart_is_saved(db, boot):
+async def test_a_reject_after_a_restart_is_saved(db, boot, new_id):
     """The live failure. The checkpoint handler marks the shared task failed
     before the engine asked "was this already finished?", so the engine took
     its own reject for an earlier ending and skipped the save."""
-    _seed(db, _paused("task-restored"))
+    task_id = new_id("restored")
+    _seed(db, _paused(task_id))
     engine = boot()
 
-    result = await engine.reject_checkpoint("task-restored")
+    result = await engine.reject_checkpoint(task_id)
 
     assert result is not None and result.status == "failed"
-    assert _status_on_disk(db, "task-restored") == "failed"
-    assert _paused_on_disk(db) == [], "the rejected pipeline comes back paused at the next boot"
+    assert _status_on_disk(db, task_id) == "failed"
+    assert task_id not in _paused_on_disk(db), "the rejected pipeline comes back paused at the next boot"
 
 
 @pytest.mark.asyncio
-async def test_a_paused_task_with_no_checkpoint_is_closed_by_reject(db, boot):
+async def test_a_paused_task_with_no_checkpoint_is_closed_by_reject(db, boot, new_id):
     """Nothing can approve it, so Reject is the only way to close it."""
-    _seed(db, _paused("task-orphan", checkpoint=False))
+    task_id = new_id("orphan")
+    _seed(db, _paused(task_id, checkpoint=False))
     engine = boot()
 
-    result = await engine.reject_checkpoint("task-orphan", reason="Test pipeline")
+    result = await engine.reject_checkpoint(task_id, reason="Test pipeline")
 
     assert result is not None and result.status == "failed"
     assert "no checkpoint was pending" in (result.error or "")
-    assert _status_on_disk(db, "task-orphan") == "failed"
-    assert _paused_on_disk(db) == []
+    assert _status_on_disk(db, task_id) == "failed"
+    assert task_id not in _paused_on_disk(db)
 
 
 @pytest.mark.asyncio
-async def test_reject_leaves_an_unknown_or_finished_task_alone(db, boot):
-    done = _paused("task-done")
-    done.status = TaskStatus.COMPLETED
-    done.result = TaskResult(task_id="task-done", status="success", aggregated_output="kept")
-    _seed(db, done)
+async def test_reject_leaves_an_unknown_or_finished_task_alone(db, boot, new_id):
+    done = new_id("done")
+    _seed(db, _finished(done, TaskStatus.COMPLETED,
+                        TaskResult(task_id=done, status="success", aggregated_output="kept")))
     engine = boot()
 
-    assert await engine.reject_checkpoint("task-unknown") is None
-    assert await engine.reject_checkpoint("task-done") is None
-    assert _status_on_disk(db, "task-done") == "completed"
+    assert await engine.reject_checkpoint(new_id("unknown")) is None
+    assert await engine.reject_checkpoint(done) is None
+    assert _status_on_disk(db, done) == "completed"
 
 
-def test_boot_names_paused_tasks_that_have_no_checkpoint(db, boot, caplog):
-    _seed(db, _paused("task-fine"), _paused("task-orphan", checkpoint=False))
+def test_boot_names_paused_tasks_that_have_no_checkpoint(db, boot, new_id, caplog):
+    fine, orphan = new_id("fine"), new_id("orphan")
+    _seed(db, _paused(fine), _paused(orphan, checkpoint=False))
     with caplog.at_level("WARNING", logger="kazma_core.swarm.checkpoint_manager"):
         boot()
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
-    assert any("task-orphan" in w and "Reject or Cancel" in w for w in warnings), warnings
-    assert not any("task-fine" in w for w in warnings)
+    assert any(orphan in w and "Reject or Cancel" in w for w in warnings), warnings
+    assert not any(fine in w for w in warnings)
 
 
 # ── cancel ────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_a_paused_pipeline_restored_after_a_restart_can_be_cancelled(db, boot):
+async def test_a_paused_pipeline_restored_after_a_restart_can_be_cancelled(db, boot, new_id):
     """It is in history only, never in the in-flight map cancel looked at."""
     from kazma_core.safety.hitl_gates import live_gates
 
-    _seed(db, _paused("task-restored"))
+    task_id = new_id("restored")
+    _seed(db, _paused(task_id))
     engine = boot()
-    assert [g.gate_id for g in live_gates("task-restored")] == ["pipeline-task-restored-step1"]
+    assert [g.gate_id for g in live_gates(task_id)] == [f"pipeline-{task_id}-step1"]
 
-    assert await engine.cancel_task("task-restored") is True
-    await _background_gate_settles("task-restored")
+    assert await engine.cancel_task(task_id) is True
+    await _background_gate_settles(task_id)
 
-    assert _status_on_disk(db, "task-restored") == "cancelled"
-    assert _paused_on_disk(db) == []
-    assert engine.get_checkpoint_info("task-restored") is None, (
+    assert _status_on_disk(db, task_id) == "cancelled"
+    assert task_id not in _paused_on_disk(db)
+    assert engine.get_checkpoint_info(task_id) is None, (
         "Approve is still offered on a cancelled task"
     )
-    assert live_gates("task-restored") == [], "its gate row is still pending on the approvals list"
+    assert live_gates(task_id) == [], "its gate row is still pending on the approvals list"
 
 
 @pytest.mark.asyncio
-async def test_cancel_stops_the_checkpoint_timer(db, boot):
+async def test_cancel_stops_the_checkpoint_timer(db, boot, new_id):
     """A cancelled pipeline must not be auto-rejected later."""
-    _seed(db, _paused("task-timed", timeout=3600))
+    task_id = new_id("timed")
+    _seed(db, _paused(task_id, timeout=3600))
     engine = boot()  # inside a running loop, so the timer is armed at once
     await engine.arm_pending_checkpoint_timeouts()
-    timer = engine._checkpoint_handler._paused["task-timed"].timeout_task
+    timer = engine._checkpoint_handler._paused[task_id].timeout_task
     assert timer is not None and not timer.done()
 
-    assert await engine.cancel_task("task-timed") is True
-    await _background_gate_settles("task-timed")
+    assert await engine.cancel_task(task_id) is True
+    await _background_gate_settles(task_id)
     await asyncio.gather(timer, return_exceptions=True)
 
     assert timer.cancelled()
 
 
 @pytest.mark.asyncio
-async def test_cancel_of_an_unknown_or_finished_task_still_answers_false(db, boot):
-    done = _paused("task-done")
-    done.status = TaskStatus.FAILED
-    done.result = TaskResult(task_id="task-done", status="failed", error="earlier")
-    _seed(db, done)
+async def test_cancel_of_an_unknown_or_finished_task_still_answers_false(db, boot, new_id):
+    done = new_id("done")
+    _seed(db, _finished(done, TaskStatus.FAILED,
+                        TaskResult(task_id=done, status="failed", error="earlier")))
     engine = boot()
 
-    assert await engine.cancel_task("task-unknown") is False
-    assert await engine.cancel_task("task-done") is False
-    assert _status_on_disk(db, "task-done") == "failed"
+    assert await engine.cancel_task(new_id("unknown")) is False
+    assert await engine.cancel_task(done) is False
+    assert _status_on_disk(db, done) == "failed"
 
 
 # ── the reaper ────────────────────────────────────────────────────────
 
 
-def test_the_reaper_settles_the_gate_of_a_paused_pipeline():
+def test_the_reaper_settles_the_gate_of_a_paused_pipeline(new_id):
     """It dropped the checkpoint entry but never settled the gate row."""
     from kazma_core.safety.hitl_gates import live_gates
     from kazma_core.swarm.checkpoint import HITLCheckpoint
     from kazma_core.swarm.checkpoint_manager import _gate_register_pipeline
 
     engine = SwarmEngine(SwarmConfig(enabled=True, workers=[]))
-    task = _paused("task-stale")
+    task = _paused(new_id("stale"))
     task.timeout = 1.0
     task.started_at = "2020-01-01T00:00:00+00:00"
     engine._active_tasks[task.id] = task
@@ -261,51 +304,52 @@ def client(boot, monkeypatch):
     reset_swarm_service()
 
 
-def test_the_reject_route_closes_a_paused_task_with_no_checkpoint(db, client):
-    _seed(db, _paused("task-orphan", checkpoint=False))
+def test_the_reject_route_closes_a_paused_task_with_no_checkpoint(db, client, new_id):
+    task_id = new_id("orphan")
+    _seed(db, _paused(task_id, checkpoint=False))
 
-    response = client().post("/api/swarm/tasks/task-orphan/reject")
+    response = client().post(f"/api/swarm/tasks/{task_id}/reject")
 
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "failed"
-    assert _paused_on_disk(db) == []
+    assert task_id not in _paused_on_disk(db)
 
 
-def test_the_approve_route_says_there_is_nothing_to_approve(db, client):
-    _seed(db, _paused("task-orphan", checkpoint=False))
+def test_the_approve_route_says_there_is_nothing_to_approve(db, client, new_id):
+    task_id = new_id("orphan")
+    _seed(db, _paused(task_id, checkpoint=False))
 
-    response = client().post("/api/swarm/tasks/task-orphan/approve")
+    response = client().post(f"/api/swarm/tasks/{task_id}/approve")
 
     assert response.status_code == 409, "the task exists; 'not found' was wrong"
     assert "Reject it to close it" in response.json()["message"]
-    assert _paused_on_disk(db) == ["task-orphan"], "approve must not change anything"
+    assert task_id in _paused_on_disk(db), "approve must not change anything"
 
 
-def test_the_cancel_route_cancels_a_pipeline_restored_after_a_restart(db, client):
-    _seed(db, _paused("task-restored"))
+def test_the_cancel_route_cancels_a_pipeline_restored_after_a_restart(db, client, new_id):
+    task_id = new_id("restored")
+    _seed(db, _paused(task_id))
 
-    response = client().post("/api/swarm/tasks/task-restored/cancel")
+    response = client().post(f"/api/swarm/tasks/{task_id}/cancel")
 
     assert response.status_code == 200, response.text
-    assert _status_on_disk(db, "task-restored") == "cancelled"
+    assert _status_on_disk(db, task_id) == "cancelled"
 
 
 @pytest.mark.parametrize("action", ["approve", "reject", "cancel"])
-def test_an_unknown_task_is_still_not_found(client, action):
-    response = client().post(f"/api/swarm/tasks/task-unknown/{action}")
+def test_an_unknown_task_is_still_not_found(client, new_id, action):
+    response = client().post(f"/api/swarm/tasks/{new_id('unknown')}/{action}")
     assert response.status_code == 404
 
 
-def test_the_cancel_route_refuses_a_finished_task(db, client):
-    done = _paused("task-done")
-    done.status = TaskStatus.COMPLETED
-    done.result = TaskResult(task_id="task-done", status="success")
-    _seed(db, done)
+def test_the_cancel_route_refuses_a_finished_task(db, client, new_id):
+    done = new_id("done")
+    _seed(db, _finished(done, TaskStatus.COMPLETED, TaskResult(task_id=done, status="success")))
 
-    response = client().post("/api/swarm/tasks/task-done/cancel")
+    response = client().post(f"/api/swarm/tasks/{done}/cancel")
 
     assert response.status_code == 404
-    assert _status_on_disk(db, "task-done") == "completed"
+    assert _status_on_disk(db, done) == "completed"
 
 
 # ── the class: one writer for a task's ending ─────────────────────────
