@@ -1,5 +1,71 @@
 # CHANGELOG
 
+## Retire drafts, read-only probes, and fourteen other classes closed in one pass (2026-09-25)
+
+**Drafts.** Saved drafts can be retired and restored — `discard_proposal` in
+chat, Dismiss / Restore (and "Show dismissed") in X Studio — without deleting
+anything; a retired draft cannot be posted until it is restored, and posted or
+scheduled drafts are never touched. The English language lock no longer hides
+drafts written in Arabic: quoted material (drafts, file contents, tool
+results) is reproduced exactly as stored, in its own script.
+
+**Probes cannot write.** Every health, readiness and diagnostics route and
+`kazma doctor` now run as read-only diagnostics: a write to settings or the
+vault from inside one is refused, and the write side effects of reads are
+skipped. `/health/deep` had been bumping the access count of whatever memory
+best matched "health canary probe" on every poll, keeping it "in use" forever
+and penalising it in real recall. Three of those routes also stopped running
+blocking work on the event loop (one slept 100 ms in `psutil`).
+
+**Settings writes cannot be overruled by their own caller.** The write guard's
+refusal is a typed value that cannot be stored, instead of `None`. With `None`,
+an update that returned nothing for a stored secret logged "refused to blank"
+and then wrote null over it — measured on SQLite and Postgres. On Postgres,
+reading a plaintext secret now moves it into the vault as intended; it used to
+fail silently and leave the plaintext in place.
+
+**Who shares your settings store.** On Postgres, every server boot records
+itself and names any other install that booted against the same database in
+the last 14 days — the dev-clone-shares-live shape behind the 2026-09-16
+outage, which the existing data-dir warning could not see. `kazma doctor`
+shows the same. Replicas you run on purpose can be acknowledged by id.
+
+**No more silent second copies of the data dir.** Sixteen code paths answered
+"the data directory cannot be created" by quietly using `./kazma-data` under
+whatever directory the process started in — a second settings file, a document
+store no backup copies, a different IDE sandbox, and (in the database client)
+an extra allowed path. They fail loudly now.
+
+**The vault says when a key is one tenant away.** A read with no tenant that
+misses a key stored under a tenant logs one warning naming the tenant, instead
+of looking exactly like "not configured".
+
+**`python_exec` gets the same catastrophe floor as `shell_exec`.**
+`shutil.rmtree("/")`, `os.system("rm -rf ~")`, fork bombs, `os.kill(-1)` and
+raw-disk writes are refused before the approval card, read from the code
+itself; ordinary code still goes to the card.
+
+**Reminders match the thing you named.** The date guard matched subjects as
+substrings, so "a cursory look" was about the Cursor reset; it matches whole
+words now, which also lets short names like `tax_due` be found by "tax".
+
+**Opt-in restore rehearsal.** Set `backups.pg.restore_rehearsal` (or
+`KAZMA_PG_RESTORE_REHEARSAL=1`) and the weekly backup drill restores the newest
+Postgres dump into a scratch database, checks Kazma's tables and settings came
+back, and drops it. Off by default; it never touches anything but databases
+named `kazma_restore_rehearsal_<epoch>`.
+
+**Engineering.** The Postgres CI job runs every test marked
+`@pytest.mark.postgres` (227, up from 158, all verified on a real Postgres);
+two Postgres tests read the working directory's `.env` — one the live
+install's — and no longer can. `patch.dict(sys.modules)` is banned from tests
+(it evicted modules mid-suite). Bandit's high-severity gate now covers
+`tests/` and `scripts/`, and every `# nosec` names its rule and a reason. A
+generated index lists all 262 `KAZMA_*` variables the code reads, with the
+undocumented count on a ratchet. SQLite store connections close as well as
+commit; Arabic shaping uses one shared reshaper (a per-call reshaper was 96%
+of a layout test's runtime).
+
 ## Kazma can read back what it saves, and its stores are one list (2026-09-25)
 
 **The incident.** Asked "list me all remaining posts", the agent spent 67

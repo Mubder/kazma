@@ -1864,6 +1864,91 @@ location rule, migration exporter, importer) — the bundle silently left
   the operator's card remain the control); per-tenant isolation of a store
   inside one SQLite file is the store's own job, not this registry's.
 
+### 38. The 2026-09-25 hardening batch — each rule with the gate that holds it
+
+One pass after §37, each item a class with its own gate and negative control.
+Read the named test before changing the code it guards.
+
+- **Drafts are retired, never deleted; quoting beats the language lock.**
+  `discard_proposal` (tool, `write` tier) and X Studio Dismiss/Restore set
+  per-item `used_via="discarded"`; posted/scheduled items are never touched,
+  and the commitment gate refuses a discarded `proposal_id` with the restore
+  call to use. `language_lock` carries `QUOTED MATERIAL IS EXEMPT` in every
+  variant — the lock governs the words the model writes, not stored drafts it
+  reproduces (an English lock had hidden 11 Arabic drafts). Gate:
+  `tests/test_language_lock_quoting.py` (no prompt constant bans a script
+  outright); `tests/test_draft_discard.py`.
+- **A SQLite connection used as a context manager commits AND closes.**
+  `with sqlite3.connect()` commits and leaves the handle open (it sits in a
+  reference cycle), which blocks rename/delete on Windows. Store `_connect()`
+  helpers return `db.sqlite_session.committed_and_closed(conn)`. Gate:
+  `test_store_registry.py::test_no_raw_connection_opener_is_used_as_a_context`.
+- **All Arabic shaping and direction go through `documents/arabic.py`** (§19H),
+  with ONE shared reshaper (`functools.lru_cache`): a reshaper per call was
+  96% of a layout test's runtime and took a CI chunk down on its timeout. Gate:
+  `tests/test_arabic_single_home.py` (only arabic.py imports
+  `arabic_reshaper`/`bidi`).
+- **A vault miss that is really a missing tenant says so, once.**
+  `SecretVault.retrieve` with NO tenant bound that misses a name stored under
+  a tenant logs one WARNING per name (tenants named, never the value). A
+  caller with its own tenant missing another's key is isolation, and silent.
+  Gate: `tests/test_vault_scoped_miss_tripwire.py`.
+- **Every install sharing one Postgres settings store is named.** Each server
+  boot records `system.installs.<id>` (the id lives in the install's own data
+  dir, `<data_dir>/install_id`) and names installs booted in the last 14 days;
+  replicas go under `database.shared_store.acknowledged_peers` (INFO, not
+  WARNING). `kazma doctor` shows the same, read-only. The data-dir warning
+  cannot see a second checkout that relocates nothing — the 2026-09-16 shape.
+  Gate: `tests/test_shared_store_peers.py`.
+- **No except-branch re-derives the data dir from the CWD.** Sixteen did
+  (`Path.cwd() / "kazma-data" / ...`): a second settings.db, a document store
+  no backup copies, an IDE sandbox the chat tools did not use, a CWD root
+  ADDED to the database client's path allowlist. They raise, deny, or use a
+  non-store location now; only the updater keeps one (it runs while its own
+  package may not import). Gate 8 in `tests/test_store_registry.py`.
+- **Diagnostics are read-only, by scope** (`kazma_core/diagnostic_scope.py`).
+  `read_only_diagnostic(name, allow=...)` is a ContextVar (follows
+  `to_thread`): every ConfigStore mutator and vault store/delete raises
+  `DiagnosticWriteRefused` unless allowed, and read side effects are skipped
+  (recall's access bump — `/health/deep` had been keeping one memory "in use"
+  forever — and the lazy plaintext→vault migration). Every `/health`,
+  readiness and diagnostics route and `kazma doctor` open a scope;
+  `/health/deep` allows only its canary key. Gate:
+  `tests/test_diagnostics_are_read_only.py` (routes enumerated from source).
+- **A write veto is a `_Veto`, never `None`.** It cannot be serialized, so a
+  caller that forgets to test it raises instead of writing. With `None`,
+  `atomic_update(secret, lambda _: None)` logged "refused to blank" and wrote
+  null over the pointer, on both backends. `_write_db_value` is
+  backend-aware (the lazy migration never landed on Postgres).
+- **Tests stub modules with `tests._module_stubs.stub_modules`**, never
+  `patch.dict(sys.modules)` (it evicts every module imported inside it).
+  **No test reads a real `.env`** — two Postgres tests did, one the LIVE
+  install's by hard-coded path. **`@pytest.mark.postgres` is the Postgres
+  job's list** (`scripts/postgres_suite.py`), per test, verified on a real
+  Postgres before marking. Gates: `tests/test_module_stubs.py`,
+  `tests/test_postgres_suite.py`.
+- **Every `KAZMA_*` variable is inventoried** in the generated
+  `docs/docs/reference/environment-variables-index.md`
+  (`scripts/generate_env_reference.py`); the number the curated page does not
+  describe is on a ratchet (`tests/test_env_reference.py`). A new variable
+  means a row on the curated page.
+- **Bandit's HIGH gate covers `tests/` and `scripts/`; every `# nosec` names
+  its rule and a reason** (`tests/test_security_scan_scope.py`).
+- **`python_exec`/`code_exec` get the exec denylist's deny-before-card
+  floor** from the code's AST (`safety/commitment/python_denylist.py`),
+  judged by the shell denylist's own rm/chmod patterns. Computed paths still
+  go to the card. Gate: `tests/test_python_exec_denylist.py`.
+- **Restore rehearsal: opt-in, scratch-only** (`backup/restore_rehearsal.py`,
+  `backups.pg.restore_rehearsal` / `KAZMA_PG_RESTORE_REHEARSAL`): the weekly
+  pass restores the newest dump into `kazma_restore_rehearsal_<epoch>`,
+  checks it, drops it; every CREATE/DROP re-checks that exact pattern and
+  refuses the live database. Gate: `tests/test_restore_rehearsal.py`.
+- **The date guard matches a subject by whole words** (Latin script;
+  Arabic stays substring because of clitics), so three-letter heads are safe
+  (`tests/test_date_guard_word_match.py`).
+- **Async routes that never await are plain `def`s** (§35); the debt ratchet
+  counts the rest (`async_route_never_awaits`), and it only goes down.
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser
