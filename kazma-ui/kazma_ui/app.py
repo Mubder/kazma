@@ -1722,6 +1722,7 @@ class KazmaAppBuilder:
                     KAZMA_PG_TABLES,
                     latest_pg_backup,
                     pg_backup_enabled,
+                    pg_dump_tool_problem,
                     verify_required_pg_tables,
                 )
 
@@ -1764,6 +1765,25 @@ class KazmaAppBuilder:
                                 "[PG-BACKUP] schema verification OK (all %d tables present)",
                                 len(KAZMA_PG_TABLES),
                             )
+                    # Can the dump actually run? Said at boot, not at the first
+                    # dump up to six hours later: on 2026-09-25 a Docker Desktop
+                    # update dropped the docker CLI from PATH and the first sign
+                    # was a failed dump the morning after.
+                    import asyncio as _aio
+
+                    _tool_problem = await _aio.to_thread(pg_dump_tool_problem)
+                    if _tool_problem:
+                        logger.critical(
+                            "[PG-BACKUP] Postgres backups cannot run: %s", _tool_problem
+                        )
+                        from kazma_core.observability.ops_alerts import alert as _ops_alert
+
+                        _ops_alert(
+                            "backup.pg_tools",
+                            "Postgres backups cannot run",
+                            _tool_problem[:300],
+                            severity="critical",
+                        )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[PG-BACKUP] boot schema verification failed: %s", exc)
 

@@ -60,8 +60,9 @@ class TestNoHardcodedUnixPathsInProductionCode:
         offenders: list[str] = []
         # Platform-discovery candidate lists (NOT hardcoded dependencies):
         # these enumerate where binaries MIGHT live on each OS — removing
-        # them would break Linux/Mac discovery.
-        _DISCOVERY_ALLOWLIST = {"binaries.py", "post_hitl.py"}
+        # them would break Linux/Mac discovery. docker_cli.py is the docker
+        # CLI's list (a Docker Desktop update dropped it from PATH, 2026-09-25).
+        _DISCOVERY_ALLOWLIST = {"binaries.py", "post_hitl.py", "docker_cli.py"}
         for py_file in pkg_dir.rglob("*.py"):
             if py_file.name in _DISCOVERY_ALLOWLIST:
                 continue
