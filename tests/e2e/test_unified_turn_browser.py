@@ -194,6 +194,26 @@ def page(harness: Harness, evidence: dict):
             browser.close()
 
 
+#: A step drawn as running (a spinner).
+_SPINNING = ".agent-progress-step.state-running, .agent-progress-step .step-icon.is-animated"
+_SPINNING_JS = """(sel) => Array.from(document.querySelectorAll(sel)).map(
+  (e) => ((e.closest('.agent-progress-step') || e).textContent || '').trim().slice(0, 60))"""
+
+
+def _wait_until_nothing_spins(pg, why: str, timeout: int = 20000) -> None:
+    """A completed header and no running step, polled to a deadline."""
+    try:
+        pg.wait_for_function(
+            "(sel) => { const h = document.querySelector('.turn-header');"
+            " return !!h && h.className.indexOf('is-completed') >= 0"
+            " && document.querySelectorAll(sel).length === 0; }",
+            arg=_SPINNING,
+            timeout=timeout,
+        )
+    except Exception:
+        raise AssertionError(f"{why}: {pg.evaluate(_SPINNING_JS, _SPINNING)}") from None
+
+
 def _shape(pg) -> dict:
     return pg.evaluate(_SHAPE_JS) or {}
 
@@ -374,6 +394,14 @@ def test_sequential_allow_tool_in_one_bubble(page, harness: Harness) -> None:
     # group rather than inside it.
     assert end["shape"][: len(EXPECTED_SHAPE)] == EXPECTED_SHAPE, end["shape"]
     assert not end["bottomBar"], "the separate status bar is back"
+
+    # Nothing spins on a finished turn. The gate rows ("Approved", "Approval
+    # resolved") carry state `info`, which the step renderer drew as running:
+    # four spinners on a finished turn, live and after every reload
+    # (2026-09-26).
+    _wait_until_nothing_spins(pg, "a finished turn shows a running step")
+    pg.reload(wait_until="domcontentloaded")
+    _wait_until_nothing_spins(pg, "a reloaded finished turn shows a running step", 60000)
 
 
 def test_the_row_settles_before_any_poll(page) -> None:

@@ -1744,8 +1744,15 @@ Load-bearing rules:
   (the revision, the usage and the close time were each dropped by a
   whitelist nobody updated). The meta line under a bubble has one writer,
   `_paintMetaTail` in `chat.js`: callers set fields, never `textContent`
-  (that flattened the `<time>` element). A reply shows `closed_at` — its
-  delivery time, set once by `_write_lifecycle` on the closing write.
+  (that flattened the `<time>` element). A terminal frame's stats reach it
+  through `_paintTurnStatsFor` from BOTH mouths (the socket bridge
+  `applyTurnStats` updated only the badges, so a watching tab never showed
+  the line). A reply shows `closed_at` — its delivery time, set once by
+  `_write_lifecycle` on the closing write.
+- **A step spins only when it says `running`.** Gate rows carry `info`;
+  `_activityRowsHtml` drew every status row without running/failed/done as
+  running, so decided gates spun forever (`test_sequential_allow_tool_in_one_bubble`
+  asserts nothing spins on a finished four-gate turn, live and reloaded).
 
 Sequential approval is proven at the lifecycle level by
 `tests/e2e/test_unified_turn_app_graph.py` and in a browser by
@@ -1889,6 +1896,15 @@ in the vault and does **not** automatically feed Calendar.
   in the call or by `KAZMA_CALENDAR_PROVIDER` (the env value was judged
   non-explicit until 2026-09-25). Sandbox is auto fallback only when no
   account is connected.
+- **Email fails closed the same way** (`EmailNotConnectedError`,
+  `email_manager/router.py`, since 2026-09-26). A provider named in the call
+  or by `EMAIL_DEFAULT_PROVIDER`, or an account alias, that is not connected
+  is refused with the Settings step to fix it; an unknown provider or a
+  typo'd alias is refused too (both used to default to the sandbox, which
+  answered "Sandbox sent to …" for a send that never happened). The sandbox
+  answers only `auto` with nothing connected, `sandbox` itself, or an
+  account whose TYPE is `sandbox`. Every email tool returns the refusal as
+  its answer (`tests/test_email_fail_closed.py` enumerates the tools).
 - Connect with Google requests Calendar as a **soft** extra (like
   `drive.file`): Gmail connect still succeeds if Calendar API is off.
   Settings → Email → **Connect Calendar** is the dedicated grant (same
@@ -2278,6 +2294,28 @@ Gates: `tests/test_guard_owns_reload.py` (each with a negative control),
 `tests/test_guard_integration.py` (the real guard against a fake server:
 graceful reload, an ignored stop, a leftover request, the heartbeat),
 `tests/test_idle_reload.py`.
+
+### 40. One checkpoint serializer, strict (`kazma_core/checkpoint_serde.py`)
+
+LangGraph's `JsonPlusSerializer` rebuilds typed values from a checkpoint by
+calling the class the checkpoint names, and its default is PERMISSIVE (any
+class, with a warning). Given an allowlist it is strict: LangGraph's safe
+types plus `KAZMA_MSGPACK_TYPES`, anything else back as raw data.
+
+- **Every saver takes `serde=kazma_checkpoint_serde()`** — the gateway's
+  CheckpointManager and per-tenant savers, the Postgres saver, KazmaAgent's
+  own savers, the shared SQLite saver (`checkpoints_shared` no longer takes a
+  serializer: it used to keep whichever its FIRST caller passed, so the
+  process's posture depended on boot order), and the CLI's MemorySaver.
+- **Every Enum the graph-state modules define is on the list**
+  (`kazma_core.agent.state`, `kazma_core.agent.intent.types`). `TaskStatus`
+  and `RouteKind` were not: on SQLite they came back as plain strings with
+  a warning (Postgres stores `str` inline, so the live install never showed
+  it). A new state enum goes on the list.
+- Gate: `tests/test_checkpoint_serde.py` — every saver construction in the
+  product source, the one construction site, every state enum round-tripped
+  as itself, and a class off the list never constructed (negative control:
+  LangGraph's permissive mode builds it).
 
 ## UI Conventions (Web)
 
