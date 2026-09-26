@@ -119,6 +119,13 @@ def _findability_component(fnd: dict[str, Any]) -> dict[str, Any]:
         parts.append(
             f"{unrecovered} kept only as their short stub: no copy of the full text survives."
         )
+    legacy = fnd.get("legacy_archive") or {}
+    stranded = int(legacy.get("pending") or 0)
+    if stranded:
+        parts.append(
+            f"{stranded} memories sit in a legacy archive table recall does not read; "
+            "the next recovery pass puts them back."
+        )
     reconcile = fnd.get("turn_reconcile") or {}
     catching_up = bool(reconcile) and not reconcile.get("done", True)
     if catching_up:
@@ -129,8 +136,8 @@ def _findability_component(fnd: dict[str, Any]) -> dict[str, Any]:
     return _comp(
         "memory_findability",
         "Every memory findable",
-        ok=not waiting and not pending and not catching_up,
-        status="warn" if (waiting or pending or catching_up) else "ok",
+        ok=not waiting and not pending and not stranded and not catching_up,
+        status="warn" if (waiting or pending or stranded or catching_up) else "ok",
         detail=" ".join(parts),
         meta=fnd,
     )

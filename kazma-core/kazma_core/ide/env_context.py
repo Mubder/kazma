@@ -86,17 +86,31 @@ def _resolve_root(workspace_id: str | None = None) -> Path:
     brain and tools never disagree (Switch Repo / clone).
     """
     if workspace_id:
-        try:
-            from kazma_core.stores import get_workspace_store
+        # A task that names its workspace must be told THAT workspace. The
+        # fallback below names the process-wide one, so an id that does not
+        # resolve is said out loud -- it used to be a DEBUG line, and a
+        # targeted swarm task was silently handed another repository's root
+        # (seen once on CI, 2026-09-26: the previous test's root). One retry
+        # covers a store that is briefly busy.
+        from kazma_core.db.pg_helpers import store_errors
 
-            store = get_workspace_store()
-            for ws in store.list_workspaces():
-                if ws.get("id") == workspace_id:
-                    rp = ws.get("root_path")
-                    if rp:
-                        return Path(rp).resolve()
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.debug("[env_context] workspace_id %s lookup failed: %s", workspace_id, exc)
+        failure: BaseException | None = None
+        for _attempt in (1, 2):
+            try:
+                from kazma_core.stores import get_workspace_store
+
+                for ws in get_workspace_store().list_workspaces():
+                    if ws.get("id") == workspace_id and ws.get("root_path"):
+                        return Path(ws["root_path"]).resolve()
+                failure = None
+                break
+            except store_errors() as exc:
+                failure = exc
+        logger.warning(
+            "[env_context] workspace %s %s; the context names the active workspace instead",
+            workspace_id,
+            f"could not be read ({type(failure).__name__}: {failure})" if failure else "is not registered",
+        )
 
     try:
         from kazma_core.tools.file_write import _get_workspace

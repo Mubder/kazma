@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 308 memories from July are searchable again; test data removed (2026-09-26)
+
+On 2 and 3 August a one-off clean-up moved 329 of Kazma's memories -- July's
+conversations carried over from the first memory system, 39 notes you had
+asked it to keep, and 10 chat turns -- into a separate table that nothing
+reads. They were stored, but no question could reach them. Kazma now puts
+each one back as an older memory, searched like any other and brought
+forward when a question needs it; 21 were already held under another name
+and are left as they are. Memory health reports any that are still waiting.
+
+Test data that a test run wrote into the live install on 14 August, and
+the probes from earlier live checks, are gone: 24 test chats, 23 memories
+made from them, 18 test documents, 8 test tasks and their records. Every
+removed row was saved to a file first. One memory of yours that had been
+filed under the wrong account is back under yours.
+
 ## File tools work in the workspace you chose, and keep your line endings (2026-09-26)
 
 When Kazma was given a file name like `README.md`, its file tools looked for

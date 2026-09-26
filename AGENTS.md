@@ -605,6 +605,14 @@ came up short, and archiving had erased 76 memories.
   a run was stored in a file nobody read. It now seeds and recalls on a
   private database (`recall(conn=...)`), refuses the live one, and runs off
   the event loop.
+- **Nothing stranded in a table recall does not read** (item J,
+  `memory/legacy_tables.py`): a one-off operation on 2026-08-02/03 (never
+  committed) moved 329 episodes into `episodes_archive`, which no code
+  reads. The recovery sweep puts each back as a cold (`archived`) memory --
+  own id, text, vector, tenant, time -- skipping an id `episodes` holds and
+  a text the tenant already holds; the legacy table is left as it is. Health
+  counts what is still stranded. `entities_archive` stays archived (junk
+  nodes and 200-character truncations of memories held in full).
 - **Conversation history has one reader** (`memory/chat_history.py`): the
   past-chats fallback and the recovery read Postgres `kazma_chat_sessions` or
   SQLite `sessions`, overlaid with the save spool (`paths.chat_spool_db`, the

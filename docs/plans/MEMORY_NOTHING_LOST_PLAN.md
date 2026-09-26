@@ -25,8 +25,9 @@ every change is inside the existing V2 engine.
 | G | Memory health shows searchable / pending / archived / unrecovered | ☑ same file (G) |
 | H | Every conversation turn reaches memory (found during Stage 1) | ☑ `tests/test_memory_every_turn.py` |
 | I | Nothing repoints live memory: the golden eval runs on its own database (found during Stage 1) | ☑ same file |
+| J | Memories stranded in a legacy table (`episodes_archive`, 329 rows) put back where recall looks (found during S1 cleanup) | ☑ `tests/test_memory_legacy_archive.py` |
 | S1 | Stage 1 shipped: suite 2 splits, Linux, CI, deployed, proven on live | ☑ commit 3794b7e2, build a1994a70 (see change log) |
-| S2 | Stage 2 audit written (section 5) and approved | ◐ written; awaiting approval |
+| S2 | Stage 2 audit written (section 5) and approved | ☑ approved 2026-09-26 ("clean and do whatever required") |
 | S2+ | Stage 2 improvements (added to this table from the audit) | ☐ |
 
 ---
@@ -169,6 +170,25 @@ where the defect has a shape, docs in the same commit.
 - Now: seeding and recall use the eval's own connection (`recall(conn=...)`); it refuses
   the live database; its temp file is removed; the route runs it in a thread. Class gate:
   no product code rebinds a `kazma_core.paths` function or resets the writer.
+
+### J. Nothing stranded in a table recall does not read (added 2026-09-26, found during the S1 cleanup)
+- On 2026-08-02 and 08-03 a one-off operation (in no commit) moved 329 episodes -- July's
+  carried-over memories (280), 39 `memory_store` notes, 10 chat turns -- into a table it
+  created, `episodes_archive`, and 326 entities into `entities_archive`. No code reads
+  either table.
+- `memory/legacy_tables.py` restores each episode as a cold memory (tier `archived`, own id,
+  text, vector, tenant and time; `created_at` / `archived_at` read in Unix seconds or julian
+  days, both of which the operation wrote), skipping an id already held and a text the
+  tenant already holds under another id (21 on live). Runs first in the 15-minute recovery
+  sweep; health warns while any remain. The legacy table is not touched.
+- `entities_archive` stays: 11 junk "concepts" (bare numbers, file names) and 315
+  "memory_chunk" rows that are 200-character truncations of memories held in full (256)
+  or of smoke-test notes (59).
+- Found while testing it, for Stage 2 (R1/R2): a memory whose vector matches the question
+  exactly lost to five unrelated notes. The keyword channel's LIKE fallback matched the
+  question's `out` inside `about`, every such note ranked in two channels (keyword + the
+  graph walk seeded from them), and rank fusion scores ranks, not similarity. The test
+  scenario goes into the R7 benchmark as a required case.
 
 ### Rollout
 Memory suite (baseline 320 passed / 2 skipped) -> new tests -> full suite split 4 and 7 ->
