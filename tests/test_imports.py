@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -27,26 +28,32 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# Every kazma-*/kazma_* product package in the monorepo.
-PACKAGES: dict[str, Path] = {}
-for pkg_dir in sorted(REPO_ROOT.glob("kazma-*")):
-    for child in sorted(pkg_dir.glob("kazma_*")):
-        if (child / "__init__.py").is_file():
-            PACKAGES[child.name] = child
+
+
+def _enumeration():
+    """scripts/check_fresh_imports.py: the one list of product modules.
+
+    That script imports each module alone in a fresh interpreter; this file
+    imports them all in one process. Same list, so neither can drift.
+    """
+    name = "_kazma_check_fresh_imports"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(
+            name, REPO_ROOT / "scripts" / "check_fresh_imports.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+# Every kazma-*/kazma_* product package in the monorepo, and every module in
+# them (packages included) as (dotted name, file).
+PACKAGES: dict[str, Path] = _enumeration().product_packages(REPO_ROOT)
+MODULES: list[tuple[str, Path]] = list(_enumeration().iter_modules(REPO_ROOT))
 
 assert PACKAGES, "no product packages discovered"
-
-
-def _iter_module_names(package_name: str, package_dir: Path):
-    """Yield dotted module names for every .py under *package_dir*."""
-    for py in sorted(package_dir.rglob("*.py")):
-        rel = py.relative_to(package_dir)
-        parts = list(rel.with_suffix("").parts)
-        if parts[-1] == "__init__":
-            parts = parts[:-1]
-        if not parts or parts[-1] == "__main__":
-            continue
-        yield package_name + "." + ".".join(parts), py
 
 
 def test_packages_discovered():
@@ -64,15 +71,12 @@ def test_every_product_module_imports():
     not at first use in production."""
     failures: list[str] = []
     count = 0
-    for pkg_name, pkg_dir in PACKAGES.items():
-        if pkg_name not in sys.modules:
-            importlib.import_module(pkg_name)
-        for mod_name, _py in _iter_module_names(pkg_name, pkg_dir):
-            count += 1
-            try:
-                importlib.import_module(mod_name)
-            except Exception as exc:
-                failures.append(f"{mod_name}: {type(exc).__name__}: {exc}")
+    for mod_name, _py in MODULES:
+        count += 1
+        try:
+            importlib.import_module(mod_name)
+        except Exception as exc:
+            failures.append(f"{mod_name}: {type(exc).__name__}: {exc}")
     assert not failures, (
         f"{len(failures)}/{count} product modules failed to import "
         "(dangling import after a deletion?):\n" + "\n".join(failures[:40])
@@ -115,46 +119,46 @@ def test_no_dangling_kazma_import_references():
     """
     dangling: list[str] = []
     scanned = 0
-    for pkg_name, pkg_dir in PACKAGES.items():
-        for _mod, py in _iter_module_names(pkg_name, pkg_dir):
-            scanned += 1
-            try:
-                tree = ast.parse(py.read_text(encoding="utf-8", errors="replace"))
-            except SyntaxError:
-                # Syntax is py_compile's job; ignore here.
+    for mod_name, py in MODULES:
+        pkg_name = mod_name.split(".")[0]
+        scanned += 1
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            # Syntax is py_compile's job; ignore here.
+            continue
+        guarded = _guarded_import_ids(tree)
+        here_parts = py.relative_to(PACKAGES[pkg_name].parent).with_suffix("").parts
+        for node in ast.walk(tree):
+            if id(node) in guarded:
                 continue
-            guarded = _guarded_import_ids(tree)
-            here_parts = py.relative_to(PACKAGES[pkg_name].parent).with_suffix("").parts
-            for node in ast.walk(tree):
-                if id(node) in guarded:
+            targets: list[str] = []
+            if isinstance(node, ast.Import):
+                targets = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                base_parts: list[str] = []
+                if node.level:  # relative: strip (level-1) packages
+                    base_parts = list(here_parts[: len(here_parts) - node.level])
+                if node.module:
+                    base_parts = base_parts + node.module.split(".")
+                if not base_parts:
                     continue
-                targets: list[str] = []
-                if isinstance(node, ast.Import):
-                    targets = [a.name for a in node.names]
-                elif isinstance(node, ast.ImportFrom):
-                    base_parts: list[str] = []
-                    if node.level:  # relative: strip (level-1) packages
-                        base_parts = list(here_parts[: len(here_parts) - node.level])
-                    if node.module:
-                        base_parts = base_parts + node.module.split(".")
-                    if not base_parts:
-                        continue
-                    target = ".".join(base_parts)
-                    # `from pkg.mod import name` — name may be a submodule…
-                    if base_parts[0] in PACKAGES:
-                        for a in node.names:
-                            sub = f"{target}.{a.name}"
-                            if _module_file_exists(sub):
-                                targets.append(sub)
-                                continue
-                            # …or an attribute of pkg.mod — the module must exist
-                            targets.append(target)
-                            break
-                    else:
+                target = ".".join(base_parts)
+                # `from pkg.mod import name` — name may be a submodule…
+                if base_parts[0] in PACKAGES:
+                    for a in node.names:
+                        sub = f"{target}.{a.name}"
+                        if _module_file_exists(sub):
+                            targets.append(sub)
+                            continue
+                        # …or an attribute of pkg.mod — the module must exist
                         targets.append(target)
-                for t in targets:
-                    if t.split(".")[0] in PACKAGES and not _module_file_exists(t):
-                        dangling.append(f"{py.relative_to(REPO_ROOT)}: import {t}")
+                        break
+                else:
+                    targets.append(target)
+            for t in targets:
+                if t.split(".")[0] in PACKAGES and not _module_file_exists(t):
+                    dangling.append(f"{py.relative_to(REPO_ROOT)}: import {t}")
     assert not dangling, (
         f"{len(dangling)} dangling kazma_* import references in {scanned} files "
         "(module deleted but still imported?):\n" + "\n".join(dangling[:40])

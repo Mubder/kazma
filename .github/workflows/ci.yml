@@ -38,6 +38,27 @@ jobs:
           print(f'All Python files compiled OK')
           "
 
+  fresh-imports:
+    name: Every module imports on its own
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install deps
+        # The Tests job's set: tests/test_imports.py imports every module
+        # with exactly these installed.
+        run: pip install -e ".[test]" pillow pymupdf sqlite-vec pypdfium2 numpy prometheus-client
+      - name: Import each product module in a fresh interpreter (GATE)
+        # tests/test_imports.py imports every module in ONE process, where each
+        # finds the earlier ones loaded, so an import cycle that only works when
+        # entered at the right module passes there. kazma_core.routing_engine
+        # was one until 2026-09-26: fine inside the server, an ImportError for
+        # anything that imported it first. Its own job, so it adds no time to
+        # the suite.
+        run: python scripts/check_fresh_imports.py --jobs 4
+
   lint:
     name: Lint (Ruff)
     runs-on: ubuntu-latest

@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## The swarm router loads in any order (2026-09-26)
+
+Loading Kazma's swarm router before the rest of the swarm stopped with an
+import error. The server always loaded them the other way round, so it never
+showed, but a script or command that reached the router first would have
+failed. It now loads either way, and a new check loads each of Kazma's 794
+modules on its own, in a fresh process, on every push.
+
 ## Updates and restarts are about ten seconds quicker (2026-09-26)
 
 Every restart spent about ten seconds waiting for the Discord and Slack

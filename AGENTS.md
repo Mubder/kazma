@@ -1152,6 +1152,16 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   (`ModuleNotFoundError`). **Rule: deleting a module requires green
   `tests/test_imports.py` in the SAME commit, and importers removed in the
   same change.** Optional pre-commit hook: `.pre-commit-config.yaml`.
+- **Every product module also imports ON ITS OWN**, in a fresh interpreter
+  (`scripts/check_fresh_imports.py`, CI job "Every module imports on its
+  own"). The one-process gate above cannot see an import cycle that works
+  only when entered at the right module: each import finds the earlier ones
+  loaded. `kazma_core.routing_engine` was one until 2026-09-26 -- the swarm
+  package's `__init__` imports it, and it imported `kazma_core.swarm.task`
+  back at module level. A module that a package's `__init__` imports must
+  not import that package at module level; take annotation-only types under
+  `TYPE_CHECKING` and the rest at call time. Both gates walk one list
+  (the script's `iter_modules`).
 - `tools/read_url.fetch_full_text` is the PUBLIC ladder entry point
   (alias of `_fetch_full_text`); the `web_acquire.fetch` façade and KB
   ingest fallback use the public name — do not import the underscored one.

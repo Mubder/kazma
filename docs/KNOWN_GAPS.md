@@ -366,7 +366,7 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
   admin as a bypass actor would block unreviewed red pushes from anyone else
   while keeping the owner's direct pushes — the objection recorded in AGENTS
   §31. It changes GitHub settings, so it is not done here. The checklist is
-  ready: `docs/docs/ops/branch-protection.md` (the ten required checks by
+  ready: `docs/docs/ops/branch-protection.md` (the eleven required checks by
   name, the ruleset, and the metrics bot's direct push, which the ruleset
   would reject -- decide that first).
 - **The shared-store peer registry is advisory.** It names installs; it does
@@ -500,6 +500,31 @@ logs were checked, rotations included: the DSN was never written there.
   saving request's tenant, where background readers cannot see it.
 - **The Web approval card shows tool arguments raw** — by design, to the
   operator's own authenticated session (chat-platform cards are redacted).
+
+### A module that imported only in the right order (2026-09-26), and fixed
+
+In a fresh process, `import kazma_core.routing_engine` raised `ImportError:
+cannot import name 'UnifiedRouter' from partially initialized module`. The
+router imported `kazma_core.swarm.task`; importing a submodule runs its
+package first, and the swarm package's engine imports the router back while
+the router is half built. The server always imports the swarm package first,
+so it never showed; a script, skill or command that reached the router first
+would have crashed. The router now imports the swarm types for type checking
+only, and the semantic router when a router is built.
+
+Found when the test suite started importing every product module up front
+(Test baseline, below), and confirmed by importing each of the 794 modules
+alone: one failure. `tests/test_imports.py` imports them all in one process,
+where each finds the earlier ones loaded, so it could not see this.
+`scripts/check_fresh_imports.py` imports each module in a fresh interpreter;
+CI runs it over all of them in its own job ("Every module imports on its
+own"), and `tests/test_fresh_imports.py` shows it catching the same cycle in
+miniature, with the deferred import as the negative control.
+
+**Still open from that:** 311 of the 794 modules sit in module-level import
+cycles, nearly all a package re-exporting its own submodules. Each imports on
+its own today; the job is what stops a new import edge from turning one of
+them into the next `routing_engine`.
 
 ## Prompt injection
 

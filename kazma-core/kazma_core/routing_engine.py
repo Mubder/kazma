@@ -9,11 +9,17 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from kazma_core.swarm.task import SwarmTask, WorkerCapabilities
-from kazma_core.swarm.semantic_router import get_semantic_router
-from kazma_core.router import DialectRouter, AgentRequest
+from kazma_core.router import AgentRequest, DialectRouter
+
+# The swarm package imports this module (swarm/__init__ -> engine ->
+# routing_engine), so nothing under kazma_core.swarm may be imported here at
+# module level: importing a submodule runs the package first, which comes back
+# for UnifiedRouter before it exists. A fresh `import kazma_core.routing_engine`
+# failed that way until 2026-09-26 (scripts/check_fresh_imports.py).
+if TYPE_CHECKING:
+    from kazma_core.swarm.task import SwarmTask, WorkerCapabilities
 
 __all__ = ["NoCapableWorkersError", "UnifiedRouter"]
 
@@ -55,6 +61,8 @@ class UnifiedRouter:
     DEFAULT_TOP_N: int = 5
 
     def __init__(self) -> None:
+        from kazma_core.swarm.semantic_router import get_semantic_router
+
         self._semantic_router = get_semantic_router()
         self._dialect_router = DialectRouter()
 
