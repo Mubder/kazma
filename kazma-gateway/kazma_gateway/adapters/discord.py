@@ -202,9 +202,14 @@ class DiscordAdapter(BaseAdapter):
         try:
             import websockets
 
-            from kazma_gateway.adapters.ws_shutdown import closes_on_shutdown
+            from kazma_gateway.adapters.ws_shutdown import (
+                CLOSE_TIMEOUT_S,
+                closes_on_shutdown,
+            )
 
-            async with websockets.connect(_DISCORD_GATEWAY) as ws, closes_on_shutdown(
+            async with websockets.connect(
+                _DISCORD_GATEWAY, close_timeout=CLOSE_TIMEOUT_S
+            ) as ws, closes_on_shutdown(
                 ws, shutdown_event
             ):
                 self._ws = ws
