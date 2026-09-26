@@ -19,7 +19,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from kazma_core.workspace.binding import allow_absolute_paths, resolve_active_root
+from kazma_core.workspace.binding import (
+    allow_absolute_paths,
+    resolve_active_root,
+    resolve_tool_path,
+)
 from kazma_core.workspace.path_grants import (
     AccessMode,
     list_durable_roots,
@@ -258,7 +262,8 @@ def check_path_access(
     need: AccessMode = "write" if str(mode).lower() in ("write", "rw") else "read"
     workspace = resolve_active_root()
     try:
-        resolved = Path(path).expanduser().resolve()
+        # A relative path means the workspace, the same as in every tool.
+        resolved = resolve_tool_path(path, root=workspace)
     except OSError as exc:
         return PathAccessResult(
             allowed=False,

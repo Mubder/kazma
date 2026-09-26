@@ -23,6 +23,7 @@ from pathlib import Path
 # Shared workspace configuration (re-exported for convenience so callers
 # can import ``configure_workspace`` from either module).
 import kazma_core.tools.file_write as _fw
+from kazma_core.workspace.binding import resolve_tool_path
 
 __all__ = ["MAX_CHARS", "MAX_READ_BUDGET", "clear_read_cache", "file_read"]
 
@@ -195,7 +196,7 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
     """Read a file and return its contents with line numbers.
 
     Args:
-        path:   File path (absolute or relative to cwd).
+        path:   File path (absolute, or relative to the active workspace).
         offset: 1-indexed line number to start from (0 = start of file).
         limit:  Maximum number of lines to return.
 
@@ -205,7 +206,7 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
     if not path or not path.strip():
         return "Error: No path provided."
 
-    p = Path(path).expanduser().resolve()
+    p = resolve_tool_path(path)
 
     # ── Safety check FIRST (workspace + path grants + allow_absolute) ──
     # Reordered (M31/H16): a cached read must never bypass a grant

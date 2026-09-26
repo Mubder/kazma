@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from kazma_core.tools.text_newlines import in_newline_style, newline_of, read_exact
+from kazma_core.workspace.binding import resolve_tool_path
 from kazma_core.workspace.path_policy import check_path_access, denied_message
 
 __all__ = [
@@ -33,10 +35,6 @@ class PatchError(ValueError):
     """The patch did not apply cleanly."""
 
 
-def _newline_of(text: str) -> str:
-    return "\r\n" if "\r\n" in text and text.count("\r\n") >= max(1, text.count("\n") // 2) else "\n"
-
-
 def apply_search_replace(
     original: str,
     old: str,
@@ -47,7 +45,7 @@ def apply_search_replace(
     """Replace ``old`` with ``new`` in ``original``. Raises :class:`PatchError`."""
     if old == new:
         raise PatchError("old_string and new_string are identical — nothing to change")
-    nl = _newline_of(original)
+    nl = newline_of(original)
     src = original.replace("\r\n", "\n")
     needle = (old or "").replace("\r\n", "\n")
     repl = (new or "").replace("\r\n", "\n")
@@ -144,7 +142,12 @@ def apply_unified_diff(original: str, patch: str) -> str:
     hunks = _iter_hunks(patch)
     if not hunks:
         raise PatchError("patch contained no hunks")
-    current = original
+    # Work in LF and put the file's own line endings back at the end: the
+    # add-file branch below joins with "\n", which mixed endings into a CRLF
+    # file.
+    nl = newline_of(original)
+    current = original.replace("\r\n", "\n")
+    original = current
     for old, new in hunks:
         if not old and new:
             # Add-file style hunk: append (or fill empty file).
@@ -156,7 +159,7 @@ def apply_unified_diff(original: str, patch: str) -> str:
                 current = new if new.endswith("\n") else new + "\n"
             continue
         current = apply_search_replace(current, old, new, replace_all=False)
-    return current
+    return in_newline_style(current, nl)
 
 
 async def file_apply_patch(
@@ -170,7 +173,7 @@ async def file_apply_patch(
     if not path or not path.strip():
         return "Error: No path provided."
 
-    p = Path(path).expanduser().resolve()
+    p = resolve_tool_path(path)
     access = check_path_access(p, "write")
     if not access.allowed:
         return denied_message(path, "write", result=access)
@@ -195,9 +198,13 @@ async def file_apply_patch(
         return f"Created {path} ({len(new.encode('utf-8'))} bytes) via file_apply_patch"
 
     try:
-        original = p.read_text(encoding="utf-8")
+        # Exact text: newline translation on read is what kept the CRLF
+        # handling in apply_search_replace from ever seeing a CRLF file.
+        original = read_exact(p)
     except OSError as exc:
         return f"Error: Could not read {path} — {exc}"
+    except UnicodeDecodeError:
+        return f"Error: {path} is not UTF-8 text; file_apply_patch edits text files only."
 
     try:
         if patch_text:
@@ -213,7 +220,7 @@ async def file_apply_patch(
         return f"No changes applied to {path}"
 
     try:
-        p.write_text(updated, encoding="utf-8")
+        p.write_text(updated, encoding="utf-8", newline="")
     except OSError as exc:
         return f"Error: Could not write {path} — {exc}"
 
@@ -233,7 +240,7 @@ def _nearby_tests(paths: list[str]) -> list[str]:
     seen: set[str] = set()
     for raw in paths:
         try:
-            d = Path(raw).expanduser().resolve().parent
+            d = resolve_tool_path(raw).parent
         except OSError:
             continue
         if not d.is_dir():
@@ -251,11 +258,16 @@ def _run_pytest(test_files: list[str], cwd: Path) -> str:
     import subprocess
     import sys
 
+    from kazma_core.security.child_env import tool_child_env
+
     cmd = [sys.executable, "-m", "pytest", "-q", "--tb=line", *test_files]
     try:
         proc = subprocess.run(
             cmd,
             cwd=str(cwd),
+            # The workspace's tests are code nobody reviewed; they get the
+            # server's environment without its secrets.
+            env=tool_child_env(),
             capture_output=True,
             text=True,
             timeout=90,

@@ -214,10 +214,11 @@ async def send_file_message(
     Returns:
         Backend response string, or error message.
     """
-    from pathlib import Path
     import mimetypes
 
-    p = Path(file_path).expanduser().resolve()
+    from kazma_core.workspace.binding import resolve_tool_path
+
+    p = resolve_tool_path(file_path)
     if not p.exists():
         return f"Error: file not found: {file_path}"
     if not p.is_file():

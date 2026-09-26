@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from kazma_core.tools.vision_analyze import analyze_image
 from kazma_core.tools.image_gen import generate_image
 from kazma_core.agent.tool_registry import _workspace_scope_error
+from kazma_core.workspace.binding import resolve_tool_path
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +23,15 @@ async def analyze_local_image(path: str, query: str = "Describe this image in de
         Structured textual description of the image content.
     """
     if not path.startswith(("http://", "https://")):
-        p = Path(path).expanduser().resolve()
+        p = resolve_tool_path(path)
         scope_err = _workspace_scope_error(p, path, "reads")
         if scope_err:
             return scope_err
 
         if not p.exists():
             return f"Error: Image file not found: {path}"
+        # analyze_image resolves again; hand it the path this check approved.
+        path = str(p)
 
     try:
         return await analyze_image(path, question=query)

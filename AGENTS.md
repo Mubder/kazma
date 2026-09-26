@@ -271,6 +271,21 @@ workspace. Three new modules; understanding their interaction is essential.
   remain future work.
 - Path-traversal protection: `IdeService.resolve()` does a string-level
   `normpath` `..` check + containment backstop (symlink/junction-aware).
+- **A relative path an agent tool is given means the active workspace**
+  (`binding.resolve_tool_path`), the directory `shell_exec` runs in — never
+  the server process's CWD. Every file tool, `check_path_access` and the
+  skill tools resolved against the CWD until 2026-09-26; it only looked
+  right because the live workspace IS the install folder. After a Switch
+  Repo, `file_read("README.md")` read the install's README. Gate:
+  `tests/test_tool_paths.py` (every tool that builds a path from its own
+  parameter, behavioural runs from a CWD holding a same-named decoy).
+  `file_delete` refuses the workspace root and its ancestors.
+- **File tools keep a file's own line endings**
+  (`tools/text_newlines.py`): read exact, write `newline=""` in the file's
+  existing style; a new file takes the platform default. Text mode turned
+  every patched LF file into CRLF on Windows, and the checkpoint rollback
+  wrote CRLF files back as `\r\r\n`. Tests: `tests/test_text_newlines.py`
+  (bytes, both styles).
 
 **B. HITL routing — no parallel write/exec path**
 - All mutating/exec IDE operations (`write_file`, `apply_patch`, `delete_file`,
@@ -1459,6 +1474,24 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
 - The *explicit* `ConfigStore.close()` was the remaining way to free that
   handle under a reader, and it did — see §8. Repro:
   `tests/test_config_store_close_race.py`.
+
+**I. A process a tool starts gets no secrets (2026-09-26).**
+- `shell_exec` / `python_exec` always used a minimal environment. pytest
+  (`run_unit_tests`, the patch-set verify run), `pip`/`npm` installs, `ruff`,
+  git and the IDE's read-only git passed the server's whole environment --
+  `KAZMA_VAULT_KEY`, the database password, API keys -- to code nobody
+  reviewed: a repository's conftest and tests, install scripts, hooks,
+  `core.fsmonitor`.
+- `security/child_env.tool_child_env()` is the builder: the server's
+  environment minus every `KAZMA_*` name, credential-named variables and URLs
+  carrying a password (git keeps HOME, its credential helper, SSH_AUTH_SOCK).
+  `run_off_loop` (the skills' runner) fills `env=` with it when the caller
+  does not; a caller that builds its own env starts from it
+  (`get_commit_env`, `_git_sync`). `KAZMA_CHILD_ENV_ALLOW` lets named
+  variables through, never `KAZMA_*` ones.
+- Gate: `tests/test_child_env.py` finds every process started under the
+  tool, IDE and skill folders and checks where its env came from (closures
+  included); behavioural half runs real pytest and a real git hook.
 
 
 

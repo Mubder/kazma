@@ -355,9 +355,17 @@ def _boot_env(*, workspace: str = "", model: str = "") -> None:
 
     root = (workspace or "").strip() or str(_Path.cwd())
     try:
+        from kazma_core.ide.workspace_scope import pin_workspace_path
         from kazma_core.workspace.binding import configure_workspace
 
         configure_workspace(workspace=root)
+        # The CLI's workspace is explicit (--workspace, else the folder it was
+        # started in). The process pin alone sits BELOW the web UI's active
+        # workspace row on the ladder, so with a row active every file and
+        # shell tool of this CLI turn worked in the web's workspace instead.
+        # The path scope is the top rung; this task and the tasks it starts
+        # carry it.
+        pin_workspace_path(root)
     except Exception:
         logger.debug("[ask] configure_workspace skipped", exc_info=True)
     if model:

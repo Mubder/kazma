@@ -116,9 +116,12 @@ def _git(command: str, root: Path) -> str | None:
     import shlex
 
     try:
+        from kazma_core.security.child_env import tool_child_env
+
         res = subprocess.run(
             shlex.split(command),
             cwd=str(root),
+            env=tool_child_env(),
             capture_output=True,
             text=True,
             timeout=4,

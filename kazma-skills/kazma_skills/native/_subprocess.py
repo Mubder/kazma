@@ -57,5 +57,16 @@ async def run_off_loop(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess
     Note on cancellation: ``asyncio.to_thread`` cannot interrupt the worker,
     so a cancelled caller returns immediately while the child keeps running
     until its own ``timeout`` fires. Always pass a ``timeout``.
+
+    The child's environment defaults to the server's WITHOUT its secrets
+    (:func:`kazma_core.security.child_env.tool_child_env`): pytest, pip and
+    npm installs and git all run code nobody reviewed (a repository's
+    conftest, an install script, a hook), and they used to inherit the vault
+    key and the database password. A caller that passes ``env=`` builds it
+    from ``tool_child_env`` too; ``tests/test_child_env.py`` holds both.
     """
+    if kwargs.get("env") is None:
+        from kazma_core.security.child_env import tool_child_env
+
+        kwargs["env"] = tool_child_env()
     return await asyncio.to_thread(subprocess.run, *args, **kwargs)

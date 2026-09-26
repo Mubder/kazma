@@ -190,7 +190,11 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         elif target_branch:
             cmd.extend([push_target, target_branch])
 
-    env = dict(os.environ)
+    from kazma_core.security.child_env import tool_child_env
+
+    # The server's environment without its secrets: a push or pull runs the
+    # repository's hooks, which have no business with the vault key.
+    env = tool_child_env()
     env["GIT_TERMINAL_PROMPT"] = "0"
     # The App token is sent via http.extraheader. A globally-configured
     # credential helper (Git Credential Manager, osxkeychain, wincred) would

@@ -18,7 +18,7 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
 
-from kazma_core.workspace.binding import resolve_active_root
+from kazma_core.workspace.binding import resolve_active_root, resolve_tool_path
 from kazma_core.workspace.path_policy import check_path_access
 
 logger = logging.getLogger(__name__)
@@ -172,7 +172,9 @@ class FileCheckpointStore:
                 restored.append(str(p))
                 continue
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(str(item.get("content") or ""), encoding="utf-8")
+            # The stored text is the file's exact bytes; text mode would
+            # write a CRLF file back with a doubled carriage return.
+            p.write_text(str(item.get("content") or ""), encoding="utf-8", newline="")
             restored.append(str(p))
         return restored
 
@@ -180,7 +182,7 @@ class FileCheckpointStore:
         rec = self.get(checkpoint_id)
         if rec is None:
             raise ValueError(f"unknown checkpoint {checkpoint_id}")
-        want = Path(path).expanduser().resolve()
+        want = resolve_tool_path(path)
         for item in rec["files"]:
             raw = str(item.get("path") or "")
             access = check_path_access(raw, "write")
@@ -194,7 +196,7 @@ class FileCheckpointStore:
                     p.unlink()
                 return str(p)
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(str(item.get("content") or ""), encoding="utf-8")
+            p.write_text(str(item.get("content") or ""), encoding="utf-8", newline="")
             return str(p)
         raise ValueError(f"path not in checkpoint: {path}")
 
