@@ -94,27 +94,7 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
             return
     except Exception:
         pass
-    # Gate registry: record the deny decision (CAS pending→claimed→resuming)
-    # exactly like the manual approve endpoint. Without this the row stayed
-    # `pending` forever after an auto-deny — a permanent ghost card in chat
-    # and dashboard (2026-09-01). Best-effort: a registry failure never
-    # blocks the deny; the terminal block settles claimed/resuming rows.
-    try:
-        from kazma_ui.hitl_gate_bridge import gate_claimed, gate_resuming
-
-        _iid = str((_intr_payload or {}).get("interrupt_id") or "")
-        await gate_claimed(
-            thread_id,
-            _iid,
-            "deny",
-            "watchdog:timeout",
-            tool=str((_intr_payload or {}).get("tool") or ""),
-            payload=dict(_intr_payload or {}),
-        )
-        if _iid:
-            await gate_resuming(_iid)
-    except Exception:
-        logger.debug("[HITL-WD] gate claim skipped", exc_info=True)
+    _iid = str((_intr_payload or {}).get("interrupt_id") or "")
     try:
         from kazma_ui.active_turns import register_turn
         from kazma_ui.reply_sink import resolve_reply_turn
@@ -136,6 +116,24 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
             session_id = ensure_session_for_thread(thread_id)
         turn_id = resolve_reply_turn(thread_id, session_id)
 
+        # The decision, written down everywhere it is read -- the registry
+        # (the row stayed `pending` forever after an auto-deny until
+        # 2026-09-01) AND the transcript part, which stayed `pending` until
+        # 2026-09-26: the turn reloaded with a dead Approve row and its
+        # answer missing (turn 9bdd89fd93cb).
+        from kazma_ui.hitl_decision import record_gate_decision
+
+        await record_gate_decision(
+            thread_id,
+            decision="timeout",
+            actor="watchdog:timeout",
+            tool=str((_intr_payload or {}).get("tool") or ""),
+            payload=dict(_intr_payload or {}),
+            interrupt_id=_iid,
+            session_id=session_id,
+            turn_id=turn_id,
+        )
+
         try:
             from kazma_ui.delivery import get_turn_broker
 
@@ -143,6 +141,9 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
                 "type": "approval_timeout",
                 "data": {
                     "thread_id": thread_id,
+                    "interrupt_id": _iid,
+                    "tool": str((_intr_payload or {}).get("tool") or ""),
+                    "turn_id": turn_id,
                     "message": (
                         "Approval timed out after "
                         f"{int(timeout_s)}s — continuing without this tool."

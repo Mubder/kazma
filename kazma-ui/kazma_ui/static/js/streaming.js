@@ -299,7 +299,7 @@ var KazmaStream = (function() {
           case 'approval_timeout':
             try {
               if (window.KazmaChat && typeof window.KazmaChat.markApprovalTimedOut === 'function') {
-                window.KazmaChat.markApprovalTimedOut((data && data.message) || '');
+                window.KazmaChat.markApprovalTimedOut((data && data.message) || '', data || {});
               }
             } catch (e) { /* ignore */ }
             if (callbacks.onEvent) callbacks.onEvent(type, data);

@@ -260,7 +260,11 @@
       turnId: String((doc && doc.turnId) || ''),
       phase: phase,
       terminal: terminal,
-      connection: connectionOf(facts),
+      // A finished turn has no connection to report. The page's own facts
+      // lag the terminal frame until its next status read, and a completed
+      // header read "Completed · Reconnecting…" in that gap (live,
+      // 2026-09-26).
+      connection: terminal ? 'idle' : connectionOf(facts),
       // How long the journal has been quiet, so the header can SAY it
       // rather than just colour itself amber.
       silentMs: (function () {

@@ -1045,7 +1045,8 @@ function registerAgentStore() {
           try {
             if (window.KazmaChat && typeof window.KazmaChat.markApprovalTimedOut === 'function') {
               window.KazmaChat.markApprovalTimedOut(
-                (data && data.message) || (frame && frame.message) || ''
+                (data && data.message) || (frame && frame.message) || '',
+                data || {}
               );
             }
           } catch (e) { /* ignore */ }

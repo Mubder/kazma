@@ -55,7 +55,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 #: Lower these whenever the counts drop. Never raise them casually.
 BASELINE = {
     # except Exception / except BaseException / bare except, any body
-    "blind_except": 3819,
+    "blind_except": 3818,
     # ...whose body is only `pass` (or a docstring): the error vanishes
     "silent_except": 569,
 }
@@ -100,7 +100,11 @@ def debt_counts(sources: list[str]) -> dict[str, int]:
 
 def _product_sources() -> list[str]:
     files = subprocess.run(
-        ["git", "ls-files", "kazma-*/*.py", "kazma-*/**/*.py"],
+        # --others: a new file counts before it is committed. Tracked-only
+        # listing let a local full run pass that CI then failed (2026-09-26:
+        # observability/supervisor_watch.py was untracked when it ran).
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard",
+         "kazma-*/*.py", "kazma-*/**/*.py"],
         cwd=REPO_ROOT, capture_output=True, text=True, check=True,
     ).stdout.split()
     return [
@@ -335,7 +339,7 @@ def bare_module_attr_assignments(tests: dict[str, str]) -> list[str]:
 
 def _tracked(patterns: list[str]) -> dict[str, str]:
     files = subprocess.run(
-        ["git", "ls-files", *patterns],
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", *patterns],
         cwd=REPO_ROOT, capture_output=True, text=True, check=True,
     ).stdout.split()
     return {

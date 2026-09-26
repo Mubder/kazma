@@ -134,6 +134,11 @@ ok("a live stream reads live",
   TP.header(doc({ parts: [TEXT] }), { streamLive: true }).connection === "live");
 ok("an idle finished turn is neither",
   TP.header(doc({ status: "done", parts: [TEXT] }), {}).connection === "idle");
+// The page's generating fact lags the terminal frame until its next status
+// read; a Completed header read "Reconnecting…" in that gap (2026-09-26).
+ok("a finished turn never reports a reconnect, whatever the page still thinks",
+  TP.header(doc({ status: "done", parts: [TEXT] }),
+    { serverGenerating: true, streamLive: false }).connection === "idle");
 
 // ── Elapsed comes from the server, and says when ───────────────────────
 let d = TD.applyEvent(TD.empty("t1"), {

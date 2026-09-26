@@ -883,21 +883,23 @@ async def _handle_hitl_resume(
                 "[HITL] Resume: thread=%s approved=%s action=%s",
                 target_thread, approved, action,
             )
-            # Gate registry (P3): record the decision through the same CAS
-            # choke every surface uses. Best-effort — the platform reply
-            # below stays authoritative until P6.
+            # Record the decision the way every surface does: registry CAS,
+            # the transcript part a browser on this thread paints, and the
+            # journal frame that tells open tabs it was decided here.
             try:
-                from kazma_ui.hitl_gate_bridge import gate_claimed_for_thread
+                from kazma_ui.hitl_decision import record_gate_decision
 
-                await gate_claimed_for_thread(
+                _pending = pending if isinstance(pending, dict) else {}
+                await record_gate_decision(
                     target_thread,
-                    "approve" if approved else "deny",
-                    f"{msg.platform}:{msg.sender_id or 'unknown'}",
-                    tool=str(pending.get("tool") or "") if isinstance(pending, dict) else "",
-                    payload=pending if isinstance(pending, dict) else None,
+                    decision="approved" if approved else "denied",
+                    actor=f"{msg.platform}:{msg.sender_id or 'unknown'}",
+                    tool=str(_pending.get("tool") or ""),
+                    payload=_pending,
+                    interrupt_id=str(_pending.get("interrupt_id") or ""),
                 )
             except Exception:
-                logger.debug("[HITL] gate claim skipped", exc_info=True)
+                logger.debug("[HITL] gate decision record skipped", exc_info=True)
             # Mark successful resume so a late second callback stays quiet.
             try:
                 import time as _time

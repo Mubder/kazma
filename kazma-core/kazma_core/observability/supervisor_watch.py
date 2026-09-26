@@ -25,7 +25,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["STALE_AFTER_S", "STATE_ENV", "check_supervisor", "supervisor_status"]
+__all__ = ["STALE_AFTER_S", "STATE_ENV", "check_supervisor"]
 
 #: Set by the guard for the server it spawns.
 STATE_ENV = "KAZMA_GUARD_STATE_FILE"
@@ -36,7 +36,7 @@ _lock = threading.Lock()
 _state = {"confirmed": False, "gone": False}
 
 
-def supervisor_status(now: float | None = None) -> dict[str, Any] | None:
+def _supervisor_status(now: float | None = None) -> dict[str, Any] | None:
     """What the guard's state file says, or None when no guard started us."""
     path = (os.environ.get(STATE_ENV) or "").strip()
     if not path:
@@ -60,7 +60,7 @@ def supervisor_status(now: float | None = None) -> dict[str, Any] | None:
 
 def check_supervisor() -> None:
     """One check. Pages when the guard that started this server is gone."""
-    status = supervisor_status()
+    status = _supervisor_status()
     if status is None:
         return
     age = status["heartbeat_age_s"]
