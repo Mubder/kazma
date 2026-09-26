@@ -1832,10 +1832,11 @@ Send in seconds, and threw `Cannot read properties of null (reading
   `_checkpoint_backfill_unanswered` returns early while the thread's turn
   runs, is paused, or its snapshot has a `next` node; it had written a paused
   turn's narration as a finished reply on the page's own `/messages` poll.
-- **Open (KNOWN_GAPS):** token, tool and status frames carry no `turn_id`
-  (only done/turn_complete/hitl do), so every client files them under "the
-  current turn". The rules above keep that guess right; stamping the id on
-  every journaled frame is the thorough fix and changes both transports.
+- **Token, tool and status frames name their turn** since 2026-09-26 (the
+  load-bearing rule "Every journaled frame names its turn" above). Before
+  that only done/turn_complete/hitl did, and every client filed the rest
+  under "the current turn"; the rules in this list are what kept that guess
+  right, and they still hold.
 
 
 ### 32. SSRF pin-IP (Wave 8 H-7)
