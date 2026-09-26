@@ -3230,13 +3230,9 @@
           };
           if (currentMsgEl) {
             var meta = currentMsgEl.querySelector('.message-meta');
-            if (meta) {
-              var modelBit = data.model ? (' \u00B7 ' + data.model) : '';
-              meta.textContent = KS.formatTokens(data.tokens) + ' ' + ti('tokens', 'tokens') + ' \u00B7 ' +
-                KS.formatCost(data.cost) + ' \u00B7 ' +
-                KS.formatDuration(data.duration_ms) + modelBit;
-              meta.setAttribute('dir', 'auto');
-            }
+            var metaFields = { stats: _turnStatsText(data.tokens, data.cost, data.duration_ms) };
+            if (data.model) metaFields.model = data.model;
+            _paintMetaTail(meta, metaFields);
           }
           updateContextBadgeSoon();
         }
@@ -4536,6 +4532,48 @@
     return html;
   }
 
+  // A turn's stats -- "1,234 tokens · $0.0042 · 3.1s". ONE format for the
+  // live terminal frame and for a reload: the reload used to drop the line,
+  // and the live frame used to overwrite the time with it (2026-09-26).
+  function _turnStatsText(tokens, cost, durationMs) {
+    var bits = [
+      KS.formatTokens(Number(tokens) || 0) + ' ' + ti('tokens', 'tokens'),
+      KS.formatCost(Number(cost) || 0),
+    ];
+    if (Number(durationMs) > 0) bits.push(KS.formatDuration(Number(durationMs)));
+    return bits.join(' · ');
+  }
+
+  // The ONE writer of a bubble's meta line after its time:
+  //   [📎 file · ] <time> [ · stats] [ · model]
+  // Each caller sets only the fields it knows (the terminal frame: stats and
+  // model; a turn render: model), kept on the element, and the tail is
+  // rebuilt from them. Two writers used to assign textContent, which
+  // flattened the <time> element -- the next write then dropped the time
+  // (2026-09-26).
+  var _META_FIELDS = ['stats', 'model'];
+
+  function _paintMetaTail(metaEl, fields) {
+    if (!metaEl) return;
+    _META_FIELDS.forEach(function (f) {
+      if (fields && Object.prototype.hasOwnProperty.call(fields, f)) {
+        metaEl.setAttribute('data-' + f, fields[f] ? String(fields[f]) : '');
+      }
+    });
+    var tail = _META_FIELDS
+      .map(function (f) { return metaEl.getAttribute('data-' + f) || ''; })
+      .filter(Boolean)
+      .join(' · ');
+    var timeEl = metaEl.querySelector('time');
+    if (timeEl) {
+      while (timeEl.nextSibling) metaEl.removeChild(timeEl.nextSibling);
+      if (tail) metaEl.appendChild(document.createTextNode(' · ' + tail));
+    } else {
+      metaEl.textContent = tail;
+    }
+    if (tail) metaEl.setAttribute('dir', 'auto');
+  }
+
   function appendMessage(role, content, attachmentName, ts, opts) {
     var wrapper = document.createElement('div');
     wrapper.className = 'message message-' + role;
@@ -4557,7 +4595,13 @@
           'onerror="this.style.display=\'none\';this.parentNode.textContent=\'K\';" />' +
         '</div>';
 
-    var modelBit = (opts && opts.model) ? (' \u00B7 ' + escapeHtml(String(opts.model))) : '';
+    // The turn's saved usage, in the line the live terminal frame writes.
+    // Without it a reload kept only the time and the model (2026-09-26).
+    var statsText = '';
+    var usage = (opts && opts.usage) || null;
+    if (role === 'assistant' && usage && (Number(usage.tokens) > 0 || Number(usage.cost) > 0)) {
+      statsText = _turnStatsText(usage.tokens, usage.cost, usage.duration_ms);
+    }
     if (role === 'assistant' && opts && opts.turn_id) {
       wrapper.setAttribute('data-turn-id', String(opts.turn_id));
     }
@@ -4570,9 +4614,12 @@
         '<div class="message-meta" data-ts="' + escapeHtml(iso) + '">' +
           (attachmentName ? '\uD83D\uDCCE ' + escapeHtml(attachmentName) + ' \u00B7 ' : '') +
           '<time datetime="' + escapeHtml(iso) + '">' + escapeHtml(when) + '</time>' +
-          modelBit +
         '</div>' +
       '</div>';
+    _paintMetaTail(wrapper.querySelector('.message-meta'), {
+      stats: statsText,
+      model: (opts && opts.model) ? String(opts.model) : '',
+    });
 
     // Bidi for user + assistant bubbles: English UI must still render Arabic
     // RTL (dir=auto alone is not enough for mixed/dominant Arabic blocks).
@@ -5827,7 +5874,10 @@
           : (scope === 'yolo' ? ti('yolo_on', 'YOLO on ✓')
             : (scope === 'tool' ? ti('tool_allowed', 'Tool allowed ✓')
               : ti('approved', 'Approved ✓'))),
-        state: 'running',
+        // A decision, made: nothing about it keeps running. The resume
+        // shows as the steps and tools that follow (it read "running" on
+        // the finished turn forever, 2026-09-26).
+        state: 'done',
       });
 
       // Approve is a JSON command. The live tail is the existing chat SSE
@@ -6628,13 +6678,18 @@
               msg = KazmaTurnDocument.hydrateMessage(msg);
               content = msg.content || content;
             }
-            var painted = appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null, {
+            // A reply shows when it was delivered (closed_at), as the live
+            // bubble does at its end; ts is when its bubble was created.
+            var shownAt = (role === 'assistant' && msg.closed_at)
+              || msg.ts || msg.timestamp || msg.created_at || null;
+            var painted = appendMessage(role, content, null, shownAt, {
               activity: (window.KazmaTurnDocument && KazmaTurnDocument.activityForMessage)
                 ? KazmaTurnDocument.activityForMessage(msg)
                 : msg.activity,
               parts: msg.parts,
               model: msg.model || '',
               turn_id: msg.turn_id || '',
+              usage: { tokens: msg.tokens, cost: msg.cost, duration_ms: msg.duration_ms },
             });
             if (role === 'assistant' && window.KazmaTurnDocument && KazmaTurnDocument.fromMessage) {
               var hydratedDoc = KazmaTurnDocument.fromMessage(msg);
@@ -7200,10 +7255,25 @@
     if (!TD || typeof TD.activityOf !== 'function') return [];
     // Same resolver the cards are ordered and labelled with, so the
     // workbench row for a gate cannot contradict the card next to it.
-    return TD.activityOf((doc && doc.parts) || [], function (part) {
+    var rows = TD.activityOf((doc && doc.parts) || [], function (part) {
       var s = _hitlDisplayState(part);
       return s == null ? 'error' : s;
     });
+    // A finished turn has nothing running. A step left "running" -- a status
+    // line whose closing event never came -- showed a spinner on a finished
+    // turn, live and after every reload (2026-09-26).
+    if (doc && (doc.status === 'done' || doc.status === 'error')) {
+      rows = rows.map(function (r) {
+        if (!r || r.state !== 'running') return r;
+        var copy = {};
+        for (var k in r) {
+          if (Object.prototype.hasOwnProperty.call(r, k)) copy[k] = r[k];
+        }
+        copy.state = 'done';
+        return copy;
+      });
+    }
+    return rows;
   }
 
 
@@ -8123,13 +8193,7 @@
     // inside here; nothing else may insert into this bubble.
     TV.render(el, doc, _turnRenderers, meta);
 
-    if (doc.model) {
-      var metaEl = el.querySelector('.message-meta');
-      if (metaEl && String(metaEl.textContent || '').indexOf(doc.model) < 0) {
-        metaEl.textContent =
-          (metaEl.textContent ? metaEl.textContent + ' · ' : '') + doc.model;
-      }
-    }
+    if (doc.model) _paintMetaTail(el.querySelector('.message-meta'), { model: doc.model });
 
     // A closed turn's render must not release the OPEN turn's wait state
     // (a late turn-N hydrate mid-turn-N+1 used to clear _awaitingReply,

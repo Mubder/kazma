@@ -114,6 +114,7 @@ def persist_reply(
     model: str = "",
     tokens: int | None = None,
     cost: float | None = None,
+    duration_ms: float | None = None,
     activity: list[dict[str, Any]] | None = None,
     parts: list[dict[str, Any]] | None = None,
     streamed_text: str = "",
@@ -151,6 +152,7 @@ def persist_reply(
             model=model or None,
             tokens=tokens,
             cost=cost,
+            duration_ms=duration_ms,
             allow_shrink=allow_shrink,
         )
         if not open_turn:

@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## A reloaded answer keeps its stats, its time and its finished state (2026-09-26)
+
+**Reloading a chat dropped the line under each answer.** The tokens, cost
+and duration were saved but the chat history never sent them back, so after
+a reload only the time and the model remained. They are sent now, and the
+reloaded line is the same line the live answer showed.
+
+**The time under an answer changed on reload.** The live answer showed when
+it finished; a reload showed when it started -- minutes apart for a long
+turn. Kazma now records when each answer was delivered and shows that
+after a reload too. The live line also no longer loses its time when the
+stats arrive.
+
+**Long turns read in minutes.** A four-minute turn showed "240.0s"; it
+now shows "4m 0s".
+
+**A finished answer no longer shows a step still spinning.** An approval
+step, or a status line whose closing event never came, kept a "running"
+spinner on the finished turn, live and after every reload.
+
 ## Turn stats describe the whole turn; reloads no longer revive a finished one (2026-09-26)
 
 **The numbers under an answer were wrong whenever the turn paused for an

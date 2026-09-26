@@ -1513,6 +1513,8 @@ def create_sse_chat_router(
         page refresh (``ChatSession.total_*`` are incremented per turn via
         ``SessionManager.add_usage``).
         """
+        from kazma_ui import reply_sink as _reply_sink
+
         if session_id.startswith("gw-"):
             _get_store()._refresh_from_db(session_id)
 
@@ -1579,7 +1581,10 @@ def create_sse_chat_router(
                         key = str(m.get("content") or "").strip()
                         extra = {
                             k: m[k]
-                            for k in ("turn_id", "parts", "activity", "open", "pending", "model", "ts")
+                            for k in (
+                                "parts", "activity", "open", "pending",
+                                *_reply_sink.CLIENT_ROW_FIELDS,
+                            )
                             if m.get(k) is not None
                         }
                         if key and extra:
@@ -1745,21 +1750,14 @@ def create_sse_chat_router(
                 item["pending"] = True
             if msg.get("open"):
                 item["open"] = True
-            if msg.get("ts"):
-                item["ts"] = msg["ts"]
-            if msg.get("model"):
-                item["model"] = msg["model"]
-            if msg.get("turn_id"):
-                item["turn_id"] = msg["turn_id"]
-            # The durable revision and schema of this row. This serializer
-            # is a WHITELIST, so a field the store holds is invisible to
-            # the client until it is named here — which is exactly how the
-            # revision went out as 0 on its first run
-            # (docs/plans/UNIFIED_TURN_BLOCK.md §6, invariant U05).
-            if msg.get("rev") is not None:
-                item["rev"] = msg["rev"]
-            if msg.get("schema") is not None:
-                item["schema"] = msg["schema"]
+            # This serializer is a WHITELIST: a stored field is invisible to
+            # the client until it is named. The names live with the writer
+            # (reply_sink.CLIENT_ROW_FIELDS), and a gate holds every field
+            # it stores to that list (tests/test_history_row_fields.py).
+            for _field in _reply_sink.CLIENT_ROW_FIELDS:
+                _value = msg.get(_field)
+                if _value is not None and _value != "":
+                    item[_field] = _value
             parts = msg.get("parts") if isinstance(msg.get("parts"), list) else None
             if parts:
                 item["parts"] = parts

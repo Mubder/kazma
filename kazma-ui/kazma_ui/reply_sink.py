@@ -90,6 +90,35 @@ _OPEN = "open"
 # readers that predate this.
 _LIFECYCLE = "lifecycle"
 
+# When the turn closed -- the reply's delivery time (see _write_lifecycle).
+_CLOSED_AT = "closed_at"
+
+#: Row fields the chat history returns to the client exactly as stored. Both
+#: of the history route's serializers are whitelists, and a field the store
+#: keeps is invisible to the client until it is named: the revision went out
+#: as 0 (docs/plans/UNIFIED_TURN_BLOCK.md U05), and a turn's usage and its
+#: close time vanished on every reload (2026-09-26). role, content, pending,
+#: open, parts and activity have their own handling there.
+#: tests/test_history_row_fields.py writes a row with every field this module
+#: stores and requires each to come back, or to be in SERVER_ROW_FIELDS.
+CLIENT_ROW_FIELDS: tuple[str, ...] = (
+    "ts",
+    _CLOSED_AT,
+    "turn_id",
+    "model",
+    "rev",
+    "schema",
+    "tokens",
+    "cost",
+    "duration_ms",
+)
+
+#: Row fields kept for the server alone, and why.
+SERVER_ROW_FIELDS: dict[str, str] = {
+    _LIFECYCLE: "the client reads the legacy `open` flag written beside it",
+    "kind": "an instant turn's origin (a capacity reply); no client reads it",
+}
+
 #: A turn's lifecycle is a JOIN-SEMILATTICE, not a field: it only ever moves
 #: forward, and `closed` absorbs.
 #:
@@ -137,10 +166,21 @@ def _join_lifecycle(current: str | None, incoming: str) -> str:
 
 
 def _write_lifecycle(row: dict[str, Any], state: str) -> None:
-    """Store the lifecycle plus the legacy `open` flag derived from it."""
+    """Store the lifecycle plus the legacy `open` flag derived from it.
+
+    The write that CLOSES a turn also records when (`closed_at`): the time a
+    reply was delivered, which the chat shows under it. The row's `ts` is when
+    the bubble was created -- the start of a turn that may then run for
+    minutes -- so a reload used to show a different time from the one the
+    live bubble showed at its end (2026-09-26). Set once, on the transition;
+    a turn closed before this field existed keeps showing its `ts`.
+    """
+    closing = state == _CLOSED and _lifecycle_of(row) != _CLOSED
     row[_LIFECYCLE] = state
     if state == _CLOSED:
         row.pop(_OPEN, None)
+        if closing:
+            row.setdefault(_CLOSED_AT, _now())
     else:
         row[_OPEN] = True
 
@@ -401,6 +441,7 @@ def upsert_reply(
     model: str | None = None,
     tokens: int | None = None,
     cost: float | None = None,
+    duration_ms: float | None = None,
     allow_shrink: bool = False,
 ) -> bool:
     """Idempotently write the reply for *turn_id* into *session_id*.
@@ -503,6 +544,8 @@ def upsert_reply(
                 row["tokens"] = int(tokens or 0)
             if cost is not None:
                 row["cost"] = round(float(cost or 0.0), 6)
+            if duration_ms is not None:
+                row["duration_ms"] = int(round(float(duration_ms or 0.0)))
 
             # ── Authoritative document revision ────────────────────────
             # The delivery `seq` orders FRAMES on a thread; this orders

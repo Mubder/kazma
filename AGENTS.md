@@ -1735,6 +1735,17 @@ Load-bearing rules:
   body's `interrupt_id` against the registry before resuming. A retried
   Approve used to decide whichever question the graph had reached by
   then.
+- **A stored row field is named once, beside its writer.** The history
+  route's two serializers (the row list and the checkpoint-hydrate merge)
+  are whitelists; they pass `reply_sink.CLIENT_ROW_FIELDS`, and a field kept
+  for the server goes in `SERVER_ROW_FIELDS` with its reason.
+  `tests/test_history_row_fields.py` enumerates every field `reply_sink`
+  stores from its source and reads a full row back through the real route
+  (the revision, the usage and the close time were each dropped by a
+  whitelist nobody updated). The meta line under a bubble has one writer,
+  `_paintMetaTail` in `chat.js`: callers set fields, never `textContent`
+  (that flattened the `<time>` element). A reply shows `closed_at` — its
+  delivery time, set once by `_write_lifecycle` on the closing write.
 
 Sequential approval is proven at the lifecycle level by
 `tests/e2e/test_unified_turn_app_graph.py` and in a browser by
