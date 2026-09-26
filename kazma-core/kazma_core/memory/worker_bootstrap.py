@@ -98,6 +98,15 @@ _handle_global_reconsolidation = _offload(
 )
 
 
+def _handle_post_turn_memory_sync(payload: dict[str, Any]) -> bool:
+    from kazma_core.memory.consolidator import run_deferred_turn_memory
+
+    return run_deferred_turn_memory(payload)
+
+
+_handle_post_turn_memory = _offload(lambda payload: _handle_post_turn_memory_sync(payload))
+
+
 def register_v2_handlers() -> None:
     """Register all V2 task handlers on the durable queue (idempotent)."""
     global _registered
@@ -111,6 +120,8 @@ def register_v2_handlers() -> None:
     # wholesale: its SQLite halves (prepare, apply) run in threads inside it.
     register_handler("micro_consolidation", _handle_micro_consolidation)
     register_handler("global_reconsolidation", _handle_global_reconsolidation)
+    # A turn the post-turn pool could not take (Stage 2, W2).
+    register_handler("post_turn_memory", _handle_post_turn_memory)
     _registered = True
     logger.info("[memory_worker] V2 task handlers registered")
 

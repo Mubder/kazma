@@ -176,6 +176,7 @@ def build_v2_health() -> dict[str, Any]:
         # the memories the pre-2026-09-26 archive rule erased.
         from kazma_core.config_store import get_config_store
         from kazma_core.db.pg_helpers import store_errors
+        from kazma_core.memory.legacy_tables import legacy_archive_counts
         from kazma_core.memory.reembed import vector_repair_counts
         from kazma_core.memory.rehydrate import STATE_KEY, erased_counts
         from kazma_core.memory.turn_reconcile import STATE_KEY as RECONCILE_KEY
@@ -184,6 +185,7 @@ def build_v2_health() -> dict[str, Any]:
             findability: dict[str, Any] = {
                 "vectors": vector_repair_counts(primary_conn),
                 "erased": erased_counts(primary_conn),
+                "legacy_archive": legacy_archive_counts(primary_conn),
             }
             state = get_config_store().get(STATE_KEY)
             if isinstance(state, dict) and isinstance(state.get("last"), dict):

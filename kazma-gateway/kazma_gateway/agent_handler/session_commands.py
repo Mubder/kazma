@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -113,11 +114,12 @@ async def try_session_command(
         )
         sessions_map[sender] = entry.thread_id
         try:
-            from kazma_core.memory.consolidator import clear_working_memory
+            # The old conversation's last turn stays a memory (never deleted).
+            from kazma_core.memory.consolidator import promote_working_memory
 
-            clear_working_memory(thread_id)
+            await asyncio.to_thread(promote_working_memory, thread_id)
         except Exception:
-            logger.debug("[session-cmd] clear_working_memory on new failed", exc_info=True)
+            logger.debug("[session-cmd] promote_working_memory on new failed", exc_info=True)
         name = entry.title
         await _reply(
             f"🆕 New season: **{name}**\n"

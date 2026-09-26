@@ -259,6 +259,17 @@ class VectorBackend(Protocol):
 
     def delete(self, item_id: str, *, tenant_id: str = "default") -> bool: ...
 
+    def similarities(
+        self,
+        query_vec: list[float] | None,
+        ids: list[str],
+        *,
+        tenant_id: str = "default",
+        kind: str | None = None,
+    ) -> dict[str, float]:
+        """Cosine of exactly these items with *query_vec*; an unknown one is absent."""
+        ...
+
 
 class LocalSqliteVectorBackend:
     """Default VectorBackend — wraps :class:`VectorEngine` on primary DB."""
@@ -336,6 +347,19 @@ class LocalSqliteVectorBackend:
         except Exception:
             return False
 
+    def similarities(
+        self,
+        query_vec: list[float] | None,
+        ids: list[str],
+        *,
+        tenant_id: str = "default",
+        kind: str | None = None,
+    ) -> dict[str, float]:
+        del tenant_id  # row id is global PK
+        return self._engine.similarities(
+            query_vec, ids, kind="belief" if str(kind or "") == "belief" else "episode"
+        )
+
 
 class _EmptyVectorBackend:
     """Fail-open empty results (failover policy ``empty``)."""
@@ -355,6 +379,9 @@ class _EmptyVectorBackend:
 
     def delete(self, item_id, *, tenant_id="default"):
         return False
+
+    def similarities(self, query_vec, ids, *, tenant_id="default", kind=None):
+        return {}
 
 
 class QdrantVectorBackend:
@@ -491,6 +518,50 @@ class QdrantVectorBackend:
         except Exception:
             logger.debug("[qdrant] search failed", exc_info=True)
             return []
+
+    def similarities(
+        self,
+        query_vec: list[float] | None,
+        ids: list[str],
+        *,
+        tenant_id: str = "default",
+        kind: str | None = None,
+    ) -> dict[str, float]:
+        """A search confined to these items: Qdrant scores exactly them."""
+        wanted = list(dict.fromkeys(str(i) for i in ids if i))
+        if not query_vec or not wanted or not self._url:
+            return {}
+        try:
+            import httpx
+
+            must: list[dict[str, Any]] = [
+                {"key": "tenant_id", "match": {"value": tenant_id}},
+                {"key": "episode_id", "match": {"any": wanted}},
+            ]
+            if kind:
+                must.append({"key": "kind", "match": {"value": str(kind)}})
+            with httpx.Client(timeout=self._timeout) as client:
+                r = client.post(
+                    f"{self._url}/collections/{self._collection}/points/search",
+                    headers=self._headers(),
+                    json={
+                        "vector": list(query_vec),
+                        "limit": len(wanted),
+                        "with_payload": True,
+                        "filter": {"must": must},
+                    },
+                )
+            if r.status_code >= 400:
+                return {}
+            out: dict[str, float] = {}
+            for hit in (r.json() or {}).get("result") or []:
+                eid = str((hit.get("payload") or {}).get("episode_id") or "")
+                if eid in wanted:
+                    out[eid] = float(hit.get("score") or 0.0)
+            return out
+        except Exception:
+            logger.debug("[qdrant] similarity lookup failed", exc_info=True)
+            return {}
 
     def upsert(
         self,
@@ -800,6 +871,47 @@ class PgvectorBackend:
             logger.debug("[pgvector] search failed", exc_info=True)
             return []
 
+    def similarities(
+        self,
+        query_vec: list[float] | None,
+        ids: list[str],
+        *,
+        tenant_id: str = "default",
+        kind: str | None = None,
+    ) -> dict[str, float]:
+        """Cosine of exactly these rows with *query_vec* (one statement)."""
+        wanted = list(dict.fromkeys(str(i) for i in ids if i))
+        if not query_vec or not wanted or not self._dsn or not self.available:
+            return {}
+        try:
+            conn = self._connect()
+            try:
+                self._ensure_table(conn)
+                cur = conn.cursor()
+                emb = "[" + ",".join(str(float(x)) for x in query_vec) + "]"
+                kind_sql = ""
+                params: list[Any] = [emb, tenant_id, wanted]
+                if kind:
+                    kind_sql = " AND COALESCE(meta->>'kind', 'episode') = %s"
+                    params.append(str(kind))
+                cur.execute(
+                    f"""
+                    SELECT id, 1 - (embedding <=> %s::vector) AS score
+                    FROM {self._table}
+                    WHERE tenant_id = %s AND id = ANY(%s){kind_sql}
+                    """,
+                    params,
+                )
+                rows = cur.fetchall()
+                cur.close()
+                return {str(r[0]): float(r[1]) for r in rows if r[1] is not None}
+            finally:
+                conn.close()
+        except Exception:
+            self._table_failed()
+            logger.debug("[pgvector] similarity lookup failed", exc_info=True)
+            return {}
+
     def upsert(
         self,
         item_id: str,
@@ -908,6 +1020,27 @@ class HybridVectorBackend:
         return self._local.search(
             query_vec, tenant_id=tenant_id, tier=tier, limit=limit, kind=kind
         )
+
+    def similarities(
+        self,
+        query_vec: list[float] | None,
+        ids: list[str],
+        *,
+        tenant_id: str = "default",
+        kind: str | None = None,
+    ) -> dict[str, float]:
+        """The remote index's answer, and the local vectors for what it lacks."""
+        out: dict[str, float] = {}
+        for store in (self._remote, self._local):
+            missing = [i for i in ids if i not in out]
+            lookup = getattr(store, "similarities", None)
+            if not missing or not callable(lookup) or not getattr(store, "available", False):
+                continue
+            try:
+                out.update(lookup(query_vec, missing, tenant_id=tenant_id, kind=kind))
+            except Exception:
+                logger.debug("[hybrid] similarity lookup failed", exc_info=True)
+        return out
 
     def upsert(
         self,

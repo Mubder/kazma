@@ -734,17 +734,27 @@ def run_rehydrate_pass(*, time_budget_s: float = 90.0) -> dict[str, Any]:
     conn.row_factory = sqlite3.Row
     try:
         apply_sqlite_pragmas(conn, busy_timeout=15000)
+        # Memories an old one-off operation moved into a table nothing reads
+        # (memory/legacy_tables.py) come back first: they are whole, not erased.
+        from kazma_core.memory.legacy_tables import restore_legacy_episode_archive
+
+        legacy = restore_legacy_episode_archive(conn)
         report = _rehydrate_erased(
             conn,
             time_budget_s=time_budget_s,
             note_scan_after=str(state.get("note_scan_after") or ""),
         )
+        report["legacy_archive"] = legacy
     except sqlite3.OperationalError:
         logger.debug("[rehydrate] memory database not ready", exc_info=True)
         return {}
     finally:
         conn.close()
-    if report["candidates"] or state.get("note_scan_after") != report["note_scan_after"]:
+    if (
+        report["candidates"]
+        or legacy["restored"]
+        or state.get("note_scan_after") != report["note_scan_after"]
+    ):
         store.set(
             STATE_KEY,
             {"note_scan_after": report["note_scan_after"], "last": {**report, "at": time.time()}},

@@ -1,5 +1,54 @@
 # CHANGELOG
 
+## Kazma remembers what a question is about -- and says nothing when it has nothing (2026-09-26)
+
+Before, every message you sent pulled five facts and five past messages from
+memory into Kazma's context, whether they had anything to do with the
+question or not. Asked "what's my shoe size?", it was handed your passport
+date, your dog's name and a coffee recipe. Now each memory has to earn its
+place: its meaning must stand out from everything else Kazma knows, or it
+must share most of the question's words. When nothing does, nothing is
+added, and Kazma searches your earlier chats instead. A memory that only
+partly matches is shown to Kazma as "possibly related". Measured on a new
+benchmark (a made-up person's four months of chat and facts, 76 questions),
+two thirds of what memory adds is now relevant, against about a quarter
+before; questions are answered as often as before, and a third of the
+questions with no answer now get none.
+
+Also in this change:
+
+- Starting a new conversation with `/new` no longer deletes the last
+  message of the old one from memory.
+- A message sent while memory is busy with others is queued and remembered
+  a moment later; it used to be skipped, and the facts in it never saved.
+- Looking things up in memory no longer holds up other conversations while
+  it runs.
+- A hidden settings action that deleted memories by pattern -- it would have
+  removed facts whose names merely began with four letters like "face" or
+  "dead" -- is gone. Every place that deletes a memory now has to say why
+  nothing is lost.
+- Memory lookups do less work: the settings file is read once instead of
+  several times per lookup, and recording that a memory was used no longer
+  rewrites its search index.
+- Arabic words now match with or without "ال" and "و/ب/ل" in front of them,
+  and a fact's name like "platform_team" matches "team".
+
+## 308 memories from July are searchable again; test data removed (2026-09-26)
+
+On 2 and 3 August a one-off clean-up moved 329 of Kazma's memories -- July's
+conversations carried over from the first memory system, 39 notes you had
+asked it to keep, and 10 chat turns -- into a separate table that nothing
+reads. They were stored, but no question could reach them. Kazma now puts
+each one back as an older memory, searched like any other and brought
+forward when a question needs it; 21 were already held under another name
+and are left as they are. Memory health reports any that are still waiting.
+
+Test data that a test run wrote into the live install on 14 August, and
+the probes from earlier live checks, are gone: 24 test chats, 23 memories
+made from them, 18 test documents, 8 test tasks and their records. Every
+removed row was saved to a file first. One memory of yours that had been
+filed under the wrong account is back under yours.
+
 ## File tools work in the workspace you chose, and keep your line endings (2026-09-26)
 
 When Kazma was given a file name like `README.md`, its file tools looked for

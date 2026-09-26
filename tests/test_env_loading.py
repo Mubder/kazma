@@ -160,6 +160,7 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
     "scripts/verify_documents.py": "verifies the document layer against built-in samples",
     "scripts/verify_docx_rtl.py": "renders built-in RTL samples",
     "scripts/smoke_topic_shift_p0.py": "pure intent-policy smoke; no server, no settings",
+    "scripts/memory_bench.py": "builds and scores the retrieval benchmark on a temp database",
 }
 
 #: Scripts that load a `.env` their own way, on purpose, and why.

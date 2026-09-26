@@ -307,7 +307,7 @@ V2 is the **only** chat memory stack (`recall()` in `memory/recall.py`). The V1
 
 | Layer | Role |
 |-------|------|
-| Recall | FTS5 + dense (sqlite-vec, or **pgvector** when a Postgres DSN is set) + belief/episode PPR + session bias |
+| Recall | content-word FTS5 + dense (sqlite-vec, or **pgvector** when a Postgres DSN is set) candidates, ranked on evidence (`recall._rank_by_evidence`: nothing injected below the floor; `scripts/memory_bench.py` measures it) + session bias |
 | Write | `mutate_belief` (single INSERT choke) + optional PG mirror + Neo4j dual-write |
 | Per-turn | Supervisor inject when `memory.per_turn_retrieval` (ConfigStore ← yaml) |
 | Post-turn | `turn_runtime.close_turn` → `consolidator.remember_turn` → extractor → `mutate_belief` + ego-anchor; missed turns: `turn_reconcile` |

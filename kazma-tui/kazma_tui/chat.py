@@ -1393,17 +1393,13 @@ class ChatPanel(Vertical):
                 return str(prompt)
         except Exception as exc:
             logger.debug("ConfigStore system prompt read failed: %s", exc)
-        # Fallback: read directly from kazma.yaml
+        # Fallback: the install's kazma.yaml (not the one in the working directory)
         try:
-            from pathlib import Path
-            import yaml
-            yaml_path = Path("kazma.yaml")
-            if yaml_path.exists():
-                with open(yaml_path, encoding="utf-8") as fh:
-                    data = yaml.safe_load(fh) or {}
-                prompt = data.get("system_prompt")
-                if prompt:
-                    return str(prompt)
+            from kazma_core.config_loader import install_yaml_section
+
+            prompt = install_yaml_section().get("system_prompt")
+            if prompt:
+                return str(prompt)
         except Exception as exc:
             logger.debug("YAML system prompt read failed: %s", exc)
         return ""

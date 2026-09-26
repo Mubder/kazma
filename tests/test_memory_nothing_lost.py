@@ -256,8 +256,10 @@ def test_the_fact_a_question_means_is_recalled_past_keyword_noise(conn, monkeypa
     for i in range(300):
         _belief(conn, f"n{i}", vec=_away_from(meaning, 1000 + i), predicate=f"n{i}",
                 obj=f"thing {i}")
-    _belief(conn, "target", vec=meaning, importance=1, predicate="drinks",
-            obj="espresso every morning")
+    # No word -- not even a stem, now that keyword search matches "drink" in
+    # "drinks" -- in common with the question.
+    _belief(conn, "target", vec=meaning, importance=1, predicate="morning_order",
+            obj="a double espresso")
     conn.commit()
 
     keyword_only = _belief_fts(conn, question, "default", 15)
@@ -268,23 +270,29 @@ def test_the_fact_a_question_means_is_recalled_past_keyword_noise(conn, monkeypa
 
 
 def test_relevance_outranks_standing_and_standing_breaks_ties():
-    from kazma_core.memory.recall import _belief_rank_score
+    """Standing (importance x confidence x trust) only breaks near-ties.
 
-    relevant = {"id": "rel", "structural_importance": 1, "confidence": 0.5,
-                "source_trust_weight": 0.5}
-    important = {"id": "imp", "structural_importance": 5, "confidence": 1.0,
-                 "source_trust_weight": 1.0}
+    Until 2026-09-26 standing WAS the score, so the fact a question was about
+    lost its place to "important" facts it was not about. The ranking is
+    evidence now (``recall._rank_by_evidence``, the belief rules).
+    """
+    from kazma_core.memory.recall import _Candidate, _rank_by_evidence
+    from kazma_core.memory.recall import _standing as standing
 
-    def old(row):  # the pre-2026-09-26 score: standing alone
-        return row["structural_importance"] * row["confidence"] * row["source_trust_weight"]
+    relevant = {"structural_importance": 1, "confidence": 0.5, "source_trust_weight": 0.5}
+    important = {"structural_importance": 5, "confidence": 1.0, "source_trust_weight": 1.0}
+    assert standing(important) > standing(relevant)  # negative control: the old score
 
-    assert old(important) > old(relevant)  # negative control
-    ranks = {"fts": {"rel": 0, "imp": 3}}
-    assert _belief_rank_score(relevant, ranks) > _belief_rank_score(important, ranks)
-    ranks = {"fts": {"rel": 0, "imp": 40}, "dense": {"imp": 0}}
-    assert _belief_rank_score(important, ranks) > _belief_rank_score(relevant, ranks)
-    tie = {"fts": {"rel": 0, "imp": 1}, "dense": {"imp": 0, "rel": 1}}
-    assert _belief_rank_score(important, tie) > _belief_rank_score(relevant, tie)
+    def ranked(sim_rel, sim_imp):
+        cands = [
+            _Candidate(id=bid, text=f"fact {bid}", created_at=0.0, similarity=sim,
+                       by_meaning=True, content=bid, standing=standing(row))
+            for bid, sim, row in (("imp", sim_imp, important), ("rel", sim_rel, relevant))
+        ]
+        return [h.id for h in _rank_by_evidence("zzz", cands, 0.5, kind="belief")]
+
+    assert ranked(0.70, 0.62) == ["rel", "imp"]  # more relevant: first, whatever it weighs
+    assert ranked(0.70, 0.70) == ["imp", "rel"]  # as relevant: the one that matters more
 
 
 # ── C. Archive is cold storage: kept, recalled, revived ───────────────────

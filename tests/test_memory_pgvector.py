@@ -2,7 +2,8 @@
 
 sqlite-vec stays the one-node default. A process Postgres DSN auto-selects
 pgvector (hybrid dual-write, or remote-first when state.role=primary).
-Postgres-primary recall fuses ILIKE sparse with dense — not ILIKE-only.
+Postgres-primary recall ranks the mirror's keyword matches and the index's
+nearest memories together, on evidence -- not keyword-only.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from kazma_core.memory.backends import (
     _apply_pgvector_scale_defaults,
     get_backends_cfg,
 )
-from kazma_core.memory.recall import RecallHit, _rrf_fuse, recall
+from kazma_core.memory.recall import recall
 
 # Verified against a real Postgres; the CI Postgres job runs every test
 # carrying this marker (scripts/postgres_suite.py).
@@ -202,6 +203,12 @@ def test_postgres_primary_fuses_pgvector_dense(monkeypatch) -> None:
                 return [("b-dense", 0.91)]
             return [("e-dense", 0.88)]
 
+        def similarities(self, query_vec, ids, *, tenant_id="default", kind=None):
+            # A keyword match is judged by meaning too (Stage 2 R1): the index
+            # scores the rows the mirror's word search found.
+            known = {"e-sparse": 0.86, "b-sparse": 0.9}
+            return {i: known[i] for i in ids if i in known}
+
         def upsert(self, *a, **k):
             return True
 
@@ -246,17 +253,6 @@ def test_postgres_primary_still_fail_closed(monkeypatch) -> None:
     result = recall("where do I live")
     assert result.beliefs == []
     assert result.episodes == []
-
-
-def test_rrf_keeps_both_channels() -> None:
-    sparse = [
-        RecallHit(id="a", content="s", score=1.0, kind="episode", source="postgres_state"),
-    ]
-    dense = [
-        RecallHit(id="b", content="d", score=0.9, kind="episode", source="dense"),
-    ]
-    fused = _rrf_fuse(sparse, dense, {}, 5)
-    assert {h.id for h in fused} == {"a", "b"}
 
 
 def test_pgvector_search_filters_kind(monkeypatch) -> None:

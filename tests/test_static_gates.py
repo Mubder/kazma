@@ -918,6 +918,14 @@ _LOOP_STALL_HELPERS = frozenset({
     "get_mcp_servers_config", "list_mcp_servers",
     "check_config_store", "check_llm_provider",
     "get_appearance", "mint_soul_commitment", "apply_agent_mutation",
+    # Memory (Stage 2 S2, 2026-09-26): recall is SQLite scans plus an
+    # embedding of the question, federated search adds the knowledge
+    # library, the health builders count every table, the past-chats search
+    # reads every session. The supervisor ran its per-turn knowledge search
+    # on the loop; the memory_search tool and the probe / federated-search
+    # routes did too.
+    "recall", "federated_search", "build_v2_health", "build_memory_health",
+    "search_transcripts", "promote_working_memory", "run_golden_eval",
 })
 
 
@@ -2283,6 +2291,7 @@ _BINARY_EXT = {
     ".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".docx", ".xlsx",
     ".ttf", ".otf", ".woff", ".woff2", ".zip", ".gz", ".db", ".sqlite",
     ".sqlite3", ".pyc", ".so", ".dll", ".exe", ".webp", ".mp4", ".wasm",
+    ".npz", ".npy",  # NumPy arrays (the memory benchmark's recorded vectors)
 }
 
 

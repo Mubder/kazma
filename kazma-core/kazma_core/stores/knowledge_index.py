@@ -840,7 +840,8 @@ async def get_knowledge_auto_inject_block(user_message: str) -> str:
             format_kb_hits_for_prompt,
         )
 
-        fed = federated_search(
+        fed = await asyncio.to_thread(
+            federated_search,
             msg,
             limit_memory=0,
             limit_kb=_auto_inject_top_k(),

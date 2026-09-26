@@ -24,13 +24,18 @@ Design notes:
     ``memory.transcript_fallback=false`` (live-read, no restart).
   * Transcript text is UNTRUSTED conversation data — callers must inject it
     via :func:`format_transcript_block` (prompt-fenced), never raw.
+  * A session is a hit when it holds MORE THAN HALF of the question's content
+    words (``memory/query_terms.py``: stopwords dropped, Arabic folded), each
+    as a whole word. It fires whenever memory recall comes back empty, which
+    since the relevance floor (2026-09-26) is every question memory has no
+    answer for -- and it used to accept one substring ("size" in "sizeable")
+    from a list that kept "what's", "is" and "my".
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import re
 from pathlib import Path
 from typing import Any
 
@@ -44,17 +49,9 @@ __all__ = [
 
 _MAX_HITS = 3
 _SNIPPET_CHARS = 320
-_MIN_TERM = 3
-
-# Latin words/digits + Arabic letter runs. Terms shorter than 3 chars are noise.
-_TERM_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]{2,}|[\u0600-\u06FF]{3,}|\d[\d/]{2,}")
-
-_STOPWORDS = {
-    "the", "and", "for", "you", "your", "our", "with", "that", "this",
-    "what", "when", "where", "which", "list", "every", "all", "from",
-    "about", "into", "have", "has", "was", "were", "are", "not", "but",
-    "can", "get", "give", "show", "find", "need", "want", "please",
-}
+#: The store's substring ranking is a prefilter: it is asked for this many
+#: times the hits wanted, and each row is then confirmed word by word.
+_PREFILTER_FACTOR = 5
 
 
 def transcript_fallback_enabled() -> bool:
@@ -79,17 +76,17 @@ def transcript_fallback_enabled() -> bool:
 
 
 def _terms(query: str, max_terms: int = 6) -> list[str]:
-    """Most-specific query terms: longest first (proper nouns like a brand
-    name carry the signal), stopwords dropped, case-insensitive."""
-    seen: dict[str, str] = {}
-    for m in _TERM_RE.finditer(str(query or "")):
-        raw = m.group(0)
-        low = raw.lower()
-        if low in _STOPWORDS:
-            continue
-        seen.setdefault(low, raw)
-    ordered = sorted(seen.values(), key=len, reverse=True)
-    return ordered[:max_terms]
+    """The question's content words, most specific (longest) first."""
+    from kazma_core.memory.query_terms import content_terms
+
+    return sorted(content_terms(str(query or "")), key=len, reverse=True)[:max_terms]
+
+
+def _present(terms: list[str], text: str) -> list[str]:
+    """The *terms* that *text* holds as whole words (any written form)."""
+    from kazma_core.memory.query_terms import mentions, search_terms
+
+    return [t for t in terms if mentions(text, search_terms(t) or [t])]
 
 
 def _snippet(text: str, terms: list[str]) -> str:
@@ -122,32 +119,34 @@ def search_transcripts(
 
     Every session of the tenant is ranked -- in whichever store holds the
     chats (:func:`kazma_core.memory.chat_history.search_sessions`) -- title
-    matches 5, message occurrences up to 4 per term. ``db_path`` searches that
-    SQLite file instead. Returns up to ``limit`` hits: {session_id, thread_id,
-    title, created_at, score, matched, snippet}; empty when the store is
-    missing or no term matches.
+    matches 5, message occurrences up to 4 per term -- as a prefilter; a hit
+    must hold more than half of the content words as whole words. ``db_path``
+    searches that SQLite file instead. Returns up to ``limit`` hits:
+    {session_id, thread_id, title, created_at, score, matched, snippet}; empty
+    when the store is missing or no session is about the question.
     """
     try:
         terms = _terms(query)
         if not terms:
             return []
         from kazma_core.memory.chat_history import search_sessions
+        from kazma_core.memory.query_terms import search_terms
 
+        prefilter = list(dict.fromkeys(w for t in terms for w in (search_terms(t) or [t])))
         rows = search_sessions(
-            terms,
+            prefilter,
             tenant_id=tenant_id,
             exclude_session_id=exclude_session_id,
-            limit=max(1, limit),
+            limit=max(1, limit) * _PREFILTER_FACTOR,
             sqlite_path=Path(db_path) if db_path is not None else None,
         )
         hits: list[dict[str, Any]] = []
         for r in rows:
             title = str(r.get("title") or "")
             messages = str(r.get("messages") or "")
-            low_title, low_msgs = title.lower(), messages.lower()
-            matched = [t for t in terms if t.lower() in low_title or t.lower() in low_msgs]
-            if not matched:
-                continue
+            matched = _present(terms, f"{title}\n{messages}")
+            if len(matched) * 2 <= len(terms):
+                continue  # half the question or less: not about it
             hits.append(
                 {
                     "session_id": str(r.get("session_id") or ""),
@@ -159,6 +158,8 @@ def search_transcripts(
                     "snippet": _snippet(messages if len(messages) < 200000 else title, matched),
                 }
             )
+            if len(hits) >= max(1, limit):
+                break
         return hits
     except Exception:
         logger.debug("[transcript-recall] search failed — returning no hits", exc_info=True)

@@ -30,7 +30,6 @@ from __future__ import annotations
 import logging
 import os
 import time
-from pathlib import Path
 from typing import Any
 
 __all__ = [
@@ -51,17 +50,13 @@ def _read_config() -> dict[str, Any]:
     """Read the ``git.bot_identity`` and GitHub App credentials from ConfigStore, kazma.yaml, and env vars."""
     merged: dict[str, Any] = {}
 
-    # 1. Start with kazma.yaml defaults
+    # 1. Start with kazma.yaml defaults (the install's file, not the CWD's)
     try:
-        import yaml
+        from kazma_core.config_loader import install_yaml_section
 
-        cfg_path = Path("kazma.yaml")
-        if cfg_path.exists():
-            with open(cfg_path) as f:
-                full = yaml.safe_load(f) or {}
-            merged.update(full.get("git", {}).get("bot_identity", {}) or {})
+        merged.update(install_yaml_section("git", "bot_identity"))
     except Exception:
-        pass
+        logger.debug("[git_identity] kazma.yaml bot identity unreadable", exc_info=True)
 
     # 2. Merge from ConfigStore singleton
     try:

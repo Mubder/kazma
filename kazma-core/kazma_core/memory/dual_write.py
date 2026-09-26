@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "DualWriteMirror",
+    "episode_row",
     "mirror_belief",
     "mirror_episode",
 ]
@@ -110,6 +111,75 @@ def _episode_id(session_id: str, turn: int, content: str) -> str:
         f"{session_id}|{turn}|{content[:512]}".encode("utf-8")
     ).hexdigest()
     return f"e_{h[:24]}"
+
+
+#: Phrases that mark a turn the user explicitly asked Kazma to keep.
+_REMEMBER_PHRASES = (
+    "remember that",
+    "remember my",
+    "remember this",
+    "don't forget",
+    "do not forget",
+    "note that",
+)
+#: Sources whose turns are written after the fact, so they are not the live
+#: session's short-term buffer and stay episodic.
+_AFTER_THE_FACT_SOURCES = frozenset(
+    {"knowledge_library_promote", "kb_promote", "turn_reconcile", "benchmark", "golden_eval"}
+)
+
+
+def episode_row(
+    *,
+    session_id: str,
+    turn_number: int,
+    user_text: str = "",
+    assistant_text: str = "",
+    summary_text: str = "",
+    tenant_id: str = "default",
+    tier: str = "episodic",
+    importance: int = 1,
+    source: str = "dual_write_mirror",
+    created_at: float | None = None,
+) -> dict[str, Any]:
+    """The episode row the writer stores for one turn.
+
+    Its id, tier, importance and metadata, and ``embed_text`` -- the text the
+    meaning vector is computed from. Everything that writes an episode (this
+    mirror, the golden eval, the retrieval benchmark) builds the row here, so
+    none of them can drift from what live chat turns get.
+    """
+    content = (user_text or assistant_text or summary_text or "").strip()
+    meta: dict[str, Any] = {"source": source}
+    effective_tier = tier
+    effective_importance = int(importance)
+    ut_low = (user_text or "").strip().lower()
+    if any(phrase in ut_low for phrase in _REMEMBER_PHRASES):
+        # Explicit "remember" turns go straight to the recall tier so meaning
+        # search finds them immediately (Phase A).
+        effective_tier = "recall"
+        effective_importance = max(effective_importance, 3)
+        meta["promote_reason"] = "explicit_remember"
+    elif tier == "episodic" and source not in _AFTER_THE_FACT_SOURCES:
+        # A live turn lands in the working buffer (Phase C); the post-turn
+        # pass promotes the session's earlier working turns to episodic.
+        effective_tier = "working"
+        meta["promote_reason"] = "working_buffer"
+    return {
+        "id": _episode_id(session_id, turn_number, content),
+        "tenant_id": tenant_id,
+        "session_id": session_id,
+        "turn_number": int(turn_number),
+        "user_text": (user_text or "")[:4000],
+        "assistant_text": (assistant_text or "")[:4000],
+        "summary_text": (summary_text or "")[:2000],
+        "tier": effective_tier,
+        "importance": effective_importance,
+        "created_at": time.time() if created_at is None else float(created_at),
+        "meta": meta,
+        "embedding_model_version": _embedding_model_version(),
+        "embed_text": (summary_text or user_text or assistant_text or "").strip(),
+    }
 
 
 def _infer_predicate_type(predicate: str) -> str:
@@ -259,43 +329,23 @@ class DualWriteMirror:
         """
         if not self._ensure():
             return None
-        # Build a content blob for the stable id when texts are empty
-        content = (user_text or assistant_text or summary_text or "").strip()
-        eid = _episode_id(session_id, turn_number, content)
-        now = time.time() if created_at is None else float(created_at)
-        meta = {"source": source}
-        # Explicit "remember" turns go straight to recall tier so dense search
-        # finds them immediately (Phase A — avoid episodic-only dense miss).
-        # Phase C: default new turns land in working (short-term buffer);
-        # post-turn promotes prior working → episodic for the session.
-        effective_tier = tier
-        effective_importance = int(importance)
-        ut_low = (user_text or "").strip().lower()
-        if any(
-            phrase in ut_low
-            for phrase in (
-                "remember that",
-                "remember my",
-                "remember this",
-                "don't forget",
-                "do not forget",
-                "note that",
-            )
-        ):
-            effective_tier = "recall"
-            effective_importance = max(effective_importance, 3)
-            meta["promote_reason"] = "explicit_remember"
-        elif tier == "episodic" and source not in (
-            "knowledge_library_promote",
-            "kb_promote",
-            # A turn written after the fact is not the live session's buffer.
-            "turn_reconcile",
-        ):
-            # Default post-turn path uses tier=episodic — promote to working
-            # buffer so active-thread recall prefers the current session.
-            # KB soft-merge promotes stay episodic so they are not session-buffer.
-            effective_tier = "working"
-            meta["promote_reason"] = "working_buffer"
+        row = episode_row(
+            session_id=session_id,
+            turn_number=turn_number,
+            user_text=user_text,
+            assistant_text=assistant_text,
+            summary_text=summary_text,
+            tenant_id=tenant_id,
+            tier=tier,
+            importance=importance,
+            source=source,
+            created_at=created_at,
+        )
+        eid = row["id"]
+        now = row["created_at"]
+        meta = row["meta"]
+        effective_tier = row["tier"]
+        effective_importance = row["importance"]
         try:
             # Lock only the local SQLite writes. The remote embed, vector
             # upsert, and state mirror below can each block up to ~60s;
@@ -315,15 +365,15 @@ class DualWriteMirror:
                         eid,
                         tenant_id,
                         session_id,
-                        int(turn_number),
-                        (user_text or "")[:4000],
-                        (assistant_text or "")[:4000],
-                        (summary_text or "")[:2000],
+                        row["turn_number"],
+                        row["user_text"],
+                        row["assistant_text"],
+                        row["summary_text"],
                         effective_tier,
                         effective_importance,
                         now,
                         json.dumps(meta, ensure_ascii=False),
-                        _embedding_model_version(),
+                        row["embedding_model_version"],
                     ),
                 )
                 self._primary.commit()
@@ -337,7 +387,7 @@ class DualWriteMirror:
                     get_embedder,
                 )
 
-                ep_text = (summary_text or user_text or assistant_text or "").strip()
+                ep_text = row["embed_text"]
                 if ep_text:
                     emb_blob = encode_text_to_blob(ep_text)
                     if emb_blob is not None:

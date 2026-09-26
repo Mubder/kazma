@@ -135,3 +135,48 @@ async def test_workspace_scope_pins_resolution(tmp_path, monkeypatch):
         store.close()
         reset_workspace_store()
         configure_workspace(workspace=None)
+
+
+def test_an_unresolvable_workspace_id_is_announced(tmp_ws, monkeypatch, caplog):
+    """A task that names its workspace must not be handed another one quietly.
+
+    The fallback (the active workspace) stays -- the block is always
+    rendered -- but a missing or unreadable id is logged at WARNING, and a
+    store that is busy once is read again before giving up.
+    """
+    import logging
+    import sqlite3
+
+    from kazma_core.ide.env_context import _resolve_root
+    import kazma_core.stores.workspaces as wsmod
+
+    with caplog.at_level(logging.WARNING, logger="kazma_core.ide.env_context"):
+        _resolve_root("no-such-workspace")
+    assert "is not registered" in caplog.text
+
+    store = wsmod.get_workspace_store()
+    real = store.list_workspaces
+    calls = {"n": 0}
+
+    def busy_once():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real()
+
+    monkeypatch.setattr(store, "list_workspaces", busy_once)
+    target = tmp_ws / "sub"
+    target.mkdir()
+    rec = store.create_workspace("Sub", str(target))
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="kazma_core.ide.env_context"):
+        assert _resolve_root(rec["id"]) == target.resolve()
+    assert calls["n"] == 2 and not caplog.text
+
+    def always_busy():
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(store, "list_workspaces", always_busy)
+    with caplog.at_level(logging.WARNING, logger="kazma_core.ide.env_context"):
+        _resolve_root(rec["id"])
+    assert "could not be read (OperationalError: database is locked)" in caplog.text

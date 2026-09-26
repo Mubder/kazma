@@ -4,15 +4,17 @@ This is the single read-path entry point for the V2 cognitive memory
 stack when ``memory.v2.use_new_stack`` is True.
 
 Pipeline:
-  1. **Episode hybrid search** — FTS5 MATCH+bm25 (LIKE fallback) + dense
-     vector over episodic+recall tiers (sqlite-vec, or **pgvector** when
-     Postgres is on), session-clique PPR, RRF fusion, optional same-session
-     bias.
-  2. **Belief lookup** — FTS5/LIKE + episode-bridge + dense (pgvector when
-     configured, else capped cosine) + belief-graph PPR. Only currently-valid
-     beliefs.
-  Postgres-primary (``state.role=primary``): ILIKE sparse **fused with
-  pgvector dense** — not ILIKE-only.
+  1. **Episode search** — the question's content-word matches (FTS5) and its
+     nearest memories by meaning (sqlite-vec, or **pgvector** when Postgres
+     is on), every recallable tier, ranked on EVIDENCE (``_rank_by_evidence``:
+     meaning above the question's background plus word coverage). Nothing
+     about the question means nothing injected. Optional same-session bias.
+  2. **Belief lookup** — content-word matches, nearest beliefs by meaning
+     (every current belief), the facts extracted from the turns step 1 found,
+     and the belief graph's walk -- ranked on the same evidence, with the
+     belief thresholds. Only currently-valid beliefs.
+  Postgres-primary (``state.role=primary``): the mirror's keyword matches and
+  the vector index's nearest memories, ranked on the same evidence.
   3. **Access bump** — on non-empty hits, increment access_count /
      last_accessed (Phase A; toggle ``access_bump_enabled``).
   4. **Format** — beliefs first, then episodes, prompt-fenced.
@@ -29,6 +31,7 @@ import sqlite3
 import threading
 import weakref
 from collections import OrderedDict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -44,8 +47,6 @@ __all__ = [
     "format_recall_block",
     "build_memory_explain_payload",
 ]
-
-_RRF_K = 60  # RRF smoothing constant (matches legacy adapter)
 
 #: Tier IN (...) for every episode search, built from the one tier list:
 #: archived included (recall weights archived hits down, ``_weigh_archived``).
@@ -88,6 +89,7 @@ def recall(
     limit: int = 5,
     session_id: str | None = None,
     explain: bool | None = None,
+    local_only: bool = False,
 ) -> RecallResult:
     """Unified V2 recall — beliefs first, then ranked episodes.
 
@@ -104,6 +106,10 @@ def recall(
         explain: When True, each hit's ``metadata["sources"]`` lists the
             channels that contributed (fts5/dense/ppr/session_boost).
             ``None`` reads ``memory.v2.explain_recall`` (default False).
+        local_only: Search only *conn* (or the local database): no Postgres
+            state primary, no remote hits merged in. A caller that seeds its
+            own database -- the retrieval benchmark -- must not read live
+            memory through the mirror.
 
     Returns:
         :class:`RecallResult` with ``beliefs`` and ``episodes`` lists.
@@ -113,7 +119,7 @@ def recall(
     try:
         from kazma_core.memory.state_backend import is_state_primary
 
-        if is_state_primary():
+        if not local_only and is_state_primary():
             return _recall_postgres_primary(
                 query,
                 tenant_id=tenant_id,
@@ -177,7 +183,7 @@ def recall(
         )
         # Multi-replica assist: merge sparse hits from Postgres state mirror
         # when local results are thin (does not replace SQLite FTS/dense).
-        if len(episodes) < limit or len(beliefs) < limit:
+        if not local_only and (len(episodes) < limit or len(beliefs) < limit):
             try:
                 episodes, beliefs = _merge_remote_state_hits(
                     query,
@@ -186,6 +192,7 @@ def recall(
                     episodes=episodes,
                     beliefs=beliefs,
                     explain=bool(do_explain),
+                    local_conn=conn,
                 )
             except Exception:
                 logger.debug("[recall] remote state merge skipped", exc_info=True)
@@ -254,8 +261,11 @@ def _recall_postgres_primary(
     """Recall through Postgres StateBackend + pgvector dense.
 
     Fail-closed when the state primary is down — do not silently read SQLite.
-    Sparse is ILIKE on mirrored rows; dense is VectorBackend (pgvector by
-    default when a DSN is set). The two lists are RRF-fused.
+    Episodes are ranked exactly like the local path (:func:`_rank_by_evidence`)
+    over the mirror's content-word matches and the vector index's nearest
+    memories; it used to rank-fuse them, so the newest rows holding "is" or
+    "my" outvoted the memory the question was about. Beliefs the same way,
+    with the belief thresholds.
     """
     do_explain = bool(explain)
     if explain is None:
@@ -293,30 +303,20 @@ def _recall_postgres_primary(
         return RecallResult([], [])
 
     try:
-        sparse_ep, sparse_bel = _merge_remote_state_hits(
-            query,
-            tenant_id=tenant_id,
-            limit=limit,
-            episodes=[],
-            beliefs=[],
-            explain=do_explain,
-        )
-        dense_ep, dense_bel = _dense_from_vector_backend(
+        episodes = _pg_primary_episodes(
             query,
             tenant_id=tenant_id,
             limit=limit,
             state_backend=be,
             explain=do_explain,
         )
-        episodes = _rrf_fuse(list(sparse_ep), list(dense_ep), {}, limit)
-        beliefs = _rrf_fuse(list(sparse_bel), list(dense_bel), {}, limit)
-        for hit in episodes:
-            hit.source = hit.source or "postgres_primary"
-            if do_explain:
-                srcs = list(hit.metadata.get("sources") or [])
-                if "postgres_primary" not in srcs:
-                    srcs.append("postgres_primary")
-                hit.metadata["sources"] = srcs
+        beliefs = _pg_primary_beliefs(
+            query,
+            tenant_id=tenant_id,
+            limit=limit,
+            state_backend=be,
+            explain=do_explain,
+        )
         for hit in beliefs:
             hit.source = hit.source or "postgres_primary"
             if do_explain:
@@ -336,117 +336,220 @@ def _recall_postgres_primary(
         return RecallResult([], [])
 
 
-def _dense_from_vector_backend(
+def _available_vector_backend() -> Any | None:
+    """The configured vector index when it is up, else None."""
+    try:
+        from kazma_core.memory.backends import get_vector_backend
+
+        backend = get_vector_backend()
+    except Exception:
+        logger.debug("[recall] vector backend unavailable", exc_info=True)
+        return None
+    return backend if getattr(backend, "available", False) else None
+
+
+def _backend_search(
+    backend: Any,
+    qvec: list[float],
+    *,
+    tenant_id: str,
+    tier: list[str] | None,
+    limit: int,
+    kind: str,
+) -> list[tuple[str, float]]:
+    """``backend.search``; a backend that predates ``kind`` answers for episodes only."""
+    try:
+        return list(
+            backend.search(qvec, tenant_id=tenant_id, tier=tier, limit=limit, kind=kind)
+        )
+    except TypeError:
+        if kind == "belief":
+            return []
+        return list(backend.search(qvec, tenant_id=tenant_id, tier=tier, limit=limit))
+    except Exception:
+        logger.debug("[recall] vector index %s search failed", kind, exc_info=True)
+        return []
+
+
+def _state_episode_display(row: dict[str, Any]) -> str:
+    """What recall shows of a mirrored episode (as :func:`_episode_text` locally)."""
+    return str(
+        row.get("summary_text") or row.get("user_text") or row.get("assistant_text") or ""
+    )[:400]
+
+
+def _pg_primary_episodes(
     query: str,
     *,
     tenant_id: str,
     limit: int,
     state_backend: Any,
     explain: bool,
-) -> tuple[list[RecallHit], list[RecallHit]]:
-    """pgvector / Qdrant dense hits, hydrated from the Postgres state mirror."""
+) -> list[RecallHit]:
+    """Postgres-primary episode recall, ranked on evidence like the local path.
+
+    Candidates: the vector index's nearest memories and the mirror's
+    content-word matches. A candidate only its words found is scored by
+    meaning through the index (``similarities``); an index that cannot say
+    leaves it to its words alone.
+    """
+    from kazma_core.memory.state_backend import search_state_episodes
+
     qvec = _encode_query(query)
-    if not qvec:
-        return [], []
-    try:
-        from kazma_core.memory.backends import get_vector_backend
-
-        backend = get_vector_backend()
-    except Exception:
-        return [], []
-    if not getattr(backend, "available", False):
-        return [], []
-
-    ep_hits: list[RecallHit] = []
-    bel_hits: list[RecallHit] = []
-    try:
-        ep_ids = backend.search(
+    backend = _available_vector_backend() if qvec else None
+    dense_pairs = (
+        _backend_search(
+            backend,
             qvec,
             tenant_id=tenant_id,
             tier=list(RECALLABLE_TIERS),
-            limit=max(limit * 3, 10),
+            limit=max(_DENSE_POOL, limit * 3),
             kind="episode",
         )
-    except TypeError:
-        ep_ids = backend.search(
-            qvec,
-            tenant_id=tenant_id,
-            tier=list(RECALLABLE_TIERS),
-            limit=max(limit * 3, 10),
+        if backend is not None and qvec
+        else []
+    )
+    sims = {str(eid): float(sim) for eid, sim in dense_pairs}
+    rows: dict[str, dict[str, Any]] = {}
+    for row in search_state_episodes(query, tenant_id=tenant_id, limit=limit * 3):
+        if row.get("id"):
+            rows[str(row["id"])] = row
+    fetch = getattr(state_backend, "fetch_episodes", None)
+    need = [eid for eid in sims if eid not in rows]
+    if need and callable(fetch):
+        for row in fetch(need, tenant_id=tenant_id) or []:
+            if row.get("id"):
+                rows[str(row["id"])] = row
+    lookup = getattr(backend, "similarities", None)
+    unscored = [eid for eid in rows if eid not in sims]
+    if unscored and qvec and callable(lookup):
+        try:
+            sims.update(lookup(qvec, unscored, tenant_id=tenant_id, kind="episode") or {})
+        except Exception:
+            logger.debug("[recall] vector index similarity lookup failed", exc_info=True)
+    by_meaning = {str(eid) for eid, _sim in dense_pairs}
+    candidates: list[_Candidate] = []
+    for eid in dict.fromkeys([*(str(e) for e, _s in dense_pairs), *rows]):
+        row = rows.get(eid)
+        if row is None:
+            continue
+        text = " ".join(
+            str(row.get(k)) for k in ("user_text", "assistant_text", "summary_text") if row.get(k)
         )
-    except Exception:
-        logger.debug("[recall] pgvector episode search failed", exc_info=True)
-        ep_ids = []
-    try:
-        bel_ids = backend.search(
+        if not text:
+            continue
+        candidates.append(
+            _Candidate(
+                id=eid,
+                text=text,
+                created_at=float(row.get("created_at") or 0.0),
+                similarity=sims.get(eid),
+                by_meaning=eid in by_meaning,
+                content=_state_episode_display(row),
+            )
+        )
+    ranked = _rank_by_evidence(
+        query, candidates, _question_background(sim for _e, sim in dense_pairs)
+    )
+    weight = _archived_weight()
+    for hit in ranked:
+        tier = (rows.get(hit.id) or {}).get("tier")
+        hit.metadata["tier"] = tier
+        if tier == "archived":
+            hit.score *= weight
+            hit.metadata["archived"] = True
+        if explain:
+            hit.metadata["sources"] = [hit.source, "postgres_primary"]
+    ranked.sort(key=lambda h: h.score, reverse=True)
+    return ranked[:limit]
+
+
+def _state_belief_hit(
+    row: dict[str, Any], score: float, *, explain: bool, weak: bool = False
+) -> RecallHit | None:
+    """A mirrored belief row as a hit; None when it says nothing."""
+    bid = str(row.get("id") or "")
+    sub = row.get("subject") or ""
+    obj = row.get("object") or ""
+    content = _format_belief_text(row)
+    if not bid or not content:
+        return None
+    meta: dict[str, Any] = {
+        "subject": sub,
+        "predicate": row.get("predicate"),
+        "object": obj,
+        "remote_state": True,
+    }
+    if weak:
+        meta["strength"] = "weak"
+    if explain:
+        meta["sources"] = ["postgres_state"]
+    return RecallHit(
+        id=bid,
+        content=content,
+        score=score,
+        kind="belief",
+        source="postgres_state",
+        metadata=meta,
+    )
+
+
+def _pg_primary_beliefs(
+    query: str,
+    *,
+    tenant_id: str,
+    limit: int,
+    state_backend: Any,
+    explain: bool,
+) -> list[RecallHit]:
+    """Postgres-primary belief recall, ranked on evidence like the local path."""
+    from kazma_core.memory.state_backend import search_state_beliefs
+
+    qvec = _encode_query(query)
+    backend = _available_vector_backend() if qvec else None
+    dense_pairs = (
+        _backend_search(
+            backend,
             qvec,
             tenant_id=tenant_id,
             tier=None,
-            limit=max(limit * 3, 10),
+            limit=max(_DENSE_POOL, limit * 3),
             kind="belief",
         )
-    except TypeError:
-        bel_ids = []
-    except Exception:
-        logger.debug("[recall] pgvector belief search failed", exc_info=True)
-        bel_ids = []
-
-    fetch_ep = getattr(state_backend, "fetch_episodes", None)
-    if callable(fetch_ep) and ep_ids:
-        by_id = {
-            str(r.get("id")): r
-            for r in (fetch_ep([eid for eid, _s in ep_ids], tenant_id=tenant_id) or [])
-        }
-        for eid, sim in ep_ids:
-            row = by_id.get(str(eid))
-            text = ""
-            if row:
-                text = (
-                    row.get("summary_text")
-                    or row.get("user_text")
-                    or row.get("assistant_text")
-                    or ""
-                )[:400]
-            meta: dict[str, Any] = {"tier": (row or {}).get("tier"), "dense": True}
-            if explain:
-                meta["sources"] = ["dense", "pgvector"]
-            ep_hits.append(
-                RecallHit(
-                    id=str(eid),
-                    content=text,
-                    score=float(sim),
-                    kind="episode",
-                    source="dense",
-                    metadata=meta,
-                )
-            )
-
-    fetch_bel = getattr(state_backend, "fetch_beliefs", None)
-    if callable(fetch_bel) and bel_ids:
-        by_id = {
-            str(r.get("id")): r
-            for r in (fetch_bel([bid for bid, _s in bel_ids], tenant_id=tenant_id) or [])
-        }
-        for bid, sim in bel_ids:
-            row = by_id.get(str(bid)) or {}
-            sub = row.get("subject") or ""
-            pred = str(row.get("predicate") or "").replace("_", " ")
-            obj = row.get("object") or ""
-            content = f"{sub} {pred} {obj}".strip()
-            meta = {"dense": True}
-            if explain:
-                meta["sources"] = ["dense", "pgvector"]
-            bel_hits.append(
-                RecallHit(
-                    id=str(bid),
-                    content=content,
-                    score=float(sim),
-                    kind="belief",
-                    source="dense",
-                    metadata=meta,
-                )
-            )
-    return ep_hits, bel_hits
+        if backend is not None and qvec
+        else []
+    )
+    sims = {str(bid): float(sim) for bid, sim in dense_pairs}
+    rows: dict[str, dict[str, Any]] = {}
+    for row in search_state_beliefs(query, tenant_id=tenant_id, limit=limit * 3):
+        if row.get("id"):
+            rows[str(row["id"])] = row
+    fetch = getattr(state_backend, "fetch_beliefs", None)
+    need = [bid for bid in sims if bid not in rows]
+    if need and callable(fetch):
+        for row in fetch(need, tenant_id=tenant_id) or []:
+            if row.get("id"):
+                rows[str(row["id"])] = row
+    lookup = getattr(backend, "similarities", None)
+    unscored = [bid for bid in rows if bid not in sims]
+    if unscored and qvec and callable(lookup):
+        try:
+            sims.update(lookup(qvec, unscored, tenant_id=tenant_id, kind="belief") or {})
+        except Exception:
+            logger.debug("[recall] vector index belief similarity failed", exc_info=True)
+    by_meaning = {str(bid) for bid, _sim in dense_pairs}
+    candidates = [
+        _belief_candidate(bid, rows[bid], sims.get(bid), bid in by_meaning)
+        for bid in dict.fromkeys([*(str(b) for b, _s in dense_pairs), *rows])
+        if bid in rows and _format_belief_text(rows[bid])
+    ]
+    ranked = _rank_by_evidence(
+        query, candidates, _question_background(sim for _b, sim in dense_pairs), kind="belief"
+    )
+    sources = {
+        bid: (["dense", "pgvector"] if bid in by_meaning else ["postgres_state"]) for bid in rows
+    }
+    return _finish_beliefs(ranked, rows, sources if explain else None)[:limit]
 
 
 #: Recent query vectors: one recall runs two meaning searches (episodes and
@@ -499,8 +602,19 @@ def _merge_remote_state_hits(
     episodes: list[RecallHit],
     beliefs: list[RecallHit],
     explain: bool,
+    local_conn: sqlite3.Connection,
 ) -> tuple[list[RecallHit], list[RecallHit]]:
-    """Augment local recall with Postgres dual-mirror sparse results."""
+    """Top up a thin local result with memories only the Postgres mirror holds.
+
+    The mirror is a copy of this install's memories plus other replicas'
+    writes. A row this install also holds was already judged by local recall
+    -- re-adding it undid the relevance floor, which makes a short result
+    normal, and the mirror search returned the newest rows containing "is" or
+    "my" -- so it is skipped. A remote-only row joins only when it holds at
+    least half of the question's content words, labelled weak, after every
+    local hit.
+    """
+    from kazma_core.memory.query_terms import content_terms, coverage
     from kazma_core.memory.state_backend import (
         get_state_backend,
         search_state_beliefs,
@@ -511,29 +625,49 @@ def _merge_remote_state_hits(
     if not getattr(be, "available", False) or getattr(be, "name", "") == "null":
         return episodes, beliefs
 
+    terms = content_terms(query)
+
+    def _held_locally(table: str, ids: list[str]) -> set[str]:
+        wanted = [i for i in ids if i]
+        if not wanted:
+            return set()
+        try:
+            return {
+                str(r[0])
+                for r in local_conn.execute(
+                    f"SELECT id FROM {table} WHERE id IN ({','.join('?' * len(wanted))})",
+                    wanted,
+                )
+            }
+        except sqlite3.Error:
+            logger.debug("[recall] local id check failed; no remote top-up", exc_info=True)
+            return set(wanted)  # cannot tell: add nothing rather than re-add judged rows
+
     # Fill-ins rank AFTER what local recall found: they only top up a thin
-    # result, and their own scores are on another scale (a fixed 0.5/(i+1),
-    # or importance x confidence) that outranked every fused local score.
+    # result, and their own scores are on another scale.
     ep_floor = min((h.score for h in episodes), default=1.0)
     bel_floor = min((h.score for h in beliefs), default=1.0)
 
     seen_ep = {h.id for h in episodes}
     if len(episodes) < limit:
-        for i, row in enumerate(
-            search_state_episodes(query, tenant_id=tenant_id, limit=limit * 2)
-        ):
+        remote = search_state_episodes(query, tenant_id=tenant_id, limit=limit * 2)
+        held = _held_locally("episodes", [str(r.get("id") or "") for r in remote])
+        for i, row in enumerate(remote):
             eid = str(row.get("id") or "")
-            if not eid or eid in seen_ep:
+            text = _state_episode_display(row)
+            if not eid or eid in seen_ep or eid in held or not text:
                 continue
-            text = (
-                row.get("summary_text")
-                or row.get("user_text")
-                or row.get("assistant_text")
-                or ""
-            )[:400]
-            if not text:
+            full = " ".join(
+                str(row.get(k)) for k in ("user_text", "assistant_text", "summary_text")
+                if row.get(k)
+            )
+            if coverage(terms, full) < 0.5:
                 continue
-            meta: dict[str, Any] = {"tier": row.get("tier"), "remote_state": True}
+            meta: dict[str, Any] = {
+                "tier": row.get("tier"),
+                "remote_state": True,
+                "strength": "weak",
+            }
             if explain:
                 meta["sources"] = ["postgres_state"]
             episodes.append(
@@ -552,37 +686,16 @@ def _merge_remote_state_hits(
 
     seen_b = {h.id for h in beliefs}
     if len(beliefs) < limit:
-        for i, row in enumerate(
-            search_state_beliefs(query, tenant_id=tenant_id, limit=limit * 2)
-        ):
+        remote_b = search_state_beliefs(query, tenant_id=tenant_id, limit=limit * 2)
+        held_b = _held_locally("beliefs", [str(r.get("id") or "") for r in remote_b])
+        for i, row in enumerate(remote_b):
             bid = str(row.get("id") or "")
-            if not bid or bid in seen_b:
+            if not bid or bid in seen_b or bid in held_b:
                 continue
-            sub = row.get("subject") or ""
-            pred = (row.get("predicate") or "").replace("_", " ")
-            obj = row.get("object") or ""
-            content = f"{sub} {pred} {obj}".strip()
-            if not content:
+            hit = _state_belief_hit(row, bel_floor * 0.5 / (i + 1), explain=explain, weak=True)
+            if hit is None or coverage(terms, hit.content) < 0.5:
                 continue
-            score = bel_floor * 0.5 / (i + 1)
-            meta = {
-                "subject": sub,
-                "predicate": row.get("predicate"),
-                "object": obj,
-                "remote_state": True,
-            }
-            if explain:
-                meta["sources"] = ["postgres_state"]
-            beliefs.append(
-                RecallHit(
-                    id=bid,
-                    content=content,
-                    score=score,
-                    kind="belief",
-                    source="postgres_state",
-                    metadata=meta,
-                )
-            )
+            beliefs.append(hit)
             seen_b.add(bid)
             if len(beliefs) >= limit:
                 break
@@ -658,327 +771,194 @@ def _recall_beliefs(
     vector_engine: Any = None,
     explain: bool = False,
 ) -> list[RecallHit]:
-    """Find currently-valid beliefs relevant to the query.
+    """Current beliefs that are about the question, best first; [] when none is.
 
-    Matching stages (a real query like "where do I live" rarely
-    contains the literal answer "Paris", so naive token match fails):
+    Candidates come from four places: the question's content words (FTS5),
+    the nearest beliefs by meaning (every current belief), the facts
+    extracted from the turns episode recall just found -- their provenance,
+    ``source_session``/``source_turn``: "where do I live" finds the turn "we
+    now live in Braga" and with it "user lives_in Braga" -- and the belief
+    graph's walk. Each is judged on evidence like an episode
+    (:func:`_rank_by_evidence`, with the belief thresholds).
 
-    1. **FTS5 / LIKE** — query tokens against subject/predicate/object.
-    2. **Episode-bridged match** — entities in retrieved episodes surface
-       matching beliefs (e.g. "moved to Paris" → ``user lives_in Paris``).
-    3. **Belief-graph PPR** — multi-hop over subject–object edges.
-    4. **Dense cosine** — capped candidate scan when sparse results are thin.
+    Until 2026-09-26 they were rank-fused and the top five always returned,
+    whatever the question: on the retrieval benchmark no question without an
+    answer got an empty result and three facts in four injected were noise.
+    The bridge was every word of three or more letters in the recalled turns
+    matched as a substring ("the", "and", "out" in "about"), a LIKE fallback
+    ran whenever keyword search found nothing, and a fact recalled often was
+    scored DOWN ("rotation"), so the fact a user kept asking about lost its
+    place for being asked about. The belief floor is what keeps a hub fact out
+    of unrelated turns now.
 
-    Only ``valid_until IS NULL`` beliefs are returned. For functional
-    predicates, the highest-scoring active belief per (subject,
-    predicate) wins — so a superseded "London" never displaces "Paris".
+    Only currently-valid beliefs; for a functional predicate the best belief
+    per (subject, predicate) wins.
     """
     q = (query or "").strip()
-    if not q and not seed_episodes:
+    if not q:
         return []
-    terms = [t for t in q.lower().split() if len(t) >= 3]
-    # Entities surfaced by the retrieved episodes (bridge)
-    bridge_entities: set[str] = set()
-    if seed_episodes:
-        for ep in seed_episodes:
-            for tok in (ep.content or "").lower().split():
-                cleaned = "".join(c for c in tok if c.isalnum())
-                if len(cleaned) >= 3:
-                    bridge_entities.add(cleaned)
+    sources: dict[str, list[str]] = {}
 
-    source_by_id: dict[str, list[str]] = {}
-    # Each channel's ids in its own order of relevance; ranking fuses them.
-    channel_order: dict[str, list[str]] = {}
-    rows: list[Any] = []
+    def _found(ids: list[str], channel: str) -> None:
+        for bid in ids:
+            sources.setdefault(str(bid), []).append(channel)
 
-    # ── Stage 1: FTS5 MATCH (preferred) or LIKE fallback ──
-    fts_rows = _belief_fts(conn, q, tenant_id, limit * 3) if q else []
-    if fts_rows:
-        rows = list(fts_rows)
-        channel_order["fts"] = [r["id"] for r in fts_rows]
-        for r in fts_rows:
-            source_by_id.setdefault(r["id"], []).append("belief_fts")
-    else:
-        try:
-            if terms:
-                clauses = " OR ".join(
-                    "(LOWER(b.object) LIKE ? OR LOWER(b.predicate) LIKE ? OR LOWER(b.subject) LIKE ?)"
-                    for _ in terms
-                )
-                term_params: list[Any] = []
-                for t in terms:
-                    term_params.extend([f"%{t}%", f"%{t}%", f"%{t}%"])
-                sql = f"""
-                    SELECT b.id, b.subject, b.predicate, b.object, b.predicate_type,
-                           b.confidence, b.structural_importance, b.valid_from,
-                           b.source_trust_weight
-                    FROM beliefs b
-                    WHERE b.valid_until IS NULL AND b.invalidated_at IS NULL
-                      AND b.tenant_id = ?
-                      AND ({clauses})
-                """
-                params: list[Any] = [tenant_id] + term_params
-                if bridge_entities:
-                    ent_clauses = " OR ".join(
-                        "(LOWER(b.object) LIKE ? OR LOWER(b.subject) LIKE ?)"
-                        for _ in bridge_entities
-                    )
-                    ent_params: list[Any] = []
-                    for e in bridge_entities:
-                        ent_params.extend([f"%{e}%", f"%{e}%"])
-                    sql = (
-                        f"SELECT * FROM ({sql} UNION SELECT b.id, b.subject, b.predicate, "
-                        f"b.object, b.predicate_type, b.confidence, b.structural_importance, "
-                        f"b.valid_from, b.source_trust_weight FROM beliefs b WHERE "
-                        f"b.valid_until IS NULL AND b.invalidated_at IS NULL AND "
-                        f"b.tenant_id = ? AND ({ent_clauses}))"
-                    )
-                    params.extend([tenant_id] + ent_params)
-                sql += (
-                    " ORDER BY (structural_importance * confidence * source_trust_weight) "
-                    "DESC LIMIT ?"
-                )
-                params.append(limit * 3)
-                rows = list(conn.execute(sql, params).fetchall())
-                channel_order["like"] = [r["id"] for r in rows]
-                for r in rows:
-                    source_by_id.setdefault(r["id"], []).append("belief_like")
-            elif bridge_entities:
-                ent_clauses = " OR ".join(
-                    "(LOWER(b.object) LIKE ? OR LOWER(b.subject) LIKE ?)"
-                    for _ in bridge_entities
-                )
-                ent_params = []
-                for e in bridge_entities:
-                    ent_params.extend([f"%{e}%", f"%{e}%"])
-                rows = list(
-                    conn.execute(
-                        f"""
-                        SELECT b.id, b.subject, b.predicate, b.object, b.predicate_type,
-                               b.confidence, b.structural_importance, b.valid_from,
-                               b.source_trust_weight
-                        FROM beliefs b
-                        WHERE b.valid_until IS NULL AND b.invalidated_at IS NULL
-                          AND b.tenant_id = ?
-                          AND ({ent_clauses})
-                        ORDER BY (b.structural_importance * b.confidence * b.source_trust_weight) DESC
-                        LIMIT ?
-                        """,
-                        [tenant_id] + ent_params + [limit * 3],
-                    ).fetchall()
-                )
-                channel_order["bridge"] = [r["id"] for r in rows]
-                for r in rows:
-                    source_by_id.setdefault(r["id"], []).append("belief_bridge")
-        except Exception:
-            logger.debug("[recall] belief query failed", exc_info=True)
-            rows = []
-
-    # Bridge entities even when FTS already returned rows
-    if bridge_entities and terms:
-        try:
-            existing_ids = {r["id"] for r in rows}
-            ent_clauses = " OR ".join(
-                "(LOWER(b.object) LIKE ? OR LOWER(b.subject) LIKE ?)"
-                for _ in bridge_entities
-            )
-            ent_params = []
-            for e in bridge_entities:
-                ent_params.extend([f"%{e}%", f"%{e}%"])
-            bridged = conn.execute(
-                f"""
-                SELECT b.id, b.subject, b.predicate, b.object, b.predicate_type,
-                       b.confidence, b.structural_importance, b.valid_from,
-                       b.source_trust_weight
-                FROM beliefs b
-                WHERE b.valid_until IS NULL AND b.invalidated_at IS NULL
-                  AND b.tenant_id = ?
-                  AND ({ent_clauses})
-                LIMIT ?
-                """,
-                [tenant_id] + ent_params + [limit * 3],
-            ).fetchall()
-            bridge_order = channel_order.setdefault("bridge", [])
-            for r in bridged:
-                if r["id"] not in existing_ids:
-                    rows.append(r)
-                    existing_ids.add(r["id"])
-                if r["id"] not in bridge_order:
-                    bridge_order.append(r["id"])
-                source_by_id.setdefault(r["id"], []).append("belief_bridge")
-        except Exception:
-            logger.debug("[recall] belief bridge failed", exc_info=True)
-
-    # ── Stage 3: belief-graph PPR multi-hop ──
-    ppr_scores = _belief_graph_ppr(
-        conn, q, tenant_id, seed_episodes=seed_episodes or []
+    _found([r["id"] for r in _belief_fts(conn, q, tenant_id, limit * 3)], "belief_fts")
+    dense = _belief_dense_scored(conn, q, vector_engine, tenant_id, max(_DENSE_POOL, limit * 3))
+    _found([bid for bid, _sim in dense], "dense")
+    _found(_beliefs_from_turns(conn, seed_episodes or [], tenant_id), "belief_bridge")
+    walk = _belief_graph_ppr(conn, q, tenant_id, seed_episodes=seed_episodes or [])
+    # Its head only: the walk reaches every fact about "user", and past its
+    # head the order is arbitrary.
+    _found([bid for bid, _m in sorted(walk.items(), key=lambda x: x[1], reverse=True)][: limit * 2],
+           "belief_ppr")
+    if not sources:
+        return []
+    rows = {str(r["id"]): r for r in _hydrate_beliefs(conn, list(sources), tenant_id)}
+    sims = {bid: sim for bid, sim in dense}
+    missing = [bid for bid in rows if bid not in sims]
+    if missing:
+        qvec = _encode_query(q)
+        if qvec:
+            sims.update(_similarities(conn, missing, qvec, kind="belief"))
+    by_meaning = {bid for bid, _sim in dense}
+    candidates = [
+        _belief_candidate(bid, row, sims.get(bid), bid in by_meaning) for bid, row in rows.items()
+    ]
+    ranked = _rank_by_evidence(
+        q, candidates, _question_background(sim for _bid, sim in dense), kind="belief"
     )
-    if ppr_scores:
-        try:
-            existing_ids = {r["id"] for r in rows}
-            top_ppr = sorted(ppr_scores.items(), key=lambda x: x[1], reverse=True)[
-                : limit * 2
-            ]
-            missing = [bid for bid, _ in top_ppr if bid not in existing_ids]
-            if missing:
-                placeholders = ",".join("?" for _ in missing)
-                ppr_rows = conn.execute(
-                    f"""
-                    SELECT b.id, b.subject, b.predicate, b.object, b.predicate_type,
-                           b.confidence, b.structural_importance, b.valid_from,
-                           b.source_trust_weight
-                    FROM beliefs b
-                    WHERE b.valid_until IS NULL AND b.invalidated_at IS NULL
-                      AND b.tenant_id = ?
-                      AND b.id IN ({placeholders})
-                    """,
-                    [tenant_id] + missing,
-                ).fetchall()
-                for r in ppr_rows:
-                    rows.append(r)
-            for bid in ppr_scores:
-                source_by_id.setdefault(bid, []).append("belief_ppr")
-            # Its top results only, like every channel: the walk reaches every
-            # fact about "user", and past its head the order is arbitrary.
-            channel_order["ppr"] = [bid for bid, _mass in top_ppr]
-        except Exception:
-            logger.debug("[recall] belief PPR hydrate failed", exc_info=True)
+    return _finish_beliefs(ranked, rows, sources if explain else None)[:limit]
 
-    # ── Stage 4: meaning, over every current belief, always ──
-    # It used to run only when the stages above found fewer than `limit`
-    # beliefs: five loose keyword hits were enough to keep the one belief the
-    # question meant out of the pool altogether.
-    if q:
-        try:
-            dense_rows = _belief_dense(conn, q, vector_engine, tenant_id, limit * 2)
-            channel_order["dense"] = [dr["id"] for dr in dense_rows]
-            existing_ids = {r["id"] for r in rows}
-            for dr in dense_rows:
-                if dr["id"] not in existing_ids:
-                    rows.append(dr)
-                source_by_id.setdefault(dr["id"], []).append("dense")
-        except Exception:
-            logger.debug("[recall] belief dense search failed", exc_info=True)
 
-    if not rows:
+def _belief_candidate(
+    bid: str, row: Any, similarity: float | None, by_meaning: bool
+) -> _Candidate:
+    text = _format_belief_text(row)
+    return _Candidate(
+        id=bid,
+        text=text,
+        created_at=float(_field(row, "valid_from") or 0.0),
+        similarity=similarity,
+        by_meaning=by_meaning,
+        content=text,
+        standing=_standing(row),
+    )
+
+
+def _finish_beliefs(
+    ranked: list[RecallHit],
+    rows: dict[str, Any],
+    sources: dict[str, list[str]] | None,
+) -> list[RecallHit]:
+    """One belief per functional (subject, predicate), with its triple attached."""
+    out: list[RecallHit] = []
+    taken: set[str] = set()
+    for hit in ranked:
+        row = rows[hit.id]
+        if _field(row, "predicate_type") == "functional":
+            key = f"{_field(row, 'subject')}|{_field(row, 'predicate')}"
+            if key in taken:
+                continue
+            taken.add(key)
+        hit.metadata.update({
+            "subject": _field(row, "subject"),
+            "predicate": _field(row, "predicate"),
+            "object": _field(row, "object"),
+            "predicate_type": _field(row, "predicate_type"),
+            "confidence": _field(row, "confidence"),
+            "importance": _field(row, "structural_importance"),
+            "valid_from": _field(row, "valid_from"),
+        })
+        if sources is not None:
+            hit.metadata["sources"] = list(dict.fromkeys(sources.get(hit.id) or [hit.source]))
+            hit.source = (sources.get(hit.id) or [hit.source])[0]
+        out.append(hit)
+    return out
+
+
+def _field(row: Any, key: str, default: Any = None) -> Any:
+    """A column of a sqlite3.Row or a mirror dict; *default* when absent."""
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return default
+
+
+def _standing(row: Any) -> float:
+    """importance x confidence x trust: how much a fact matters, whatever was asked."""
+    try:
+        return max(0.0, float(_field(row, "structural_importance") or 0)
+                   * float(_field(row, "confidence") or 0)
+                   * float(_field(row, "source_trust_weight", 1.0) or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _beliefs_from_turns(
+    conn: sqlite3.Connection, episodes: list[RecallHit], tenant_id: str
+) -> list[str]:
+    """Current beliefs extracted from the turns *episodes* are (their provenance)."""
+    ids = [h.id for h in episodes if h.id]
+    if not ids:
+        return []
+    try:
+        turns = [
+            (str(r[0]), int(r[1]))
+            for r in conn.execute(
+                "SELECT session_id, turn_number FROM episodes "
+                f"WHERE id IN ({','.join('?' * len(ids))})",
+                ids,
+            )
+            if r[0] and r[1] is not None
+        ]
+        if not turns:
+            return []
+        clause = " OR ".join("(source_session = ? AND source_turn = ?)" for _ in turns)
+        return [
+            str(r[0])
+            for r in conn.execute(
+                f"SELECT id FROM beliefs WHERE tenant_id = ? AND {BELIEF_ACTIVE_SQL} "
+                f"AND ({clause})",
+                [tenant_id, *[v for turn in turns for v in turn]],
+            )
+        ]
+    except sqlite3.Error:
+        logger.debug("[recall] belief provenance lookup failed", exc_info=True)
         return []
 
-    hits: list[RecallHit] = []
-    seen_subjects: dict[str, RecallHit] = {}
-    channel_ranks = {
-        ch: {bid: i for i, bid in enumerate(order)} for ch, order in channel_order.items()
-    }
-    for r in rows:
-        ptype = r["predicate_type"] if "predicate_type" in r.keys() else "set"
-        if ptype == "functional":
-            key = f"{r['subject']}|{r['predicate']}"
-        else:
-            key = r["id"]
-        content = _format_belief_text(r)
-        score = _belief_rank_score(r, channel_ranks)
 
-        # ── Recency diversification ──────────────────────────────
-        # Penalize beliefs that have been surfaced frequently (high access_count)
-        # so the same 5 beliefs don't dominate every turn. The penalty is gentle
-        # (logarithmic) — it reduces the score of frequently-accessed hub beliefs
-        # by a small factor, giving less-accessed beliefs a chance to appear.
-        # Without this, hub beliefs (Kazma, ShipX, KCA) with high PPR scores
-        # and max importance show up in EVERY turn's recall, wasting context
-        # slots on memories that are rarely relevant to the current question.
-        import math
-
-        access_count = 0
-        try:
-            access_count = int(r["access_count"]) if "access_count" in r.keys() else 0
-        except Exception:
-            access_count = 0
-        if access_count > 5:
-            # Gentle log decay: 6 accesses → ~0.9×, 10 → ~0.8×, 20 → ~0.7×, 50 → ~0.6×
-            # This preserves relevance (high-scoring beliefs still win) but
-            # creates rotation so the agent doesn't see the same context every turn.
-            # Without this, hub beliefs (Kazma, ShipX, KCA) with high PPR scores
-            # and max importance show up in EVERY turn's recall, wasting context
-            # slots on memories that are rarely relevant to the current question.
-            score = score * (1.0 + 2.0 / math.log2(access_count)) / 2.0
-        srcs = source_by_id.get(r["id"]) or ["belief_match"]
-        meta: dict[str, Any] = {
-            "subject": r["subject"],
-            "predicate": r["predicate"],
-            "object": r["object"],
-            "predicate_type": r["predicate_type"],
-            "confidence": r["confidence"],
-            "importance": r["structural_importance"],
-            "valid_from": r["valid_from"],
-        }
-        if explain:
-            meta["sources"] = list(dict.fromkeys(srcs))
-        hit = RecallHit(
-            id=r["id"],
-            content=content,
-            score=score,
-            kind="belief",
-            source=srcs[0],
-            metadata=meta,
-        )
-        prev = seen_subjects.get(key)
-        if prev is None or hit.score > prev.score:
-            seen_subjects[key] = hit
-
-    hits = list(seen_subjects.values())
-    hits.sort(key=lambda h: h.score, reverse=True)
-    return hits[:limit]
+#: Belief relevance: the episode rules on a belief's own scale. A fact is a
+#: short triple ("user lives_in Braga"): unrelated facts reach 0.04-0.10 of
+#: meaning lift for a question where unrelated chat turns reach about 0, and
+#: a short triple holds a question's word easily. Values from a sweep on the
+#: retrieval benchmark v2 (floor 0.04-0.14, gap 0.08-0.20, coverage
+#: 0.06-0.12, standing and recency 0/0.02): the floor has a knee -- 0.04 ->
+#: 0.06 takes unanswerable questions answered empty from 0.07 to 0.33 and
+#: loses no answer; from 0.08 up answers are lost (0.99 -> 0.95 of answerable
+#: questions). A gap of 0.08 has the best precision at every floor. The two
+#: tie-breakers add 0.01 of MRR.
+_BELIEF_COVERAGE_WEIGHT = 0.06
+_BELIEF_FLOOR = 0.06
+_BELIEF_STRONG = 0.10
+_BELIEF_GAP = 0.08
+_BELIEF_RECENCY_WEIGHT = 0.02  # among close facts, the one stated later
+_BELIEF_STANDING_WEIGHT = 0.02  # ...and the one that matters more (importance x confidence x trust)
 
 
-#: Each channel's weight in the belief fusion. Meaning counts double: a fact
-#: is a short triple, where sharing a word with the question is weak evidence
-#: (a question about coffee shares a word with every fact that mentions
-#: coffee). The graph walk counts half: it is seeded by those same words, so
-#: at full weight it would count the keyword evidence twice.
-_BELIEF_CHANNEL_WEIGHTS = {"dense": 2.0, "fts": 1.0, "like": 1.0, "bridge": 1.0, "ppr": 0.5}
+def _format_belief_text(row: Any) -> str:
+    """Render a belief as a human-readable fact sentence.
 
-#: How much standing (importance x confidence x trust) may lift a belief's
-#: fused relevance: at most 5 %. Reciprocal ranks at k=60 are close together
-#: (1/61 against 1/64 is 5 %), so standing reorders beliefs within about three
-#: places of each other in a channel -- a near-tie -- and never one that is
-#: clearly more relevant.
-_STANDING_BAND = 0.05
-
-
-def _belief_rank_score(row: Any, channel_ranks: dict[str, dict[str, int]]) -> float:
-    """Relevance, with standing as the tie-breaker.
-
-    Relevance is weighted reciprocal-rank fusion over the channels that found
-    the belief -- keyword, meaning, bridge, graph (:data:`_BELIEF_CHANNEL_WEIGHTS`).
-    Standing (importance x confidence x trust) adds at most
-    :data:`_STANDING_BAND`. Until 2026-09-26 standing WAS the score, so the
-    belief a question was about lost its place to "important" beliefs it was
-    not about.
+    The subject and predicate are slugs (``platform_team``, ``lives_in``) and
+    read as words; the object is the fact's own text and is left as stored
+    (a file path or a code keeps its underscores).
     """
-    bid = row["id"]
-    rrf = sum(
-        _BELIEF_CHANNEL_WEIGHTS.get(channel, 1.0) / (_RRF_K + ranks[bid] + 1)
-        for channel, ranks in channel_ranks.items()
-        if bid in ranks
-    ) or 1.0 / (_RRF_K + 1000)
-    try:
-        prior = (
-            float(row["structural_importance"] or 0)
-            * float(row["confidence"] or 0)
-            * float(row["source_trust_weight"] or 0)
-        )
-    except (TypeError, ValueError, IndexError, KeyError):
-        prior = 0.0
-    prior = max(0.0, prior)
-    return rrf * (1.0 + _STANDING_BAND * prior / (1.0 + prior))
+    sub = str(_field(row, "subject") or "").replace("_", " ")
+    pred = str(_field(row, "predicate") or "").replace("_", " ")
+    return f"{sub} {pred} {_field(row, 'object') or ''}".strip()
 
 
-def _format_belief_text(row: sqlite3.Row) -> str:
-    """Render a belief as a human-readable fact sentence."""
-    pred = row["predicate"].replace("_", " ")
-    return f"{row['subject']} {pred} {row['object']}".strip()
-
-
-# ── Episode hybrid search (FTS5 + dense + PPR via RRF) ────────────────────
+# ── Episode search (keywords + meaning, ranked on evidence) ───────────────
 
 
 def _recall_episodes(
@@ -991,7 +971,8 @@ def _recall_episodes(
     session_id: str | None = None,
     explain: bool = False,
 ) -> list[RecallHit]:
-    """Hybrid episode search: FTS5 + dense + PPR, fused via RRF."""
+    """Episode search: content-word matches and nearest memories by meaning,
+    ranked on evidence (:func:`_rank_episodes_by_evidence`)."""
     q = (query or "").strip()
     if not q:
         return []
@@ -1004,19 +985,13 @@ def _recall_episodes(
     for h in sparse:
         sources.setdefault(h.id, []).append(h.source or "fts5")
 
-    # ── Dense: cosine over recall + episodic (fresh turns) ──
-    dense = _episode_dense(conn, q, vector_engine, tenant_id, limit * 3)
+    # ── Dense: the question's nearest memories by meaning, every tier ──
+    dense = _episode_dense(conn, q, vector_engine, tenant_id, max(_DENSE_POOL, limit * 3))
     for h in dense:
         sources.setdefault(h.id, []).append("dense")
 
-    # ── PPR boost over session cliques seeded by top hybrid hits ──
-    ppr_seeds = [h.id for h in (sparse + dense)[:10]]
-    ppr_scores = _episode_ppr(conn, ppr_seeds, tenant_id)
-    for eid in ppr_scores:
-        sources.setdefault(eid, []).append("ppr")
-
-    # ── RRF fusion ──
-    fused = _rrf_fuse(sparse, dense, ppr_scores, limit * 2)
+    # ── Evidence, not ranks: what is about the question, best first ──
+    fused = _rank_episodes_by_evidence(conn, q, sparse, dense)[: limit * 2]
 
     # ── Session bias: boost same-thread episodes (Phase A) ──
     if session_id:
@@ -1037,12 +1012,11 @@ def _recall_episodes(
     # ── Archived memories: recallable, one step behind active ones ──
     fused = _weigh_archived(conn, fused)
 
-    # ── Deterministic dedup gate ──
-    deduped = _dedup_gate(fused)
-
-    # Hydrate episode text for the survivors
+    # Hydrate, THEN drop repeats: the same text twice tells the model nothing
+    # new. Deduplicating before the text was loaded compared ids, so one
+    # question asked in five sessions took all five slots.
     out: list[RecallHit] = []
-    for hit in deduped[:limit]:
+    for hit in fused:
         text = _episode_text(conn, hit.id)
         if text:
             meta = dict(hit.metadata or {})
@@ -1058,10 +1032,232 @@ def _recall_episodes(
                     metadata=meta,
                 )
             )
-    return out
+    return _dedup_gate(out)[:limit]
+
+
+# ── Episode relevance: evidence, not ranks (Stage 2, R1/R2) ───────────────
+#
+# Rank fusion scored a memory by its PLACE in each channel, however weak the
+# match: the fifteenth keyword hit on "what" or "my" counted almost as much as
+# a memory whose meaning matched the question, and recall always returned its
+# top five. On the retrieval benchmark (memory/benchmark.py) 25% of
+# paraphrased questions found their answer, no question without an answer
+# got an empty result, and one injected memory in five was relevant.
+#
+# Every candidate (the question's nearest memories by meaning and its
+# content-word matches) is now scored on evidence: its meaning similarity
+# ABOVE THIS QUESTION'S BACKGROUND (what unrelated memories reach for it --
+# bge-m3 puts almost everything between 0.45 and 0.65, so an absolute cosine
+# floor cannot tell "about this" from "near this"), plus how much of the
+# question's content words it holds. Below the floor, nothing is injected.
+#
+# The values come from a sweep on the benchmark (floor 0-0.12, gap 0.10-0.30,
+# coverage 0.08-0.20, recency 0-0.10): overall hit rate 0.60 -> 0.82, MRR
+# 0.67 -> 0.86, precision 0.21 -> 0.71, abstention 0 -> 0.47. The floor is the
+# recall-leaning end on purpose: at 0.10 abstention reaches 0.73, but "what is
+# my dog's name", "who looks after my teeth" and a present for mum go unfound;
+# at 0.04 those are found and four unanswerable questions get one to three
+# weak hits. Below 0.04 nothing more is found until abstention is gone.
+_DENSE_POOL = 40  # nearest memories by meaning considered per question
+_BACKGROUND_RANKS = (3, 15)  # meaning ranks 4-15: the level unrelated memories reach
+_COVERAGE_WEIGHT = 0.12  # a memory holding every content word earns this much lift
+_EVIDENCE_FLOOR = 0.04  # less evidence than this: not about the question
+_EVIDENCE_STRONG = 0.10  # below it a match is shown to the model as weak
+_EVIDENCE_GAP = 0.15  # this far behind the best: not worth injecting
+_RECENCY_WEIGHT = 0.05  # among close candidates, the newer statement first
+# With few memories the background has no sample: a fresh install with one
+# memory found it against itself (lift 0) and never recalled it. Below this
+# many samples the estimate is blended with a prior -- the level unrelated
+# memories reached on the benchmark with bge-m3 (median 0.51).
+_BACKGROUND_PRIOR = 0.5
+_BACKGROUND_MIN_SAMPLES = 5
+#: With no meaning to judge by, a memory must hold at least half of the
+#: question's content words, and stay within one word in three of the best.
+_WORDS_ONLY_FLOOR = 0.5
+_WORDS_ONLY_GAP = 0.34
+
+
+@dataclass(frozen=True, slots=True)
+class _Candidate:
+    """One memory the question might be about, as the evidence ranker sees it."""
+
+    id: str
+    text: str  # everything the memory says: word coverage is measured on it
+    created_at: float
+    similarity: float | None  # cosine with the question; None: no comparable vector
+    by_meaning: bool  # found by the meaning search (else by its words only)
+    content: str = ""  # what recall shows, when the caller already has it
+    standing: float = 0.0  # a belief's importance x confidence x trust
+
+
+def _question_background(dense_scores: Iterable[float]) -> float:
+    """What memories unrelated to the question reach for it by meaning.
+
+    The mean of meaning ranks 4-15 (:data:`_BACKGROUND_RANKS`), blended with
+    :data:`_BACKGROUND_PRIOR` while fewer than
+    :data:`_BACKGROUND_MIN_SAMPLES` of those ranks exist.
+    """
+    ordered = sorted((float(x) for x in dense_scores), reverse=True)
+    lo, hi = _BACKGROUND_RANKS
+    window = ordered[lo:hi]
+    missing = max(0, _BACKGROUND_MIN_SAMPLES - len(window))
+    return (sum(window) + _BACKGROUND_PRIOR * missing) / (len(window) + missing)
+
+
+def _evidence_rules(kind: str) -> tuple[float, float, float, float, float, float]:
+    """(coverage weight, floor, strong, gap, recency weight, standing weight).
+
+    Per memory kind, read at call time, so a sweep or a test can set the
+    module's values.
+    """
+    if kind == "belief":
+        return (_BELIEF_COVERAGE_WEIGHT, _BELIEF_FLOOR, _BELIEF_STRONG, _BELIEF_GAP,
+                _BELIEF_RECENCY_WEIGHT, _BELIEF_STANDING_WEIGHT)
+    return (_COVERAGE_WEIGHT, _EVIDENCE_FLOOR, _EVIDENCE_STRONG, _EVIDENCE_GAP,
+            _RECENCY_WEIGHT, 0.0)
+
+
+def _rank_by_evidence(
+    query: str,
+    candidates: list[_Candidate],
+    background: float,
+    *,
+    kind: str = "episode",
+) -> list[RecallHit]:
+    """The candidates that are about the question, best first; [] when none is.
+
+    The one ranking of every recall path (local and Postgres-primary, episodes
+    and beliefs). ``score`` is what the order is: evidence plus the recency
+    tie-breaker (and, for a belief, its standing) -- ``metadata["evidence"]``
+    is the evidence alone -- so a later re-sort by score (archived weighting,
+    session bias) keeps it.
+    """
+    from kazma_core.memory.query_terms import content_terms, coverage
+
+    if not candidates:
+        return []
+    cov_weight, floor, strong, gap, recency_weight, standing_weight = _evidence_rules(kind)
+    if all(cand.similarity is None for cand in candidates):
+        # Nothing to judge meaning by -- no embedder, or none of these
+        # memories has a comparable vector yet: the words decide alone, and
+        # must be at least half of the question, the rule of every
+        # words-only search (the mirror top-up, the past-chats fallback).
+        # The floors above assume a meaning lift; on words alone they asked
+        # a fact to hold every word of the question.
+        cov_weight, floor, strong, gap = 1.0, _WORDS_ONLY_FLOOR, 1.0, _WORDS_ONLY_GAP
+    terms = content_terms(query)
+    scored: list[tuple[_Candidate, float, float, float]] = []
+    for cand in candidates:
+        lift = (cand.similarity - background) if cand.similarity is not None else 0.0
+        cov = coverage(terms, cand.text)
+        scored.append((cand, lift + cov_weight * cov, lift, cov))
+    passing = [row for row in scored if row[1] >= floor]
+    if not passing:
+        return []
+    best = max(row[1] for row in passing)
+    kept = [row for row in passing if row[1] >= best - gap]
+    # Rank by time, equal times sharing a rank: the facts one turn yielded were
+    # all stated at once, and list position is not newer.
+    times = sorted({row[0].created_at for row in kept})
+    step = {t: i / (len(times) - 1) if len(times) > 1 else 1.0 for i, t in enumerate(times)}
+    recency = {row[0].id: step[row[0].created_at] for row in kept}
+    top_standing = max(row[0].standing for row in kept) or 1.0
+    hits = [
+        RecallHit(
+            id=cand.id,
+            content=cand.content,
+            score=round(
+                ev + recency_weight * recency[cand.id]
+                + standing_weight * cand.standing / top_standing,
+                4,
+            ),
+            kind=kind,
+            source="dense" if cand.by_meaning else "fts5",
+            metadata={
+                "lift": round(lift, 4),
+                "coverage": round(cov, 3),
+                "evidence": round(ev, 4),
+                "strength": "strong" if ev >= strong else "weak",
+            },
+        )
+        for cand, ev, lift, cov in kept
+    ]
+    hits.sort(key=lambda h: h.score, reverse=True)
+    return hits
+
+
+def _similarities(
+    conn: sqlite3.Connection, ids: list[str], qvec: list[float], *, kind: str = "episode"
+) -> dict[str, float]:
+    """Cosine of each memory's stored vector with the question's.
+
+    Comparable vectors only (the vector engine's rule: this size, this
+    model): another model's vector says nothing about this question.
+    """
+    from kazma_core.memory.vector_engine import VectorEngine
+
+    try:
+        return VectorEngine(conn).similarities(qvec, ids, kind=kind)
+    except sqlite3.Error:
+        logger.debug("[recall] similarity lookup failed", exc_info=True)
+        return {}
+
+
+def _rank_episodes_by_evidence(
+    conn: sqlite3.Connection,
+    query: str,
+    sparse: list[RecallHit],
+    dense: list[RecallHit],
+) -> list[RecallHit]:
+    """Local episodes that are about the question, best first; [] when none is."""
+    ids = list(dict.fromkeys([h.id for h in dense] + [h.id for h in sparse]))
+    if not ids:
+        return []
+    sims = {h.id: h.score for h in dense}
+    missing = [i for i in ids if i not in sims]
+    if missing:
+        qvec = _encode_query(query)
+        if qvec:
+            sims.update(_similarities(conn, missing, qvec))
+    rows = {
+        str(r[0]): r
+        for r in conn.execute(
+            "SELECT id, user_text, assistant_text, summary_text, created_at "
+            f"FROM episodes WHERE id IN ({','.join('?' * len(ids))})",
+            ids,
+        )
+    }
+    by_meaning = {h.id for h in dense}
+    candidates = [
+        _Candidate(
+            id=eid,
+            text=" ".join(t for t in (row[1], row[2], row[3]) if t),
+            created_at=float(row[4] or 0.0),
+            similarity=sims.get(eid),
+            by_meaning=eid in by_meaning,
+        )
+        for eid in ids
+        if (row := rows.get(eid)) is not None
+    ]
+    return _rank_by_evidence(query, candidates, _question_background(h.score for h in dense))
 
 
 _ARCHIVED_WEIGHT_DEFAULT = 0.98
+
+
+def _archived_weight() -> float:
+    """``memory.v2.archived_recall_weight`` (default 0.98), kept in 0.1-1.0."""
+    try:
+        from kazma_core.memory.config import read_memory_cfg
+
+        weight = float(
+            ((read_memory_cfg() or {}).get("v2") or {}).get(
+                "archived_recall_weight", _ARCHIVED_WEIGHT_DEFAULT
+            )
+        )
+    except (ImportError, TypeError, ValueError):
+        weight = _ARCHIVED_WEIGHT_DEFAULT
+    return min(1.0, max(0.1, weight))
 
 
 def _weigh_archived(conn: sqlite3.Connection, hits: list[RecallHit]) -> list[RecallHit]:
@@ -1072,10 +1268,10 @@ def _weigh_archived(conn: sqlite3.Connection, hits: list[RecallHit]) -> list[Rec
     searched the archived tier at all, so a month of disuse meant the memory
     was gone -- but an active memory that matches as well comes first. The
     weight is ``memory.v2.archived_recall_weight`` (default 0.98, kept in
-    0.1-1.0). Fused scores are reciprocal ranks, 1.6 % apart at the top, so
-    0.98 moves an archived memory about one place behind an active one that
-    matches as well -- a tie-breaker; 0.7 would be some 25 places. A recalled
-    archived memory is bumped like any other, and the next sleep cycle moves
+    0.1-1.0). Scores are evidence (:func:`_rank_by_evidence`, from the floor
+    to about 0.5), so 0.98 takes 2 % off: a tie-breaker between memories that
+    match about as well, never a reason to lose one. A recalled archived
+    memory is bumped like any other, and the next sleep cycle moves
     it back to the episodic tier.
     """
     if not hits:
@@ -1094,18 +1290,7 @@ def _weigh_archived(conn: sqlite3.Connection, hits: list[RecallHit]) -> list[Rec
         return hits
     if "archived" not in tiers.values():
         return hits
-    weight = _ARCHIVED_WEIGHT_DEFAULT
-    try:
-        from kazma_core.memory.config import read_memory_cfg
-
-        weight = float(
-            ((read_memory_cfg() or {}).get("v2") or {}).get(
-                "archived_recall_weight", _ARCHIVED_WEIGHT_DEFAULT
-            )
-        )
-    except (ImportError, TypeError, ValueError):
-        weight = _ARCHIVED_WEIGHT_DEFAULT
-    weight = min(1.0, max(0.1, weight))
+    weight = _archived_weight()
     for h in hits:
         if tiers.get(h.id) == "archived":
             h.score *= weight
@@ -1114,27 +1299,17 @@ def _weigh_archived(conn: sqlite3.Connection, hits: list[RecallHit]) -> list[Rec
 
 
 def _fts_match_query(query: str) -> str:
-    """Build a safe FTS5 MATCH expression from free text.
+    """A safe FTS5 MATCH expression over the question's content words.
 
-    Tokens are alphanumeric-only (punctuation stripped). Joined with OR so
-    any term can hit. Empty when no usable tokens remain.
+    Stopwords never reach the index (``query_terms``): ORing "what", "is"
+    and "my" made every memory that contains them a keyword hit. Each word
+    is quoted and prefix-matched, so "vaccine" also finds "vaccines". Empty
+    when the question has no content word.
     """
-    raw = (query or "").lower()
-    tokens: list[str] = []
-    for part in raw.replace("-", " ").split():
-        cleaned = "".join(c for c in part if c.isalnum())
-        if len(cleaned) >= 2:
-            tokens.append(cleaned)
-    # De-dupe preserving order
-    seen: set[str] = set()
-    uniq: list[str] = []
-    for t in tokens:
-        if t not in seen:
-            seen.add(t)
-            uniq.append(t)
-    if not uniq:
-        return ""
-    return " OR ".join(uniq)
+    from kazma_core.memory.query_terms import search_terms
+
+    words = [w.replace('"', "") for w in search_terms(query)]
+    return " OR ".join(f'"{w}"*' for w in words if w)
 
 
 def _episode_fts(
@@ -1143,73 +1318,74 @@ def _episode_fts(
     tenant_id: str,
     limit: int,
 ) -> list[RecallHit]:
-    """Lexical search over episodes — FTS5 MATCH+bm25, LIKE fallback."""
-    match_q = _fts_match_query(query)
-    if match_q:
-        try:
-            rows = conn.execute(
-                f"""
-                SELECT e.id, e.tier, e.user_text, e.assistant_text,
-                       bm25(episodes_fts) AS rank
-                FROM episodes_fts
-                JOIN episodes e ON e.rowid = episodes_fts.rowid
-                WHERE episodes_fts MATCH ?
-                  AND e.tenant_id = ?
-                  AND e.tier IN {_TIER_SQL}
-                ORDER BY rank
-                LIMIT ?
-                """,
-                (match_q, tenant_id, limit),
-            ).fetchall()
-            hits: list[RecallHit] = []
-            for r in rows:
-                text = (r["user_text"] or r["assistant_text"] or "")[:300]
-                # bm25: more negative = better match → invert for higher-is-better
-                bm = float(r["rank"] if r["rank"] is not None else 0.0)
-                score = max(0.0, -bm) if bm < 0 else 1.0 / (1.0 + abs(bm))
-                hits.append(
-                    RecallHit(
-                        id=r["id"],
-                        content=text,
-                        score=score if score > 0 else 0.01,
-                        source="fts5",
-                        metadata={"tier": r["tier"], "bm25": bm},
-                    )
-                )
-            if hits:
-                return hits
-        except Exception:
-            logger.debug("[recall] episodes_fts MATCH failed — LIKE fallback", exc_info=True)
+    """Keyword search over episodes: FTS5 MATCH + bm25 on the content words.
 
-    # ── LIKE fallback (FTS missing / empty / error) ──
-    # Strip non-alphanumerics per token and drop all-punctuation tokens (an
-    # all-punctuation token would otherwise become a LIKE wildcard `_`/%).
-    # Derive clauses AND params from the SAME filtered list so the `?`
-    # placeholder count stays in lockstep with the binding count (audit
-    # finding: the old code built clauses from `terms` but skipped params for
-    # punctuation tokens → placeholder/count desync → OperationalError → the
-    # LIKE fallback silently returned [] for any query like "deploy == error").
-    terms = [t for t in query.lower().split() if len(t) >= 2]
-    cleaned_terms: list[str] = []
-    for t in terms:
-        cleaned = "".join(c for c in t if c.isalnum())
-        if cleaned:
-            cleaned_terms.append(cleaned)
-    if not cleaned_terms:
+    Nothing matched is an answer, not a reason to look harder: the old LIKE
+    fallback ran whenever FTS found nothing and matched substrings, so "run
+    out" found "about". The fallback now runs only when the index itself
+    fails, and matches whole words.
+    """
+    match_q = _fts_match_query(query)
+    if not match_q:
+        return []
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT e.id, e.tier, e.user_text, e.assistant_text,
+                   bm25(episodes_fts) AS rank
+            FROM episodes_fts
+            JOIN episodes e ON e.rowid = episodes_fts.rowid
+            WHERE episodes_fts MATCH ?
+              AND e.tenant_id = ?
+              AND e.tier IN {_TIER_SQL}
+            ORDER BY rank
+            LIMIT ?
+            """,
+            (match_q, tenant_id, limit),
+        ).fetchall()
+    except sqlite3.Error:
+        logger.debug("[recall] episodes_fts MATCH failed -- word fallback", exc_info=True)
+        return _episode_word_fallback(conn, query, tenant_id, limit)
+    hits: list[RecallHit] = []
+    for r in rows:
+        text = (r["user_text"] or r["assistant_text"] or "")[:300]
+        # bm25: more negative = better match -> invert for higher-is-better
+        bm = float(r["rank"] if r["rank"] is not None else 0.0)
+        score = max(0.0, -bm) if bm < 0 else 1.0 / (1.0 + abs(bm))
+        hits.append(
+            RecallHit(
+                id=r["id"],
+                content=text,
+                score=score if score > 0 else 0.01,
+                source="fts5",
+                metadata={"tier": r["tier"], "bm25": bm},
+            )
+        )
+    return hits
+
+
+def _episode_word_fallback(
+    conn: sqlite3.Connection, query: str, tenant_id: str, limit: int
+) -> list[RecallHit]:
+    """Whole-word matching for when the full-text index cannot be read."""
+    from kazma_core.memory.query_terms import mentions, search_terms
+
+    words = search_terms(query)
+    if not words:
         return []
     clauses = " OR ".join(
         "(LOWER(COALESCE(e.user_text,'')) LIKE ? OR LOWER(COALESCE(e.assistant_text,'')) LIKE ?"
         " OR LOWER(COALESCE(e.summary_text,'')) LIKE ?)"
-        for _ in cleaned_terms
+        for _ in words
     )
-    params: list[Any] = []
-    for cleaned in cleaned_terms:
-        params.extend([f"%{cleaned}%", f"%{cleaned}%", f"%{cleaned}%"])
-    params.extend([limit])
+    params: list[Any] = [tenant_id]
+    for w in words:
+        params.extend([f"%{w}%"] * 3)
+    params.append(limit * 5)
     try:
         rows = conn.execute(
             f"""
-            SELECT e.id, e.tier, e.user_text, e.assistant_text
+            SELECT e.id, e.tier, e.user_text, e.assistant_text, e.summary_text
             FROM episodes e
             WHERE e.tenant_id = ?
               AND e.tier IN {_TIER_SQL}
@@ -1217,23 +1393,27 @@ def _episode_fts(
             ORDER BY e.created_at DESC
             LIMIT ?
             """,
-            [tenant_id] + params,
+            params,
         ).fetchall()
-    except Exception as e:
-        logger.error("[recall] episode LIKE fallback failed: %s", e, exc_info=True)
+    except sqlite3.Error as exc:
+        logger.warning("[recall] episode keyword fallback failed: %s", exc, exc_info=True)
         return []
-    hits = []
-    for i, r in enumerate(rows):
-        text = (r["user_text"] or r["assistant_text"] or "")[:300]
+    hits: list[RecallHit] = []
+    for r in rows:
+        text = " ".join(t for t in (r["user_text"], r["assistant_text"], r["summary_text"]) if t)
+        if not mentions(text, words):
+            continue  # the LIKE matched inside a longer word
         hits.append(
             RecallHit(
                 id=r["id"],
-                content=text,
-                score=1.0 / (i + 1),
+                content=(r["user_text"] or r["assistant_text"] or "")[:300],
+                score=1.0 / (len(hits) + 1),
                 source="fts_like",
                 metadata={"tier": r["tier"]},
             )
         )
+        if len(hits) >= limit:
+            break
     return hits
 
 
@@ -1323,14 +1503,14 @@ def _episode_dense(
     ]
 
 
-def _belief_dense(
+def _belief_dense_scored(
     conn: sqlite3.Connection,
     query: str,
     vector_engine: Any | None,
     tenant_id: str,
     limit: int,
-) -> list[sqlite3.Row]:
-    """Meaning-based belief match over EVERY current belief, best first.
+) -> list[tuple[str, float]]:
+    """The nearest current beliefs by meaning, ``(id, similarity)``, best first.
 
     A remote index (pgvector / Qdrant, or hybrid) answers when one is
     configured and up; otherwise the local engine scores every current belief
@@ -1342,16 +1522,18 @@ def _belief_dense(
     qvec = _encode_query(query)
     if not qvec:
         return []
-    remote_rows = _belief_dense_via_backend(conn, qvec, tenant_id, limit)
-    if remote_rows:
-        return remote_rows
+    remote = _belief_dense_remote(conn, qvec, tenant_id, limit)
+    if remote:
+        return remote
     engine = vector_engine if hasattr(vector_engine, "search_beliefs") else None
     if engine is None:
         from kazma_core.memory.vector_engine import VectorEngine
 
         engine = VectorEngine(conn)
-    hits = engine.search_beliefs(qvec, tenant_id=tenant_id, limit=limit)
-    return _hydrate_beliefs(conn, [bid for bid, _sim in hits], tenant_id)
+    return [
+        (str(bid), float(sim))
+        for bid, sim in engine.search_beliefs(qvec, tenant_id=tenant_id, limit=limit)
+    ]
 
 
 def _hydrate_beliefs(
@@ -1378,13 +1560,13 @@ def _hydrate_beliefs(
     return sorted(rows, key=lambda r: order.get(str(r["id"]), 10_000))
 
 
-def _belief_dense_via_backend(
+def _belief_dense_remote(
     conn: sqlite3.Connection,
     qvec: list[float],
     tenant_id: str,
     limit: int,
-) -> list[sqlite3.Row]:
-    """Hydrate pgvector/Qdrant belief ids from the local beliefs table."""
+) -> list[tuple[str, float]]:
+    """pgvector / Qdrant belief hits when a remote index is configured and up."""
     try:
         from kazma_core.memory.backends import get_vector_backend
 
@@ -1392,20 +1574,15 @@ def _belief_dense_via_backend(
     except Exception:
         return []
     name = str(getattr(backend, "name", "") or "")
-    if name not in ("pgvector", "qdrant", "hybrid"):
+    if name not in ("pgvector", "qdrant", "hybrid") or not getattr(backend, "available", False):
         return []
-    if not getattr(backend, "available", False):
-        return []
-    try:
-        hits = backend.search(
-            qvec, tenant_id=tenant_id, tier=None, limit=limit, kind="belief"
+    return [
+        (str(bid), float(sim))
+        for bid, sim in _backend_search(
+            backend, qvec, tenant_id=tenant_id, tier=None, limit=limit, kind="belief"
         )
-    except TypeError:
-        return []
-    except Exception:
-        logger.debug("[recall] belief dense backend search failed", exc_info=True)
-        return []
-    return _hydrate_beliefs(conn, [str(eid) for eid, _s in hits if eid], tenant_id)
+        if bid
+    ]
 
 
 def _belief_graph_ppr(
@@ -1544,80 +1721,6 @@ def _belief_graph_ppr(
     return belief_scores
 
 
-def _episode_ppr(
-    conn: sqlite3.Connection,
-    seed_episode_ids: list[str],
-    tenant_id: str,
-) -> dict[str, float]:
-    """PPR boost: treat episodes as nodes, shared sessions as edges.
-
-    Secondary to belief-graph PPR — keeps same-session episode cliques
-    in the hybrid RRF fusion. Bounded by ``ppr_max_nodes``.
-    """
-    if not seed_episode_ids:
-        return {}
-    try:
-        from kazma_core.memory.config import read_memory_cfg
-        from kazma_core.memory.ppr import compute_local_ppr
-
-        v2 = (read_memory_cfg() or {}).get("v2") or {}
-        alpha = float(v2.get("ppr_alpha", 0.15))
-        max_iter = int(v2.get("ppr_max_iter", 10))
-        max_nodes = int(v2.get("ppr_max_nodes", 200))
-    except Exception:
-        return {}
-    # Cap seed set
-    seed_k = 10
-    try:
-        from kazma_core.memory.config import read_memory_cfg as _rmc
-
-        seed_k = int(((_rmc() or {}).get("v2") or {}).get("ppr_seed_k", 10))
-    except Exception:
-        pass
-    seeds = seed_episode_ids[:seed_k]
-
-    # Build edges: only sessions that touch seeds (avoid full-tenant clique load)
-    try:
-        placeholders = ",".join("?" for _ in seeds)
-        seed_sessions = conn.execute(
-            f"SELECT DISTINCT session_id FROM episodes WHERE id IN ({placeholders})",
-            seeds,
-        ).fetchall()
-        session_ids = [r[0] for r in seed_sessions if r[0]]
-        if not session_ids:
-            return {}
-        sph = ",".join("?" for _ in session_ids)
-        rows = conn.execute(
-            f"""
-            SELECT id, session_id FROM episodes
-            WHERE tenant_id = ?
-              AND tier IN {_TIER_SQL}
-              AND session_id IN ({sph})
-            LIMIT ?
-            """,
-            [tenant_id] + session_ids + [max_nodes * 2],
-        ).fetchall()
-    except Exception:
-        return {}
-    by_session: dict[str, list[str]] = {}
-    for r in rows:
-        by_session.setdefault(r["session_id"], []).append(r["id"])
-    edges: list[tuple[str, str, float]] = []
-    for session_eps in by_session.values():
-        for i, a in enumerate(session_eps):
-            for b in session_eps[i + 1 :]:
-                edges.append((a, b, 1.0))
-                edges.append((b, a, 1.0))
-    if not edges:
-        return {}
-    try:
-        return compute_local_ppr(
-            seeds, edges, alpha=alpha, max_iter=max_iter, max_nodes=max_nodes
-        )
-    except Exception:
-        return {}
-
-
 # ── Access accounting + session bias (Phase A) ────────────────────────────
 
 
@@ -1690,8 +1793,9 @@ def _apply_session_bias(
     """Boost scores for episodes belonging to the active thread/session.
 
     Does not hard-filter: global memories still appear, but same-session
-    episodes rank higher for identical content. ``boost`` is added to the
-    fused RRF score (typical RRF scores are small, so 0.35 is material).
+    episodes rank higher. ``boost`` is added to the evidence score (the floor
+    to about 0.5), so a same-session memory comes first among those about the
+    question; it never admits one that is not (only ranked hits get here).
     """
     if not hits or not session_id:
         return hits
@@ -1729,43 +1833,6 @@ def _apply_session_bias(
     except Exception:
         logger.debug("[recall] session bias failed", exc_info=True)
         return hits
-
-
-# ── RRF fusion ────────────────────────────────────────────────────────────
-
-
-def _rrf_fuse(
-    sparse: list[RecallHit],
-    dense: list[RecallHit],
-    ppr: dict[str, float],
-    top_n: int,
-) -> list[RecallHit]:
-    """Reciprocal Rank Fusion across sparse + dense + PPR."""
-    # Sort each source by its own score descending
-    sparse.sort(key=lambda h: h.score, reverse=True)
-    dense.sort(key=lambda h: h.score, reverse=True)
-    ppr_sorted = sorted(ppr.items(), key=lambda x: x[1], reverse=True)
-
-    rrf: dict[str, float] = {}
-    meta: dict[str, RecallHit] = {}
-
-    for rank, h in enumerate(sparse, start=1):
-        rrf[h.id] = rrf.get(h.id, 0.0) + 1.0 / (_RRF_K + rank)
-        meta.setdefault(h.id, h)
-    for rank, h in enumerate(dense, start=1):
-        rrf[h.id] = rrf.get(h.id, 0.0) + 1.0 / (_RRF_K + rank)
-        meta.setdefault(h.id, h)
-    for rank, (eid, _score) in enumerate(ppr_sorted, start=1):
-        rrf[eid] = rrf.get(eid, 0.0) + 1.0 / (_RRF_K + rank)
-        meta.setdefault(eid, RecallHit(id=eid, content="", score=0.0, source="ppr"))
-
-    ranked = sorted(rrf.items(), key=lambda x: x[1], reverse=True)[:top_n]
-    out: list[RecallHit] = []
-    for eid, score in ranked:
-        h = meta[eid]
-        h.score = score
-        out.append(h)
-    return out
 
 
 # ── Deterministic dedup gate ──────────────────────────────────────────────
@@ -1843,6 +1910,10 @@ def format_recall_block(
 
     def _line(h: RecallHit) -> str:
         base = f"- {h.content}"
+        if (h.metadata or {}).get("strength") == "weak":
+            # Found on thin evidence (memory/recall.py _EVIDENCE_STRONG): the
+            # model should weigh it as possibly related, not as the answer.
+            base = f"- (possibly related) {h.content}"
         if not do_explain:
             return base
         srcs = (h.metadata or {}).get("sources") or ([h.source] if h.source else [])

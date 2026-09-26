@@ -12,7 +12,6 @@ through :func:`read_memory_cfg` so the TUI ``memory.enabled`` toggle is real.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 __all__ = [
@@ -131,16 +130,11 @@ _STORE_KEYS = (
 
 
 def _read_yaml_memory() -> dict[str, Any]:
+    """The install's ``memory`` block (``config_loader``: cached, install root)."""
     try:
-        import yaml
+        from kazma_core.config_loader import install_yaml_section
 
-        path = Path("kazma.yaml")
-        if path.exists():
-            with open(path, encoding="utf-8") as f:
-                full = yaml.safe_load(f) or {}
-            block = full.get("memory") or {}
-            if isinstance(block, dict):
-                return dict(block)
+        return install_yaml_section("memory")
     except Exception:
         logger.debug("[memory.config] yaml read failed", exc_info=True)
     return {}

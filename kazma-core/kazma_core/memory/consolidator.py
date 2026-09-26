@@ -33,7 +33,7 @@ from kazma_core.config_store import apply_sqlite_pragmas
 __all__ = [
     "reset_turn_counter",
     "remember_turn",
-    "clear_working_memory",
+    "promote_working_memory",
     "extract_turn_texts",
     "get_post_turn_metrics",
     "message_text",
@@ -62,6 +62,7 @@ _post_turn_metrics: dict[str, Any] = {
     "extract_fail": 0,
     "enqueue_fail": 0,
     "thread_fail": 0,
+    "deferred": 0,  # turns sent to the durable queue (pool full / no thread)
     "last_ok_at": None,
     "last_error": None,
     "last_error_at": None,
@@ -270,72 +271,6 @@ def _schedule_post_turn_memory(
     except RuntimeError:
         return
 
-    def _run_v2_sync() -> None:
-        """Synchronous V2 mirror + heuristic belief extraction (runs in a thread).
-
-        Deliberately SYNC and httpx-free: this thread never touches the
-        loop-bound httpx client, so it cannot raise
-        ``RuntimeError: ... bound to a different event loop`` (the bug
-        that poisoned the LLM connection pool and caused V2 amnesia).
-
-        Two-stage extraction:
-          1. HERE (sync, thread): heuristic extraction + mutate_belief.
-             Catches name/location/preference/favorite patterns instantly.
-          2. DEFERRED (queue, worker loop): a ``micro_consolidation`` task
-             runs the LLM extraction on the worker's own event loop where
-             the httpx client is valid, so complex/nuanced beliefs that the
-             heuristic misses still get extracted — just not synchronously.
-        """
-        # ── Phase C: promote prior working → episodic for this session ─
-        try:
-            _promote_working_to_episodic(session_id=session_id, tenant_id=tenant_id)
-        except Exception:
-            logger.debug("[post_turn] working→episodic promote failed", exc_info=True)
-        # ── V2 dual-write mirror ─────────────────────────────────────
-        try:
-            _mirror_turn_to_v2(messages, session_id=session_id, turn=turn, tenant_id=tenant_id)
-        except Exception as exc:
-            logger.warning("[post_turn] V2 mirror failed: %s", exc, exc_info=True)
-            _metric_fail("mirror", exc)
-        # ── Stage 1: sync heuristic extraction ───────────────────────
-        try:
-            _v2_extract_sync(messages, session_id=session_id, turn=turn, tenant_id=tenant_id)
-        except Exception as exc:
-            logger.warning("[post_turn] V2 heuristic extraction failed: %s", exc, exc_info=True)
-            _metric_fail("extract", exc)
-        # ── Stage 2: enqueue LLM deep-pass on the worker loop ─────────
-        # The micro_consolidation handler runs on the durable worker's
-        # event loop (where httpx is valid), so it can safely call the LLM.
-        # We point it at the episode the mirror just wrote.
-        try:
-            from kazma_core.memory.dual_write import _episode_id
-
-            user_text, _ = extract_turn_texts(messages)
-            if user_text and not user_text.strip().startswith("/"):
-                eid = _episode_id(
-                    session_id or "unknown",
-                    int(turn) if turn is not None else 0,
-                    user_text,
-                )
-                from kazma_core.memory.task_queue import enqueue_task
-
-                enqueue_task(
-                    "micro_consolidation",
-                    # episode_id only: the handler reads tenant_id from the
-                    # episode ROW (authoritative). A payload tenant_id was
-                    # dead data — the handler never consulted it (audit finding).
-                    {"episode_id": eid},
-                )
-        except Exception as exc:
-            logger.warning(
-                "[post_turn] could not enqueue micro_consolidation: %s",
-                exc,
-                exc_info=True,
-            )
-            _metric_fail("enqueue", exc)
-        else:
-            _metric_ok()
-
     # V2 path runs in a DEDICATED OS thread (not the loop's executor) so
     # blocking sync calls cannot starve or gate V2 writes. A plain Thread
     # is fully decoupled from the asyncio loop and runs even if the loop
@@ -343,15 +278,17 @@ def _schedule_post_turn_memory(
     # unbounded → thread/connection storm).
     def _run_v2_bounded() -> None:
         try:
-            _run_v2_sync()
+            _run_turn_memory(messages, session_id=session_id, turn=turn, tenant_id=tenant_id)
         finally:
             _v2_extract_sem.release()
 
-    # Best-effort: if the pool is full, skip this turn's consolidation rather
-    # than pile up threads or block the turn. The next turn picks up recent
-    # context.
+    # A full pool, or a thread that will not start, sends the turn to the
+    # durable queue: the memory worker runs the same pipeline later, with
+    # retries. It used to skip the turn for good -- its facts were never
+    # extracted, and only turn reconcile brought the episode back (Stage 2, W2).
     if not _v2_extract_sem.acquire(blocking=False):
-        logger.debug("[post_turn] V2 extract pool full — skipping this turn")
+        _defer_turn_memory(messages, session_id=session_id, turn=turn, tenant_id=tenant_id,
+                           why="extraction pool full")
         return
     try:
         t = threading.Thread(target=_run_v2_bounded, daemon=True, name="kazma-v2-extract")
@@ -360,17 +297,160 @@ def _schedule_post_turn_memory(
         _v2_extract_sem.release()  # thread never started — free the slot
         logger.warning("[post_turn] could not start V2 thread: %s", exc, exc_info=True)
         _metric_fail("thread", exc)
+        _defer_turn_memory(messages, session_id=session_id, turn=turn, tenant_id=tenant_id,
+                           why="no thread")
 
 
-def _promote_working_to_episodic(
+#: The most a deferred turn carries of each text: more than the episode keeps
+#: (4,000) and the extractor needs, bounded so a queue row stays small.
+_DEFERRED_TEXT_MAX = 16_000
+
+
+def _defer_turn_memory(
+    messages: list[dict[str, Any]],
     *,
     session_id: str | None,
-    tenant_id: str = "default",
-) -> int:
-    """Promote existing working-tier episodes for a session → episodic.
+    turn: int | None,
+    tenant_id: str,
+    why: str,
+) -> None:
+    """Hand one turn to the durable queue (``post_turn_memory``)."""
+    from kazma_core.memory.task_queue import enqueue_task
 
-    Called before writing the new turn as ``working`` so the active thread
-    keeps a short buffer of the latest turn only. Returns rows updated.
+    user_text, assistant_text = extract_turn_texts(messages)
+    if not user_text:
+        return
+    task_id = enqueue_task(
+        "post_turn_memory",
+        {
+            "user_text": user_text[:_DEFERRED_TEXT_MAX],
+            "assistant_text": assistant_text[:_DEFERRED_TEXT_MAX],
+            "session_id": session_id,
+            "turn": turn,
+            "tenant_id": tenant_id,
+        },
+    )
+    if task_id:
+        logger.info("[post_turn] %s -- turn %s of %s goes to the memory queue", why, turn, session_id)
+        with _metrics_lock:
+            _post_turn_metrics["deferred"] = int(_post_turn_metrics.get("deferred") or 0) + 1
+    else:
+        logger.warning(
+            "[post_turn] %s and the memory queue refused turn %s of %s: its facts are not "
+            "extracted (turn reconcile restores the episode)", why, turn, session_id,
+        )
+        _metric_fail("enqueue")
+
+
+def run_deferred_turn_memory(payload: dict[str, Any]) -> bool:
+    """The ``post_turn_memory`` queue task: one deferred turn, in a thread."""
+    user_text = str(payload.get("user_text") or "")
+    if not user_text:
+        return True  # nothing to remember; not a failure to retry
+    messages = [{"role": "user", "content": user_text}]
+    if payload.get("assistant_text"):
+        messages.append({"role": "assistant", "content": str(payload["assistant_text"])})
+    turn = payload.get("turn")
+    return _run_turn_memory(
+        messages,
+        session_id=payload.get("session_id"),
+        turn=int(turn) if turn is not None else None,
+        tenant_id=str(payload.get("tenant_id") or "default"),
+    )
+
+
+def _run_turn_memory(
+    messages: list[dict[str, Any]],
+    *,
+    session_id: str | None,
+    turn: int | None,
+    tenant_id: str = "default",
+) -> bool:
+    """Synchronous V2 mirror + heuristic belief extraction for one turn.
+
+    Runs in the post-turn thread, or in the memory worker's thread for a
+    deferred turn. Deliberately SYNC and httpx-free: it never touches the
+    loop-bound httpx client, so it cannot raise ``RuntimeError: ... bound to
+    a different event loop`` (the bug that poisoned the LLM connection pool
+    and caused V2 amnesia).
+
+    Two-stage extraction:
+      1. HERE: heuristic extraction + mutate_belief. Catches
+         name/location/preference/favorite patterns instantly.
+      2. DEFERRED (queue, worker loop): a ``micro_consolidation`` task runs
+         the LLM extraction on the worker's own event loop where the httpx
+         client is valid, so complex/nuanced beliefs that the heuristic
+         misses still get extracted -- just not synchronously.
+
+    Returns False when the episode or the facts could not be written (a
+    deferred turn is then retried by the queue).
+    """
+    ok = True
+    # ── Phase C: promote prior working → episodic for this session ─
+    try:
+        promote_working_memory(session_id, tenant_id=tenant_id)
+    except Exception:
+        logger.debug("[post_turn] working→episodic promote failed", exc_info=True)
+    # ── V2 dual-write mirror ─────────────────────────────────────
+    try:
+        _mirror_turn_to_v2(messages, session_id=session_id, turn=turn, tenant_id=tenant_id)
+    except Exception as exc:
+        logger.warning("[post_turn] V2 mirror failed: %s", exc, exc_info=True)
+        _metric_fail("mirror", exc)
+        ok = False
+    # ── Stage 1: sync heuristic extraction ───────────────────────
+    try:
+        _v2_extract_sync(messages, session_id=session_id, turn=turn, tenant_id=tenant_id)
+    except Exception as exc:
+        logger.warning("[post_turn] V2 heuristic extraction failed: %s", exc, exc_info=True)
+        _metric_fail("extract", exc)
+        ok = False
+    # ── Stage 2: enqueue LLM deep-pass on the worker loop ─────────
+    # The micro_consolidation handler runs on the durable worker's event
+    # loop (where httpx is valid), so it can safely call the LLM. We point
+    # it at the episode the mirror just wrote.
+    try:
+        from kazma_core.memory.dual_write import _episode_id
+
+        user_text, _ = extract_turn_texts(messages)
+        if user_text and not user_text.strip().startswith("/"):
+            eid = _episode_id(
+                session_id or "unknown",
+                int(turn) if turn is not None else 0,
+                user_text,
+            )
+            from kazma_core.memory.task_queue import enqueue_task
+
+            enqueue_task(
+                "micro_consolidation",
+                # episode_id only: the handler reads tenant_id from the
+                # episode ROW (authoritative). A payload tenant_id was
+                # dead data — the handler never consulted it (audit finding).
+                {"episode_id": eid},
+            )
+    except Exception as exc:
+        logger.warning(
+            "[post_turn] could not enqueue micro_consolidation: %s",
+            exc,
+            exc_info=True,
+        )
+        _metric_fail("enqueue", exc)
+    else:
+        if ok:
+            _metric_ok()
+    return ok
+
+
+def promote_working_memory(session_id: str | None, *, tenant_id: str | None = None) -> int:
+    """A session's working-tier episodes become episodic. Returns rows moved.
+
+    The working tier is a live session's buffer of its latest turn: each new
+    turn promotes the previous one before it is written, and ending a
+    conversation (``/new``) promotes the last. Nothing is deleted -- ``/new``
+    used to DELETE the working turn, so the last thing said before a new
+    conversation was gone from memory until turn reconcile re-added it
+    (Stage 2, W3). ``tenant_id=None`` matches the session under any tenant
+    (a thread id names one conversation whatever the tenant mode).
     """
     if not session_id:
         return 0
@@ -383,54 +463,16 @@ def _promote_working_to_episodic(
     apply_sqlite_pragmas(conn)
     try:
         ensure_primary_schema(conn)
-        cur = conn.execute(
-            """
-            UPDATE episodes SET tier = 'episodic'
-            WHERE session_id = ? AND tenant_id = ? AND tier = 'working'
-            """,
-            (session_id, tenant_id),
-        )
+        sql = "UPDATE episodes SET tier = 'episodic' WHERE session_id = ? AND tier = 'working'"
+        params: list[Any] = [session_id]
+        if tenant_id is not None:
+            sql += " AND tenant_id = ?"
+            params.append(tenant_id)
+        cur = conn.execute(sql, params)
         conn.commit()
         return int(cur.rowcount or 0)
     finally:
         conn.close()
-
-
-def clear_working_memory(
-    session_id: str,
-    *,
-    tenant_id: str = "default",
-) -> int:
-    """Drop working-tier episodes for a session (e.g. on ``/new``).
-
-    Episodic/recall tiers are retained. Returns deleted row count.
-    """
-    if not session_id:
-        return 0
-    import sqlite3
-
-    from kazma_core.memory.schema_v2 import ensure_primary_schema
-    from kazma_core.paths import primary_memory_db
-
-    try:
-        conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
-        apply_sqlite_pragmas(conn)
-        try:
-            ensure_primary_schema(conn)
-            cur = conn.execute(
-                """
-                DELETE FROM episodes
-                WHERE session_id = ? AND tenant_id = ? AND tier = 'working'
-                """,
-                (session_id, tenant_id),
-            )
-            conn.commit()
-            return int(cur.rowcount or 0)
-        finally:
-            conn.close()
-    except Exception:
-        logger.debug("[post_turn] clear_working_memory failed", exc_info=True)
-        return 0
 
 
 def _mirror_turn_to_v2(

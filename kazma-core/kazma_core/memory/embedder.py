@@ -475,18 +475,14 @@ def _read_embedding_config() -> dict[str, Any]:
     """
     cfg: dict[str, Any] = {}
 
-    # From kazma.yaml (memory.embedding block)
+    # From kazma.yaml (memory.embedding block): the install's file, parsed
+    # once per version -- this runs several times per recall.
     try:
-        import yaml
-        from pathlib import Path
+        from kazma_core.config_loader import install_yaml_section
 
-        cfg_path = Path("kazma.yaml")
-        if cfg_path.exists():
-            with open(cfg_path) as f:
-                full = yaml.safe_load(f) or {}
-            cfg = full.get("memory", {}).get("embedding", {}) or {}
+        cfg = install_yaml_section("memory", "embedding")
     except Exception:
-        pass
+        logger.debug("[Embedder] kazma.yaml embedding block unreadable", exc_info=True)
 
     # From ConfigStore (Web UI Embedder settings page) — wins over yaml.
     cfg = {**cfg, **_store_embedding_overrides()}

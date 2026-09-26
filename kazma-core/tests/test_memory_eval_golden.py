@@ -1,10 +1,20 @@
-"""Sprint 6: run golden memory cases against V2 (lightweight, no LLM)."""
+"""The golden memory cases, through the product's own golden eval (no LLM).
+
+``kazma_core.memory.eval_golden.run_golden_eval`` is what the Dashboard runs:
+it seeds each case the way the product writes memories (turns through
+``dual_write.episode_row``, facts through ``mutate_belief``) into a private
+database and asks ``recall()``. This file used to carry its own copy of the
+seeding, which wrote facts as raw rows with no vector -- so the two drifted,
+and the test measured something the product never did.
+
+CI has no embedder: a case marked ``needs_meaning`` (its question shares no
+word with its answer) is skipped there, with that reason, and must pass
+where an embedder runs.
+"""
 
 from __future__ import annotations
 
 import json
-import sqlite3
-import time
 from pathlib import Path
 
 import pytest
@@ -12,101 +22,60 @@ import pytest
 GOLDEN = Path(__file__).resolve().parent / "fixtures" / "memory_golden.json"
 
 
-@pytest.fixture()
-def mem_db(tmp_path, monkeypatch):
-    db = tmp_path / "memory_state.db"
-    monkeypatch.setenv("KAZMA_MEMORY_STATE_DB", str(db))
-    try:
-        import kazma_core.paths as paths
+def _cases() -> list[dict]:
+    return json.loads(GOLDEN.read_text(encoding="utf-8")).get("cases") or []
 
-        monkeypatch.setattr(paths, "primary_memory_db", lambda: str(db))
-    except Exception:
-        pass
+
+@pytest.fixture()
+def no_embedder(monkeypatch):
+    monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: None)
+
+
+def test_golden_set_passes_on_words_alone(no_embedder):
+    from kazma_core.memory.eval_golden import run_golden_eval
+
+    report = run_golden_eval()
+    assert report["failed"] == 0, [c for c in report["cases"] if c["status"] == "fail"]
+    meaning = {c["id"] for c in _cases() if c.get("needs_meaning") and not c.get("optional")}
+    skipped = {c["id"] for c in report["cases"] if c.get("reason") == "needs an embedder"}
+    assert meaning and meaning <= skipped
+    assert report["passed"] >= 3 and report["pass_rate"] == 1.0
+
+
+def test_a_meaning_case_is_never_judged_on_words(monkeypatch):
+    from kazma_core.memory.eval_golden import _needs_meaning_unavailable
+
+    case = next(c for c in _cases() if c.get("needs_meaning"))
+
+    class _Encodes:
+        def encode(self, text):
+            return [1.0, 0.0]
+
+    monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: None)
+    assert _needs_meaning_unavailable(case)
+    monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: _Encodes())
+    assert not _needs_meaning_unavailable(case)  # an embedder: the case runs
+    assert not _needs_meaning_unavailable({"id": "words", "query": "x"})
+
+
+def test_golden_facts_are_stored_the_way_extraction_stores_them(no_embedder, monkeypatch):
+    """Slugged subjects, and nothing sent past the eval's own database."""
+    import sqlite3
+
+    from kazma_core.memory import eval_golden
     from kazma_core.memory.schema_v2 import ensure_primary_schema
 
-    conn = sqlite3.connect(str(db), check_same_thread=False)
+    conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     ensure_primary_schema(conn)
-    yield conn
-    conn.close()
-
-
-def _load_cases():
-    data = json.loads(GOLDEN.read_text(encoding="utf-8"))
-    return data.get("cases") or []
-
-
-def test_golden_set_pass_rate(mem_db):
-    from kazma_core.memory.recall import recall
-
-    cases = _load_cases()
-    assert cases
-    passed = 0
-    failed = []
-    for case in cases:
-        # Fresh isolation per case: clear tables
-        mem_db.execute("DELETE FROM episodes")
-        mem_db.execute("DELETE FROM beliefs")
-        mem_db.commit()
-        # Seed beliefs if provided
-        now = time.time()
-        for i, b in enumerate(case.get("setup_beliefs") or []):
-            mem_db.execute(
-                """INSERT INTO beliefs
-                   (id, tenant_id, subject, predicate, predicate_type, object,
-                    confidence, structural_importance, source_trust_weight,
-                    valid_from, ingested_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    f"{case['id']}-b{i}",
-                    "default",
-                    b["subject"],
-                    b["predicate"],
-                    "functional",
-                    b["object"],
-                    0.9,
-                    4,
-                    1.0,
-                    now,
-                    now,
-                ),
-            )
-        mem_db.commit()
-        # Seed episodes via dual-write mirror (singleton uses primary_memory_db)
-        from kazma_core.memory.dual_write import _get_mirror, _reset_mirror
-
-        _reset_mirror()
-        mirror = _get_mirror()
-        for turn, msg in enumerate(case.get("setup") or [], start=1):
-            if msg.get("role") == "user":
-                mirror.mirror_episode(
-                    session_id=f"golden-{case['id']}",
-                    turn_number=turn,
-                    user_text=msg.get("content") or "",
-                    assistant_text="OK",
-                    tenant_id="default",
-                )
-        result = recall(
-            case["query"],
-            conn=mem_db,
-            limit=8,
-            session_id=f"golden-{case['id']}",
-        )
-        blob = " ".join(
-            h.content for h in (result.beliefs + result.episodes)
-        ).lower()
-        expected = [e.lower() for e in case.get("expect_contains") or []]
-        match_any = bool(case.get("match_any"))
-        ok = any(e in blob for e in expected) if match_any else all(
-            e in blob for e in expected
-        )
-        if ok:
-            passed += 1
-        else:
-            if case.get("optional"):
-                continue
-            failed.append({"id": case["id"], "blob": blob[:200], "expected": expected})
-
-    rate = passed / max(1, len([c for c in cases if not c.get("optional")]))
-    assert not failed, f"golden failures ({passed} passed): {failed}"
-    assert rate >= 0.5
+    shared: list[str] = []
+    monkeypatch.setattr("kazma_core.memory.state_backend.remirror_belief_by_id",
+                        lambda *_a, **_k: shared.append("mirror"))
+    monkeypatch.setattr("kazma_core.memory.unified_index.upsert_unified",
+                        lambda *_a, **_k: shared.append("unified"))
+    eval_golden._seed_belief(
+        conn, {"subject": "Platform Team", "predicate": "owns", "object": "Kazma Gateway"}, now=1.0
+    )
+    row = conn.execute("SELECT subject, predicate, object, valid_from FROM beliefs").fetchone()
+    assert tuple(row) == ("platform_team", "owns", "Kazma Gateway", 1.0)
+    assert shared == []

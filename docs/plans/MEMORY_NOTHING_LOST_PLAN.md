@@ -25,9 +25,21 @@ every change is inside the existing V2 engine.
 | G | Memory health shows searchable / pending / archived / unrecovered | ☑ same file (G) |
 | H | Every conversation turn reaches memory (found during Stage 1) | ☑ `tests/test_memory_every_turn.py` |
 | I | Nothing repoints live memory: the golden eval runs on its own database (found during Stage 1) | ☑ same file |
+| J | Memories stranded in a legacy table (`episodes_archive`, 329 rows) put back where recall looks (found during S1 cleanup) | ☑ `tests/test_memory_legacy_archive.py` |
 | S1 | Stage 1 shipped: suite 2 splits, Linux, CI, deployed, proven on live | ☑ commit 3794b7e2, build a1994a70 (see change log) |
-| S2 | Stage 2 audit written (section 5) and approved | ◐ written; awaiting approval |
-| S2+ | Stage 2 improvements (added to this table from the audit) | ☐ |
+| S2 | Stage 2 audit written (section 5) and approved | ☑ approved 2026-09-26 ("clean and do whatever required") |
+| R7 | Retrieval benchmark: 1,109 turns + 72 facts, 76 questions; recorded bge-m3 vectors replayed in CI; a versioned ratchet | ☑ `tests/test_memory_benchmark.py` |
+| R1 | Relevance floor: every path ranks on evidence (meaning above the question's background + word coverage); nothing injected when nothing is about the question; past-chats fallback revived | ☑ `tests/test_memory_relevance.py` |
+| R2 | Content words: EN + Gulf/MSA stopwords, Arabic folding with the article and prefixes, whole words, underscores split | ☑ same file, `tests/test_transcript_recall.py` |
+| R4 | Access "rotation" penalty removed (a fact asked about often is not demoted) | ☑ `tests/test_memory_nothing_lost.py` (B) |
+| S4 | `kazma.yaml` read from the install root, parsed once per version | ☑ `tests/test_install_yaml.py` |
+| S5 | FTS update triggers fire on indexed columns only | ☑ `tests/test_memory_fts_triggers.py` |
+| W3 | `/new` promotes the working turn; nothing deletes it | ☑ `kazma-core/tests/test_memory_v2_phase_c_d.py` |
+| X1 | Found building R1: an unused `POST /api/settings/memory/clean` deleted memories by pattern (every tool fact, every entity id starting with four hex letters, every turn saying "retroactive"). Removed; every memory hard delete is declared | ☑ `tests/test_memory_deletes.py` |
+| X2 | Found building R7: writes to a private database reached the process-wide stores (`mutate_belief(private=True)`), and the golden eval stored facts without vectors | ☑ `tests/test_memory_benchmark.py`, `kazma-core/tests/test_memory_eval_golden.py` |
+| S2 | Memory calls off the event loop (supervisor knowledge search, probe, federated search, health card) | ☑ `tests/test_static_gates.py` |
+| W2 | A turn the extraction pool cannot take goes to the durable queue (episode and facts), never dropped | ☑ `tests/test_memory_every_turn.py` |
+| S2+ | Remaining Stage 2 items, in the approved order: W1, then R3, R5, R8, W4, W5, then C1, U1, W6, R6, C2 | ☐ |
 
 ---
 
@@ -169,6 +181,25 @@ where the defect has a shape, docs in the same commit.
 - Now: seeding and recall use the eval's own connection (`recall(conn=...)`); it refuses
   the live database; its temp file is removed; the route runs it in a thread. Class gate:
   no product code rebinds a `kazma_core.paths` function or resets the writer.
+
+### J. Nothing stranded in a table recall does not read (added 2026-09-26, found during the S1 cleanup)
+- On 2026-08-02 and 08-03 a one-off operation (in no commit) moved 329 episodes -- July's
+  carried-over memories (280), 39 `memory_store` notes, 10 chat turns -- into a table it
+  created, `episodes_archive`, and 326 entities into `entities_archive`. No code reads
+  either table.
+- `memory/legacy_tables.py` restores each episode as a cold memory (tier `archived`, own id,
+  text, vector, tenant and time; `created_at` / `archived_at` read in Unix seconds or julian
+  days, both of which the operation wrote), skipping an id already held and a text the
+  tenant already holds under another id (21 on live). Runs first in the 15-minute recovery
+  sweep; health warns while any remain. The legacy table is not touched.
+- `entities_archive` stays: 11 junk "concepts" (bare numbers, file names) and 315
+  "memory_chunk" rows that are 200-character truncations of memories held in full (256)
+  or of smoke-test notes (59).
+- Found while testing it, for Stage 2 (R1/R2): a memory whose vector matches the question
+  exactly lost to five unrelated notes. The keyword channel's LIKE fallback matched the
+  question's `out` inside `about`, every such note ranked in two channels (keyword + the
+  graph walk seeded from them), and rank fusion scores ranks, not similarity. The test
+  scenario goes into the R7 benchmark as a required case.
 
 ### Rollout
 Memory suite (baseline 320 passed / 2 skipped) -> new tests -> full suite split 4 and 7 ->

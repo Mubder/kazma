@@ -284,7 +284,8 @@ def register_memory_routes(self: Any) -> None:
             from kazma_core.memory.federated_search import federated_search
             from kazma_core.tenant_isolation import require_tenant_id
 
-            return federated_search(
+            return await asyncio.to_thread(
+                federated_search,
                 query,
                 tenant_id=require_tenant_id(),
                 session_id=(body or {}).get("session_id") or None,
@@ -327,6 +328,49 @@ def register_memory_routes(self: Any) -> None:
                 "total": 0,
                 "cases": [],
             }
+    def _empty_recall_hints(tenant_id: str) -> list[str]:
+        """Why a probe found nothing: no embedder, no rows, or no match."""
+        hints: list[str] = []
+        try:
+            import os
+            import sqlite3 as _sq
+
+            from kazma_core.memory.embedder import get_embedder
+            from kazma_core.paths import primary_memory_db
+
+            if get_embedder() is None:
+                hints.append("embedder unavailable — meaning search offline; keywords only")
+            dbp = primary_memory_db()
+            if not os.path.exists(dbp):
+                hints.append("memory_state.db not initialized — no rows yet")
+                return hints
+            c = _sq.connect(dbp)
+            try:
+                ep_n = c.execute(
+                    "SELECT COUNT(*) FROM episodes WHERE tenant_id=?",
+                    (tenant_id,),
+                ).fetchone()[0]
+                bel_n = c.execute(
+                    "SELECT COUNT(*) FROM beliefs WHERE tenant_id=? "
+                    "AND valid_until IS NULL AND invalidated_at IS NULL",
+                    (tenant_id,),
+                ).fetchone()[0]
+            finally:
+                c.close()
+            if ep_n == 0 and bel_n == 0:
+                hints.append(
+                    "no episodes or beliefs for this tenant — try chat: "
+                    "“Remember my favorite color is teal.”"
+                )
+            else:
+                hints.append(
+                    f"store has {bel_n} beliefs / {ep_n} episodes but none is about this "
+                    "question (recall injects nothing below its relevance floor)"
+                )
+        except Exception:
+            hints.append("empty recall — check memory health on Dashboard")
+        return hints
+
     @self.app.post("/api/memory/v2/probe")
     async def _memory_v2_probe(request: Request):
         """Live recall dry-run for the dashboard probe panel."""
@@ -345,53 +389,17 @@ def register_memory_routes(self: Any) -> None:
             from kazma_core.tenant_isolation import require_tenant_id
 
             tenant_id = require_tenant_id()
-            result = recall(
+            # Recall and the empty-result counts are SQLite and an embedding:
+            # off the loop (Stage 2 S2 -- this ran on it).
+            result = await asyncio.to_thread(
+                recall,
                 query,
                 limit=max(1, min(limit, 20)),
                 session_id=session_id,
                 tenant_id=tenant_id,
                 explain=True,
             )
-            hints: list[str] = []
-            if result.empty:
-                try:
-                    import os
-                    import sqlite3 as _sq
-
-                    from kazma_core.memory.embedder import get_embedder
-                    from kazma_core.paths import primary_memory_db
-
-                    if get_embedder() is None:
-                        hints.append("embedder unavailable — dense search offline; FTS/LIKE only")
-                    dbp = primary_memory_db()
-                    if not os.path.exists(dbp):
-                        hints.append("memory_state.db not initialized — no rows yet")
-                    else:
-                        c = _sq.connect(dbp)
-                        try:
-                            ep_n = c.execute(
-                                "SELECT COUNT(*) FROM episodes WHERE tenant_id=?",
-                                (tenant_id,),
-                            ).fetchone()[0]
-                            bel_n = c.execute(
-                                "SELECT COUNT(*) FROM beliefs WHERE tenant_id=? "
-                                "AND valid_until IS NULL AND invalidated_at IS NULL",
-                                (tenant_id,),
-                            ).fetchone()[0]
-                        finally:
-                            c.close()
-                        if ep_n == 0 and bel_n == 0:
-                            hints.append(
-                                "no episodes or beliefs for this tenant — try chat: "
-                                "“Remember my favorite color is teal.”"
-                            )
-                        else:
-                            hints.append(
-                                f"store has {bel_n} beliefs / {ep_n} episodes but none matched — "
-                                "try different keywords or check tenant_mode"
-                            )
-                except Exception:
-                    hints.append("empty recall — check memory health on Dashboard")
+            hints = await asyncio.to_thread(_empty_recall_hints, tenant_id) if result.empty else []
             return {
                 "ok": True,
                 "query": query,
