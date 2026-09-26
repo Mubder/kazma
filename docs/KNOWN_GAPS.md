@@ -417,10 +417,13 @@ Writing each of the 148 undescribed variables from its call site:
 
 **Still open from those:**
 
-- **Email does not fail closed the way Calendar does.** An explicitly named
-  email provider or account that is not connected is answered by the sandbox
-  mailbox. The result says so ("Sandbox sent to …"), so it is not silent, but
-  the call does not fail the way §34 makes Calendar fail.
+- **~~Email does not fail closed the way Calendar does.~~** Closed
+  2026-09-26: a provider named in the call or by `EMAIL_DEFAULT_PROVIDER`, or
+  an account alias, that is not connected raises `EmailNotConnectedError`,
+  and every email tool answers with the Settings step to fix it. An unknown
+  provider and a typo'd alias are refused too — both used to default to the
+  sandbox. `tests/test_email_fail_closed.py` (every tool enumerated from the
+  module; a connected provider as the negative control).
 - **`KAZMA_CHECKPOINT_RETENTION_DAYS` is only an on/off switch.** Its value is
   never used as days; the policy (200 per thread, 10 after 30 idle days) is
   fixed. Documented as such rather than given a meaning, because a new

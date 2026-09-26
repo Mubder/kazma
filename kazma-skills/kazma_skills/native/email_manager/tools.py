@@ -12,7 +12,12 @@ from kazma_skills.native.email_manager.models import (
     ListQuery,
     SendRequest,
 )
-from kazma_skills.native.email_manager.router import get_backend, mode_banner, resolve_provider
+from kazma_skills.native.email_manager.router import (
+    EmailNotConnectedError,
+    get_backend,
+    mode_banner,
+    resolve_provider,
+)
 
 # account= multi-account alias (EMAIL_ACCOUNTS + EMAIL_ACCOUNT_{ALIAS}_*)
 
@@ -81,6 +86,8 @@ async def email_list(
             + fenced
             + "\n\nUse `email_get(message_id=...)` for full body."
         )
+    except EmailNotConnectedError as exc:
+        return f"Error: {exc.hint}"
     except Exception as exc:
         logger.exception("email_list failed")
         msg = str(exc)
@@ -146,6 +153,8 @@ async def email_get(
         )
     except KeyError as exc:
         return f"Error: {exc}"
+    except EmailNotConnectedError as exc:
+        return f"Error: {exc.hint}"
     except Exception as exc:
         logger.exception("email_get failed")
         return f"Error getting email: {exc}"
@@ -192,6 +201,8 @@ async def email_send(
             f"message_id: `{result.message_id or 'n/a'}`\n"
             f"{result.detail}"
         )
+    except EmailNotConnectedError as exc:
+        return f"Error: {exc.hint}"
     except Exception as exc:
         logger.exception("email_send failed")
         return f"Error sending email: {exc}"
@@ -214,6 +225,8 @@ async def email_delete(
         return f"{banner}\n{action}: `{message_id}`"
     except KeyError as exc:
         return f"Error: {exc}"
+    except EmailNotConnectedError as exc:
+        return f"Error: {exc.hint}"
     except Exception as exc:
         logger.exception("email_delete failed")
         return f"Error deleting email: {exc}"
@@ -248,6 +261,8 @@ async def email_categorize(
         return f"{banner}\nUpdated categories for `{message_id}`."
     except KeyError as exc:
         return f"Error: {exc}"
+    except EmailNotConnectedError as exc:
+        return f"Error: {exc.hint}"
     except Exception as exc:
         logger.exception("email_categorize failed")
         return f"Error categorizing email: {exc}"
@@ -306,6 +321,8 @@ async def email_analyze(
         )
     except KeyError as exc:
         return f"Error: {exc}"
+    except EmailNotConnectedError as exc:
+        return f"Error: {exc.hint}"
     except Exception as exc:
         logger.exception("email_analyze failed")
         return f"Error analyzing email: {exc}"
