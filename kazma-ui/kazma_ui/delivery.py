@@ -87,6 +87,34 @@ SUBSCRIBER_QUEUE_MAX = 1000
 REPLAY_SKIP_TYPES = frozenset({"capacity", "steer", "error", "user_message"})
 
 
+def _with_turn_id(thread_id: str, frame: dict[str, Any]) -> dict[str, Any]:
+    """*frame* with ``data.turn_id`` set: every journaled frame names its turn.
+
+    Only done, turn_complete and hitl frames used to (three of sixty in one
+    replay), so every client filed the rest under "the current turn" and
+    correctness hung on knowing where one turn ended -- a guess that went
+    wrong twice on 2026-09-26 (KNOWN_GAPS "Most chat frames do not say which
+    turn they belong to"). The id comes from the emitting task's bound turn,
+    so a superseded turn's late frames keep their own; else the thread's open
+    reply turn. A frame that already names one keeps it, and a frame emitted
+    between turns stays unnamed. ``data`` is where both mouths read it (SSE
+    sends only the data object).
+    """
+    data = frame.get("data")
+    if not isinstance(data, dict) or data.get("turn_id") or frame.get("turn_id"):
+        return frame
+    from kazma_core.observability.correlation import current_turn_id
+
+    turn_id = current_turn_id()
+    if not turn_id:
+        from kazma_ui.reply_sink import current_reply_turn
+
+        turn_id = current_reply_turn(thread_id)
+    if not turn_id:
+        return frame
+    return {**frame, "data": {**data, "turn_id": turn_id}}
+
+
 def is_replayable(frame: dict[str, Any]) -> bool:
     """False for frames that must never be served on cursor replay."""
     if frame.get("type") in REPLAY_SKIP_TYPES:
@@ -278,7 +306,9 @@ class TurnBroker:
         """
         if not thread_id:
             raise ValueError("thread_id is required")
-        frame = event.to_dict() if hasattr(event, "to_dict") else dict(event)
+        frame = _with_turn_id(
+            thread_id, event.to_dict() if hasattr(event, "to_dict") else dict(event)
+        )
         ftype = str(frame.get("type") or "")
         try:
             from kazma_ui.gate_view import (

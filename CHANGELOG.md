@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Every chat update says which answer it belongs to (2026-09-26)
+
+Kazma's live chat updates -- words of an answer, tool steps, progress --
+did not say which answer they were for, so a browser had to guess, and
+twice today a second tab guessed wrong (fixed at the time). Every update now
+carries the id of its answer, so a tab can no longer paint one answer's
+steps into another. Nothing changes on screen.
+
 ## A password inside a provider or connector URL is hidden too (2026-09-26)
 
 Settings showed a password written inside a provider's base URL, a saved

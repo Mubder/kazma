@@ -63,7 +63,7 @@ BASELINE = {
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
 STRUCTURAL_BASELINE = {
     "async_route_never_awaits": 189,
-    "module_local_public_symbols": 604,
+    "module_local_public_symbols": 603,
     "patched_value_imports": 82,
     "sleep_then_assert": 53,
     "bare_module_attr_assignments": 138,
