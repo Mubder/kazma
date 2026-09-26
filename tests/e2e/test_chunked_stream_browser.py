@@ -190,10 +190,22 @@ def test_turns_read_through_a_cut_stream_paint_whole(page, harness: Harness) -> 
                 + repr(page.console_lines[-12:])  # type: ignore[attr-defined]
             ) from None
 
-        # The approval frame of the turn this tab started is LIVE, and it
-        # paints the card itself -- not the reconciler's poll after it.
+        # The approval frame of the turn this tab started is LIVE, and when
+        # its handler returns a live card is on screen -- painted by the
+        # frame itself or by the socket's copy, never left to the
+        # reconciler's poll. The socket can win the race (it did on Linux
+        # CI, 2026-09-26), so wait for the stream's own frame before
+        # judging it; a cut stream delivers it a little later.
+        try:
+            page.wait_for_function(
+                "(b) => window.__cut.approvals.length > b", arg=before, timeout=30000
+            )
+        except Exception:
+            raise AssertionError(
+                f"turn {n}: the stream never delivered its approval frame "
+                "(a live card is on screen, so another path painted it)"
+            ) from None
         delivered = page.evaluate("() => window.__cut.approvals")[before:]
-        assert delivered, f"turn {n}: the stream never delivered its approval frame"
         assert not delivered[0]["replay"], (
             f"turn {n}: a live approval arrived labelled replay: {delivered}"
         )
@@ -227,6 +239,11 @@ def test_turns_read_through_a_cut_stream_paint_whole(page, harness: Harness) -> 
     diag = page.evaluate("() => window.KazmaChat.diagnostics()") or []
     broken = [d for d in diag if d.get("e") in ("sse-error", "sse-frame-error")]
     assert not broken, f"the stream failed while reading cut frames: {broken}"
+    # The renderer's own check fires when it holds something it cannot show.
+    # A socket approval without its gate view did that on every approval,
+    # spending one of the session's three recovery resyncs each time.
+    invariants = [d for d in diag if d.get("e") == "render-invariant"]
+    assert not invariants, f"the renderer reported a turn it could not show: {invariants}"
     lost = [c for c in page.console_lines if "SSE stream lost" in c or "stream continues" in c]  # type: ignore[attr-defined]
     assert not lost, f"frames were lost or failed: {lost}"
 
@@ -274,7 +291,33 @@ def _run_turn(pg, n: int) -> None:
     )
 
 
-def test_a_watching_tab_shows_each_turn_in_its_own_block(two_tabs) -> None:
+_WATCH_STATE_JS = """() => ({
+  blocks: Array.from(document.querySelectorAll('.message-assistant')).map((b) => {
+    const h = b.querySelector('.turn-header');
+    return {
+      id: b.getAttribute('data-turn-id') || '',
+      header: h ? (h.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 80) : '(none)',
+      answer: ((b.querySelector('.message-text') || {}).textContent || '').trim().slice(0, 40),
+      rows: Array.from(b.querySelectorAll('.turn-approvals-rows .hitl-approval-card'))
+        .map((c) => (c.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 40)),
+    };
+  }),
+  diag: ((window.KazmaChat && window.KazmaChat.diagnostics && window.KazmaChat.diagnostics()) || []).slice(-15),
+})"""
+
+#: The watching tab's journal attach never delivers, so the socket is all
+#: it has -- what Linux CI hit on 2026-09-26 when the attach lost the race.
+_SOCKET_ONLY_JS = """() => {
+  window.__attaches = 0;
+  window.KazmaStream.sse = function () {
+    window.__attaches += 1;
+    return { abort() {}, lastEventId() { return 0; }, isClosed() { return true; } };
+  };
+}"""
+
+
+@pytest.mark.parametrize("socket_only", [False, True], ids=["attach", "socket-only"])
+def test_a_watching_tab_shows_each_turn_in_its_own_block(two_tabs, socket_only) -> None:
     """Live 2026-09-26: a second browser window on the same chat showed the
     approved cards and replies "aligned like they are one task" until a
     refresh. The watching tab never got a user row for a turn another tab
@@ -282,6 +325,13 @@ def test_a_watching_tab_shows_each_turn_in_its_own_block(two_tabs) -> None:
     open one and painted into it; its catch-up attach replayed from seq 0
     and put earlier blocks back to "working". The server now fans the
     question out (user_message) and the page attaches from what it has read.
+
+    ``socket-only``: the same tab when its journal attach delivers nothing.
+    The socket had no path for the approve route's ``hitl`` frame, so the
+    watcher never saw the other tab's approval settle and the block stayed
+    on "Approval required" under its answer -- red on Linux CI, where the
+    attach lost the race. Both mouths now paint every journal frame
+    (tests/test_journal_frame_parity.py).
     """
     context, sender = two_tabs
     _run_turn(sender, 1)
@@ -292,6 +342,8 @@ def test_a_watching_tab_shows_each_turn_in_its_own_block(two_tabs) -> None:
         "() => !!window.KazmaChat && document.querySelectorAll('.message-assistant').length === 1",
         timeout=30000,
     )
+    if socket_only:
+        watcher.evaluate(_SOCKET_ONLY_JS)
     # A watcher that never regresses a finished block: record every render
     # of a completed header going back to open.
     watcher.evaluate(
@@ -318,11 +370,17 @@ def test_a_watching_tab_shows_each_turn_in_its_own_block(two_tabs) -> None:
             timeout=60000,
         )
 
-    watcher.wait_for_function(
-        "() => Array.from(document.querySelectorAll('.message-assistant'))"
-        ".every((b) => !!b.querySelector('.turn-header.is-completed'))",
-        timeout=30000,
-    )
+    try:
+        watcher.wait_for_function(
+            "() => Array.from(document.querySelectorAll('.message-assistant'))"
+            ".every((b) => !!b.querySelector('.turn-header.is-completed'))",
+            timeout=30000,
+        )
+    except Exception:
+        raise AssertionError(
+            "a block in the watching tab never completed: "
+            + repr(watcher.evaluate(_WATCH_STATE_JS))
+        ) from None
     users = watcher.evaluate(
         "() => Array.from(document.querySelectorAll('.message-user')).map((u) => (u.textContent || '').trim())"
     )
@@ -335,6 +393,10 @@ def test_a_watching_tab_shows_each_turn_in_its_own_block(two_tabs) -> None:
     assert watcher.evaluate("() => window.__regressed") == [], (
         "a finished block in the watching tab went back to working"
     )
+    watch_diag = watcher.evaluate(
+        "() => (window.KazmaChat.diagnostics() || []).filter((d) => d.e === 'render-invariant')"
+    )
+    assert watch_diag == [], f"the watching tab reported turns it could not show: {watch_diag}"
 
     # And the sender never painted its own question twice.
     sent = sender.evaluate("() => document.querySelectorAll('.message-user').length")

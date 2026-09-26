@@ -495,7 +495,8 @@ left backups/export inert). Current boot list:
 - **15-min commitment GC:** TTL expiry + tiered retention (§20). Every
   sweep on this cadence is one entry of `_MAINTENANCE_SWEEPS` (commitment GC,
   artifact GC, HITL-gate TTL, memory task-queue purge, swarm task retention —
-  `swarm.task_retention_days`, default 30, 0 keeps all), run by ONE isolated
+  `swarm.task_retention_days`, default 30, 0 keeps all — and the supervisor
+  watch, §39), run by ONE isolated
   runner so a failing sweep never stops the rest. A new periodic cleanup is a
   new entry there, never a new loop (`tests/test_swarm_task_retention.py`).
 - **Session purge, daily digest, weekly firing ledger, restore drill:**
@@ -1648,6 +1649,20 @@ appended.
 graph (`agent_handler/graph.py`) all close through the same completion
 contract. A new mouth that invents its own “Done” is a delivery bug.
 
+**Both browser mouths paint every journal frame.** The turn broker stamps
+one frame and fans it to the SSE stream AND the WebSocket, and a tab that
+only watches a turn (another window, a phone) may have the socket alone. So
+every frame type `streaming.js` `dispatch` handles needs a case in
+`agentStore.handleSocketMessage`, painted by the same functions
+(`chat.applyJournalFrame`, `chat.ingestGateViews`; the attach callbacks use
+them too). Live 2026-09-26 the socket had no case for `hitl` -- the approve
+route's approved/denied -- nor the tool frames, and dropped `done`'s gate
+views: a watching tab never saw the other tab's approval settle, and its
+block stayed on "Approval required" under the answer. Gate:
+`tests/test_journal_frame_parity.py` (reads both dispatchers); the
+browser net is `test_a_watching_tab_shows_each_turn_in_its_own_block
+[socket-only]`.
+
 **E. Presentation is governed by one plan.**
 `docs/plans/UNIFIED_TURN_BLOCK.md` is the binding contract for how a Web
 chat turn is presented: one persistent block per turn, an integrated status
@@ -2207,6 +2222,12 @@ code) and Kazma ran with nobody supervising it.
 - **A recorded PID is verified before it is reaped:** creation time recorded
   at spawn, a python image otherwise. A PID left by a dead guard can belong
   to anything by now.
+- **The server says when its guard is gone.** The maintenance cadence runs
+  `observability/supervisor_watch.check_supervisor`: with
+  `KAZMA_GUARD_STATE_FILE` set (the guard started this server) and no
+  heartbeat for 5 minutes, it pages `guard.gone` (critical, every 6 hours
+  while it lasts) and logs once when the guard is back. A server started
+  without the guard is not watched.
 - **The OS brings a dead guard back:** `install_service.py` registers a
   5-minute repeating trigger with `MultipleInstances IgnoreNew`. An existing
   task gets it only when re-registered from an elevated shell (owner action).

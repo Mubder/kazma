@@ -505,6 +505,106 @@
     try { _resyncDelivery('sse-frame-error'); } catch (eR) { /* never fatal */ }
   }
 
+  /* ── Journal frames both mouths deliver ─────────────────────────────
+     The stream and the socket carry the SAME journal frames: the turn
+     broker stamps one frame and fans it to both. A tab that only WATCHES a
+     turn -- a second window, a phone -- sees it through the socket alone,
+     so a frame the stream paints must be paintable from the socket too, and
+     through the same code. Live 2026-09-26 the socket had no path for
+     `hitl` (the approve route's approved/denied) or the tool frames, and
+     dropped the gate views a `done` carries: a watching tab never learned
+     that the other tab approved, and its block stayed on "approval" under
+     the answer. agentStore hands these frames to applyJournalFrame(); the
+     attach callbacks below paint with the same functions. */
+  function _paintToolCall(data) {
+    data = data || {};
+    var inputs = data.inputs;
+    if (typeof inputs === 'object') {
+      try { inputs = JSON.stringify(inputs); } catch (e) { inputs = String(inputs); }
+    }
+    logProgress({
+      kind: 'tool',
+      title: data.tool_name || 'tool',
+      detail: _toolDetailWithGist(_toolArgSummary(data.inputs), inputs),
+      state: 'running',
+      // The graph's own run id, so the LIVE row and the row the
+      // server persisted are one row rather than two after a
+      // refresh. activityToParts reads 'tool#<id>' back into
+      // call_id, which is what partKey keys on.
+      id: data.tool_call_id ? 'tool#' + data.tool_call_id : undefined,
+    });
+  }
+
+  function _paintToolResult(data) {
+    data = data || {};
+    logProgress({
+      kind: 'tool',
+      title: data.tool_name || 'tool',
+      detail: _toolDetailWithGist(_toolResultSummary(data.result), data.result),
+      state: 'done',
+      id: data.tool_call_id ? 'tool#' + data.tool_call_id : undefined,
+    });
+  }
+
+  function _paintHeartbeat(data, source) {
+    // The heartbeat is the only frame carrying a SERVER-measured
+    // elapsed. Without this the header would have to time the turn
+    // itself, which is the client clock that printed "Done 0s" while
+    // the graph was still working (plan §3).
+    applyTurnEvent({
+      type: 'turn_heartbeat',
+      elapsed_s: (data && data.elapsed_s) || 0,
+      seq: data && data.seq,
+      turn_id: (data && data.turn_id) || _liveTurnId,
+      source: source,
+    });
+  }
+
+  function _paintGateFrame(data, source) {
+    var st = String((data && data.state) || 'pending');
+    if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
+    if (st === 'pending') pauseForApproval(data);
+    else _awaitingApproval = false;
+    _ingestFrameGateViews(data);
+    applyTurnEvent({
+      type: 'hitl',
+      state: st,
+      tool: (data && data.tool) || '',
+      interrupt_id: (data && data.interrupt_id) || '',
+      payload: data || {},
+      view: (data && data.view) || undefined,
+      turn_id: (data && data.turn_id) || _liveTurnId,
+      source: source,
+    });
+  }
+
+  /** The socket's way in for the journal frames above (agentStore). Same
+   *  rules as the stream: a replayed pending gate is history, and a gate
+   *  this page already claimed is not asked again. True when handled. */
+  function applyJournalFrame(type, data) {
+    data = data || {};
+    switch (String(type || '')) {
+      case 'tool_call':
+        _paintToolCall(data);
+        return true;
+      case 'tool_result':
+        _paintToolResult(data);
+        return true;
+      case 'turn_heartbeat':
+        _paintHeartbeat(data, 'ws');
+        return true;
+      case 'hitl': {
+        var st = String(data.state || 'pending');
+        if (st === 'pending' && data.replay) return true;
+        if (st === 'pending' && _hitlAlreadyClaimed(data)) return true;
+        _paintGateFrame(data, 'ws');
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
   function _defaultAttachCallbacks(epoch) {
     function _mine() { return epoch === _sseEpoch; }
     return {
@@ -525,35 +625,11 @@
       },
       onToolCall: function(data) {
         if (!_mine()) return;
-        var inputs = data.inputs;
-        if (typeof inputs === 'object') {
-          try { inputs = JSON.stringify(inputs); } catch (e) { inputs = String(inputs); }
-        }
-        logProgress({
-          kind: 'tool',
-          title: data.tool_name || 'tool',
-          detail: _toolDetailWithGist(_toolArgSummary(data.inputs), inputs),
-          state: 'running',
-          // The graph's own run id, so the LIVE row and the row the
-          // server persisted are one row rather than two after a
-          // refresh. activityToParts reads 'tool#<id>' back into
-          // call_id, which is what partKey keys on.
-          id: data.tool_call_id ? 'tool#' + data.tool_call_id : undefined,
-        });
+        _paintToolCall(data);
       },
       onToolResult: function(data) {
         if (!_mine()) return;
-        logProgress({
-          kind: 'tool',
-          title: data.tool_name || 'tool',
-          detail: _toolDetailWithGist(_toolResultSummary(data.result), data.result),
-          state: 'done',
-          // The graph's own run id, so the LIVE row and the row the
-          // server persisted are one row rather than two after a
-          // refresh. activityToParts reads 'tool#<id>' back into
-          // call_id, which is what partKey keys on.
-          id: data.tool_call_id ? 'tool#' + data.tool_call_id : undefined,
-        });
+        _paintToolResult(data);
       },
       onStatus: function(data) {
         if (!_mine()) return;
@@ -567,17 +643,7 @@
         // Journaled liveness frame — not epoch-gated (same rule as HITL):
         // a superseded stream's graph is the live graph.
         _noteSeq();
-        // The heartbeat is the only frame carrying a SERVER-measured
-        // elapsed. Without this the header would have to time the turn
-        // itself, which is the client clock that printed "Done 0s" while
-        // the graph was still working (plan §3).
-        applyTurnEvent({
-          type: 'turn_heartbeat',
-          elapsed_s: (data && data.elapsed_s) || 0,
-          seq: data && data.seq,
-          turn_id: (data && data.turn_id) || _liveTurnId,
-          source: 'sse',
-        });
+        _paintHeartbeat(data, 'sse');
       },
       onApprovalRequired: function(data) {
         // HITL is not epoch-gated: a superseded stream's approval is still
@@ -605,20 +671,7 @@
         if (st === 'pending' && data && data.replay) return;
         if (st === 'pending' && _hitlAlreadyClaimed(data)) return;
         if (st !== 'pending' && !_mine()) return;
-        if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
-        if (st === 'pending') pauseForApproval(data);
-        else _awaitingApproval = false;
-        _ingestFrameGateViews(data);
-        applyTurnEvent({
-          type: 'hitl',
-          state: st,
-          tool: (data && data.tool) || '',
-          interrupt_id: (data && data.interrupt_id) || '',
-          payload: data || {},
-          view: (data && data.view) || undefined,
-          turn_id: (data && data.turn_id) || _liveTurnId,
-          source: 'sse',
-        });
+        _paintGateFrame(data, 'sse');
       },
       onDone: function(data) {
         if (!_mine()) return;
@@ -7923,13 +7976,17 @@
    */
   function ingestHitlApproval(data) {
     if (!data) return;
+    // The stream ingests the gate views an approval frame carries; the
+    // socket did not, so a watching tab resolved its card from a stale view.
+    _ingestFrameGateViews(data);
     applyTurnEvent({
       type: 'hitl',
       state: 'pending',
       tool: _hitlToolOf(data),
       interrupt_id: _hitlInterruptIdOf(data),
       payload: data,
-      turn_id: _liveTurnId,
+      view: data.view || undefined,
+      turn_id: data.turn_id || _liveTurnId,
       source: 'ws',
     });
   }
@@ -8184,6 +8241,8 @@
     // recovery, hydration) feeds applyTurnEvent, and TurnView is the only
     // thing that builds a card.
     _hitlApproval: ingestHitlApproval,
+    applyJournalFrame: applyJournalFrame,
+    ingestGateViews: _ingestFrameGateViews,
     hasLiveGate: hasLiveGate,
     markApprovalTimedOut: markApprovalTimedOut,
     hasInlineApprovalCard: hasInlineApprovalCard,

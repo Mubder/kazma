@@ -649,3 +649,49 @@ def test_the_task_restarts_a_guard_that_exited(elevated):
     ps1 = installer.windows_task_ps1(elevated=elevated)
     assert "-RepetitionInterval" in ps1
     assert "-MultipleInstances IgnoreNew" in ps1
+
+
+# ── --pause --stop: the same rights problem, the same answer ──────────────
+
+
+def test_pause_stop_leaves_the_stop_to_a_running_guard(monkeypatch, capsys):
+    monkeypatch.setattr(guard, "_guard_alive", lambda: True)
+    monkeypatch.setattr(guard, "_wait_until_down", lambda url, timeout: True)
+    monkeypatch.setattr(guard, "_stop_recorded_child",
+                        lambda log, **kw: pytest.fail("the shell must not stop it"))
+    assert guard._cmd_pause("maintenance", 600, stop_now=True) == 0
+    assert "server stopped." in capsys.readouterr().out
+
+
+def test_pause_stop_without_a_guard_says_when_it_could_not_stop(monkeypatch, capsys):
+    """It printed "server stopped." whatever taskkill answered."""
+    monkeypatch.setattr(guard, "_guard_alive", lambda: False)
+    monkeypatch.setattr(guard, "_stop_recorded_child", lambda log, **kw: 0)
+    monkeypatch.setattr(guard, "probe", lambda *a: (True, "ready"))
+    assert guard._cmd_pause("maintenance", 600, stop_now=True) == 0
+    out = capsys.readouterr().out
+    assert "could not stop the server" in out and "server stopped" not in out
+
+
+def test_negative_control_a_stop_that_worked_is_reported(monkeypatch, capsys):
+    monkeypatch.setattr(guard, "_guard_alive", lambda: False)
+    monkeypatch.setattr(guard, "_stop_recorded_child", lambda log, **kw: 4242)
+    assert guard._cmd_pause("maintenance", 600, stop_now=True) == 0
+    assert "server stopped (pid 4242)." in capsys.readouterr().out
+
+
+def test_a_pause_wakes_the_guard_at_once(monkeypatch):
+    """The guard stops the child when it sees the pause -- within a second,
+    not at the next 30-second probe."""
+    clock = _Clock(early=0.0)
+    _use_clock(monkeypatch, clock)
+    g = _bare_guard()
+    g.proc = _Child()
+    Path(os.environ["KAZMA_GUARD_PAUSE_FILE"]).write_text(
+        json.dumps({"reason": "t", "until": 0.0, "since": 0.0}), encoding="utf-8")
+    assert g._sleep(30.0, wake_on_pause=True) is True
+    assert clock.now - 1000.0 < 1.5
+    # Negative control: without wake_on_pause the full interval passes.
+    clock.now = 1000.0
+    assert g._sleep(30.0) is False
+    assert clock.now - 1000.0 >= 29.9
