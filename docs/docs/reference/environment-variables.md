@@ -574,7 +574,7 @@ Which remotes `kazma update` trusts at all is `KAZMA_UPDATE_REMOTE_ALLOWLIST`, i
 | `KAZMA_GUARD_GRACEFUL_STOP_S` | `60` | Seconds a deliberate stop (reload, maintenance pause, guard shutdown) waits for the server to shut itself down before it is killed. |
 | `KAZMA_GUARD_LOG` / `KAZMA_GUARD_STATE` | `<install>/.kazma/` | Guard log, and the state file: child PID, the guard's heartbeat, reload acknowledgements. |
 | `KAZMA_GUARD_RELOAD_FILE` / `KAZMA_GUARD_PAUSE_FILE` | `<install>/.kazma/` | The `--reload` request and the `--pause` flag. |
-| `KAZMA_GUARD_STATE_FILE` | set by the guard | Given to the server the guard spawns: the path of the guard's state file. |
+| `KAZMA_GUARD_STATE_FILE` | set by the guard | Given to the server the guard spawns: the path of the guard's state file. The server's supervisor watch reads the guard's heartbeat there and pages when it stops. |
 | `KAZMA_GUARD_TELEGRAM_TOKEN` / `KAZMA_GUARD_TELEGRAM_CHAT` | vault / `SWARM_*` | Direct Telegram paging, independent of the app. |
 
 ## Cost, chaos, tests

@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## Kazma says when its guard is gone (2026-09-26)
+
+The guard's death this morning was found by a person reading logs. Now the
+server checks every 15 minutes that the guard which started it is still
+alive, from the heartbeat the guard writes, and sends a critical alert
+"Kazma is running without its guard" when it is not, with the command that
+starts it again. It says so once more when the guard is back.
+
+`kazma_guard.py --pause --stop` had the same problem as `--reload`: from a
+normal terminal the stop failed with "Access is denied" and the command
+still printed "server stopped." Now the guard stops the server itself (it
+notices the pause within a second, and stops it gracefully), and without a
+guard the command reports whether the stop really worked.
+
+## A second window follows approvals made in another (2026-09-26)
+
+With the same chat open in two windows (or on a phone), approving a card in
+one left the other showing "Approval required" under the finished answer
+until it was refreshed, and a later turn could pick up a stray "No longer
+pending" row.
+
+The second window gets the turn over its live connection, and that
+connection had no way to hear "this approval was decided": only the window
+that clicked, or one that happened to re-read the whole turn, ever learned
+it. Both connections now handle every kind of update the same way, so the
+watching window sees the approval settle, the tool steps, and the elapsed
+time as they happen.
+
 ## The guard restarts Kazma itself, and can no longer die unnoticed (2026-09-26)
 
 A deploy that should have taken a minute found three problems.

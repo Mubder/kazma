@@ -1543,12 +1543,14 @@ class Guard:
         *,
         wake_on_child_exit: bool = False,
         wake_on_reload: bool = False,
+        wake_on_pause: bool = False,
     ) -> bool:
         """Interruptible sleep so shutdown, --reload, and a dead child stay responsive.
 
         Wakes early only for what the caller handles: a reload request the
-        guard has not dealt with yet (``wake_on_reload``), a child that
-        exited (``wake_on_child_exit``), or shutdown. Beats the heartbeat.
+        guard has not dealt with yet (``wake_on_reload``), a pause
+        (``wake_on_pause``), a child that exited (``wake_on_child_exit``), or
+        shutdown. Beats the heartbeat.
         Returns True when it woke early, False when the time ran out.
         """
         end = time.monotonic() + seconds
@@ -1561,6 +1563,8 @@ class Guard:
                 return False
             self._beat()
             if wake_on_reload and self._reload_pending():
+                return True
+            if wake_on_pause and read_pause() is not None:
                 return True
             if (
                 wake_on_child_exit
@@ -1942,7 +1946,8 @@ class Guard:
             # every sleep made this a busy loop of 53 probes a second for
             # 47 hours (2026-09-20..22).
             woke_early = self._sleep(max(0.0, next_probe - time.monotonic()),
-                                     wake_on_child_exit=True, wake_on_reload=True)
+                                     wake_on_child_exit=True, wake_on_reload=True,
+                                     wake_on_pause=True)
             if self._stop:
                 return "guard shutting down"
 
@@ -2058,27 +2063,31 @@ def _cmd_pause(reason: str, ttl: float, *, stop_now: bool) -> int:
     print(f"  file    : {_pause_path()}")
 
     if stop_now:
-        # Stop via the recorded child so the whole tree goes, including the
-        # uvicorn grandchild that would otherwise keep holding the port.
-        try:
-            state = json.loads(_state_path().read_text(encoding="utf-8"))
-            pid = int(state.get("child_pid") or 0)
-        except Exception:
-            pid = 0
-        if pid and _pid_alive(pid):
-            print(f"  stopping server (pid {pid})...")
-            try:
-                if os.name == "nt":
-                    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
-                                   capture_output=True, timeout=30, check=False)
-                else:
-                    os.killpg(os.getpgid(pid), signal.SIGTERM)
-                log("info", "maintenance.server_stopped", pid=pid)
+        health = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
+        if _guard_alive():
+            # The guard stops its own child the moment it sees the pause, and
+            # gracefully; this shell may not have the rights to (the same
+            # "Access is denied" as --reload, 2026-09-26).
+            print("  the guard is stopping the server…")
+            if _wait_until_down(health, GRACEFUL_STOP_S + TERMINATE_GRACE_S + 15.0):
+                log("info", "maintenance.server_stopped", by="guard")
                 print("  server stopped.")
-            except Exception as exc:
-                print(f"  could not stop pid {pid}: {exc}")
+            else:
+                log("error", "maintenance.server_still_up", by="guard")
+                print("  the server is still answering; check --status.")
         else:
-            print("  no running server recorded; nothing to stop.")
+            # No guard to do it: stop the recorded child from here, the whole
+            # tree, including the uvicorn grandchild that would otherwise keep
+            # holding the port -- and say so only if it worked.
+            stopped = _stop_recorded_child(log)
+            if stopped:
+                log("info", "maintenance.server_stopped", pid=stopped)
+                print(f"  server stopped (pid {stopped}).")
+            elif probe(health, 5.0)[0]:
+                print("  could not stop the server: it runs with more rights than "
+                      "this shell. Run this from an elevated terminal.")
+            else:
+                print("  no running server; nothing to stop.")
     print("")
     print("Resume with:  python scripts/service/kazma_guard.py --resume")
     return 0
@@ -2207,6 +2216,17 @@ def _wait_until_idle(health_url: str, max_wait_s: float, log: GuardLog, *,
             log("warn", "reload.busy_gave_up", running=running)
             return False
         time.sleep(poll_s)
+
+
+def _wait_until_down(health_url: str, timeout_s: float) -> bool:
+    """Wait until the server stops answering. True if it did in time."""
+    deadline = time.monotonic() + timeout_s
+    while True:
+        if not probe(health_url, 3.0)[0]:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
 
 
 def _wait_for_reload_ack(requested_at: float, timeout_s: float) -> bool:

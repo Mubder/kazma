@@ -836,6 +836,15 @@ def _prune_swarm_tasks() -> None:
     prune_finished_tasks()
 
 
+def _watch_supervisor() -> None:
+    # Is the guard that started this server still alive? Its heartbeat is in
+    # the state file named by KAZMA_GUARD_STATE_FILE. The guard died on
+    # 2026-09-26 with exit code 1 and nothing said so; this pages.
+    from kazma_core.observability.supervisor_watch import check_supervisor
+
+    check_supervisor()
+
+
 #: Every sweep on the 15-minute maintenance cadence, in order. A cleanup that
 #: exists but is on no cadence never runs: that is how backups once went inert
 #: (§15) and how swarm task history went unpruned until 2026-09-25. Add a new
@@ -846,6 +855,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("gate TTL sweep", _expire_gates),
     ("task queue purge", _purge_task_queue),
     ("swarm task retention", _prune_swarm_tasks),
+    ("supervisor watch", _watch_supervisor),
 )
 
 

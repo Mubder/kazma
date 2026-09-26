@@ -1051,6 +1051,53 @@ function registerAgentStore() {
           } catch (e) { /* ignore */ }
           break;
 
+        case 'tool_call':
+        case 'tool_result':
+        case 'turn_heartbeat': {
+          // Journal frames the stream paints; a watching tab has only this
+          // socket, so they go through the same painters (chat.js).
+          const chat = this._chat();
+          if (chat && typeof chat.applyJournalFrame === 'function') {
+            try { chat.applyJournalFrame(type, data); } catch (e) { /* never break the socket */ }
+          }
+          if (type !== 'turn_heartbeat') {
+            this.isThinking = true;
+            this._turnActive = true;
+          }
+          break;
+        }
+
+        case 'hitl': {
+          // Gate transitions: the approve route journals approved/denied, and
+          // a tab that did not click must still see the gate settle -- or its
+          // block keeps saying "approval" under the answer (2026-09-26).
+          const st = String((data && data.state) || frame.state || 'pending');
+          if (st === 'pending' && (frame.replay || data.replay)) break;
+          const chat = this._chat();
+          if (chat && typeof chat.applyJournalFrame === 'function') {
+            try { chat.applyJournalFrame('hitl', data); } catch (e) { /* never break the socket */ }
+          }
+          const iid = String((data && data.interrupt_id) || frame.interrupt_id || '');
+          if (st === 'pending') {
+            this.isThinking = false;
+            this._turnActive = false;
+            this.pendingApproval = {
+              thread_id: frame.thread_id || data.thread_id || this.sessionId,
+              tool: frame.tool || data.tool || '',
+              args: frame.args || data.args || {},
+              tools: frame.tools || data.tools || [],
+              message: frame.message || data.message || '',
+              interrupt_id: iid,
+              kind: frame.kind || data.kind || '',
+              items: frame.items || data.items || null,
+            };
+          } else if (this.pendingApproval
+              && (!iid || String(this.pendingApproval.interrupt_id || '') === iid)) {
+            this.pendingApproval = null;
+          }
+          break;
+        }
+
         case 'approval_required':
           this._progress({
             kind: 'status',
@@ -1072,6 +1119,13 @@ function registerAgentStore() {
             yolo_allowed: frame.yolo_allowed !== undefined
               ? frame.yolo_allowed
               : (data.yolo_allowed !== undefined ? data.yolo_allowed : undefined),
+            // The registry's view of this gate travels with the frame. Without
+            // it the page held a pending gate it could not show: the row was
+            // withheld and the render invariant fired on every approval the
+            // socket delivered before the stream did (2026-09-26).
+            gate_views: data.gate_views || frame.gate_views || undefined,
+            view: data.view || frame.view || undefined,
+            turn_id: data.turn_id || frame.turn_id || undefined,
           });
           break;
 
@@ -1128,6 +1182,15 @@ function registerAgentStore() {
         case 'turn_complete': {
           const finalText = data.content || frame.content || '';
           const isReplay = !!(data && data.replay) || !!(frame && frame.replay);
+          // A terminal carries the gate views of the turn it ends. The
+          // stream applies them first; the socket dropped them, so a
+          // watching tab judged the finished turn by a stale pending view.
+          {
+            const chatGv = this._chat();
+            if (chatGv && typeof chatGv.ingestGateViews === 'function') {
+              try { chatGv.ingestGateViews(data); } catch (e) { /* never break the socket */ }
+            }
+          }
           if (finalText) {
             this._applyTurnEvent({
               type: 'done',
