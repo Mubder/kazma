@@ -722,7 +722,7 @@ class KnowledgeIndex:
             "persist_dir": self._persist_dir,
         }
 
-    def backfill_vectors(self, *, time_budget_s: float = 30.0, batch: int = 32) -> dict[str, Any]:
+    def backfill_vectors(self, *, time_budget_s: float = 300.0, batch: int = 16) -> dict[str, Any]:
         """Make each library's vectors match its chunks; one bounded, resumable pass.
 
         A chunk is embedded when it is ingested, and a retired chunk's vector
@@ -731,14 +731,19 @@ class KnowledgeIndex:
         every library on an install was keyword-only: 6,598 chunks on the
         live one. This embeds every active chunk the store lacks and removes
         every vector with no active chunk behind it (it would take a search
-        slot and join to nothing), library by library, as far as
-        *time_budget_s* allows; the next pass continues. Nothing to do costs
-        two id listings per library.
+        slot and join to nothing), as far as *time_budget_s* allows; the next
+        pass continues. The shortest chunks go first, across all libraries:
+        on CPU a short chunk embeds ~50 times faster than a long one, so most
+        of every library can be searched by meaning early, and a batch of
+        like lengths wastes nothing on padding. Nothing to do costs two id
+        listings per library.
         """
         deadline = time.monotonic() + max(1.0, float(time_budget_s))
         step = max(1, int(batch))
         report: dict[str, Any] = {"libraries": 0, "embedded": 0, "removed": 0, "missing": 0,
                                   "unavailable": False, "complete": True}
+        stores: dict[str, VectorStore] = {}
+        todo: list[tuple[int, str, str]] = []  # (characters, library, chunk id)
         for library_id in self._store.all_library_ids():
             if time.monotonic() >= deadline:
                 report["complete"] = False
@@ -752,23 +757,27 @@ class KnowledgeIndex:
             # Vectors first: a chunk ingested between the two reads is then
             # embedded twice (harmless), never taken for a retired one.
             have = vs.ids()
-            active = self._store.active_chunk_ids(library_id)
-            report["removed"] += vs.delete_many(sorted(have - active))
-            todo = sorted(active - have)
-            report["missing"] += len(todo)
-            for start in range(0, len(todo), step):
-                if time.monotonic() >= deadline:
-                    report["complete"] = False
-                    break
-                rows = self._store.get_chunks_by_ids(todo[start:start + step])
-                done = vs.index_many([
+            sizes = self._store.active_chunk_sizes(library_id)
+            report["removed"] += vs.delete_many(sorted(have - set(sizes)))
+            todo += [(sizes[cid], library_id, cid) for cid in set(sizes) - have]
+            stores[library_id] = vs
+        todo.sort()
+        report["missing"] = len(todo)
+        for start in range(0, len(todo), step):
+            if time.monotonic() >= deadline:
+                report["complete"] = False
+                break
+            by_library: dict[str, list[str]] = {}
+            for _size, library_id, chunk_id in todo[start:start + step]:
+                by_library.setdefault(library_id, []).append(chunk_id)
+            for library_id, chunk_ids in by_library.items():
+                rows = self._store.get_chunks_by_ids(chunk_ids)
+                done = stores[library_id].index_many([
                     (chunk_id, row.get("content") or "", self._chunk_vector_metadata(library_id, row))
                     for chunk_id, row in rows.items()
                 ])
                 report["embedded"] += done
                 report["missing"] -= done
-            if not report["complete"]:
-                break
         if report["embedded"] or report["removed"]:
             logger.info(
                 "[knowledge] meaning vectors: %d chunks embedded, %d retired vectors removed (%s)",

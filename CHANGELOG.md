@@ -21,6 +21,8 @@ few hours.
 - Deleting a library now also deletes its search data, even if the library
   was not searched since Kazma last started. Backups leave that data out;
   it is rebuilt from the library after a restore.
+- The number of chunks shown for a library is counted each time; one library
+  showed one fewer than it held.
 - `/memory` in a chat app shows how many facts are stored instead of "?".
 - The `agent.nonstop` settings in kazma.yaml are read. They were always
   ignored.

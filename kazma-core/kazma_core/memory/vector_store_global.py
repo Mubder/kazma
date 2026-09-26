@@ -51,11 +51,14 @@ _RETRY_AFTER_S = 300.0
 _SPACE = "cosine"
 #: Ids fetched per call when listing a collection.
 _ID_PAGE = 5000
-#: The most text one vector is made from. The model reads up to 8,192
-#: tokens and a batch is padded to its longest text: one 60,000-character
-#: chunk on the live install would have made a 32-text batch of 8,192 tokens
-#: each. Keyword search still reads the whole chunk.
-_EMBED_MAX_CHARS = 4000
+#: The most text one vector is made from; keyword search still reads the
+#: whole chunk. Measured on the live machine (bge-m3, 24 CPU threads,
+#: 2026-09-27): chunks of median length embed at ~18 a second, but the 32
+#: longest took 113 s at a 4,000-character cap, 58 s at 1,500 and 37 s at
+#: 1,000 -- and the model would read 8,192 tokens of the 60,000-character
+#: one. 1,500 characters (a few hundred words) carries a chunk's subject;
+#: 942 of the live 6,598 chunks are longer.
+_EMBED_MAX_CHARS = 1500
 
 
 def _unit(vec: Any) -> list[float] | None:

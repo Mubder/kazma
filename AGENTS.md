@@ -1423,12 +1423,16 @@ module was deleted and the import's `except` said "chromadb not installed".
   squared L2, which every earlier collection has; with unit vectors it ranks
   the same, and `query` reports the true cosine for either (`_similarity`).
   It used to report `1 - L2` as a cosine. No embedding function: every write
-  and search passes its own vectors, made from at most 4,000 characters
-  (`_EMBED_MAX_CHARS`: the live install has a 60,000-character chunk, and a
-  batch is padded to its longest text; keyword search reads it all).
-- **The "knowledge vector repair" sweep** (15 min, ~30 s,
+  and search passes its own vectors, made from at most 1,500 characters
+  (`_EMBED_MAX_CHARS`; keyword search reads the whole chunk). Measured on the
+  live CPU: 64 chunks of median length embed in 3.4 s, the 32 longest took
+  113 s at a 4,000-character cap.
+- **The "knowledge vector repair" sweep** (15 min, up to 5 min a pass,
+  LAST in the cycle so the memory sweeps never wait on it;
   `KnowledgeIndex.backfill_vectors`) makes each library's vectors match its
-  active chunks both ways: embeds the missing, removes those of retired
+  active chunks both ways: embeds the missing, **shortest first across all
+  libraries** (most of every library is searchable early, and a batch of
+  like lengths wastes nothing on padding), and removes those of retired
   chunks (they took search slots and joined to nothing). Ingest still embeds
   on write; the sweep covers whatever the store missed.
 - **`delete_library` opens the collection before dropping it** -- only a
@@ -1443,7 +1447,9 @@ module was deleted and the import's `except` said "chromadb not installed".
 - **The Knowledge page shows each library's coverage** ("Meaning search:
   N of M", or "Keyword search only"), from `KnowledgeIndex.health` through
   `/api/kb/libraries`. Nothing showed it before, which is how the outage
-  lasted two months.
+  lasted two months. A library's `chunk_count` is COUNTED by every library
+  SELECT (`_CHUNK_COUNT_SQL`): the column is a cache several writers keep,
+  one missed, and the page listed 365 chunks for a library holding 366.
 - Gate: `tests/test_knowledge_meaning_search.py` (a fake chromadb in CI, the
   real one where the `rag` extra is installed).
 

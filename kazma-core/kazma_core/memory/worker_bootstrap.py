@@ -859,15 +859,17 @@ def _repair_memory_vectors() -> None:
 
 
 def _embed_knowledge_chunks() -> None:
-    # Each Knowledge Library's vectors made to match its chunks, ~30 s a pass:
-    # missing ones embedded, those of retired chunks removed (AGENTS.md §24F).
-    # The vector store's client module was deleted on 2026-07-31 and the
-    # import that needed it sat in a try, so every library stayed
-    # keyword-only until 2026-09-26. With nothing to do this lists each
+    # Each Knowledge Library's vectors made to match its chunks: missing ones
+    # embedded, shortest first, those of retired chunks removed (AGENTS.md
+    # §24F). The vector store's client module was deleted on 2026-07-31 and
+    # the import that needed it sat in a try, so every library stayed
+    # keyword-only until 2026-09-26: ~40 minutes of CPU to catch up on the
+    # live install, so a pass may take 5; it is last in the cycle so the
+    # memory sweeps never wait on it. With nothing to do it lists each
     # library's ids and returns; it logs what it changes.
     from kazma_core.stores.knowledge_index import get_knowledge_index
 
-    get_knowledge_index().backfill_vectors(time_budget_s=30.0)
+    get_knowledge_index().backfill_vectors(time_budget_s=300.0)
 
 
 def _recover_erased_memories() -> None:
@@ -910,9 +912,9 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("swarm task retention", _prune_swarm_tasks),
     ("supervisor watch", _watch_supervisor),
     ("memory vector repair", _repair_memory_vectors),
-    ("knowledge vector repair", _embed_knowledge_chunks),
     ("memory recovery", _recover_erased_memories),
     ("memory turn reconcile", _reconcile_memory_turns),
+    ("knowledge vector repair", _embed_knowledge_chunks),
 )
 
 

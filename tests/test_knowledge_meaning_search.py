@@ -12,8 +12,11 @@ indexing embeds only when the store is up. Fixed here:
   the missing module), and is retried after a pause rather than logged on
   every search;
 * ``KnowledgeIndex.backfill_vectors`` -- a maintenance sweep -- makes each
-  library's vectors match its chunks: every active chunk embedded, every
-  vector of a retired chunk removed, bounded per pass and resumable;
+  library's vectors match its chunks: every active chunk embedded, shortest
+  first across libraries, every vector of a retired chunk removed, bounded
+  per pass and resumable. On the live CPU the 32 longest chunks took 113 s
+  where 64 of median length took 3.4 s: a vector is made from at most
+  1,500 characters;
 * collections compare by angle. Chroma's default is squared L2, which every
   collection had been given while ``query`` reported ``1 - distance`` as a
   cosine; vectors are unit length now, so an older L2 collection ranks and
@@ -332,6 +335,35 @@ def test_a_huge_chunk_is_embedded_from_its_opening_only(kb, monkeypatch):
     assert kb.index.backfill_vectors(time_budget_s=30)["embedded"] == 2
     assert max(seen) == vsg._EMBED_MAX_CHARS and min(seen) == len("Install the command line tool")
     assert kb.store.get_chunks_by_ids(["api-0"])["api-0"]["content"].count("Webhooks") == 1800
+
+
+def test_the_shortest_chunks_go_first_across_libraries(kb, monkeypatch):
+    """So most of every library is searchable by meaning early, and a batch
+    of like lengths wastes nothing on padding."""
+    seen: list[int] = []
+    toy = _Embedder()
+
+    class Recording(_Embedder):
+        def encode_batch(self, texts):
+            seen.extend(len(t) for t in texts)
+            return toy.encode_batch(texts)
+
+    monkeypatch.setattr(vsg, "get_encoder", lambda model_name=None: Recording())
+    _seed(kb, "api", ["a" * 300, "b" * 10])
+    _seed(kb, "guide", ["c" * 150, "d" * 50])
+    assert kb.index.backfill_vectors(time_budget_s=30, batch=1)["embedded"] == 4
+    assert seen == [10, 50, 150, 300]
+
+
+def test_a_library_counts_its_chunks_when_it_is_read(kb):
+    """The chunk_count column is a cache several writers keep; one missed and
+    the live page listed 365 chunks for a library holding 366."""
+    _seed(kb, "api", ["Webhooks retry delivery five times", "Install the command line tool"])
+    assert kb.store.get_library("api")["chunk_count"] == 2
+    assert [lib["chunk_count"] for lib in kb.store.list_libraries()] == [2]
+    # Negative control: nothing above updated the cached column.
+    conn = kb.store._get_conn()
+    assert conn.execute("SELECT chunk_count FROM knowledge_libraries WHERE id='api'").fetchone()[0] == 0
 
 
 def test_the_backfill_stops_at_its_budget_and_the_next_pass_continues(kb, monkeypatch):
