@@ -2077,6 +2077,17 @@ Read the named test before changing the code it guards.
   floor** from the code's AST (`safety/commitment/python_denylist.py`),
   judged by the shell denylist's own rm/chmod patterns. Computed paths still
   go to the card. Gate: `tests/test_python_exec_denylist.py`.
+- **The python_exec sandbox restricts the SNIPPET, not the process**
+  (`code_exec._build_sandbox_script`): the snippet runs with its own builtins
+  (guarded `__import__`, no exec/eval/compile/breakpoint) and the modules it
+  imports run normally. Patching the builtins module broke Python's own
+  import system -- 17 of 20 ordinary snippets (`datetime`, `json`, `re`...)
+  died with "exec() is disabled" and the operator approved one date sum three
+  times. Never patch `builtins` process-wide again. What the runner refuses
+  is refused before the card by `code_exec.sandbox_refusal` (commitment exec
+  resolver step 1c; not under E2B, which runs code raw). Gates:
+  `tests/test_code_exec.py` (the stdlib runs; the snippet's escapes do not;
+  negative control) and `tests/test_python_exec_denylist.py`.
 - **Restore rehearsal: opt-in, scratch-only** (`backup/restore_rehearsal.py`,
   `backups.pg.restore_rehearsal` / `KAZMA_PG_RESTORE_REHEARSAL`): the weekly
   pass restores the newest dump into `kazma_restore_rehearsal_<epoch>`,

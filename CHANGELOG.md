@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## python_exec can use the standard library again (2026-09-26)
+
+One date calculation took three approvals: each run of `python_exec` died
+with "exec() is disabled in the code_exec sandbox", the model rewrote the
+code, and asked again. The code only imported `datetime` and `zoneinfo`.
+
+The sandbox blocks a snippet from importing `os`, `subprocess`, `socket` and
+similar, and from calling `exec`/`eval`/`compile` itself. It did that by
+changing Python's built-in functions for the whole process, and Python's own
+import system uses those same functions to load modules. So nearly the whole
+standard library failed to import: 17 of 20 ordinary snippets (`datetime`,
+`json`, `re`, `random`, `decimal`, `typing`…) died, measured on this build.
+
+- The block now applies to the snippet's own code only. The standard library
+  works (20 of 20); `import os`, `exec(...)` and the rest are still refused.
+- A snippet the sandbox would refuse is now refused **before** the approval
+  card, with the reason, so you are never asked to approve code that cannot
+  run.
+- Errors now point at your snippet's own line numbers.
+
+The local sandbox is still not a jail (see THREAT_MODEL.md); Docker or E2B
+is the boundary for untrusted code.
+
 ## Web chat over Cloudflare Tunnel: no more lost cards or merged turns (2026-09-26)
 
 Over the tunnel, a message could show no thinking at all, the Stop button went

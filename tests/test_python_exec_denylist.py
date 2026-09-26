@@ -101,9 +101,71 @@ def test_ordinary_python_exec_is_allowed_to_the_card(ops_db):
 
 
 def test_negative_control_without_the_ast_check_it_reached_the_card(ops_db, monkeypatch):
-    """The pre-2026-09-25 behaviour: nothing read `code`, so the call was allowed."""
+    """The pre-2026-09-25 behaviour: nothing read `code`, so the call was allowed.
+
+    The sandbox pre-check (1c, 2026-09-26) also refuses ``import shutil``
+    before the card, for a different reason; it is switched off here so the
+    control still isolates the catastrophic-call check.
+    """
     import kazma_core.safety.commitment.python_denylist as pd
+    import kazma_core.tools.code_exec as ce
 
     monkeypatch.setattr(pd, "catastrophic_python", lambda *a, **k: None)
+    monkeypatch.setattr(ce, "sandbox_refusal", lambda code: None)
     d = authorize_effect("python_exec", {"code": "import shutil\nshutil.rmtree('/')"})
     assert d.decision == "allow"
+
+
+# ── What the sandbox refuses is refused before the card (2026-09-26) ─────
+#
+# Live: the operator approved one date calculation three times. Each run
+# died inside the sandbox (its process-wide exec/import block broke the
+# standard library), the model rewrote the snippet, and asked again. The
+# sandbox now scopes its block to the snippet; what it still refuses -- a
+# blocked import or a direct exec/eval/compile in the snippet itself -- is
+# refused here, with the reason, before anyone is asked.
+
+REFUSED_BY_THE_SANDBOX = {
+    "import os": "import os\nprint(os.getcwd())",
+    "from subprocess": "from subprocess import run\nrun(['ls'])",
+    "dotted import": "import http.client",
+    "exec": "exec('print(1)')",
+    "eval": "print(eval('1+1'))",
+    "compile": "code = compile('1', 'x', 'eval')",
+}
+
+RUNS_IN_THE_SANDBOX = {
+    "datetime": "from datetime import datetime, timedelta\nprint(datetime(2026, 9, 26) + timedelta(days=2))",
+    "zoneinfo": "import zoneinfo\nprint(zoneinfo.ZoneInfo('Asia/Kuwait'))",
+    "json": "import json\nprint(json.dumps({'a': 1}))",
+    "mention in a string": "print('import os and exec( are refused')",
+    "method named exec": "class T:\n    def exec(self):\n        return 1\nprint(T().exec())",
+}
+
+
+@pytest.mark.parametrize("name", sorted(REFUSED_BY_THE_SANDBOX))
+def test_what_the_sandbox_refuses_never_reaches_the_card(ops_db, monkeypatch, name):
+    monkeypatch.delenv("KAZMA_E2B", raising=False)
+    monkeypatch.delenv("KAZMA_E2B_API_KEY", raising=False)
+    monkeypatch.delenv("E2B_API_KEY", raising=False)
+    d = authorize_effect("python_exec", {"code": REFUSED_BY_THE_SANDBOX[name]})
+    assert d.decision == "deny", (name, d.decision, d.reason)
+    assert "sandbox refuses" in d.reason and "datetime" in d.reason, d.reason
+
+
+@pytest.mark.parametrize("name", sorted(RUNS_IN_THE_SANDBOX))
+def test_ordinary_standard_library_code_goes_to_the_card(ops_db, monkeypatch, name):
+    monkeypatch.delenv("KAZMA_E2B", raising=False)
+    monkeypatch.delenv("KAZMA_E2B_API_KEY", raising=False)
+    monkeypatch.delenv("E2B_API_KEY", raising=False)
+    d = authorize_effect("python_exec", {"code": RUNS_IN_THE_SANDBOX[name]})
+    assert d.decision == "allow", (name, d.reason)
+
+
+def test_e2b_runs_the_code_raw_so_nothing_is_refused_for_the_sandbox(ops_db, monkeypatch):
+    """E2B executes the snippet without the runner: its imports are not ours
+    to refuse there."""
+    monkeypatch.setenv("KAZMA_E2B_API_KEY", "e2b-test-key")
+    monkeypatch.delenv("KAZMA_E2B", raising=False)
+    d = authorize_effect("python_exec", {"code": "import os\nprint(os.getcwd())"})
+    assert d.decision == "allow", d.reason
