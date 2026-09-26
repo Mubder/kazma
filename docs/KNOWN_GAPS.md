@@ -931,7 +931,13 @@ every time. That happened three times on 2026-09-12 alone.
 
 ## Operational tripwires
 
-**Most chat frames do not say which turn they belong to** (2026-09-26).
+**~~Most chat frames do not say which turn they belong to~~** (2026-09-26;
+closed the same day: `delivery._with_turn_id` stamps `data.turn_id` on
+every journaled frame at the broker's choke point -- the emitting task's
+bound turn, else the thread's open reply turn -- and the client's
+`applyTurnEvent` adopts the `'live'` document when a turn's first named
+frame arrives. `tests/test_frames_name_their_turn.py`; all 49 browser
+tests pass with it. The history below stays for the record.)
 Token, tool, status and approval frames are journaled without a `turn_id`;
 only `done`, `turn_complete` and `hitl` carry one (measured on a journal
 replay: 60 frames, three with an id). Every client files the rest under "the

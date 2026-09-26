@@ -8230,6 +8230,16 @@
     scrollToBottom();
   }
 
+  // A copy of *doc* filed under another turn id (the adoption below).
+  function _retagDoc(doc, turnId) {
+    var copy = {};
+    for (var k in doc) {
+      if (Object.prototype.hasOwnProperty.call(doc, k)) copy[k] = doc[k];
+    }
+    copy.turnId = String(turnId);
+    return copy;
+  }
+
   function applyTurnEvent(ev) {
     ev = ev || {};
     var TD = window.KazmaTurnDocument;
@@ -8251,6 +8261,16 @@
     var turnId = incoming || _liveTurnId || '';
     if (!turnId) turnId = 'live';
     if (_isRetiredTurn(turnId)) return false;
+    // The server names every journaled frame's turn (delivery._with_turn_id).
+    // The first named frame of the turn this tab has been painting under
+    // 'live' ADOPTS that document -- its streamed text, steps and plan move
+    // with it, the same rename turn_view.promote makes for the bubble. A
+    // fresh document here would repaint the bubble from the new frame alone.
+    if (incoming && incoming !== 'live' && !_docs[incoming] && _docs.live
+        && (!_liveTurnId || _liveTurnId === 'live')) {
+      _docs[incoming] = _retagDoc(_docs.live, incoming);
+      delete _docs.live;
+    }
     _liveTurnId = turnId;
     var prev = _docs[turnId] || TD.empty(turnId);
     var next = TD.applyEvent(prev, ev);

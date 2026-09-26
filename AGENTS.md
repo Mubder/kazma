@@ -1738,6 +1738,13 @@ Load-bearing rules:
   body's `interrupt_id` against the registry before resuming. A retried
   Approve used to decide whichever question the graph had reached by
   then.
+- **Every journaled frame names its turn.** `TurnBroker.emit` stamps
+  `data.turn_id` (`delivery._with_turn_id`: the emitting task's bound turn,
+  else the thread's open reply turn; an existing id is kept, a frame between
+  turns stays unnamed). The client's first named frame of a turn painted
+  under `'live'` ADOPTS that document (`applyTurnEvent` -> `_retagDoc`) --
+  never a fresh one, which would repaint the bubble from one frame.
+  `tests/test_frames_name_their_turn.py`.
 - **A stored row field is named once, beside its writer.** The history
   route's two serializers (the row list and the checkpoint-hydrate merge)
   are whitelists; they pass `reply_sink.CLIENT_ROW_FIELDS`, and a field kept
