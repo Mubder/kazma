@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## A timed-out approval no longer leaves a dead card (2026-09-26)
+
+When nobody answered an approval in time, Kazma denied it and carried on,
+but the chat kept the card as "Approval required". After a reload that
+turn showed a dead Approve button and its answer went missing. Approving
+from Telegram, Discord or Slack had a smaller version of the same problem:
+a browser open on that conversation never heard about the decision.
+
+Every way of deciding an approval (the web card, the chat-app buttons,
+the timeout) now records it the same way, in the same order: the chat
+transcript, the approvals registry, then every open window. A timed-out
+card now says so, in its own row.
+
 ## Kazma says when its guard is gone (2026-09-26)
 
 The guard's death this morning was found by a person reading logs. Now the

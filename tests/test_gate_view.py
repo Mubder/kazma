@@ -291,14 +291,14 @@ def test_attach_view_decision_frame_beats_pending_row(tmp_path) -> None:
 def test_approve_emits_after_cas() -> None:
     from pathlib import Path
 
-    src = (
-        Path(__file__).resolve().parent.parent
-        / "kazma-ui"
-        / "kazma_ui"
-        / "routes_direct"
-        / "misc.py"
-    ).read_text(encoding="utf-8")
-    claim_at = src.index("await _gate_claimed(")
+    ui = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui"
+    # The approve route records through the one decision writer...
+    route = (ui / "routes_direct" / "misc.py").read_text(encoding="utf-8")
+    assert "await record_gate_decision(" in route
+    # ...which claims the registry before it tells the journal. The same
+    # order is asserted behaviourally in tests/test_gate_decision_recorder.py.
+    src = (ui / "hitl_decision.py").read_text(encoding="utf-8")
+    claim_at = src.index("await gate_claimed(")
     emit_at = src.index("get_turn_broker().emit(")
     assert claim_at < emit_at, "journal emit still runs before the registry CAS"
 

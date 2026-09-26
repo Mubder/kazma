@@ -1305,7 +1305,7 @@ def test_claimed_card_parks_above_reply_and_collapses() -> None:
     assert "className" not in set_state
     sem = js.split("_semCard.querySelectorAll('.hitl-sem-opt')", 1)[1][:900]
     assert "_noteGateDecided(data," in sem
-    timeout = js_function_body(js, "function markApprovalTimedOut(msg)")
+    timeout = js_function_body(js, "function markApprovalTimedOut(msg, data)")
     assert "_noteGateDecided(" not in timeout
     assert "applyTurnEvent({" in timeout
     assert "card.className" not in timeout

@@ -4839,13 +4839,20 @@
             .replace(/\n{3,}/g, '\n\n').trim();
   }
 
-  function markApprovalTimedOut(msg) {
+  function markApprovalTimedOut(msg, data) {
+    data = data || {};
     var text = String(msg || 'Approval timed out — continuing without this tool.');
+    var iid = String(data.interrupt_id || '');
+    // The gate's id and tool, so the timeout lands on ITS card. Without them
+    // the event was a separate part keyed 'hitl:' -- a stray row next to a
+    // card left saying "Approval required".
     applyTurnEvent({
       type: 'hitl',
       state: 'timeout',
-      payload: { message: text },
-      turn_id: _liveTurnId,
+      interrupt_id: iid,
+      tool: String(data.tool || ''),
+      payload: iid ? { message: text, interrupt_id: iid } : { message: text },
+      turn_id: data.turn_id || _liveTurnId,
       source: 'timeout',
     });
     // Chrome comes from TurnView after the document update. Do not

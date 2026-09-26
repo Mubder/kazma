@@ -1589,6 +1589,20 @@ pending: a second live question keeps the turn open), gateway pause/resume
 `safety.check()` (register→bus→claim+settle), pipeline
 `checkpoint_manager._gate_register_pipeline`/`_gate_settle_pipeline`.
 
+**D2. A decision has ONE writer:** `kazma_ui/hitl_decision.record_gate_decision`
+-- transcript part stamp, registry CAS, THEN the journal `hitl` frame (the
+broker stamps the frame's view from the registry; emit-before-CAS painted "No
+longer pending", 2026-09-20). The web approve route, the approval-timeout
+watchdog (`decision="timeout"`), platform buttons and the WS approve path all
+call it. Each used to write its own subset: the watchdog never stamped the
+transcript, so an auto-denied card stayed `pending` in the chat forever and
+the turn reloaded broken (2026-09-26); platform buttons never told the journal,
+so a browser watching the thread never saw the decision. It stamps only a turn
+the session already has (a minted id would add an empty bubble). Gate:
+`tests/test_gate_decision_recorder.py` (every function that builds a resume
+with `approved=` calls it; `kazma ask` and `hitl_supersede` are exempt with
+reasons).
+
 **E. Reconciler — every crash window has one behavior.**
 Approve-on-missing-row backfills (`created_missing`); `close_turn` settles
 pending rows whose checkpoint is NOT paused as `orphaned` (in seconds);
@@ -1902,7 +1916,9 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   module only its own tests import fails, unless allowlisted with a reason.
 - **Debt ratchet:** `tests/test_debt_ratchet.py` holds the blind/silent
   exception-handler counts; they may only go down, and lowering them means
-  updating the baseline in the same change.
+  updating the baseline in the same change. It counts untracked files too:
+  listing only committed files let a local run pass that CI then failed on a
+  new module (2026-09-26).
 - **Loop-stall dumps name the next gate entry.** `kazma_core.observability.
   loop_stall` writes every thread's stack to `.kazma/stall-*.txt` when the
   loop is unresponsive for 15s, and the weekly ledger counts them. The frame

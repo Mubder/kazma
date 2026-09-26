@@ -86,7 +86,8 @@ def test_approve_route_returns_json_not_sse() -> None:
     assert "_drive_graph_to_journal" in fn
     assert "create_task" in fn
     assert 'reason": "not_pending"' in fn or "reason\": \"not_pending\"" in fn
-    assert "stamp_hitl_part_state" in fn
+    # The decision is written by the one recorder (stamp, CAS, journal).
+    assert "record_gate_decision" in fn
     planted = "return StreamingResponse(_stream_langgraph_events("
     assert planted not in fn
 

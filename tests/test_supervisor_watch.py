@@ -36,7 +36,7 @@ def _state(tmp_path, monkeypatch, **fields):
 
 def test_a_server_the_guard_did_not_start_is_not_watched(monkeypatch, _fresh):
     monkeypatch.delenv(sw.STATE_ENV, raising=False)
-    assert sw.supervisor_status() is None
+    assert sw._supervisor_status() is None
     sw.check_supervisor()
     assert _fresh == []
 
@@ -70,9 +70,9 @@ def test_negative_control_the_threshold_decides(tmp_path, monkeypatch, _fresh):
     """Just inside the threshold is supervised; just outside is not."""
     now = time.time()
     _state(tmp_path, monkeypatch, heartbeat=now - sw.STALE_AFTER_S + 5)
-    assert sw.supervisor_status(now)["supervised"] is True
+    assert sw._supervisor_status(now)["supervised"] is True
     _state(tmp_path, monkeypatch, heartbeat=now - sw.STALE_AFTER_S - 5)
-    assert sw.supervisor_status(now)["supervised"] is False
+    assert sw._supervisor_status(now)["supervised"] is False
 
 
 def test_the_check_runs_on_the_maintenance_cadence(monkeypatch):

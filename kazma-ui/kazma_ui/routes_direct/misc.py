@@ -794,7 +794,6 @@ def register_misc_routes(self: Any) -> None:
             from kazma_ui.sse_chat._streaming import (
                 _drive_graph_to_journal,
                 mark_thread_unpaused,
-                stamp_hitl_part_state,
             )
             from kazma_ui.turn_runtime import ensure_session_for_thread
 
@@ -962,56 +961,22 @@ def register_misc_routes(self: Any) -> None:
                         ),
                         status_code=409,
                     )
-                stamp_hitl_part_state(
-                    _resume_session_id,
-                    _resume_turn,
-                    state="approved" if approved else "denied",
-                    thread_id=thread_id,
+                # The one writer for a decision: transcript stamp, registry
+                # CAS, THEN the journal frame (the broker stamps the gate's
+                # view from the registry; emit-before-CAS painted "No longer
+                # pending" on an approved card, 2026-09-20).
+                from kazma_ui.hitl_decision import record_gate_decision
+
+                await record_gate_decision(
+                    thread_id,
+                    decision="approved" if approved else "denied",
+                    actor=actor,
                     tool=pending_tool_name,
                     payload=_stamp_payload,
-                    interrupt_id=str(_stamp_payload.get("interrupt_id") or ""),
+                    interrupt_id=_live_iid,
+                    session_id=_resume_session_id,
+                    turn_id=_resume_turn,
                 )
-                # Gate registry CAS BEFORE the journal emit so attach_view
-                # sees claimed/resuming (inflight), not the leftover pending
-                # row. Emit-before-CAS stamped a pending view on an approved
-                # frame — live "No longer pending" (2026-09-20).
-                try:
-                    from kazma_ui.hitl_gate_bridge import (
-                        gate_claimed as _gate_claimed,
-                        gate_resuming as _gate_resuming,
-                    )
-
-                    await _gate_claimed(
-                        thread_id,
-                        _live_iid,
-                        "approve" if approved else "deny",
-                        actor,
-                        tool=pending_tool_name,
-                        payload=_stamp_payload,
-                    )
-                    await _gate_resuming(_live_iid)
-                except Exception:
-                    logger.debug("[HITL] gate claim skipped", exc_info=True)
-                try:
-                    from kazma_ui.delivery import get_turn_broker
-
-                    await get_turn_broker().emit(
-                        thread_id,
-                        {
-                            "type": "hitl",
-                            "data": {
-                                "state": "approved" if approved else "denied",
-                                "interrupt_id": str(
-                                    _stamp_payload.get("interrupt_id") or ""
-                                ),
-                                "tool": pending_tool_name,
-                                "thread_id": thread_id,
-                                "turn_id": _resume_turn,
-                            },
-                        },
-                    )
-                except Exception:
-                    logger.debug("[HITL] hitl journal frame skipped", exc_info=True)
                 _resume_inflight.add(thread_id)
                 _resume_task = asyncio.create_task(
                     _drive_graph_to_journal(

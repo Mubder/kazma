@@ -2425,6 +2425,23 @@ def create_ws_chat_router(
                             approved=approved, scope=scope,
                         )
 
+                    # Written down like every other decision: registry,
+                    # transcript, journal (kazma_ui/hitl_decision.py). This
+                    # path recorded none of them.
+                    from kazma_ui.hitl_decision import record_gate_decision
+
+                    _ws_intr = _intr_payload if isinstance(_intr_payload, dict) else {}
+                    await record_gate_decision(
+                        target_thread_id,
+                        decision="approved" if approved else "denied",
+                        actor=f"ws:{session_id[:12]}",
+                        tool=str(_ws_intr.get("tool") or tool_name or ""),
+                        payload=_ws_intr,
+                        interrupt_id=str(
+                            _ws_intr.get("interrupt_id") or _req_gate or ""
+                        ),
+                    )
+
                     await websocket.send_json(
                         ApprovalEventBridge.create_approval_started_event(
                             target_thread_id,
