@@ -7614,10 +7614,11 @@
     panel.classList.remove('kazma-cot-restored');
     var titleEl = panel.querySelector('.agent-progress-title');
     if (titleEl) {
+      // A finished panel is named like the one a reload builds
+      // (_buildRestoredWorkbench). A turn with no thoughts used to keep
+      // "Working..." under its own "Completed" header (live, 2026-09-26).
       titleEl.textContent = done
-        ? (thoughtN
-          ? ti('cot_title', 'Thinking & Activity')
-          : ti('working', 'Working\u2026'))
+        ? ti('cot_title', 'Thinking & Activity')
         : ti('thinking', 'Kazma is thinking\u2026');
     }
     var list = panel.querySelector('.agent-progress-steps');

@@ -25,8 +25,8 @@ every change is inside the existing V2 engine.
 | G | Memory health shows searchable / pending / archived / unrecovered | ☑ same file (G) |
 | H | Every conversation turn reaches memory (found during Stage 1) | ☑ `tests/test_memory_every_turn.py` |
 | I | Nothing repoints live memory: the golden eval runs on its own database (found during Stage 1) | ☑ same file |
-| S1 | Stage 1 shipped: suite 2 splits, Linux, CI, deployed, proven on live | ☐ |
-| S2 | Stage 2 audit written (section 5) and approved | ☐ |
+| S1 | Stage 1 shipped: suite 2 splits, Linux, CI, deployed, proven on live | ☑ commit 3794b7e2, build a1994a70 (see change log) |
+| S2 | Stage 2 audit written (section 5) and approved | ◐ written; awaiting approval |
 | S2+ | Stage 2 improvements (added to this table from the audit) | ☐ |
 
 ---
@@ -203,7 +203,64 @@ section 5 and presented for approval before building.
 
 ## 5. Stage 2 audit findings
 
-(Written here when the audit is done.)
+Written 2026-09-26 after Stage 1 shipped (build a1994a70). Each finding: evidence, severity,
+the fix, and the test or gate that would hold it. **Nothing below is built until approved.**
+Severity: **H** = memory is wrong, missing or unsafe; **M** = quality or cost; **L** = polish.
+
+### 5.1 Retrieval quality
+
+| # | Finding | Evidence | Sev | Fix | Holds it |
+|---|---|---|---|---|---|
+| R1 | **No relevance floor.** Recall always returns its top k, so every turn injects 5 facts + 5 episodes whether or not they relate to the question, and the past-chats fallback (fires only on an EMPTY recall) never runs. | Live log 2026-09-19..26: 77 of 77 recalls injected exactly "5 beliefs, 5 episodes"; transcript fallback fired 0 times. | H | Calibrated floors: cosine floor for the meaning channel (per embedding model, measured), fused-score floor for the rest; inject only what clears it; nothing clears -> fallback. | Benchmark R7 no-answer cases; injected-but-unrelated rate metric. |
+| R2 | Keyword channel ORs every token of 2+ chars, stopwords included ("is", "the", "at"), and fusion is rank-based, so memories sharing only common words take ranks. | `recall._fts_match_query` (recall.py:1116); a Stage 1 test had to route around it. | M | EN + AR stopword lists; Arabic folding with `documents/arabic.fold_for_search` on both index and query (the knowledge FTS already does this, memory FTS does not). | Tests with stopword-only overlap; Arabic variant queries. |
+| R3 | Episode vectors embed the summary, else the question -- never the answer. "What did you tell me about X" misses when X is only in the answer. | `dual_write.mirror_episode` embeds `summary or user or assistant`. | M | Embed question + answer (bounded), or a second answer vector; re-encode through the repair pass. | Benchmark cases answered only in the assistant text. |
+| R4 | Hub-rotation penalty multiplies a fused score by up to 0.6 -- about 40 places under RRF -- so a popular fact can lose to barely related ones. | recall.py:895. | M | Make rotation a tie-break band (like standing, <=5 %), or rotate only among near-equal hits. | Test: the most relevant high-access fact stays first. |
+| R5 | The graph walk loads only the 800 most important facts -- another importance cap on a retrieval channel. | recall.py:1452 `max(max_nodes*4, 400)`. | M | Seed-local neighbourhood query (edges touching the seeds, then hop) instead of a global top-N load. | At-scale test like Stage 1's 1,200 facts. |
+| R6 | No reranker. | -- | M | Optional cross-encoder rerank of the fused top ~30 (bge-reranker-v2-m3 pairs with bge-m3); off by default until the benchmark shows gain. | Benchmark delta recorded. |
+| R7 | **Evaluation is a 6-case golden set.** Nothing measures recall@k, MRR or no-answer precision at scale. | `tests/fixtures/memory_golden.json`. | H | A benchmark in the LongMemEval / LoCoMo style: synthetic conversations + anonymised real-shaped ones, single- and multi-session questions, temporal, update, and no-answer cases; recall@5, MRR, abstention accuracy; a CI job with thresholds. Every retrieval change above is judged by it, not by hand. | The benchmark job. |
+| R8 | Hybrid vector search returns remote hits without merging local ones: rows not yet in the remote index are invisible whenever the remote answers anything. | backends.py:906. | L | Merge local and remote by id (local wins on conflict). | Test with a partially filled remote. |
+
+### 5.2 Writing memories
+
+| # | Finding | Evidence | Sev | Fix | Holds it |
+|---|---|---|---|---|---|
+| W1 | Facts are replayed by ingestion time: functional supersede closes the active belief at "now". An old statement written late overwrites a newer fact -- the reason Stage 1's turn reconcile writes episodes only. | belief_mutation._mutate_functional (valid_until=now). | H | Event-time assertions: `mutate_belief(asserted_at=...)`; an assertion older than the active belief lands already-superseded (history), never replaces it. Then reconciled turns can get their facts too. | Tests: old-then-new and new-then-old orders give the same current fact. |
+| W2 | When the 4-thread extraction pool is full, a turn's facts are skipped for good (no retry). Turn reconcile now restores the episode, not the facts. | consolidator.py:354 "V2 extract pool full -- skipping". | H | Put the turn on the durable task queue instead of dropping it. | Test: saturated pool -> facts still extracted. |
+| W3 | `/new` in chat apps DELETES the conversation's latest turn from memory (the working-tier episode). Turn reconcile re-adds it within 25 minutes, but deleting was never right. | session_commands.py:118 -> consolidator.clear_working_memory. | M | Demote working -> episodic on `/new`; delete nothing. | Test: `/new` keeps every episode. |
+| W4 | "Remember this" is recognised only in English. | dual_write.py:277. | M | Arabic phrases (تذكر، لا تنسى، احفظ …) and a test per language. | Test table. |
+| W5 | Filler turns ("Hi", "Hello") become episodes and take recall slots. | `is_filler_turn` exists but gates only fact extraction. | L | Mark filler episodes low-importance / exclude from injection (keep them stored). | Test. |
+| W6 | Extraction is heuristic + an LLM pass per turn; duplicates are merged only on exact subject-predicate-object. | global_reconsolidation._merge_duplicate_beliefs. | M | Mem0-style decision step (ADD / UPDATE / DELETE / NONE against the nearest existing facts by meaning), with the Stage 1 trust gate kept. | Benchmark update cases. |
+
+### 5.3 Safety, isolation, hygiene
+
+| # | Finding | Evidence | Sev | Fix | Holds it |
+|---|---|---|---|---|---|
+| S1 | Test and probe data live in the production stores. | Live memory: episodes in `rt-thread-1/2` ("run echo -- Done. Tool said: git version…"); Postgres chat store: tenants `t1`, `tenant-alpha`, `tenant-beta` (2026-08-14); an episode under tenant `web:<uuid>`. | M | One-off cleanup (owner's call -- it deletes); then trace how each got there and gate it (tests may not reach a live DSN; tenant ids come from one resolver). | Gate per route found. |
+| S2 | Several memory paths block the event loop: the supervisor's per-turn knowledge search, the `memory_search` tool, the memory probe and federated-search routes. | graph_supervisor.py:1053; tool_builtins/memory.py:588; routes_direct/memory.py (probe, federated-search). | H | Add `recall`, `federated_search`, `build_v2_health` to `_LOOP_STALL_HELPERS`; the gate then finds every call site; each moves to `asyncio.to_thread`. | tests/test_static_gates.py. |
+| S3 | Deleting a chat keeps its memories. | No memory cleanup on session delete. | M | Owner decision: keep (memory outlives chats, like ChatGPT) or cascade; either way the UI says which, and "forget this chat" exists. | Test of the chosen rule. |
+| S4 | The embedding config is re-read -- YAML parsed from the process's working directory -- on every recall. | embedder.py:483 `Path("kazma.yaml")`. | M | Resolve kazma.yaml from the install root (AGENTS §38 CWD rule) and cache the config with the ConfigStore's invalidation. | CWD gate entry; a timing test. |
+| S5 | Every recall's access bump rewrites 10 FTS rows: `episodes_fts_au` fires on ANY column update. | schema_v2.py:461. | M | `AFTER UPDATE OF user_text, assistant_text, summary_text` (and the same for beliefs); migration recreates the triggers. | FTS integrity + a row-count test. |
+
+### 5.4 What leading memory systems do that Kazma does not yet
+
+| Capability | Letta / MemGPT | Mem0 | Zep / Graphiti | LangMem | ChatGPT / Claude memory | Kazma after Stage 1 | Proposed |
+|---|---|---|---|---|---|---|---|
+| Always-in-context profile ("core memory") | yes (memory blocks) | -- | user summary | yes | saved memories | none -- the user's name competes in recall each turn | C1: a small, user-editable profile block from `user_explicit` facts, injected every turn |
+| Temporal facts | -- | partial | bi-temporal edges | -- | -- | bi-temporal schema, ingestion-ordered writes | W1 |
+| Update decisions | self-edit | ADD/UPDATE/DELETE | edge invalidation | yes | model-managed | functional supersede + trust gate | W6 |
+| Consolidation / reflection | summaries | -- | community summaries | background reflection | -- | none | C2: weekly per-topic summaries from episodes into semantic memory, fenced and reviewable |
+| Relevance gating | tool-driven | score threshold | reranker | threshold | model-decided | none (R1) | R1, R6 |
+| User control | edit blocks | API | API | API | view / edit / forget / off per chat | admin UI for facts and entities | U1: per-memory view / edit / forget / export in the UI, "don't remember this chat", provenance shown |
+| Evaluation | -- | LoCoMo | LongMemEval / DMR | -- | -- | 6 cases | R7 |
+
+### 5.5 Proposed order (each step: plan detail -> build -> tests -> suite -> deploy -> live proof)
+
+1. **R7 benchmark** first -- every later change is measured against it.
+2. **R1 relevance floor** (+ fallback revived), **S2 loop blocking**, **W2 durable extraction**, **W3 `/new`**, **S5 triggers**, **S4 config** -- correctness and cost.
+3. **W1 event-time facts**, then extract facts for the reconciled turns.
+4. **R2 stopwords + Arabic folding**, **R3 answer-aware vectors**, **R4/R5 caps**, **R8**, **W4**, **W5**.
+5. **C1 core profile**, **U1 user control**, **W6 update decisions**, **R6 reranker**, **C2 consolidation**.
+6. **S1 cleanup** and **S3 chat-deletion rule** -- owner decisions (they delete data or set policy).
 
 ---
 
@@ -211,5 +268,11 @@ section 5 and presented for approval before building.
 - 2026-09-26: plan written and approved; Stage 1 started.
 - 2026-09-26: items A-G built and tested (see the table); full suite 10,729 passed.
 - 2026-09-26: item H added and built (web turns had not reached memory since 2026-08-08).
-- 2026-09-26: item I added and built (the golden eval could repoint live memory writes);
-  deploy and live proof next.
+- 2026-09-26: item I added and built (the golden eval could repoint live memory writes).
+- 2026-09-26: Stage 1 shipped (3794b7e2, live build a1994a70). Suite 10,744 passed (4- and
+  7-way), Linux memory set 214 passed, Postgres-marked tests on postgres:16, CI. Live, first
+  15-minute pass: 71 vectors re-encoded (0 unsearchable left); 75 erased memories restored in
+  full (0 unrecoverable); turn reconcile began (71 turns in its first 60-second pass, the rest
+  over the next passes); every one of 447 episodes and 321 facts is the top hit for its own
+  vector (or tied with an identical copy); a new web chat turn became a memory in ~3 s.
+- 2026-09-26: Stage 2 audit written (section 5), for approval.
