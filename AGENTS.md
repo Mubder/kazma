@@ -2339,6 +2339,38 @@ types plus `KAZMA_MSGPACK_TYPES`, anything else back as raw data.
 - **Responsive grids:** use `class="two-col-grid"` (collapses to one column
   ≤768px via `kazma.css`) on any inline `grid-template-columns:1fr 1fr;` —
   bare inline 2-col grids don't collapse and crush on mobile.
+- **Every page loads clean — four did not (2026-09-26).** Touring the live
+  install page by page found the IDE, workspace, knowledge and settings pages
+  throwing on every load; no test had opened them. The rules that broke:
+  - **No markup inside a double-quoted directive.** `x-text="a ? '<span
+    class="ki">' : b"` ends the attribute at `class=` (a SyntaxError per
+    row). Build markup in a component method and bind it with `x-html`.
+  - **Icons inserted after load come from `KazmaIcons.span(name)`**, which
+    returns them filled. `icons.js` hydrates `[data-icon]` only on DOM ready,
+    so a bare `<span data-icon>` inserted later stays empty.
+  - **A `<template x-for>` carries only `x-for` and `:key`.** Any other
+    binding on it runs OUTSIDE the loop ("s is not defined").
+  - **Declare every field a template reads in the component's initial
+    data**, and expose a closure constant the template uses (`kb.js`'s `S`).
+    A field set only by a loader throws until the loader runs.
+  - **Settings mixins compose by descriptor** (`settings.js`):
+    `Object.assign` evaluated every getter once and froze it, so the
+    Packages, Skills and Tools filters never worked.
+  - **The CodeMirror bundle checks its own load order**
+    (`scripts/vendor_codemirror.py`: every `require()` bundled earlier, or
+    the build fails). One missing addon stopped nine editor modes loading.
+  Gates: `tests/e2e/test_pages_load_clean.py` (every nav page in its own
+  tab: no uncaught error, every directive compiles, every bundled mode
+  registered), `tests/test_alpine_templates.py` (every directive in every
+  template compiles in node; `<template x-for>` scope),
+  `tests/js/test_settings_mixins.js`, `tests/test_vendor_codemirror.py` —
+  each with a negative control.
+- **A polled route never calls a rate-limited API per poll.**
+  `/api/github/status` spent ~2,000 GitHub calls an hour per open Workspace
+  tab (10 s poll, fetched twice per tick, three calls each). It now keeps one
+  status per (owner, repo, token fingerprint) for 30 s, fetched once at a time
+  (`_status_once`: single-flight), reads its stores in a thread, and the page
+  refreshes on a new connection only. `tests/test_github_status_cache.py`.
 
 ## Server Management
 

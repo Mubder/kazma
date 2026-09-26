@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## Four pages that broke on every load now load clean (2026-09-26)
+
+Opening each page of the live install found four that threw errors every
+time they loaded. Each is fixed, and a new check opens every page the
+navigation links to and fails the build if any of them throws.
+
+- **IDE:** syntax colouring was missing for Rust, Go, Ruby, Dockerfile,
+  TOML, diff, PowerShell, properties and Lua files -- one missing editor
+  component stopped all nine from loading. The coding-skill picker also
+  threw on every load.
+- **Workspace:** the file list showed no file or folder icons (every row
+  threw an error instead), and neither did the GitHub activity list.
+- **Knowledge:** the Active / Archived tab labels were blank.
+- **Settings:** the package list under Packages never appeared, and the
+  Skills, Tools and package searches never filtered; the timezone lists and
+  the offsite backup label never updated. The keyboard-shortcut conflict
+  warning and the turn-notification switch threw instead of rendering.
+
+**The Workspace page no longer burns the GitHub API budget.** With GitHub
+connected, one open Workspace tab asked GitHub about 2,000 times an hour
+(its limit is 5,000; 60 without a token) and each refresh took 3-4 seconds.
+The status is now shared by every open tab and refreshed at most every 30
+seconds, and its two follow-up calls run together.
+
 ## Email refuses a mailbox that is not connected; a fresh install's first question is quiet (2026-09-26)
 
 **Asking for a mailbox that is not connected no longer "works".** Naming

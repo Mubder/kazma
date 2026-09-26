@@ -8,11 +8,13 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
 import secrets
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -176,20 +178,76 @@ async def save_app_config(body: AppConfigSaveRequest) -> JSONResponse:
 
 
 
+#: One status per repository and token, shared by every open tab. The
+#: workspace page polls every 10 s and a status is three GitHub API calls: one
+#: open tab spent ~2,000 calls an hour of GitHub's 5,000 (2026-09-26). A
+#: status card 30 s old is still a live one.
+_STATUS_TTL_S = 30.0
+_status_cache: dict[tuple[str, str, str], tuple[float, dict[str, Any]]] = {}
+_status_inflight: dict[tuple[str, str, str], asyncio.Future] = {}
+
+
+def _workspace_cwd() -> str:
+    """The active workspace's root. Store reads: call it via to_thread."""
+    try:
+        from kazma_core.stores import get_workspace_store
+
+        active_ws = get_workspace_store().get_active_workspace()
+        if active_ws:
+            return active_ws["root_path"]
+        from kazma_core.config_store import get_config_store
+
+        return get_config_store().get("workspace.selected_path") or os.getcwd()
+    except Exception:
+        return os.getcwd()
+
+
+def _token_state() -> tuple[str, bool]:
+    """(token, oauth_connected). Vault and ConfigStore reads: via to_thread."""
+    from kazma_gateway.routers.github_client import get_github_token, is_oauth_connected
+
+    return get_github_token() or "", bool(is_oauth_connected())
+
+
+def _status_key(owner: str, repo: str, token: str) -> tuple[str, str, str]:
+    fingerprint = hashlib.sha256(token.encode()).hexdigest()[:16] if token else ""
+    return owner.lower(), repo.lower(), fingerprint
+
+
+async def _status_once(key: tuple[str, str, str], fetch: Any) -> dict[str, Any]:
+    """The status for *key* from the cache, else fetched -- once at a time:
+    tabs that ask while a fetch is running await the same task. A client that
+    goes away does not cancel the fetch the others are waiting on (shield)."""
+    hit = _status_cache.get(key)
+    if hit is not None and time.monotonic() - hit[0] < _STATUS_TTL_S:
+        return hit[1]
+    task = _status_inflight.get(key)
+    if task is None or task.done():
+        task = asyncio.ensure_future(fetch())
+        _status_inflight[key] = task
+        # Added before any waiter's callback, so the cache is filled before
+        # the first waiter resumes.
+        task.add_done_callback(lambda done, k=key: _status_settled(k, done))
+    return await asyncio.shield(task)
+
+
+def _status_settled(key: tuple[str, str, str], task: asyncio.Future) -> None:
+    """Cache a fetch that succeeded; a failed one is only forgotten."""
+    if _status_inflight.get(key) is task:
+        del _status_inflight[key]
+    if task.cancelled() or task.exception() is not None:  # exception(): retrieved
+        return
+    now = time.monotonic()
+    for stale in [k for k, (at, _) in _status_cache.items() if now - at >= _STATUS_TTL_S]:
+        del _status_cache[stale]
+    _status_cache[key] = (now, task.result())
+
+
 @router.get("/status")
 async def github_status() -> JSONResponse:
     """Fetch live GitHub repository details, stats, and workflows."""
-    # 1. Resolve workspace path
-    try:
-        from kazma_core.stores import get_workspace_store
-        active_ws = get_workspace_store().get_active_workspace()
-        if active_ws:
-            cwd = active_ws["root_path"]
-        else:
-            from kazma_core.config_store import get_config_store
-            cwd = get_config_store().get("workspace.selected_path") or os.getcwd()
-    except Exception:
-        cwd = os.getcwd()
+    # 1. Resolve workspace path (store reads, off the loop).
+    cwd = await asyncio.to_thread(_workspace_cwd)
 
     # 2. Check if git repository and get remote URL
     git_dir = Path(cwd) / ".git"
@@ -237,11 +295,19 @@ async def github_status() -> JSONResponse:
     # Must match GitHubClient / get_github_token() — the old path only read
     # connectors.github.token and ignored OAuth, which caused "Token Missing"
     # + unauthenticated 60/hr rate limits while the user was OAuth-connected.
-    from kazma_gateway.routers.github_client import get_github_token, is_oauth_connected
+    token, oauth_connected = await asyncio.to_thread(_token_state)
 
-    token = get_github_token()
-    oauth_connected = is_oauth_connected()
+    payload = await _status_once(
+        _status_key(owner, repo, token),
+        lambda: _fetch_status(owner, repo, token, oauth_connected),
+    )
+    return JSONResponse(payload)
 
+
+async def _fetch_status(
+    owner: str, repo: str, token: str, oauth_connected: bool
+) -> dict[str, Any]:
+    """Repository details, open PRs and the latest workflow run, from GitHub."""
     # 4. Fetch details from GitHub API
     headers = {
         "Accept": "application/vnd.github+json",
@@ -272,15 +338,15 @@ async def github_status() -> JSONResponse:
             # Fetch repo metadata
             repo_resp = await client.get(api_url, headers=headers)
             if repo_resp.status_code == 401:
-                return JSONResponse(_base_payload(
+                return _base_payload(
                     token_valid=False,
                     error="Invalid GitHub Token (401 Unauthorized).",
-                ))
+                )
             elif repo_resp.status_code == 403:
                 # Check rate limit
                 rate_limit_remaining = repo_resp.headers.get("X-RateLimit-Remaining", "")
                 if rate_limit_remaining == "0":
-                    return JSONResponse(_base_payload(
+                    return _base_payload(
                         token_valid=bool(token),
                         rate_limited=True,
                         error=(
@@ -289,14 +355,13 @@ async def github_status() -> JSONResponse:
                             else "GitHub API rate limit exceeded (unauthenticated 60/hr). "
                             "Connect GitHub OAuth or save a Personal Access Token."
                         ),
-                    ))
-                else:
-                    return JSONResponse(_base_payload(
-                        token_valid=bool(token),
-                        error="Access Forbidden (403). For private repositories, ensure your token has the correct scopes.",
-                    ))
+                    )
+                return _base_payload(
+                    token_valid=bool(token),
+                    error="Access Forbidden (403). For private repositories, ensure your token has the correct scopes.",
+                )
             elif repo_resp.status_code == 404:
-                return JSONResponse(_base_payload(
+                return _base_payload(
                     token_valid=bool(token),
                     error=(
                         "Repository not found (404). It may be private — configure a token with access, "
@@ -304,35 +369,30 @@ async def github_status() -> JSONResponse:
                         if not token
                         else "Repository not found (404). Check remote URL and token scopes."
                     ),
-                ))
+                )
             elif repo_resp.status_code != 200:
-                return JSONResponse(_base_payload(
+                return _base_payload(
                     token_valid=bool(token),
                     error=f"Failed to retrieve repository details. HTTP {repo_resp.status_code}",
-                ))
+                )
 
             repo_data = repo_resp.json()
 
-            # Fetch open PRs count
-            pulls_resp = await client.get(pulls_url, headers=headers)
+            # Open PRs and the latest workflow run are independent: one round
+            # trip for both, not one after the other.
+            pulls_resp, workflows_resp = await asyncio.gather(
+                client.get(pulls_url, headers=headers),
+                client.get(workflows_url, headers=headers),
+            )
             open_prs_count = 0
             if pulls_resp.status_code == 200:
                 link_header = pulls_resp.headers.get("Link", "")
-                if link_header:
-                    last_match = re.search(r"page=(\d+)>;\s*rel=\"last\"", link_header)
-                    if last_match:
-                        open_prs_count = int(last_match.group(1))
-                    else:
-                        open_prs_count = len(pulls_resp.json())
-                else:
-                    open_prs_count = len(pulls_resp.json())
+                last_match = re.search(r"page=(\d+)>;\s*rel=\"last\"", link_header) if link_header else None
+                open_prs_count = int(last_match.group(1)) if last_match else len(pulls_resp.json())
 
-            # Fetch latest workflow run
-            workflows_resp = await client.get(workflows_url, headers=headers)
             latest_run = None
             if workflows_resp.status_code == 200:
-                run_data = workflows_resp.json()
-                runs = run_data.get("workflow_runs", [])
+                runs = workflows_resp.json().get("workflow_runs", [])
                 if runs:
                     r = runs[0]
                     latest_run = {
@@ -342,14 +402,14 @@ async def github_status() -> JSONResponse:
                         "html_url": r.get("html_url", ""),
                         "event": r.get("event", ""),
                         "branch": r.get("head_branch", ""),
-                        "id": r.get("id", "")
+                        "id": r.get("id", ""),
                     }
 
             # Subtract PRs from open_issues because GitHub api includes PRs in open_issues_count
             raw_issues = repo_data.get("open_issues_count", 0)
             net_issues = max(0, raw_issues - open_prs_count)
 
-            return JSONResponse(_base_payload(
+            return _base_payload(
                 token_valid=True,
                 private=repo_data.get("private", False),
                 stars=repo_data.get("stargazers_count", 0),
@@ -359,13 +419,11 @@ async def github_status() -> JSONResponse:
                 description=repo_data.get("description", ""),
                 html_url=repo_data.get("html_url", ""),
                 latest_workflow=latest_run,
-            ))
+            )
 
         except httpx.RequestError as exc:
             logger.error("[github/status] Connection error: %s", exc)
-            return JSONResponse(_base_payload(
-                error="Failed to reach GitHub API.",
-            ))
+            return _base_payload(error="Failed to reach GitHub API.")
 
 
 # ── OAuth flow (read-only integration) ────────────────────────────────
