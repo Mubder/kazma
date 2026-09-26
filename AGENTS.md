@@ -2161,6 +2161,61 @@ Read the named test before changing the code it guards.
   `tests/test_vector_store_probe.py` (fakes for every state; a real Postgres
   with and without pgvector).
 
+### 39. The guard carries out reloads, keeps a heartbeat, never dies silently (`scripts/service/kazma_guard.py`)
+
+Live 2026-09-26, three failures in one reload. `--reload` from an operator
+shell could not stop the server -- the `KazmaAgent` task runs the guard
+elevated, in its own logon session, and the shell got "Access is denied" --
+so the old build kept serving. The request file it left behind was the kind
+that, from 2026-09-20 to 09-22, woke the guard on every sleep: 3.8 million
+health probes in 47 hours, 53 a second. And the guard itself had died twenty
+minutes earlier, exit code 1 and nothing in guard.log; the task sat "Ready"
+(Task Scheduler does not restart a process that ran and exited, whatever its
+code) and Kazma ran with nobody supervising it.
+
+- **The running guard does the stop.** `--reload` writes a dated request;
+  the guard handles it within a second, in its sleep loop and during a
+  boot. A request older than the running child is already satisfied and is
+  cleared; a newer one stops the child and respawns at once. The CLI waits
+  for the acknowledgement (`reload_ack`, or a spawn after the request, in
+  the state file), starts the task when no guard is alive, and stops the
+  server itself only for a guard from before this change -- never a server
+  that booted after the request -- and withdraws a request it could not
+  apply.
+- **Deliberate stops are graceful.** Reload, pause and the guard's own
+  shutdown send CTRL_BREAK (Windows) / SIGTERM (POSIX) to the child's
+  process group and wait `KAZMA_GUARD_GRACEFUL_STOP_S` (60) before the
+  kill; uvicorn drains and the app announces its own stop, so the guard pages
+  a reload only when the app could not. An unhealthy child gets 15 s. Never
+  signal process group 0: that is every process on the console.
+- **One wake-up per request; probes keep their interval.** A handled
+  request is remembered by its on-disk signature (a file the guard cannot
+  delete is handled once), and `_supervise` never probes more often than
+  `KAZMA_GUARD_INTERVAL`, whatever wakes it.
+- **The heartbeat answers "is a guard running?"** The guard writes
+  `heartbeat` into its state file at least every 10 s in every state it waits
+  in; `--status` and `--reload` read it, because an operator shell cannot
+  open the elevated processes to ask. The guard hands the server that file's
+  path in `KAZMA_GUARD_STATE_FILE`.
+- **Never silent.** The whole body of the supervision loop sits in a try
+  whose handler logs `guard.internal_error` with the traceback, pages once
+  per kind, and keeps supervising the SAME child (a second server next to it
+  is the one outcome worse than the error). `_run_supervisor` logs
+  `guard.crashed` for anything that still escapes; native crashes go to
+  `guard.fault.log`. The sleep loop reads the clock once per pass (a negative
+  `time.sleep` raises), and the logger never raises.
+- **A recorded PID is verified before it is reaped:** creation time recorded
+  at spawn, a python image otherwise. A PID left by a dead guard can belong
+  to anything by now.
+- **The OS brings a dead guard back:** `install_service.py` registers a
+  5-minute repeating trigger with `MultipleInstances IgnoreNew`. An existing
+  task gets it only when re-registered from an elevated shell (owner action).
+
+Gates: `tests/test_guard_owns_reload.py` (each with a negative control),
+`tests/test_guard_integration.py` (the real guard against a fake server:
+graceful reload, an ignored stop, a leftover request, the heartbeat),
+`tests/test_idle_reload.py`.
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser
@@ -2186,27 +2241,38 @@ Read the named test before changing the code it guards.
 
 ## Server Management
 
-> **RULE (user directive, 2026-08-15): NEVER start or restart the Kazma server.**
-> The user ALWAYS starts it themselves. Do not run uvicorn, do not kill the
-> running server to "apply changes", do not restart it as part of any task.
-> After code changes, just tell the user a restart is needed — they will do it.
+> **RULE (user directive, 2026-08-15, amended 2026-09-26): never start the
+> Kazma server and never kill it by hand.** Code reaches the running server
+> only through the guard's reload, below.
 
 > **RULE (user directive, 2026-09-02): NEVER edit the live install at
 > `C:\Users\balfa\kazma`.** The dev repo (`G:\GitHubRepos\kazma`) is where all
-> work happens; the deploy clone is the user's. Do not write, copy, patch, or
-> revert ANY file there (not even static assets that the server would pick up
-> "without a restart", and not even to verify a fix). Change only `origin/main`
-> via a normal commit + push; the user pulls in the deploy clone themselves.
+> work happens. Do not write, copy, patch, or revert ANY file there (not even
+> static assets that the server would pick up "without a restart", and not
+> even to verify a fix), and do not change its git config or history.
 
+> **Deploys (operator's standing order, 2026-09-26).** The agent may deploy
+> the live install itself: push to `origin/main`, then
+> `git -C C:/Users/balfa/kazma pull` (a plain merge -- the clone keeps a
+> local `kazma.yaml` delta, so it is never a fast-forward; pull only a tree
+> with no modified tracked files), then reload with the LIVE install's guard,
+> then verify the new commit is serving and test through the UI.
 
 ```powershell
-# Pick up code changes (the only restart that cooperates with kazma_guard).
-# Do NOT kill python/uvicorn by hand — the guard respawns the old port holder
-# or refuses to start because 9090 is still served.
-cd 'G:\GitHubRepos\kazma'
-& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --reload
-& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --status
+# The RUNNING GUARD carries out the reload: it stops the server gracefully
+# (the app's shutdown hooks run) and starts the code on disk (§39). Run the
+# guard script OF THE INSTALL BEING RELOADED -- the request lands in
+# <that install>/.kazma. --when-idle waits until no chat turn is running
+# (GET /health/activity, local callers only); exit 3 = still busy at
+# --idle-timeout, nothing was touched.
+& 'C:\Users\balfa\kazma\.venv\Scripts\python.exe' 'C:\Users\balfa\kazma\scripts\service\kazma_guard.py' --reload --when-idle
+& 'C:\Users\balfa\kazma\.venv\Scripts\python.exe' 'C:\Users\balfa\kazma\scripts\service\kazma_guard.py' --status
 ```
+
+`--status` says `guard : running` or `NOT RUNNING`, from the guard's
+heartbeat. With no guard running, `--reload` starts the `KazmaAgent` task and
+the new guard clears the old server with its own rights, so a reload never
+needs an elevated shell.
 
 `--reload` also picks up a tool added to PATH while Kazma ran (§38). A
 new *guard* (its own code, or other OS-level variables) still needs the

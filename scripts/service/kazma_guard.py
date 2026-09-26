@@ -36,6 +36,7 @@ Usage
     python scripts/service/kazma_guard.py --once          # no restarts (debug)
     python scripts/service/kazma_guard.py --dry-run       # print config, exit
     python scripts/service/kazma_guard.py --reload        # pick up code changes
+    python scripts/service/kazma_guard.py --reload --when-idle   # ...once no turn runs
     python scripts/service/kazma_guard.py --status
     python scripts/service/kazma_guard.py --pause --stop --reason "…"
     python scripts/service/kazma_guard.py --resume
@@ -47,6 +48,7 @@ Configuration (all optional, env vars):
     KAZMA_GUARD_START_TIMEOUT   seconds to first ready       (default: 900)
     KAZMA_GUARD_INTERVAL        seconds between probes       (default: 30)
     KAZMA_GUARD_FAILURES        consecutive fails = dead     (default: 3)
+    KAZMA_GUARD_GRACEFUL_STOP_S seconds a deliberate stop waits (default: 60)
     KAZMA_GUARD_LOG             guard log path
     KAZMA_GUARD_STATE           child-PID state file (orphan reaping)
     KAZMA_GUARD_TELEGRAM_TOKEN  bot token (falls back to SWARM_BOT_TOKEN)
@@ -106,6 +108,33 @@ CRASH_LOOP_COOLDOWN_S = 1800
 PAGE_COOLDOWN_S = float(os.environ.get("KAZMA_GUARD_PAGE_COOLDOWN_S", "900"))
 
 TERMINATE_GRACE_S = 20.0
+
+# A deliberate stop -- operator reload, maintenance pause, the guard itself
+# shutting down -- asks the server to shut down first and waits this long
+# before the kill. uvicorn drains connections for 15s (serve.py
+# timeout_graceful_shutdown); the rest is the app's own shutdown hooks,
+# which announce the stop and flush what they hold. Every reload was a
+# hard kill until 2026-09-26, so none of that ever ran on a deploy.
+GRACEFUL_STOP_S = float(os.environ.get("KAZMA_GUARD_GRACEFUL_STOP_S", "60"))
+# A server replaced for failing its health checks may be wedged: a short
+# chance, then the kill.
+UNHEALTHY_STOP_S = min(15.0, GRACEFUL_STOP_S)
+# A child that never became ready has nothing to save.
+NEVER_READY_STOP_S = min(5.0, GRACEFUL_STOP_S)
+
+# The guard writes a heartbeat into its state file at least this often, in
+# every state it waits in. It is how --reload, --status and the server tell
+# a live guard from a dead one: the processes run elevated in the task's own
+# logon session, so an operator shell cannot open them to ask (2026-09-26).
+HEARTBEAT_EVERY_S = 10.0
+# No heartbeat for this long = no guard. Longer than the longest stretch the
+# guard spends without beating (a stop: graceful wait + kill wait).
+GUARD_STALE_S = max(120.0, GRACEFUL_STOP_S + TERMINATE_GRACE_S + 3 * HEARTBEAT_EVERY_S)
+# --reload hands the stop to the running guard; this is how long it waits
+# for the guard to take the request before doing the stop itself.
+GUARD_ACK_S = 20.0
+# What the supervisor loop returns when it stopped the child for --reload.
+RELOAD_REASON = "operator reload"
 
 # A server whose build.started_at predates our spawn by more than this is
 # NOT the child we launched -- it is an orphan or another install that won
@@ -206,12 +235,19 @@ def _pause_path() -> Path:
 
 
 def _reload_path() -> Path:
-    """Operator --reload marker. Presence means 'respawn now, not a crash'.
+    """Operator --reload request: "boot the code on disk now, not a crash".
 
-    --reload kills the child so the long-lived guard will start a new one.
-    Without this flag the guard treats that kill as ``process exited (code 1)``
-    and climbs the crash backoff (5s → 300s). The fifth deploy of the day
-    then sits on connection-refused for five minutes (live, 2026-08-31).
+    The RUNNING GUARD acts on it: it stops its child (it owns the child and
+    has the child's rights) and spawns a new one at once, without the crash
+    backoff. The request carries the time it was made; a server spawned
+    after that time already runs the new code, so an older request is
+    satisfied, never acted on twice.
+
+    History: --reload used to kill the child from the operator's shell and
+    leave this file as a "that was not a crash" note. When the kill failed --
+    the guard runs elevated, an operator shell does not -- the note stayed,
+    and the guard woke on it every sleep: 53 health probes a second for 47
+    hours (2026-09-20..22), again on 2026-09-26.
     """
     env = os.environ.get("KAZMA_GUARD_RELOAD_FILE")
     if env:
@@ -219,10 +255,35 @@ def _reload_path() -> Path:
     return _guard_file("guard.reload")
 
 
-def request_reload() -> None:
-    path = _reload_path()
+def _write_json_atomic(path: Path, data: dict) -> None:
+    """Write *data* so a reader sees the old file or the new one, never half.
+
+    On Windows the replace fails while another process has the file open
+    (a --status or --reload reading it that instant), so it is retried
+    briefly before giving up.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"ts": time.time()}), encoding="utf-8")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    for attempt in range(20):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == 19:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                raise
+            time.sleep(0.05)
+
+
+def request_reload() -> float:
+    """Ask the running guard to boot new code. Returns the request's time."""
+    ts = time.time()
+    _write_json_atomic(_reload_path(), {"ts": ts, "pid": os.getpid()})
+    return ts
 
 
 def reload_requested() -> bool:
@@ -230,6 +291,44 @@ def reload_requested() -> bool:
         return _reload_path().is_file()
     except Exception:
         return False
+
+
+def read_reload_request() -> dict | None:
+    """The pending reload request, or None. Never raises.
+
+    A request that cannot be read is still a request, dated 0: older than
+    any server, so it is cleared as satisfied rather than acted on.
+    """
+    path = _reload_path()
+    try:
+        if not path.is_file():
+            return None
+    except Exception:
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8") or "{}")
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    try:
+        data["ts"] = float(data.get("ts") or 0.0)
+    except (TypeError, ValueError):
+        data["ts"] = 0.0
+    return data
+
+
+def _reload_signature() -> tuple[int, int] | None:
+    """Identity of the request on disk (mtime, size), or None if there is none.
+
+    The guard remembers the last one it handled, so a request file it could
+    not delete is handled once -- never a wake-up on every sleep.
+    """
+    try:
+        st = _reload_path().stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
 
 
 def consume_reload_request() -> bool:
@@ -326,7 +425,13 @@ class GuardLog:
                 fh.write(line + "\n")
         except Exception:
             pass
-        print(f"[guard] {level:<5} {event} {fields or ''}", file=sys.stderr, flush=True)
+        # A logger must never raise: under the scheduled task stderr is a
+        # console nobody reads, and a failed write to it would otherwise end
+        # the guard from inside the line meant to explain why.
+        try:
+            print(f"[guard] {level:<5} {event} {fields or ''}", file=sys.stderr, flush=True)
+        except Exception:
+            pass
 
 
 # -- notifier (must not depend on Kazma being alive) ------------------
@@ -717,6 +822,101 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
+def _process_started_at(pid: int) -> float | None:
+    """Unix time *pid* was created, or None when it cannot be read.
+
+    Standard library only. On Windows this needs the right to query the
+    process: the guard has it for the processes it (or an earlier guard of
+    the same task) started; an operator shell usually does not.
+    """
+    if pid <= 0:
+        return None
+    try:
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.OpenProcess.restype = wintypes.HANDLE
+            k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            k32.GetProcessTimes.restype = wintypes.BOOL
+            k32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+            k32.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = k32.OpenProcess(0x1000, False, int(pid))  # QUERY_LIMITED_INFORMATION
+            if not handle:
+                return None
+            try:
+                times = [wintypes.FILETIME() for _ in range(4)]
+                if not k32.GetProcessTimes(handle, *[ctypes.byref(t) for t in times]):
+                    return None
+            finally:
+                k32.CloseHandle(handle)
+            ticks = (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+            return ticks / 1e7 - 11644473600.0
+        stat = Path(f"/proc/{int(pid)}/stat").read_text(encoding="utf-8")
+        start_ticks = int(stat.rsplit(")", 1)[1].split()[19])
+        btime = next(
+            int(line.split()[1])
+            for line in Path("/proc/stat").read_text(encoding="utf-8").splitlines()
+            if line.startswith("btime ")
+        )
+        return btime + start_ticks / os.sysconf("SC_CLK_TCK")
+    except Exception:
+        return None
+
+
+def _read_state() -> dict:
+    try:
+        data = json.loads(_state_path().read_text(encoding="utf-8") or "{}")
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _update_state(**fields: object) -> None:
+    """Merge *fields* into the state file. Never raises."""
+    try:
+        state = _read_state()
+        state.update(fields)
+        _write_json_atomic(_state_path(), state)
+    except Exception:
+        pass
+
+
+def _recorded_child_is_ours(pid: int, data: dict, log: GuardLog) -> bool:
+    """Is the live *pid* still the child a guard recorded, not a reused PID?
+
+    A PID recorded by a guard that died hours ago may belong to anything
+    now, and reaping it is ``taskkill /T /F`` of a whole tree. The recorded
+    creation time settles it when both sides are known; otherwise only a
+    python image is ever reaped -- the rule reap_port_holder already follows.
+    """
+    recorded = data.get("child_created")
+    actual = _process_started_at(pid)
+    if isinstance(recorded, (int, float)) and actual is not None:
+        if abs(actual - float(recorded)) > 2.0:
+            log("warn", "orphan.pid_reused", pid=pid,
+                recorded_created=recorded, actual_created=round(actual, 3),
+                note="the recorded child is gone; this pid is another process")
+            return False
+        return True
+    name = ""
+    try:
+        if os.name == "nt":
+            name = _windows_image_name(pid)
+        else:
+            name = subprocess.run(["ps", "-p", str(pid), "-o", "comm="],
+                                  capture_output=True, text=True, encoding="utf-8",
+                                  errors="replace", timeout=15, check=False).stdout.strip()
+    except Exception:
+        name = ""
+    if not _is_reapable_image(name.lower()):
+        log("warn", "orphan.not_python", pid=pid, name=name or "unknown",
+            note="refusing to kill: the recorded pid is not a python process now")
+        return False
+    return True
+
+
 def reap_orphan(log: GuardLog) -> None:
     """Kill a server left behind by a previous guard, before spawning ours.
 
@@ -733,6 +933,8 @@ def reap_orphan(log: GuardLog) -> None:
     except Exception:
         return
     if not pid or pid == os.getpid() or not _pid_alive(pid):
+        return
+    if not _recorded_child_is_ours(pid, data, log):
         return
     log("warn", "orphan.reaping", pid=pid,
         note="left by a previous guard that was killed without cleanup")
@@ -754,16 +956,12 @@ def reap_orphan(log: GuardLog) -> None:
 
 
 def _record_child(pid: int | None) -> None:
-    """Persist (or clear) the child PID. Never raises."""
-    try:
-        path = _state_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps({"child_pid": pid or 0, "guard_pid": os.getpid()}),
-            encoding="utf-8",
-        )
-    except Exception:
-        pass
+    """Persist (or clear) the child PID, and when it was created. Never raises."""
+    _update_state(
+        child_pid=pid or 0,
+        child_created=_process_started_at(pid) if pid else None,
+        guard_pid=os.getpid(),
+    )
 
 
 def _port_from_url(url: str) -> int:
@@ -1065,7 +1263,11 @@ def clear_stale_port(url: str, log: GuardLog) -> bool:
 
 
 def spawn(cmd: list[str], cwd: Path, log: GuardLog) -> subprocess.Popen:
-    kwargs: dict = {"cwd": str(cwd)}
+    # The server reads the guard's heartbeat from here to notice when it is
+    # left running with no guard (kazma_core.observability.supervisor_watch).
+    env = dict(os.environ)
+    env["KAZMA_GUARD_STATE_FILE"] = str(_state_path())
+    kwargs: dict = {"cwd": str(cwd), "env": env}
     if os.name == "nt":
         # Own process group so the child and ITS children (serve.py spawns
         # uvicorn) can be signalled and killed as a unit.
@@ -1078,11 +1280,54 @@ def spawn(cmd: list[str], cwd: Path, log: GuardLog) -> subprocess.Popen:
     return proc
 
 
-def stop_child(proc: subprocess.Popen, log: GuardLog) -> None:
-    """Terminate the child and everything it spawned. Never raises."""
+def _request_graceful_stop(proc: subprocess.Popen, log: GuardLog) -> bool:
+    """Ask the child to shut itself down. True if the request was delivered.
+
+    Windows: CTRL_BREAK_EVENT to the child's process group (spawn() gives it
+    its own). uvicorn handles it like Ctrl+C in a terminal: stop accepting,
+    drain, run the app's shutdown hooks. The venv's python.exe launcher that
+    fronts the real interpreter ignores console events and exits when its
+    child does. POSIX: SIGTERM to the process group.
+    """
+    # Group 0 is "every process on this console" -- the guard included.
+    if not isinstance(proc.pid, int) or proc.pid <= 0:
+        return False
+    try:
+        if os.name == "nt":
+            os.kill(proc.pid, signal.CTRL_BREAK_EVENT)
+        else:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        return True
+    except Exception as exc:
+        log("warn", "child.graceful_unavailable", pid=proc.pid, error=str(exc)[:200])
+        return False
+
+
+def stop_child(proc: subprocess.Popen, log: GuardLog, *, grace_s: float = 0.0) -> bool:
+    """Stop the child and everything it spawned. Never raises.
+
+    With ``grace_s`` the child is asked to shut down and given that long;
+    whatever still runs afterwards is killed. Returns True when the child
+    shut itself down (so the app announced its own stop), False when it had
+    to be killed.
+    """
     if proc.poll() is not None:
-        return
-    log("info", "child.terminating", pid=proc.pid)
+        _record_child(None)
+        return True
+    log("info", "child.terminating", pid=proc.pid, grace_s=grace_s)
+    if grace_s > 0 and _request_graceful_stop(proc, log):
+        started = time.monotonic()
+        try:
+            proc.wait(timeout=grace_s)
+            log("info", "child.stopped_gracefully", pid=proc.pid,
+                after_s=round(time.monotonic() - started, 1))
+            _record_child(None)
+            return True
+        except subprocess.TimeoutExpired:
+            log("warn", "child.graceful_timeout", pid=proc.pid, grace_s=grace_s,
+                note="did not shut down in time; killing it")
+        except Exception as exc:
+            log("warn", "child.graceful_wait_failed", pid=proc.pid, error=str(exc)[:200])
     try:
         if os.name == "nt":
             # serve.py launches uvicorn as a grandchild; terminate() would
@@ -1093,7 +1338,7 @@ def stop_child(proc: subprocess.Popen, log: GuardLog) -> None:
                 capture_output=True, timeout=20, check=False,
             )
         else:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
     except Exception as exc:
         log("warn", "child.terminate_failed", error=str(exc)[:200])
 
@@ -1106,12 +1351,22 @@ def stop_child(proc: subprocess.Popen, log: GuardLog) -> None:
         except Exception:
             pass
     _record_child(None)
+    return False
 
 
 # -- supervisor -------------------------------------------------------
 
 
 class Guard:
+    # Defaults for the per-child bookkeeping (set properly in __init__ and
+    # run()); class-level so a partially built Guard still behaves.
+    spawned_at = 0.0
+    _reload_seen: tuple[int, int] | None = None
+    _stopped_for_reload = False
+    _last_stop_graceful = False
+    _last_beat = 0.0
+    _internal_errors = 0
+
     def __init__(self, *, once: bool = False) -> None:
         self.log = GuardLog(_default_log_path())
         self.cmd = build_command()
@@ -1137,6 +1392,19 @@ class Guard:
         self._last_page_at = 0.0
         self._awaiting_recovery = ""
         self.page_cooldown_s = PAGE_COOLDOWN_S
+        # Wall-clock time the current child was spawned: a reload request
+        # made before it is already satisfied by it.
+        self.spawned_at = 0.0
+        # The last reload request handled (its on-disk signature), so the
+        # same request can never wake the guard twice.
+        self._reload_seen: tuple[int, int] | None = None
+        # Whether the last deliberate stop let the app shut itself down.
+        self._last_stop_graceful = False
+        # Set when a reload request stopped the child (also mid-boot).
+        self._stopped_for_reload = False
+        self._last_beat = 0.0
+        # Consecutive errors in the guard's own code (backoff between them).
+        self._internal_errors = 0
 
     # -- lifecycle ----------------------------------------------------
 
@@ -1215,6 +1483,12 @@ class Guard:
         last = ""
         next_progress = started + 60.0
         while time.monotonic() < deadline and not self._stop:
+            self._beat()
+            if self._reload_pending() and self._take_reload_request():
+                # New code landed while this child was booting, and it may
+                # already have imported part of the old. Start over rather
+                # than finish a boot of mixed builds.
+                return False
             if self.proc and self.proc.poll() is not None:
                 self.log("error", "child.exited_during_startup",
                          code=self.proc.returncode,
@@ -1263,19 +1537,93 @@ class Guard:
             return False
         return (now - self.recent[0]) <= CRASH_LOOP_WINDOW_S
 
-    def _sleep(self, seconds: float, *, wake_on_child_exit: bool = False) -> None:
-        """Interruptible sleep so shutdown, --reload, and a dead child stay responsive."""
+    def _sleep(
+        self,
+        seconds: float,
+        *,
+        wake_on_child_exit: bool = False,
+        wake_on_reload: bool = False,
+    ) -> bool:
+        """Interruptible sleep so shutdown, --reload, and a dead child stay responsive.
+
+        Wakes early only for what the caller handles: a reload request the
+        guard has not dealt with yet (``wake_on_reload``), a child that
+        exited (``wake_on_child_exit``), or shutdown. Beats the heartbeat.
+        Returns True when it woke early, False when the time ran out.
+        """
         end = time.monotonic() + seconds
-        while time.monotonic() < end and not self._stop:
-            if reload_requested():
-                return
+        while not self._stop:
+            # The clock is read ONCE per pass. The old loop tested it, ran
+            # the checks below, then read it again for the sleep length --
+            # which could come out negative, and time.sleep() raises on that.
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                return False
+            self._beat()
+            if wake_on_reload and self._reload_pending():
+                return True
             if (
                 wake_on_child_exit
                 and self.proc is not None
                 and self.proc.poll() is not None
             ):
-                return
-            time.sleep(min(1.0, end - time.monotonic()))
+                return True
+            time.sleep(min(1.0, remaining))
+        return True
+
+    def _beat(self, *, force: bool = False) -> None:
+        """Record that this guard is alive (see HEARTBEAT_EVERY_S)."""
+        now = time.monotonic()
+        if not force and now - self._last_beat < HEARTBEAT_EVERY_S:
+            return
+        self._last_beat = now
+        _update_state(guard_pid=os.getpid(), heartbeat=time.time())
+
+    def _reload_pending(self) -> bool:
+        """A reload request is on disk that this guard has not handled yet."""
+        sig = _reload_signature()
+        return sig is not None and sig != self._reload_seen
+
+    def _take_reload_request(self) -> bool:
+        """Handle the pending reload request. True if the child was stopped for it.
+
+        A request older than the running child is already satisfied -- the
+        child was spawned after it, from the code it asked for -- so it is
+        cleared, never acted on. A newer one stops the child here, in the
+        guard: the process that owns it and has its rights.
+        """
+        self._reload_seen = _reload_signature()
+        req = read_reload_request()
+        if req is None:
+            return False
+        requested_at = float(req.get("ts") or 0.0)
+        consume_reload_request()
+        age_s = round(max(0.0, time.time() - requested_at), 1) if requested_at else None
+        if requested_at <= self.spawned_at:
+            _update_state(reload_ack=requested_at, reload_action="already_satisfied")
+            self.log("info", "reload.already_satisfied", age_s=age_s,
+                     note="requested before the running server was started")
+            return False
+        _update_state(reload_ack=requested_at, reload_action="restarting")
+        assert self.proc is not None
+        self.log("info", "guard.reload_requested", pid=self.proc.pid, age_s=age_s)
+        self._stopped_for_reload = True
+        self._last_stop_graceful = stop_child(self.proc, self.log, grace_s=GRACEFUL_STOP_S)
+        return True
+
+    def _fresh_reload_request(self) -> bool:
+        """After a child exit: was it stopped for a reload by an older --reload?
+
+        Before 2026-09-26 the CLI killed the child itself and left the
+        request as a "that was not a crash" note. A guard that outlives a
+        pull can still meet one; only a request newer than the child counts.
+        """
+        req = read_reload_request()
+        if req is None:
+            return False
+        consume_reload_request()
+        self._reload_seen = None
+        return float(req.get("ts") or 0.0) > self.spawned_at
 
     # -- main loop ----------------------------------------------------
 
@@ -1316,6 +1664,10 @@ class Guard:
         # orphan is invisible to the probe (nothing bound yet) and both
         # instances race for the port.
         reap_orphan(self.log)
+        # From here on this is the guard --reload, --status and the server
+        # see as alive (the heartbeat; see HEARTBEAT_EVERY_S).
+        _update_state(guard_pid=os.getpid(), guard_started=time.time())
+        self._beat(force=True)
 
         if self._foreign_server_present():
             title = "Kazma guard did not start"
@@ -1331,132 +1683,198 @@ class Guard:
 
         first = True
         while not self._stop:
-            # Maintenance gate. Checked before every spawn so a pause taken
-            # while the guard is mid-backoff is still honoured.
-            if self._await_resume():
-                continue
-            if self._stop:
-                break
-            # A previous instance (or its orphaned grandchild) may still own
-            # the port. Clearing it here costs one netstat; discovering it
-            # after the spawn costs a discarded child and a backoff.
-            clear_stale_port(self.health_url, self.log)
-            # Honesty (2026-09-03): when the clear FAILED the port is still
-            # held, the spawn below cannot bind, and the server answering
-            # requests is the OLD build — the operator's restart silently
-            # did not take effect (live: elevated zombie python survived
-            # three reaps while the guard logged holder_reaped). Page once
-            # per holder pid; the kill needs an elevated shell only the
-            # operator can open.
-            _stale_pid = _port_holder_pid(_port_from_url(self.health_url))
-            if _stale_pid:
-                if _stale_pid != self._last_stale_holder_notified:
-                    self._last_stale_holder_notified = _stale_pid
-                    self.log("error", "guard.port_still_held", pid=_stale_pid,
-                             port=_port_from_url(self.health_url),
-                             note="spawn below cannot bind; old build still serving")
-                    try:
-                        port = _port_from_url(self.health_url)
-                        self._page(
-                            "error",
-                            "Restart did not take effect",
-                            f"pid {_stale_pid} still owns port {port} and is "
-                            "serving the old build — the guard cannot kill it "
-                            "(likely elevated). From an admin terminal: "
-                            f"taskkill /PID {_stale_pid} /F, then restart the guard.",
-                            fingerprint=f"stale:{_stale_pid}",
-                            force=True,
-                        )
-                    except Exception:
-                        self.log("debug", "guard.port_still_held.notify_failed")
-            else:
-                self._last_stale_holder_notified = None
-            spawned_at = time.time()
-            self.proc = spawn(self.cmd, self.cwd, self.log)
+            # The supervisor must outlive its own bugs. Until 2026-09-26 any
+            # exception in this loop ended the process: exit code 1, nothing
+            # in guard.log, the server left running with nobody watching it
+            # (the task sat "Ready" -- Task Scheduler does not restart a task
+            # whose process ran and exited, whatever the code).
+            try:
+                if self.proc is not None and self.proc.poll() is None:
+                    # An error interrupted supervision of a live child: keep
+                    # supervising it. Spawning a second server next to it is
+                    # the one outcome worse than the error.
+                    self.log("warn", "guard.supervision_resumed", pid=self.proc.pid)
+                    reason = self._supervise()
+                else:
+                    # Maintenance gate. Checked before every spawn so a pause
+                    # taken while the guard is mid-backoff is still honoured.
+                    if self._await_resume():
+                        continue
+                    if self._stop:
+                        break
+                    # A previous instance (or its orphaned grandchild) may
+                    # still own the port. Clearing it here costs one netstat;
+                    # discovering it after the spawn costs a discarded child
+                    # and a backoff.
+                    clear_stale_port(self.health_url, self.log)
+                    # Honesty (2026-09-03): when the clear FAILED the port is
+                    # still held, the spawn below cannot bind, and the server
+                    # answering requests is the OLD build — the operator's
+                    # restart silently did not take effect (live: elevated
+                    # zombie python survived three reaps while the guard
+                    # logged holder_reaped). Page once per holder pid; the
+                    # kill needs an elevated shell only the operator can open.
+                    _stale_pid = _port_holder_pid(_port_from_url(self.health_url))
+                    if _stale_pid:
+                        if _stale_pid != self._last_stale_holder_notified:
+                            self._last_stale_holder_notified = _stale_pid
+                            self.log("error", "guard.port_still_held", pid=_stale_pid,
+                                     port=_port_from_url(self.health_url),
+                                     note="spawn below cannot bind; old build still serving")
+                            try:
+                                port = _port_from_url(self.health_url)
+                                self._page(
+                                    "error",
+                                    "Restart did not take effect",
+                                    f"pid {_stale_pid} still owns port {port} and is "
+                                    "serving the old build — the guard cannot kill it "
+                                    "(likely elevated). From an admin terminal: "
+                                    f"taskkill /PID {_stale_pid} /F, then restart the guard.",
+                                    fingerprint=f"stale:{_stale_pid}",
+                                    force=True,
+                                )
+                            except Exception:
+                                self.log("debug", "guard.port_still_held.notify_failed")
+                    else:
+                        self._last_stale_holder_notified = None
+                    spawned_at = time.time()
+                    self.spawned_at = spawned_at
+                    self._stopped_for_reload = False
+                    self.proc = spawn(self.cmd, self.cwd, self.log)
+                    # --reload reads this: a child spawned after its request
+                    # already runs the code it asked for.
+                    _update_state(child_spawned=spawned_at)
 
-            if self._wait_ready(spawned_at):
-                if first:
-                    # Safe to resolve now: the server is already running, so
-                    # a slow vault import costs nothing but a delayed alert.
-                    self.log("info", "guard.notifier",
-                             target=self.notify.describe())
-                # NO notification on a healthy start. Kazma's own
-                # lifecycle_notifier already sends "server starting up",
-                # "server started" and "server restarted (was down ~Ns)"
-                # from inside the app. The guard exists to say the things
-                # the app CANNOT say -- because when they are true, the app
-                # is dead. Announcing a successful start here just doubles
-                # every message in the operator's Telegram.
-                self.log("info", "guard.supervising",
-                         restarts=self.restarts, note="app announces its own start")
-                self.notify_recovered()
-                first = False
-                reason = self._supervise()
-            else:
-                reason = "never became healthy"
-                stop_child(self.proc, self.log)
+                    if self._wait_ready(spawned_at):
+                        if first:
+                            # Safe to resolve now: the server is already
+                            # running, so a slow vault import costs nothing
+                            # but a delayed alert.
+                            self.log("info", "guard.notifier",
+                                     target=self.notify.describe())
+                        # NO notification on a healthy start. Kazma's own
+                        # lifecycle_notifier already sends "server starting
+                        # up", "server started" and "server restarted (was
+                        # down ~Ns)" from inside the app. The guard exists to
+                        # say the things the app CANNOT say -- because when
+                        # they are true, the app is dead. Announcing a
+                        # successful start here just doubles every message in
+                        # the operator's Telegram.
+                        self.log("info", "guard.supervising",
+                                 restarts=self.restarts, note="app announces its own start")
+                        self.notify_recovered()
+                        first = False
+                        self._internal_errors = 0
+                        reason = self._supervise()
+                    elif self._stopped_for_reload:
+                        reason = RELOAD_REASON
+                    else:
+                        reason = "never became healthy"
+                        stop_child(self.proc, self.log, grace_s=NEVER_READY_STOP_S)
 
-            if self._stop:
-                break
-            if self.once:
-                self.log("info", "guard.once_exit", reason=reason)
-                return 1
+                if self._stop:
+                    break
+                if self.once:
+                    self.log("info", "guard.once_exit", reason=reason)
+                    return 1
 
-            if reason == "maintenance":
-                # Not a failure: no restart count, no backoff, no crash-loop
-                # accounting. Treating a deliberate pause as a crash would
-                # push the guard into a 30-minute cooldown the moment the
-                # operator resumed.
-                self.log("info", "guard.paused_by_operator")
-                continue
+                if reason == "maintenance":
+                    # Not a failure: no restart count, no backoff, no
+                    # crash-loop accounting. Treating a deliberate pause as a
+                    # crash would push the guard into a 30-minute cooldown
+                    # the moment the operator resumed.
+                    self.log("info", "guard.paused_by_operator")
+                    continue
 
-            if consume_reload_request():
-                # Operator --reload killed this child on purpose. Spawn the
-                # new process immediately; do not climb the crash ladder and
-                # do not page Telegram as if Kazma died.
-                self.log("info", "guard.operator_reload", reason=reason)
-                # Informational notice (2026-09-03): operator reloads had
-                # become the ONLY silent restart path — every restart since
-                # Sep 2 was a --reload, so the operator's usual
-                # "stopped/restarting" Telegram alerts vanished entirely.
-                # Quiet tone: deliberate maintenance, not a crash.
-                try:
+                if reason == RELOAD_REASON or self._fresh_reload_request():
+                    # An operator reload stopped this child on purpose. Spawn
+                    # the new process immediately; do not climb the crash
+                    # ladder and do not page Telegram as if Kazma died.
+                    graceful = reason == RELOAD_REASON and self._last_stop_graceful
+                    self.log("info", "guard.operator_reload", reason=reason,
+                             graceful=graceful)
+                    # Informational notice (2026-09-03): a reload used to be a
+                    # hard kill, the ONLY silent restart path -- the app never
+                    # got to say it was stopping. A graceful stop runs the
+                    # app's own shutdown notice, so the guard speaks only
+                    # when the app could not.
+                    if not graceful:
+                        try:
+                            self._page(
+                                "info",
+                                "Kazma is restarting for an operator reload.",
+                                "Back in a moment — no action needed.",
+                                fingerprint="reload",
+                            )
+                        except Exception:
+                            self.log("debug", "guard.operator_reload.notify_failed")
+                    continue
+
+                self.restarts += 1
+                if self._crash_looping():
+                    self.log("error", "guard.crash_loop", restarts=self.restarts,
+                             window_s=CRASH_LOOP_WINDOW_S)
                     self._page(
-                        "info",
-                        "Kazma is restarting for an operator reload.",
-                        "Back in a moment — no action needed.",
-                        fingerprint="reload",
+                        "critical",
+                        f"Kazma is crash-looping ({CRASH_LOOP_COUNT} restarts in "
+                        f"{CRASH_LOOP_WINDOW_S // 60} min)",
+                        f"Last reason: {reason}. Pausing "
+                        f"{CRASH_LOOP_COOLDOWN_S // 60} min — this needs a human.",
+                        force=True,
                     )
-                except Exception:
-                    self.log("debug", "guard.operator_reload.notify_failed")
-                continue
+                    self.recent.clear()
+                    # An operator reload ends the cooldown: it is someone
+                    # acting on exactly this page.
+                    self._sleep(CRASH_LOOP_COOLDOWN_S, wake_on_reload=True)
+                    continue
 
-            self.restarts += 1
-            if self._crash_looping():
-                self.log("error", "guard.crash_loop", restarts=self.restarts,
-                         window_s=CRASH_LOOP_WINDOW_S)
-                self._page(
-                    "critical",
-                    f"Kazma is crash-looping ({CRASH_LOOP_COUNT} restarts in "
-                    f"{CRASH_LOOP_WINDOW_S // 60} min)",
-                    f"Last reason: {reason}. Pausing "
-                    f"{CRASH_LOOP_COOLDOWN_S // 60} min — this needs a human.",
-                    force=True,
-                )
-                self.recent.clear()
-                self._sleep(CRASH_LOOP_COOLDOWN_S)
-                continue
-
-            delay = self._backoff()
-            self.log("warn", "guard.restarting", reason=reason, in_s=delay,
-                     restarts=self.restarts)
-            self.notify_restart(reason, delay)
-            self._sleep(delay)
+                delay = self._backoff()
+                self.log("warn", "guard.restarting", reason=reason, in_s=delay,
+                         restarts=self.restarts)
+                self.notify_restart(reason, delay)
+                self._sleep(delay, wake_on_reload=True)
+            except Exception as exc:  # noqa: BLE001 -- see the comment above the try
+                self._internal_error(exc)
 
         if self.proc:
-            stop_child(self.proc, self.log)
+            stop_child(self.proc, self.log, grace_s=GRACEFUL_STOP_S)
         self.log("info", "guard.stopped")
         return 0
+
+    def _internal_error(self, exc: BaseException) -> None:
+        """An error in the guard's own code: log it whole, page once, go on."""
+        import traceback
+
+        self._internal_errors += 1
+        frames = traceback.extract_tb(exc.__traceback__) if exc.__traceback__ else []
+        where = frames[-1] if frames else None
+        self.log(
+            "error", "guard.internal_error",
+            error=f"{type(exc).__name__}: {exc}"[:300],
+            where=f"{Path(where.filename).name}:{where.lineno} in {where.name}" if where else "",
+            streak=self._internal_errors,
+            traceback="".join(
+                traceback.format_exception(type(exc), exc, exc.__traceback__)
+            )[-3000:],
+        )
+        try:
+            self._page(
+                "error",
+                "Kazma's guard hit an error in its own code",
+                f"{type(exc).__name__}: {exc}. It keeps supervising; "
+                "guard.log has the traceback (guard.internal_error).",
+                fingerprint=(
+                    f"internal:{type(exc).__name__}:"
+                    f"{where.name if where else '?'}:{where.lineno if where else 0}"
+                ),
+            )
+        except Exception:
+            pass
+        delay = float(BACKOFF_LADDER_S[min(self._internal_errors, len(BACKOFF_LADDER_S)) - 1])
+        try:
+            self._sleep(delay, wake_on_reload=True)
+        except Exception:
+            time.sleep(delay)
 
     def _await_resume(self) -> bool:
         """Block while a maintenance pause is active. True if we waited.
@@ -1517,8 +1935,14 @@ class Guard:
         """Watch a healthy child. Returns the reason it needs restarting."""
         consecutive = 0
         unrunnable = 0
+        next_probe = time.monotonic() + PROBE_INTERVAL_S
         while not self._stop:
-            self._sleep(PROBE_INTERVAL_S, wake_on_child_exit=True)
+            # Probes keep their cadence whatever wakes the sleep: a wake-up
+            # handled below is not a probe tick. A reload flag that woke
+            # every sleep made this a busy loop of 53 probes a second for
+            # 47 hours (2026-09-20..22).
+            woke_early = self._sleep(max(0.0, next_probe - time.monotonic()),
+                                     wake_on_child_exit=True, wake_on_reload=True)
             if self._stop:
                 return "guard shutting down"
 
@@ -1527,12 +1951,21 @@ class Guard:
                 # happens against a stopped Kazma, not a moving target.
                 self.log("info", "maintenance.requested_while_running")
                 if self.proc:
-                    stop_child(self.proc, self.log)
+                    stop_child(self.proc, self.log, grace_s=GRACEFUL_STOP_S)
                 return "maintenance"
 
             assert self.proc is not None
             if self.proc.poll() is not None:
                 return f"process exited (code {self.proc.returncode})"
+
+            if self._reload_pending():
+                if self._take_reload_request():
+                    return RELOAD_REASON
+                continue
+
+            if woke_early and time.monotonic() < next_probe:
+                continue
+            next_probe = time.monotonic() + PROBE_INTERVAL_S
 
             ok, detail = probe(self.health_url, PROBE_TIMEOUT_S)
             if ok:
@@ -1570,7 +2003,7 @@ class Guard:
                      consecutive=consecutive, threshold=FAILURES_TO_KILL)
             if consecutive >= FAILURES_TO_KILL:
                 # Alive but not healthy -- the case no OS supervisor catches.
-                stop_child(self.proc, self.log)
+                stop_child(self.proc, self.log, grace_s=UNHEALTHY_STOP_S)
                 return f"unhealthy ({detail})"
         return "guard shutting down"
 
@@ -1594,11 +2027,21 @@ def _cmd_status() -> int:
     print(f"server      : {'healthy' if ok else 'not answering'} ({detail})")
     if holder:
         print(f"  port {_port_from_url(DEFAULT_HEALTH_URL)}  : held by pid {holder}")
-    try:
-        state = json.loads(_state_path().read_text(encoding="utf-8"))
-        print(f"guard child : pid {state.get('child_pid')}")
-    except Exception:
-        print("guard child : unknown")
+    state = _read_state()
+    alive = _guard_alive()
+    beat = state.get("heartbeat")
+    seen = (
+        f", heartbeat {int(time.time() - float(beat))}s ago"
+        if isinstance(beat, (int, float)) else ""
+    )
+    # "supervision: active" only ever meant "not paused". On 2026-09-26 it
+    # said so for 20 minutes while no guard was running at all.
+    print(f"guard       : {'running' if alive else 'NOT RUNNING'} "
+          f"(pid {state.get('guard_pid') or '?'}{seen})")
+    if not alive:
+        print("  Kazma is not supervised: a crash will not be restarted.")
+        print("  Start it:  schtasks /Run /TN KazmaAgent   (or run --reload)")
+    print(f"guard child : pid {state.get('child_pid') if state else 'unknown'}")
     return 0
 
 
@@ -1651,26 +2094,51 @@ def _cmd_resume() -> int:
     return 0
 
 
-def _stop_recorded_child(log: GuardLog) -> int:
-    """Kill the guard's recorded child tree. Returns the pid stopped, or 0."""
+def _stop_recorded_child(log: GuardLog, *, spawned_before: float | None = None) -> int:
+    """Kill the guard's recorded child tree. Returns the pid stopped, or 0.
+
+    The fallback for a guard too old to stop its own child (_cmd_reload).
+    ``spawned_before`` leaves alone a child the guard spawned after that
+    time: it already runs the code the reload asked for. Honest about
+    failure -- taskkill's "Access is denied" used to be logged as
+    reload.child_stopped (live, 2026-09-26).
+    """
+    state = _read_state()
     try:
-        state = json.loads(_state_path().read_text(encoding="utf-8"))
         pid = int(state.get("child_pid") or 0)
-    except Exception:
+    except (TypeError, ValueError):
         pid = 0
-    if pid and _pid_alive(pid):
-        try:
-            if os.name == "nt":
-                subprocess.run(
-                    ["taskkill", "/PID", str(pid), "/T", "/F"],
-                    capture_output=True, timeout=30, check=False,
-                )
-            else:
-                os.killpg(os.getpgid(pid), signal.SIGTERM)
+    spawned = state.get("child_spawned")
+    if (
+        spawned_before is not None
+        and isinstance(spawned, (int, float))
+        and float(spawned) > spawned_before
+    ):
+        return 0
+    if not pid or not _pid_alive(pid):
+        return 0
+    note = ""
+    try:
+        if os.name == "nt":
+            kill = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=30, check=False,
+            )
+            if kill.returncode != 0:
+                lines = (kill.stderr or kill.stdout or "").strip().splitlines()
+                note = lines[-1][:160] if lines else f"exit {kill.returncode}"
+        else:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+    except Exception as exc:
+        note = str(exc)[:200]
+    for _ in range(20):
+        if not _pid_alive(pid):
             log("info", "reload.child_stopped", pid=pid)
             return pid
-        except Exception as exc:
-            log("error", "reload.child_stop_failed", pid=pid, error=str(exc)[:200])
+        time.sleep(0.5)
+    log("error", "reload.child_stop_failed", pid=pid,
+        error=note or "still alive after the kill")
     return 0
 
 
@@ -1689,97 +2157,226 @@ def _live_commit(health_url: str) -> str:
         return ""
 
 
-def _cmd_reload() -> int:
-    """Operator deploy: stop the running server so the supervisor boots new code.
+def _activity(health_url: str) -> dict | None:
+    """The server's /health/activity answer, or None when it cannot give one.
 
-    Killing python / uvicorn by hand fights the guard: it either respawns the
-    OLD process that still holds the port, or refuses to start because a
-    squatter is healthy. This command is the one path that (1) lifts a
-    leftover pause, (2) kills the recorded child AND the port holder, and
-    (3) waits until /health/live reports a new boot.
+    None covers a build from before the route existed (404) and a server
+    that is down; the caller decides what not knowing means.
     """
-    log = GuardLog(_default_log_path())
-    health = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
-    before = _live_commit(health)
-    if clear_pause():
-        print("Cleared leftover pause so the supervisor can respawn.")
-        log("info", "reload.cleared_pause")
-    # Must land BEFORE the kill: the running guard treats a dead child as a
-    # crash unless this flag is sitting there when it notices.
-    request_reload()
-    log("info", "reload.requested")
-    stopped = _stop_recorded_child(log)
-    if stopped:
-        print(f"Stopped recorded server pid {stopped}.")
-    else:
-        print("No recorded child; clearing whoever holds the port.")
-    reap_port_holder(health, log)
+    base = health_url.rstrip("/").rsplit("/", 1)[0]
+    url = base + "/activity" if base.endswith("/health") else "http://127.0.0.1:9090/health/activity"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "{}")
+        return data if isinstance(data, dict) else None
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
 
-    # Wait until the old process is actually gone (port free / health down).
-    deadline = time.monotonic() + 45.0
-    while time.monotonic() < deadline:
-        ok, _ = probe(health, 3.0)
-        if not ok:
-            break
+
+def _wait_until_idle(health_url: str, max_wait_s: float, log: GuardLog, *,
+                     poll_s: float = 5.0) -> bool:
+    """Wait until no turn is running (two quiet polls in a row).
+
+    True when idle -- or when this build cannot say, which is reported and
+    then treated as idle, since the operator asked for the reload. False
+    when still busy at the deadline: the reload does not happen.
+    """
+    deadline = time.monotonic() + max_wait_s
+    quiet = 0
+    told = False
+    while True:
+        act = _activity(health_url)
+        if act is None:
+            print("This build cannot report activity (no /health/activity); "
+                  "reloading without waiting.")
+            log("warn", "reload.idle_unknown")
+            return True
+        running = int(act.get("active_turns") or 0)
+        if running == 0:
+            quiet += 1
+            if quiet >= 2:
+                return True
+        else:
+            quiet = 0
+            if not told:
+                print(f"Waiting for {running} running turn(s) to finish before reloading…")
+                log("info", "reload.waiting_for_idle", running=running)
+                told = True
+        if time.monotonic() >= deadline:
+            print(f"Still busy after {max_wait_s:.0f}s ({running} turn(s) running); not reloading.")
+            log("warn", "reload.busy_gave_up", running=running)
+            return False
+        time.sleep(poll_s)
+
+
+def _wait_for_reload_ack(requested_at: float, timeout_s: float) -> bool:
+    """Did a guard take the request made at *requested_at*?
+
+    Taken = the guard recorded it (reload_ack), or spawned a child after it
+    (a guard waking from a backoff or a pause, or a fresh guard started by
+    the task, satisfies it with that spawn).
+    """
+    deadline = time.monotonic() + timeout_s
+    while True:
+        state = _read_state()
+        ack = state.get("reload_ack")
+        if isinstance(ack, (int, float)) and abs(float(ack) - requested_at) < 1e-6:
+            return True
+        spawned = state.get("child_spawned")
+        if isinstance(spawned, (int, float)) and float(spawned) > requested_at:
+            return True
+        if time.monotonic() >= deadline:
+            return False
         time.sleep(0.5)
-    else:
-        print("WARNING: something is still answering /health/ready after kill.")
-        print("  python scripts/service/kazma_guard.py --status")
-        return 1
 
-    print("Waiting for the running guard to respawn serve.py…")
+
+def _old_server_serving(health_url: str, requested_at: float) -> bool:
+    """A server that booted before the request is still answering."""
+    boot = server_started_at(health_url, 5.0)
+    return boot is not None and boot <= requested_at
+
+
+def _wait_for_new_boot(health_url: str, requested_at: float, before: str,
+                       log: GuardLog) -> int:
+    """Wait until a server that booted AFTER the request answers ready."""
+    print("Waiting for Kazma to come back on the new code…")
     print(
         f"(Typical bind is under 2 minutes; budget {int(START_TIMEOUT_S)}s. "
         "Do not Ctrl+C unless you intend to abort.)"
     )
-    kicked = False
-    started_wait = time.monotonic()
-    boot_deadline = started_wait + START_TIMEOUT_S
-    next_progress = started_wait + 30.0
-    while time.monotonic() < boot_deadline:
-        ok, detail = probe(health, 5.0)
-        if ok:
-            after = _live_commit(health)
-            print(f"Kazma is up. build {after or '?'} (was {before or '?'})")
-            if before and after and before == after:
-                print(
-                    "NOTE: commit hash unchanged — the process restarted but "
-                    "git HEAD is the same. Code edits still need this reload."
-                )
-            log("info", "reload.ready", commit=after, previous=before)
-            return 0
+    started = time.monotonic()
+    deadline = started + START_TIMEOUT_S + GRACEFUL_STOP_S
+    next_progress = started + 30.0
+    while time.monotonic() < deadline:
+        boot = server_started_at(health_url, 5.0)
+        if boot is not None and boot > requested_at:
+            ok, _detail = probe(health_url, 5.0)
+            if ok:
+                after = _live_commit(health_url)
+                print(f"Kazma is up. build {after or '?'} (was {before or '?'})")
+                if before and after and before == after:
+                    print(
+                        "NOTE: commit hash unchanged — the process restarted but "
+                        "git HEAD is the same. Code edits still need this reload."
+                    )
+                log("info", "reload.ready", commit=after, previous=before)
+                return 0
         now = time.monotonic()
-        # If the watcher PID is gone, taskkill /T took it with the child.
-        # Kick KazmaAgent once. Do NOT kick while a live guard is still
-        # booting — cold start is minutes, and a second guard fights for 9090.
-        if not kicked and now - started_wait >= 45.0 and not _guard_pid_alive():
-            kicked = True
-            if _kick_os_supervisor(log):
-                print("Watcher process was gone; kicked the KazmaAgent scheduled task.")
         if now >= next_progress:
-            print(
-                f"  still starting… {int(now - started_wait)}s "
-                f"(last: {detail})"
-            )
+            if boot is None:
+                where = "not answering yet"
+            elif boot <= requested_at:
+                where = "old server still shutting down"
+            else:
+                where = "new server booting"
+            print(f"  still restarting… {int(now - started)}s ({where})")
             next_progress += 30.0
         time.sleep(2.0)
 
-    print("Server did not become ready within the start budget.")
-    print("  python scripts/service/install_service.py --status")
+    print("Server did not come back within the start budget.")
     print("  python scripts/service/kazma_guard.py --status")
-    print("  python scripts/service/kazma_guard.py --install")
+    print("  python scripts/service/install_service.py --status")
     print("  python scripts/service/kazma_guard.py          # start supervision in this terminal")
+    log("error", "reload.not_ready")
     return 2
 
 
-def _guard_pid_alive() -> bool:
-    """True if the last recorded kazma_guard process is still running."""
+def _cmd_reload(*, when_idle: bool = False, idle_timeout_s: float = 900.0) -> int:
+    """Operator deploy: have the supervisor boot the code on disk.
+
+    The RUNNING GUARD does the stop. It owns the child and runs with the
+    child's rights; this shell may not have them. Killing the child from
+    here failed with "Access is denied" whenever the guard ran elevated --
+    the KazmaAgent task does -- and left the old build serving while the
+    request this command had written sent the guard into a probe storm
+    (2026-09-03, 2026-09-20..22, 2026-09-26). So this command:
+
+      1. with --when-idle, waits until no chat turn is running;
+      2. lifts a leftover pause and writes the reload request;
+      3. starts the KazmaAgent task if no guard is alive (the new guard
+         clears the old server with its own rights);
+      4. waits for a guard to take the request -- and only if none does
+         (a guard from before this change), stops the server from here;
+      5. waits until a server that booted AFTER the request answers ready.
+
+    A request no guard will act on is never left behind.
+    """
+    log = GuardLog(_default_log_path())
+    health = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
+    # --when-idle: a reload mid-turn drops the reply in flight (and on
+    # 2026-09-24 a restart discarded a finished answer held only in memory).
+    if when_idle and not _wait_until_idle(health, idle_timeout_s, log):
+        return 3
+    before = _live_commit(health)
+    if clear_pause():
+        print("Cleared leftover pause so the supervisor can respawn.")
+        log("info", "reload.cleared_pause")
+    requested_at = request_reload()
+    log("info", "reload.requested")
+
+    ack_wait = GUARD_ACK_S
+    if _guard_alive():
+        print("Asked the running guard to restart Kazma; it stops the server itself.")
+    else:
+        print("No guard is running for this install. Starting the KazmaAgent task: "
+              "its guard clears the old server and starts the new code.")
+        log("warn", "reload.no_guard")
+        if _kick_os_supervisor(log):
+            # A fresh guard reaps the old server and spawns before it acks.
+            ack_wait = max(GUARD_ACK_S, 90.0)
+
+    if not _wait_for_reload_ack(requested_at, ack_wait):
+        # Nobody took the request: a guard from before guard-side reloads
+        # (it only notices a child that died), or no guard at all. Stop the
+        # OLD server from here, the way this command used to -- it works
+        # when this shell has the rights the server runs with. A server
+        # that booted after the request is never touched.
+        print("No guard took the request; stopping the old server from here.")
+        log("warn", "reload.no_ack", waited_s=ack_wait)
+        stopped = _stop_recorded_child(log, spawned_before=requested_at)
+        if stopped:
+            print(f"Stopped recorded server pid {stopped}.")
+        if _old_server_serving(health, requested_at):
+            reap_port_holder(health, log)
+        deadline = time.monotonic() + 45.0
+        while time.monotonic() < deadline and _old_server_serving(health, requested_at):
+            time.sleep(0.5)
+        if _old_server_serving(health, requested_at):
+            # Never leave a request no guard will act on: a guard from
+            # before this change wakes on it every second, forever.
+            consume_reload_request()
+            print("Could not stop the running server: it runs with more rights "
+                  "than this shell (the KazmaAgent task runs elevated).")
+            print("  Run this command from an elevated terminal, or restart the "
+                  "KazmaAgent task once from one -- guards from now on restart "
+                  "Kazma themselves.")
+            log("error", "reload.not_applied",
+                note="old server still serving; request withdrawn")
+            return 1
+    return _wait_for_new_boot(health, requested_at, before, log)
+
+
+def _guard_alive() -> bool:
+    """Is a guard running for this install?
+
+    Read from the heartbeat the guard writes into its state file: the guard
+    runs elevated in the task's own logon session, and an operator shell
+    cannot open its process to ask. A state file written by a guard from
+    before the heartbeat falls back to "is that pid a python process".
+    """
+    state = _read_state()
+    beat = state.get("heartbeat")
+    if isinstance(beat, (int, float)):
+        return (time.time() - float(beat)) < GUARD_STALE_S
     try:
-        data = json.loads(_state_path().read_text(encoding="utf-8") or "{}")
-        gpid = int(data.get("guard_pid") or 0)
-    except Exception:
+        gpid = int(state.get("guard_pid") or 0)
+    except (TypeError, ValueError):
         return False
-    return bool(gpid) and _pid_alive(gpid)
+    if not gpid or gpid == os.getpid() or not _pid_alive(gpid):
+        return False
+    if os.name == "nt":
+        return _is_reapable_image(_windows_image_name(gpid).lower())
+    return True
 
 
 def _kick_os_supervisor(log: GuardLog) -> bool:
@@ -1836,7 +2433,11 @@ def main() -> int:
     ap.add_argument("--status", action="store_true",
                     help="show whether supervision is active or paused")
     ap.add_argument("--reload", action="store_true",
-                    help="stop the running server so the supervisor boots new code")
+                    help="have the supervisor boot new code (the guard stops the server)")
+    ap.add_argument("--when-idle", action="store_true",
+                    help="with --reload: first wait until no chat turn is running")
+    ap.add_argument("--idle-timeout", type=float, default=900.0,
+                    help="with --when-idle: seconds to wait before giving up (default 900)")
     ap.add_argument("--install", action="store_true",
                     help="install the OS supervisor (runs install_service.py --install)")
     ap.add_argument("--stop", action="store_true",
@@ -1852,7 +2453,7 @@ def main() -> int:
     if args.install:
         return _cmd_install()
     if args.reload:
-        return _cmd_reload()
+        return _cmd_reload(when_idle=args.when_idle, idle_timeout_s=args.idle_timeout)
     if args.pause:
         return _cmd_pause(args.reason, args.ttl, stop_now=args.stop)
     if args.resume:
@@ -1878,7 +2479,63 @@ def main() -> int:
             "notifier": guard.notify.describe(),
         }, indent=2))
         return 0
-    return guard.run()
+    return _run_supervisor(guard)
+
+
+#: Held open for the life of the process (faulthandler writes into it).
+_FAULT_FILE = None
+
+
+def _enable_fault_log() -> None:
+    """Send a native crash's stack to guard.fault.log, next to guard.log."""
+    global _FAULT_FILE
+    try:
+        import faulthandler
+
+        _FAULT_FILE = _default_log_path().with_name("guard.fault.log").open(
+            "a", encoding="utf-8"
+        )
+        faulthandler.enable(file=_FAULT_FILE, all_threads=True)
+    except Exception:
+        _FAULT_FILE = None
+
+
+def _run_supervisor(guard: Guard) -> int:
+    """Run the supervisor so that its own death is never silent.
+
+    The KazmaAgent task gives the guard a console nobody reads: a Python
+    exception or a native crash used to end it with no trace but a task
+    result of 1 (live 2026-09-26, and at least twice before). Exceptions are
+    logged whole into guard.log and paged; native crashes are written to
+    guard.fault.log by faulthandler.
+    """
+    _enable_fault_log()
+    try:
+        return guard.run()
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as exc:
+        import traceback
+
+        guard.log(
+            "critical", "guard.crashed",
+            error=f"{type(exc).__name__}: {exc}"[:300],
+            traceback="".join(
+                traceback.format_exception(type(exc), exc, exc.__traceback__)
+            )[-4000:],
+        )
+        try:
+            guard._page(
+                "critical",
+                "Kazma's guard crashed",
+                f"{type(exc).__name__}: {exc}. Kazma keeps running WITHOUT "
+                "supervision until the guard is started again: "
+                "schtasks /Run /TN KazmaAgent.",
+                force=True,
+            )
+        except Exception:
+            pass
+        raise
 
 
 if __name__ == "__main__":

@@ -80,7 +80,7 @@ def _supervise_with(monkeypatch, tmp_path, details):
     pages, kills = [], []
     g._page = lambda *a, **k: pages.append(a[1] if len(a) > 1 else k.get("title"))
     monkeypatch.setattr(guard, "read_pause", lambda: None)
-    monkeypatch.setattr(guard, "stop_child", lambda proc, log: kills.append(proc))
+    monkeypatch.setattr(guard, "stop_child", lambda proc, log, **_k: kills.append(proc))
     monkeypatch.setattr(guard, "maybe_log_tcp_snapshot", lambda log, detail, **k: False)
     script = list(details)
 

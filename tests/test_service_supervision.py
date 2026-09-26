@@ -875,7 +875,7 @@ def test_operator_reload_page_starts_with_guard_and_omits_exit_code():
     src = inspect.getsource(guard.Guard.run)
     assert "Kazma is restarting for an operator reload" in src
     assert "operator reload:" not in src
-    assert "process exited" not in src[src.index("consume_reload_request") :]
+    assert "process exited" not in src[src.index("guard.operator_reload") :]
 
 
 def test_different_unhealthy_detail_pages_again(tmp_path):

@@ -1,5 +1,47 @@
 # CHANGELOG
 
+## The guard restarts Kazma itself, and can no longer die unnoticed (2026-09-26)
+
+A deploy that should have taken a minute found three problems.
+
+**A reload from a normal terminal could not stop the server.** Kazma's
+guard runs from the KazmaAgent task, elevated. `kazma_guard.py --reload`
+tried to stop the server from the terminal it was typed in, got "Access is
+denied", and the old build kept serving.
+
+**The failed reload left a file behind that made the guard hammer the
+server.** From 2026-09-20 to 09-22 the same leftover made the guard check the
+server's health 53 times a second, for 47 hours: 3.8 million checks.
+
+**The guard itself had died.** Twenty minutes before the reload it exited
+without writing a word. Windows does not restart a task whose process ran and
+exited, so Kazma kept running with nobody watching it. Had it crashed,
+nothing would have brought it back. This had happened at least twice before.
+
+What changed:
+
+- **The guard now does the restart.** `--reload` asks; the running guard,
+  which has the rights, stops the server and starts the new code within a
+  second. No elevated terminal is ever needed. With no guard running,
+  `--reload` starts the KazmaAgent task, and the new guard clears the old
+  server itself.
+- **Restarts are graceful.** The server is asked to shut down first (the
+  same as Ctrl+C) and given up to a minute, so it finishes its shutdown work
+  and announces its own restart. It is killed only if it does not stop.
+- **`--reload --when-idle`** waits until no chat turn is running, and gives
+  up rather than interrupt one.
+- **A request is acted on once.** A leftover one is recognised as already
+  done, and health checks keep their 30-second pace whatever wakes the guard.
+- **The guard cannot die silently.** An error in its own code is written to
+  guard.log with the full traceback, sent to Telegram, and supervision goes
+  on. A crash of the guard is written down before it exits.
+- **`--status` says whether a guard is actually running**, from a heartbeat
+  the guard writes every 10 seconds. It used to say "active" with no guard at
+  all.
+- **The KazmaAgent task restarts a dead guard** within 5 minutes. An existing
+  task gets this when it is re-registered from an elevated terminal:
+  `python scripts\service\install_service.py --install`.
+
 ## python_exec can use the standard library again (2026-09-26)
 
 One date calculation took three approvals: each run of `python_exec` died

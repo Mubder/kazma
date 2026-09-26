@@ -22,6 +22,12 @@ each of the specific ways that broke the guard in production:
     FAKE_PORT             port to bind (default 9099)
     FAKE_MARKER           file to append one line to per generation, so a
                           test can count how many times it was restarted
+    FAKE_COUNT_PROBES     also append one "probe" line per /health/ready
+    FAKE_IGNORE_STOP      ignore the graceful stop request (SIGBREAK on
+                          Windows, SIGTERM elsewhere), so only a kill works
+
+A graceful stop request is otherwise honoured the way uvicorn honours it:
+the process notes "graceful_exit" and exits 0.
 
 Nothing here imports Kazma. The point is to exercise the supervisor, not
 the agent.
@@ -47,6 +53,8 @@ HANG_AFTER_S = float(os.environ.get("FAKE_HANG_AFTER_S", "0"))
 NEVER_READY = os.environ.get("FAKE_NEVER_READY", "").lower() in ("1", "true", "yes")
 PORT = int(os.environ.get("FAKE_PORT", "9099"))
 MARKER = os.environ.get("FAKE_MARKER", "")
+COUNT_PROBES = os.environ.get("FAKE_COUNT_PROBES", "").lower() in ("1", "true", "yes")
+IGNORE_STOP = os.environ.get("FAKE_IGNORE_STOP", "").lower() in ("1", "true", "yes")
 
 _state = {"hung": False, "not_ready": False, "degraded": False}
 
@@ -81,6 +89,8 @@ class Handler(BaseHTTPRequestHandler):
                 "build": {"started_at": STARTED_AT, "commit": "fake"},
             }
         elif self.path.startswith("/health/ready"):
+            if COUNT_PROBES:
+                _note("probe")
             if _state["not_ready"]:
                 # Critical dependency gone: the app itself says stop
                 # routing traffic. This is the only shape that should
@@ -129,7 +139,25 @@ def _timer(delay: float, fn) -> None:
     t.start()
 
 
+def _install_stop_handler() -> None:
+    """Honour the supervisor's graceful stop request like uvicorn does."""
+    import signal
+
+    def _graceful(_signum, _frame):
+        _note("graceful_exit")
+        os._exit(0)
+
+    def _ignored(_signum, _frame):
+        _note("stop_ignored")
+
+    handler = _ignored if IGNORE_STOP else _graceful
+    sig = getattr(signal, "SIGBREAK", None) if os.name == "nt" else signal.SIGTERM
+    if sig is not None:
+        signal.signal(sig, handler)
+
+
 def main() -> int:
+    _install_stop_handler()
     _note("spawned")
 
     if NEVER_READY:

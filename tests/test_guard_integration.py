@@ -57,6 +57,7 @@ class GuardRun:
             "KAZMA_GUARD_LOG": str(self.log),
             "KAZMA_GUARD_STATE": str(tmp / "state.json"),
             "KAZMA_GUARD_PAUSE_FILE": str(tmp / "paused"),
+            "KAZMA_GUARD_RELOAD_FILE": str(tmp / "guard.reload"),
             "KAZMA_GUARD_START_TIMEOUT": fake_env.pop("START_TIMEOUT", "25"),
             "KAZMA_GUARD_INTERVAL": fake_env.pop("INTERVAL", "2"),
             "KAZMA_GUARD_PROBE_TIMEOUT": "3",
@@ -263,3 +264,89 @@ def test_pause_is_not_counted_as_a_crash(tmp_path):
         g.wait_for("guard.paused_by_operator", timeout=60)
         restarting = [e for e in g.events() if e.get("event") == "guard.restarting"]
         assert not restarting, "maintenance must not enter the restart/backoff path"
+
+
+# ── operator reload: the guard does the stop ──────────────────────────
+
+
+def _reload_cli(g: GuardRun, timeout: float = 150.0) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(GUARD), "--reload"],
+        env=dict(g.env), cwd=str(g.tmp), capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=timeout, check=False,
+    )
+
+
+def _probe_count(g: GuardRun) -> int:
+    return sum(1 for x in g.generations() if x["event"] == "probe")
+
+
+def test_a_reload_is_carried_out_by_the_guard_and_is_graceful(tmp_path):
+    """The guard stops its own child -- an operator shell may lack the rights
+    (the KazmaAgent task runs elevated; live 2026-09-26 "Access is denied"
+    and the old build kept serving) -- and asks it to shut down instead of
+    killing it, so the app's shutdown hooks run."""
+    port = _free_port()
+    with GuardRun(tmp_path, port) as g:
+        g.wait_for("child.ready", timeout=60)
+        done = _reload_cli(g)
+        assert done.returncode == 0, done.stdout + done.stderr
+        ev = g.wait_for("guard.operator_reload", timeout=30)
+        assert ev.get("graceful") is True, g.event_names()
+        names = g.event_names()
+        assert "guard.reload_requested" in names
+        assert "child.stopped_gracefully" in names
+        # The shell never had to stop anything itself.
+        assert "reload.child_stopped" not in names
+        assert "port.reaping_holder" not in names
+        gens = [x["event"] for x in g.generations()]
+        assert gens.count("graceful_exit") == 1, gens
+        assert gens.count("spawned") == 2, gens
+        assert not (tmp_path / "guard.reload").exists()
+
+
+def test_a_server_that_ignores_the_stop_request_is_killed_after_the_grace(tmp_path):
+    port = _free_port()
+    with GuardRun(tmp_path, port, FAKE_IGNORE_STOP="1",
+                  KAZMA_GUARD_GRACEFUL_STOP_S="3") as g:
+        g.wait_for("child.ready", timeout=60)
+        done = _reload_cli(g)
+        assert done.returncode == 0, done.stdout + done.stderr
+        ev = g.wait_for("guard.operator_reload", timeout=30)
+        assert ev.get("graceful") is False
+        assert "child.graceful_timeout" in g.event_names()
+        # Instrument check: the request did reach the server.
+        assert "stop_ignored" in [x["event"] for x in g.generations()]
+
+
+def test_a_leftover_reload_request_does_not_make_the_guard_probe_nonstop(tmp_path):
+    """A request older than the running server is satisfied, not a reason to
+    wake. A leftover one made the guard probe 53 times a second for 47 hours
+    (2026-09-20..22)."""
+    port = _free_port()
+    leftover = tmp_path / "guard.reload"
+    leftover.write_text(json.dumps({"ts": time.time() - 3600}), encoding="utf-8")
+    with GuardRun(tmp_path, port, FAKE_COUNT_PROBES="1", INTERVAL="2") as g:
+        g.wait_for("child.ready", timeout=60)
+        g.wait_for("reload.already_satisfied", timeout=30)
+        before = _probe_count(g)
+        time.sleep(8)
+        during = _probe_count(g) - before
+        # Eight seconds at a two-second interval is about four probes.
+        assert 2 <= during <= 6, during
+        assert g.count("child.spawned") == 1, "a satisfied request must not restart"
+        assert not leftover.exists()
+
+
+def test_the_guard_keeps_a_heartbeat_that_status_reads(tmp_path):
+    port = _free_port()
+    with GuardRun(tmp_path, port) as g:
+        g.wait_for("child.ready", timeout=60)
+        state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+        assert time.time() - float(state["heartbeat"]) < 30
+        out = subprocess.run(
+            [sys.executable, str(GUARD), "--status"], env=dict(g.env),
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=60, check=False,
+        ).stdout
+        assert "guard       : running" in out, out
