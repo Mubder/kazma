@@ -214,6 +214,23 @@ def _wait_until_nothing_spins(pg, why: str, timeout: int = 20000) -> None:
         raise AssertionError(f"{why}: {pg.evaluate(_SPINNING_JS, _SPINNING)}") from None
 
 
+#: What a finished turn's activity panel must not say about itself.
+_STILL_WORKING = ("Working…", "Working...", "Kazma is thinking…")
+
+
+def _assert_finished_panels_say_so(pg, why: str) -> None:
+    """A finished turn's panel is not titled as work in progress. It kept
+    "Working..." under its own "Completed" header when the turn had no
+    thoughts (live, 2026-09-26)."""
+    titles = pg.evaluate(
+        "() => Array.from(document.querySelectorAll("
+        "'.agent-progress.is-done .agent-progress-title, .kazma-cot-restored .agent-progress-title'"
+        ")).map((e) => (e.textContent || '').trim())"
+    )
+    stale = [t for t in titles if t in _STILL_WORKING]
+    assert not stale, f"{why}: {stale} (all titles: {titles})"
+
+
 def _shape(pg) -> dict:
     return pg.evaluate(_SHAPE_JS) or {}
 
@@ -400,8 +417,30 @@ def test_sequential_allow_tool_in_one_bubble(page, harness: Harness) -> None:
     # four spinners on a finished turn, live and after every reload
     # (2026-09-26).
     _wait_until_nothing_spins(pg, "a finished turn shows a running step")
+    _assert_finished_panels_say_so(pg, "a finished turn's panel says it is working")
     pg.reload(wait_until="domcontentloaded")
     _wait_until_nothing_spins(pg, "a reloaded finished turn shows a running step", 60000)
+    _assert_finished_panels_say_so(pg, "a reloaded finished turn's panel says it is working")
+
+
+def test_a_finished_plain_turn_does_not_say_it_is_working(page, harness: Harness) -> None:
+    """A turn with no tools and no thoughts -- a plain answer -- kept
+    "Working..." as its activity title under its own "Completed" header,
+    until a reload (live, 2026-09-26). Its only rows are the page's own
+    phase notes, which is the case the title had a branch for."""
+    pg = page
+    harness.script.steps, harness.script.final = [], "Ready."
+    pg.evaluate("() => { try { sessionStorage.clear(); } catch (e) {} }")
+    pg.evaluate("() => window.KazmaChat.newSession()")
+    pg.wait_for_timeout(800)
+    _send(pg, "Reply with the word ready.")
+    pg.wait_for_function(
+        "() => { const h = document.querySelector('.turn-header');"
+        " return !!h && h.className.indexOf('is-completed') >= 0; }",
+        timeout=90000,
+    )
+    assert "Ready." in (_shape(pg).get("answer") or "")
+    _assert_finished_panels_say_so(pg, "a finished plain turn's panel says it is working")
 
 
 def test_the_row_settles_before_any_poll(page) -> None:
