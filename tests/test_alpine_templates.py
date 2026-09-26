@@ -50,12 +50,16 @@ class _Directives(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.found: list[tuple[int, str, str]] = []
         self.template_for: list[tuple[int, list[str]]] = []
+        self.data_with_init: list[tuple[int, str]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         line = self.getpos()[0]
         names = [name for name, _ in attrs]
         if tag == "template" and "x-for" in names:
             self.template_for.append((line, names))
+        values = {name: (value or "") for name, value in attrs}
+        if "x-data" in values and "x-init" in values:
+            self.data_with_init.append((line, values["x-init"]))
         for name, value in attrs:
             if value is None or not value.strip() or not _DIRECTIVE.match(name):
                 continue
@@ -158,3 +162,39 @@ def test_negative_control_an_out_of_loop_binding_is_caught() -> None:
     fixed = """<template x-for="s in skills" :key="s.name"><option :value="s.name"></option></template>"""
     assert template_for_extras(shipped) == [(1, [":value"])]
     assert template_for_extras(fixed) == []
+
+
+#: Alpine 3 calls a component's init() by itself. An x-init that calls it
+#: again beside x-data ran every page's init twice: eleven templates did,
+#: base.html's app shell among them, so every load fetched twice and every
+#: setInterval poller ran twice -- the workspace's GitHub poll too
+#: (2026-09-26).
+_OWN_INIT_CALL = re.compile(r"(?<![.\w$])init\s*\(\s*\)")
+
+
+def duplicate_init_calls(markup: str) -> list[int]:
+    return [
+        line
+        for line, expr in directives_of(markup).data_with_init
+        if _OWN_INIT_CALL.search(expr)
+    ]
+
+
+def test_no_template_calls_the_init_alpine_already_calls() -> None:
+    offenders = []
+    for path in _templates():
+        for line in duplicate_init_calls(path.read_text(encoding="utf-8")):
+            offenders.append(f"{path.relative_to(REPO).as_posix()}:{line}")
+    assert not offenders, (
+        'x-init="init()" beside x-data runs the component\'s init() a second '
+        "time -- Alpine 3 already calls it:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_negative_control_a_second_init_call_is_caught() -> None:
+    assert duplicate_init_calls('<div x-data="page()" x-init="init()"></div>') == [1]
+    assert duplicate_init_calls('<div x-data="page()" x-init="$nextTick(() => init())"></div>') == [1]
+    # A different method, or another object's init, is not the component's own.
+    assert duplicate_init_calls('<div x-data="page()" x-init="loadAll()"></div>') == []
+    assert duplicate_init_calls('<div x-data="page()" x-init="editor.init()"></div>') == []
+    assert duplicate_init_calls('<div x-data="page()"></div><span x-init="init()"></span>') == []

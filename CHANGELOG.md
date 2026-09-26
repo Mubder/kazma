@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Every page starts once (2026-09-26)
+
+Eleven pages -- and the app frame around every page -- started themselves
+twice on every load, so each fetched everything twice and ran every
+background refresh twice (the Workspace GitHub card, the notification and
+alert checks, Settings, Chat's setup check, Memory, Documents, X Studio and
+more). Each now starts once: half the requests on every page load, and half
+the background polling while a page is open. The alert banner also stopped
+polling on its own: it shows what the notification bell already fetched.
+
 ## Four pages that broke on every load now load clean (2026-09-26)
 
 Opening each page of the live install found four that threw errors every

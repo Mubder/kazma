@@ -142,8 +142,11 @@ class TestAgentsTemplateNotPlaceholder:
         assert "active_page" in agents_html and "agents" in agents_html
 
     def test_has_alpine_component(self, agents_html: str):
-        """Must use Alpine.js x-data pattern like other pages."""
-        assert "x-data" in agents_html and "x-init" in agents_html
+        """Must use Alpine.js x-data pattern like other pages. Alpine 3 calls
+        the component's init() itself; an x-init="init()" beside it ran init
+        twice (every fetch and poller doubled, 2026-09-26)."""
+        assert 'x-data="agentsPage()"' in agents_html
+        assert 'x-init="init()"' not in agents_html
 
     def test_shows_running_status(self, agents_html: str):
         """Must show agent running status."""

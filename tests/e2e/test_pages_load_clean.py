@@ -181,3 +181,28 @@ def test_negative_control_the_instrument_sees_both_kinds() -> None:
     assert any("x-text" in f and "does not compile" in f for f in found), found
     assert len(found) == 2, found  # the template's own binding compiles fine
     assert "rust" in bundled_modes() and "lua" in bundled_modes()
+
+
+def test_the_alert_banner_shows_what_the_store_holds(harness: Harness) -> None:
+    """The system-alerts banner reads the header's notifications store; it
+    polled /api/alerts/recent on a second poller of its own until 2026-09-26.
+    An alert in the store shows in the banner, and a dismissed one goes."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            pg = browser.new_page()
+            pg.goto(f"{harness.base}/dashboard", wait_until="domcontentloaded", timeout=30000)
+            _settle(pg)
+            pg.evaluate(
+                "() => { Alpine.store('notifications').items = [{ id: 'probe-1',"
+                " title: 'Probe alert', reason: 'from the store', timestamp: Date.now() / 1000 }]; }"
+            )
+            banner = pg.locator(".system-alerts-banner")
+            banner.wait_for(state="visible", timeout=5000)
+            assert "Probe alert" in banner.inner_text()
+            pg.click(".system-alerts-banner button[title='Dismiss']")
+            banner.wait_for(state="hidden", timeout=5000)
+        finally:
+            browser.close()
