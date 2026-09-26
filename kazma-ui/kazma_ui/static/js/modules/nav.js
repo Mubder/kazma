@@ -19,6 +19,21 @@
 // skips the tree. Pause the observer across the swap, then bind after
 // scripts. Destroy+rebind clears a stale empty marker if one landed.
 
+/**
+ * Start a new chat: a fresh session in place on /chat, and /chat?new=1 from
+ * anywhere else. /chat alone RESUMES the last session, so the header's New
+ * Chat (which went to /chat) never started one, and Ctrl+N started one only
+ * when already on /chat (2026-09-26).
+ */
+function kazmaNewChat() {
+    if (location.pathname === '/chat'
+        && window.KazmaChat && typeof window.KazmaChat.newSession === 'function') {
+        window.KazmaChat.newSession();
+        return;
+    }
+    window.location.href = '/chat?new=1';
+}
+
 const GLOBAL_LIB_PATHS = [
     '/static/js/app.js',
     '/static/js/htmx.min.js',
@@ -41,6 +56,10 @@ export function isSoftNavPageScript(src) {
 }
 
 export function initSoftNav() {
+    // The header's New Chat button calls this. Set here, not at module top
+    // level: tests import this module in Node, where there is no window.
+    window.kazmaNewChat = kazmaNewChat;
+
     const SOFT_NAV_ENABLED = true;
 
     const HARD_RELOAD_ALWAYS = new Set([]);
@@ -657,16 +676,10 @@ export function initSoftNav() {
             } catch (err) { /* search store not ready */ }
             return;
         }
-        // Ctrl+N — page-aware new chat: on /chat start a fresh session
-        // in place; anywhere else, navigate to chat (which boots fresh).
+        // Ctrl+N — the New Chat button's own action (kazmaNewChat).
         if (e.key === 'n' || e.key === 'N') {
             e.preventDefault();
-            if (location.pathname === '/chat'
-                && window.KazmaChat && typeof window.KazmaChat.newSession === 'function') {
-                window.KazmaChat.newSession();
-            } else {
-                window.location.href = '/chat';
-            }
+            kazmaNewChat();
             return;
         }
         const target = NAV_SHORTCUTS[e.key];

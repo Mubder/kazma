@@ -24,7 +24,6 @@ __all__ = [
     "check_model_registry",
     "check_swarm_engine",
     "get_build_info",
-    "get_health_dependencies",
     "router",
 ]
 
@@ -55,23 +54,6 @@ except Exception:
 def get_build_info() -> dict[str, Any]:
     """Running build identity: git commit (short) + process start time."""
     return dict(_BUILD_INFO)
-
-
-def get_health_dependencies():
-    """Get all dependencies for health checks.
-
-    Returns a dict of component checkers that can be called.
-    """
-    from kazma_core.config_store import get_config_store
-    from kazma_core.model_registry import get_registry
-    from kazma_core.swarm import get_swarm_engine
-
-    return {
-        "config_store": get_config_store,
-        "swarm_engine": get_swarm_engine,
-        "agent_runner": check_agent_runner,
-        "model_registry": get_registry,
-    }
 
 
 def check_config_store() -> dict[str, Any]:

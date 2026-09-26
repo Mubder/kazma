@@ -544,11 +544,28 @@ def _robust_copytree(src: Path, dest: Path) -> int:
     return count
 
 
+def _rebuilt_dirs() -> set[Path]:
+    """Folders under the data dir that are rebuilt, never restored.
+
+    The Knowledge Library's vectors (a live Chroma database): a file copy of
+    it can be torn mid-write, and a torn one would not open after a restore,
+    leaving meaning search off. Without it, the knowledge vector repair sweep
+    re-embeds every chunk from the Knowledge database, which IS backed up.
+    """
+    from kazma_core.paths import vector_memory_path
+
+    return {Path(vector_memory_path()).resolve()}
+
+
 def _copy_assets(src: Path, dest: Path) -> list[dict[str, Any]]:
     """Copy all non-DB files and directories (recursive) excluding backups."""
     copied: list[dict[str, Any]] = []
+    rebuilt = _rebuilt_dirs()
     for item in sorted(src.iterdir()):
         if _should_exclude(item.name, is_dir=item.is_dir()):
+            continue
+        if item.is_dir() and item.resolve() in rebuilt:
+            copied.append({"path": item.name, "type": "rebuilt", "files": 0})
             continue
         # Skip *.db files — they're handled by _backup_dbs.
         if item.is_file() and item.suffix == ".db":

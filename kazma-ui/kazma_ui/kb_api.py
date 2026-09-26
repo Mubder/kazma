@@ -152,10 +152,24 @@ def create_kb_router() -> APIRouter:
 
     # ── Libraries ───────────────────────────────────────────────────────
 
+    def _meaning_search(index: Any, library_id: str) -> dict[str, Any]:
+        """How much of a library meaning search reaches (keyword search reaches
+        all of it). Shown per library: from 2026-07-31 to 2026-09-26 meaning
+        search was off everywhere and nothing on the page said so."""
+        health = index.health(library_id)
+        return {
+            "available": bool(health.get("vector_available")),
+            "vectors": int(health.get("vector_chunks") or 0),
+            "chunks": int(health.get("sqlite_chunks") or 0),
+        }
+
     @router.get("/libraries")
     def list_libraries() -> dict[str, Any]:
         try:
             libs = _store().list_libraries()
+            index = _index()
+            for lib in libs:
+                lib["meaning_search"] = _meaning_search(index, lib["id"])
             return {"ok": True, "libraries": libs}
         except Exception as exc:
             logger.exception("[kb_api] list_libraries failed")

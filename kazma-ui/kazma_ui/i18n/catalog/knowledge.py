@@ -112,9 +112,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "أشر إلى موقع توثيق (مثل واجهة Meta WhatsApp) ليقوم كاظمة بابتلاع شجرة الصفحات دفعة واحدة. بعدها يستند الوكيل إلى المحتوى ويستشهد بمصادره عند طرح أسئلتك.",
         "en": "Point Kazma at a documentation site (e.g. the Meta WhatsApp Cloud API) and it ingests the whole tree once. The agent then reasons over the corpus and cites sources when you ask questions.",
     },
+    "knowledge.keyword_only": {
+        "ar": "بحث بالكلمات فقط",
+        "en": "Keyword search only",
+    },
     "knowledge.libraries": {
         "ar": "المكتبات",
         "en": "Libraries",
+    },
+    "knowledge.meaning_search": {
+        "ar": "البحث بالمعنى: {v} من {n}",
+        "en": "Meaning search: {v} of {n}",
     },
     "knowledge.name_placeholder": {
         "ar": "الاسم المعروض",

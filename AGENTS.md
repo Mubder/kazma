@@ -516,9 +516,10 @@ left backups/export inert). Current boot list:
   sweep on this cadence is one entry of `_MAINTENANCE_SWEEPS` (commitment GC,
   artifact GC, HITL-gate TTL, memory task-queue purge, swarm task retention —
   `swarm.task_retention_days`, default 30, 0 keeps all — the supervisor
-  watch, §39, memory vector repair, memory recovery and memory turn
-  reconcile, §15F), run by ONE isolated
-  runner so a failing sweep never stops the rest. A new periodic cleanup is a
+  watch, §39, memory vector repair, knowledge vector repair (§24F), memory
+  recovery and memory turn reconcile, §15F), run by ONE isolated
+  runner so a failing sweep never stops the rest -- and is logged at WARNING
+  (it was DEBUG: a sweep failing every pass is a feature that is off). A new periodic cleanup is a
   new entry there, never a new loop (`tests/test_swarm_task_retention.py`).
 - **Session purge, daily digest, weekly firing ledger, restore drill:**
   started here too; do not assume "the four original loops" is the set.
@@ -1303,10 +1304,21 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
 ### 24. Import Integrity + Web Acquisition SoT + CSRF/Rate-Limit (2026-08-14 audit round)
 
 **A. Import-integrity gates — `tests/test_imports.py` (deletion SOP).**
-- Two tests: `test_every_product_module_imports` (imports every module of
-  every `kazma-*/kazma_*` package) and `test_no_dangling_kazma_import_references`
-  (AST scan: every `kazma_*` import reference must resolve to a real file;
-  imports inside try/except are exempt as deliberate degradation paths).
+- Three tests: `test_every_product_module_imports` (imports every module
+  of every `kazma-*/kazma_*` package), `test_no_dangling_kazma_import_references`
+  (AST scan: every `kazma_*` import reference must resolve to a real file)
+  and `test_every_imported_kazma_name_exists` (every `from kazma_x.mod
+  import name` names something `mod` defines at its top level).
+  **No try/except exemption for Kazma's own modules** (removed 2026-09-26):
+  the module is in this repo, so the import resolves or it is dead code, and
+  the `except` makes it a feature that is silently off. Six were: the
+  Knowledge Library's meaning search (`memory.chroma_client`, deleted
+  2026-07-31, reported as "chromadb not installed"), the gateway's §25
+  Partial handling and its budget counter (one removed name,
+  `record_budget_exhausted`, sank the three imported beside it), kazma.yaml's
+  `agent.nonstop` (a `load_config` that never existed), the `/memory` count
+  and a health helper nothing called. Only a third-party package may be
+  optional.
 - Born from the crawl.py incident: a module deletion left a dangling import
   in `web_acquire/__init__` — py_compile passed (syntax-only), no test
   imported the package, production research broke at first use
@@ -1399,6 +1411,42 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   the same job. Incidents 1 and 4 stay unclaimed (no app-graph pause
   harness). Torch-bearing `rag` extra is still too heavy for CI.
 
+**F. Knowledge Library meaning search** (`memory/vector_store_global.py`,
+`stores/knowledge_index.py`). Off from 2026-07-31 to 2026-09-26: the client
+module was deleted and the import's `except` said "chromadb not installed".
+- **One Chroma client per directory** for the process (`_shared_client`),
+  telemetry off (Chroma's default posts usage events to PostHog). A failed
+  start names its real cause and is retried after 5 minutes, not on every
+  search.
+- **Collections compare by angle** (`hnsw:space: cosine`) **and every vector
+  is made unit length** before it is stored or searched. Chroma's default is
+  squared L2, which every earlier collection has; with unit vectors it ranks
+  the same, and `query` reports the true cosine for either (`_similarity`).
+  It used to report `1 - L2` as a cosine. No embedding function: every write
+  and search passes its own vectors, made from at most 4,000 characters
+  (`_EMBED_MAX_CHARS`: the live install has a 60,000-character chunk, and a
+  batch is padded to its longest text; keyword search reads it all).
+- **The "knowledge vector repair" sweep** (15 min, ~30 s,
+  `KnowledgeIndex.backfill_vectors`) makes each library's vectors match its
+  active chunks both ways: embeds the missing, removes those of retired
+  chunks (they took search slots and joined to nothing). Ingest still embeds
+  on write; the sweep covers whatever the store missed.
+- **`delete_library` opens the collection before dropping it** -- only a
+  cached one was dropped, so a library deleted after a restart kept its
+  vectors.
+- **Vectors live at `KAZMA_VECTOR_PATH`, else beside the Knowledge
+  database** (`data_dir()/vector_memory` for the install's), so a test's
+  temporary store never writes into the install's. **They are not backed
+  up** (`universal._rebuilt_dirs`; `chroma.sqlite3` is a `rebuilt` store):
+  a file copy of a live Chroma database can be torn, and the sweep rebuilds
+  them from the chunks, which are.
+- **The Knowledge page shows each library's coverage** ("Meaning search:
+  N of M", or "Keyword search only"), from `KnowledgeIndex.health` through
+  `/api/kb/libraries`. Nothing showed it before, which is how the outage
+  lasted two months.
+- Gate: `tests/test_knowledge_meaning_search.py` (a fake chromadb in CI, the
+  real one where the `rag` extra is installed).
+
 ### 25. Long-Task Continue Protocol & Partial Pause (`agent/long_task.py`)
 
 Born from the 2026-08-19 Telegram desync ("Saved. Ready…" acks instead of
@@ -1430,6 +1478,11 @@ executing commands after a mission ended Partial) — full diagnosis in
   runs fresh").
 - `/long off` (or `/abort`) remains the immediate manual clear on any
   build.
+- **The gateway does both through `_settle_recursion_partial`**
+  (`agent_handler/graph.py`), and a failure there is a WARNING. Inline, it
+  imported a name removed 2026-09-04 inside `except Exception: pass`, so
+  from then until 2026-09-26 no Partial was stored and no long task paused
+  on Telegram/Discord/Slack. `tests/test_gateway_recursion_partial.py`.
 
 ### 26. Default-Deny Boundaries (2026-08-29 security audit)
 

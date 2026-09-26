@@ -181,6 +181,11 @@ class KnowledgeStore:
         self._lock = threading.Lock()
         self._init_db()
 
+    @property
+    def path(self) -> Path:
+        """The database file this store reads and writes."""
+        return self._db_path
+
     # ------------------------------------------------------------------
     # Connection management
     # ------------------------------------------------------------------
@@ -610,6 +615,17 @@ class KnowledgeStore:
                 (library_id, source_url),
             ).fetchall()
         return [r["id"] if isinstance(r, sqlite3.Row) else r[0] for r in rows]
+
+    def active_chunk_ids(self, library_id: str) -> set[str]:
+        """Ids of the library's searchable chunks (active, not tombstoned)."""
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                """SELECT id FROM knowledge_chunks
+                   WHERE library_id = ? AND active = 1 AND tombstoned = 0""",
+                (library_id,),
+            ).fetchall()
+        return {str(r["id"] if isinstance(r, sqlite3.Row) else r[0]) for r in rows}
 
     def list_source_urls(self, library_id: str) -> list[str]:
         """Distinct source URLs indexed for a library (for refresh prune)."""
@@ -1133,6 +1149,20 @@ class KnowledgeStore:
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
+
+    def all_library_ids(self) -> list[str]:
+        """Every library of every tenant, oldest first.
+
+        For system maintenance only (the meaning-vector backfill runs with no
+        tenant bound); anything that answers a request uses
+        :meth:`list_libraries`, which scopes to the caller's tenant.
+        """
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT id FROM knowledge_libraries ORDER BY created_at"
+            ).fetchall()
+        return [str(r["id"]) for r in rows]
 
     def count_chunks(self, library_id: str) -> int:
         with self._lock:

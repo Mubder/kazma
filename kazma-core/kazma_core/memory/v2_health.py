@@ -17,11 +17,42 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["build_v2_health"]
+__all__ = ["build_v2_health", "count_current_facts"]
+
+
+def count_current_facts(tenant_id: str | None = None) -> int | None:
+    """How many facts memory holds now (current beliefs), for one tenant or all.
+
+    Read-only. ``None`` when the memory database cannot be read -- the caller
+    says "unknown", never a zero that is not true.
+    """
+    from kazma_core.paths import primary_memory_db
+
+    path = Path(primary_memory_db())
+    if not path.is_file():
+        return 0
+    sql = "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+    params: tuple[Any, ...] = ()
+    if tenant_id is not None:
+        sql += " AND tenant_id = ?"
+        params = (tenant_id,)
+    try:
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    except sqlite3.Error:
+        logger.debug("[v2_health] memory database unreadable", exc_info=True)
+        return None
+    try:
+        return int(conn.execute(sql, params).fetchone()[0])
+    except sqlite3.Error:
+        logger.debug("[v2_health] fact count failed", exc_info=True)
+        return None
+    finally:
+        conn.close()
 
 
 def _safe_count(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> int:

@@ -266,7 +266,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_VAULT_KEY` | `""` | `kazma_core.backup.restore_drill`, `kazma_core.migration.bundle`, `kazma_core.migration.exporter` +4 | yes |
 | `KAZMA_VECTOR_DB` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_VECTOR_MODEL` | `""` | `kazma_core.memory.embedder` | yes |
-| `KAZMA_VECTOR_PATH` | (none) | `kazma_core.paths` | yes |
+| `KAZMA_VECTOR_PATH` | (none) | `kazma_core.paths`, `kazma_core.stores.knowledge_index` | yes |
 | `KAZMA_VERBOSE_ERRORS` | (none) | `kazma_core.errors` | yes |
 | `KAZMA_VISION_MODELS` | `""` | `kazma_core.vision_capability` | yes |
 | `KAZMA_VOICE_DUPLEX` | (none) | `kazma_core.voice.livekit` | yes |

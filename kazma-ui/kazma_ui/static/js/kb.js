@@ -31,11 +31,22 @@
 function knowledgePage() {
   const S = window.__KB_STRINGS || {};
 
+  // How much of a library meaning search reaches (keyword search reaches
+  // all of it); empty when the server did not say.
+  function meaningLabel(m) {
+    if (!m) return "";
+    if (!m.available) return S.keyword_only || "Keyword search only";
+    return (S.meaning_search || "Meaning search: {v} of {n}")
+      .replace("{v}", String(m.vectors))
+      .replace("{n}", String(m.chunks));
+  }
+
   // Decorate a library row with the per-row UI strings (so Alpine x-text
   // binds can read them without re-fetching translations per row).
   function withStrings(lib) {
     return {
       ...lib,
+      _t_meaning: meaningLabel(lib.meaning_search),
       _t_chunks: S.chunks || "chunks",
       _t_auto_inject: S.auto_inject || "auto-inject",
       _t_ai_on: S.auto_inject_on || "Auto-inject ON",
