@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## A test's result no longer depends on which tests ran before it (2026-09-26)
+
+The test suite runs in several processes, and which tests share a process
+changes every time a test file is added. A test could leave a setting, a
+stand-in or a cached object behind for the next one, so some tests passed
+or failed depending on their neighbours -- each found by accident, one at a
+time. Every test now starts from the same point: all of Kazma is loaded
+before the first test, the environment is put back after each one, and no
+test may swap out part of Kazma without putting it back (138 did). Checked
+by running the whole suite split four, five and seven ways.
+
 ## The swarm router loads in any order (2026-09-26)
 
 Loading Kazma's swarm router before the rest of the swarm stopped with an

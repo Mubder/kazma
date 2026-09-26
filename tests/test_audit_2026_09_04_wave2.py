@@ -104,7 +104,7 @@ class TestWave2M6SemanticCache:
 
 class TestWave2M7HttpPoolLock:
     @pytest.mark.asyncio
-    async def test_close_http_client_releases_lock(self):
+    async def test_close_http_client_releases_lock(self, monkeypatch: pytest.MonkeyPatch):
         """close_http_client must release _client_lock before awaiting client.aclose()."""
         import kazma_core.http_pool as hp
 
@@ -123,7 +123,7 @@ class TestWave2M7HttpPoolLock:
         mock_client.aclose.side_effect = check_lock
 
         with hp._client_lock:
-            hp._client = mock_client
+            monkeypatch.setattr(hp, "_client", mock_client)
 
         await close_http_client()
         assert not lock_held_during_aclose, "Lock was held across aclose() await point!"

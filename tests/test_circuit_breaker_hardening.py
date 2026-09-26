@@ -236,7 +236,7 @@ async def test_graph_mcp_policy_denials_do_not_trip() -> None:
 
 
 @pytest.mark.anyio
-async def test_swarm_worker_circuit_breaker_hard_rounds() -> None:
+async def test_swarm_worker_circuit_breaker_hard_rounds(monkeypatch) -> None:
     """InProcessWorker trips only after 3 hard rounds, not empty results."""
     worker = InProcessWorker(
         name="TestCircuitBreakerWorker",
@@ -279,8 +279,7 @@ async def test_swarm_worker_circuit_breaker_hard_rounds() -> None:
         def get_model(self, *args, **kwargs):
             return MockProvider()
 
-    old_registry = mr.get_model_registry
-    mr.get_model_registry = lambda: MockRegistry()
+    monkeypatch.setattr(mr, "get_model_registry", lambda: MockRegistry())
 
     class MockToolRegistry:
         def get_tool_definitions(self):
@@ -303,13 +302,8 @@ async def test_swarm_worker_circuit_breaker_hard_rounds() -> None:
 
     import kazma_core.agent.tool_registry as tr
 
-    old_tr_getter = tr.get_tool_registry
-    tr.get_tool_registry = lambda: MockToolRegistry()
+    monkeypatch.setattr(tr, "get_tool_registry", lambda: MockToolRegistry())
 
-    try:
-        result = await worker.dispatch("Find something online.")
-        assert result["status"] == "success"
-        assert "Done after circuit breaker" in result["output"]
-    finally:
-        mr.get_model_registry = old_registry
-        tr.get_tool_registry = old_tr_getter
+    result = await worker.dispatch("Find something online.")
+    assert result["status"] == "success"
+    assert "Done after circuit breaker" in result["output"]

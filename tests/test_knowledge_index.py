@@ -29,44 +29,32 @@ from kazma_core.stores.knowledge_index import KnowledgeIndex, reset_knowledge_in
 
 
 @pytest.fixture(autouse=True)
-def _contain_project_root():
-    """Undo `_setup()`'s `KAZMA_PROJECT_ROOT` write after every test here.
+def _contain_project_root(monkeypatch):
+    """Keep the project root this file's tests resolve from outliving them.
 
-    `_setup()` points that variable at a fresh temp directory and never puts it
-    back, so it leaked into the rest of the session. `get_project_root()`
-    consults it only when the CWD walk finds no `pyproject.toml`, which is why
-    this stayed invisible for so long -- but under the right ordering a later
-    test resolves the project root to this file's temp directory and fails.
-    That is how it surfaced: `test_portability.py` asserting the root holds a
-    `pyproject.toml`, and getting `.../Temp/kazma_kbi_test_k3qxyn9i` instead.
-
-    Snapshot and restore, including the cached value the env var feeds.
+    `_setup()` points `KAZMA_PROJECT_ROOT` at a fresh temp directory (through
+    `monkeypatch`, so the variable is undone), and `get_project_root()`
+    caches what it resolves. The cache used to survive: under the right
+    ordering a later test resolved the project root to this file's temp
+    directory -- `test_portability.py` asserting the root holds a
+    `pyproject.toml` and getting `.../Temp/kazma_kbi_test_k3qxyn9i`. Setting
+    the cache to its own value registers the undo.
     """
     from kazma_core import paths
 
-    had = "KAZMA_PROJECT_ROOT" in os.environ
-    previous = os.environ.get("KAZMA_PROJECT_ROOT")
-    cached = paths._project_root
-    try:
-        yield
-    finally:
-        if had:
-            os.environ["KAZMA_PROJECT_ROOT"] = previous  # type: ignore[arg-type]
-        else:
-            os.environ.pop("KAZMA_PROJECT_ROOT", None)
-        paths._project_root = cached
+    monkeypatch.setattr(paths, "_project_root", paths._project_root)
 
 
-def _setup():
-    """Fresh store + index against a temp DB."""
+def _setup(monkeypatch):
+    """Fresh store + index against a temp DB, installed for this test only."""
     tmp = tempfile.mkdtemp(prefix="kazma_kbi_test_")
-    os.environ["KAZMA_PROJECT_ROOT"] = tmp
+    monkeypatch.setenv("KAZMA_PROJECT_ROOT", tmp)
     # Reset BOTH singletons — the auto-inject getter uses the store singleton.
     reset_knowledge_index()
     reset_knowledge_store()
     store = KnowledgeStore(db_path=os.path.join(tmp, "settings.db"))
     # Make this temp store the process singleton so the getter sees it.
-    _kb_module._knowledge_store = store
+    monkeypatch.setattr(_kb_module, "_knowledge_store", store)
     store.create_library("lib_a", "A")
     store.create_library("lib_b", "B")
     index = KnowledgeIndex(store=store)
@@ -116,8 +104,8 @@ def _ingest(index: KnowledgeIndex, library_id: str, md: str, url: str):
 # ── Round-trip + isolation ──────────────────────────────────────────────────
 
 
-def test_search_returns_relevant_chunk_with_citation():
-    store, index = _setup()
+def test_search_returns_relevant_chunk_with_citation(monkeypatch):
+    store, index = _setup(monkeypatch)
     _ingest(index, "lib_a", WHATSAPP_DOC, "https://x/wa/messages")
     hits = asyncio.run(index.search("401 expired token authentication", "lib_a", top_k=3))
     assert hits, "expected hits"
@@ -128,10 +116,10 @@ def test_search_returns_relevant_chunk_with_citation():
     assert top.library_id == "lib_a"
 
 
-def test_library_isolation_query_never_returns_other_library():
+def test_library_isolation_query_never_returns_other_library(monkeypatch):
     """The headline isolation contract: a query against lib_a must not return
     chunks from lib_b, even when lib_b contains matching terms."""
-    store, index = _setup()
+    store, index = _setup(monkeypatch)
     _ingest(index, "lib_a", WHATSAPP_DOC, "https://x/wa")
     _ingest(index, "lib_b", INSTAGRAM_DOC, "https://x/ig")
     # Search lib_b for something only lib_a knows about.
@@ -144,8 +132,8 @@ def test_library_isolation_query_never_returns_other_library():
         assert h.library_id == "lib_a"
 
 
-def test_reingest_same_doc_dedups():
-    store, index = _setup()
+def test_reingest_same_doc_dedups(monkeypatch):
+    store, index = _setup(monkeypatch)
     _ingest(index, "lib_a", WHATSAPP_DOC, "https://x/wa")
     first_count = store.count_chunks("lib_a")
     # Ingest identical content again.
@@ -153,8 +141,8 @@ def test_reingest_same_doc_dedups():
     assert store.count_chunks("lib_a") == first_count  # no growth
 
 
-def test_cross_library_search_returns_per_library():
-    store, index = _setup()
+def test_cross_library_search_returns_per_library(monkeypatch):
+    store, index = _setup(monkeypatch)
     _ingest(index, "lib_a", WHATSAPP_DOC, "https://x/wa")
     _ingest(index, "lib_b", INSTAGRAM_DOC, "https://x/ig")
     out = asyncio.run(index.search_across("endpoint", ["lib_a", "lib_b"], top_k=3))
@@ -162,10 +150,10 @@ def test_cross_library_search_returns_per_library():
     assert isinstance(out["lib_a"], list)
 
 
-def test_search_all_fuses_libraries_into_one_ranking():
+def test_search_all_fuses_libraries_into_one_ranking(monkeypatch):
     """The Phase 2 cross-library RRF path: a single fused ranking, not a
     dict of per-library lists.  Hits keep their library_id provenance."""
-    store, index = _setup()
+    store, index = _setup(monkeypatch)
     _ingest(index, "lib_a", WHATSAPP_DOC, "https://x/wa")
     _ingest(index, "lib_b", INSTAGRAM_DOC, "https://x/ig")
     hits = asyncio.run(index.search_all("api endpoint post", ["lib_a", "lib_b"], top_k=5))
@@ -179,8 +167,8 @@ def test_search_all_fuses_libraries_into_one_ranking():
     assert scores == sorted(scores, reverse=True)
 
 
-def test_delete_library_removes_chunks_and_isolates():
-    store, index = _setup()
+def test_delete_library_removes_chunks_and_isolates(monkeypatch):
+    store, index = _setup(monkeypatch)
     _ingest(index, "lib_a", WHATSAPP_DOC, "https://x/wa")
     _ingest(index, "lib_b", INSTAGRAM_DOC, "https://x/ig")
     assert index.delete_library("lib_a") is True
@@ -191,8 +179,8 @@ def test_delete_library_removes_chunks_and_isolates():
     assert store.count_chunks("lib_b") > 0
 
 
-def test_search_empty_query_returns_empty():
-    store, index = _setup()
+def test_search_empty_query_returns_empty(monkeypatch):
+    store, index = _setup(monkeypatch)
     _ingest(index, "lib_a", WHATSAPP_DOC, "https://x/wa")
     assert asyncio.run(index.search("", "lib_a")) == []
     assert asyncio.run(index.search("   ", "lib_a")) == []
@@ -201,7 +189,7 @@ def test_search_empty_query_returns_empty():
 # ── Auto-inject getter (Phase 2) ────────────────────────────────────────────
 
 
-def test_auto_inject_off_by_default_no_opt_in():
+def test_auto_inject_off_by_default_no_opt_in(monkeypatch):
     """With no library opted in, the getter returns "" even when the kill
     switch is on — behaviour is strictly opt-in per library."""
     from kazma_core.stores.knowledge_index import (
@@ -210,14 +198,14 @@ def test_auto_inject_off_by_default_no_opt_in():
     )
 
     assert kb_auto_inject_enabled() is True  # default ON
-    _setup()  # fresh libs, none have auto_inject=1
+    _setup(monkeypatch)  # fresh libs, none have auto_inject=1
     assert asyncio.run(get_knowledge_auto_inject_block("whatsapp 401")) == ""
 
 
-def test_auto_inject_returns_block_when_library_opted_in():
+def test_auto_inject_returns_block_when_library_opted_in(monkeypatch):
     from kazma_core.stores.knowledge_index import get_knowledge_auto_inject_block
 
-    store, index = _setup()
+    store, index = _setup(monkeypatch)
     _ingest(index, "lib_a", WHATSAPP_DOC, "https://x/wa")
     store.update_library("lib_a", auto_inject=True)
     block = asyncio.run(get_knowledge_auto_inject_block("whatsapp 401 token"))
@@ -226,7 +214,7 @@ def test_auto_inject_returns_block_when_library_opted_in():
     assert "https://x/wa" in block
 
 
-def test_auto_inject_kill_switch_disables_everything():
+def test_auto_inject_kill_switch_disables_everything(monkeypatch):
     """KAZMA_KB_AUTO_INJECT=0 must short-circuit even when a library is
     opted in — checked live, per call."""
     import os
@@ -236,7 +224,7 @@ def test_auto_inject_kill_switch_disables_everything():
         kb_auto_inject_enabled,
     )
 
-    store, index = _setup()
+    store, index = _setup(monkeypatch)
     _ingest(index, "lib_a", WHATSAPP_DOC, "https://x/wa")
     store.update_library("lib_a", auto_inject=True)
 
@@ -252,9 +240,9 @@ def test_auto_inject_kill_switch_disables_everything():
             os.environ["KAZMA_KB_AUTO_INJECT"] = old
 
 
-def test_auto_inject_empty_message_returns_empty():
+def test_auto_inject_empty_message_returns_empty(monkeypatch):
     from kazma_core.stores.knowledge_index import get_knowledge_auto_inject_block
 
-    _setup()
+    _setup(monkeypatch)
     assert asyncio.run(get_knowledge_auto_inject_block("")) == ""
     assert asyncio.run(get_knowledge_auto_inject_block("   ")) == ""

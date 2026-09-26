@@ -339,14 +339,13 @@ def test_expired_sessions_are_purged(monkeypatch, tmp_path):
 
 # ── F-13: rate limiter eviction ──────────────────────────────────────────
 
-def test_rate_limiter_evicts_lru_not_everything():
+def test_rate_limiter_evicts_lru_not_everything(monkeypatch):
     """F-13: hitting the key cap must not reset other principals' windows."""
     from kazma_ui import rate_limit
 
     rate_limit._windows.clear()
     monkey_cap = 8
-    original = rate_limit._MAX_TRACKED_KEYS
-    rate_limit._MAX_TRACKED_KEYS = monkey_cap
+    monkeypatch.setattr(rate_limit, "_MAX_TRACKED_KEYS", monkey_cap)
     try:
         victim = ("bucket", "victim")
         for _ in range(3):
@@ -362,7 +361,6 @@ def test_rate_limiter_evicts_lru_not_everything():
         # was silently cleared — the map never dropped to zero entries.
         assert rate_limit._windows, "eviction wiped the entire map (the F-13 bug)"
     finally:
-        rate_limit._MAX_TRACKED_KEYS = original
         rate_limit._windows.clear()
 
 

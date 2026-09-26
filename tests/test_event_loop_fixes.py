@@ -52,7 +52,7 @@ def isolated_ws(tmp_path: Path, monkeypatch):
 
     reset_workspace_store()
     store = wsmod.WorkspaceStore(str(tmp_path / "settings.db"))
-    wsmod._workspace_store = store
+    monkeypatch.setattr(wsmod, "_workspace_store", store)
     rec = store.create_workspace("test-ws", str(ws))
     store.set_active_workspace(rec["id"])
     configure_workspace(workspace=str(ws))
@@ -96,7 +96,7 @@ async def test_env_context_async_workspace_id_passthrough(tmp_path, monkeypatch)
 
     reset_workspace_store()
     store = wsmod.WorkspaceStore(str(tmp_path / "settings.db"))
-    wsmod._workspace_store = store
+    monkeypatch.setattr(wsmod, "_workspace_store", store)
     rec_b = store.create_workspace("Repo B", str(ws_b))
     store.set_active_workspace(rec_b["id"])
     try:

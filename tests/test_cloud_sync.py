@@ -102,53 +102,53 @@ def tmp_backup_dir(tmp_path: Path) -> Path:
 # ── provider routing ─────────────────────────────────────────────────────
 
 
-def test_get_sync_provider_routes_by_config() -> None:
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "webdav"})  # type: ignore[assignment]
+def test_get_sync_provider_routes_by_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "webdav"}))
     assert isinstance(cs.get_sync_provider(), cs.WebDAVSync)
 
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "ftp"})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "ftp"}))
     assert isinstance(cs.get_sync_provider(), cs.FTPSync)
 
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "s3"})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "s3"}))
     assert isinstance(cs.get_sync_provider(), cs.S3Sync)
 
-    cs._read_config = _FakeConfig({"backups.offsite.provider": ""})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": ""}))
     assert cs.get_sync_provider() is None
 
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "dropbox"})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "dropbox"}))
     assert cs.get_sync_provider() is None
 
 
-def test_status_reports_connection() -> None:
-    cs._read_vault = _FakeVault({"email.gmail.refresh_token": "rt"})  # type: ignore[assignment]
+def test_status_reports_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"email.gmail.refresh_token": "rt"}))
     st = cs.GoogleDriveSync().status()
     assert st["connected"] is True
     assert st["provider"] == "google_drive"
 
-    cs._read_vault = _FakeVault({})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({}))
     assert cs.GoogleDriveSync().status()["connected"] is False
 
 
-def test_status_reports_drive_health() -> None:
-    cs._read_vault = _FakeVault({  # type: ignore[assignment]
+def test_status_reports_drive_health(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({
         "email.gmail.refresh_token": "rt",
         "email.gmail.drive_ok": "ok",
-    })
+    }))
     st = cs.GoogleDriveSync().status()
     assert st["drive_ok"] is True
     assert st["drive_error"] == ""
 
     # Drive blocked at connect time (e.g. consent screen stripped the scope)
-    cs._read_vault = _FakeVault({  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({
         "email.gmail.refresh_token": "rt",
         "email.gmail.drive_ok": "accessNotConfigured",
-    })
+    }))
     st = cs.GoogleDriveSync().status()
     assert st["drive_ok"] is False
     assert st["drive_error"] == "accessNotConfigured"
 
     # Legacy token connected before the drive probe existed — unknown, not broken
-    cs._read_vault = _FakeVault({"email.gmail.refresh_token": "rt"})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"email.gmail.refresh_token": "rt"}))
     st = cs.GoogleDriveSync().status()
     assert st["drive_ok"] is None
     assert st["drive_error"] == ""
@@ -158,8 +158,8 @@ def test_status_reports_drive_health() -> None:
 
 
 def test_google_drive_test_connection_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "google_drive"})  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({"email.gmail.access_token": "tok"})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "google_drive"}))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"email.gmail.access_token": "tok"}))
     captured: list[httpx.Request] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -189,13 +189,13 @@ def test_google_drive_test_connection_403_is_actionable(
     The two causes are indistinguishable without the error body: Drive API
     disabled in the Cloud project vs. the token lacking the drive.file scope.
     """
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "google_drive"})  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "google_drive"}))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({
         "email.gmail.access_token": "tok",
         "email.gmail.refresh_token": "rt",
         "email.gmail.client_id": "cid",
         "email.gmail.client_secret": "csec",
-    })
+    }))
     captured: list[httpx.Request] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -219,8 +219,8 @@ def test_google_drive_test_connection_403_is_actionable(
 def test_google_drive_upload_and_folder_creation(
     monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
 ) -> None:
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "google_drive"})  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({"email.gmail.access_token": "tok"})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "google_drive"}))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"email.gmail.access_token": "tok"}))
     captured: list[httpx.Request] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -251,14 +251,14 @@ def test_google_drive_upload_and_folder_creation(
 def test_google_drive_refreshes_expired_token(
     monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
 ) -> None:
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "google_drive"})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "google_drive"}))
     vault = _FakeVault({
         "email.gmail.access_token": "expired",
         "email.gmail.refresh_token": "rt",
         "email.gmail.client_id": "cid",
         "email.gmail.client_secret": "csec",
     })
-    cs._read_vault = vault  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_vault", vault)
     captured: list[httpx.Request] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -287,8 +287,8 @@ def test_google_drive_refreshes_expired_token(
 def test_google_drive_without_tokens_fails_clear(
     monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
 ) -> None:
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "google_drive"})  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "google_drive"}))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({}))
     captured: list[httpx.Request] = []
     _install_mock_transport(monkeypatch, lambda req: httpx.Response(500), captured)
 
@@ -299,8 +299,8 @@ def test_google_drive_without_tokens_fails_clear(
 def test_google_drive_upload_file_single_archive(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "google_drive"})  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({"email.gmail.access_token": "tok"})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "google_drive"}))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"email.gmail.access_token": "tok"}))
     local = tmp_path / "backup_20260816_120000.zip"
     local.write_bytes(b"ZIPDATA")
     captured: list[httpx.Request] = []
@@ -332,8 +332,8 @@ def test_google_drive_upload_file_single_archive(
 def test_google_drive_upload_file_reports_actionable_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "google_drive"})  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({"email.gmail.access_token": "tok"})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "google_drive"}))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"email.gmail.access_token": "tok"}))
     local = tmp_path / "b.zip"
     local.write_bytes(b"x")
     captured: list[httpx.Request] = []
@@ -363,8 +363,8 @@ def test_google_drive_upload_file_reports_actionable_error(
 def test_onedrive_upload_via_graph_put(
     monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
 ) -> None:
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "onedrive"})  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({"email.microsoft.access_token": "mstok"})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "onedrive"}))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"email.microsoft.access_token": "mstok"}))
     captured: list[httpx.Request] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -388,13 +388,13 @@ def test_onedrive_upload_via_graph_put(
 def test_onedrive_refreshes_and_rotates_token(
     monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
 ) -> None:
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "onedrive"})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "onedrive"}))
     vault = _FakeVault({
         "email.microsoft.access_token": "old",
         "email.microsoft.refresh_token": "rt-old",
         "email.microsoft.client_id": "cid",
     })
-    cs._read_vault = vault  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_vault", vault)
     captured: list[httpx.Request] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -419,8 +419,8 @@ def test_onedrive_refreshes_and_rotates_token(
 def test_onedrive_upload_file_single_archive(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "onedrive"})  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({"email.microsoft.access_token": "mstok"})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "onedrive"}))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"email.microsoft.access_token": "mstok"}))
     local = tmp_path / "backup.zip"
     local.write_bytes(b"ZIP")
     captured: list[httpx.Request] = []
@@ -446,8 +446,8 @@ def test_onedrive_upload_file_single_archive(
 
 def _onedrive_token_capture(monkeypatch: pytest.MonkeyPatch, vault: "_FakeVault"):
     """Install a mock transport that captures the MS token-grant form body."""
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "onedrive"})  # type: ignore[assignment]
-    cs._read_vault = vault  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "onedrive"}))
+    monkeypatch.setattr(cs, "_read_vault", vault)
     captured: list[httpx.Request] = []
     token_body: dict[str, str] = {}
 
@@ -505,12 +505,12 @@ def test_onedrive_refresh_omits_client_secret_for_public_client(
 def test_webdav_upload_mkcol_and_put(
     monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
 ) -> None:
-    cs._read_config = _FakeConfig({
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
         "backups.offsite.provider": "webdav",
         "backups.offsite.webdav.url": "https://nas.local/backups",
         "backups.offsite.webdav.username": "user",
-    })  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({"backups.offsite.webdav.password": "pw"})  # type: ignore[assignment]
+    }))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"backups.offsite.webdav.password": "pw"}))
     captured: list[httpx.Request] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -533,11 +533,11 @@ def test_webdav_upload_mkcol_and_put(
     assert all(r.headers.get("authorization", "").startswith("Basic ") for r in captured)
 
 
-def test_webdav_unconfigured_fails_clear(tmp_backup_dir: Path) -> None:
-    cs._read_config = _FakeConfig({
+def test_webdav_unconfigured_fails_clear(monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path) -> None:
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
         "backups.offsite.provider": "webdav",
         "backups.offsite.webdav.url": "",
-    })  # type: ignore[assignment]
+    }))
 
     result = asyncio.run(cs.WebDAVSync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
     assert result["ok"] is False
@@ -547,10 +547,10 @@ def test_webdav_unconfigured_fails_clear(tmp_backup_dir: Path) -> None:
 def test_webdav_partial_failure_reports_count(
     monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
 ) -> None:
-    cs._read_config = _FakeConfig({
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
         "backups.offsite.provider": "webdav",
         "backups.offsite.webdav.url": "https://nas.local/backups",
-    })  # type: ignore[assignment]
+    }))
     captured: list[httpx.Request] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -570,12 +570,12 @@ def test_webdav_partial_failure_reports_count(
 def test_webdav_upload_file_single_archive(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    cs._read_config = _FakeConfig({
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
         "backups.offsite.provider": "webdav",
         "backups.offsite.webdav.url": "https://nas.local/backups",
         "backups.offsite.webdav.username": "user",
-    })  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({"backups.offsite.webdav.password": "pw"})  # type: ignore[assignment]
+    }))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"backups.offsite.webdav.password": "pw"}))
     local = tmp_path / "backup.zip"
     local.write_bytes(b"ZIP")
     captured: list[httpx.Request] = []
@@ -597,7 +597,7 @@ def test_webdav_upload_file_single_archive(
     assert all(r.headers.get("authorization", "").startswith("Basic ") for r in captured)
 
 
-def test_webdav_integration_real_server(tmp_backup_dir: Path) -> None:
+def test_webdav_integration_real_server(monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path) -> None:
     """End-to-end WebDAV upload against a real threaded local HTTP server."""
     stored: dict[str, bytes] = {}
 
@@ -623,12 +623,12 @@ def test_webdav_integration_real_server(tmp_backup_dir: Path) -> None:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        cs._read_config = _FakeConfig({  # type: ignore[assignment]
+        monkeypatch.setattr(cs, "_read_config", _FakeConfig({
             "backups.offsite.provider": "webdav",
             "backups.offsite.webdav.url": f"http://127.0.0.1:{server.server_port}/dav",
             "backups.offsite.webdav.username": "",
-        })
-        cs._read_vault = _FakeVault({})  # type: ignore[assignment]
+        }))
+        monkeypatch.setattr(cs, "_read_vault", _FakeVault({}))
 
         provider = cs.WebDAVSync()
         result = asyncio.run(provider.upload_directory(tmp_backup_dir, tmp_backup_dir.name))
@@ -708,14 +708,14 @@ def fake_ftplib(monkeypatch: pytest.MonkeyPatch):
 def test_ftp_upload_file_single_archive(
     monkeypatch: pytest.MonkeyPatch, fake_ftplib: Any, tmp_path: Path
 ) -> None:
-    cs._read_config = _FakeConfig({
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
         "backups.offsite.provider": "ftp",
         "backups.offsite.ftp.host": "192.168.50.45",
         "backups.offsite.ftp.port": "2121",
         "backups.offsite.ftp.username": "user",
         "backups.offsite.ftp.path": "Mubder Alfaris",
-    })  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({"backups.offsite.ftp.password": "pw"})  # type: ignore[assignment]
+    }))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"backups.offsite.ftp.password": "pw"}))
     local = tmp_path / "backup.zip"
     local.write_bytes(b"ZIPDATA")
 
@@ -735,43 +735,43 @@ def test_ftp_upload_file_single_archive(
 
 
 def test_ftp_test_connection(monkeypatch: pytest.MonkeyPatch, fake_ftplib: Any) -> None:
-    cs._read_config = _FakeConfig({
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
         "backups.offsite.provider": "ftp",
         "backups.offsite.ftp.host": "192.168.50.45",
         "backups.offsite.ftp.username": "user",
-    })  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({"backups.offsite.ftp.password": "pw"})  # type: ignore[assignment]
+    }))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"backups.offsite.ftp.password": "pw"}))
 
     result = asyncio.run(cs.FTPSync().test_connection())
     assert result["ok"] is True
     assert result["message"] == "FTP: 192.168.50.45"
 
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "ftp"})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "ftp"}))
     result = asyncio.run(cs.FTPSync().test_connection())
     assert result["ok"] is False
     assert result["error"] == "FTP host not configured"
 
 
-def test_ftp_unconfigured_fails_clear(tmp_path: Path) -> None:
-    cs._read_config = _FakeConfig({"backups.offsite.provider": "ftp"})  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({})  # type: ignore[assignment]
+def test_ftp_unconfigured_fails_clear(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "ftp"}))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({}))
 
     result = asyncio.run(cs.FTPSync().upload_file(tmp_path / "x.zip", "x.zip"))
     assert result["ok"] is False
     assert result["error"] == "FTP host not configured"
 
 
-def test_ftp_status_reports_connection() -> None:
-    cs._read_config = _FakeConfig({
+def test_ftp_status_reports_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
         "backups.offsite.ftp.host": "192.168.50.45",
         "backups.offsite.ftp.username": "user",
-    })  # type: ignore[assignment]
+    }))
     st = cs.FTPSync().status()
     assert st["provider"] == "ftp"
     assert st["connected"] is True
     assert st["remote"] == "ftp:192.168.50.45"
 
-    cs._read_config = _FakeConfig({})  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({}))
     assert cs.FTPSync().status()["connected"] is False
 
 
@@ -781,14 +781,14 @@ def test_ftp_status_reports_connection() -> None:
 def test_s3_upload_signs_with_sigv4(
     monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
 ) -> None:
-    cs._read_config = _FakeConfig({
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
         "backups.offsite.provider": "s3",
         "backups.offsite.s3.access_key": "AKID",
         "backups.offsite.s3.bucket": "kazma-bucket",
         "backups.offsite.s3.endpoint": "https://s3.example.com",
         "backups.offsite.s3.region": "eu-west-1",
-    })  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({"backups.offsite.s3.secret_key": "s3secret"})  # type: ignore[assignment]
+    }))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"backups.offsite.s3.secret_key": "s3secret"}))
     captured: list[httpx.Request] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -809,12 +809,12 @@ def test_s3_upload_signs_with_sigv4(
         assert f"/{tmp_backup_dir.name}/" in req.url.path
 
 
-def test_s3_unconfigured_fails_clear(tmp_backup_dir: Path) -> None:
-    cs._read_config = _FakeConfig({
+def test_s3_unconfigured_fails_clear(monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path) -> None:
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
         "backups.offsite.provider": "s3",
         "backups.offsite.s3.access_key": "",
         "backups.offsite.s3.bucket": "",
-    })  # type: ignore[assignment]
+    }))
 
     result = asyncio.run(cs.S3Sync().upload_directory(tmp_backup_dir, tmp_backup_dir.name))
     assert result["ok"] is False
@@ -824,13 +824,13 @@ def test_s3_unconfigured_fails_clear(tmp_backup_dir: Path) -> None:
 def test_s3_upload_file_single_archive(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    cs._read_config = _FakeConfig({
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
         "backups.offsite.provider": "s3",
         "backups.offsite.s3.access_key": "AKID",
         "backups.offsite.s3.bucket": "kazma-bucket",
         "backups.offsite.s3.endpoint": "https://s3.example.com",
-    })  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({"backups.offsite.s3.secret_key": "s3secret"})  # type: ignore[assignment]
+    }))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"backups.offsite.s3.secret_key": "s3secret"}))
     local = tmp_path / "backup.zip"
     local.write_bytes(b"ZIP")
     captured: list[httpx.Request] = []
@@ -851,13 +851,13 @@ def test_s3_upload_file_single_archive(
     assert puts[0].content == b"ZIP"
 
 
-def test_s3_signs_head_request() -> None:
-    cs._read_config = _FakeConfig({
+def test_s3_signs_head_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({
         "backups.offsite.provider": "s3",
         "backups.offsite.s3.access_key": "AKID",
         "backups.offsite.s3.bucket": "kazma-bucket",
-    })  # type: ignore[assignment]
-    cs._read_vault = _FakeVault({"backups.offsite.s3.secret_key": "s3secret"})  # type: ignore[assignment]
+    }))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"backups.offsite.s3.secret_key": "s3secret"}))
 
     provider = cs.S3Sync()
     signed = provider._sign_request(

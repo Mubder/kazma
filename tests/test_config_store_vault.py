@@ -23,8 +23,8 @@ def vault_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     vault_mod.reset_vault()
     db = tmp_path / "vault.db"
     v = vault_mod.SecretVault(db_path=str(db))
-    vault_mod._vault = v
-    vault_mod._vault_init_attempted = True
+    monkeypatch.setattr(vault_mod, "_vault", v)
+    monkeypatch.setattr(vault_mod, "_vault_init_attempted", True)
     yield v
     vault_mod.reset_vault()
     monkeypatch.delenv("KAZMA_VAULT_KEY", raising=False)

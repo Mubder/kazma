@@ -35,7 +35,7 @@ _APP = _UI / "app.py"
 
 
 @pytest.fixture()
-def registry(tmp_path):
+def registry(tmp_path, monkeypatch):
     db = tmp_path / "cfg.db"
     store = ConfigStore(str(db))
     reg = ModelRegistry(store)
@@ -52,9 +52,8 @@ def registry(tmp_path):
     # Re-bind the test registry into the process singleton used by switch helpers
     from kazma_core import model_registry as mr
 
-    mr._registry = reg  # type: ignore[attr-defined]
-    yield reg
-    mr._registry = None  # type: ignore[attr-defined]
+    monkeypatch.setattr(mr, "_registry", reg)
+    return reg
 
 
 class TestSwitchActiveModel:

@@ -87,7 +87,7 @@ def test_auto_without_token_uses_sandbox(monkeypatch: pytest.MonkeyPatch) -> Non
 
     monkeypatch.setattr(creds, "google_connected", lambda: False)
     monkeypatch.setattr(creds, "microsoft_connected", lambda: False)
-    cal_router._sandbox_instance = None
+    monkeypatch.setattr(cal_router, "_sandbox_instance", None)
     backend = cal_router.get_backend("auto")
     assert backend.name == "sandbox"
 
@@ -110,7 +110,7 @@ def test_a_provider_forced_by_the_environment_fails_closed(
         monkeypatch.setattr(creds, name, lambda: "")
     monkeypatch.setattr(creds, "google_connected", lambda: False)
     monkeypatch.setattr(creds, "microsoft_connected", lambda: False)
-    cal_router._sandbox_instance = None
+    monkeypatch.setattr(cal_router, "_sandbox_instance", None)
 
     monkeypatch.setenv("KAZMA_CALENDAR_PROVIDER", forced)
     with pytest.raises(cal_router.CalendarNotConnectedError) as exc:

@@ -35,10 +35,8 @@ from kazma_core.llm_provider import _shared_ssl_context
 
 
 @pytest.fixture(autouse=True)
-def _fresh_context():
-    lp._SSL_CONTEXT = None
-    yield
-    lp._SSL_CONTEXT = None
+def _fresh_context(monkeypatch):
+    monkeypatch.setattr(lp, "_SSL_CONTEXT", None)
 
 
 @pytest.mark.asyncio

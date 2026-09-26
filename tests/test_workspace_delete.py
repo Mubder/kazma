@@ -52,7 +52,7 @@ def test_store_delete_workspace(tmp_path, monkeypatch):
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     reset_workspace_store()
     store = wsmod.WorkspaceStore(str(tmp_path / "settings.db"))
-    wsmod._workspace_store = store
+    monkeypatch.setattr(wsmod, "_workspace_store", store)
 
     root = tmp_path / "proj"
     root.mkdir()

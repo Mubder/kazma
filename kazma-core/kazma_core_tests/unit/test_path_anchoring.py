@@ -1,5 +1,6 @@
 """Tests for O2 path anchoring — workspace scoping for file operations."""
 
+import os
 import pytest
 from pathlib import Path
 from unittest.mock import patch
@@ -117,8 +118,11 @@ def test_workspace_scope_error_no_temp_fallback(anchored_workspace):
     assert "Safety" in err
 
     # Path in temp directory should be denied (no temp fallback)
-    tmp_file = Path(tempfile.gettempdir()) / "test.txt"
-    tmp_file.touch()
+    # A file of its own under the temp dir: `test.txt` there was anyone's,
+    # and this test unlinked it.
+    fd, name = tempfile.mkstemp(suffix=".txt")
+    os.close(fd)
+    tmp_file = Path(name)
     try:
         err = _workspace_scope_error(tmp_file, str(tmp_file), "reads")
         assert err is not None

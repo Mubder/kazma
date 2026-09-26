@@ -402,7 +402,7 @@ class TestV2ArchitecturePresent:
         assert "if (!hadContent) {" in src
         assert "diag('load-messages-failed'" in src
 
-    def test_persist_writers_stamp_ts(self):
+    def test_persist_writers_stamp_ts(self, monkeypatch):
         """Every assistant row carries ``ts`` — mixed shapes produced ts-less
         duplicate rows after restarts (2026-08-26).
 
@@ -429,12 +429,8 @@ class TestV2ArchitecturePresent:
             def transact(self, sid):
                 return _Txn()
 
-        original = reply_sink._store
-        reply_sink._store = lambda: _Store()
-        try:
-            reply_sink.upsert_reply("s1", "turn-1", "answer")
-        finally:
-            reply_sink._store = original
+        monkeypatch.setattr(reply_sink, "_store", lambda: _Store())
+        reply_sink.upsert_reply("s1", "turn-1", "answer")
 
         assert _Sess.messages, "the sink must create the row"
         row = _Sess.messages[-1]

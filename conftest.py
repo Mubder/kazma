@@ -13,6 +13,7 @@ Loaded before any suite conftest (pytest walks from the root down).
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 os.environ.pop("KAZMA_SECRET", None)
@@ -120,14 +121,76 @@ def _shielded_setitem(self, key, value):
 os.environ.__class__.__setitem__ = _shielded_setitem
 
 
+import pytest as _pytest
+
+
+# ── The environment a test starts with is the one it ends with ──────────────
+# `monkeypatch.setenv` undoes what it sets; a bare `os.environ[...] = ...`
+# does not, and every later test in the process inherited it. That is how
+# test_knowledge_index's KAZMA_PROJECT_ROOT made test_portability resolve the
+# project root to a temp directory -- under one partition only. There were 88
+# bare environment writes in 20 test files on 2026-09-26. This puts the
+# snapshot back after every test, so none of them reaches the next one.
+#
+# Pytest sets up a conftest's autouse fixtures in NAME order, root conftest
+# first; this one is named to sort first, so it is set up before every other
+# function fixture and its teardown runs after all of theirs
+# (tests/test_order_independence.py holds the order). Fixtures of a wider
+# scope are set up before it, so what they export is in the snapshot and
+# survives until they undo it themselves. KAZMA_TEST_ISOLATION=0 turns it off
+# with the rest of the isolation below (the same test file's negative control).
+@_pytest.fixture(autouse=True)
+def _environment_restored():
+    if os.environ.get("KAZMA_TEST_ISOLATION") == "0":
+        yield
+        return
+    before = dict(os.environ)
+    yield
+    for key in [k for k in os.environ if k not in before]:
+        del os.environ[key]
+    for key, value in before.items():
+        if os.environ.get(key) != value:
+            os.environ[key] = value
+
+
+# ── Every product module is imported before the first test ─────────────────
+# Which test first imported a module used to decide what that module held for
+# the rest of the process. A module first imported while a test's patch was
+# live kept the fake for good -- `from owner import name` copies the object,
+# and undoing the patch restores only `owner.name` (the _streaming
+# persist_reply failure, 2026-09-21) -- and one first imported under a test's
+# environment kept what it read. fast_test hands each process a different set
+# of files, so a test passed or failed with its neighbours. Importing every
+# module here, before collection, gives every process the same modules in the
+# same state (0.8 s): a test that only worked because it happened to import
+# something first fails every time, in any split. The list is
+# scripts/check_fresh_imports.py's; a module that does not import is
+# tests/test_imports.py's to report. KAZMA_TEST_PREIMPORT=0 turns this off.
+def pytest_configure(config):
+    if os.environ.get("KAZMA_TEST_PREIMPORT") == "0":
+        return
+    import importlib
+    import importlib.util
+
+    name = "_kazma_check_fresh_imports"
+    spec = importlib.util.spec_from_file_location(
+        name, Path(__file__).resolve().parent / "scripts" / "check_fresh_imports.py"
+    )
+    enumeration = importlib.util.module_from_spec(spec)
+    sys.modules[name] = enumeration
+    spec.loader.exec_module(enumeration)
+    for module in enumeration.product_modules():
+        try:
+            importlib.import_module(module)
+        except Exception:  # noqa: BLE001 -- tests/test_imports.py reports it
+            pass
+
+
 # ── Global shutdown-event reset ─────────────────────────────────────────────
 # Tests that call create_app() + uvicorn (e2e, pipeline_sandbox, …) fire the
 # app's lifespan shutdown → signal_shutdown(), setting the GLOBAL event for
 # the rest of the process. Every later SSE/WS/stream test then sees
 # is_shutting_down()==True and immediately breaks. Reset before each test.
-import pytest as _pytest
-
-
 @_pytest.fixture(autouse=True)
 def _reset_shutdown_event():
     try:

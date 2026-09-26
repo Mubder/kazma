@@ -71,11 +71,11 @@ def test_alert_payload_dataclass_and_dict_compatibility() -> None:
 
 
 @pytest.mark.asyncio
-async def test_alert_dispatcher_registration() -> None:
+async def test_alert_dispatcher_registration(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test registration and unregistration of alert channels."""
     AlertDispatcher.clear_alerts()
     # Reset channels
-    AlertDispatcher._initialized = False
+    monkeypatch.setattr(AlertDispatcher, "_initialized", False)
     AlertDispatcher._init_default_channels()
 
     initial_count = len(AlertDispatcher.get_channels())

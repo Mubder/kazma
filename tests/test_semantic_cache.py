@@ -125,8 +125,9 @@ class TestLLMProviderSemanticCaching(unittest.IsolatedAsyncioTestCase):
         self.db_path = os.path.join(self.test_dir, "test_cache.db")
         # Direct the LLMProvider to use our test db path
         from kazma_core.swarm import semantic_cache
-        self.orig_db = semantic_cache._DEFAULT_DB
-        semantic_cache._DEFAULT_DB = self.db_path
+        db_patch = patch.object(semantic_cache, "_DEFAULT_DB", self.db_path)
+        db_patch.start()
+        self.addCleanup(db_patch.stop)
 
         # Clean any singleton in llm_provider
         llm_prov_mod = sys.modules.get("kazma_core.llm_provider")
@@ -142,8 +143,6 @@ class TestLLMProviderSemanticCaching(unittest.IsolatedAsyncioTestCase):
                 singleton.close()
             delattr(llm_prov_mod, "_semantic_cache_singleton")
 
-        from kazma_core.swarm import semantic_cache
-        semantic_cache._DEFAULT_DB = self.orig_db
         shutil.rmtree(self.test_dir)
 
     @patch("kazma_core.llm_provider.httpx.AsyncClient")

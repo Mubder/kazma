@@ -150,21 +150,17 @@ def test_slack_chunk_message_empty_text_yields_no_chunks():
 # ── Fix #7: WebDAV TLS verification defaults to ON ──────────────────────
 
 
-def test_webdav_tls_verify_defaults_on():
+def test_webdav_tls_verify_defaults_on(monkeypatch):
     from kazma_core.backup import cloud_sync as cs
 
-    original = cs._read_config
-    try:
-        cs._read_config = lambda key, default="": default  # type: ignore[assignment]
-        assert cs._webdav_tls_verify() is True
+    monkeypatch.setattr(cs, "_read_config", lambda key, default="": default)
+    assert cs._webdav_tls_verify() is True
 
-        cs._read_config = lambda key, default="": "false"  # type: ignore[assignment]
-        assert cs._webdav_tls_verify() is False
+    monkeypatch.setattr(cs, "_read_config", lambda key, default="": "false")
+    assert cs._webdav_tls_verify() is False
 
-        cs._read_config = lambda key, default="": "1"  # type: ignore[assignment]
-        assert cs._webdav_tls_verify() is True
-    finally:
-        cs._read_config = original  # type: ignore[assignment]
+    monkeypatch.setattr(cs, "_read_config", lambda key, default="": "1")
+    assert cs._webdav_tls_verify() is True
 
 
 # ── Patch 2 — finding #2: catalog activation never crashes on integrity

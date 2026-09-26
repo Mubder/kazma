@@ -78,11 +78,11 @@ def _make_components(snapshots=None, state=None):
     return recorder, engine
 
 
-def _reset_cache():
-    """Reset the lazy-import cache so each test starts fresh."""
-    sc._replay_recorder = None
-    sc._replay_engine = None
-    sc._replay_import_attempted = False
+def _reset_cache(monkeypatch):
+    """Reset the lazy-import cache for this test; monkeypatch restores it after."""
+    monkeypatch.setattr(sc, "_replay_recorder", None)
+    monkeypatch.setattr(sc, "_replay_engine", None)
+    monkeypatch.setattr(sc, "_replay_import_attempted", False)
 
 
 # ── Tests ────────────────────────────────────────────────────────────
@@ -91,9 +91,9 @@ def _reset_cache():
 class TestReplayCommand:
     """Tests for /replay slash command against the real engine API."""
 
-    def test_replay_list_when_available(self):
+    def test_replay_list_when_available(self, monkeypatch):
         """Test 1: /replay list shows snapshot list when components are available."""
-        _reset_cache()
+        _reset_cache(monkeypatch)
         snaps = [_make_snapshot(1, "gpt-4o-mini"), _make_snapshot(2, "groq/compound-mini")]
         recorder, engine = _make_components(snapshots=snaps)
 
@@ -106,9 +106,9 @@ class TestReplayCommand:
         assert "gpt-4o-mini" in result
         recorder.list_snapshots.assert_called_once_with("t1")
 
-    def test_replay_list_when_unavailable(self):
+    def test_replay_list_when_unavailable(self, monkeypatch):
         """Test 2: /replay shows friendly fallback when components not available."""
-        _reset_cache()
+        _reset_cache(monkeypatch)
 
         with patch.object(sc, "_get_replay_components", return_value=(None, None)):
             result = sc.resolve_slash_command("/replay list")
@@ -116,9 +116,9 @@ class TestReplayCommand:
         assert result is not None
         assert "Time travel not yet available" in result
 
-    def test_replay_numeric_falls_through(self):
+    def test_replay_numeric_falls_through(self, monkeypatch):
         """Test 3: /replay <n> returns None so the graph handler can restore."""
-        _reset_cache()
+        _reset_cache(monkeypatch)
         recorder, engine = _make_components(state=_make_state(3))
 
         with patch.object(sc, "_get_replay_components", return_value=(recorder, engine)):
@@ -127,9 +127,9 @@ class TestReplayCommand:
         # Must return None — the graph handler (_handle_replay) does the restore.
         assert result is None
 
-    def test_replay_invalid_subcommand(self):
+    def test_replay_invalid_subcommand(self, monkeypatch):
         """Test 4: /replay <non-numeric> shows error for unknown sub-command."""
-        _reset_cache()
+        _reset_cache(monkeypatch)
         recorder, engine = _make_components()
 
         with patch.object(sc, "_get_replay_components", return_value=(recorder, engine)):
@@ -139,9 +139,9 @@ class TestReplayCommand:
         assert "Unknown" in result or "unknown" in result
         assert "frobnicate" in result
 
-    def test_replay_compare(self):
+    def test_replay_compare(self, monkeypatch):
         """Test 5: /replay compare <a> <b> diffs two snapshots via real API."""
-        _reset_cache()
+        _reset_cache(monkeypatch)
         state_a = _make_state(1, model="gpt-4o-mini", cost=0.001)
         state_b = _make_state(3, model="groq/compound-mini", cost=0.002)
         recorder, engine = _make_components(state=state_a)
@@ -158,9 +158,9 @@ class TestReplayCommand:
         # replay_from called for both iterations
         assert engine.replay_from.call_count == 2
 
-    def test_replay_clear(self):
+    def test_replay_clear(self, monkeypatch):
         """Test 6: /replay clear clears snapshots for current thread."""
-        _reset_cache()
+        _reset_cache(monkeypatch)
         recorder, engine = _make_components()
         recorder.clear_snapshots.return_value = 5
 

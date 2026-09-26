@@ -92,14 +92,11 @@ class TestHealthActiveModel:
         initialize_model_registry(store)
         from kazma_core import model_registry as mr
 
-        mr._registry = reg  # type: ignore[attr-defined]
-        try:
-            out = check_model_registry()
-            assert out["status"] == "ok"
-            assert out.get("active_model") == "deepseek-v4-flash"
-            assert out.get("active_provider") == "deepseek"
-        finally:
-            mr._registry = None  # type: ignore[attr-defined]
+        monkeypatch.setattr(mr, "_registry", reg)
+        out = check_model_registry()
+        assert out["status"] == "ok"
+        assert out.get("active_model") == "deepseek-v4-flash"
+        assert out.get("active_provider") == "deepseek"
 
 
 class TestSessionModelStamp:

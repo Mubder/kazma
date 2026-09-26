@@ -469,6 +469,15 @@ code logs 140 server errors for 80 calls, the new code none.
   (musl) has text indexes ordered by musl's collation, and the pgvector image
   is glibc — an existing install must dump and restore, not swap the image
   (`docs/docs/ops/postgres-and-saas.md`). The owner decides.
+- **Without a remote vector store, meaning-based fact search reads the 400
+  most important facts.** `recall._belief_dense` scores the top
+  `memory.v2.dense_belief_candidate_cap` beliefs (default 400, clamped to
+  50-5000) by structural importance and confidence; conversation memories
+  have their own local vector index and no cap. The live install had 321
+  facts, all with vectors, on 2026-09-26 -- every one covered, at about 15
+  new facts a month. Past the cap the least important drop out of
+  meaning-based matching (keyword matching still finds them). The fix is a
+  local vector index for beliefs like the one episodes have, not pgvector.
 - **~~A Postgres DSN with its password is kept as a plain setting and
   echoed.~~** Closed 2026-09-25, next section.
 
@@ -1185,30 +1194,13 @@ while it is open, and the damage lands on a *later* test that looks unrelated.
 only the names it stubbed, all eight remaining uses moved to it, and
 `tests/test_module_stubs.py` bans the pattern in every test tree.
 
-**Two surfaces measured while fixing the above, neither of them a bug list.**
-Both were counted on 2026-09-21 because the next order-dependent failure
-should start here rather than with a day of bisecting:
-
-* **104 module-level value-imports of a name some test monkeypatches** —
-  `from pkg.mod import func` at module scope, where a test patches
-  `pkg.mod.func`. That is the `_streaming` shape. A trap only fires if the
-  importing module is FIRST imported while the patch is live, which depends on
-  import order, so 104 is an exposure surface and exactly one has ever fired.
-* **64 `sleep(<2s)`-then-`assert` sites in tests** — the shape behind both
-  flakes fixed today. Not all are wrong: where the sleep IS the stimulus (a
-  watchdog that must fire after N seconds) it is correct, and only the ones
-  waiting on asynchronous work to land are bets. Telling them apart means
-  reading each one.
-
-Neither was swept. A 104-import refactor or a 64-test rewrite trades a rare,
-order-dependent latent issue for a large diff across the whole tree, which is
-a worse bargain than it looks — especially against a suite whose own failures
-are order-dependent. The scanners that produced these counts are twenty lines
-each and easy to rewrite; the numbers are here so nobody re-derives them from
-scratch.
-
-**Historic detail, kept because the partition sensitivity is still real:**
-Measured 2026-09-21, same machine, same runner, three runs:
+**The partition sensitivity itself, closed as a class (2026-09-26).** Both
+symptoms above were root-caused and fixed on 2026-09-21; a paragraph here
+kept calling them unexplained for five more days. What stayed true is what
+made them possible: the state a test started from depended on which tests
+shared its process, and `fast_test.py` deals files to processes round-robin,
+so one new test file changes every process's neighbours. The measurement
+that started this (2026-09-21, same machine, same runner):
 
 | Run | Files | Result |
 |---|---|---|
@@ -1216,31 +1208,50 @@ Measured 2026-09-21, same machine, same runner, three runs:
 | HEAD with two new test files **removed** | 648 | 9620 passed, **0 failed** |
 | HEAD, full | 650 | 9638 passed, **7 failed** |
 
-The runner chunks by FILE, so adding two files repartitions the tree and
-changes which tests share a process. Replacing those two files' contents with
-inert placeholders — same names, same partition, no global state touched — still
-reproduces six of the seven, which is what rules out the new tests as the
-polluter. All six pass in isolation. CI is green because it happens to run a
-different partition, which is the same kind of luck as the control-plane store
-being safe by position.
+State crossed from one test to the next by three routes. Each is now closed
+for every test at once, not per incident (`tests/test_order_independence.py`;
+each guard has a negative control that runs the same tests with it off and
+watches them fail):
 
-The two symptoms, recorded without a root cause because none has been proven:
+* **The environment.** 88 bare `os.environ` writes in 20 test files --
+  `test_knowledge_index`'s `KAZMA_PROJECT_ROOT` once sent `test_portability`
+  to a temp directory. The root conftest restores the environment after
+  every test.
+* **Import timing.** A module first imported while a test's patch was live
+  kept the fake (`from owner import name` copies the object; undoing the
+  patch restores only `owner.name`) -- the `_streaming` failure -- and one
+  first imported under a test's environment kept what it read. The root
+  conftest imports every product module before collection (under a second
+  per process), so every process starts from the same modules in the same
+  state. A leak probe (every patch recorded, every module scanned after
+  every test) found three fakes kept for good in a 5-way split before this
+  -- `db.postgres_pool` held two MagicMocks, so `is_postgres()` answered
+  truthy for the rest of that process, and `stores.knowledge_ingest` held a
+  test's knowledge store -- and none after. The 82 `patched_value_imports`
+  the ratchet counts still hold the original, so a test that patches the
+  owner does not reach them -- now in every split, where its author sees it,
+  not in one.
+* **Module attributes.** 138 `alias.attr = value` in tests; most restored by
+  hand in `finally`, some never (a closed workspace store, a model registry,
+  the shared HTTP client, the swarm registry path left pointing at a deleted
+  temp directory for every suite that ran after `tests/`). All are
+  `monkeypatch.setattr` now, and the debt ratchet holds the count at zero.
 
-* `test_tools_quickwins.py::test_read_url_connection_error` — expects
-  `"Could not connect"`, gets `"Blocked URL … could not be resolved"`. The test
-  already stubs `ssrf.validate_url` (deliberately, with a comment explaining it
-  must not depend on live DNS), so the guard fired anyway and the stub did not
-  hold. Why it does not hold in a chunk but does alone is unknown. A plausible
-  mechanism — some earlier test reloading or re-importing the module and
-  dropping the monkeypatch — is a guess, and chasing it needs the chunk context
-  reproduced, not another reading of the file.
-* `test_turn_durable_presentation.py` (five tests) — `len(tools) == 1` gets `0`;
-  a shared store is not in the state the test expects.
+A fourth shape was not about order at all: `test_python_exec_cleanup`
+listed the machine's temp directory and counted another chunk's
+`python_exec` directory as its own, which is how the 7-way split failed. It
+now checks the directory `python_exec` made, and the debt ratchet's
+`shared_temp_names` (zero) refuses a test that lists that directory or
+names a fixed path in it -- two more did.
 
-Not fixed here because the cause is not known, and a fix aimed at a guess would
-land as "reordered some fixtures, seems green now". The honest cost of leaving
-it: anyone who adds two test files can turn the suite red without touching any
-product code, and will reasonably blame their own diff first.
+Measured 2026-09-26. Before: the 5-way split passed, the 7-way split
+failed one test. After: the full suite passed split
+four and seven ways, both runs at once on the same machine -- 10,678 passed,
+0 failed, in each -- and all 794 modules import on their own, on Windows
+and on Linux.
+
+What remains is timing, not order: 52 `sleep_then_assert` sites, ratcheted
+(each needs reading -- where the sleep is the stimulus it is correct).
 
 **The control-plane write guard covers file tools, shell arguments, and named stores in `python_exec`.** Rule 0 in
 `check_path_access` makes Kazma's own databases unwritable by `file_write`,

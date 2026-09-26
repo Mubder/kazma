@@ -90,7 +90,7 @@ async def test_division_status_reports_what_the_check_does(monkeypatch, tmp_path
 
     monkeypatch.setenv("KAZMA_DIVISION", "gas_oil")
     reset_division_runtime()
-    dr._rbac = RBACEngine(db_path=str(tmp_path / "rbac.db"))
+    monkeypatch.setattr(dr, "_rbac", RBACEngine(db_path=str(tmp_path / "rbac.db")))
     assert await check_division_tool(tool) is not None
     assert division_enforcement_on() is True
 
@@ -103,7 +103,7 @@ async def test_division_blocks_denied_mcp(monkeypatch, tmp_path):
 
     monkeypatch.setenv("KAZMA_DIVISION", "gas_oil")
     reset_division_runtime()
-    dr._rbac = RBACEngine(db_path=str(tmp_path / "rbac.db"))
+    monkeypatch.setattr(dr, "_rbac", RBACEngine(db_path=str(tmp_path / "rbac.db")))
     err = await check_division_tool("mcp__tourism-booking-api__book")
     assert err is not None
     assert "division" in err.lower()

@@ -519,7 +519,7 @@ def test_the_new_key_is_verified_before_the_old_is_removed():
     assert src.index('out["verified"]') < src.index('"key", "remove"')
 
 
-def test_the_new_passphrase_is_stored_before_any_key_is_revoked(repo, payload):
+def test_the_new_passphrase_is_stored_before_any_key_is_revoked(repo, payload, monkeypatch):
     """The window this closes was walked into on the first live rotation.
 
     Storing only after the function returns leaves an interval -- old keys
@@ -538,12 +538,9 @@ def test_the_new_passphrase_is_stored_before_any_key_is_revoked(repo, payload):
         return real_run(args, repo_, pw, **kw)
 
     import kazma_core.backup.restic_repo as mod
-    mod._run = _tracking
-    try:
-        res = rr.rotate_password({"local": repo}, _PW, "stored-first-pw",
-                                 persist=lambda p: order.append("persist"))
-    finally:
-        mod._run = real_run
+    monkeypatch.setattr(mod, "_run", _tracking)
+    res = rr.rotate_password({"local": repo}, _PW, "stored-first-pw",
+                             persist=lambda p: order.append("persist"))
 
     assert res["ok"], res["errors"]
     assert order and order[0] == "persist", (

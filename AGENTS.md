@@ -2147,8 +2147,17 @@ Read the named test before changing the code it guards.
   **Tests patch attributes with `monkeypatch.setattr`, never `mod.attr =
   fake`**: nothing restores the assignment, and a later test in the same
   process inherits it (`rs._db_path = ...` hid another file's check once a
-  new file shifted fast_test's chunks, 2026-09-26). The debt ratchet counts
-  them (`bare_module_attr_assignments`), and the count only goes down.
+  new file shifted fast_test's chunks, 2026-09-26). The debt ratchet holds
+  them (`bare_module_attr_assignments`) at zero since all 138 were converted.
+  **A test starts from the same state whatever ran before it**: the root
+  conftest imports every product module before collection, so no module is
+  first imported under a test's patches or environment, and restores the
+  environment after every test (a bare `os.environ` write no longer reaches
+  the next test). `fast_test.py` deals files to processes round-robin, so
+  anything a test inherits from its neighbours changes whenever a test file
+  is added. Gate: `tests/test_order_independence.py` (each guard's negative
+  control runs the same tests with it off: `KAZMA_TEST_ISOLATION=0`,
+  `KAZMA_TEST_PREIMPORT=0`).
   **No test reads a real `.env`** — two Postgres tests did, one the LIVE
   install's by hard-coded path. **`@pytest.mark.postgres` is the Postgres
   job's list** (`scripts/postgres_suite.py`), per test, verified on a real

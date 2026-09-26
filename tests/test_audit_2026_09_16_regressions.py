@@ -94,7 +94,9 @@ async def test_heartbeat_actually_writes_the_key(tmp_path, monkeypatch):
     import kazma_core.config_store as config_store
     from kazma_ui.app import KazmaAppBuilder
 
-    config_store._CONFIG_STORE = None  # type: ignore[attr-defined]
+    # The root conftest already gave this test its own SQLite store. (This
+    # used to set `config_store._CONFIG_STORE = None` -- a name the module
+    # does not have, so it reset nothing; monkeypatch refuses it.)
     monkeypatch.setattr(KazmaAppBuilder, "_heartbeat_started", False, raising=False)
 
     builder = KazmaAppBuilder.__new__(KazmaAppBuilder)
