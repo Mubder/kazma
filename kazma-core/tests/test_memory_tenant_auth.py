@@ -57,7 +57,13 @@ def test_resolve_per_user_session_fallback(monkeypatch):
 
 
 def test_merge_remote_state_hits_dedupes(monkeypatch):
+    import sqlite3
+
     from kazma_core.memory.recall import RecallHit, _merge_remote_state_hits
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    local_conn = sqlite3.connect(":memory:")
+    ensure_primary_schema(local_conn)
 
     class _BE:
         name = "postgres"
@@ -96,7 +102,9 @@ def test_merge_remote_state_hits_dedupes(monkeypatch):
         episodes=list(local_ep),
         beliefs=[],
         explain=True,
+        local_conn=local_conn,
     )
+    local_conn.close()
     ids = {h.id for h in eps}
     assert "ep-local" in ids
     assert "ep-remote" in ids

@@ -1762,18 +1762,6 @@ class SettingsRouterBuilder:
                     "error_code": "rebind_failed",
                 }
 
-        @router.post("/api/settings/memory/clean")
-        def api_clean_memory() -> dict[str, Any]:
-            """Purge backfill garbage, SoulEvolution noise, and scan chunks."""
-            try:
-                from kazma_core.memory.backfill_v2 import cleanup_polluted_backfill
-
-                stats = cleanup_polluted_backfill()
-                return {"status": "ok", "stats": stats}
-            except Exception as exc:
-                logger.warning("[Settings] Memory cleanup failed: %s", exc)
-                return {"status": "error", "error": safe_error(exc)}
-
     def _build_mcp_routes(self) -> None:
         router = self.mcp_router
         _get_sm = self._get_sm

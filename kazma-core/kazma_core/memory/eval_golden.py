@@ -59,28 +59,68 @@ def _seed_episode(
     columns ``dual_write.mirror_episode`` writes and the vector it would
     compute -- never through the process-wide writer (which would also have
     copied it into a state mirror or remote vector index, when configured)."""
-    from kazma_core.memory.dual_write import _episode_id
-    from kazma_core.memory.embedder import encode_text_to_blob, get_embedding_model_name
+    from kazma_core.memory.dual_write import episode_row
+    from kazma_core.memory.embedder import encode_text_to_blob
 
+    row = episode_row(
+        session_id=session_id,
+        turn_number=turn,
+        user_text=content,
+        summary_text=content[:500],
+        importance=3,
+        source="golden_eval",
+        created_at=now,
+    )
     conn.execute(
         """INSERT OR IGNORE INTO episodes
            (id, tenant_id, session_id, turn_number, user_text, assistant_text,
             summary_text, tier, structural_importance, created_at, metadata_json,
             embedding, embedding_model_version)
-           VALUES (?,?,?,?,?,'',?,'episodic',3,?,?,?,?)""",
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
-            _episode_id(session_id, turn, content.strip()),
-            "default",
-            session_id,
-            turn,
-            content[:4000],
-            content[:500],
-            now,
-            json.dumps({"source": "golden_eval"}),
-            encode_text_to_blob(content[:500]),
-            get_embedding_model_name() or "",
+            row["id"], row["tenant_id"], row["session_id"], row["turn_number"],
+            row["user_text"], row["assistant_text"], row["summary_text"], row["tier"],
+            row["importance"], row["created_at"], json.dumps(row["meta"]),
+            encode_text_to_blob(row["embed_text"]), row["embedding_model_version"],
         ),
     )
+
+
+def _seed_belief(conn: sqlite3.Connection, fact: dict[str, Any], *, now: float) -> None:
+    """A case's fact, stored the way extraction stores it: ``mutate_belief``,
+    so it has the vector recall judges it by -- a raw row had none, and was
+    judged on its words alone -- kept private (nothing reaches a mirror or a
+    shared index)."""
+    from kazma_core.memory.belief_mutation import mutate_belief
+
+    mutate_belief(
+        conn,
+        fact["subject"],
+        fact["predicate"],
+        fact["object"],
+        predicate_type="functional",
+        confidence=0.9,
+        importance=4,
+        extraction_method="user_explicit",
+        tenant_id="default",
+        now=now,
+        private=True,
+    )
+
+
+def _needs_meaning_unavailable(case: dict[str, Any]) -> bool:
+    """A case marked ``needs_meaning`` asks what only meaning can answer (the
+    question shares no word with the fact); without an embedder it is skipped
+    with that reason, never failed or passed on words."""
+    if not case.get("needs_meaning"):
+        return False
+    try:
+        from kazma_core.memory.embedder import get_embedder
+
+        embedder = get_embedder()
+        return embedder is None or not embedder.encode("probe")
+    except Exception:  # noqa: BLE001 -- no embedder is the answer, whatever broke it
+        return True
 
 
 def run_golden_eval(
@@ -137,30 +177,17 @@ def run_golden_eval(
                     }
                 )
                 continue
+            if _needs_meaning_unavailable(case):
+                skipped += 1
+                results.append(
+                    {"id": case.get("id"), "status": "skipped", "reason": "needs an embedder"}
+                )
+                continue
             conn.execute("DELETE FROM episodes")
             conn.execute("DELETE FROM beliefs")
             now = time.time()
-            for i, b in enumerate(case.get("setup_beliefs") or []):
-                conn.execute(
-                    """INSERT INTO beliefs
-                       (id, tenant_id, subject, predicate, predicate_type, object,
-                        confidence, structural_importance, source_trust_weight,
-                        valid_from, ingested_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                    (
-                        f"{case.get('id', 'c')}-b{i}",
-                        "default",
-                        b["subject"],
-                        b["predicate"],
-                        "functional",
-                        b["object"],
-                        0.9,
-                        4,
-                        1.0,
-                        now,
-                        now,
-                    ),
-                )
+            for b in case.get("setup_beliefs") or []:
+                _seed_belief(conn, b, now=now)
             session = f"golden-{case.get('id')}"
             for turn, msg in enumerate(case.get("setup") or [], start=1):
                 content = str(msg.get("content") or "") if isinstance(msg, dict) else str(msg)

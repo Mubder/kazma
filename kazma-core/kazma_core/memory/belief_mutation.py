@@ -271,8 +271,21 @@ def mutate_belief(
     source_turn: int | None = None,
     cfg: dict[str, Any] | None = None,
     subject_id: str | None = None,
+    now: float | None = None,
+    private: bool = False,
 ) -> dict[str, Any]:
     """Apply a belief mutation per the predicate-type rules.
+
+    *now* is when the fact was stated (default: this moment). Something that
+    records a fact after the fact -- the retrieval benchmark on its fixed
+    clock -- passes the statement's own time, so validity and supersession
+    follow the order the facts were said in.
+
+    *private*: *primary_conn* is a private database (the retrieval
+    benchmark's), and nothing may leave it -- no state mirror, graph backend,
+    unified index or remote vector index write. Those are process-wide, so
+    without this a private write landed in the install's shared stores (the
+    golden eval's class, AGENTS.md section 15F item I).
 
     Returns a dict describing the outcome::
 
@@ -342,7 +355,7 @@ def mutate_belief(
         pass
     trust = _trust_weight(extraction_method, cfg)
     mem_class = derive_memory_class(ptype, importance, cfg=cfg)
-    now = time.time()
+    now = time.time() if now is None else float(now)
 
     try:
         with _mutation_lock:
@@ -352,7 +365,7 @@ def mutate_belief(
                     confidence=confidence, importance=importance, trust=trust,
                     extraction_method=extraction_method, tenant_id=tenant_id,
                     source_session=source_session, source_turn=source_turn,
-                    mem_class=mem_class, now=now, cfg=cfg,
+                    mem_class=mem_class, now=now, cfg=cfg, private=private,
                 )
             elif ptype == "state":
                 result = _mutate_state(
@@ -360,7 +373,7 @@ def mutate_belief(
                     confidence=confidence, importance=importance, trust=trust,
                     extraction_method=extraction_method, tenant_id=tenant_id,
                     source_session=source_session, source_turn=source_turn,
-                    mem_class=mem_class, now=now, cfg=cfg,
+                    mem_class=mem_class, now=now, cfg=cfg, private=private,
                 )
             else:
                 result = _mutate_set(
@@ -368,7 +381,7 @@ def mutate_belief(
                     confidence=confidence, importance=importance, trust=trust,
                     extraction_method=extraction_method, tenant_id=tenant_id,
                     source_session=source_session, source_turn=source_turn,
-                    mem_class=mem_class, now=now, cfg=cfg,
+                    mem_class=mem_class, now=now, cfg=cfg, private=private,
                 )
         # Phase 0 instrumentation (Commitment Layer): surface every functional
         # supersede so ``belief.supersede_without_user_assert`` (plan §8.1) is
@@ -391,7 +404,7 @@ def mutate_belief(
             except Exception:
                 pass
         # Best-effort dual-write to shared state / graph backends (P2-2/P2-3)
-        if result.get("action") not in ("noop", None) and result.get("belief_id"):
+        if not private and result.get("action") not in ("noop", None) and result.get("belief_id"):
             try:
                 from kazma_core.memory.graph_backend import upsert_belief_edge
                 from kazma_core.memory.state_backend import remirror_belief_by_id
@@ -474,6 +487,7 @@ def _insert_belief(
     mem_class: str,
     now: float,
     supersedes_id: str | None = None,
+    private: bool = False,
 ) -> dict[str, Any]:
     meta = {"memory_class": mem_class}
     try:
@@ -532,7 +546,8 @@ def _insert_belief(
             from kazma_core.memory.backends import get_vector_backend
             from kazma_core.memory.embedder import get_embedder
 
-            enc = get_embedder()
+            # The vector index may be process-wide: a private database skips it.
+            enc = None if private else get_embedder()
             qvec = enc.encode(f"{sub} {pred} {obj}") if enc is not None else None
             if qvec:
                 get_vector_backend(conn).upsert(
@@ -588,6 +603,7 @@ def _insert_kw(kw: dict[str, Any]) -> dict[str, Any]:
         "source_session": kw.get("source_session"),
         "source_turn": kw.get("source_turn"),
         "mem_class": kw["mem_class"],
+        "private": bool(kw.get("private")),
     }
 
 
@@ -685,27 +701,28 @@ def _mutate_functional(
             "UPDATE beliefs SET valid_until=?, invalidated_at=? WHERE id=?",
             (now, now, superseded_id),
         )
-        # Dual-write cleanup: drop superseded edge from Neo4j
-        try:
-            from kazma_core.memory.graph_backend import delete_belief_edge
+        if not kw.get("private"):
+            # Dual-write cleanup: drop superseded edge from Neo4j
+            try:
+                from kazma_core.memory.graph_backend import delete_belief_edge
 
-            delete_belief_edge(
-                belief_id=str(superseded_id),
-                subject=sub,
-                predicate=pred,
-                obj=str(old_obj or ""),
-                tenant_id=tenant_id,
-            )
-        except Exception:
-            logger.debug("[belief_mutate] neo4j delete on supersede skipped", exc_info=True)
-        # Mirror tombstone: push the superseded row's death flags to shared
-        # state (M-04 — the mirror previously stayed live forever).
-        try:
-            from kazma_core.memory.state_backend import remirror_belief_by_id
+                delete_belief_edge(
+                    belief_id=str(superseded_id),
+                    subject=sub,
+                    predicate=pred,
+                    obj=str(old_obj or ""),
+                    tenant_id=tenant_id,
+                )
+            except Exception:
+                logger.debug("[belief_mutate] neo4j delete on supersede skipped", exc_info=True)
+            # Mirror tombstone: push the superseded row's death flags to shared
+            # state (M-04 — the mirror previously stayed live forever).
+            try:
+                from kazma_core.memory.state_backend import remirror_belief_by_id
 
-            remirror_belief_by_id(conn, str(superseded_id))
-        except Exception:
-            logger.debug("[belief_mutate] mirror tombstone skipped", exc_info=True)
+                remirror_belief_by_id(conn, str(superseded_id))
+            except Exception:
+                logger.debug("[belief_mutate] mirror tombstone skipped", exc_info=True)
     bid = _belief_id(tenant_id, sub, pred, now)
     try:
         state_after = _insert_belief(

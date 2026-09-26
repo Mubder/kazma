@@ -108,7 +108,7 @@ def test_fts5_match_ranks_and_tenant_isolates(mem_db):
     assert teal.source in ("fts5", "fts_like")
 
 
-def test_belief_graph_ppr_multi_hop(mem_db):
+def test_belief_graph_ppr_multi_hop(mem_db, monkeypatch):
     """user works_at Acme + Acme located_in Paris → query about workplace city."""
     from kazma_core.memory.recall import recall
 
@@ -128,19 +128,39 @@ def test_belief_graph_ppr_multi_hop(mem_db):
         obj="Paris",
         importance=4,
     )
-    # Seed with entity "user" so PPR walks user → AcmeCorp → Paris
-    result = recall("where does the user company sit", conn=mem_db, limit=5, explain=True)
-    ids = {h.id for h in result.beliefs}
-    contents = " ".join(h.content for h in result.beliefs).lower()
-    # Multi-hop should surface the location belief (or at least works_at)
-    assert "b-work" in ids or "b-loc" in ids
-    assert "acmecorp" in contents or "paris" in contents
-    # Prefer that Paris / located_in appears via graph walk
-    assert any(
-        "paris" in (h.content or "").lower() or h.id == "b-loc" for h in result.beliefs
-    ) or any(
-        "ppr" in (h.metadata.get("sources") or []) for h in result.beliefs
-    )
+    from kazma_core.memory import recall as recall_mod
+
+    question = "where does the user company sit"
+    # The walk: seeded by "user", it reaches the location two hops away.
+    walk = recall_mod._belief_graph_ppr(mem_db, question, "default")
+    assert {"b-work", "b-loc"} <= set(walk)
+
+    # The walk is a candidate source; the location is recalled when its own
+    # meaning is about the question (Stage 2 R1 -- a fact the question shares
+    # no meaning or word with is not injected, however it was reached).
+    import struct
+
+    def vec(cos: float, axis: int) -> list[float]:
+        v = [0.0] * 8
+        v[0], v[axis] = cos, (1 - cos * cos) ** 0.5
+        return v
+
+    class _Embedder:
+        def encode(self, text):
+            return [1.0] + [0.0] * 7
+
+    monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: _Embedder())
+    monkeypatch.setattr("kazma_core.memory.embedder.get_embedding_model_name", lambda: "m")
+    for bid, cos, axis in (("b-work", 0.7, 1), ("b-loc", 0.8, 2)):
+        mem_db.execute(
+            "UPDATE beliefs SET embedding = ?, embedding_model_version = 'm' WHERE id = ?",
+            (struct.pack("8f", *vec(cos, axis)), bid),
+        )
+    mem_db.commit()
+    result = recall(question, conn=mem_db, limit=5, explain=True, local_only=True)
+    loc = next(h for h in result.beliefs if h.id == "b-loc")
+    assert "paris" in loc.content.lower()
+    assert "belief_ppr" in loc.metadata["sources"]
 
 
 def test_explain_recall_tags_sources(mem_db):
@@ -193,33 +213,7 @@ def test_dense_belief_search_without_an_embedder_is_empty(mem_db, monkeypatch):
         "kazma_core.memory.embedder.get_embedder",
         lambda: None,
     )
-    rows = recall_mod._belief_dense(mem_db, "anything", None, "default", 5)
-    assert rows == []
-
-
-def test_episode_ppr_traverses_from_later_seed(mem_db):
-    from kazma_core.memory.ppr import ppr_available
-    from kazma_core.memory.recall import _episode_ppr
-
-    _insert_episode(
-        mem_db,
-        eid="ep-a",
-        session_id="sess-ppr",
-        user_text="session alpha",
-        tier="episodic",
-    )
-    _insert_episode(
-        mem_db,
-        eid="ep-b",
-        session_id="sess-ppr",
-        user_text="session beta",
-        tier="episodic",
-    )
-    scores = _episode_ppr(mem_db, ["ep-b"], "default")
-    if ppr_available():
-        assert "ep-a" in scores
-    else:
-        assert "ep-b" in scores
+    assert recall_mod._belief_dense_scored(mem_db, "anything", None, "default", 5) == []
 
 
 def test_read_memory_cfg_store_overlay_includes_ppr_hop_radius(monkeypatch):

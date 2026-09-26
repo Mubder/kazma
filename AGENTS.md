@@ -498,11 +498,10 @@ left backups/export inert). Current boot list:
   archived (created past the TTL *and* not recalled within it — every chat
   turn is importance 1 and can never be promoted, so the recall clock is
   what keeps an in-use memory). Recall searches every tier in
-  `vector_engine.RECALLABLE_TIERS`; an archived hit ranks about one place
-  behind an equally matching active one (`memory.v2.archived_recall_weight`,
-  0.98 -- fused scores are reciprocal ranks 1.6 % apart, so 0.7 would be ~25
-  places, i.e. never found), and a recalled archived memory returns to
-  episodic at the next sweep. Moves reach the state mirror; a remote vector
+  `vector_engine.RECALLABLE_TIERS`; an archived hit ranks just behind an
+  equally matching active one (`memory.v2.archived_recall_weight`, 0.98 --
+  2 % off its evidence score, a tie-breaker, never a reason to lose it), and
+  a recalled archived memory returns to episodic at the next sweep. Moves reach the state mirror; a remote vector
   index is re-tagged, never told to delete. There is no decay score:
   `compute_retention` was removed 2026-09-23 (per-second λ, no reader).
 - **6h backup/export** (`_BACKUP_EXPORT_INTERVAL_HOURS = 6`, not 24):
@@ -558,12 +557,8 @@ came up short, and archiving had erased 76 memories.
   model; NULL/'' version = legacy same model), NumPy chunked fallback, zero
   vectors excluded, read-only (no temp tables). Gate: no `LIMIT` in a
   candidate fetch unless it orders by distance.
-- **Facts** (`recall._recall_beliefs`): meaning search always runs; the score
-  is weighted RRF (`_BELIEF_CHANNEL_WEIGHTS`: meaning 2, keyword/bridge 1,
-  graph walk 0.5 and capped to its top results -- it is seeded by the same
-  keywords and reaches every fact about "user") times a standing band of at
-  most +5 % (`_STANDING_BAND`). A multiplier on RRF is worth ranks, not
-  percent: keep bands small.
+- **Facts** (`recall._recall_beliefs`): meaning search always runs, over
+  every current fact; ranking is §15G's evidence, with the belief thresholds.
 - **Vector repair** (`reembed.run_vector_repair_pass`, 15 min, ~20 s): no
   vector, wrong size or another model's vector -> re-encoded in place,
   newest first; with nothing to repair it never loads the model.
@@ -618,6 +613,79 @@ came up short, and archiving had erased 76 memories.
   SQLite `sessions`, overlaid with the save spool (`paths.chat_spool_db`, the
   web UI's rule too), tenant-filtered, scored in SQL over every session. The
   fallback used to open only the SQLite file -- on Postgres a July leftover.
+
+**G. Recall injects what the question is about -- and nothing when nothing is
+(Stage 2, 2026-09-26, plan §5 R1/R2/R4/R7, S4/S5/W3).** Recall used to
+rank-fuse its channels and always return its top five: on live, 77 of 77
+recalls injected exactly "5 beliefs, 5 episodes", and on the retrieval
+benchmark no unanswerable question got an empty result and three facts in
+four injected were noise.
+- **One ranking, every path:** `recall._rank_by_evidence` scores every
+  candidate -- local and Postgres-primary, episodes and facts -- on its
+  meaning similarity ABOVE the question's background (the mean of meaning
+  ranks 4-15, blended with a 0.5 prior below five samples: bge-m3 puts
+  almost everything at 0.45-0.65, so an absolute cosine cannot tell "about
+  this" from "near this") plus the share of the question's content words it
+  holds. Below the floor nothing is injected; behind the best by more than
+  the gap, nothing either; below "strong" it is shown as "(possibly
+  related)". Thresholds per kind (`_evidence_rules`), each from a sweep on
+  the benchmark (the comments say what each end cost). With no comparable
+  vector for any candidate, words decide alone: at least half the question
+  (`_WORDS_ONLY_FLOOR`). A keyword-only candidate is judged by meaning too:
+  its stored vector locally, `VectorBackend.similarities` on the
+  Postgres-primary path (every backend implements it). Never add a path
+  that ranks by position again -- `tests/test_memory_relevance.py` replaces
+  the ranker with rank fusion and every path must break.
+- **Content words** (`memory/query_terms.py`): EN + Gulf/MSA stopwords,
+  Arabic folded (`documents.arabic.fold_for_search`) with the article and
+  one-letter prefixes handled, light plurals, whole-word prefix matching
+  (`mentions`: "out" is not in "about"), an underscore separates words (as
+  in FTS5). The FTS query, the mirror searches, the past-chats fallback and
+  coverage all use it. A words-only search needs half the question: the
+  mirror top-up (which also never re-adds a row the local database holds --
+  local recall already judged it) and the past-chats fallback (more than
+  half), which now actually runs, whenever recall comes back empty.
+- **Facts:** candidates are content-word matches, the nearest facts by
+  meaning, the facts extracted from the turns episode recall found
+  (provenance: `source_session`/`source_turn`, never a substring bridge),
+  and the graph walk's head. The access-count "rotation" penalty is gone: a
+  fact asked about often is not demoted for it (R4). Display de-slugs the
+  subject ("platform team owns ...").
+- **Measured, not asserted (R7):** `kazma_core/memory/benchmark.py` seeds a
+  private database the product's way -- turns via `episode_row`, facts via
+  `mutate_belief(private=True)`, which keeps every write in that database (no
+  state mirror, graph, unified index or remote vector index) -- and asks the
+  real `recall()`. CI replays bge-m3's recorded vectors
+  (`tests/fixtures/memory_bench/vectors.npz`); `thresholds.json` is a
+  ratchet stamped with the dataset version: `python scripts/memory_bench.py
+  lock` raises it and refuses to lower it, `lock --rebaseline` is for a new
+  dataset version only. A change to the dataset's texts needs `vectors`
+  re-recorded with the real model. The Dashboard's golden eval seeds facts
+  the same way; a case marked `needs_meaning` is skipped without an
+  embedder and must pass with one.
+- **Nothing on the hot path parses `kazma.yaml` (S4):**
+  `config_loader.install_yaml_section` -- the install root's file, parsed
+  once per file version (mtime + size). Gate: `tests/test_install_yaml.py`.
+- **The FTS update triggers fire on indexed columns only (S5):** an access
+  bump, archive move or re-embed used to rewrite the index rows it touched.
+  `ensure_primary_schema` upgrades old triggers. `tests/test_memory_fts_triggers.py`.
+  With S4, recall p50 on the benchmark went 27 ms -> 8 ms.
+- **`/new` promotes, never deletes (W3):** `consolidator.promote_working_memory`.
+  Every hard delete of an episode, fact or entity is declared with why
+  nothing is lost (`tests/test_memory_deletes.py`); the pattern-delete
+  `POST /api/settings/memory/clean` (every tool fact, every entity id
+  starting with four hex letters, every turn saying "retroactive") is gone.
+- **Memory never runs on the event loop (S2):** `recall`,
+  `federated_search`, `build_v2_health`, `build_memory_health`,
+  `search_transcripts`, `promote_working_memory` and `run_golden_eval` are
+  in `_LOOP_STALL_HELPERS` (`tests/test_static_gates.py`); the supervisor's
+  knowledge search, the probe and federated-search routes and the packages
+  page's health card call them through `asyncio.to_thread`.
+- **A busy extraction pool defers a turn, never drops it (W2):** the
+  post-turn body is `consolidator._run_turn_memory`; with all four threads
+  busy (or no thread) the turn's question and answer go to the durable queue
+  as `post_turn_memory`, which the memory worker runs with retries. A queue
+  that refuses too is a WARNING and a counted `enqueue_fail`.
 
 ### 16. Cron Scheduler & Reminder Delivery (`kazma-core/kazma_core/cron/`)
 

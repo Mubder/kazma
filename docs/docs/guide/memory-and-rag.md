@@ -79,15 +79,44 @@ Legacy deep-links: `?tab=embedder` → Memory (scroll to embedder); `?tab=connec
 
 ### `recall()`
 
-1. Currently-valid beliefs: keyword, entity bridge, graph walk and meaning,
-   fused by weighted RRF (meaning counts double, the keyword-seeded graph
-   walk half); importance only breaks near-ties (at most +5 %)  
-2. Episode hybrid search (FTS5 + dense) over **every tier, archived
-   included** -- an archived hit ranks about one place behind an equally
-   matching active one  
-3. Local Ego-Graph PPR boost  
-4. RRF / budget truncation  
-5. Fence: `format_untrusted_block(..., source="memory_v2_recall")`
+Recall injects what the question is about, and nothing when nothing is
+(since 2026-09-26). It used to fuse its channels by rank and always return
+its top five: every turn got five facts and five conversation memories,
+related or not.
+
+1. **Candidates.** Conversation memories: the question's content-word
+   matches (FTS5) and its 40 nearest memories by meaning, over **every tier,
+   archived included**. Facts: content-word matches, the nearest current
+   facts by meaning, the facts extracted from the turns just found, and the
+   belief graph's walk.
+2. **Evidence.** Each candidate is scored on how far its meaning similarity
+   rises above what unrelated memories reach for this same question, plus
+   the share of the question's content words it holds. Below a floor
+   nothing is injected; far behind the best, nothing either; a thin match
+   is shown to the model as "(possibly related)". Conversation memories and
+   facts have their own thresholds, measured on the retrieval benchmark.
+   When no candidate has a vector to judge by (no embedder), a memory must
+   hold at least half of the question's content words.
+3. **Tie-breakers.** Among close candidates the newer one comes first (and,
+   for a fact, the one that matters more); an archived memory comes just
+   behind an equally matching active one; a memory from the current session
+   comes first; the same text is shown once.
+4. **Content words** (`memory/query_terms.py`): English and Gulf/MSA
+   stopwords dropped, Arabic folded with the article and one-letter prefixes
+   handled, light plurals, whole words only ("out" is not in "about").
+5. Fence: `format_untrusted_block(..., source="memory_v2_recall")`.
+
+When memory has nothing for a question, the **past-chats fallback** searches
+earlier chats; a chat must hold more than half of the question's content
+words.
+
+**Quality is measured.** `python scripts/memory_bench.py run` scores recall
+on a persona's life -- 1,109 chat turns and 72 facts inside unrelated chat,
+76 questions (single facts, paraphrases, things only the assistant said,
+updates, codes, Arabic, questions with no answer). CI replays the real
+model's recorded vectors and holds every score to a ratchet
+(`tests/test_memory_benchmark.py`); `lock` raises it, and it cannot be
+lowered.
 
 **Meaning search is exact over every memory** (`vector_engine.py`, since
 2026-09-26): every episode and every current fact whose vector comes from
@@ -103,8 +132,9 @@ dual-write, or remote-first if `KAZMA_MEMORY_STATE_ROLE=primary`) — if that
 Postgres ships the extension. `postgres:16-alpine` does not; Kazma then
 stays on sqlite-vec, says so once at boot, and Settings → Memory shows why
 ([Postgres & SaaS](../ops/postgres-and-saas) has the states and the fix).
-Postgres-primary is **ILIKE sparse + pgvector dense, RRF-fused** — not
-ILIKE-only. Explicit Qdrant in Settings is never overridden.
+Postgres-primary ranks the mirror's keyword matches and the index's
+nearest memories on the same evidence (a keyword match's meaning comes from
+the index) — not keyword-only. Explicit Qdrant in Settings is never overridden.
 Kill-switch: `KAZMA_PGVECTOR=0`.
 
 ### Post-turn
@@ -158,7 +188,7 @@ changes and an empty summary gets a one-line stub (start of the question —
 answer); the question, the answer and the vector all stay, and a static gate
 fails the build if any statement sets episode text to NULL. Recall still
 reaches an archived memory (`memory.v2.archived_recall_weight`, default
-0.98 — about one place behind an active memory that matches as well), and a
+0.98 — just behind an active memory that matches as well), and a
 memory recalled again returns to the episodic tier at the next sweep. Tier
 moves reach the optional Postgres state mirror; a remote vector index keeps
 the archived vector, re-tagged.

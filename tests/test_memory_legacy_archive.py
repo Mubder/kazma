@@ -109,16 +109,20 @@ def test_a_stranded_memory_comes_back_whole_and_cold(conn):
 def test_recall_reaches_a_restored_memory_and_could_not_before(conn, monkeypatch):
     """Both recall channels see it once it is back: by meaning (its own
     vector, a question sharing no word with it) and by words."""
-    from kazma_core.memory.recall import _episode_dense, recall
+    from kazma_core.memory.recall import recall
 
     question = "when does my travel document run out"
     meaning = _unit(2)
 
     class _Embedder:
+        """Like a real model: the words query means the memory too."""
+
         dim = DIM
 
         def encode(self, text):
-            return meaning if text == question else _unit(abs(hash(text)) % 10_000)
+            if text == question or "passport" in text.lower():
+                return meaning
+            return _unit(abs(hash(text)) % 10_000)
 
     monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: _Embedder())
     monkeypatch.setattr("kazma_core.memory.embedder.get_embedding_model_name", lambda: "m")
@@ -127,7 +131,9 @@ def test_recall_reaches_a_restored_memory_and_could_not_before(conn, monkeypatch
         _live(conn, f"e_other{i}", f"note about topic {i} and the weather")
 
     def by_meaning():
-        return [h.id for h in _episode_dense(conn, question, None, "default", 5)]
+        # recall() itself: under rank fusion this memory lost to twenty notes
+        # whose "about" held the question's "out" (Stage 2 R1/R2 fixed it).
+        return [h.id for h in recall(question, conn=conn, limit=5).episodes]
 
     def by_words():
         return [h.id for h in recall("passport renewal", conn=conn, limit=5).episodes]

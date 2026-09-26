@@ -218,6 +218,74 @@ def _run(mem, budget=60.0, now=None):
     )
 
 
+def _queued(mem, task_type):
+    from kazma_core.paths import memory_ops_db
+
+    conn = sqlite3.connect(memory_ops_db())
+    try:
+        return [json.loads(r[0]) for r in conn.execute(
+            "SELECT payload_json FROM memory_task_queue WHERE task_type = ?", (task_type,))]
+    finally:
+        conn.close()
+
+
+def _with_the_pool_full(fn):
+    taken = 0
+    while consolidator._v2_extract_sem.acquire(blocking=False):
+        taken += 1
+    try:
+        async def in_a_turn():
+            fn()
+
+        asyncio.run(in_a_turn())
+    finally:
+        for _ in range(taken):
+            consolidator._v2_extract_sem.release()
+
+
+def test_a_turn_the_pool_cannot_take_is_remembered_from_the_queue(mem):
+    """Every extraction thread busy: the turn goes to the durable queue, and
+    the memory worker writes its episode AND its facts. It used to be skipped
+    for good -- turn reconcile brought the episode back, never the facts
+    (Stage 2, W2)."""
+    from kazma_core.memory import worker_bootstrap
+
+    msgs = [_u("Quick note: I live in Porto."), _a("Porto, lovely city.")]
+    _with_the_pool_full(lambda: consolidator._schedule_post_turn_memory(
+        msgs, session_id="sess-w2", turn=1, tenant_id="default"))
+    assert _episodes(mem.db) == []  # nothing ran in the turn
+    [payload] = _queued(mem, "post_turn_memory")
+    assert payload["user_text"] == "Quick note: I live in Porto."
+    assert payload["assistant_text"] == "Porto, lovely city."
+
+    assert asyncio.run(worker_bootstrap._handle_post_turn_memory(payload)) is True
+
+    [episode] = _episodes(mem.db)
+    assert (episode["session_id"], episode["turn_number"]) == ("sess-w2", 1)
+    assert episode["assistant_text"] == "Porto, lovely city."
+    facts = mem.db.execute(
+        "SELECT predicate, object, source_session, source_turn FROM beliefs").fetchall()
+    assert [tuple(f) for f in facts] == [("lives_in", "Porto", "sess-w2", 1)]
+    worker_bootstrap.register_v2_handlers()
+    from kazma_core.memory.task_queue import _HANDLERS
+
+    assert "post_turn_memory" in _HANDLERS
+
+
+def test_a_turn_the_queue_refuses_is_reported(mem, monkeypatch, caplog):
+    """Negative control: with the queue down too, the loss is a warning and a
+    counted failure -- never the silent debug line it used to be."""
+    import logging
+
+    monkeypatch.setattr("kazma_core.memory.task_queue.enqueue_task", lambda *a, **k: None)
+    before = consolidator.get_post_turn_metrics()["enqueue_fail"]
+    with caplog.at_level(logging.WARNING, logger="kazma_core.memory.consolidator"):
+        _with_the_pool_full(lambda: consolidator._schedule_post_turn_memory(
+            [_u("I live in Braga.")], session_id="sess-w2b", turn=1, tenant_id="default"))
+    assert any("memory queue refused" in r.getMessage() for r in caplog.records)
+    assert consolidator.get_post_turn_metrics()["enqueue_fail"] == before + 1
+
+
 def test_turns_missing_from_memory_are_written_with_their_own_time(mem):
     from kazma_core.memory.dual_write import mirror_episode
 

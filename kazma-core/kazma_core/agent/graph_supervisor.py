@@ -1050,7 +1050,9 @@ async def supervisor_node(
                         # Industry path: hybrid RRF over inject-scoped libs first
                         # (auto_inject + optional smart search), same stack as
                         # get_knowledge_auto_inject_block — not a parallel FTS path.
-                        fed = federated_search(
+                        # to_thread: SQLite + the knowledge index, like recall above.
+                        fed = await asyncio.to_thread(
+                            federated_search,
                             last_user_content,
                             tenant_id=state.get("tenant_id", "default"),
                             session_id=state.get("thread_id"),

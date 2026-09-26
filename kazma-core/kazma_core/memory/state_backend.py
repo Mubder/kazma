@@ -401,8 +401,16 @@ class PostgresStateBackend:
     def search_episodes(
         self, query: str, *, tenant_id: str = "default", limit: int = 10
     ) -> list[dict[str, Any]]:
-        """ILIKE sparse search over mirrored episode text (multi-replica read)."""
-        terms = [t for t in (query or "").lower().split() if len(t) >= 2][:8]
+        """Keyword search over mirrored episode text (multi-replica read).
+
+        The question's content words only (``memory/query_terms.py``): ORing
+        every token as a substring matched "is" and "my" everywhere, so this
+        returned the newest memories whatever was asked. ``LIKE`` prefilters;
+        whole words are confirmed in Python.
+        """
+        from kazma_core.memory.query_terms import mentions, search_terms
+
+        terms = search_terms(query)[:8]
         if not terms or not self._dsn:
             return []
         try:
@@ -422,7 +430,7 @@ class PostgresStateBackend:
                 for t in terms:
                     pat = f"%{t}%"
                     params.extend([pat, pat, pat])
-                params.append(max(1, min(int(limit), 50)))
+                params.append(max(1, min(int(limit), 50)) * 5)
                 cur.execute(
                     f"""
                     SELECT id, session_id, user_text, assistant_text, summary_text,
@@ -437,7 +445,14 @@ class PostgresStateBackend:
                 cols = [d[0] for d in cur.description]
                 rows = [dict(zip(cols, r)) for r in cur.fetchall()]
                 cur.close()
-                return rows
+                rows = [
+                    r for r in rows
+                    if mentions(
+                        " ".join(str(r.get(k) or "") for k in ("user_text", "assistant_text", "summary_text")),
+                        terms,
+                    )
+                ]
+                return rows[: max(1, min(int(limit), 50))]
             finally:
                 conn.close()
         except Exception:
@@ -447,8 +462,10 @@ class PostgresStateBackend:
     def search_beliefs(
         self, query: str, *, tenant_id: str = "default", limit: int = 10
     ) -> list[dict[str, Any]]:
-        """ILIKE sparse search over mirrored active beliefs."""
-        terms = [t for t in (query or "").lower().split() if len(t) >= 2][:8]
+        """Keyword search over mirrored active beliefs (content words, whole words)."""
+        from kazma_core.memory.query_terms import mentions, search_terms
+
+        terms = search_terms(query)[:8]
         if not terms or not self._dsn:
             return []
         try:
@@ -468,7 +485,7 @@ class PostgresStateBackend:
                 for t in terms:
                     pat = f"%{t}%"
                     params.extend([pat, pat, pat])
-                params.append(max(1, min(int(limit), 50)))
+                params.append(max(1, min(int(limit), 50)) * 5)
                 cur.execute(
                     f"""
                     SELECT id, subject, predicate, object, predicate_type,
@@ -486,7 +503,14 @@ class PostgresStateBackend:
                 cols = [d[0] for d in cur.description]
                 rows = [dict(zip(cols, r)) for r in cur.fetchall()]
                 cur.close()
-                return rows
+                rows = [
+                    r for r in rows
+                    if mentions(
+                        " ".join(str(r.get(k) or "") for k in ("subject", "predicate", "object")),
+                        terms,
+                    )
+                ]
+                return rows[: max(1, min(int(limit), 50))]
             finally:
                 conn.close()
         except Exception:

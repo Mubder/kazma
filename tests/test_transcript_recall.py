@@ -114,6 +114,42 @@ def test_no_hits_for_unrelated_query(sessions_db: Path) -> None:
     assert search_transcripts("zebra quantum umbrella", db_path=sessions_db) == []
 
 
+def _add_session(db: Path, sid: str, title: str, text: str) -> None:
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO sessions (tenant_id, session_id, thread_id, title, messages, created_at) "
+        "VALUES ('default', ?, ?, ?, ?, '2026-09-01T00:00:00')",
+        (sid, f"thread-{sid}", title, f'[{{"role":"user","content":"{text}"}}]'),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_a_hit_holds_most_of_the_question_as_whole_words(sessions_db: Path) -> None:
+    """Since the relevance floor this runs for every question memory cannot
+    answer, so one shared word is not enough: "shoe size" is not answered by
+    a coffee filter's size, and "out" is not in "about"."""
+    _add_session(sessions_db, "s-filter", "coffee kit", "the filter size is 4")
+    _add_session(sessions_db, "s-about", "notes", "I told you about the passport renewal")
+    assert search_transcripts("What's my shoe size?", db_path=sessions_db) == []
+    assert search_transcripts("does my passport run out", db_path=sessions_db) == []
+    # Controls: the same sessions ARE found once the question is about them.
+    assert [h["session_id"] for h in search_transcripts("filter size", db_path=sessions_db)] == [
+        "s-filter"]
+    assert "s-about" in {
+        h["session_id"] for h in search_transcripts("passport renewal", db_path=sessions_db)}
+
+
+def test_a_question_of_stopwords_searches_nothing(sessions_db: Path) -> None:
+    assert search_transcripts("what is it that I have", db_path=sessions_db) == []
+
+
+def test_arabic_words_match_through_the_article(sessions_db: Path) -> None:
+    """The transcript says "الأسماء الخضراء"; the question drops the article."""
+    hits = search_transcripts("اسماء خضراء", db_path=sessions_db)
+    assert hits and hits[0]["session_id"] == "s-ar"
+
+
 def test_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KAZMA_TRANSCRIPT_RECALL", "0")
     assert transcript_fallback_enabled() is False

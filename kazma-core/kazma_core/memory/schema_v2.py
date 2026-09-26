@@ -443,6 +443,23 @@ def _ensure_fts5(conn: Any) -> None:
         logger.debug("[schema_v2] FTS5 create failed (engine may lack fts5)", exc_info=True)
         return
 
+    # The update triggers fire only when an INDEXED column changes. They used
+    # to fire on any column, so every recall's access bump, every archive
+    # move and every re-embed deleted and re-inserted those rows' index
+    # entries (Stage 2 S5). CREATE ... IF NOT EXISTS never replaces a trigger,
+    # so an install still carrying the any-column form gets it dropped here
+    # and recreated below.
+    for name in ("episodes_fts_au", "beliefs_fts_au", "entities_fts_au"):
+        try:
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?", (name,)
+            ).fetchone()
+            if row and " UPDATE OF " not in " ".join(str(row[0] or "").upper().split()):
+                conn.execute(f"DROP TRIGGER {name}")
+                logger.info("[schema_v2] %s now fires only on indexed columns", name)
+        except Exception:
+            logger.debug("[schema_v2] trigger upgrade check failed for %s", name, exc_info=True)
+
     # Sync triggers — external content tables require explicit maintainence.
     for sql in (
         """
@@ -458,7 +475,8 @@ def _ensure_fts5(conn: Any) -> None:
         END
         """,
         """
-        CREATE TRIGGER IF NOT EXISTS episodes_fts_au AFTER UPDATE ON episodes BEGIN
+        CREATE TRIGGER IF NOT EXISTS episodes_fts_au
+        AFTER UPDATE OF user_text, assistant_text, summary_text ON episodes BEGIN
           INSERT INTO episodes_fts(episodes_fts, rowid, user_text, assistant_text, summary_text)
           VALUES ('delete', old.rowid, old.user_text, old.assistant_text, old.summary_text);
           INSERT INTO episodes_fts(rowid, user_text, assistant_text, summary_text)
@@ -478,7 +496,8 @@ def _ensure_fts5(conn: Any) -> None:
         END
         """,
         """
-        CREATE TRIGGER IF NOT EXISTS beliefs_fts_au AFTER UPDATE ON beliefs BEGIN
+        CREATE TRIGGER IF NOT EXISTS beliefs_fts_au
+        AFTER UPDATE OF subject, predicate, object ON beliefs BEGIN
           INSERT INTO beliefs_fts(beliefs_fts, rowid, subject, predicate, object)
           VALUES ('delete', old.rowid, old.subject, old.predicate, old.object);
           INSERT INTO beliefs_fts(rowid, subject, predicate, object)
@@ -500,7 +519,8 @@ def _ensure_fts5(conn: Any) -> None:
         END
         """,
         """
-        CREATE TRIGGER IF NOT EXISTS entities_fts_au AFTER UPDATE ON entities BEGIN
+        CREATE TRIGGER IF NOT EXISTS entities_fts_au
+        AFTER UPDATE OF name, type, aliases_json ON entities BEGIN
           INSERT INTO entities_fts(entities_fts, rowid, name, type, aliases_json)
           VALUES ('delete', old.rowid, old.name, old.type, old.aliases_json);
           INSERT INTO entities_fts(rowid, name, type, aliases_json)

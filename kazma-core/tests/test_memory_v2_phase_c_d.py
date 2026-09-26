@@ -145,24 +145,32 @@ def test_global_reconsolidation_dedupes(mem_db):
     assert active == 1
 
 
-def test_working_tier_promote_and_clear(mem_db, monkeypatch):
-    from kazma_core.memory.consolidator import clear_working_memory
+def test_ending_a_conversation_keeps_every_episode(mem_db, monkeypatch):
+    """``/new`` promotes the old conversation's working turn; nothing is deleted.
 
-    # Direct insert as working
+    It used to DELETE the working-tier episode, so the last thing said before
+    a new conversation left memory (Stage 2, W3).
+    """
+    from kazma_core.memory.consolidator import promote_working_memory
+
     now = time.time()
-    mem_db.execute(
-        """INSERT INTO episodes
-           (id, tenant_id, session_id, turn_number, user_text, tier, created_at)
-           VALUES ('w1','default','sess-w',1,'hello working','working',?)""",
-        (now,),
-    )
+    for eid, session, tier, tenant in (
+        ("w1", "sess-w", "working", "telegram:42"),  # any tenant mode
+        ("e1", "sess-w", "episodic", "telegram:42"),
+        ("x1", "sess-x", "working", "default"),  # another conversation
+    ):
+        mem_db.execute(
+            """INSERT INTO episodes
+               (id, tenant_id, session_id, turn_number, user_text, tier, created_at)
+               VALUES (?,?,?,1,'hello',?,?)""",
+            (eid, tenant, session, tier, now),
+        )
     mem_db.commit()
-    n = clear_working_memory("sess-w", tenant_id="default")
-    assert n >= 1
-    left = mem_db.execute(
-        "SELECT COUNT(*) FROM episodes WHERE session_id='sess-w' AND tier='working'"
-    ).fetchone()[0]
-    assert left == 0
+
+    assert promote_working_memory("sess-w") == 1
+
+    tiers = dict(mem_db.execute("SELECT id, tier FROM episodes").fetchall())
+    assert tiers == {"w1": "episodic", "e1": "episodic", "x1": "working"}
 
 
 def test_tenant_isolation_beliefs(mem_db):

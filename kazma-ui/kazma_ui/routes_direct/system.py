@@ -776,7 +776,7 @@ def register_system_routes(self: Any) -> None:
         try:
             from kazma_core.memory.health import build_memory_health
 
-            mh = build_memory_health()
+            mh = await asyncio.to_thread(build_memory_health)
             layers = {}
             for c in mh.get("components") or []:
                 cid = c.get("id") or ""

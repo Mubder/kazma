@@ -150,6 +150,26 @@ class VectorEngine:
             "beliefs", ["tenant_id = ?", BELIEF_ACTIVE_SQL], [tenant_id], query_vec, limit
         )
 
+    def similarities(
+        self,
+        query_vec: list[float] | None,
+        ids: list[str],
+        *,
+        kind: str = "episode",
+    ) -> dict[str, float]:
+        """Cosine of exactly these rows with the question, by id.
+
+        Recall judges every candidate on meaning, including one only its
+        words found. A row without a comparable vector (none, another size,
+        another model's) is left out: its similarity is unknown, not zero.
+        """
+        wanted = list(dict.fromkeys(str(i) for i in ids if i))
+        if not wanted:
+            return {}
+        table = "beliefs" if kind == "belief" else "episodes"
+        where = [f"id IN ({','.join('?' for _ in wanted)})"]
+        return dict(self._exact(table, where, wanted, query_vec, len(wanted)))
+
     def comparable_clause(self, dim: int) -> tuple[str, list[Any]]:
         """SQL predicate for rows whose vector can be compared with a *dim* query."""
         sql = "embedding IS NOT NULL AND length(embedding) = ?"

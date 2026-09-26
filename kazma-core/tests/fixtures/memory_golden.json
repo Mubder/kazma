@@ -17,7 +17,8 @@
       ],
       "query": "where do I live",
       "expect_contains": ["paris"],
-      "optional": true
+      "optional": true,
+      "needs_meaning": true
     },
     {
       "id": "multi_hop_work",
@@ -27,7 +28,8 @@
       ],
       "query": "where does the user company sit",
       "expect_contains": ["paris", "acme"],
-      "match_any": true
+      "match_any": true,
+      "needs_meaning": true
     },
     {
       "id": "multi_hop_three",
