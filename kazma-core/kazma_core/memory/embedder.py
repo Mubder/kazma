@@ -39,6 +39,8 @@ import os
 import struct
 import threading
 import time
+from array import array
+from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
@@ -181,6 +183,12 @@ class Embedder(Protocol):
 # ══════════════════════════════════════════════════════════════════════════
 
 
+#: Texts up to this long are remembered by the local embedder, at most this
+#: many (a 1,024-dimension float32 vector is 4 KB: 16 MB at most).
+_SHORT_TEXT_CHARS = 256
+_SHORT_TEXT_CACHE = 4096
+
+
 class LocalSentenceTransformerEmbedder:
     """Local in-process embedder backed by ``sentence-transformers``.
 
@@ -207,6 +215,12 @@ class LocalSentenceTransformerEmbedder:
         self._model: Any = None
         self._model_lock = threading.Lock()
         self._allow_download = allow_download
+        # Short texts are embedded again and again: every entity name of the
+        # tenant on each extraction that finds a fact (93 names, seconds of
+        # CPU per turn on the live install, 2026-09-27), repeated questions.
+        # A vector of a text never changes under one model; kept as float32.
+        self._short: OrderedDict[str, array] = OrderedDict()
+        self._short_lock = threading.Lock()
 
     def _ensure_model(self) -> Any:
         if self._model is not None:
@@ -242,15 +256,29 @@ class LocalSentenceTransformerEmbedder:
         return self._dim
 
     def encode(self, text: str) -> list[float]:
+        short = len(text) <= _SHORT_TEXT_CHARS
+        if short:
+            with self._short_lock:
+                hit = self._short.get(text)
+                if hit is not None:
+                    self._short.move_to_end(text)
+                    return hit.tolist()
         model = self._ensure_model()
         if model is None:
             return []
         emb = model.encode(text, convert_to_numpy=False)
         if isinstance(emb, list):
-            return emb
-        if hasattr(emb, "tolist"):
-            return emb.tolist()
-        return list(emb)
+            vec = emb
+        elif hasattr(emb, "tolist"):
+            vec = emb.tolist()
+        else:
+            vec = list(emb)
+        if short and vec:
+            with self._short_lock:
+                self._short[text] = array("f", vec)
+                while len(self._short) > _SHORT_TEXT_CACHE:
+                    self._short.popitem(last=False)
+        return vec
 
     def encode_batch(self, texts: list[str]) -> list[list[float]]:
         model = self._ensure_model()

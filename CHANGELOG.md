@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Kazma keeps what you told it in the order you said it (2026-09-27)
+
+When something you said long ago reached memory late -- a message recovered
+from the chat history, or one that waited in a queue -- it replaced whatever
+you had said since. If you once said "I live in Paris" and later "I moved to
+London", recovering the old message made Kazma think you live in Paris again.
+Now every fact carries the time you said it: an older statement is kept as
+history and never replaces a newer one.
+
+- The ~1,000 conversation turns recovered from the chat history on 26
+  September now also give Kazma the facts they contain, 60 turns every
+  quarter hour.
+- "I work at Google" is remembered as where you work. It used to be stored
+  as where you live.
+- Learning a fact is faster: Kazma no longer re-reads every name it knows
+  each time.
+
 ## The Knowledge Library understands questions again; New Chat starts a new chat (2026-09-26)
 
 Since the end of July, searching your Knowledge Library (the WhatsApp,

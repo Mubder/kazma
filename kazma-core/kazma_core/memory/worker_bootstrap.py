@@ -311,7 +311,8 @@ def _micro_consolidation_prepare(episode_id: str) -> dict[str, Any] | None:
         ensure_primary_schema(primary)
         ensure_ops_schema(ops)
         row = primary.execute(
-            "SELECT user_text, assistant_text, session_id, turn_number, tenant_id FROM episodes WHERE id=?",
+            "SELECT user_text, assistant_text, session_id, turn_number, tenant_id, created_at "
+            "FROM episodes WHERE id=?",
             (episode_id,),
         ).fetchone()
         if not row:
@@ -341,7 +342,7 @@ def _micro_consolidation_prepare(episode_id: str) -> dict[str, Any] | None:
                     primary, ops,
                     row["user_text"] or "", row["assistant_text"] or "",
                     session_id=row["session_id"], turn=row["turn_number"],
-                    tenant_id=row["tenant_id"],
+                    tenant_id=row["tenant_id"], now=row["created_at"],
                 )
                 if sync_stats.get("applied", 0) > 0:
                     logger.debug(
@@ -386,10 +387,13 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
                 row["user_text"] or "", row["assistant_text"] or "", use_llm=prep["use_llm"],
             )
             if raw:
+                # The facts were stated when the turn happened, not when this
+                # deep pass got to it (minutes later, or after a restart): a
+                # later turn's facts may already be written (W1).
                 stats = await asyncio.to_thread(
                     _apply_beliefs_to_v2, raw, primary, ops, stats=stats,
                     session_id=row["session_id"], turn=row["turn_number"],
-                    tenant_id=row["tenant_id"],
+                    tenant_id=row["tenant_id"], now=row["created_at"],
                 )
             logger.info(
                 "[memory_worker] micro_consolidation of %s: applied=%d (llm=%s)",

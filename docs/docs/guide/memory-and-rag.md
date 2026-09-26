@@ -144,13 +144,21 @@ runs (`kazma_ui.turn_runtime.close_turn` → `consolidator.remember_turn`) —
 web, Telegram, Slack and Discord alike. Until 2026-09-26 only the gateway
 handler did it, so no web chat turn was remembered from 2026-08-08; a
 15-minute **turn reconcile** now writes an episode for every chat-store
-turn that has none (with the turn's own time; episodes only, since replaying
-old statements as facts could overwrite newer ones), which recovered those
-turns and catches any future gap.
+turn that has none, with the turn's own time, which recovered those turns and
+catches any future gap. The turns it writes then get their facts like a live
+turn (the heuristic pass at once, the LLM pass queued, 60 turns a pass).
+
+**Facts follow the order they were said in** (2026-09-27). A fact carries
+the time it was stated (`valid_from`), apart from the time it was written
+(`ingested_at`). A single-valued statement OLDER than the current fact -- a
+reconciled turn, a turn that waited in the queue, the LLM pass arriving
+after a later turn -- is kept as history in its place on the timeline and
+never replaces the current fact. Before, whichever statement was written
+last won.
 
 - Mirror working/recall episode (the question and ITS answer; the episode's
   turn number is the conversation's turn index)  
-- Heuristic (+ optional LLM queue) belief extraction → `mutate_belief`. A `user_explicit` functional belief **cannot** be superseded by `llm_inferred` / `system_tool` (commitment source-trust gate in `_mutate_functional`; independent of `authorize_effect`).  
+- Heuristic (+ optional LLM queue) belief extraction → `mutate_belief`, stated at the turn's time. A `user_explicit` functional belief **cannot** be superseded by `llm_inferred` / `system_tool` (commitment source-trust gate in `_mutate_functional`; independent of `authorize_effect`), nor cut short by an earlier lower-trust statement.  
 - Hygiene rejects stack/version subjects (e.g. `kazma_v2_4_0` mistaken for product version)  
 - Dual-write: optional Postgres state mirror + Neo4j edge upsert  
 - **Ego-graph anchor** — every non-hub subject that does not already reach `user` gets `user → related_to → <subject>` at write time (payload leaves **and** floating entity clusters). Payload objects (`fully_clean`, paths) are **not** minted as concept entities (that mint used to skip the hub edge). Idempotent backfill on the 6h sweep.  
@@ -165,7 +173,7 @@ turns and catches any future gap.
 | ~6h | `macro_sleep` (rule-based tier moves + archival, below) + ego-anchor backfill + FTS drift COUNT (`*_docsize` vs base; rebuild on mismatch) |
 | **~6h** (not 24h) | `native_backup` + JSONL/GraphML/episodes/merges/audit export + `native_pg_backup` + mirror-drift warning. Universal backup **checks** PG dump freshness; it does not dump twice. |
 | ~24h | `global_reconsolidation` (dedupe + re-embed; **partitioned** for large corpora; recomputes entity counts) |
-| ~15m | commitment GC (TTL + soul-pending), HITL-gate TTL sweep, **memory vector repair** (missing, wrong-size or old-model vectors re-encoded in place, ~20 s a pass, no model load when there is nothing to do), **memory recovery** (below) and **turn reconcile** (chat-store turns without an episode) — one sweep runner, no extra loop |
+| ~15m | commitment GC (TTL + soul-pending), HITL-gate TTL sweep, **memory vector repair** (missing, wrong-size or old-model vectors re-encoded in place, ~20 s a pass, no model load when there is nothing to do), **memory recovery** (below), **turn reconcile** (chat-store turns without an episode, then their facts) and **knowledge vector repair** (Knowledge Library chunks without a meaning vector, shortest first, up to 5 min a pass, last in the cycle) — one sweep runner, no extra loop |
 | (also from this boot) | session purge, daily digest, weekly firing ledger, restore drill |
 
 Huge corpus: subject-hash partitions + chained queue tasks (see `global_reconsolidation.py`).
