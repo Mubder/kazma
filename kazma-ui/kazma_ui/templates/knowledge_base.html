@@ -20,6 +20,8 @@
     search_placeholder: {{ t('knowledge.search_placeholder') | tojson }},
     search_btn: {{ t('knowledge.search_btn') | tojson }},
     searching: {{ t('knowledge.searching') | tojson }},
+    meaning_search: {{ t('knowledge.meaning_search') | tojson }},
+    keyword_only: {{ t('knowledge.keyword_only') | tojson }},
     delete_confirm_title: {{ t('knowledge.delete_confirm_title') | tojson }},
     delete_confirm_msg: {{ t('knowledge.delete_confirm_msg') | tojson }},
     refresh_started: {{ t('knowledge.refresh_started') | default('Refresh started.') | tojson }},
@@ -165,6 +167,12 @@
               <span
                 style="font-size:0.7rem;padding:1px 6px;border-radius:8px;background:var(--bg-accent,#2a2a3a);"
                 x-text="lib.chunk_count + ' ' + lib._t_chunks"
+              ></span>
+              <span
+                x-show="lib._t_meaning"
+                style="font-size:0.7rem;color:var(--text-secondary);"
+                x-text="lib._t_meaning"
+                x-cloak
               ></span>
               <label
                 style="font-size:0.72rem;display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:var(--text-secondary);"

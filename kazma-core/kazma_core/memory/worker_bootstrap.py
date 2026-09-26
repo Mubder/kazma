@@ -858,6 +858,18 @@ def _repair_memory_vectors() -> None:
     run_vector_repair_pass()
 
 
+def _embed_knowledge_chunks() -> None:
+    # Each Knowledge Library's vectors made to match its chunks, ~30 s a pass:
+    # missing ones embedded, those of retired chunks removed (AGENTS.md §24F).
+    # The vector store's client module was deleted on 2026-07-31 and the
+    # import that needed it sat in a try, so every library stayed
+    # keyword-only until 2026-09-26. With nothing to do this lists each
+    # library's ids and returns; it logs what it changes.
+    from kazma_core.stores.knowledge_index import get_knowledge_index
+
+    get_knowledge_index().backfill_vectors(time_budget_s=30.0)
+
+
 def _recover_erased_memories() -> None:
     # Memories the pre-2026-09-26 archive rule erased, restored from the
     # sources that still hold them, verified (item D). Rows get one verdict
@@ -898,6 +910,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("swarm task retention", _prune_swarm_tasks),
     ("supervisor watch", _watch_supervisor),
     ("memory vector repair", _repair_memory_vectors),
+    ("knowledge vector repair", _embed_knowledge_chunks),
     ("memory recovery", _recover_erased_memories),
     ("memory turn reconcile", _reconcile_memory_turns),
 )
@@ -905,12 +918,17 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
 
 async def _run_maintenance_sweeps() -> None:
     """One pass of every maintenance sweep, each in a thread and isolated:
-    one that fails is logged and the others still run."""
+    one that fails is logged and the others still run.
+
+    At WARNING: a sweep that fails every pass is a feature that is off, and
+    at DEBUG nobody would see it (the lesson of the Knowledge Library's
+    meaning search, off from 2026-07-31 to 2026-09-26 behind one debug line).
+    """
     for label, sweep in _MAINTENANCE_SWEEPS:
         try:
             await asyncio.to_thread(sweep)
         except Exception:
-            logger.debug("[memory_worker] %s failed", label, exc_info=True)
+            logger.warning("[memory_worker] %s failed", label, exc_info=True)
 
 
 def _start_commitment_gc_scheduler() -> None:

@@ -37,7 +37,9 @@ import asyncio
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from kazma_core.memory.vector_store_global import VectorStore
@@ -59,6 +61,19 @@ logger = logging.getLogger(__name__)
 # Reciprocal Rank Fusion smoothing constant.  Matches ``adapter.py`` so the
 # fusion math is identical to the proven 4-layer memory blender.
 _RRF_K = 60
+
+
+def _vector_dir_for(store: KnowledgeStore) -> str:
+    """Where a library's meaning vectors live.
+
+    ``KAZMA_VECTOR_PATH`` when the operator set it, else beside the chunks'
+    database: for the install's store that is ``data_dir()/vector_memory``,
+    as always, and a store opened elsewhere (a test's temporary database)
+    keeps its vectors with it instead of writing into the install's.
+    """
+    if (os.environ.get("KAZMA_VECTOR_PATH") or "").strip():
+        return vector_memory_path()
+    return str(Path(store.path).resolve().parent / "vector_memory")
 
 
 @dataclass(slots=True)
@@ -91,7 +106,7 @@ class KnowledgeIndex:
         # Lazy per-library VectorStore cache.  Created on first access for a
         # given library_id and reused thereafter.
         self._vector_stores: dict[str, VectorStore] = {}
-        self._persist_dir = vector_memory_path()
+        self._persist_dir = _vector_dir_for(self._store)
 
     # ------------------------------------------------------------------
     # Vector store management
@@ -108,15 +123,16 @@ class KnowledgeIndex:
         """
         if library_id in self._vector_stores:
             return self._vector_stores[library_id]
+        vs = self._open_vector_store(library_id)
+        self._vector_stores[library_id] = vs
+        return vs
+
+    def _open_vector_store(self, library_id: str) -> VectorStore:
+        """A (not yet connected) store for the library's collection."""
         # Sanitise the library id for use as a Chroma collection name
         # (alphanumerics + underscore + hyphen only).
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in library_id)
-        vs = VectorStore(
-            collection_name=f"kazma_kb_{safe}",
-            persist_dir=self._persist_dir,
-        )
-        self._vector_stores[library_id] = vs
-        return vs
+        return VectorStore(collection_name=f"kazma_kb_{safe}", persist_dir=self._persist_dir)
 
     # ------------------------------------------------------------------
     # Indexing
@@ -408,26 +424,24 @@ class KnowledgeIndex:
         return dropped
 
     def delete_library(self, library_id: str) -> bool:
-        """Drop the ChromaDB collection + all SQLite/FTS5 rows for a library."""
-        vs = self._vector_stores.pop(library_id, None)
-        # Best-effort collection drop.  ChromaDB exposes ``delete_collection``
-        # on the client; VectorStore keeps it private so we reach in via the
-        # underlying client.  Safe to ignore if unavailable.
-        if vs is not None:
-            try:
-                client = getattr(vs, "_client", None)
-                if client is not None and vs._ensure_client():
-                    col_name = getattr(vs, "_collection_name", "")
-                    if col_name:
-                        try:
-                            client.delete_collection(col_name)
-                            logger.info("[KnowledgeIndex] Dropped collection %s", col_name)
-                        except Exception as exc:
-                            logger.debug(
-                                "[KnowledgeIndex] delete_collection failed: %s", exc
-                            )
-            except Exception as exc:
-                logger.debug("[KnowledgeIndex] vector teardown failed: %s", exc)
+        """Drop the ChromaDB collection + all SQLite/FTS5 rows for a library.
+
+        The collection is opened when this process never used it: dropping
+        only a cached one left every library deleted after a restart, before
+        anyone searched it, with its vectors on disk for good.
+        """
+        vs = self._vector_stores.pop(library_id, None) or self._open_vector_store(library_id)
+        try:
+            if vs.drop():
+                logger.info("[KnowledgeIndex] dropped the meaning vectors of library %s", library_id)
+        except Exception as exc:
+            # The chunks still go; their vectors stay behind in a collection
+            # nothing searches (a library id is never reused).
+            logger.warning(
+                "[KnowledgeIndex] could not drop the meaning vectors of library %s: %s",
+                library_id,
+                exc,
+            )
         return self._store.delete_library(library_id)
 
     # ------------------------------------------------------------------
@@ -702,8 +716,88 @@ class KnowledgeIndex:
             "library_id": library_id,
             "vector_available": bool(vs.available),
             "sqlite_chunks": sqlite_count,
+            # How many of them meaning search can reach (the backfill closes
+            # the gap; see backfill_vectors).
+            "vector_chunks": vs.count() if vs.available else 0,
             "persist_dir": self._persist_dir,
         }
+
+    def backfill_vectors(self, *, time_budget_s: float = 30.0, batch: int = 32) -> dict[str, Any]:
+        """Make each library's vectors match its chunks; one bounded, resumable pass.
+
+        A chunk is embedded when it is ingested, and a retired chunk's vector
+        removed, only while the vector store is up. From 2026-07-31 to
+        2026-09-26 it never was (its client module had been deleted), so
+        every library on an install was keyword-only: 6,598 chunks on the
+        live one. This embeds every active chunk the store lacks and removes
+        every vector with no active chunk behind it (it would take a search
+        slot and join to nothing), library by library, as far as
+        *time_budget_s* allows; the next pass continues. Nothing to do costs
+        two id listings per library.
+        """
+        deadline = time.monotonic() + max(1.0, float(time_budget_s))
+        step = max(1, int(batch))
+        report: dict[str, Any] = {"libraries": 0, "embedded": 0, "removed": 0, "missing": 0,
+                                  "unavailable": False, "complete": True}
+        for library_id in self._store.all_library_ids():
+            if time.monotonic() >= deadline:
+                report["complete"] = False
+                break
+            vs = self._vector_store_for(library_id)
+            if not vs.available:
+                report["unavailable"] = True
+                report["complete"] = False
+                break
+            report["libraries"] += 1
+            # Vectors first: a chunk ingested between the two reads is then
+            # embedded twice (harmless), never taken for a retired one.
+            have = vs.ids()
+            active = self._store.active_chunk_ids(library_id)
+            report["removed"] += vs.delete_many(sorted(have - active))
+            todo = sorted(active - have)
+            report["missing"] += len(todo)
+            for start in range(0, len(todo), step):
+                if time.monotonic() >= deadline:
+                    report["complete"] = False
+                    break
+                rows = self._store.get_chunks_by_ids(todo[start:start + step])
+                done = vs.index_many([
+                    (chunk_id, row.get("content") or "", self._chunk_vector_metadata(library_id, row))
+                    for chunk_id, row in rows.items()
+                ])
+                report["embedded"] += done
+                report["missing"] -= done
+            if not report["complete"]:
+                break
+        if report["embedded"] or report["removed"]:
+            logger.info(
+                "[knowledge] meaning vectors: %d chunks embedded, %d retired vectors removed (%s)",
+                report["embedded"],
+                report["removed"],
+                "all libraries done" if report["complete"] else "more next pass",
+            )
+        return report
+
+    @staticmethod
+    def _chunk_vector_metadata(library_id: str, chunk: dict[str, Any]) -> dict[str, Any]:
+        """What the vector store keeps beside a chunk; Chroma refuses None values."""
+        meta = {
+            "library_id": library_id,
+            "source_url": chunk.get("source_url"),
+            "section_header": chunk.get("section_header"),
+            "document_title": chunk.get("document_title"),
+            "chunk_index": int(chunk.get("chunk_index") or 0),
+            "content_hash": chunk.get("content_hash"),
+            "document_id": chunk.get("document_id"),
+            "version_id": chunk.get("version_id"),
+        }
+        extra = chunk.get("metadata") if isinstance(chunk.get("metadata"), dict) else {}
+        for key in ("page_start", "page_end"):
+            if extra.get(key) is not None:
+                meta[key] = int(extra[key])
+        if extra.get("citation_label"):
+            meta["citation_label"] = str(extra["citation_label"])
+        return {k: v for k, v in meta.items() if v is not None and v != ""}
 
 
 # ══════════════════════════════════════════════════════════════════════════

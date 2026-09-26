@@ -166,6 +166,13 @@ STORES: dict[str, Store] = {
         "the swarm memory sqlite-vec index", "rebuilt",
         reason="an index over memory; rebuilt from the memory stores",
         ambiguous_name=True),
+    # In vector_memory/: Chroma names the file, Kazma starts the client
+    # (memory/vector_store_global.py). Left out of backups for the same reason.
+    "chroma.sqlite3": Store(
+        "the Knowledge Library's meaning vectors (Chroma, in vector_memory/)", "rebuilt",
+        reason="re-embedded from the Knowledge Library's chunks by the "
+               "knowledge vector repair sweep",
+        ambiguous_name=True),
     "workspaces.db": Store(
         "the workspaces table, as named inside a migration bundle", "settings",
         reason="a bundle-internal copy of settings.db's workspaces table"),

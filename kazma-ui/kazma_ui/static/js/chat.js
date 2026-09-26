@@ -2566,15 +2566,21 @@
         populateModelSelector(fallback, savedModels);
       });
 
-    // Resume the last active session and HYDRATE messages. Previously we only
-    // set chatSessionId and showed a welcome screen — sessions looked empty
-    // until a manual sidebar click/refresh. Always loadSession for continuity.
+    // ?new=1 asks for a fresh session (New Chat, Ctrl+N from another page);
+    // otherwise resume the last active session and HYDRATE its messages.
+    // Previously we only set chatSessionId and showed a welcome screen —
+    // sessions looked empty until a manual sidebar click/refresh.
     try {
-      var savedSid = localStorage.getItem(SESSION_LS_KEY);
-      if (savedSid) {
-        loadSession(savedSid);
-      } else {
+      if (/(?:^|[?&])new=1(?:&|$)/.test(location.search)) {
+        try { history.replaceState(null, '', location.pathname + location.hash); } catch (e2) {}
         newSession();
+      } else {
+        var savedSid = localStorage.getItem(SESSION_LS_KEY);
+        if (savedSid) {
+          loadSession(savedSid);
+        } else {
+          newSession();
+        }
       }
     } catch (e) {
       newSession();

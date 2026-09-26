@@ -172,20 +172,3 @@ def test_openai_embedder_encode_batch_failure():
 
     results = e.encode_batch(["a", "b", "c"])
     assert results == [[], [], []]
-
-
-# ── ChromaDB wrapper ───────────────────────────────────────────────────
-
-
-def test_chroma_wrapper_local_uses_native_ef():
-    """For local embedders, the wrapper delegates to ChromaDB's native EF."""
-    e = LocalSentenceTransformerEmbedder(model_name="all-MiniLM-L6-v2", dim=384)
-    from kazma_core.memory.embedder import make_chroma_embedding_function
-
-    try:
-        ef = make_chroma_embedding_function(e)
-        # If chromadb is installed, this returns a real EF (not None).
-        if ef is not None:
-            assert hasattr(ef, "__call__")
-    except ImportError:
-        pass  # chromadb not installed in test env — skip

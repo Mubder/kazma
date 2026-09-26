@@ -926,6 +926,10 @@ _LOOP_STALL_HELPERS = frozenset({
     # routes did too.
     "recall", "federated_search", "build_v2_health", "build_memory_health",
     "search_transcripts", "promote_working_memory", "run_golden_eval",
+    "count_current_facts", "backfill_vectors",
+    # Deleting a Knowledge Library: every chunk and FTS row, then the Chroma
+    # collection (which may start the client). /kb delete ran it on the loop.
+    "delete_library",
 })
 
 

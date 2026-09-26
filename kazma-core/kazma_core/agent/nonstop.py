@@ -108,10 +108,12 @@ def get_nonstop_config(raw_config: dict[str, Any] | None = None) -> NonStopConfi
     try:
         yaml_ns: dict[str, Any] = {}
         if raw_config is None:
+            # config_loader never had load_config: until 2026-09-26 this
+            # always fell to {} and kazma.yaml's agent.nonstop was ignored.
             try:
-                from kazma_core.config_loader import load_config
+                from kazma_core.config_loader import install_yaml_section
 
-                raw_config = load_config()
+                raw_config = {"agent": {"nonstop": install_yaml_section("agent", "nonstop")}}
             except Exception:
                 raw_config = {}
         yaml_ns = (raw_config.get("agent", {}) or {}).get("nonstop", {}) or {}

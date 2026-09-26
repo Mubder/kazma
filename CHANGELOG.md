@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## The Knowledge Library understands questions again; New Chat starts a new chat (2026-09-26)
+
+Since the end of July, searching your Knowledge Library (the WhatsApp,
+GitHub and Meta documentation, the CITRA guide, TypeSafe) only matched
+exact words: a question worded differently from the page found nothing.
+A part of the search had been deleted in a clean-up, and the error said
+"chromadb not installed", which was not true. Search by meaning is back,
+and all 6,598 existing passages are given it in the background over the next
+few hours.
+
+- The **New Chat** button now starts a new chat. It used to reopen the chat
+  you were already in.
+- On Telegram, Discord and Slack, when a long task stops at its step limit,
+  Kazma again keeps its progress for **Proceed** and pauses the task, as it
+  did before 4 September.
+- Each library on the Knowledge page shows how much of it can be searched
+  by meaning ("Meaning search: 1,200 of 4,539"), so an outage like this one
+  is visible.
+- Deleting a library now also deletes its search data, even if the library
+  was not searched since Kazma last started. Backups leave that data out;
+  it is rebuilt from the library after a restore.
+- `/memory` in a chat app shows how many facts are stored instead of "?".
+- The `agent.nonstop` settings in kazma.yaml are read. They were always
+  ignored.
+- A new check makes sure that everything one part of Kazma uses from another
+  still exists. It found the search, the long-task, `/memory` and non-stop
+  problems above, and a piece of unused code, now removed. The New Chat
+  button was found by using the web app.
+
 ## Kazma remembers what a question is about -- and says nothing when it has nothing (2026-09-26)
 
 Before, every message you sent pulled five facts and five past messages from

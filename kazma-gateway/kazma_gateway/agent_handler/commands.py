@@ -1272,7 +1272,8 @@ async def _try_kb_command(
             )
             return True
         try:
-            kb_index.delete_library(lib_id)
+            # Every chunk and FTS row, and the Chroma collection: off the loop.
+            await asyncio.to_thread(kb_index.delete_library, lib_id)
             await _send_model_reply(
                 msg, store, manager, thread_id,
                 f"🗑️ Deleted library `{lib_id}` and all its chunks.",
@@ -2157,14 +2158,21 @@ async def _build_slash_ctx(
         logger.debug("Failed to calculate token count for slash context: %s", exc, exc_info=True)
         ctx["token_count"] = 0
 
-    # Memory count
+    # Memory: the facts it holds for this sender. It read a V1 agent memory
+    # through an import that no longer resolved (agent_runner.get_agent), so
+    # /memory answered "?" from the V1 removal until 2026-09-26.
     try:
-        from kazma_core.agent_runner import get_agent
-        agent = get_agent()
-        if agent and agent.memory:
-            ctx["memory_count"] = len(agent.memory)
+        from kazma_core.memory.config import resolve_tenant_id
+        from kazma_core.memory.v2_health import count_current_facts
+
+        tenant = resolve_tenant_id(
+            msg.platform or "unknown", sender_id=str(msg.sender_id or ""), prefer_context=True
+        )
+        count = await asyncio.to_thread(count_current_facts, tenant)
+        if count is not None:
+            ctx["memory_count"] = count
     except Exception as exc:
-        logger.debug("Failed to get agent memory count: %s", exc)
+        logger.debug("Failed to count memory facts: %s", exc)
 
     # Cost data from cost breaker
     ctx["total_tokens"] = 0

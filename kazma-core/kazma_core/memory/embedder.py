@@ -11,8 +11,9 @@ All call sites that previously did ``model.encode(text, convert_to_numpy=False)`
 now go through ``get_embedder().encode(text)`` — a mechanical swap that keeps
 the return type identical (``list[float]``).
 
-For ChromaDB (which requires an ``EmbeddingFunction`` returning ``numpy.ndarray``),
-``ChromaEmbeddingFunctionWrapper`` adapts any ``Embedder`` to that interface.
+ChromaDB collections (the Knowledge Library) are given vectors from here
+directly and have no embedding function of their own
+(``memory/vector_store_global.py``).
 
 Config precedence (highest wins):
 
@@ -56,7 +57,6 @@ __all__ = [
     "get_embedding_dim",
     "get_embedding_model_name",
     "get_embedder_status",
-    "make_chroma_embedding_function",
     "reset_embedder",
     "resolve_unix_timestamp",
     "serialize_f32_embedding",
@@ -381,58 +381,6 @@ class OpenAICompatibleEmbedder:
             logger.warning("[Embedder:openai-compatible] batch encode failed: %s", exc)
             results = [[] for _ in texts]
         return results
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# ChromaDB embedding-function adapter
-# ══════════════════════════════════════════════════════════════════════════
-
-
-def make_chroma_embedding_function(embedder: Embedder) -> Any:
-    """Create a ChromaDB-compatible EmbeddingFunction wrapping any Embedder.
-
-    ChromaDB's ``EmbeddingFunction.__call__`` must return a ``numpy.ndarray``
-    (not a list). This adapter centralizes the numpy coercion so
-    ``vector_store.py`` stays provider-agnostic.
-
-    Always uses the generic wrapper — even for local SentenceTransformer
-    — to avoid loading the model twice (the embedder already holds it).
-    """
-    try:
-        import numpy as np
-        from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
-    except ImportError:
-        logger.warning("[Embedder] chromadb not installed; ChromaDB EF unavailable")
-        return None
-
-    class _Wrapper(EmbeddingFunction):
-        def __call__(self, input: Documents) -> Embeddings:
-            embeddings = []
-            for doc in input:
-                emb = embedder.encode(doc)
-                if not emb:
-                    # Remote endpoint returned nothing (timeout / rate limit).
-                    # Retry once — if still empty, fall back to a zero vector
-                    # so ChromaDB doesn't crash (the doc just won't match well).
-                    emb = embedder.encode(doc)
-                if not emb:
-                    logger.warning(
-                        "[Embedder] embedding failed after retry — using zero vector "
-                        "(recall quality degraded for this document)"
-                    )
-                    emb = [0.0] * embedder.dim
-                embeddings.append(emb)
-            return np.array(embeddings, dtype=np.float32)
-
-        # ChromaDB 1.5.x calls name() and default_space() as methods
-        # (not properties). Must return strings, not be properties.
-        def name(self) -> str:
-            return "kazma_embedder_wrapper"
-
-        def default_space(self) -> str:
-            return "cosine"
-
-    return _Wrapper()
 
 
 # ══════════════════════════════════════════════════════════════════════════

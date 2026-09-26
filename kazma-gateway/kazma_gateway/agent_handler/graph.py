@@ -261,6 +261,34 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
         logger.debug("[agent-handler] Failed to sync session to Web UI: %s", exc)
 
 
+
+def _settle_recursion_partial(thread_id: str, partial: str) -> bool:
+    """A turn hit the recursion limit with salvaged progress (AGENTS.md §25).
+
+    Keeps the Partial as the thread's continue context, so a reply of
+    "Proceed" resumes from it, and pauses a running long task: the next
+    message is a fresh command, not a mission follow-up (the 2026-08-19
+    Telegram desync). Returns whether a long task was running.
+
+    This ran inline behind ``except Exception: pass``, importing a name
+    removed on 2026-09-04 (``record_budget_exhausted``): the import failed
+    every time, so from then until 2026-09-26 no Partial was kept and no
+    long task paused. ``tests/test_imports.py`` checks every imported name.
+    """
+    from kazma_core.agent.long_task import (
+        is_long_task_active,
+        pause_long_task,
+        record_long_task_event,
+        store_continue_context,
+    )
+
+    was_long = is_long_task_active(thread_id)
+    store_continue_context(thread_id, summary=partial, reason="recursion")
+    if was_long:
+        pause_long_task(thread_id, reason="recursion")
+    record_long_task_event("budget_recursion")
+    return was_long
+
 async def _persist_hitl_pause(
     graph: Any,
     config: dict[str, Any],
@@ -2016,26 +2044,16 @@ def create_graph_handler(
                     if partial:
                         _was_long = False
                         try:
-                            from kazma_core.agent.long_task import (
-                                is_long_task_active,
-                                pause_long_task,
-                                record_budget_exhausted,
-                                store_continue_context,
-                            )
-
-                            _was_long = is_long_task_active(thread_id)
-                            store_continue_context(
-                                thread_id, summary=partial, reason="recursion"
-                            )
-                            if _was_long:
-                                # A Partial must NOT leave the long task
-                                # silently active — subsequent user messages
-                                # are fresh commands, not mission follow-ups
-                                # (deep-audit 2026-08-19 Telegram desync).
-                                pause_long_task(thread_id, reason="recursion")
-                            record_budget_exhausted("recursion")
+                            _was_long = _settle_recursion_partial(thread_id, partial)
                         except Exception:
-                            pass
+                            # Never silent: this swallow hid a dead import for
+                            # three weeks (see _settle_recursion_partial).
+                            logger.warning(
+                                "[agent-handler] could not keep the Partial of %s for "
+                                "Proceed or pause its long task",
+                                thread_id,
+                                exc_info=True,
+                            )
                         err_msg = (
                             partial[:3500]
                             + "\n\n---\n"
@@ -2052,11 +2070,13 @@ def create_graph_handler(
                             )
                     else:
                         try:
-                            from kazma_core.agent.long_task import record_budget_exhausted
+                            from kazma_core.agent.long_task import record_long_task_event
 
-                            record_budget_exhausted("recursion")
+                            record_long_task_event("budget_recursion")
                         except Exception:
-                            pass
+                            logger.debug(
+                                "[agent-handler] recursion budget counter failed", exc_info=True
+                            )
                         err_msg = (
                             "⚠️ توقفت المهمة بعد حلقات أدوات كثيرة (حد التكرار).\n"
                             "⚠️ Turn stopped: tool loop hit the recursion limit "

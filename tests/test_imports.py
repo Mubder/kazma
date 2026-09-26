@@ -14,6 +14,22 @@ class permanently:
    module file. Catches references in rarely-executed code paths (function
    -level imports) that even the import smoke can miss when they sit in
    modules excluded from it.
+3. ``test_every_imported_kazma_name_exists`` — the NAME half: ``from
+   kazma_x.mod import name`` needs ``name`` defined at the top of ``mod``.
+
+An import inside ``try/except`` used to be exempt, as a "degradation path".
+For a Kazma module there is none: the module is in this repository, so the
+import either resolves or is dead code, and the ``except`` turns the dead
+code into a feature that is silently off. Found 2026-09-26, six of them:
+the Knowledge Library's meaning search (``memory.chroma_client``, deleted
+2026-07-31 -- logged as "chromadb not installed"); the gateway's handling of
+a recursion Partial, its continue context and long-task pause (one missing
+name, ``record_budget_exhausted``, removed 2026-09-04, took the three names
+imported beside it down too) and the same name in the no-Partial branch's
+budget counter; kazma.yaml's ``agent.nonstop`` (``config_loader.load_config``
+never existed); the ``/memory`` fact count (``agent_runner.get_agent``); and
+a health dependency map nothing called (``model_registry.get_registry``).
+Only a third-party package may be optional.
 """
 
 from __future__ import annotations
@@ -93,29 +109,134 @@ def _module_file_exists(dotted: str) -> bool:
     return base.with_suffix(".py").is_file() or (base / "__init__.py").is_file()
 
 
-def _guarded_import_ids(tree: ast.AST) -> set[int]:
-    """IDs of Import/ImportFrom nodes lexically inside a Try body.
+def _module_path(dotted: str) -> Path | None:
+    """The file of product module *dotted* (a package's ``__init__.py``)."""
+    parts = dotted.split(".")
+    if parts[0] not in PACKAGES:
+        return None
+    base = PACKAGES[parts[0]].joinpath(*parts[1:])
+    if (base / "__init__.py").is_file():
+        return base / "__init__.py"
+    if base.with_suffix(".py").is_file():
+        return base.with_suffix(".py")
+    return None
 
-    Imports wrapped in try/except are deliberate degradation paths
-    (optional dependencies, legacy fallbacks) — the module still imports
-    and the failure is handled. The gate targets UNGUARDED references,
-    which crash the first time the code path runs (the crawl.py class).
-    """
-    guarded: set[int] = set()
+
+_TOP_NAMES: dict[Path, tuple[frozenset[str], bool]] = {}
+
+
+def _top_level_names(path: Path) -> tuple[frozenset[str], bool]:
+    """Names a module binds at top level, and whether it is open-ended
+    (a module ``__getattr__`` or a star import can supply any name)."""
+    if path in _TOP_NAMES:
+        return _TOP_NAMES[path]
+    tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    names: set[str] = set()
+    open_ended = False
+
+    def bind(target: ast.AST) -> None:
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for elt in target.elts:
+                bind(elt)
+
+    def walk(stmts: list[ast.stmt]) -> None:
+        nonlocal open_ended
+        for node in stmts:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(node.name)
+                open_ended = open_ended or node.name == "__getattr__"
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    bind(target)
+            elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+                bind(node.target)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    names.add((alias.asname or alias.name).split(".")[0])
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    open_ended = open_ended or alias.name == "*"
+                    names.add(alias.asname or alias.name)
+            elif isinstance(node, (ast.If, ast.Try, ast.With, ast.For, ast.While)):
+                for field in ("body", "orelse", "finalbody"):
+                    walk(getattr(node, field, None) or [])
+                for handler in getattr(node, "handlers", None) or []:
+                    walk(handler.body)
+
+    walk(tree.body)
+    _TOP_NAMES[path] = (frozenset(names), open_ended)
+    return _TOP_NAMES[path]
+
+
+def _missing_names(tree: ast.AST, here_parts: tuple[str, ...]) -> list[tuple[int, str]]:
+    """``from kazma_x.mod import name`` where ``mod`` has no ``name``."""
+    missing: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Try):
-            for sub in ast.walk(node):
-                if isinstance(sub, (ast.Import, ast.ImportFrom)):
-                    guarded.add(id(sub))
-    return guarded
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        base = list(here_parts[: len(here_parts) - node.level]) if node.level else []
+        if node.module:
+            base += node.module.split(".")
+        if not base or base[0] not in PACKAGES:
+            continue
+        module = ".".join(base)
+        path = _module_path(module)
+        if path is None:
+            continue  # a missing MODULE is the other test's finding
+        names, open_ended = _top_level_names(path)
+        if open_ended:
+            continue
+        for alias in node.names:
+            if alias.name == "*" or alias.name in names or _module_path(f"{module}.{alias.name}"):
+                continue
+            missing.append((node.lineno, f"{module}.{alias.name}"))
+    return missing
+
+
+def test_every_imported_kazma_name_exists():
+    """``from kazma_x.mod import name``: ``mod`` defines ``name``, guarded or not."""
+    missing: list[str] = []
+    for mod_name, py in MODULES:
+        pkg_name = mod_name.split(".")[0]
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        here = py.relative_to(PACKAGES[pkg_name].parent).with_suffix("").parts
+        missing += [f"{py.relative_to(REPO_ROOT)}:{line}: {name}"
+                    for line, name in _missing_names(tree, here)]
+    assert not missing, (
+        "Imports of names their Kazma module does not define. Inside a "
+        "try/except that is a feature silently switched off:\n  " + "\n  ".join(missing)
+    )
+
+
+def test_the_name_gate_sees_a_missing_name_inside_a_try():
+    """Negative control: the gateway's Partial handler before its fix."""
+    planted = ast.parse(
+        "def partial(thread):\n"
+        "    try:\n"
+        "        from kazma_core.agent.long_task import (\n"
+        "            pause_long_task,\n"
+        "            record_budget_exhausted,\n"
+        "        )\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "from kazma_core.config_loader import deep_merge\n"
+    )
+    here = ("kazma_gateway", "agent_handler", "graph")
+    assert _missing_names(planted, here) == [
+        (3, "kazma_core.agent.long_task.record_budget_exhausted")]
 
 
 def test_no_dangling_kazma_import_references():
-    """Every UNGUARDED kazma_* import reference in product code must resolve.
+    """Every kazma_* import reference in product code must resolve.
 
     Static (AST) so it also covers function-level imports on paths no test
-    executes — the exact shape of the crawl.py incident. Imports inside
-    try/except blocks are skipped (deliberate optional/degradation paths).
+    executes — the exact shape of the crawl.py incident. An import inside
+    try/except is checked too (see the module docstring).
     """
     dangling: list[str] = []
     scanned = 0
@@ -127,11 +248,8 @@ def test_no_dangling_kazma_import_references():
         except SyntaxError:
             # Syntax is py_compile's job; ignore here.
             continue
-        guarded = _guarded_import_ids(tree)
         here_parts = py.relative_to(PACKAGES[pkg_name].parent).with_suffix("").parts
         for node in ast.walk(tree):
-            if id(node) in guarded:
-                continue
             targets: list[str] = []
             if isinstance(node, ast.Import):
                 targets = [a.name for a in node.names]

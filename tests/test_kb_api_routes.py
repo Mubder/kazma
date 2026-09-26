@@ -99,6 +99,10 @@ class _Index:
     def __init__(self, store: _Store) -> None:
         self.store = store
 
+    def health(self, lib_id):
+        self.store.seen("index.health")
+        return {"library_id": lib_id, "vector_available": True, "sqlite_chunks": 2, "vector_chunks": 1}
+
     def delete_library(self, lib_id):
         self.store.seen("index.delete_library")
         return self.store.libs.pop(lib_id, None) is not None
@@ -177,7 +181,11 @@ def test_library_lifecycle(kb):
     c = kb.client
     assert c.post("/api/kb/libraries", json={"id": "Docs Lib", "name": "Docs"}).json()["ok"]
     (lib_id,) = kb.store.libs
-    assert [lib["id"] for lib in c.get("/api/kb/libraries").json()["libraries"]] == [lib_id]
+    [listed] = c.get("/api/kb/libraries").json()["libraries"]
+    assert listed["id"] == lib_id
+    # How much meaning search reaches is on the page (it was off for two
+    # months and nothing said so).
+    assert listed["meaning_search"] == {"available": True, "vectors": 1, "chunks": 2}
     assert c.get(f"/api/kb/libraries/{lib_id}").json()["library"]["name"] == "Docs"
     duplicate = c.post("/api/kb/libraries", json={"id": "Docs Lib"}).json()
     assert duplicate["ok"] is False and "already exists" in duplicate["error"]
