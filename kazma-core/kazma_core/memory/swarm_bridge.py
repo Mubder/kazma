@@ -29,6 +29,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "bridge_episode_id",
     "store_swarm_result",
     "log_evolution_v2",
     "store_compaction_summary",
@@ -50,7 +51,20 @@ def _open_primary() -> sqlite3.Connection | None:
         return None
 
 
-def _insert_episode(    conn: sqlite3.Connection,
+def bridge_episode_id(source: str, session_id: str, turn_number: int, content: str) -> str:
+    """The id of an episode this module writes: stable on source, session,
+    turn and the first 200 characters of its text, so repeated writes of one
+    payload dedupe (INSERT OR IGNORE) while distinct events still land. Memory
+    recovery recomputes it to prove a candidate text is the one written."""
+    import hashlib
+
+    return "ep_" + hashlib.sha256(
+        f"{source}:{session_id}:{turn_number}:{content[:200]}".encode("utf-8", "ignore")
+    ).hexdigest()[:24]
+
+
+def _insert_episode(
+    conn: sqlite3.Connection,
     *,
     session_id: str,
     turn_number: int,
@@ -64,16 +78,10 @@ def _insert_episode(    conn: sqlite3.Connection,
 ) -> str:
     """Insert one V2 episode row. Caller owns the connection."""
     now = time.time()
-    content = (user_text or summary_text or "").strip()
     if eid is None:
-        # Stable id keyed on source + content + timestamp-second so repeated
-        # writes for the same payload dedup (INSERT OR IGNORE) but distinct
-        # events still land.
-        import hashlib
-
-        eid = "ep_" + hashlib.sha256(
-            f"{source}:{session_id}:{turn_number}:{content[:200]}".encode("utf-8", "ignore")
-        ).hexdigest()[:24]
+        eid = bridge_episode_id(
+            source, session_id, turn_number, (user_text or summary_text or "").strip()
+        )
     # The `source` param is the authoritative V2 categorization — it must
     # win over any caller-supplied metadata["source"] (e.g. the legacy
     # "swarm_worker" source) so V2 read filters by source stay reliable.

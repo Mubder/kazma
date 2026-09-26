@@ -171,12 +171,15 @@ def test_explain_recall_tags_sources(mem_db):
     assert tagged, "explain=True must tag metadata['sources']"
 
 
-def test_dense_belief_cap_respected(mem_db, monkeypatch):
-    """Candidate fetch uses LIMIT from dense_belief_candidate_cap."""
+def test_dense_belief_search_without_an_embedder_is_empty(mem_db, monkeypatch):
+    """No embedder, no meaning search: an empty result, never an error.
+
+    This was ``test_dense_belief_cap_respected``. The 400-belief candidate cap
+    is gone (every current belief is scored): tests/test_memory_nothing_lost.py
+    finds the least important of 1,200.
+    """
     from kazma_core.memory import recall as recall_mod
 
-    # No embedder → dense returns []; we still verify the SQL path doesn't crash
-    # with many beliefs.
     for i in range(20):
         _insert_belief(
             mem_db,

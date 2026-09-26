@@ -469,15 +469,25 @@ code logs 140 server errors for 80 calls, the new code none.
   (musl) has text indexes ordered by musl's collation, and the pgvector image
   is glibc — an existing install must dump and restore, not swap the image
   (`docs/docs/ops/postgres-and-saas.md`). The owner decides.
-- **Without a remote vector store, meaning-based fact search reads the 400
-  most important facts.** `recall._belief_dense` scores the top
-  `memory.v2.dense_belief_candidate_cap` beliefs (default 400, clamped to
-  50-5000) by structural importance and confidence; conversation memories
-  have their own local vector index and no cap. The live install had 321
-  facts, all with vectors, on 2026-09-26 -- every one covered, at about 15
-  new facts a month. Past the cap the least important drop out of
-  meaning-based matching (keyword matching still finds them). The fix is a
-  local vector index for beliefs like the one episodes have, not pgvector.
+- **~~Without a remote vector store, meaning-based fact search reads the 400
+  most important facts.~~** Closed 2026-09-26. The entry was also wrong about
+  episodes: their "index" compared an unordered `LIMIT` slice, and on the
+  live install the 60 newest of 300 were never searched. Meaning search now
+  scores every episode and every current fact exactly
+  (`memory/vector_engine.py`), fact meaning search always runs, and
+  archiving no longer deletes text (76 memories it had erased were
+  recovered from verified sources). `docs/plans/MEMORY_NOTHING_LOST_PLAN.md`;
+  AGENTS.md §15F; gates in `tests/test_memory_nothing_lost.py`.
+- **Exact meaning search is linear in the number of memories.** About 1 ms
+  per 1,000 rows of 1024-dim vectors (20,000 rows: ~21 ms, measured
+  2026-09-26), so it stays exact well past 100k memories on one node. An
+  approximate index (sqlite-vec's vec0 or pgvector HNSW) is the next step
+  when a tenant nears that, with recall@k measured against this exact scan.
+- **Recall's keyword channel matches stopwords.** `_fts_match_query` ORs every
+  token of two or more characters ("is", "the", "at"), so memories that only
+  share common words take keyword ranks, and fusion is rank-based. Stage 2 of
+  the memory plan (query rewriting, stopwords, a reranker) owns it, with a
+  measured benchmark rather than the 6-case golden set.
 - **~~A Postgres DSN with its password is kept as a plain setting and
   echoed.~~** Closed 2026-09-25, next section.
 

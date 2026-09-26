@@ -135,7 +135,7 @@ async def test_respond_node_empty_final_attempts_synthesis(monkeypatch):
     from kazma_core.agent import graph_builder as gb
 
     monkeypatch.setattr(
-        "kazma_core.memory.consolidator.schedule_post_turn_memory",
+        "kazma_core.memory.consolidator._schedule_post_turn_memory",
         lambda *_a, **_k: None,
     )
 
@@ -174,7 +174,7 @@ async def test_respond_node_turn_failed_skips_synthesis(monkeypatch):
     from kazma_core.agent import graph_builder as gb
 
     monkeypatch.setattr(
-        "kazma_core.memory.consolidator.schedule_post_turn_memory",
+        "kazma_core.memory.consolidator._schedule_post_turn_memory",
         lambda *_a, **_k: None,
     )
 
@@ -217,7 +217,7 @@ async def test_respond_node_no_fallback_when_final_text_present(monkeypatch):
     from kazma_core.agent import graph_builder as gb
 
     monkeypatch.setattr(
-        "kazma_core.memory.consolidator.schedule_post_turn_memory",
+        "kazma_core.memory.consolidator._schedule_post_turn_memory",
         lambda *_a, **_k: None,
     )
 

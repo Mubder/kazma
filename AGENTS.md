@@ -475,15 +475,21 @@ left backups/export inert). Current boot list:
 **B. Distinct cadences (do not collapse them):**
 - **6h `macro_sleep`:** rule-based tier demotion/promotion (TTLs,
   importance, access) and archival (`macro_sleep.py:run_macro_sleep`).
-  First sweep 60s after boot. Archival drops text, so three rules hold:
-  only rows stale on BOTH clocks are archived (created past the TTL *and*
-  not recalled within it — every chat turn is importance 1 and can never
-  be promoted, so the recall clock is what keeps an in-use memory);
-  `_ARCHIVE_EPISODE_SQL` is the only statement that nulls episode text and
-  always keeps a stub (summary, else question — answer); and moves reach
-  the optional state mirror / remote vector index. There is no decay
-  score: `compute_retention` was removed 2026-09-23 (per-second λ, no
-  reader).
+  First sweep 60s after boot. **Archival is cold storage, never deletion**
+  (2026-09-26): `_ARCHIVE_EPISODE_SQL` moves the tier and fills an empty
+  summary with a stub; the question, the answer and the vector stay, and
+  no statement may set episode text to NULL (gate in
+  `tests/test_memory_nothing_lost.py`). Only rows stale on BOTH clocks are
+  archived (created past the TTL *and* not recalled within it — every chat
+  turn is importance 1 and can never be promoted, so the recall clock is
+  what keeps an in-use memory). Recall searches every tier in
+  `vector_engine.RECALLABLE_TIERS`; an archived hit ranks about one place
+  behind an equally matching active one (`memory.v2.archived_recall_weight`,
+  0.98 -- fused scores are reciprocal ranks 1.6 % apart, so 0.7 would be ~25
+  places, i.e. never found), and a recalled archived memory returns to
+  episodic at the next sweep. Moves reach the state mirror; a remote vector
+  index is re-tagged, never told to delete. There is no decay score:
+  `compute_retention` was removed 2026-09-23 (per-second λ, no reader).
 - **6h backup/export** (`_BACKUP_EXPORT_INTERVAL_HOURS = 6`, not 24):
   enqueues `native_backup` + `nightly_export` + `native_pg_backup` →
   native `sqlite3.backup()` of both memory DBs (`backup.py`) + JSONL/GraphML
@@ -495,8 +501,9 @@ left backups/export inert). Current boot list:
 - **15-min commitment GC:** TTL expiry + tiered retention (§20). Every
   sweep on this cadence is one entry of `_MAINTENANCE_SWEEPS` (commitment GC,
   artifact GC, HITL-gate TTL, memory task-queue purge, swarm task retention —
-  `swarm.task_retention_days`, default 30, 0 keeps all — and the supervisor
-  watch, §39), run by ONE isolated
+  `swarm.task_retention_days`, default 30, 0 keeps all — the supervisor
+  watch, §39, memory vector repair, memory recovery and memory turn
+  reconcile, §15F), run by ONE isolated
   runner so a failing sweep never stops the rest. A new periodic cleanup is a
   new entry there, never a new loop (`tests/test_swarm_task_retention.py`).
 - **Session purge, daily digest, weekly firing ledger, restore drill:**
@@ -525,6 +532,69 @@ beliefs, episodes, entities, procedural DAGs) is isolated from
 `memory_ops.db` (cold writes: task queue, audit log) precisely so background
 consolidation/backup writes don't WAL-contend with chat recall reads. Do
 not merge them or route queue writes at the primary DB.
+
+**F. Every memory findable (2026-09-26, `docs/plans/MEMORY_NOTHING_LOST_PLAN.md`).**
+Measured on live that day: meaning search compared episodes inside an
+unordered `LIMIT` slice (the 60 newest of 300 were never searched), facts
+inside the 400 "most important", fact meaning search ran only when keywords
+came up short, and archiving had erased 76 memories.
+- **Exact meaning search, every row** (`vector_engine.py`):
+  `vec_distance_cosine` in SQL over every comparable row (same size, same
+  model; NULL/'' version = legacy same model), NumPy chunked fallback, zero
+  vectors excluded, read-only (no temp tables). Gate: no `LIMIT` in a
+  candidate fetch unless it orders by distance.
+- **Facts** (`recall._recall_beliefs`): meaning search always runs; the score
+  is weighted RRF (`_BELIEF_CHANNEL_WEIGHTS`: meaning 2, keyword/bridge 1,
+  graph walk 0.5 and capped to its top results -- it is seeded by the same
+  keywords and reaches every fact about "user") times a standing band of at
+  most +5 % (`_STANDING_BAND`). A multiplier on RRF is worth ranks, not
+  percent: keep bands small.
+- **Vector repair** (`reembed.run_vector_repair_pass`, 15 min, ~20 s): no
+  vector, wrong size or another model's vector -> re-encoded in place,
+  newest first; with nothing to repair it never loads the model.
+  `global_reconsolidation` calls the same function.
+- **Recovery of erased rows** (`rehydrate.run_rehydrate_pass`, 15 min):
+  sources are earlier backups of the memory DB (a same-row copy whose text
+  reproduces the stub), the chat store + spool and checkpoint history
+  (`chat_history.py`, both backends), `noted` beliefs, `memory_store` tool
+  calls (resumable scan), the knowledge library. Anything but a backup must
+  reproduce the episode id (`dual_write._episode_id` /
+  `swarm_bridge.bridge_episode_id`) AND the stub (`_archive_stub`, checked
+  against the old SQL). Sources must agree or nothing is restored; text is
+  never overwritten; an unreadable source leaves the row pending (an outage
+  is never a verdict). Verdicts live in `metadata.rehydrated` /
+  `metadata.rehydrate`; memory health shows them (`memory_findability`).
+- **Every turn reaches memory** (item H): `kazma_ui.turn_runtime.close_turn`
+  -- the closer every transport runs -- hands a finished turn (graph
+  terminal, not paused, and the `_post_turn_memory` record's turn index
+  equal to the state's) to `consolidator.remember_turn`, once per turn.
+  Nothing else calls it or `_schedule_post_turn_memory` (gate in
+  `tests/test_memory_every_turn.py`). Until 2026-09-26 only the gateway
+  handler did, so no web chat turn reached memory from 2026-08-08.
+  `extract_turn_texts` pairs a question with ITS answer (it used to take the
+  previous turn's when there was none); the episode `turn_number` is the
+  turn index (`user_turn_index`), not the iteration count that made a
+  repeated question collide into one memory.
+- **Turn reconcile** (`turn_reconcile.run_turn_reconcile_pass`, 15 min, ~60
+  s): every chat-store turn older than 10 minutes without an episode gets
+  one, with its own time, through `mirror_episode`. Episodes only: facts are
+  not re-extracted from old turns (functional supersede orders by ingestion,
+  so an old statement would overwrite a newer fact). Repeated questions are
+  counted, erased-row stubs count as present, and the cursor passes only
+  settled sessions. On live it found 1,004 of 1,174 chat turns missing.
+- **Nothing repoints live memory** (item I): no product code rebinds a
+  `kazma_core.paths` function or resets the shared `dual_write` writer
+  (`_reset_mirror` is a test helper; gate in `tests/test_memory_every_turn.py`).
+  The Dashboard's golden eval did both inside the live server, so any turn
+  written during -- and, through the writer left on its temp file, after --
+  a run was stored in a file nobody read. It now seeds and recalls on a
+  private database (`recall(conn=...)`), refuses the live one, and runs off
+  the event loop.
+- **Conversation history has one reader** (`memory/chat_history.py`): the
+  past-chats fallback and the recovery read Postgres `kazma_chat_sessions` or
+  SQLite `sessions`, overlaid with the save spool (`paths.chat_spool_db`, the
+  web UI's rule too), tenant-filtered, scored in SQL over every session. The
+  fallback used to open only the SQLite file -- on Postgres a July leftover.
 
 ### 16. Cron Scheduler & Reminder Delivery (`kazma-core/kazma_core/cron/`)
 

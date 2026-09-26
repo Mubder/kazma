@@ -18,6 +18,23 @@ def use_postgres() -> bool:
         return False
 
 
+def store_errors() -> tuple[type[BaseException], ...]:
+    """What reading or writing a Kazma store can legitimately raise: the
+    SQLite and Postgres drivers, the file system, a pool that is not there
+    (``RuntimeError``), a value that will not decode. Catch this rather than
+    ``Exception``, so a programming error still surfaces."""
+    import sqlite3
+
+    errs: list[type[BaseException]] = [OSError, RuntimeError, ValueError, TypeError, sqlite3.Error]
+    try:
+        import psycopg
+
+        errs.append(psycopg.Error)
+    except ImportError:
+        pass
+    return tuple(errs)
+
+
 def get_pool() -> Any:
     from kazma_core.db.postgres_pool import get_postgres_pool
 

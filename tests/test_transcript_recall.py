@@ -101,6 +101,15 @@ def test_excludes_current_session_and_missing_db(tmp_path: Path, sessions_db: Pa
     assert search_transcripts("anything", db_path=tmp_path / "nope.db") == []
 
 
+def test_another_tenants_sessions_never_leak(sessions_db: Path) -> None:
+    """The fixture's other-tenant row said "must never leak" and nothing
+    checked it: until 2026-09-26 the search had no tenant filter at all."""
+    hits = search_transcripts("HypertFit green names", db_path=sessions_db)
+    assert hits and "s-other" not in {h["session_id"] for h in hits}
+    theirs = search_transcripts("HypertFit green names", db_path=sessions_db, tenant_id="other")
+    assert [h["session_id"] for h in theirs] == ["s-other"]
+
+
 def test_no_hits_for_unrelated_query(sessions_db: Path) -> None:
     assert search_transcripts("zebra quantum umbrella", db_path=sessions_db) == []
 

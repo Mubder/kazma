@@ -16,13 +16,15 @@ every change is inside the existing V2 engine.
 
 | Item | What | State |
 |---|---|---|
-| A | Exact meaning search over every memory (episodes + beliefs) | ☐ |
-| B | Fact recall: meaning search always runs; relevance-aware ranking | ☐ |
-| C | Archive keeps the text; archived memories recallable (weighted); revived on use | ☐ |
-| D | Recover the erased archived memories (verified matches only) | ☐ |
-| E | Past-chats fallback reads the real chat store, no row cap | ☐ |
-| F | Vector repair every 15 min (missing, wrong size, old model) | ☐ |
-| G | Memory health shows searchable / pending / archived / unrecovered | ☐ |
+| A | Exact meaning search over every memory (episodes + beliefs) | ☑ `tests/test_memory_nothing_lost.py` (A) |
+| B | Fact recall: meaning search always runs; relevance-aware ranking | ☑ same file (B) |
+| C | Archive keeps the text; archived memories recallable (weighted); revived on use | ☑ same file (C) + `test_memory_v2_phase3.py` |
+| D | Recover the erased archived memories (verified matches only) | ☑ `tests/test_memory_rehydrate.py` |
+| E | Past-chats fallback reads the real chat store, no row cap | ☑ `tests/test_chat_history.py`, `tests/test_transcript_recall.py` |
+| F | Vector repair every 15 min (missing, wrong size, old model) | ☑ `tests/test_memory_nothing_lost.py` (F) |
+| G | Memory health shows searchable / pending / archived / unrecovered | ☑ same file (G) |
+| H | Every conversation turn reaches memory (found during Stage 1) | ☑ `tests/test_memory_every_turn.py` |
+| I | Nothing repoints live memory: the golden eval runs on its own database (found during Stage 1) | ☑ same file |
 | S1 | Stage 1 shipped: suite 2 splits, Linux, CI, deployed, proven on live | ☐ |
 | S2 | Stage 2 audit written (section 5) and approved | ☐ |
 | S2+ | Stage 2 improvements (added to this table from the audit) | ☐ |
@@ -89,17 +91,25 @@ where the defect has a shape, docs in the same commit.
 
 ### B. Fact recall (`memory/recall.py::_recall_beliefs`)
 - Dense (exact, B-A) always runs, not only when keyword search is thin.
-- Ranking: RRF over the channels (FTS, dense, bridge, PPR) x a bounded prior
-  `0.5 + p/(1+p)` (p = importance x confidence x trust) x the existing hub-rotation penalty.
+- Ranking: weighted RRF over the channels -- meaning 2, keyword and bridge 1,
+  graph walk 0.5 and capped to its top results -- x a standing band of at most
+  +5 % (p = importance x confidence x trust) x the existing hub-rotation penalty.
 - Unchanged: validity filters, functional (subject, predicate) dedupe, supersession.
 - `dense_belief_candidate_cap` removed.
+- *Built differently from the first draft, because the tests failed it:* a
+  prior of `0.5 + p/(1+p)` (0.5x-1.5x) is worth about 100 ranks under RRF, so
+  an important fact at rank ~99 beat the most relevant one; and the graph walk
+  as a full channel ranked every fact about "user" (nearly all of them),
+  burying the meaning match under keyword noise it had amplified.
 
 ### C. Archive = cold, not deleted (`memory/macro_sleep.py`, `recall.py`)
 - `_ARCHIVE_EPISODE_SQL` moves the tier and fills an empty summary; it never nulls text.
 - Archived rows keep their vector (local and remote index; the remote copy is re-tagged, not
   deleted).
 - Every recall path searches archived; fused scores x `memory.v2.archived_recall_weight`
-  (default 0.7).
+  (default **0.98**, not the 0.7 first planned: fused scores are reciprocal ranks
+  1.6 % apart, so 0.7 was ~25 places -- an archived exact match lost to
+  moderately similar active memories and would almost never surface).
 - An archived episode recalled within `episodic_ttl_days` returns to `episodic` at the next
   sleep cycle.
 
@@ -113,6 +123,14 @@ where the defect has a shape, docs in the same commit.
   unrecovered (the stub remains searchable). Runs on the maintenance cadence.
 - Measured before building: chat store 15 exact, checkpoints 36 exact (45 chat-derived);
   6 of 31 memory-tool notes complete in the stub.
+- As built: the episode id (SHA-256 of session, turn, first 512 characters) is
+  the verification, with the stub; earlier backups of `memory_state.db` are a
+  source (a same-row copy that reproduces the stub is the erased text); also
+  `noted` beliefs (incl. `beliefs_archive`), `memory_store` tool calls
+  (resumable scan) and the knowledge library. Dry run on copies of the live
+  data: 75 of 76 restored in full (72 from the 2026-08-13 snapshot, 2 from
+  checkpoints, 1 complete stub), the 76th a compaction summary that had lost
+  nothing; 0 unrecovered, 0 ambiguous; 2.4 s.
 
 ### E. Past-chats fallback (`memory/transcript_recall.py`)
 - One backend-aware chat reader (Postgres `kazma_chat_sessions` or SQLite `sessions`), shared
@@ -125,6 +143,32 @@ where the defect has a shape, docs in the same commit.
 
 ### G. Visibility (`memory/health.py`, Settings / Dashboard)
 - Counts: searchable by meaning, pending repair (by reason), archived, erased-unrecovered.
+
+### H. Every conversation reaches memory (added 2026-09-26, found while building A-G)
+- Measured on live: of 1,174 chat-store turns, 1,004 had no memory episode (877 web,
+  127 gateway). Since 2026-08-08 (commit b0c3527b moved the post-turn hand-over out of
+  the graph into the gateway handler to stop a UI flicker) no web chat turn was written
+  to memory; the live log showed 0 web episodes after 2026-09-17's last Telegram-thread
+  one and the past-chats fallback firing 0 times in 8 days.
+- `turn_runtime.close_turn`, the closer every transport runs, hands a finished turn to
+  `consolidator.remember_turn` once (terminal, not paused, the post-turn record's turn
+  index equal to the state's). Nothing else may call it; the gateway's own call is gone.
+- `extract_turn_texts` pairs a question with ITS answer; the episode turn number is the
+  turn index, so a repeated question is two memories (it collided on the iteration count).
+- `memory/turn_reconcile.py` (15 min, ~60 s): every chat-store turn older than 10 minutes
+  without an episode gets one, with its own time. Episodes only: replaying old
+  statements through functional supersede would overwrite newer facts. Dry run on a copy
+  of live: 1,010 turns from 276 conversations, idempotent, resumable.
+
+### I. Nothing repoints live memory (added 2026-09-26, found while building H)
+- `POST /api/memory/v2/eval/golden` (Dashboard) ran `eval_golden.run_golden_eval` in the
+  live server: it rebound the process-wide `paths.primary_memory_db` to a temp file and
+  called `dual_write.reset_mirror()` before seeding through the shared writer, which then
+  stayed on the temp file after the run. Every episode written meanwhile, and every one
+  after until a restart, went to a file nobody read. It also ran on the event loop.
+- Now: seeding and recall use the eval's own connection (`recall(conn=...)`); it refuses
+  the live database; its temp file is removed; the route runs it in a thread. Class gate:
+  no product code rebinds a `kazma_core.paths` function or resets the writer.
 
 ### Rollout
 Memory suite (baseline 320 passed / 2 skipped) -> new tests -> full suite split 4 and 7 ->
@@ -165,3 +209,7 @@ section 5 and presented for approval before building.
 
 ## Change log
 - 2026-09-26: plan written and approved; Stage 1 started.
+- 2026-09-26: items A-G built and tested (see the table); full suite 10,729 passed.
+- 2026-09-26: item H added and built (web turns had not reached memory since 2026-08-08).
+- 2026-09-26: item I added and built (the golden eval could repoint live memory writes);
+  deploy and live proof next.

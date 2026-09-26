@@ -285,7 +285,8 @@ class LocalSqliteVectorBackend:
         limit: int = 10,
         kind: str | None = None,
     ) -> list[tuple[str, float]]:
-        del kind  # local engine is the episodes table
+        if str(kind or "") == "belief":
+            return self._engine.search_beliefs(query_vec, tenant_id=tenant_id, limit=limit)
         return self._engine.search(
             query_vec, tenant_id=tenant_id, tier=tier, limit=limit
         )
@@ -298,17 +299,25 @@ class LocalSqliteVectorBackend:
         tenant_id: str = "default",
         meta: dict[str, Any] | None = None,
     ) -> bool:
-        """Store float32 embedding on the episode row (local path)."""
-        del tenant_id, meta  # row id is global PK
+        """Store the float32 embedding on its row (local path).
+
+        ``meta["kind"] == "belief"`` targets the beliefs table; anything else
+        is an episode. The model version is stamped with the vector, so the
+        search never compares it with another model's vectors.
+        """
+        del tenant_id  # row id is global PK
         if not item_id or not vec:
             return False
+        table = "beliefs" if str((meta or {}).get("kind") or "") == "belief" else "episodes"
         try:
             import struct
 
+            from kazma_core.memory.embedder import get_embedding_model_name
+
             blob = struct.pack(f"{len(vec)}f", *vec)
             self._conn.execute(
-                "UPDATE episodes SET embedding=? WHERE id=?",
-                (blob, item_id),
+                f"UPDATE {table} SET embedding=?, embedding_model_version=? WHERE id=?",
+                (blob, get_embedding_model_name() or "", item_id),
             )
             self._conn.commit()
             return True
@@ -896,9 +905,6 @@ class HybridVectorBackend:
             )
             if hits:
                 return hits
-        # Local sqlite-vec is the episodes table — do not mix belief queries.
-        if str(kind or "") == "belief":
-            return []
         return self._local.search(
             query_vec, tenant_id=tenant_id, tier=tier, limit=limit, kind=kind
         )

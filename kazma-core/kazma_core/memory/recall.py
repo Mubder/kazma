@@ -26,8 +26,13 @@ from __future__ import annotations
 import hashlib
 import logging
 import sqlite3
+import threading
+import weakref
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
+
+from kazma_core.memory.vector_engine import BELIEF_ACTIVE_SQL, RECALLABLE_TIERS
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +46,10 @@ __all__ = [
 ]
 
 _RRF_K = 60  # RRF smoothing constant (matches legacy adapter)
+
+#: Tier IN (...) for every episode search, built from the one tier list:
+#: archived included (recall weights archived hits down, ``_weigh_archived``).
+_TIER_SQL = "(" + ", ".join(f"'{t}'" for t in RECALLABLE_TIERS) + ")"
 
 
 @dataclass(slots=True)
@@ -354,7 +363,7 @@ def _dense_from_vector_backend(
         ep_ids = backend.search(
             qvec,
             tenant_id=tenant_id,
-            tier=["working", "recall", "episodic"],
+            tier=list(RECALLABLE_TIERS),
             limit=max(limit * 3, 10),
             kind="episode",
         )
@@ -362,7 +371,7 @@ def _dense_from_vector_backend(
         ep_ids = backend.search(
             qvec,
             tenant_id=tenant_id,
-            tier=["working", "recall", "episodic"],
+            tier=list(RECALLABLE_TIERS),
             limit=max(limit * 3, 10),
         )
     except Exception:
@@ -440,17 +449,44 @@ def _dense_from_vector_backend(
     return ep_hits, bel_hits
 
 
+#: Recent query vectors: one recall runs two meaning searches (episodes and
+#: beliefs) over the same question, and the local model keeps no cache. An
+#: entry belongs to one embedder INSTANCE (held weakly, so a replaced model is
+#: neither kept alive nor mistaken for the new one) -- a model switch never
+#: serves a vector from the old space.
+_QUERY_VECTORS: OrderedDict[tuple[int, str], tuple[Any, list[float]]] = OrderedDict()
+_QUERY_VECTORS_MAX = 64
+_QUERY_VECTORS_LOCK = threading.Lock()
+
+
 def _encode_query(query: str) -> list[float] | None:
+    """The question's meaning vector, encoded once however many searches use it."""
     try:
         from kazma_core.memory.embedder import get_embedder
 
         embedder = get_embedder()
         if embedder is None:
             return None
+        key = (id(embedder), query)
+        with _QUERY_VECTORS_LOCK:
+            entry = _QUERY_VECTORS.get(key)
+            if entry is not None and entry[0]() is embedder:
+                _QUERY_VECTORS.move_to_end(key)
+                return list(entry[1])
         qvec = embedder.encode(query)
         if not qvec:
             return None
-        return list(qvec)
+        vec = [float(x) for x in qvec]
+        try:
+            ref = weakref.ref(embedder)
+        except TypeError:  # an embedder that cannot be weakly referenced is not cached
+            return vec
+        with _QUERY_VECTORS_LOCK:
+            _QUERY_VECTORS[key] = (ref, vec)
+            _QUERY_VECTORS.move_to_end(key)
+            while len(_QUERY_VECTORS) > _QUERY_VECTORS_MAX:
+                _QUERY_VECTORS.popitem(last=False)
+        return list(vec)
     except Exception:
         return None
 
@@ -475,6 +511,12 @@ def _merge_remote_state_hits(
     if not getattr(be, "available", False) or getattr(be, "name", "") == "null":
         return episodes, beliefs
 
+    # Fill-ins rank AFTER what local recall found: they only top up a thin
+    # result, and their own scores are on another scale (a fixed 0.5/(i+1),
+    # or importance x confidence) that outranked every fused local score.
+    ep_floor = min((h.score for h in episodes), default=1.0)
+    bel_floor = min((h.score for h in beliefs), default=1.0)
+
     seen_ep = {h.id for h in episodes}
     if len(episodes) < limit:
         for i, row in enumerate(
@@ -498,7 +540,7 @@ def _merge_remote_state_hits(
                 RecallHit(
                     id=eid,
                     content=text,
-                    score=0.5 / (i + 1),
+                    score=ep_floor * 0.5 / (i + 1),
                     kind="episode",
                     source="postgres_state",
                     metadata=meta,
@@ -522,12 +564,7 @@ def _merge_remote_state_hits(
             content = f"{sub} {pred} {obj}".strip()
             if not content:
                 continue
-            try:
-                score = float(row.get("structural_importance") or 1) * float(
-                    row.get("confidence") or 0.5
-                )
-            except Exception:
-                score = 0.5 / (i + 1)
+            score = bel_floor * 0.5 / (i + 1)
             meta = {
                 "subject": sub,
                 "predicate": row.get("predicate"),
@@ -650,12 +687,15 @@ def _recall_beliefs(
                     bridge_entities.add(cleaned)
 
     source_by_id: dict[str, list[str]] = {}
+    # Each channel's ids in its own order of relevance; ranking fuses them.
+    channel_order: dict[str, list[str]] = {}
     rows: list[Any] = []
 
     # ── Stage 1: FTS5 MATCH (preferred) or LIKE fallback ──
     fts_rows = _belief_fts(conn, q, tenant_id, limit * 3) if q else []
     if fts_rows:
         rows = list(fts_rows)
+        channel_order["fts"] = [r["id"] for r in fts_rows]
         for r in fts_rows:
             source_by_id.setdefault(r["id"], []).append("belief_fts")
     else:
@@ -700,6 +740,7 @@ def _recall_beliefs(
                 )
                 params.append(limit * 3)
                 rows = list(conn.execute(sql, params).fetchall())
+                channel_order["like"] = [r["id"] for r in rows]
                 for r in rows:
                     source_by_id.setdefault(r["id"], []).append("belief_like")
             elif bridge_entities:
@@ -726,6 +767,7 @@ def _recall_beliefs(
                         [tenant_id] + ent_params + [limit * 3],
                     ).fetchall()
                 )
+                channel_order["bridge"] = [r["id"] for r in rows]
                 for r in rows:
                     source_by_id.setdefault(r["id"], []).append("belief_bridge")
         except Exception:
@@ -756,10 +798,13 @@ def _recall_beliefs(
                 """,
                 [tenant_id] + ent_params + [limit * 3],
             ).fetchall()
+            bridge_order = channel_order.setdefault("bridge", [])
             for r in bridged:
                 if r["id"] not in existing_ids:
                     rows.append(r)
                     existing_ids.add(r["id"])
+                if r["id"] not in bridge_order:
+                    bridge_order.append(r["id"])
                 source_by_id.setdefault(r["id"], []).append("belief_bridge")
         except Exception:
             logger.debug("[recall] belief bridge failed", exc_info=True)
@@ -793,13 +838,20 @@ def _recall_beliefs(
                     rows.append(r)
             for bid in ppr_scores:
                 source_by_id.setdefault(bid, []).append("belief_ppr")
+            # Its top results only, like every channel: the walk reaches every
+            # fact about "user", and past its head the order is arbitrary.
+            channel_order["ppr"] = [bid for bid, _mass in top_ppr]
         except Exception:
             logger.debug("[recall] belief PPR hydrate failed", exc_info=True)
 
-    # ── Stage 4: dense (capped) when sparse is thin ──
-    if q and len(rows) < limit:
+    # ── Stage 4: meaning, over every current belief, always ──
+    # It used to run only when the stages above found fewer than `limit`
+    # beliefs: five loose keyword hits were enough to keep the one belief the
+    # question meant out of the pool altogether.
+    if q:
         try:
-            dense_rows = _belief_dense(conn, q, vector_engine, tenant_id, limit)
+            dense_rows = _belief_dense(conn, q, vector_engine, tenant_id, limit * 2)
+            channel_order["dense"] = [dr["id"] for dr in dense_rows]
             existing_ids = {r["id"] for r in rows}
             for dr in dense_rows:
                 if dr["id"] not in existing_ids:
@@ -813,6 +865,9 @@ def _recall_beliefs(
 
     hits: list[RecallHit] = []
     seen_subjects: dict[str, RecallHit] = {}
+    channel_ranks = {
+        ch: {bid: i for i, bid in enumerate(order)} for ch, order in channel_order.items()
+    }
     for r in rows:
         ptype = r["predicate_type"] if "predicate_type" in r.keys() else "set"
         if ptype == "functional":
@@ -820,12 +875,7 @@ def _recall_beliefs(
         else:
             key = r["id"]
         content = _format_belief_text(r)
-        score = float(r["structural_importance"]) * float(r["confidence"]) * float(
-            r["source_trust_weight"]
-        )
-        # PPR multi-hop boost (additive on structural score)
-        if r["id"] in ppr_scores:
-            score = score + float(ppr_scores[r["id"]]) * 2.0
+        score = _belief_rank_score(r, channel_ranks)
 
         # ── Recency diversification ──────────────────────────────
         # Penalize beliefs that have been surfaced frequently (high access_count)
@@ -877,6 +927,49 @@ def _recall_beliefs(
     hits = list(seen_subjects.values())
     hits.sort(key=lambda h: h.score, reverse=True)
     return hits[:limit]
+
+
+#: Each channel's weight in the belief fusion. Meaning counts double: a fact
+#: is a short triple, where sharing a word with the question is weak evidence
+#: (a question about coffee shares a word with every fact that mentions
+#: coffee). The graph walk counts half: it is seeded by those same words, so
+#: at full weight it would count the keyword evidence twice.
+_BELIEF_CHANNEL_WEIGHTS = {"dense": 2.0, "fts": 1.0, "like": 1.0, "bridge": 1.0, "ppr": 0.5}
+
+#: How much standing (importance x confidence x trust) may lift a belief's
+#: fused relevance: at most 5 %. Reciprocal ranks at k=60 are close together
+#: (1/61 against 1/64 is 5 %), so standing reorders beliefs within about three
+#: places of each other in a channel -- a near-tie -- and never one that is
+#: clearly more relevant.
+_STANDING_BAND = 0.05
+
+
+def _belief_rank_score(row: Any, channel_ranks: dict[str, dict[str, int]]) -> float:
+    """Relevance, with standing as the tie-breaker.
+
+    Relevance is weighted reciprocal-rank fusion over the channels that found
+    the belief -- keyword, meaning, bridge, graph (:data:`_BELIEF_CHANNEL_WEIGHTS`).
+    Standing (importance x confidence x trust) adds at most
+    :data:`_STANDING_BAND`. Until 2026-09-26 standing WAS the score, so the
+    belief a question was about lost its place to "important" beliefs it was
+    not about.
+    """
+    bid = row["id"]
+    rrf = sum(
+        _BELIEF_CHANNEL_WEIGHTS.get(channel, 1.0) / (_RRF_K + ranks[bid] + 1)
+        for channel, ranks in channel_ranks.items()
+        if bid in ranks
+    ) or 1.0 / (_RRF_K + 1000)
+    try:
+        prior = (
+            float(row["structural_importance"] or 0)
+            * float(row["confidence"] or 0)
+            * float(row["source_trust_weight"] or 0)
+        )
+    except (TypeError, ValueError, IndexError, KeyError):
+        prior = 0.0
+    prior = max(0.0, prior)
+    return rrf * (1.0 + _STANDING_BAND * prior / (1.0 + prior))
 
 
 def _format_belief_text(row: sqlite3.Row) -> str:
@@ -941,6 +1034,9 @@ def _recall_episodes(
             if (h.metadata or {}).get("session_boost"):
                 sources.setdefault(h.id, []).append("session_boost")
 
+    # ── Archived memories: recallable, one step behind active ones ──
+    fused = _weigh_archived(conn, fused)
+
     # ── Deterministic dedup gate ──
     deduped = _dedup_gate(fused)
 
@@ -963,6 +1059,58 @@ def _recall_episodes(
                 )
             )
     return out
+
+
+_ARCHIVED_WEIGHT_DEFAULT = 0.98
+
+
+def _weigh_archived(conn: sqlite3.Connection, hits: list[RecallHit]) -> list[RecallHit]:
+    """Archived memories stay recallable, ranked one step behind active ones.
+
+    An archived memory is one nobody recalled for a month. When it is what the
+    question is about it must still come back -- until 2026-09-26 recall never
+    searched the archived tier at all, so a month of disuse meant the memory
+    was gone -- but an active memory that matches as well comes first. The
+    weight is ``memory.v2.archived_recall_weight`` (default 0.98, kept in
+    0.1-1.0). Fused scores are reciprocal ranks, 1.6 % apart at the top, so
+    0.98 moves an archived memory about one place behind an active one that
+    matches as well -- a tie-breaker; 0.7 would be some 25 places. A recalled
+    archived memory is bumped like any other, and the next sleep cycle moves
+    it back to the episodic tier.
+    """
+    if not hits:
+        return hits
+    ids = [h.id for h in hits]
+    try:
+        tiers = {
+            str(r[0]): str(r[1] or "")
+            for r in conn.execute(
+                f"SELECT id, tier FROM episodes WHERE id IN ({','.join('?' for _ in ids)})",
+                ids,
+            ).fetchall()
+        }
+    except sqlite3.Error:
+        logger.debug("[recall] tier lookup for archived weighting failed", exc_info=True)
+        return hits
+    if "archived" not in tiers.values():
+        return hits
+    weight = _ARCHIVED_WEIGHT_DEFAULT
+    try:
+        from kazma_core.memory.config import read_memory_cfg
+
+        weight = float(
+            ((read_memory_cfg() or {}).get("v2") or {}).get(
+                "archived_recall_weight", _ARCHIVED_WEIGHT_DEFAULT
+            )
+        )
+    except (ImportError, TypeError, ValueError):
+        weight = _ARCHIVED_WEIGHT_DEFAULT
+    weight = min(1.0, max(0.1, weight))
+    for h in hits:
+        if tiers.get(h.id) == "archived":
+            h.score *= weight
+            h.metadata = {**(h.metadata or {}), "archived": True}
+    return sorted(hits, key=lambda h: h.score, reverse=True)
 
 
 def _fts_match_query(query: str) -> str:
@@ -1000,14 +1148,14 @@ def _episode_fts(
     if match_q:
         try:
             rows = conn.execute(
-                """
+                f"""
                 SELECT e.id, e.tier, e.user_text, e.assistant_text,
                        bm25(episodes_fts) AS rank
                 FROM episodes_fts
                 JOIN episodes e ON e.rowid = episodes_fts.rowid
                 WHERE episodes_fts MATCH ?
                   AND e.tenant_id = ?
-                  AND e.tier IN ('working', 'recall', 'episodic')
+                  AND e.tier IN {_TIER_SQL}
                 ORDER BY rank
                 LIMIT ?
                 """,
@@ -1050,12 +1198,13 @@ def _episode_fts(
     if not cleaned_terms:
         return []
     clauses = " OR ".join(
-        "(LOWER(COALESCE(e.user_text,'')) LIKE ? OR LOWER(COALESCE(e.assistant_text,'')) LIKE ?)"
+        "(LOWER(COALESCE(e.user_text,'')) LIKE ? OR LOWER(COALESCE(e.assistant_text,'')) LIKE ?"
+        " OR LOWER(COALESCE(e.summary_text,'')) LIKE ?)"
         for _ in cleaned_terms
     )
     params: list[Any] = []
     for cleaned in cleaned_terms:
-        params.extend([f"%{cleaned}%", f"%{cleaned}%"])
+        params.extend([f"%{cleaned}%", f"%{cleaned}%", f"%{cleaned}%"])
     params.extend([limit])
     try:
         rows = conn.execute(
@@ -1063,7 +1212,7 @@ def _episode_fts(
             SELECT e.id, e.tier, e.user_text, e.assistant_text
             FROM episodes e
             WHERE e.tenant_id = ?
-              AND e.tier IN ('working', 'recall', 'episodic')
+              AND e.tier IN {_TIER_SQL}
               AND ({clauses})
             ORDER BY e.created_at DESC
             LIMIT ?
@@ -1149,24 +1298,15 @@ def _episode_dense(
                 return []
     if not getattr(backend, "available", False):
         return []
-    # Encode the query
-    try:
-        from kazma_core.memory.embedder import get_embedder
-
-        embedder = get_embedder()
-        if embedder is None:
-            return []
-        qvec = embedder.encode(query)
-        if qvec is None:
-            return []
-    except Exception:
+    qvec = _encode_query(query)
+    if not qvec:
         return []
-    # Search working + episodic + recall so fresh turns and active buffer hit.
+    # Every recallable tier: fresh turns, the active buffer, and archived.
     try:
         results = backend.search(
             qvec,
             tenant_id=tenant_id,
-            tier=["working", "recall", "episodic"],
+            tier=list(RECALLABLE_TIERS),
             limit=limit,
             kind="episode",
         )
@@ -1174,7 +1314,7 @@ def _episode_dense(
         results = backend.search(
             qvec,
             tenant_id=tenant_id,
-            tier=["working", "recall", "episodic"],
+            tier=list(RECALLABLE_TIERS),
             limit=limit,
         )
     return [
@@ -1190,75 +1330,52 @@ def _belief_dense(
     tenant_id: str,
     limit: int,
 ) -> list[sqlite3.Row]:
-    """Dense (semantic) belief match.
+    """Meaning-based belief match over EVERY current belief, best first.
 
-    When pgvector/Qdrant is the vector backend, search there (no 400-row
-    cap). Otherwise cosine over a **capped** local candidate set
-    (``memory.v2.dense_belief_candidate_cap``, default 400).
+    A remote index (pgvector / Qdrant, or hybrid) answers when one is
+    configured and up; otherwise the local engine scores every current belief
+    exactly (:meth:`VectorEngine.search_beliefs`). Until 2026-09-26 the local
+    path compared only the 400 most "important" beliefs, so once a tenant had
+    more, a fact that mattered less by importance could not be found by
+    meaning at all.
     """
-    del vector_engine  # reserved for future sqlite-vec belief path
-    try:
-        from kazma_core.memory.embedder import get_embedder
-
-        embedder = get_embedder()
-        if embedder is None:
-            return []
-        qvec = embedder.encode(query)
-        if not qvec:
-            return []
-    except Exception:
+    qvec = _encode_query(query)
+    if not qvec:
         return []
     remote_rows = _belief_dense_via_backend(conn, qvec, tenant_id, limit)
     if remote_rows:
         return remote_rows
-    try:
-        import numpy as np
+    engine = vector_engine if hasattr(vector_engine, "search_beliefs") else None
+    if engine is None:
+        from kazma_core.memory.vector_engine import VectorEngine
 
-        qarr = np.asarray(qvec, dtype=np.float32)
-        qnorm = float(np.linalg.norm(qarr)) or 1.0
-        qarr = qarr / qnorm
-    except Exception:
-        return []  # numpy required for cosine; degrade silently
+        engine = VectorEngine(conn)
+    hits = engine.search_beliefs(qvec, tenant_id=tenant_id, limit=limit)
+    return _hydrate_beliefs(conn, [bid for bid, _sim in hits], tenant_id)
 
-    cap = 400
-    try:
-        from kazma_core.memory.config import read_memory_cfg
 
-        cap = int(
-            ((read_memory_cfg() or {}).get("v2") or {}).get(
-                "dense_belief_candidate_cap", 400
-            )
-        )
-        cap = max(50, min(cap, 5000))
-    except Exception:
-        pass
-
-    # Cap + importance prefilter (Phase B scale guard)
-    rows = conn.execute(
-        """SELECT id, subject, predicate, object, predicate_type,
-                  confidence, structural_importance, valid_from,
-                  source_trust_weight, embedding
-           FROM beliefs
-           WHERE valid_until IS NULL AND invalidated_at IS NULL
-             AND tenant_id = ? AND embedding IS NOT NULL
-           ORDER BY structural_importance DESC, confidence DESC
-           LIMIT ?""",
-        (tenant_id, cap),
-    ).fetchall()
-    if not rows:
+def _hydrate_beliefs(
+    conn: sqlite3.Connection, ids: list[str], tenant_id: str
+) -> list[sqlite3.Row]:
+    """The current beliefs named by *ids*, in the order given."""
+    if not ids:
         return []
-
-    scored: list[tuple[float, sqlite3.Row]] = []
-    for r in rows:
-        try:
-            varr = np.frombuffer(r["embedding"], dtype=np.float32)
-            vnorm = float(np.linalg.norm(varr)) or 1.0
-            sim = float(np.dot(qarr, varr / vnorm))
-        except Exception:
-            continue
-        scored.append((sim, r))
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [r for _sim, r in scored[:limit]]
+    placeholders = ",".join(["?"] * len(ids))
+    try:
+        rows = conn.execute(
+            f"""SELECT id, subject, predicate, object, predicate_type,
+                      confidence, structural_importance, valid_from,
+                      source_trust_weight, embedding
+               FROM beliefs
+               WHERE {BELIEF_ACTIVE_SQL}
+                 AND tenant_id = ? AND id IN ({placeholders})""",
+            (tenant_id, *ids),
+        ).fetchall()
+    except sqlite3.Error:
+        logger.debug("[recall] belief hydrate failed", exc_info=True)
+        return []
+    order = {eid: i for i, eid in enumerate(ids)}
+    return sorted(rows, key=lambda r: order.get(str(r["id"]), 10_000))
 
 
 def _belief_dense_via_backend(
@@ -1288,24 +1405,7 @@ def _belief_dense_via_backend(
     except Exception:
         logger.debug("[recall] belief dense backend search failed", exc_info=True)
         return []
-    ids = [str(eid) for eid, _s in hits if eid]
-    if not ids:
-        return []
-    placeholders = ",".join(["?"] * len(ids))
-    try:
-        rows = conn.execute(
-            f"""SELECT id, subject, predicate, object, predicate_type,
-                      confidence, structural_importance, valid_from,
-                      source_trust_weight, embedding
-               FROM beliefs
-               WHERE valid_until IS NULL AND invalidated_at IS NULL
-                 AND tenant_id = ? AND id IN ({placeholders})""",
-            (tenant_id, *ids),
-        ).fetchall()
-    except Exception:
-        return []
-    order = {eid: i for i, eid in enumerate(ids)}
-    return sorted(rows, key=lambda r: order.get(str(r["id"]), 10_000))
+    return _hydrate_beliefs(conn, [str(eid) for eid, _s in hits if eid], tenant_id)
 
 
 def _belief_graph_ppr(
@@ -1491,7 +1591,7 @@ def _episode_ppr(
             f"""
             SELECT id, session_id FROM episodes
             WHERE tenant_id = ?
-              AND tier IN ('working','recall','episodic')
+              AND tier IN {_TIER_SQL}
               AND session_id IN ({sph})
             LIMIT ?
             """,

@@ -303,78 +303,17 @@ def _reembed_missing(
     partition_index: int = 0,
     partition_count: int = 1,
 ) -> tuple[int, int]:
-    """Encode rows with NULL embedding. Returns (episodes, beliefs) counts."""
-    try:
-        from kazma_core.memory.embedder import encode_text_to_blob, get_embedding_model_name
-    except Exception:
-        return 0, 0
+    """Re-encode rows meaning search cannot compare. Returns (episodes, beliefs).
 
-    model = ""
-    try:
-        model = get_embedding_model_name() or ""
-    except Exception:
-        pass
-
+    The same repair the 15-minute maintenance cadence runs
+    (:func:`kazma_core.memory.reembed.repair_unsearchable_vectors`) -- one copy,
+    which also covers wrong-size and old-model vectors, not only NULL ones.
+    Partitioned runs repair once, on partition 0; *limit* bounds the batch.
+    """
     p_count = max(1, int(partition_count or 1))
-    p_index = max(0, int(partition_index or 0)) % p_count
+    if max(0, int(partition_index or 0)) % p_count != 0:
+        return 0, 0
+    from kazma_core.memory.reembed import repair_unsearchable_vectors
 
-    # Episodes: no subject key — only run on partition 0 (once per full cycle)
-    ep_n = 0
-    if p_index == 0:
-        for r in conn.execute(
-            """
-            SELECT id, user_text, assistant_text, summary_text
-            FROM episodes
-            WHERE tenant_id = ? AND embedding IS NULL
-              AND tier IN ('working', 'episodic', 'recall')
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            (tenant_id, limit),
-        ).fetchall():
-            text = (r["summary_text"] or r["user_text"] or r["assistant_text"] or "").strip()
-            if not text:
-                continue
-            blob = encode_text_to_blob(text)
-            if blob is None:
-                continue
-            conn.execute(
-                "UPDATE episodes SET embedding=?, embedding_model_version=? WHERE id=?",
-                (blob, model, r["id"]),
-            )
-            ep_n += 1
-
-    bel_n = 0
-    # Over-fetch then filter by partition so each shard re-embeds its share
-    fetch_n = max(limit * max(1, p_count), limit)
-    for r in conn.execute(
-        """
-        SELECT id, subject, predicate, object
-        FROM beliefs
-        WHERE tenant_id = ? AND embedding IS NULL
-          AND valid_until IS NULL AND invalidated_at IS NULL
-        ORDER BY ingested_at DESC
-        LIMIT ?
-        """,
-        (tenant_id, fetch_n),
-    ).fetchall():
-        sub = (r["subject"] or "").strip().lower()
-        if p_count > 1 and subject_partition_index(sub, p_count) != p_index:
-            continue
-        text = f"{r['subject']} {r['predicate']} {r['object']}".strip()
-        if not text:
-            continue
-        blob = encode_text_to_blob(text)
-        if blob is None:
-            continue
-        conn.execute(
-            "UPDATE beliefs SET embedding=?, embedding_model_version=? WHERE id=?",
-            (blob, model, r["id"]),
-        )
-        bel_n += 1
-        if bel_n >= limit:
-            break
-
-    if ep_n or bel_n:
-        conn.commit()
-    return ep_n, bel_n
+    done = repair_unsearchable_vectors(conn, tenant_id=tenant_id, batch=max(1, int(limit)))
+    return int(done.get("episodes", 0)), int(done.get("beliefs", 0))

@@ -315,7 +315,9 @@ def register_memory_routes(self: Any) -> None:
         try:
             from kazma_core.memory.eval_golden import run_golden_eval
 
-            return run_golden_eval(include_optional=include_optional)
+            # Seeding and recall do SQLite and embedder work: off the loop
+            # that serves every chat stream (AGENTS §35).
+            return await asyncio.to_thread(run_golden_eval, include_optional=include_optional)
         except Exception as exc:
             return {
                 "ok": False,
@@ -840,12 +842,16 @@ def register_memory_routes(self: Any) -> None:
                 where += " AND tier = ?"
                 params.append(tier.strip())
             else:
-                where += " AND tier IN ('working','episodic','recall')"
+                # Every tier recall searches -- archived is cold, not gone.
+                from kazma_core.memory.vector_engine import RECALLABLE_TIERS
+
+                where += f" AND tier IN ({','.join('?' for _ in RECALLABLE_TIERS)})"
+                params.extend(RECALLABLE_TIERS)
             total = conn.execute(f"SELECT COUNT(*){where}", params).fetchone()[0]
             lim = max(1, min(int(limit or 40), 100))
             off = max(0, int(offset or 0))
             sql = (
-                "SELECT id, tier, user_text, assistant_text, created_at, session_id"
+                "SELECT id, tier, user_text, assistant_text, summary_text, created_at, session_id"
                 + where
                 + " ORDER BY created_at DESC LIMIT ? OFFSET ?"
             )
@@ -855,7 +861,7 @@ def register_memory_routes(self: Any) -> None:
             for r in rows:
                 ut = (r["user_text"] or "")[:120]
                 at = (r["assistant_text"] or "")[:80]
-                preview = ut or at or r["id"]
+                preview = ut or at or (r["summary_text"] or "")[:120] or r["id"]
                 out.append(
                     {
                         "id": r["id"],
@@ -972,9 +978,7 @@ def register_memory_routes(self: Any) -> None:
                 bel = conn.execute(
                     "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
                 ).fetchone()[0]
-                ep = conn.execute(
-                    "SELECT COUNT(*) FROM episodes WHERE tier IN ('working','episodic','recall')"
-                ).fetchone()[0]
+                ep = conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
                 emb = conn.execute(
                     "SELECT COUNT(*) FROM episodes WHERE embedding IS NOT NULL"
                 ).fetchone()[0]

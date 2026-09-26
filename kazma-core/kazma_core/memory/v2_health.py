@@ -171,6 +171,30 @@ def build_v2_health() -> dict[str, Any]:
                 primary_conn, "SELECT COUNT(*) FROM episodes WHERE tier=?", (tier,)
             )
 
+        # Findability (docs/plans/MEMORY_NOTHING_LOST_PLAN.md, item G): what
+        # meaning search can compare, what waits for the 15-minute repair, and
+        # the memories the pre-2026-09-26 archive rule erased.
+        from kazma_core.config_store import get_config_store
+        from kazma_core.db.pg_helpers import store_errors
+        from kazma_core.memory.reembed import vector_repair_counts
+        from kazma_core.memory.rehydrate import STATE_KEY, erased_counts
+        from kazma_core.memory.turn_reconcile import STATE_KEY as RECONCILE_KEY
+
+        try:
+            findability: dict[str, Any] = {
+                "vectors": vector_repair_counts(primary_conn),
+                "erased": erased_counts(primary_conn),
+            }
+            state = get_config_store().get(STATE_KEY)
+            if isinstance(state, dict) and isinstance(state.get("last"), dict):
+                findability["last_recovery"] = state["last"]
+            reconcile = get_config_store().get(RECONCILE_KEY)
+            if isinstance(reconcile, dict) and isinstance(reconcile.get("last"), dict):
+                findability["turn_reconcile"] = reconcile["last"]
+            out["findability"] = findability
+        except store_errors():
+            logger.debug("[v2_health] findability counts failed", exc_info=True)
+
         # Entities + procedural DAGs
         out["entities"] = _safe_count(primary_conn, "SELECT COUNT(*) FROM entities")
         out["procedural_dags"]["active"] = _safe_count(

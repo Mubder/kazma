@@ -1,81 +1,111 @@
-"""V2 Vector Engine — sqlite-vec with guarded NumPy fallback.
+"""V2 Vector Engine — exact similarity over EVERY stored memory.
 
-Three-tier capability ladder (per resolution #1 — zero-dependency by
-default, NumPy only when already present via the ``[rag]`` extra):
+Both memory kinds are searched here: episodes (conversation memories) and
+beliefs (facts). Each search scores every eligible row and returns the best —
+there is no candidate cap, no pre-selection by importance or age, and no
+sampling. Until 2026-09-26 neither kind worked that way: episodes were
+compared within an arbitrary ``LIMIT limit*16`` slice fetched with no ORDER BY
+(on the live install the 60 newest of 300 conversation memories were never
+searched), and beliefs within the 400 most "important". A memory the search
+cannot see is a memory the agent has lost, whatever the database holds.
 
-1. **sqlite-vec** (preferred) — native C-extension virtual table, fastest.
-2. **NumPy fallback** — in-memory cosine similarity over float32 BLOBs.
-   Activated only when ``numpy`` is importable; never a hard dependency.
-3. **Degraded** — no vector path; the caller falls back to FTS5-only.
+Capability ladder:
 
-The engine queries the V2 ``episodes`` table (where the consolidator
-stores embeddings alongside the tiered text). It is scraping/LLM-scoped
-to read-only retrieval — never writes.
+1. **sqlite-vec** (a core dependency) — ``vec_distance_cosine`` evaluated in
+   SQL over every eligible row. Exact, read-only, ~1 ms per 1,000 rows of
+   1024-dim vectors (20,000 rows: ~21 ms, measured 2026-09-26).
+2. **NumPy** — the same exact scan in chunks (bounded memory, merged top-k).
+3. **Degraded** — no vector path; recall falls back to FTS5 only.
+
+A row is comparable when its vector has the query's dimension and was made by
+the current embedding model (``embedding_model_version``; rows without a
+version are legacy rows of the same model). Rows that are not comparable
+stay out of the ranking — a different model's vector space gives meaningless
+scores — and the repair sweep (:mod:`kazma_core.memory.reembed`) re-encodes
+them, so they return within minutes rather than staying lost.
+
+The engine never writes: no temporary tables, no DDL, no commits.
 """
 
 from __future__ import annotations
 
+import heapq
 import logging
 import sqlite3
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["VectorEngine"]
+__all__ = ["BELIEF_ACTIVE_SQL", "RECALLABLE_TIERS", "VectorEngine"]
+
+#: Every episode tier recall may return. Archived memories are recallable:
+#: they rank below active ones (recall weights them) but are never out of
+#: reach -- one tier list for every search path.
+RECALLABLE_TIERS: tuple[str, ...] = ("working", "recall", "episodic", "archived")
+
+#: The beliefs recall may return: current, not invalidated.
+BELIEF_ACTIVE_SQL = "valid_until IS NULL AND invalidated_at IS NULL"
+
+_NUMPY_CHUNK = 2048
+
+
+def _current_model_name() -> str:
+    try:
+        from kazma_core.memory.embedder import get_embedding_model_name
+
+        return str(get_embedding_model_name() or "")
+    except Exception:  # noqa: BLE001 -- unknown model: compare by dimension only
+        logger.debug("[vector_engine] embedding model name unreadable", exc_info=True)
+        return ""
 
 
 class VectorEngine:
-    """Read-only vector similarity over the V2 ``episodes`` table.
+    """Read-only exact vector similarity over the V2 memory tables.
 
     Args:
         conn: An open connection to ``memory_state.db``. The engine does
             NOT own this connection (shared with the recall engine).
+        model: The embedding model the query vectors come from. ``None``
+            reads the configured model; ``""`` compares by dimension only.
     """
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: sqlite3.Connection, *, model: str | None = None) -> None:
         self.conn = conn
+        self.model = _current_model_name() if model is None else str(model)
         self.has_sqlite_vec = False
         self.has_numpy = False
-        self._numpy: Any = None  # the numpy module, lazily bound
+        self._numpy: Any = None
         self._init_backends()
 
     def _init_backends(self) -> None:
         """Probe sqlite-vec, then NumPy. Both are best-effort."""
-        # ── Tier 1: sqlite-vec C-extension ──
         try:
             self.conn.enable_load_extension(True)
             import sqlite_vec  # type: ignore[import-untyped]
 
             sqlite_vec.load(self.conn)
-            # Smoke-test: confirm the extension actually responds.
             self.conn.execute("SELECT vec_version()").fetchone()
             self.has_sqlite_vec = True
-            logger.info("[vector_engine] sqlite-vec C-extension active")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- optional native extension
             self.has_sqlite_vec = False
             logger.debug("[vector_engine] sqlite-vec unavailable (%s)", exc)
-            # Disable extension loading only if we enabled it
+        finally:
             try:
                 self.conn.enable_load_extension(False)
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 -- connection without the switch
+                logger.debug("[vector_engine] could not disable extension loading", exc_info=True)
+        try:
+            import numpy as np  # type: ignore[import-untyped]
 
-        # ── Tier 2: NumPy fallback (guarded — never a hard dep) ──
-        # Per resolution #1: numpy is pulled transitively by [rag]; a
-        # minimal `pip install kazma` has no numpy. Guard keeps it optional.
-        if not self.has_sqlite_vec:
-            try:
-                import numpy as np  # type: ignore[import-untyped]
-
-                self._numpy = np
-                self.has_numpy = True
-                logger.info("[vector_engine] NumPy fallback active")
-            except ImportError:
-                self.has_numpy = False
-                logger.warning(
-                    "[vector_engine] no sqlite-vec AND no numpy — "
-                    "vector search disabled (FTS5-only retrieval)"
-                )
+            self._numpy = np
+            self.has_numpy = True
+        except ImportError:
+            self.has_numpy = False
+        if not (self.has_sqlite_vec or self.has_numpy):
+            logger.warning(
+                "[vector_engine] no sqlite-vec AND no numpy -- "
+                "vector search disabled (FTS5-only retrieval)"
+            )
 
     @property
     def available(self) -> bool:
@@ -89,159 +119,125 @@ class VectorEngine:
         query_vec: list[float] | None,
         *,
         tenant_id: str = "default",
-        tier: str | list[str] | None = "recall",
+        tier: str | list[str] | tuple[str, ...] | None = "recall",
         limit: int = 10,
     ) -> list[tuple[str, float]]:
-        """Return ``(episode_id, similarity)`` pairs ranked by cosine.
+        """Rank EVERY eligible episode by cosine; return ``(id, similarity)``.
 
-        Args:
-            query_vec: The query embedding (float list). If None or the
-                engine is unavailable, returns ``[]`` (caller falls back
-                to FTS5).
-            tenant_id: Tenant isolation filter.
-            tier: Restrict to a tier (``'recall'``), a list of tiers
-                (``['recall','episodic']``), or ``None`` for all tiers.
-            limit: Max results.
-
-        Returns:
-            List of ``(episode_id, cosine_score)`` descending. Empty if
-            the engine is unavailable or no embeddings match.
+        ``tier`` restricts to one tier, a list of tiers, or ``None`` for all.
         """
-        if query_vec is None or not self.available:
-            return []
-        if self.has_sqlite_vec:
-            return self._search_sqlite_vec(query_vec, tenant_id, tier, limit)
-        return self._search_numpy(query_vec, tenant_id, tier, limit)
-
-    # ── Tier 1: sqlite-vec ─────────────────────────────────────────────
-
-    def _search_sqlite_vec(
-        self,
-        query_vec: list[float],
-        tenant_id: str,
-        tier: str | list[str] | None,
-        limit: int,
-    ) -> list[tuple[str, float]]:
-        """Native sqlite-vec cosine search via a transient vec0 view.
-
-        The V2 ``episodes`` table stores embeddings as float32 BLOBs in
-        ``metadata_json`` under key ``embedding`` (written by the
-        consolidator). We build a transient vec0 virtual table from the
-        candidate rows, query it, then drop it.
-        """
-        np = self._numpy  # used for BLOB packing even under sqlite-vec
-        try:
-            dim = len(query_vec)
-            # Fetch candidate episode ids + embedding blobs
-            rows = self._fetch_candidate_embeddings(tenant_id, tier, limit * 4)
-            if not rows:
-                return []
-            # Build a transient vec0 table
-            vtab = "_v2_query_vec"
-            self.conn.execute(f"DROP TABLE IF EXISTS {vtab}")
-            self.conn.execute(
-                f"CREATE VIRTUAL TABLE {vtab} USING vec0(id TEXT PRIMARY KEY, embedding float[{dim}])"
-            )
-            for eid, blob in rows:
-                if blob and len(blob) == dim * 4:
-                    self.conn.execute(
-                        f"INSERT INTO {vtab} (id, embedding) VALUES (?, ?)",
-                        (eid, sqlite3.Binary(blob)),
-                    )
-            # Pack query
-            if np is not None:
-                qblob = sqlite3.Binary(np.asarray(query_vec, dtype=np.float32).tobytes())
-            else:
-                qblob = sqlite3.Binary(self._pack_floats(query_vec))
-            results = self.conn.execute(
-                f"SELECT id, distance FROM {vtab} WHERE embedding MATCH ? ORDER BY distance LIMIT ?",
-                (qblob, limit),
-            ).fetchall()
-            self.conn.execute(f"DROP TABLE IF EXISTS {vtab}")
-            # vec0 'distance' is cosine *distance* (0=identical); convert to similarity
-            return [(r[0], 1.0 - float(r[1])) for r in results]
-        except Exception as exc:
-            logger.debug("[vector_engine] sqlite-vec query failed: %s", exc)
-            # Fall through to numpy if available
-            if self.has_numpy:
-                return self._search_numpy(query_vec, tenant_id, tier, limit)
-            return []
-
-    # ── Tier 2: NumPy fallback ─────────────────────────────────────────
-
-    def _search_numpy(
-        self,
-        query_vec: list[float],
-        tenant_id: str,
-        tier: str | list[str] | None,
-        limit: int,
-    ) -> list[tuple[str, float]]:
-        """In-memory cosine similarity via NumPy."""
-        np = self._numpy
-        if np is None:
-            return []
-        try:
-            rows = self._fetch_candidate_embeddings(tenant_id, tier, limit * 4)
-            if not rows:
-                return []
-            q = np.asarray(query_vec, dtype=np.float32)
-            qn = np.linalg.norm(q) + 1e-9
-            scored: list[tuple[str, float]] = []
-            for eid, blob in rows:
-                if not blob or len(blob) != len(query_vec) * 4:
-                    continue
-                v = np.frombuffer(blob, dtype=np.float32)
-                sim = float(np.dot(q, v) / (qn * (np.linalg.norm(v) + 1e-9)))
-                scored.append((eid, sim))
-            scored.sort(key=lambda x: x[1], reverse=True)
-            return scored[:limit]
-        except Exception as exc:
-            logger.debug("[vector_engine] numpy fallback failed: %s", exc)
-            return []
-
-    # ── Helpers ────────────────────────────────────────────────────────
-
-    def _fetch_candidate_embeddings(
-        self,
-        tenant_id: str,
-        tier: str | list[str] | None,
-        limit: int,
-    ) -> list[tuple[str, bytes]]:
-        """Read (episode_id, embedding_blob) from episodes with embeddings.
-
-        Embeddings live in the dedicated ``episodes.embedding`` BLOB
-        column (written by the consolidator in Phase 3). Rows without an
-        embedding are skipped. Tenant + tier filtered.
-
-        Note: embeddings are NEVER stored inside ``metadata_json`` — raw
-        bytes are not JSON-serializable.
-        """
-        sql = (
-            "SELECT id, embedding FROM episodes "
-            "WHERE tenant_id = ? AND embedding IS NOT NULL"
-        )
+        where = ["tenant_id = ?"]
         params: list[Any] = [tenant_id]
         if isinstance(tier, (list, tuple)):
             tiers = [str(t) for t in tier if t]
             if tiers:
-                placeholders = ",".join("?" for _ in tiers)
-                sql += f" AND tier IN ({placeholders})"
+                where.append(f"tier IN ({','.join('?' for _ in tiers)})")
                 params.extend(tiers)
         elif tier:
-            sql += " AND tier = ?"
-            params.append(tier)
-        sql += " LIMIT ?"
-        params.append(limit * 4)
-        try:
-            rows = self.conn.execute(sql, params).fetchall()
-            return [(r[0], r[1]) for r in rows if r[1]]
-        except Exception as exc:
-            logger.debug("[vector_engine] candidate fetch failed: %s", exc)
-            return []
+            where.append("tier = ?")
+            params.append(str(tier))
+        return self._exact("episodes", where, params, query_vec, limit)
 
-    @staticmethod
-    def _pack_floats(vec: list[float]) -> bytes:
-        """Pack a float list into a float32 BLOB without numpy (struct)."""
+    def search_beliefs(
+        self,
+        query_vec: list[float] | None,
+        *,
+        tenant_id: str = "default",
+        limit: int = 10,
+    ) -> list[tuple[str, float]]:
+        """Rank EVERY current belief by cosine; return ``(id, similarity)``."""
+        return self._exact(
+            "beliefs", ["tenant_id = ?", BELIEF_ACTIVE_SQL], [tenant_id], query_vec, limit
+        )
+
+    def comparable_clause(self, dim: int) -> tuple[str, list[Any]]:
+        """SQL predicate for rows whose vector can be compared with a *dim* query."""
+        sql = "embedding IS NOT NULL AND length(embedding) = ?"
+        params: list[Any] = [int(dim) * 4]
+        if self.model:
+            sql += (
+                " AND (embedding_model_version IS NULL OR embedding_model_version = ''"
+                " OR embedding_model_version = ?)"
+            )
+            params.append(self.model)
+        return sql, params
+
+    # ── Exact search ───────────────────────────────────────────────────
+
+    def _exact(
+        self,
+        table: str,
+        where: list[str],
+        params: list[Any],
+        query_vec: list[float] | None,
+        limit: int,
+    ) -> list[tuple[str, float]]:
+        if not query_vec or limit <= 0 or not self.available:
+            return []
+        clause, clause_params = self.comparable_clause(len(query_vec))
+        predicate = " AND ".join([*where, clause])
+        all_params = [*params, *clause_params]
+        if self.has_sqlite_vec:
+            try:
+                return self._exact_sqlite_vec(table, predicate, all_params, query_vec, limit)
+            except sqlite3.Error:
+                logger.warning(
+                    "[vector_engine] sqlite-vec search of %s failed; using numpy", table,
+                    exc_info=True,
+                )
+        if self.has_numpy:
+            try:
+                return self._exact_numpy(table, predicate, all_params, query_vec, limit)
+            except (sqlite3.Error, ValueError):
+                logger.warning("[vector_engine] numpy search of %s failed", table, exc_info=True)
+        return []
+
+    def _query_blob(self, query_vec: list[float]) -> bytes:
+        if self._numpy is not None:
+            return self._numpy.asarray(query_vec, dtype=self._numpy.float32).tobytes()
         import struct
 
-        return struct.pack(f"{len(vec)}f", *vec)
+        return struct.pack(f"{len(query_vec)}f", *query_vec)
+
+    def _exact_sqlite_vec(
+        self, table: str, predicate: str, params: list[Any], query_vec: list[float], limit: int
+    ) -> list[tuple[str, float]]:
+        # A zero vector has no direction: vec_distance_cosine returns NULL for
+        # it, and NULLs sort FIRST -- filter them out before ordering.
+        sql = (
+            "SELECT id, d FROM ("
+            f"SELECT id, vec_distance_cosine(embedding, ?) AS d FROM {table} WHERE {predicate}"
+            ") WHERE d IS NOT NULL ORDER BY d ASC LIMIT ?"
+        )
+        rows = self.conn.execute(sql, [self._query_blob(query_vec), *params, int(limit)]).fetchall()
+        return [(str(r[0]), 1.0 - float(r[1])) for r in rows]
+
+    def _exact_numpy(
+        self, table: str, predicate: str, params: list[Any], query_vec: list[float], limit: int
+    ) -> list[tuple[str, float]]:
+        np = self._numpy
+        q = np.asarray(query_vec, dtype=np.float32)
+        qn = float(np.linalg.norm(q))
+        if qn == 0.0:
+            return []
+        q = q / qn
+        best: list[tuple[float, str]] = []
+        cur = self.conn.execute(f"SELECT id, embedding FROM {table} WHERE {predicate}", params)
+        while True:
+            chunk = cur.fetchmany(_NUMPY_CHUNK)
+            if not chunk:
+                break
+            ids = [str(r[0]) for r in chunk]
+            mat = np.frombuffer(b"".join(bytes(r[1]) for r in chunk), dtype=np.float32)
+            mat = mat.reshape(len(chunk), q.shape[0])
+            norms = np.linalg.norm(mat, axis=1)
+            sims = np.divide(mat @ q, norms, out=np.full(len(chunk), np.nan, dtype=np.float32),
+                             where=norms > 0)
+            for eid, sim in zip(ids, sims.tolist()):
+                if sim != sim:  # NaN: zero vector, no direction
+                    continue
+                if len(best) < limit:
+                    heapq.heappush(best, (sim, eid))
+                elif sim > best[0][0]:
+                    heapq.heapreplace(best, (sim, eid))
+        return [(eid, float(sim)) for sim, eid in sorted(best, reverse=True)]

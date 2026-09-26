@@ -1,13 +1,24 @@
 """Golden-set recall evaluator — industry regression for V2 hybrid retrieval.
 
 Runs fixture cases from ``kazma-core/tests/fixtures/memory_golden.json``
-against a temporary memory DB (or an injected connection). No live LLM.
+against a private memory database (a temp file of its own, or an injected
+connection that is not the live one). No live LLM.
+
+It never touches the live memory database or the process-wide episode
+writer. Until 2026-09-26 it rebound ``paths.primary_memory_db`` to its temp
+file and reset the shared ``dual_write`` mirror inside the live server (the
+Dashboard runs it through ``POST /api/memory/v2/eval/golden``), so a chat
+turn written meanwhile -- and, through the mirror left on the temp file,
+every turn after it until a restart -- was stored in a file nobody read.
+tests/test_memory_every_turn.py holds that no product code rebinds a
+``kazma_core.paths`` function or resets the mirror.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import tempfile
 import time
@@ -30,12 +41,60 @@ def load_golden_cases() -> list[dict[str, Any]]:
     return list(data.get("cases") or [])
 
 
+def _is_live_memory_db(conn: sqlite3.Connection) -> bool:
+    """True when *conn* is open on the install's own memory database."""
+    from kazma_core.paths import primary_memory_db
+
+    live = primary_memory_db()
+    for _seq, name, path in conn.execute("PRAGMA database_list").fetchall():
+        if name == "main" and path and live and os.path.exists(path) and os.path.exists(live):
+            return os.path.samefile(path, live)
+    return False
+
+
+def _seed_episode(
+    conn: sqlite3.Connection, *, session_id: str, turn: int, content: str, now: float
+) -> None:
+    """A case's episode, written straight into the eval's own database -- the
+    columns ``dual_write.mirror_episode`` writes and the vector it would
+    compute -- never through the process-wide writer (which would also have
+    copied it into a state mirror or remote vector index, when configured)."""
+    from kazma_core.memory.dual_write import _episode_id
+    from kazma_core.memory.embedder import encode_text_to_blob, get_embedding_model_name
+
+    conn.execute(
+        """INSERT OR IGNORE INTO episodes
+           (id, tenant_id, session_id, turn_number, user_text, assistant_text,
+            summary_text, tier, structural_importance, created_at, metadata_json,
+            embedding, embedding_model_version)
+           VALUES (?,?,?,?,?,'',?,'episodic',3,?,?,?,?)""",
+        (
+            _episode_id(session_id, turn, content.strip()),
+            "default",
+            session_id,
+            turn,
+            content[:4000],
+            content[:500],
+            now,
+            json.dumps({"source": "golden_eval"}),
+            encode_text_to_blob(content[:500]),
+            get_embedding_model_name() or "",
+        ),
+    )
+
+
 def run_golden_eval(
     *,
     include_optional: bool = False,
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
-    """Execute golden cases; return pass-rate report for API / CI."""
+    """Execute golden cases on a private database; return the pass-rate report.
+
+    Every case clears the database, seeds it, and recalls from it
+    (``recall(conn=...)``). Without *conn* the database is a temp file of its
+    own, removed afterwards. An injected *conn* must not be the live memory
+    database: every case clears it.
+    """
     cases = load_golden_cases()
     if not cases:
         return {
@@ -47,34 +106,19 @@ def run_golden_eval(
             "cases": [],
         }
 
+    from kazma_core.memory.recall import recall
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
     owns = conn is None
-    tmp_path: str | None = None
-    _orig_primary = None
-    if owns:
-        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-        tmp.close()
-        tmp_path = tmp.name
+    tmp_path = ""
+    if conn is None:
+        fd, tmp_path = tempfile.mkstemp(prefix="kazma-golden-", suffix=".db")
+        os.close(fd)
         conn = sqlite3.connect(tmp_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
-        from kazma_core.memory.schema_v2 import ensure_primary_schema
-
         ensure_primary_schema(conn)
-        # Point recall() dual-write/paths at the temp DB
-        try:
-            import kazma_core.paths as paths
-
-            _orig_primary = getattr(paths, "primary_memory_db", None)
-            paths.primary_memory_db = lambda: tmp_path  # type: ignore[assignment]
-        except Exception:
-            _orig_primary = None
-        try:
-            from kazma_core.memory.dual_write import reset_mirror
-
-            reset_mirror()
-        except Exception:
-            pass
-
-    from kazma_core.memory.recall import recall
+    elif _is_live_memory_db(conn):
+        raise ValueError("the golden eval clears its database; it never runs on live memory")
 
     results: list[dict[str, Any]] = []
     passed = 0
@@ -93,113 +137,56 @@ def run_golden_eval(
                     }
                 )
                 continue
-            try:
-                conn.execute("DELETE FROM episodes")
-                conn.execute("DELETE FROM beliefs")
-                conn.commit()
-            except Exception:
-                pass
-
+            conn.execute("DELETE FROM episodes")
+            conn.execute("DELETE FROM beliefs")
             now = time.time()
             for i, b in enumerate(case.get("setup_beliefs") or []):
-                try:
-                    conn.execute(
-                        """INSERT INTO beliefs
-                           (id, tenant_id, subject, predicate, predicate_type, object,
-                            confidence, structural_importance, source_trust_weight,
-                            valid_from, ingested_at)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                        (
-                            f"{case.get('id', 'c')}-b{i}",
-                            "default",
-                            b["subject"],
-                            b["predicate"],
-                            "functional",
-                            b["object"],
-                            0.9,
-                            4,
-                            1.0,
-                            now,
-                            now,
-                        ),
-                    )
-                except Exception as exc:
-                    logger.debug("[eval_golden] seed belief failed: %s", exc)
-            conn.commit()
-
-            # Episodes via dual-write when available
+                conn.execute(
+                    """INSERT INTO beliefs
+                       (id, tenant_id, subject, predicate, predicate_type, object,
+                        confidence, structural_importance, source_trust_weight,
+                        valid_from, ingested_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        f"{case.get('id', 'c')}-b{i}",
+                        "default",
+                        b["subject"],
+                        b["predicate"],
+                        "functional",
+                        b["object"],
+                        0.9,
+                        4,
+                        1.0,
+                        now,
+                        now,
+                    ),
+                )
+            session = f"golden-{case.get('id')}"
             for turn, msg in enumerate(case.get("setup") or [], start=1):
-                content = ""
-                if isinstance(msg, dict):
-                    content = str(msg.get("content") or "")
-                else:
-                    content = str(msg)
-                if not content:
-                    continue
-                try:
-                    from kazma_core.memory.dual_write import get_mirror, reset_mirror
-
-                    reset_mirror()
-                    get_mirror().mirror_episode(
-                        session_id=f"golden-{case.get('id')}",
-                        turn_number=turn,
-                        user_text=content,
-                        assistant_text="",
-                        summary_text=content[:500],
-                        tenant_id="default",
-                        tier="episodic",
-                        importance=3,
-                        source="golden_eval",
-                    )
-                except Exception:
-                    # Fallback: direct episode insert if dual-write needs full stack
-                    try:
-                        eid = f"{case.get('id')}-ep{turn}"
-                        conn.execute(
-                            """INSERT INTO episodes
-                               (id, tenant_id, session_id, turn_number, role, content,
-                                tier, importance, created_at)
-                               VALUES (?,?,?,?,?,?,?,?,?)""",
-                            (
-                                eid,
-                                "default",
-                                f"golden-{case.get('id')}",
-                                turn,
-                                "user",
-                                content,
-                                "episodic",
-                                3,
-                                now,
-                            ),
-                        )
-                        conn.commit()
-                    except Exception as exc:
-                        logger.debug("[eval_golden] episode seed failed: %s", exc)
+                content = str(msg.get("content") or "") if isinstance(msg, dict) else str(msg)
+                if content:
+                    _seed_episode(conn, session_id=session, turn=turn, content=content, now=now)
+            conn.commit()
 
             query = str(case.get("query") or "")
             expect = [str(x).lower() for x in (case.get("expect_contains") or [])]
             match_any = bool(case.get("match_any"))
-            try:
-                # Point recall at this connection via env is hard; use in-process
-                # if primary_memory_db was monkeypatched by tests. For API, seed
-                # into live DB is dangerous — eval uses temp when owns=True.
-                result = recall(
-                    query,
-                    limit=8,
-                    tenant_id="default",
-                    session_id=f"golden-{case.get('id')}",
-                    explain=True,
-                )
-                blob = " ".join(
-                    [(h.content or "").lower() for h in (result.beliefs + result.episodes)]
-                )
-                if match_any:
-                    ok = any(e in blob for e in expect) if expect else True
-                else:
-                    ok = all(e in blob for e in expect) if expect else True
-            except Exception as exc:
-                ok = False
-                blob = f"error:{exc}"
+            # recall never raises: a failure comes back as an empty result.
+            result = recall(
+                query,
+                conn=conn,
+                limit=8,
+                tenant_id="default",
+                session_id=session,
+                explain=True,
+            )
+            blob = " ".join(
+                [(h.content or "").lower() for h in (result.beliefs + result.episodes)]
+            )
+            if match_any:
+                ok = any(e in blob for e in expect) if expect else True
+            else:
+                ok = all(e in blob for e in expect) if expect else True
 
             if ok:
                 passed += 1
@@ -219,18 +206,13 @@ def run_golden_eval(
             )
     finally:
         if owns:
-            try:
-                if _orig_primary is not None:
-                    import kazma_core.paths as paths
-
-                    paths.primary_memory_db = _orig_primary  # type: ignore[assignment]
-            except Exception:
-                pass
-            if conn is not None:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+            conn.close()
+            for leftover in (tmp_path, f"{tmp_path}-wal", f"{tmp_path}-shm"):
+                if os.path.exists(leftover):
+                    try:
+                        os.remove(leftover)  # the eval's own temp file
+                    except OSError:
+                        logger.debug("[eval_golden] temp file %s left", leftover, exc_info=True)
 
     total = passed + failed
     rate = (passed / total) if total else 0.0

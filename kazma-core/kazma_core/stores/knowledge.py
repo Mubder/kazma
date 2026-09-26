@@ -1023,6 +1023,26 @@ class KnowledgeStore:
             ).fetchall()
         return {r["id"]: self._chunk_row_to_dict(r) for r in rows}
 
+    def chunks_starting_with(self, prefix: str, *, limit: int = 5) -> list[dict[str, Any]]:
+        """Chunks whose content begins with *prefix*, active or not.
+
+        Memory recovery (``kazma_core.memory.rehydrate``) finds the chunk a
+        knowledge-promoted memory was copied from by the text the memory
+        kept; it verifies what it finds against the memory's id.
+        """
+        if not prefix:
+            return []
+        with self._lock:
+            rows = self._get_conn().execute(
+                """SELECT id, library_id, source_url, document_title, section_header,
+                          chunk_index, content_hash, has_code, char_count, content,
+                          metadata_json, document_id, version_id, source_sha256,
+                          active, tombstoned, created_at
+                   FROM knowledge_chunks WHERE substr(content, 1, ?) = ? LIMIT ?""",
+                (len(prefix), prefix, max(1, int(limit))),
+            ).fetchall()
+        return [self._chunk_row_to_dict(r) for r in rows]
+
     def get_document_chunks(
         self,
         *,

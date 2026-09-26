@@ -79,11 +79,23 @@ Legacy deep-links: `?tab=embedder` → Memory (scroll to embedder); `?tab=connec
 
 ### `recall()`
 
-1. Currently-valid beliefs (entity bridge + text match + dense)  
-2. Episode hybrid search (FTS5 + dense)  
+1. Currently-valid beliefs: keyword, entity bridge, graph walk and meaning,
+   fused by weighted RRF (meaning counts double, the keyword-seeded graph
+   walk half); importance only breaks near-ties (at most +5 %)  
+2. Episode hybrid search (FTS5 + dense) over **every tier, archived
+   included** -- an archived hit ranks about one place behind an equally
+   matching active one  
 3. Local Ego-Graph PPR boost  
 4. RRF / budget truncation  
 5. Fence: `format_untrusted_block(..., source="memory_v2_recall")`
+
+**Meaning search is exact over every memory** (`vector_engine.py`, since
+2026-09-26): every episode and every current fact whose vector comes from
+the current model is scored in SQL (`vec_distance_cosine`; about 1 ms per
+1,000 rows), with a NumPy fallback. It used to compare an unordered slice of
+episodes (the newest 60 of 300 were never searched) and the 400 "most
+important" facts, and fact meaning search ran only when keywords came up
+short.
 
 **Dense engine:** sqlite-vec while you stay on one SQLite node. When the
 process already has a Postgres DSN, recall uses **pgvector** (hybrid
@@ -97,7 +109,17 @@ Kill-switch: `KAZMA_PGVECTOR=0`.
 
 ### Post-turn
 
-- Mirror working/recall episode  
+Every finished turn is handed to memory once, by the closer every transport
+runs (`kazma_ui.turn_runtime.close_turn` → `consolidator.remember_turn`) —
+web, Telegram, Slack and Discord alike. Until 2026-09-26 only the gateway
+handler did it, so no web chat turn was remembered from 2026-08-08; a
+15-minute **turn reconcile** now writes an episode for every chat-store
+turn that has none (with the turn's own time; episodes only, since replaying
+old statements as facts could overwrite newer ones), which recovered those
+turns and catches any future gap.
+
+- Mirror working/recall episode (the question and ITS answer; the episode's
+  turn number is the conversation's turn index)  
 - Heuristic (+ optional LLM queue) belief extraction → `mutate_belief`. A `user_explicit` functional belief **cannot** be superseded by `llm_inferred` / `system_tool` (commitment source-trust gate in `_mutate_functional`; independent of `authorize_effect`).  
 - Hygiene rejects stack/version subjects (e.g. `kazma_v2_4_0` mistaken for product version)  
 - Dual-write: optional Postgres state mirror + Neo4j edge upsert  
@@ -113,7 +135,7 @@ Kill-switch: `KAZMA_PGVECTOR=0`.
 | ~6h | `macro_sleep` (rule-based tier moves + archival, below) + ego-anchor backfill + FTS drift COUNT (`*_docsize` vs base; rebuild on mismatch) |
 | **~6h** (not 24h) | `native_backup` + JSONL/GraphML/episodes/merges/audit export + `native_pg_backup` + mirror-drift warning. Universal backup **checks** PG dump freshness; it does not dump twice. |
 | ~24h | `global_reconsolidation` (dedupe + re-embed; **partitioned** for large corpora; recomputes entity counts) |
-| ~15m | commitment GC (TTL + soul-pending) **and** HITL-gate TTL sweep — no extra sweeper |
+| ~15m | commitment GC (TTL + soul-pending), HITL-gate TTL sweep, **memory vector repair** (missing, wrong-size or old-model vectors re-encoded in place, ~20 s a pass, no model load when there is nothing to do), **memory recovery** (below) and **turn reconcile** (chat-store turns without an episode) — one sweep runner, no extra loop |
 | (also from this boot) | session purge, daily digest, weekly firing ledger, restore drill |
 
 Huge corpus: subject-hash partitions + chained queue tasks (see `global_reconsolidation.py`).
@@ -131,11 +153,29 @@ rates were per-second).
 | recall → episodic | not recalled for `recall_demote_idle_days` (30) |
 | → archived | stale on **both** clocks — created more than the TTL ago **and** not recalled within it — and below the promote floor. A memory still being recalled is never archived. |
 
-Archiving drops the raw text and keeps a stub in `summary_text` (the summary
-if there is one, else the start of the question — answer); it is the one
-statement allowed to do so (`_ARCHIVE_EPISODE_SQL`, enforced by a static
-gate). Tier moves also reach the optional Postgres state mirror, and archived
-rows leave a remote vector index.
+**Archiving is cold storage, not deletion** (since 2026-09-26). The tier
+changes and an empty summary gets a one-line stub (start of the question —
+answer); the question, the answer and the vector all stay, and a static gate
+fails the build if any statement sets episode text to NULL. Recall still
+reaches an archived memory (`memory.v2.archived_recall_weight`, default
+0.98 — about one place behind an active memory that matches as well), and a
+memory recalled again returns to the episodic tier at the next sweep. Tier
+moves reach the optional Postgres state mirror; a remote vector index keeps
+the archived vector, re-tagged.
+
+**Recovering what the old rule erased.** Until 2026-09-26 archiving *did*
+null the text (the live install had lost 76 memories). The 15-minute
+recovery pass (`memory/rehydrate.py`) restores them from whatever still holds
+the text: an earlier backup of `memory_state.db`, the chat store and its save
+spool, LangGraph checkpoint history, the `noted` belief or `memory_store`
+tool call a saved note left, the knowledge library. A text is restored only
+when it is provably the one erased: a backup must be a copy of the same row
+whose text reproduces the stub; any other source must reproduce the
+episode's id (a SHA-256 of session, turn and text) *and* the stub. Sources
+must agree, existing text is never overwritten, and a source that cannot be
+read leaves the row for the next pass. Memory health on the Dashboard shows
+what is restored, pending, or kept only as its stub ("Every memory
+findable").
 
 **Why this matters:** every ordinary chat turn is written at importance 1, so it
 can never be promoted. Until 2026-09-23 archival tested creation age only and
@@ -310,7 +350,12 @@ not a hardcoded “You”.
 | `memory/graph_backend.py` | SQLite default + Neo4j dual-write + tenant edge clear |
 | `memory/backends.py` | Vector / state / graph factory; pgvector auto-select; env Neo4j defaults |
 | `memory/federated_search.py` | Memory + KB labeled search |
-| `memory/global_reconsolidation.py` | Dedup + re-embed (partitioned) |
+| `memory/vector_engine.py` | Exact meaning search over every episode and fact; `RECALLABLE_TIERS` |
+| `memory/reembed.py` | Rebuild + the 15-minute vector repair |
+| `memory/rehydrate.py` | Recovery of memories the pre-2026-09-26 archive rule erased |
+| `memory/chat_history.py` | The one reader of chat history (chat store + spool, checkpoints) |
+| `memory/turn_reconcile.py` | Every chat-store turn gets its episode |
+| `memory/global_reconsolidation.py` | Dedup + re-embed (partitioned; repair via `reembed`) |
 | `memory/worker_bootstrap.py` | Queue handlers + **eight** schedulers (single boot entry) |
 | `memory/v2_health.py` / `health.py` | Health APIs for Dashboard / Packages |
 | `kazma_ui/memory_api.py` | `/memory` admin routes (rename, edit, merge, hygiene) |
@@ -346,8 +391,12 @@ supported) and injects the top hits as a **prompt-fenced untrusted block**
 (`chat_history` source) next to the memory block — zero extra iterations, no
 danger tools, no permissions. Suppressed-recall turns skip it too.
 
-- Read-only, opens `kazma-data/chat_sessions.db` by path, never raises
-  (missing store = silent no-op).
+- Read-only, through `memory/chat_history.py`: the chat store the web UI
+  writes (Postgres `kazma_chat_sessions` or SQLite `chat_sessions.db`) plus
+  its save spool, the current tenant only, every session ranked in SQL.
+  Until 2026-09-26 it opened only the SQLite file — on a Postgres install a
+  leftover from July — and ranked the 400 most recent matches of any
+  tenant. A missing store is a silent no-op.
 - Kill-switch: `KAZMA_TRANSCRIPT_RECALL=0` env or ConfigStore
   `memory.transcript_fallback=false` (live-read, default ON).
 - Module: `kazma_core/memory/transcript_recall.py`; wired in

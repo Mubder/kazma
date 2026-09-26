@@ -49,7 +49,7 @@ kazma-data/                             # Runtime data (gitignored)
 | `fts_health.py` | Periodic FTS `*_docsize` COUNT vs base + rebuild (M-10) | `fts_drift_check()` |
 | `entity_counts.py` | Single SoT for materialized `belief_count` / `graph_degree` SQL (M-02) | `belief_count_sql()`, `entity_degree_sql()`, `recompute_entity_counts()` |
 | `procedural.py` | Parametric DAG skills, Laplace C(d)=(S+1)/(N+2) | `record_procedural_outcome()`, `laplace_confidence()` |
-| `consolidator.py` | Post-turn pipeline: turn-text extraction, V2 mirror + belief extraction (LLM/heuristic, fence, dedup) | `schedule_post_turn_memory()`, `extract_turn_texts()` |
+| `consolidator.py` | Post-turn pipeline: turn-text extraction, V2 mirror + belief extraction (LLM/heuristic, fence, dedup) | `remember_turn()` (called by `turn_runtime.close_turn`), `extract_turn_texts()` |
 | `dual_write.py` | Best-effort mirror of legacy/external writes into V2 | `DualWriteMirror`, `get_mirror()`, `mirror_belief()`, `mirror_episode()` |
 | `graph_backend.py` | SQLite default + Neo4j dual-write; tenant mass-clear after graph-clear (M-15) | `upsert_belief_edge()`, `delete_belief_edge()`, `clear_tenant_edges()` |
 | `state_backend.py` | Optional Postgres state mirror; tombstones on invalidate | `remirror_belief_by_id()`, `mirror_drift_summary()` |
@@ -78,7 +78,7 @@ kazma-data/                             # Runtime data (gitignored)
 | Ego-graph leaf anchor | `memory/ego_anchor.py:anchor_orphan_leaf_concepts()` |
 | FTS drift heal | `memory/fts_health.py:fts_drift_check()` |
 | Mirror reconcile CLI | `scripts/reconcile_memory_mirror.py` |
-| Post-turn extraction | `memory/consolidator.py:schedule_post_turn_memory()` |
+| Post-turn extraction | `memory/consolidator.py:remember_turn()` (from `kazma_ui/turn_runtime.py:close_turn`) |
 | V2 enabled check | `memory/config.py:memory_v2_enabled()` |
 | Backfill migration | `memory/backfill_v2.py:run_backfill()` |
 | Worker start (app boot) | `memory/worker_bootstrap.py:start_memory_worker()` |
@@ -104,7 +104,7 @@ Swarm subsystem V2 writes flow through `memory/swarm_bridge.py` (in the core mem
 
 | File | Purpose | Key Functions |
 |------|---------|---------------|
-| `graph_builder.py` | Supervisor graph build + per-turn V2 recall injection + post-turn memory hook | `_format_retrieved_memories()` (line ~329), `respond_node()` calls `schedule_post_turn_memory()` (line ~1319); per-turn recall at line ~551 |
+| `graph_builder.py` | Supervisor graph build + per-turn V2 recall injection + post-turn memory hook | `_format_retrieved_memories()` (line ~329), `respond_node()` marks the turn (`_post_turn_memory`); `turn_runtime.close_turn` hands it to `consolidator.remember_turn`; per-turn recall at line ~551 |
 | `tool_registry.py` | `memory_search` tool delegates to `recall()` (line ~766); `get_vector_memory()`/`set_vector_memory()` are retired no-ops (V1 removed) | `memory_search`, `get_vector_memory()` (returns None) |
 | `agent_runner.py` | Graph compilation, checkpointer, streaming graph holder | `get_streaming_graph()`, `_ensure_graph()`, `_ensure_streaming_graph()` |
 
@@ -146,7 +146,7 @@ Swarm subsystem V2 writes flow through `memory/swarm_bridge.py` (in the core mem
 | Config SoT (read effective config) | `memory/config.py:read_memory_cfg()` |
 | V2 recall (beliefs + episodes + PPR) | `memory/recall.py:recall()` |
 | Belief write (functional/set/state) | `memory/belief_mutation.py:mutate_belief()` |
-| Post-turn memory pipeline | `memory/consolidator.py:schedule_post_turn_memory()` |
+| Post-turn memory pipeline | `memory/consolidator.py:remember_turn()`; missed turns `memory/turn_reconcile.py` |
 | Per-turn RAG injection (format hits) | `agent/graph_builder.py:_format_retrieved_memories()` |
 | V2 enabled check | `memory/config.py:memory_v2_enabled()` |
 | Backfill migration | `memory/backfill_v2.py:run_backfill()` |
@@ -173,7 +173,7 @@ LLM Reply
     ▼
 respond_node() assembles final messages
     │
-    └─► schedule_post_turn_memory(messages)
+    └─► close_turn → remember_turn(values)
             ├─► extract_turn_texts()
             ├─► mirror_episode (raw turn snapshot)
             └─► extract_and_apply_beliefs_sync (heuristic, sync, thread-safe)

@@ -35,7 +35,10 @@ __all__ = [
     "embedding_version_counts",
     "get_rebuild_status",
     "rebuild_embeddings",
+    "repair_unsearchable_vectors",
     "reset_rebuild_status",
+    "run_vector_repair_pass",
+    "vector_repair_counts",
 ]
 
 REBUILD_STATUS_KEY = "embedding.rebuild_status"
@@ -312,3 +315,242 @@ def rebuild_embeddings(
     summary["started_at"] = started
     summary["finished_at"] = datetime.now(UTC).isoformat()
     return summary
+
+
+# ── Continuous repair (the 15-minute maintenance cadence) ──────────────────
+
+#: The text each writer embeds -- ``dual_write`` for episodes (the summary, else
+#: the question, else the answer) and ``belief_mutation`` for beliefs. A repair
+#: must use the same text, or its vector would sit apart from a fresh one.
+_EPISODE_TEXT_SQL = (
+    "COALESCE(NULLIF(TRIM(summary_text), ''), NULLIF(TRIM(user_text), ''), "
+    "NULLIF(TRIM(assistant_text), ''))"
+)
+
+#: Vector size each embedding model produced when probed in this process, so
+#: a pass with nothing to repair never loads the model or pays for a call.
+_MODEL_DIMS: dict[str, int] = {}
+_BELIEF_TEXT_SQL = "TRIM(subject || ' ' || predicate || ' ' || object)"
+
+
+def _unsearchable_sql(kind: str, model: str) -> str:
+    """``FROM ... WHERE`` for the rows meaning search cannot compare.
+
+    Parameters, in order: tenant, vector byte length, then *model* when set.
+    """
+    stale = "embedding IS NULL OR length(embedding) != ?"
+    if model:
+        stale += (
+            " OR (embedding_model_version IS NOT NULL AND embedding_model_version != ''"
+            " AND embedding_model_version != ?)"
+        )
+    if kind == "episodes":
+        return f"episodes WHERE tenant_id = ? AND ({stale}) AND {_EPISODE_TEXT_SQL} IS NOT NULL"
+    return (
+        "beliefs WHERE tenant_id = ? AND valid_until IS NULL AND invalidated_at IS NULL"
+        f" AND ({stale}) AND {_BELIEF_TEXT_SQL} != ''"
+    )
+
+
+def _tenants(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute(
+        "SELECT tenant_id FROM episodes UNION SELECT tenant_id FROM beliefs"
+    ).fetchall()
+    return sorted({str(r[0] or "default") for r in rows})
+
+
+def _embed(emb: Any, text: str) -> list[float] | None:
+    text = (text or "").strip()
+    if not text:
+        return None
+    try:
+        vec = emb.encode(text)
+    except Exception:  # noqa: BLE001 -- one row that will not encode is skipped
+        logger.debug("[reembed] encode failed for %r", text[:80], exc_info=True)
+        return None
+    return [float(x) for x in vec] if vec is not None and len(vec) else None
+
+
+def _unsearchable_counts(
+    conn: sqlite3.Connection, *, dim: int, model: str, tenant_id: str | None = None
+) -> dict[str, int]:
+    """Memories meaning search cannot compare right now, per kind."""
+    out = {"episodes": 0, "beliefs": 0}
+    for tenant in [tenant_id] if tenant_id else _tenants(conn):
+        for kind in out:
+            params: list[Any] = [tenant, int(dim) * 4] + ([model] if model else [])
+            out[kind] += int(
+                conn.execute(
+                    f"SELECT count(*) FROM {_unsearchable_sql(kind, model)}", params
+                ).fetchone()[0]
+            )
+    return out
+
+
+def repair_unsearchable_vectors(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str | None = None,
+    time_budget_s: float = 20.0,
+    batch: int = 32,
+    embedder: Any = None,
+    model: str | None = None,
+) -> dict[str, int]:
+    """Re-encode, in place, every memory meaning search cannot compare.
+
+    Unsearchable: no vector, a vector of another size, or one stamped with
+    another embedding model -- episodes of every tier and every current
+    belief. Until 2026-09-26 only missing vectors were repaired, 100 a day,
+    and a model switch left every older memory in the old vector space until
+    someone clicked Rebuild. The old vector stays until its replacement is
+    written, so a switch never leaves a memory with nothing. Newest first,
+    bounded by *time_budget_s* per call -- the next pass continues. A remote
+    index gets each new vector too. Returns ``{"episodes", "beliefs",
+    "remaining"}`` (``remaining`` is -1 when no embedder is available).
+    """
+    from kazma_core.memory.embedder import (
+        get_embedder,
+        get_embedding_dim,
+        get_embedding_model_name,
+    )
+
+    model = get_embedding_model_name() if model is None else model
+    if embedder is None:
+        # Nothing to repair: no model load, no paid embedding call. Until the
+        # model has been probed the size is the configured one; a wrong
+        # configured size only makes this say "maybe", and the probe settles it.
+        known = _MODEL_DIMS.get(model) or int(get_embedding_dim() or 0)
+        if known and not any(
+            _unsearchable_counts(conn, dim=known, model=model, tenant_id=tenant_id).values()
+        ):
+            return {"episodes": 0, "beliefs": 0, "remaining": 0}
+    emb = embedder if embedder is not None else get_embedder()
+    if emb is None:
+        return {"episodes": 0, "beliefs": 0, "remaining": -1}
+    dim = _MODEL_DIMS.get(model) if embedder is None else None
+    if not dim:
+        probe = _embed(emb, "dimension probe")
+        if not probe:
+            return {"episodes": 0, "beliefs": 0, "remaining": -1}
+        dim = len(probe)  # what the model produces, not what the config claims
+        if embedder is None:
+            _MODEL_DIMS[model] = dim
+    tenants = [tenant_id] if tenant_id else _tenants(conn)
+    remote = _remote_index(conn)
+    deadline = time.monotonic() + max(0.0, float(time_budget_s))
+    done = {"episodes": 0, "beliefs": 0}
+    skipped: set[str] = set()  # text that would not encode, this pass only
+    for kind in ("episodes", "beliefs"):
+        text_sql = _EPISODE_TEXT_SQL if kind == "episodes" else _BELIEF_TEXT_SQL
+        extra = ", tier, session_id" if kind == "episodes" else ", '', ''"
+        order = "created_at" if kind == "episodes" else "ingested_at"
+        for tenant in tenants:
+            while time.monotonic() < deadline:
+                params: list[Any] = [tenant, dim * 4] + ([model] if model else [])
+                exclude = ""
+                if skipped:
+                    exclude = f" AND id NOT IN ({','.join('?' for _ in skipped)})"
+                    params.extend(sorted(skipped))
+                rows = conn.execute(
+                    f"SELECT id, {text_sql}{extra} FROM {_unsearchable_sql(kind, model)}"
+                    f"{exclude} ORDER BY {order} DESC LIMIT ?",
+                    [*params, int(batch)],
+                ).fetchall()
+                if not rows:
+                    break
+                for rid, text, tier, session_id in rows:
+                    vec = _embed(emb, text)
+                    if not vec or len(vec) != dim:
+                        skipped.add(str(rid))
+                        continue
+                    conn.execute(
+                        f"UPDATE {kind} SET embedding = ?, embedding_model_version = ? WHERE id = ?",
+                        (struct.pack(f"<{dim}f", *vec), model, rid),
+                    )
+                    done[kind] += 1
+                    if remote is not None:
+                        _upsert_remote(remote, kind, str(rid), vec, tenant, tier, session_id)
+                conn.commit()
+    remaining = sum(_unsearchable_counts(conn, dim=dim, model=model).values())
+    if done["episodes"] or done["beliefs"]:
+        logger.info(
+            "[memory] re-encoded %d episode and %d belief vector(s); %d still unsearchable",
+            done["episodes"], done["beliefs"], remaining,
+        )
+    return {**done, "remaining": remaining}
+
+
+def vector_repair_counts(conn: sqlite3.Connection) -> dict[str, Any]:
+    """How many memories meaning search can compare now, and how many wait
+    for the repair pass, per kind (every tenant). No model load."""
+    from kazma_core.memory.embedder import get_embedding_dim, get_embedding_model_name
+
+    model = get_embedding_model_name()
+    dim = _MODEL_DIMS.get(model) or int(get_embedding_dim() or 0)
+    pending = _unsearchable_counts(conn, dim=dim, model=model)
+    totals = {
+        "episodes": int(
+            conn.execute(
+                f"SELECT count(*) FROM episodes WHERE {_EPISODE_TEXT_SQL} IS NOT NULL"
+            ).fetchone()[0]
+        ),
+        "beliefs": int(
+            conn.execute(
+                "SELECT count(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+                f" AND {_BELIEF_TEXT_SQL} != ''"
+            ).fetchone()[0]
+        ),
+    }
+    out: dict[str, Any] = {"model": model, "dim": dim}
+    for kind, total in totals.items():
+        out[kind] = {"total": total, "searchable": max(0, total - pending[kind]), "pending": pending[kind]}
+    return out
+
+
+def run_vector_repair_pass(*, time_budget_s: float = 20.0) -> dict[str, int]:
+    """One repair pass over the primary memory database (15-minute cadence).
+
+    Returns :func:`repair_unsearchable_vectors`'s counts, or zeros when there
+    is no memory database yet.
+    """
+    from kazma_core.config_store import apply_sqlite_pragmas
+    from kazma_core.paths import primary_memory_db
+
+    zero = {"episodes": 0, "beliefs": 0, "remaining": 0}
+    db = primary_memory_db()
+    if not db or not os.path.isfile(db):
+        return zero
+    conn = sqlite3.connect(db, timeout=15)
+    try:
+        apply_sqlite_pragmas(conn, busy_timeout=15000)
+        return repair_unsearchable_vectors(conn, time_budget_s=time_budget_s)
+    except sqlite3.OperationalError:  # the schema is not there yet
+        logger.debug("[reembed] memory database not ready for repair", exc_info=True)
+        return zero
+    finally:
+        conn.close()
+
+
+def _remote_index(conn: sqlite3.Connection) -> Any:
+    """The configured remote vector index, or None for the local-only setup."""
+    from kazma_core.memory.backends import LocalSqliteVectorBackend, get_vector_backend
+
+    try:
+        backend = get_vector_backend(conn)
+    except RuntimeError:  # remote down with failover=raise: the local repair still runs
+        logger.debug("[reembed] vector backend unavailable for repair", exc_info=True)
+        return None
+    return None if isinstance(backend, LocalSqliteVectorBackend) else backend
+
+
+def _upsert_remote(
+    backend: Any, kind: str, rid: str, vec: list[float], tenant: str, tier: str, session_id: str
+) -> None:
+    meta = (
+        {"kind": "episode", "tier": tier or "episodic", "session_id": session_id}
+        if kind == "episodes"
+        else {"kind": "belief", "tier": "semantic"}
+    )
+    # A backend reports a failed write by returning False; the local row is the truth.
+    if not backend.upsert(rid, vec, tenant_id=tenant, meta=meta):
+        logger.debug("[reembed] remote index did not take %s", rid)

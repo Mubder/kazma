@@ -250,6 +250,15 @@ def checkpoints_db() -> str:
     return str(data_dir() / "checkpoints.db")
 
 
+def chat_spool_db(sessions_db: str | Path) -> Path:
+    """The spool beside a chat transcript store, where a save the store
+    refused waits (``chat_sessions.db`` -> ``chat_sessions_spool.db``). The
+    web UI writes it (``kazma_ui.session_spool``) and memory reads it
+    (``kazma_core.memory.chat_history``): one rule for both."""
+    p = Path(sessions_db)
+    return p.with_name(f"{p.stem}_spool.db")
+
+
 def settings_db() -> str:
     """ConfigStore database."""
     return str(data_dir() / "settings.db")

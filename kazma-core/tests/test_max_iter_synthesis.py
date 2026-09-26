@@ -137,7 +137,7 @@ async def test_respond_node_synthesizes_after_max_with_tool_tail(monkeypatch):
 
     # Avoid scheduling post-turn memory side effects
     monkeypatch.setattr(
-        "kazma_core.memory.consolidator.schedule_post_turn_memory",
+        "kazma_core.memory.consolidator._schedule_post_turn_memory",
         lambda *_a, **_k: None,
     )
 
@@ -187,7 +187,7 @@ async def test_respond_synthesizes_when_only_short_preamble_after_tools(monkeypa
     }
 
     monkeypatch.setattr(
-        "kazma_core.memory.consolidator.schedule_post_turn_memory",
+        "kazma_core.memory.consolidator._schedule_post_turn_memory",
         lambda *_a, **_k: None,
     )
 
@@ -245,7 +245,7 @@ async def test_respond_always_synthesizes_on_max_even_with_long_draft(monkeypatc
     }
 
     monkeypatch.setattr(
-        "kazma_core.memory.consolidator.schedule_post_turn_memory",
+        "kazma_core.memory.consolidator._schedule_post_turn_memory",
         lambda *_a, **_k: None,
     )
 
