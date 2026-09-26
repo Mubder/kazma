@@ -1,5 +1,55 @@
 # CHANGELOG
 
+## File tools work in the workspace you chose, and keep your line endings (2026-09-26)
+
+When Kazma was given a file name like `README.md`, its file tools looked for
+it in the folder the server was started from, not in the workspace you had
+open. On this install the two are the same folder, so it never showed; after
+switching to another repository, Kazma would have read, edited or listed the
+Kazma install's files instead of the repository's, while its terminal
+commands ran in the right place. Every file tool -- read, write, patch,
+append, delete, list, search, send, and the document, image and lint tools
+-- now reads a plain file name as "in the workspace". Deleting the workspace
+folder itself is refused outright.
+
+Editing a file no longer changes its line endings. On Windows every patch
+turned a file with Unix line endings into Windows line endings (a change to
+every line, for one edited line), and undoing a failed multi-file edit put
+the files back with a broken extra line break on every line.
+
+File search is faster and finds more: it no longer walks into `.venv`,
+`.git` or `node_modules` before discarding them (one search took 19 seconds
+on the live install), it can search inside folders such as `kazma-data` or a
+project kept under a `build` folder (it found nothing there before), patterns
+such as `*.{js,ts}` and `kazma-**/*.py` work (the first silently matched
+nothing, the second made the tool fail), binary files are skipped, and a
+search whose file pattern matches nothing says so instead of "No matches".
+
+Programs that Kazma's tools start no longer receive Kazma's secrets. Running
+a project's tests, installing a package, formatting code or running git
+used to hand the new process everything the server knew -- the key that
+unlocks every stored credential, the database password, API keys -- and each
+of those runs code nobody reviewed: a cloned project's test setup, a
+package's install script, a repository's git hooks. They now get the
+server's environment with every secret taken out (terminal commands and
+Python snippets already worked this way).
+
+Discord no longer drops messages when it asks Kazma to reconnect. Discord
+asks every hour or two and expects the bot to pick its session back up at an
+address it gives when the bot connects; Kazma went back to the general
+address instead, so every one of those reconnects failed (seven of seven on
+25 September) and whatever was said to the bot in between was never
+delivered. It now resumes where Discord says, waits the 1-5 seconds Discord
+asks for before starting over after a refusal, and answers Discord's
+"heartbeat now" requests.
+
+GitHub App sign-in no longer fails when this machine's clock runs a little
+fast. From 22:32 on 24 September to 01:55 on 25 September, GitHub refused
+every App token (386 times) because the token's expiry was set to exactly
+the 10-minute maximum, measured on a clock slightly ahead of GitHub's. The
+token now leaves a margin and, if the clock is further off, uses GitHub's
+own time, and a refused sign-in is not retried on every request.
+
 ## Kazma's memory keeps everything and can find all of it (2026-09-26)
 
 Some memories could not be found, some were being thrown away, and most

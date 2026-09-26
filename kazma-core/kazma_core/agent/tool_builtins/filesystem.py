@@ -8,10 +8,15 @@ within this group is preserved.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+import os
+import re
+from collections.abc import Iterator
+from fnmatch import fnmatchcase
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any
 
 from kazma_core.agent.tool_scope import _workspace_scope_error
+from kazma_core.workspace.binding import resolve_tool_path
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +28,163 @@ def _qnorm(q: str) -> str:
     lowercased. Paired with REPLACE(...) in SQL so 'memory system' matches
     user_memory_system (2026-08-27 report — the literal LIKE filter missed
     it while FTS memory_search matched fine)."""
-    import re as _re
+    return re.sub(r"[_\-\s]+", " ", str(q or "").strip().lower()).strip()
 
-    return _re.sub(r"[_\-\s]+", " ", str(q or "").strip().lower()).strip()
+
+# ── Walking and matching for file_search / file_list ────────────────────
+#
+# Directories a walk never enters. rglob used to descend into all of them
+# and the skip test ran on what came back, so one file_search on the live
+# install spent 19 s walking a 1.6 GB .venv (2026-09-23). They are pruned
+# during the walk now, and only BELOW the root being walked: the old test
+# looked at the absolute path, so a search inside kazma-data, or in any repo
+# that sits under a folder named "build" or "dist", always found nothing.
+_WALK_SKIP_DIRS = frozenset({
+    ".venv", "venv", ".git", "node_modules", "__pycache__",
+    ".kazma", "kazma-data", ".pytest_cache", ".mypy_cache",
+    ".ruff_cache", "build", "dist", ".tox", ".eggs",
+    "vector_memory", "site-packages",
+})
+_SEARCH_MAX_FILES = 5000  # hard cap so a huge tree can't run for minutes
+_SEARCH_MAX_FILE_BYTES = 500_000
+_LIST_MAX_ENTRIES = 200
+_MAX_GLOB_ALTERNATIVES = 64
+# Windows paths are case-insensitive, and rglob matched them that way.
+_FOLD_CASE = os.name == "nt"
+
+
+def _expand_braces(pattern: str) -> list[str]:
+    """``*.{js,ts}`` -> ``["*.js", "*.ts"]`` (nested braces too).
+
+    Models write brace globs constantly and pathlib has no braces: the glob
+    matched nothing and the search answered "No matches", which the model
+    could not tell apart from a real miss.
+    """
+    out: list[str] = []
+    todo = [pattern]
+    while todo:
+        pat = todo.pop(0)
+        m = re.search(r"\{([^{}]*,[^{}]*)\}", pat)
+        if m is None:
+            if pat not in out:
+                out.append(pat)
+            continue
+        todo.extend(pat[: m.start()] + alt + pat[m.end():] for alt in m.group(1).split(","))
+        if len(todo) + len(out) > _MAX_GLOB_ALTERNATIVES:
+            raise ValueError(
+                f"glob {pattern!r} expands to more than {_MAX_GLOB_ALTERNATIVES} patterns"
+            )
+    return out
+
+
+def _glob_segments(pattern: str) -> list[str]:
+    """A glob split into path segments.
+
+    ``**`` inside a segment (``kazma-**``) means ``*`` -- Python 3.13's rule.
+    3.12's pathlib raised "'**' can only be an entire path component" and the
+    tool failed (live 2026-09-24, ``glob=kazma-**/*.py``).
+    """
+    pat = pattern.strip()
+    if os.name == "nt":
+        pat = pat.replace("\\", "/")
+    segs: list[str] = []
+    for seg in pat.split("/"):
+        if seg in ("", "."):
+            continue
+        if seg != "**" and "**" in seg:
+            seg = re.sub(r"\*{2,}", "*", seg)
+        if seg == "**" and segs and segs[-1] == "**":
+            continue
+        segs.append(seg.casefold() if _FOLD_CASE else seg)
+    return segs
+
+
+def _parts_match(parts: tuple[str, ...], segs: list[str]) -> bool:
+    """Whether path *parts* match glob *segs* (``**`` spans zero or more parts)."""
+    if not segs:
+        return not parts
+    head, rest = segs[0], segs[1:]
+    if head == "**":
+        return any(_parts_match(parts[i:], rest) for i in range(len(parts) + 1))
+    return bool(parts) and fnmatchcase(parts[0], head) and _parts_match(parts[1:], rest)
+
+
+class _Glob:
+    """One glob, matched against paths relative to the root being walked.
+
+    ``anywhere=True`` is rglob's reading (``*.py`` matches at any depth: the
+    file_search contract); ``anywhere=False`` is Path.glob's (``*.py`` means
+    the root's own children: file_list).
+    """
+
+    def __init__(self, pattern: str, *, anywhere: bool) -> None:
+        text = (pattern or "*").strip() or "*"
+        if PurePath(text).is_absolute() or text.startswith(("/", "\\")):
+            raise ValueError(f"glob must be relative (got {pattern!r}); put the folder in path")
+        self.alternatives: list[list[str]] = []
+        for alt in _expand_braces(text):
+            segs = _glob_segments(alt) or ["*"]
+            if anywhere and segs[0] != "**":
+                segs.insert(0, "**")
+            self.alternatives.append(segs)
+        self.recursive = any("**" in segs for segs in self.alternatives)
+        self.depth = max(len(segs) for segs in self.alternatives)
+
+    def matches(self, rel_parts: tuple[str, ...]) -> bool:
+        if _FOLD_CASE:
+            rel_parts = tuple(p.casefold() for p in rel_parts)
+        return any(_parts_match(rel_parts, segs) for segs in self.alternatives)
+
+
+def _is_linked_dir(path: str) -> bool:
+    """A symlinked or junctioned directory: a walk that follows it can leave the root."""
+    if os.path.islink(path):
+        return True
+    isjunction = getattr(os.path, "isjunction", None)
+    return bool(isjunction and isjunction(path))
+
+
+def _walk(root: Path, *, max_depth: int | None = None) -> Iterator[tuple[Path, bool]]:
+    """``(path, is_dir)`` under *root*, sorted.
+
+    Every directory is reported; a skipped or linked one is not entered, and
+    nothing deeper than *max_depth* levels is.
+    """
+    base_depth = len(root.parts)
+    for dirpath, dirnames, filenames in os.walk(root):
+        names = sorted(dirnames)
+        for d in names:
+            yield Path(dirpath, d), True
+        descend = max_depth is None or len(Path(dirpath).parts) - base_depth + 1 < max_depth
+        dirnames[:] = [
+            d for d in names
+            if descend
+            and d not in _WALK_SKIP_DIRS
+            and not _is_linked_dir(os.path.join(dirpath, d))
+        ]
+        for name in sorted(filenames):
+            yield Path(dirpath, name), False
+
+
+def _searchable_text(path: Path, root: Path) -> str | None:
+    """A file's text for searching, or None to skip it.
+
+    Skipped: a link that leads out of *root*, files over the size cap, and
+    binary files (a NUL in the first 8 KB) -- a database or an image read as
+    text only ever produced noise lines.
+    """
+    try:
+        if path.is_symlink() and not path.resolve().is_relative_to(root):
+            return None
+        if path.stat().st_size > _SEARCH_MAX_FILE_BYTES:
+            return None
+        data = path.read_bytes()
+    except OSError as exc:
+        logger.debug("[ToolRegistry] Failed to read %s in search: %s", path, exc)
+        return None
+    if b"\0" in data[:8192]:
+        return None
+    return data.decode("utf-8", errors="replace")
 
 
 
@@ -122,16 +281,25 @@ def register_filesystem_tools(registry: Any) -> None:
     async def file_append(path: str, content: str, encoding: str = "utf-8") -> str:
         import asyncio
 
-        p = Path(path).expanduser().resolve()
+        p = resolve_tool_path(path)
         scope_err = _workspace_scope_error(p, path, "writes")
         if scope_err:
             return scope_err
 
         def _run() -> str:
+            from kazma_core.tools.text_newlines import existing_newline, in_newline_style
+
             try:
                 p.parent.mkdir(parents=True, exist_ok=True)
-                with open(p, "a", encoding=encoding) as f:
-                    f.write(content)
+                # Appended lines take the file's own line endings; text mode
+                # wrote CRLF lines onto the end of an LF file on Windows.
+                nl = existing_newline(p)
+                if nl is None:
+                    with open(p, "a", encoding=encoding) as f:
+                        f.write(content)
+                else:
+                    with open(p, "a", encoding=encoding, newline="") as f:
+                        f.write(in_newline_style(content, nl))
                 try:
                     from kazma_core.code_index.indexer import notify_file_changed
 
@@ -154,10 +322,22 @@ def register_filesystem_tools(registry: Any) -> None:
         import asyncio
         import shutil as _shutil
 
-        p = Path(path).expanduser().resolve()
+        p = resolve_tool_path(path)
         scope_err = _workspace_scope_error(p, path, "deletions")
         if scope_err:
             return scope_err
+        # "." is the workspace root now that relative paths mean the
+        # workspace; removing the root, or a folder that holds it, is never
+        # one file operation, whatever an approval card says.
+        from kazma_core.workspace.binding import resolve_active_root
+
+        root = resolve_active_root()
+        if p == root or root.is_relative_to(p):
+            return (
+                f"Error: refusing to delete {path}: it is the workspace root"
+                + ("" if p == root else " or a folder containing it")
+                + ". Delete the files inside it instead."
+            )
         if not p.exists():
             return f"Error: Path not found: {path}"
 
@@ -185,7 +365,7 @@ def register_filesystem_tools(registry: Any) -> None:
     async def file_list(path: str = ".", pattern: str = "*") -> str:
         import asyncio
 
-        p = Path(path).expanduser().resolve()
+        p = resolve_tool_path(path)
         # Workspace scoping — block listing outside workspace (fail-closed)
         scope_err = _workspace_scope_error(p, path, "listings")
         if scope_err:
@@ -194,12 +374,32 @@ def register_filesystem_tools(registry: Any) -> None:
             return f"Error: Path not found: {path}"
         if not p.is_dir():
             return f"Error: Not a directory: {path}"
+        try:
+            glob = _Glob(pattern, anywhere=False)
+        except ValueError as exc:
+            return f"Error: {exc}"
 
         def _run() -> str:
-            entries = sorted(str(child.name) for child in p.glob(pattern))
+            # A pattern that reaches into subfolders lists paths relative to
+            # *path*: bare names from different folders were ambiguous.
+            nested = glob.recursive or glob.depth > 1
+            entries: list[str] = []
+            more = 0
+            for entry, _is_dir in _walk(p, max_depth=None if glob.recursive else glob.depth):
+                rel = entry.relative_to(p).parts
+                if not glob.matches(rel):
+                    continue
+                if len(entries) >= _LIST_MAX_ENTRIES:
+                    more += 1
+                    continue
+                entries.append("/".join(rel) if nested else entry.name)
             if not entries:
                 return f"No files matching '{pattern}' in {path}"
-            return "\n".join(entries[:200])  # cap at 200 entries
+            if not nested:
+                entries.sort()
+            if more:
+                entries.append(f"... ({more} more; narrow the pattern)")
+            return "\n".join(entries)
 
         return await asyncio.to_thread(_run)
     @registry.register(
@@ -234,6 +434,12 @@ def register_filesystem_tools(registry: Any) -> None:
             return "Error: path is required."
         mode_n = "write" if str(mode).lower() in ("write", "rw", "readwrite") else "read"
         scope_n = "durable" if str(scope).lower() in ("durable", "permanent", "always") else "session"
+        # Resolved once, here, the way every file tool resolves it -- so the
+        # folder granted is the folder the retried tool will ask about.
+        try:
+            path = str(resolve_tool_path(path))
+        except OSError as exc:
+            return f"Error: invalid path: {exc}"
 
         # Already allowed?
         existing = check_path_access(path, mode_n)
@@ -248,10 +454,7 @@ def register_filesystem_tools(registry: Any) -> None:
 
         if scope_n == "durable":
             roots = [g.to_dict() for g in list_durable_roots()]
-            try:
-                resolved = str(Path(path).expanduser().resolve())
-            except OSError as exc:
-                return f"Error: invalid path: {exc}"
+            resolved = path
             p = Path(resolved)
             root = resolved if p.is_dir() or not p.suffix else str(p.parent)
             # Upsert
@@ -303,7 +506,6 @@ def register_filesystem_tools(registry: Any) -> None:
         limit: int = 20,
     ) -> str:
         import asyncio
-        import re
 
         # Topic-shift / audit quarantine: block broad documents/ gold corpus
         try:
@@ -315,71 +517,69 @@ def register_filesystem_tools(registry: Any) -> None:
         except Exception:
             pass
 
-        root = Path(path).expanduser().resolve()
-        if not root.exists():
-            return f"Error: Path not found: {path}"
-        # Workspace scoping — block searches outside workspace (fail-closed)
+        root = resolve_tool_path(path)
+        # Workspace scoping FIRST — block searches outside workspace
+        # (fail-closed), and never answer "not found" about a path the
+        # tool may not look at.
         scope_err = _workspace_scope_error(root, path, "searches")
         if scope_err:
             return scope_err
-
-        # Skip directories that would make the search catastrophically slow
-        # (e.g. 1.6 GB .venv, .git internals, node_modules, build artifacts,
-        # data dirs). Without this, rglob walks the entire venv reading
-        # every .py — a 212-second operation on a standard install.
-        _SKIP_DIRS = frozenset({
-            ".venv", "venv", ".git", "node_modules", "__pycache__",
-            ".kazma", "kazma-data", ".pytest_cache", ".mypy_cache",
-            ".ruff_cache", "build", "dist", ".tox", ".eggs",
-            "vector_memory", "site-packages",
-        })
-
-        def _should_skip(p: Path) -> bool:
-            """True if any path component is in the skip set."""
-            return any(part in _SKIP_DIRS for part in p.parts)
+        if not root.exists():
+            return f"Error: Path not found: {path}"
+        try:
+            regex = re.compile(pattern)
+        except re.error as exc:
+            return (
+                f"Error: {pattern!r} is not a valid regular expression ({exc}). "
+                "Escape special characters (\\( \\[ \\. \\*) to search for them literally."
+            )
+        try:
+            matcher = _Glob(glob, anywhere=True)
+        except ValueError as exc:
+            return f"Error: {exc}"
+        cap = max(1, min(int(limit or 20), 500))
 
         def _run() -> str:
-            regex = re.compile(pattern)
             results: list[str] = []
-            files_scanned = 0
-            _MAX_FILES = 5000  # hard cap so a huge tree can't run for minutes
-
-            for file_path in root.rglob(glob):
-                if _should_skip(file_path):
-                    continue
-                if not file_path.is_file():
-                    continue
-                if files_scanned >= _MAX_FILES:
+            searched = 0
+            if root.is_file():
+                candidates: Iterator[Path] = iter([root])
+                base = root.parent
+            else:
+                candidates = (
+                    entry
+                    for entry, is_dir in _walk(root)
+                    if not is_dir and matcher.matches(entry.relative_to(root).parts)
+                )
+                base = root
+            for file_path in candidates:
+                if searched >= _SEARCH_MAX_FILES:
                     results.append(
-                        f"... (search stopped after scanning {_MAX_FILES} files; "
+                        f"... (search stopped after scanning {_SEARCH_MAX_FILES} files; "
                         f"narrow the path or glob to find more matches)"
                     )
                     break
-                files_scanned += 1
-                if file_path.stat().st_size < 500_000:
-                    try:
-                        for i, line in enumerate(
-                            file_path.read_text(encoding="utf-8", errors="replace").splitlines(), 1
-                        ):
-                            if regex.search(line):
-                                results.append(f"{file_path}:{i}: {line.strip()}")
-                                if len(results) >= limit:
-                                    return "\n".join(results)
-                    except Exception as exc:
-                        logger.debug(
-                            "[ToolRegistry] Failed to read %s in search: %s",
-                            file_path,
-                            exc,
-                        )
-                        continue
+                searched += 1
+                text = _searchable_text(file_path, base)
+                if text is None:
+                    continue
+                for i, line in enumerate(text.splitlines(), 1):
+                    if regex.search(line):
+                        results.append(f"{file_path}:{i}: {line.strip()}")
+                        if len(results) >= cap:
+                            return "\n".join(results)
+            if results:
+                return "\n".join(results)
+            if not searched:
+                # Not the same answer as a miss: the glob selected nothing,
+                # so the text was never looked for.
+                return (
+                    f"No matches for '{pattern}': no file under {root} matches "
+                    f"glob '{glob}'. Widen the glob (e.g. '*' or '**/*.js')."
+                )
+            return f"No matches for '{pattern}' in {path}/{glob} ({searched} files searched)"
 
-            return (
-                "\n".join(results)
-                if results
-                else f"No matches for '{pattern}' in {path}/{glob}"
-            )
-
-        # Path.rglob + stat + read_text must not run on the asyncio selector
+        # The walk, stat and reads must not run on the asyncio selector
         # loop — a large tree freezes SSE/WS/health for tens of seconds.
         # codebase_search already offloads; keep the two siblings aligned.
         return await asyncio.to_thread(_run)
@@ -440,15 +640,15 @@ def register_filesystem_tools(registry: Any) -> None:
         file_path: str,
         caption: str = "",
     ) -> str:
-        from pathlib import Path
-
-        p = Path(file_path).expanduser().resolve()
-        if not p.exists():
-            return f"Error: file not found: {file_path}"
-        # Workspace scoping — block sends outside workspace (fail-closed)
+        p = resolve_tool_path(file_path)
+        # Workspace scoping FIRST — block sends outside workspace
+        # (fail-closed); "not found" about an out-of-scope path told the
+        # model which files exist there.
         scope_err = _workspace_scope_error(p, file_path, "file sends")
         if scope_err:
             return scope_err
+        if not p.exists():
+            return f"Error: file not found: {file_path}"
         if not p.is_file():
             return f"Error: not a file: {file_path}"
         if p.stat().st_size > 50 * 1024 * 1024:

@@ -10,6 +10,7 @@ from typing import Any
 from kazma_core.agent.tool_registry import _workspace_scope_error
 from kazma_core.documents.errors import DocumentParseError
 from kazma_core.documents.service import DocumentService
+from kazma_core.workspace.binding import resolve_tool_path
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ def _scope() -> dict[str, str]:
 
 
 def _resolve_input(path: str, op: str = "document reads") -> tuple[Path | None, str | None]:
-    resolved = Path(path).expanduser().resolve()
+    resolved = resolve_tool_path(path)
     scope_error = _workspace_scope_error(resolved, path, op)
     if scope_error:
         return None, scope_error

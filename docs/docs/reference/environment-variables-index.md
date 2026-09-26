@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**263** variables are read by the product code; **263** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**264** variables are read by the product code; **264** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -32,6 +32,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_CALENDAR_PROVIDER` | `"auto"` | `kazma_skills.native.calendar.router` | yes |
 | `KAZMA_CHAOS_ENABLED` | `""` | `kazma_core.chaos.__init__`, `kazma_ui.routes_chaos` | yes |
 | `KAZMA_CHECKPOINT_RETENTION_DAYS` | (none) | `kazma_core.checkpoint_retention` | yes |
+| `KAZMA_CHILD_ENV_ALLOW` | (none) | `kazma_core.security.child_env` | yes |
 | `KAZMA_CLONE_DIR` | `""` | `kazma_gateway.agent_handler.commands`, `kazma_gateway.routers.github`, `kazma_gateway.routers.workspaces` | yes |
 | `KAZMA_CLONE_HOSTS` | `""` | `kazma_gateway.routers.github` | yes |
 | `KAZMA_CODE_EXEC_ALLOW_LOCAL` | (none) | `kazma_core.tools.code_exec` | yes |

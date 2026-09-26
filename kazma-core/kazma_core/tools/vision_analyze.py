@@ -347,7 +347,9 @@ async def analyze_image(
         if is_url:
             image_bytes, mime = await _download_image(image_path)
         else:
-            path = Path(image_path).expanduser().resolve()
+            from kazma_core.workspace.binding import resolve_tool_path
+
+            path = resolve_tool_path(image_path)
             # Honor the same path-policy SoT as file_read/file_write so an
             # operator-granted extra root or a session path grant applies to
             # image analysis too. Previously this checked only the raw

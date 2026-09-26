@@ -590,6 +590,8 @@ class IdeService:
         import shlex
         import subprocess
 
+        from kazma_core.security.child_env import tool_child_env
+
         cwd = str(self.root)
         try:
             argv = ["git", *shlex.split(subcommand, posix=os.name != "nt")]
@@ -600,6 +602,9 @@ class IdeService:
             return subprocess.run(
                 argv,
                 cwd=cwd,
+                # Read-only git still runs the repo's configured programs
+                # (core.fsmonitor, textconv): no server secrets for them.
+                env=tool_child_env(),
                 capture_output=True,
                 text=True,
                 timeout=max(1, int(timeout)),

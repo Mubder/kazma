@@ -17,7 +17,9 @@ from kazma_core.workspace.binding import (
     allow_absolute_paths as _allow_absolute_paths,
     configure_workspace,
     resolve_active_root,
+    resolve_tool_path,
 )
+from kazma_core.tools.text_newlines import existing_newline, in_newline_style
 from kazma_core.workspace.path_policy import check_path_access, denied_message
 
 __all__ = ["configure_workspace", "file_write"]
@@ -89,7 +91,7 @@ async def file_write(path: str, content: str) -> str:
     if not path or not path.strip():
         return "Error: No path provided."
 
-    p = Path(path).expanduser().resolve()
+    p = resolve_tool_path(path)
 
     # ── Safety check (workspace + path grants + allow_absolute) ───
     access = check_path_access(p, "write")
@@ -111,7 +113,13 @@ async def file_write(path: str, content: str) -> str:
             raise PermissionError(
                 "destination became a symlink after the access check — refusing to write"
             )
-        p.write_text(content, encoding="utf-8")
+        # Overwriting keeps the file's own line endings (text mode turned an
+        # LF file into CRLF on Windows); a new file takes the platform's.
+        nl = existing_newline(p)
+        if nl is None:
+            p.write_text(content, encoding="utf-8")
+        else:
+            p.write_text(in_newline_style(content, nl), encoding="utf-8", newline="")
 
     try:
         await asyncio.to_thread(_write_sync)

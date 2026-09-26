@@ -51,13 +51,12 @@ def _scope() -> tuple[str, str, str]:
 def _resolve_workspace_file(path: str) -> tuple[Path | None, str | None]:
     """Resolve a workspace-relative/absolute path with strict containment."""
     try:
-        from kazma_core.workspace.binding import resolve_active_root
+        from kazma_core.workspace.binding import resolve_active_root, resolve_tool_path
 
         root = resolve_active_root().resolve()
     except Exception:  # pragma: no cover - defensive
         return None, "Error: workspace is unavailable"
-    candidate = Path(path).expanduser()
-    candidate = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+    candidate = resolve_tool_path(path, root=root)
     try:
         candidate.relative_to(root)
     except ValueError:

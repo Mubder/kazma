@@ -9,6 +9,7 @@ from pathlib import Path
 
 from kazma_core.agent.tool_registry import _workspace_scope_error
 from kazma_core.tools.file_write import _get_workspace
+from kazma_core.workspace.binding import resolve_tool_path
 
 # `subprocess` stays imported for TimeoutExpired / PIPE; every RUN goes
 # through run_off_loop so a 60s pytest does not freeze the whole server
@@ -27,7 +28,7 @@ async def lint_code(path: str) -> str:
     Returns:
         Structured linter warnings or success messages.
     """
-    p = Path(path).expanduser().resolve()
+    p = resolve_tool_path(path)
     scope_err = _workspace_scope_error(p, path, "searches")
     if scope_err:
         return scope_err
@@ -69,7 +70,7 @@ async def format_code(path: str) -> str:
     Returns:
         Success or failure message.
     """
-    p = Path(path).expanduser().resolve()
+    p = resolve_tool_path(path)
     scope_err = _workspace_scope_error(p, path, "writes")
     if scope_err:
         return scope_err
@@ -102,7 +103,7 @@ async def run_unit_tests(test_path: str) -> str:
     Returns:
         pytest execution summary.
     """
-    p = Path(test_path).expanduser().resolve()
+    p = resolve_tool_path(test_path)
     scope_err = _workspace_scope_error(p, test_path, "searches")
     if scope_err:
         return scope_err
@@ -124,7 +125,12 @@ async def run_unit_tests(test_path: str) -> str:
 
     try:
         # Limit test suite execution to 60 seconds to prevent hanging
-        res = await run_off_loop(cmd, capture_output=True, text=True, timeout=60)
+        # In the workspace, like shell_exec: the server's own working
+        # directory is the Kazma install, and relative imports, fixtures and
+        # --basetemp belong to the project being tested.
+        res = await run_off_loop(
+            cmd, cwd=str(_get_workspace()), capture_output=True, text=True, timeout=60
+        )
         output = res.stdout.strip()
         err = res.stderr.strip()
         combined = f"{output}\n{err}".strip()

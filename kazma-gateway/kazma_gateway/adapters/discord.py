@@ -96,6 +96,9 @@ class DiscordAdapter(BaseAdapter):
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._sequence: int | None = None
         self._session_id: str | None = None
+        # READY's resume_gateway_url. Discord answers a Resume sent anywhere
+        # else with op 9, and the session is lost (see _gateway_url).
+        self._resume_url: str | None = None
         # Per-channel serial chains for message processing (voice fetch +
         # STT): keeps arrival order within a channel so a slow transcription
         # can no longer enqueue AFTER a later text message and swap turn
@@ -155,7 +158,15 @@ class DiscordAdapter(BaseAdapter):
 
             while not shutdown_event.is_set():
                 try:
-                    await self._connect_gateway(queue, shutdown_event)
+                    wait = await self._connect_gateway(queue, shutdown_event)
+                    if wait:
+                        # Discord's rule after a non-resumable op 9: wait
+                        # 1-5 s before a fresh Identify. The socket is
+                        # already closed; shutdown cuts the wait short.
+                        try:
+                            await asyncio.wait_for(shutdown_event.wait(), timeout=wait)
+                        except TimeoutError:
+                            pass
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
@@ -193,12 +204,29 @@ class DiscordAdapter(BaseAdapter):
                 self._http = None
             logger.info("[discord] Adapter stopped")
 
+    def _gateway_url(self) -> str:
+        """Where to connect: READY's resume URL when resuming, else the default.
+
+        Discord answers a Resume on any URL but the ``resume_gateway_url``
+        it sent in READY with op 9, not resumable. The adapter always used
+        the default URL, so every hourly-or-so reconnect request (op 7)
+        ended in a new session -- seven of seven on the live install on
+        2026-09-25 -- and messages sent in the gap were never delivered.
+        """
+        if self._session_id and self._sequence is not None and self._resume_url:
+            return self._resume_url.rstrip("/") + "/?v=10&encoding=json"
+        return _DISCORD_GATEWAY
+
     async def _connect_gateway(
         self,
         queue: asyncio.Queue[IncomingMessage],
         shutdown_event: asyncio.Event,
-    ) -> None:
-        """Connect to Discord Gateway WebSocket and process events."""
+    ) -> float | None:
+        """Connect to Discord Gateway WebSocket and process events.
+
+        Returns how long to wait before connecting again (Discord's 1-5 s
+        after an invalid session), or None to reconnect at once.
+        """
         try:
             import websockets
 
@@ -208,7 +236,7 @@ class DiscordAdapter(BaseAdapter):
             )
 
             async with websockets.connect(
-                _DISCORD_GATEWAY, close_timeout=CLOSE_TIMEOUT_S
+                self._gateway_url(), close_timeout=CLOSE_TIMEOUT_S
             ) as ws, closes_on_shutdown(
                 ws, shutdown_event
             ):
@@ -285,6 +313,11 @@ class DiscordAdapter(BaseAdapter):
                     # Dispatch
                     if op == 0 and t == "READY":
                         self._session_id = d.get("session_id") if isinstance(d, dict) else None
+                        self._resume_url = (
+                            str(d.get("resume_gateway_url") or "") or None
+                            if isinstance(d, dict)
+                            else None
+                        )
                         logger.info("[discord] Gateway READY, session_id=%s", self._session_id)
 
                     elif op == 0 and t == "RESUMED":
@@ -330,7 +363,7 @@ class DiscordAdapter(BaseAdapter):
 
                     elif op == 7:  # Reconnect
                         logger.info("[discord] Gateway requested reconnect")
-                        return
+                        return None
 
                     elif op == 9:  # Invalid session
                         resumable = bool(d)
@@ -338,7 +371,12 @@ class DiscordAdapter(BaseAdapter):
                         if not resumable:
                             self._session_id = None
                             self._sequence = None
-                        return
+                            self._resume_url = None
+                            return random.uniform(1.0, 5.0)
+                        return None
+
+                    elif op == 1:  # Discord asks for a heartbeat now
+                        await ws.send(json.dumps({"op": 1, "d": self._sequence}))
 
                     elif op == 11:  # Heartbeat ACK
                         pass

@@ -150,10 +150,15 @@ def get_commit_env(base_env: dict[str, str] | None = None) -> dict[str, str]:
     """Return env vars to inject for bot-authored commits.
 
     Merges ``GIT_AUTHOR_*`` / ``GIT_COMMITTER_*`` into a copy of
-    ``base_env`` (or ``os.environ`` if not given). When bot identity is
+    ``base_env`` (or the server's environment without its secrets, if not
+    given -- a commit runs the repository's hooks). When bot identity is
     disabled, returns the base env unchanged.
     """
-    env = dict(base_env if base_env is not None else os.environ)
+    if base_env is None:
+        from kazma_core.security.child_env import tool_child_env
+
+        base_env = tool_child_env()
+    env = dict(base_env)
     identity = get_bot_identity()
     if identity is None:
         return env
@@ -274,6 +279,31 @@ def _fetch_bot_user_id(app_slug: str) -> int | None:
     return None
 
 
+# GitHub judges an App JWT by ITS clock: ``iat`` must be in the past and
+# ``exp`` no more than 600 s in the future. ``exp = now + 600`` -- the value
+# the docs show -- is therefore refused whenever this machine's clock runs
+# even a second fast, which is what happened on the live install from
+# 2026-09-24 22:32 to 2026-09-25 01:55 (386 refusals: "'Expiration time'
+# claim ('exp') is too far in the future"). A 540 s lifetime and a 60 s
+# backdate tolerate a clock up to 60 s fast or 540 s slow; beyond that the
+# refusal's ``Date`` header gives GitHub's time and the mint retries once
+# on it (the same correction Octokit's auth-app makes).
+_JWT_BACKDATE_S = 60
+_JWT_LIFETIME_S = 540
+# GitHub's clock minus this machine's, learned from a clock refusal.
+_clock_offset: dict[str, float] = {"seconds": 0.0}
+# A failed mint is not retried on every call: the next unforced attempt
+# waits 30 s, doubling to 15 min while GitHub keeps refusing.
+_MINT_BACKOFF_FIRST_S = 30.0
+_MINT_BACKOFF_MAX_S = 900.0
+_mint_backoff: dict[str, float] = {"until": 0.0, "delay": 0.0}
+
+
+def _now() -> float:
+    """This machine's clock (tests substitute it to simulate a skewed clock)."""
+    return time.time()
+
+
 def _mint_github_jwt(app_id: int | str, private_key_bytes: bytes) -> str:
     """Create a signed RS256 JWT for GitHub App authentication.
 
@@ -281,21 +311,87 @@ def _mint_github_jwt(app_id: int | str, private_key_bytes: bytes) -> str:
     (https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app)
     requires:
       * ``iss`` — the App's ID or client ID, as a **string**
-      * ``iat`` — issued-at, seconds since epoch
-      * ``exp`` — expiry, at most 10 minutes after ``iat``
+      * ``iat`` — issued-at, in the past by GitHub's clock
+      * ``exp`` — expiry, no more than 10 minutes ahead of GitHub's clock
       * algorithm RS256, signed with the App's private key
 
+    The claims are stamped on GitHub's time as far as it is known
+    (``_clock_offset``), with the margins above for the drift that is not.
     Uses standard :func:`jwt.encode` (PyJWT ≥ 2.0 returns ``str`` for RS256).
     """
     import jwt
 
-    now = int(time.time())
+    now = int(_now() + _clock_offset["seconds"])
     payload = {
-        "iat": now - 60,  # 60s in the past to tolerate clock drift
-        "exp": now + 600,  # 10-minute max lifetime
+        "iat": now - _JWT_BACKDATE_S,
+        "exp": now + _JWT_LIFETIME_S,
         "iss": str(app_id),  # App ID / client ID as a string (per GitHub docs)
     }
     return jwt.encode(payload, private_key_bytes, algorithm="RS256")
+
+
+def _is_clock_refusal(status_code: int, body: str) -> bool:
+    """True for GitHub's 401s about the JWT's time claims (not a bad key)."""
+    return status_code == 401 and ("claim ('exp')" in body or "claim ('iat')" in body)
+
+
+def _learn_clock_offset(date_header: str) -> bool:
+    """Adopt GitHub's clock from a response ``Date`` header.
+
+    Returns False when the header is missing or unparseable (the caller then
+    has nothing to retry with). Says so once per new offset: a system clock
+    this far off breaks more than GitHub (TLS, one-time codes), so the
+    operator should fix it even though the mint no longer depends on it.
+    """
+    from datetime import timezone
+    from email.utils import parsedate_to_datetime
+
+    try:
+        stamp = parsedate_to_datetime(date_header)
+        if stamp.tzinfo is None:  # "-0000": HTTP dates are GMT
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        server = stamp.timestamp()
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return False
+    offset = server - _now()
+    if abs(offset - _clock_offset["seconds"]) >= 2:
+        logger.warning(
+            "[git_identity] This machine's clock is %+.0f s off GitHub's; GitHub App "
+            "tokens are now minted on GitHub's time. Resynchronise the system clock "
+            "(Windows: w32tm /resync).",
+            -offset,
+        )
+    _clock_offset["seconds"] = offset
+    return True
+
+
+def _note_mint_failure() -> None:
+    delay = min(
+        max(_mint_backoff["delay"] * 2, _MINT_BACKOFF_FIRST_S), _MINT_BACKOFF_MAX_S
+    )
+    _mint_backoff["delay"] = delay
+    _mint_backoff["until"] = time.monotonic() + delay
+
+
+def _post_app_jwt(client: Any, url: str, app_id: str, private_key_bytes: bytes) -> Any:
+    return client.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {_mint_github_jwt(app_id, private_key_bytes)}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+
+
+def _exchange_app_jwt(client: Any, url: str, app_id: str, private_key_bytes: bytes) -> Any:
+    """POST a fresh App JWT; on a clock refusal, retry once on GitHub's time."""
+    resp = _post_app_jwt(client, url, app_id, private_key_bytes)
+    if _is_clock_refusal(resp.status_code, resp.text or "") and _learn_clock_offset(
+        resp.headers.get("Date", "")
+    ):
+        resp = _post_app_jwt(client, url, app_id, private_key_bytes)
+    return resp
 
 
 def get_app_installation_token() -> str | None:
@@ -331,6 +427,11 @@ def mint_app_installation_token(force: bool = False) -> str | None:
     # Check cache (unless caller forced a fresh mint).
     if not force and _app_token_cache["token"] and time.time() < _app_token_cache["expires"]:
         return _app_token_cache["token"]
+    # A recent refusal: the callers fall back to their next credential
+    # instead of re-signing and re-posting on every call. A forced mint is
+    # the caller saying it needs a new token now, so it still goes out.
+    if not force and time.monotonic() < _mint_backoff["until"]:
+        return None
 
     try:
         from pathlib import Path
@@ -352,22 +453,15 @@ def mint_app_installation_token(force: bool = False) -> str | None:
                 logger.debug("[git_identity] App private key not found at path %s (expanded: %s)", key_path, kp)
                 return None
 
-        # Create the JWT with string `iss` claim required by GitHub App API
-        app_jwt = _mint_github_jwt(app_id, private_key_bytes)
-        if not app_jwt:
-            return None
-
         clean_inst_id = str(installation_id).strip()
 
-        # Exchange for installation token.
+        # Exchange a fresh JWT for an installation token.
         with httpx.Client(timeout=15.0) as client:
-            resp = client.post(
+            resp = _exchange_app_jwt(
+                client,
                 f"https://api.github.com/app/installations/{clean_inst_id}/access_tokens",
-                headers={
-                    "Authorization": f"Bearer {app_jwt}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
+                app_id,
+                private_key_bytes,
             )
             if resp.status_code >= 400:
                 logger.warning(
@@ -375,7 +469,8 @@ def mint_app_installation_token(force: bool = False) -> str | None:
                     resp.status_code,
                     resp.text[:500],
                 )
-            resp.raise_for_status()
+                _note_mint_failure()
+                return None
             data = resp.json()
             token = data.get("token")
 
@@ -383,11 +478,15 @@ def mint_app_installation_token(force: bool = False) -> str | None:
             # Cache for 50 minutes (tokens are valid for 1 hour).
             _app_token_cache["token"] = token
             _app_token_cache["expires"] = time.time() + 3000
+            _mint_backoff["until"] = _mint_backoff["delay"] = 0.0
             logger.info("[git_identity] Minted GitHub App installation token for App ID %s", app_id)
             return token
+        logger.warning("[git_identity] GitHub App token exchange returned no token")
     except ImportError:
         logger.debug("[git_identity] PyJWT/httpx not installed — app token unavailable")
+        return None
     except Exception as exc:
         logger.warning("[git_identity] App token minting failed: %s", exc)
 
+    _note_mint_failure()
     return None

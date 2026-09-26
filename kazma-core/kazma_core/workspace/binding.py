@@ -28,6 +28,7 @@ __all__ = [
     "get_bound_mcp_root",
     "notify_root_changed",
     "resolve_active_root",
+    "resolve_tool_path",
     "set_bound_mcp_root",
     "subscribe_root_changed",
     "unsubscribe_root_changed",
@@ -152,6 +153,28 @@ def resolve_active_root() -> Path:
         root,
     )
     return root
+
+
+def resolve_tool_path(path: str | os.PathLike[str], *, root: Path | None = None) -> Path:
+    """Where a path an agent tool was given points.
+
+    Absolute (after ``~`` expansion): itself. Relative: under the active
+    workspace root (or *root*, when the caller already resolved it) -- the
+    directory ``shell_exec`` runs in and the root the prompt names -- never
+    the server process's working directory. Every file tool resolved against
+    the process CWD, so ``file_read("README.md")`` after a Switch Repo read
+    the Kazma install's README (or was refused as outside the workspace)
+    while ``shell_exec("cat README.md")`` read the repo's. It only looked
+    right while the workspace WAS the install folder, as it is on the live
+    install. ``tests/test_tool_paths.py`` gates every tool that takes a path.
+
+    Access policy is the caller's job: this says where the path points, not
+    whether a tool may touch it.
+    """
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        p = (root if root is not None else resolve_active_root()) / p
+    return p.resolve()
 
 
 def subscribe_root_changed(callback: RootChangedCallback) -> None:
