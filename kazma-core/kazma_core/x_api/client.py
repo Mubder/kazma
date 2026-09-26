@@ -276,6 +276,7 @@ class XClient:
         user_id: str,
         *,
         since_id: str = "",
+        start_time: str = "",
         max_results: int = 25,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """``GET /2/users/:id/mentions`` — tweets mentioning this account.
@@ -298,6 +299,13 @@ class XClient:
         sid = str(since_id or "").strip()
         if sid:
             params.append(f"since_id={sid}")
+        # RFC 3339, second granularity, inclusive. The poller's cursor: a
+        # time cannot be deleted, a since_id tweet can (mentions_fire).
+        start = str(start_time or "").strip()
+        if start:
+            from urllib.parse import quote
+
+            params.append(f"start_time={quote(start, safe='')}")
         path = f"/2/users/{str(user_id).strip()}/mentions?" + "&".join(params)
         data = await self._request("GET", path, audit_action="read_mentions")
         tweets = data.get("data")

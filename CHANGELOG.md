@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## X mentions: one read per quiet check, not two (2026-09-26)
+
+Every quiet mentions check (every 10 minutes) logged a warning and read
+the latest page of mentions a second time -- up to 25 billed tweet reads
+each time, 17 warnings in three hours on the live install. The check could
+not tell "nothing new" from "the bookmark tweet was deleted" (X answers
+both with nothing), so it re-read everything to be safe.
+
+The bookmark is now the time the last handled mention was posted, which
+cannot be deleted: one read per check, and the one tweet X returns again at
+that exact second is recognised and skipped. A deleted bookmark tweet no
+longer hides new mentions either.
+
 ## A timed-out approval no longer leaves a dead card (2026-09-26)
 
 When nobody answered an approval in time, Kazma denied it and carried on,

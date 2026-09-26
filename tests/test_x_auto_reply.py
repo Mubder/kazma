@@ -2090,7 +2090,7 @@ async def test_poll_once_direct_mention_drafts(_no_llm, monkeypatch):
         async def verify_credentials(self):
             return {"id": "1", "username": "KazmaAI"}
 
-        async def get_mentions(self, uid, since_id=""):
+        async def get_mentions(self, uid, since_id="", start_time=""):
             return (
                 [{
                     "id": "99",
@@ -2132,8 +2132,9 @@ async def test_poll_once_ignore_cursor_does_not_pass_since_id(_no_llm, monkeypat
         async def verify_credentials(self):
             return {"id": "1", "username": "KazmaAI"}
 
-        async def get_mentions(self, uid, since_id=""):
+        async def get_mentions(self, uid, since_id="", start_time=""):
             seen["since_id"] = since_id
+            seen["start_time"] = start_time
             return [], {}
 
     get_reply_store().set_since_id("2100705922142073166")
@@ -2142,15 +2143,15 @@ async def test_poll_once_ignore_cursor_does_not_pass_since_id(_no_llm, monkeypat
     monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
     rows = await mf.poll_once(cfg=_cfg(subjects=()), ignore_cursor=True)
     assert rows == []
-    assert seen["since_id"] == ""
+    assert seen["since_id"] == "" and seen["start_time"] == ""
     mf._identity = None
 
 
 @pytest.mark.asyncio
-async def test_empty_cursor_looks_back_when_since_id_is_a_handled_summon(
-    _no_llm, monkeypatch
-):
-    """Deleted mention as since_id: X returns 0, a new mention is sitting there."""
+async def test_a_deleted_cursor_cannot_hide_a_new_mention(_no_llm, monkeypatch):
+    """Live 2026-09-18: the stored cursor was a deleted mention, and X answers
+    ``since_id=<deleted>`` with nothing, forever. The cursor is now the TIME
+    that id was minted, which cannot be deleted: one read finds the mention."""
     import kazma_core.x_api.mentions_fire as mf
     from kazma_core.x_api.reply_store import get_reply_store
 
@@ -2168,10 +2169,9 @@ async def test_empty_cursor_looks_back_when_since_id_is_a_handled_summon(
         async def verify_credentials(self):
             return {"id": "1", "username": "KazmaAI"}
 
-        async def get_mentions(self, uid, since_id=""):
-            calls.append(since_id)
-            if since_id:
-                return [], {}
+        async def get_mentions(self, uid, since_id="", start_time=""):
+            calls.append((since_id, start_time))
+            # The deleted boundary is gone; the new mention is newer.
             return (
                 [{
                     "id": "2100999999999999999",
@@ -2191,14 +2191,81 @@ async def test_empty_cursor_looks_back_when_since_id_is_a_handled_summon(
         target_handle="t", summoner="s",
     )
     store.mark_failed("2100705922142073166", "deleted or not visible")
-    mf._identity = None
+    monkeypatch.setattr(mf, "_identity", None)
     monkeypatch.setattr("kazma_core.x_api.client.XClient", _Client)
     monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
     _stub_draft(monkeypatch)
     rows = await mf.poll_once(cfg=_cfg(subjects=()))
-    assert calls == ["2100705922142073166", ""]
+    assert calls == [("", "2026-09-17T21:58:15Z")], calls
     assert rows and rows[0]["mention"] == "2100999999999999999"
-    mf._identity = None
+    assert store.get_since_id() == "2100999999999999999"
+
+
+@pytest.mark.asyncio
+async def test_a_quiet_poll_reads_once_and_says_so_quietly(_no_llm, monkeypatch, caplog):
+    """Live 2026-09-26: every quiet poll logged a WARNING and read the latest
+    window a second time -- up to 25 billed tweets every 10 minutes -- because
+    "nothing new" and "dead cursor" looked the same. X returns the boundary
+    tweet itself (start_time is inclusive); it is dropped, not re-handled."""
+    import logging
+
+    import kazma_core.x_api.mentions_fire as mf
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    calls = []
+
+    class _Xcfg:
+        def can_post(self):
+            return True
+        credentials = None
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def verify_credentials(self):
+            return {"id": "1", "username": "KazmaAI"}
+
+        async def get_mentions(self, uid, since_id="", start_time=""):
+            # Behaves like X on a quiet account: since_id means "strictly
+            # newer" (nothing); a time cursor is inclusive, so the handled
+            # boundary mention comes back; no cursor is the latest window.
+            calls.append((since_id, start_time))
+            if since_id:
+                return [], {}
+            return (
+                [{"id": "2100705922142073166", "text": "@KazmaAI old", "author_id": "2"}],
+                {"users": [{"id": "2", "username": "balfaris"}]},
+            )
+
+        async def get_tweet(self, tid):
+            raise AssertionError("a quiet poll fetches nothing else")
+
+    store = get_reply_store()
+    store.set_since_id("2100705922142073166")
+    store.claim(
+        summon_id="2100705922142073166", parent_id="p",
+        target_handle="t", summoner="s",
+    )
+    monkeypatch.setattr(mf, "_identity", None)
+    monkeypatch.setattr("kazma_core.x_api.client.XClient", _Client)
+    monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
+    caplog.set_level(logging.INFO, logger="kazma_core.x_api.mentions_fire")
+    rows = await mf.poll_once(cfg=_cfg(subjects=()))
+    assert rows == []
+    assert len(calls) == 1, calls
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING], caplog.text
+    assert store.get_since_id() == "2100705922142073166"
+
+
+def test_the_cursor_time_is_read_from_the_id_itself():
+    import kazma_core.x_api.mentions_fire as mf
+
+    assert mf._snowflake_start_time("2100705922142073166") == "2026-09-17T21:58:15Z"
+    assert mf._snowflake_start_time("") == ""
+    assert mf._snowflake_start_time("not-an-id") == ""
+    # Newer ids sort after older ones even when they are longer.
+    assert mf._id_key("10") > mf._id_key("9")
 
 
 @pytest.mark.asyncio
@@ -2218,7 +2285,7 @@ async def test_poll_once_skips_replies_to_our_own_posts(_no_llm, monkeypatch):
         async def verify_credentials(self):
             return {"id": "1", "username": "KazmaAI"}
 
-        async def get_mentions(self, uid, since_id=""):
+        async def get_mentions(self, uid, since_id="", start_time=""):
             return (
                 [{
                     "id": "55",
@@ -2273,7 +2340,7 @@ async def test_poll_once_trusted_followup_walks_to_the_original(
         async def verify_credentials(self):
             return {"id": "1", "username": "KazmaAI"}
 
-        async def get_mentions(self, uid, since_id=""):
+        async def get_mentions(self, uid, since_id="", start_time=""):
             return (
                 [{
                     "id": "77",
@@ -2349,7 +2416,7 @@ async def test_poll_once_reacts_to_a_quoted_tweet_under_our_reply(
         async def verify_credentials(self):
             return {"id": "1", "username": "KazmaAI"}
 
-        async def get_mentions(self, uid, since_id=""):
+        async def get_mentions(self, uid, since_id="", start_time=""):
             return (
                 [{
                     "id": "77",
@@ -2413,7 +2480,7 @@ async def test_poll_once_reads_status_url_in_a_reply_to_us(_no_llm, monkeypatch)
         async def verify_credentials(self):
             return {"id": "1", "username": "KazmaAI"}
 
-        async def get_mentions(self, uid, since_id=""):
+        async def get_mentions(self, uid, since_id="", start_time=""):
             return (
                 [{
                     "id": "88",
