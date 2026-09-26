@@ -8,6 +8,12 @@
 
 Use this file when picking up memory work. Do **not** start a greenfield rewrite.
 
+> **Active plan (2026-09-26): [`MEMORY_NOTHING_LOST_PLAN.md`](MEMORY_NOTHING_LOST_PLAN.md).**
+> Measured on the live install: episode meaning search saw an arbitrary 240-row slice, belief
+> meaning search the 400 "most important", archiving erased text after 30 days unrecalled, and
+> the past-chats fallback read a July file. "Trust path complete" below predates that; the
+> plan is the checklist until every item is ticked.
+
 **Trust path:** Single-node V2 + optional scale adapters + KB chat inject is
 **complete**. The 2026-08-24 audit (orphans, mirror zombies, tenant gaps, FTS
 drift, graph-clear bind bug) is **closed**. Remaining work is **trigger-only
