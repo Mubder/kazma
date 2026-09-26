@@ -556,6 +556,20 @@ async def _stream_langgraph_events(
     total_tokens = 0
     total_cost = 0.0
     turn_start = time.monotonic()
+    # One turn can be several segments (it pauses for approval). The clock
+    # and the totals are the TURN's: its LLM calls from the ledger, and its
+    # time from the question -- not this segment's (kazma_ui/turn_usage.py).
+    from datetime import UTC as _UTC
+    from datetime import datetime as _datetime
+
+    from kazma_ui.turn_usage import turn_started_epoch, turn_totals
+
+    _segment_started_iso = _datetime.now(_UTC).isoformat()
+    _asked_at = await asyncio.to_thread(
+        turn_started_epoch, session_id, reply_turn_id or current_turn_id()
+    )
+    # Seconds the turn had already run when this segment began.
+    _turn_offset_s = max(0.0, time.time() - _asked_at) if _asked_at else 0.0
     content_acc = ""  # accumulated assistant text for the done event
     # Streamed narration superseded by the terminal synthesis — persisted as
     # a reasoning part instead of being silently discarded (2026-09-09).
@@ -787,7 +801,7 @@ async def _stream_langgraph_events(
                                 "current": "",
                                 "detail": "",
                                 "step": 0,
-                                "elapsed_s": round(_now - turn_start, 1),
+                                "elapsed_s": round(_turn_offset_s + (_now - turn_start), 1),
                             })
                 finally:
                     _unreg_q(thread_id)
@@ -930,7 +944,9 @@ async def _stream_langgraph_events(
                                 "current": _hb["current"],
                                 "detail": _hb["detail"],
                                 "step": _hb["step"],
-                                "elapsed_s": round(time.monotonic() - turn_start, 1),
+                                "elapsed_s": round(
+                                    _turn_offset_s + (time.monotonic() - turn_start), 1
+                                ),
                             })
                             continue
                         if event is None:
@@ -1380,7 +1396,22 @@ async def _stream_langgraph_events(
                     pass
 
             # ── Turn complete ──────────────────────────────────────────
-            duration_ms = (time.monotonic() - turn_start) * 1000
+            duration_ms = (_turn_offset_s + (time.monotonic() - turn_start)) * 1000
+            # The turn's usage, every segment and every LLM call (the
+            # respond synthesis too), from the per-call ledger. This
+            # segment's share goes to the session totals, so a turn that
+            # paused is not counted once per segment.
+            _segment_tokens, _segment_cost = int(total_tokens or 0), float(total_cost or 0.0)
+            _usage_turn = current_turn_id()
+            if _usage_turn:
+                # Zero calls = no ledger rows (ledger off): keep the old values.
+                _t_tok, _t_cost, _t_calls = await asyncio.to_thread(turn_totals, _usage_turn)
+                if _t_calls:
+                    total_tokens, total_cost = _t_tok, _t_cost
+                    _s_tok, _s_cost, _s_calls = await asyncio.to_thread(
+                        turn_totals, _usage_turn, since=_segment_started_iso
+                    )
+                    _segment_tokens, _segment_cost = _s_tok, _s_cost
             logger.info(
                 "SSE turn complete: tokens=%d cost=$%.4f duration=%.0fms content_len=%d interrupted=%s",
                 total_tokens,
@@ -1439,7 +1470,7 @@ async def _stream_langgraph_events(
                     from kazma_ui.session_manager import get_session_manager as _gsm
 
                     sess_tokens, sess_cost = _gsm().add_usage(
-                        session_id, int(total_tokens or 0), float(total_cost or 0.0)
+                        session_id, int(_segment_tokens or 0), float(_segment_cost or 0.0)
                     )
                 except Exception:
                     logger.debug("[SSE] add_usage skipped for %s", session_id, exc_info=True)

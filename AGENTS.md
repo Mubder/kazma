@@ -1742,6 +1742,21 @@ Sequential approval is proven at the lifecycle level by
 Playwright 1 and 4 — open since the 2026-09-19 F0 spike. Both run in the
 `unified-turn-lifecycle` CI job.
 
+**A turn's numbers are the turn's, not the segment's.** A turn that pauses
+for approval runs as several graph segments. The done frame's tokens and
+cost are the sum of the per-call ledger for the turn id
+(`llm_ledger.turn_usage`; every row carries `turn_id`, bound per turn in
+`_stream_langgraph_events`), its duration runs from the question
+(`kazma_ui/turn_usage.turn_started_epoch`), and the session is charged only
+the segment's calls. A new LLM call site inside a turn records into the
+ledger (the respond synthesis did not, 2026-09-26). Gate:
+`tests/test_turn_usage.py` (through the real streamer).
+
+**A plan feeds only the running turn.** `_paintTextSlot` paints every turn,
+finished ones on every reload; plan ingestion there logged progress on the
+live turn and painted a "Kazma is thinking…" header under a finished answer
+(`_isRunningDoc`; `tests/e2e/test_plan_fence_reload.py`).
+
 Cross-language turn projection is locked by shared fixtures under
 `tests/fixtures/unified_turn/` — do NOT add a Python example and a
 JavaScript example for the same rule; that is how `legacy_turn_id` came to

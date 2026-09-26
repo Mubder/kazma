@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Turn stats describe the whole turn; reloads no longer revive a finished one (2026-09-26)
+
+**The numbers under an answer were wrong whenever the turn paused for an
+approval.** A four-minute turn with three approvals ended "Completed 0:08"
+and "0 tokens · $0.0000 · 4.3s": the clock restarted after each approval,
+and the tokens and cost shown were the last model call's alone -- which
+is zero after an approval. Every model call is now recorded with the turn
+it belongs to, so the answer shows the whole turn's tokens and cost, and
+the time since you asked. The session total is charged each call once,
+however many times the turn paused. The final "write the answer" call,
+often the largest, is now counted too.
+
+**Reloading a chat could make a finished answer look stuck.** When the
+answer opened with the model's plan block, a reload added a second
+"Kazma is thinking… Stop" header under the finished answer. The plan of a
+finished turn no longer feeds the live progress display.
+
+Also: a finished turn's header no longer flashes "Reconnecting…".
+
 ## X mentions: one read per quiet check, not two (2026-09-26)
 
 Every quiet mentions check (every 10 minutes) logged a warning and read

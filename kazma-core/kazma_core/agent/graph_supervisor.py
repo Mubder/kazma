@@ -1668,7 +1668,9 @@ async def supervisor_node(
             if get_nonstop_config().ledger_enabled:
                 from kazma_core.observability.llm_ledger import record_llm_call
 
-                record_llm_call(
+                # Off the loop: the ledger is a SQLite write per call.
+                await asyncio.to_thread(
+                    record_llm_call,
                     thread_id=str(state.get("thread_id", "")),
                     iteration=int(state.get("iteration", 0) or 0),
                     provider=type(llm).__name__,
@@ -1726,7 +1728,9 @@ async def supervisor_node(
             from kazma_core.observability.llm_ledger import record_llm_call
 
             _served_model = _served_by[-1] if _served_by else ""
-            record_llm_call(
+            # Off the loop: the ledger is a SQLite write per call.
+            await asyncio.to_thread(
+                record_llm_call,
                 thread_id=str(state.get("thread_id", "")),
                 iteration=int(state.get("iteration", 0) or 0),
                 provider=type(llm).__name__,

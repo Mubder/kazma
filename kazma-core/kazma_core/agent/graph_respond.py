@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Any
 
 from kazma_core.agent.graph_helpers import (
@@ -17,6 +19,41 @@ from kazma_core.agent.plan_fence import (
 from kazma_core.agent.state import SupervisorState
 from kazma_core.llm_stream import invoke_llm_chat
 from kazma_core.summarizer import _normalize_msg
+
+
+async def _ledger_synthesis_call(
+    state: SupervisorState, llm: Any, resp: Any, duration_ms: float
+) -> None:
+    """The final synthesis is one of the turn's LLM calls (llm_calls.db).
+
+    Only the supervisor's calls were ledgered, so a turn's totals missed its
+    last and often largest call. Off the loop: the ledger is SQLite.
+    """
+    from kazma_core.agent.nonstop import get_nonstop_config
+
+    if not get_nonstop_config().ledger_enabled:
+        return
+    from kazma_core.observability.llm_ledger import record_llm_call
+
+    usage = getattr(resp, "usage", None) or {}
+    try:
+        prompt = int(usage.get("prompt_tokens", 0) or 0)
+        completion = int(usage.get("completion_tokens", 0) or 0)
+        cost = float(getattr(resp, "cost_usd", 0.0) or 0.0)
+    except (AttributeError, TypeError, ValueError):
+        prompt, completion, cost = 0, 0, 0.0
+    await asyncio.to_thread(
+        record_llm_call,
+        thread_id=str(state.get("thread_id", "")),
+        iteration=int(state.get("iteration", 0) or 0),
+        provider=type(llm).__name__,
+        model=str(getattr(resp, "model", "") or ""),
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        cost_usd=cost,
+        duration_ms=duration_ms,
+        status="ok",
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -177,8 +214,12 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
                         "- Match the user's language (Arabic if they wrote Arabic)."
                     ),
                 }
+                _synth_started = time.monotonic()
                 _resp = await invoke_llm_chat(
                     _llm, pruned_for_synth + [_wrap_msg], tools=None
+                )
+                await _ledger_synthesis_call(
+                    state, _llm, _resp, (time.monotonic() - _synth_started) * 1000
                 )
                 _content = getattr(_resp, "content", "") or ""
                 if _content.strip() and not is_unusable_assistant_content(_content):
