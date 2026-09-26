@@ -140,6 +140,13 @@
         embedderRebuildStatus: { state: 'idle', model: '', total: 0, done: 0, error: null },
         _embedderPollTimer: null,
 
+        // ── Turn-completion notifications (settings_agent.js) ──
+        // Declared here because the template reads them before the loader
+        // runs: undeclared, they threw "turnNotify is not defined" on every
+        // Settings load (2026-09-26, tests/e2e/test_pages_load_clean.py).
+        turnNotify: { enabled: false },
+        turnNotifySaving: false,
+
         // ── Time Travel (replay / fork) ──
         timeTravel: { max_snapshots: 50, retention_days: 30, auto_maintain: true },
         timeTravelEffective: null,

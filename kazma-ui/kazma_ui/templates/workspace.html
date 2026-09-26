@@ -635,7 +635,7 @@
                :class="{ 'is-directory': item.is_dir }"
                @click="navigate(item)"
                style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;transition:background 0.15s;font-size:0.8rem;">
-            <span x-text="item.is_dir ? '<span class="ki" data-icon="folder" aria-hidden="true"></span>' : fileIcon(item.name)" style="width:20px;"></span>
+            <span x-html="rowIcon(item)" style="width:20px;"></span>
             <span x-text="item.name" style="flex:1;" :style="{ fontWeight: item.is_dir ? '500' : '400' }"></span>
             <span x-text="item.size || ''" style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
           </div>
@@ -668,7 +668,7 @@
           <div @click="a.html_url && window.open(a.html_url, '_blank')"
                style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--tint);font-size:0.78rem;cursor:pointer;transition:background 0.15s;"
                onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
-            <span style="width:18px;font-size:0.85rem;" x-text="{commit:'<span class="ki" data-icon="package" aria-hidden="true"></span>',pr:'<span class="ki" data-icon="git-branch" aria-hidden="true"></span>',issue:'<span class="ki" data-icon="bug" aria-hidden="true"></span>',ci:'<span class="ki" data-icon="bot" aria-hidden="true"></span>'}[a.type] || '•'"></span>
+            <span style="width:18px;font-size:0.85rem;" x-html="activityIcon(a.type)"></span>
             <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-primary);" x-text="a.descriptor"></span>
             <span style="font-size:0.65rem;color:var(--text-muted);flex-shrink:0;" x-text="a.actor"></span>
             <span style="font-size:0.6rem;color:var(--text-tertiary);flex-shrink:0;" x-text="ghRelativeTime(a.timestamp)"></span>
@@ -1100,6 +1100,7 @@ function workspaceApp() {
         const resp = await fetch('/api/github/oauth/status');
         if (resp.ok) {
           const data = await resp.json();
+          const wasAuthed = this.ghOAuthConnected || this.ghHasToken;
           this.ghOAuthConfigured = data.configured || false;
           this.ghOAuthConnected = data.connected || false;
           // Server reports any usable token (OAuth or PAT/env) so PAT-only
@@ -1108,8 +1109,10 @@ function workspaceApp() {
             this.ghHasToken = true;
           }
           this.ghOAuthChecked = true;
-          // If just connected (OAuth or token present), refresh overview.
-          if (this.ghOAuthConnected || data.has_token) {
+          // Refresh the overview when the connection APPEARS. This ran on
+          // every 10 s poll, which already refreshes it, so each tick asked
+          // GitHub twice (2026-09-26).
+          if ((this.ghOAuthConnected || data.has_token) && !wasAuthed) {
             await this.loadGitHubStatus();
           }
         }
@@ -1413,19 +1416,40 @@ function workspaceApp() {
       }
     },
 
+    // A file-tree row's icon, as markup for x-html. It went through x-text
+    // with a double quote inside a double-quoted attribute, which cut the
+    // expression at `class=` (a SyntaxError on every row, and no icon) --
+    // and x-text would have printed the markup as text anyway (2026-09-26).
+    // KazmaIcons.span() returns the icon already filled: icons.js hydrates
+    // [data-icon] only on DOM ready, so a bare span inserted later is empty.
+    rowIcon(item) {
+      if (item && item.is_dir) return this._icon('folder');
+      return this.fileIcon(item && item.name);
+    },
+
     fileIcon(name) {
-      if (!name) return '<span class="ki" data-icon="file" aria-hidden="true"></span>';
-      const ext = name.split('.').pop().toLowerCase();
-      const icons = {
-        py: '<span class="ki" data-icon="code" aria-hidden="true"></span>', js: '<span class="ki" data-icon="square" aria-hidden="true"></span>', ts: '<span class="ki" data-icon="hexagon" aria-hidden="true"></span>', tsx: '<span class="ki" data-icon="atom" aria-hidden="true"></span>', jsx: '<span class="ki" data-icon="atom" aria-hidden="true"></span>',
-        html: '<span class="ki" data-icon="globe" aria-hidden="true"></span>', css: '<span class="ki" data-icon="palette" aria-hidden="true"></span>', json: '<span class="ki" data-icon="clipboard" aria-hidden="true"></span>', yaml: '<span class="ki" data-icon="settings" aria-hidden="true"></span>', yml: '<span class="ki" data-icon="settings" aria-hidden="true"></span>',
-        md: '<span class="ki" data-icon="file-text" aria-hidden="true"></span>', txt: '<span class="ki" data-icon="file" aria-hidden="true"></span>', log: '<span class="ki" data-icon="clipboard" aria-hidden="true"></span>', csv: '<span class="ki" data-icon="bar-chart" aria-hidden="true"></span>',
-        toml: '<span class="ki" data-icon="settings" aria-hidden="true"></span>', ini: '<span class="ki" data-icon="settings" aria-hidden="true"></span>', cfg: '<span class="ki" data-icon="settings" aria-hidden="true"></span>', env: '<span class="ki" data-icon="lock" aria-hidden="true"></span>',
-        sh: '<span class="ki" data-icon="laptop" aria-hidden="true"></span>', bash: '<span class="ki" data-icon="laptop" aria-hidden="true"></span>', zsh: '<span class="ki" data-icon="laptop" aria-hidden="true"></span>',
-        gitignore: '<span class="ki" data-icon="eye-off" aria-hidden="true"></span>', lock: '<span class="ki" data-icon="lock" aria-hidden="true"></span>', dockerfile: '<span class="ki" data-icon="box" aria-hidden="true"></span>',
-        png: '<span class="ki" data-icon="image" aria-hidden="true"></span>', jpg: '<span class="ki" data-icon="image" aria-hidden="true"></span>', svg: '<span class="ki" data-icon="target" aria-hidden="true"></span>', ico: '<span class="ki" data-icon="target" aria-hidden="true"></span>',
+      const byExt = {
+        py: 'code', js: 'square', ts: 'hexagon', tsx: 'atom', jsx: 'atom',
+        html: 'globe', css: 'palette', json: 'clipboard', yaml: 'settings', yml: 'settings',
+        md: 'file-text', txt: 'file', log: 'clipboard', csv: 'bar-chart',
+        toml: 'settings', ini: 'settings', cfg: 'settings', env: 'lock',
+        sh: 'laptop', bash: 'laptop', zsh: 'laptop',
+        gitignore: 'eye-off', lock: 'lock', dockerfile: 'box',
+        png: 'image', jpg: 'image', svg: 'target', ico: 'target',
       };
-      return icons[ext] || '<span class="ki" data-icon="file" aria-hidden="true"></span>';
+      const ext = String(name || '').split('.').pop().toLowerCase();
+      return this._icon((name && byExt[ext]) || 'file');
+    },
+
+    _icon(iconName) {
+      return window.KazmaIcons ? window.KazmaIcons.span(iconName) : '';
+    },
+
+    // A GitHub activity row's icon (same quoting bug as rowIcon: the map of
+    // markup sat in a double-quoted x-text and cut it at `class=`).
+    activityIcon(type) {
+      const byType = { commit: 'package', pr: 'git-branch', issue: 'bug', ci: 'bot' };
+      return byType[type] ? this._icon(byType[type]) : '•';
     },
 
     async runTests() {

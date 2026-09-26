@@ -256,7 +256,7 @@
                     <template x-if="hubTestResult?.success">
                         <span class="text-success">{{ t('settings.connected_latency') }} <span x-text="hubTestResult.latency_ms"></span>ms</span>
                     </template>
-                    <template x-if="!hubTestResult?.success">
+                    <template x-if="hubTestResult && !hubTestResult.success">
                         <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="hubTestResult.error"></span></span>
                     </template>
                 </div>
@@ -594,7 +594,7 @@
                         <template x-if="hubTestResult?.success">
                             <span class="text-success">{{ t('settings.connected') }} <span x-text="hubTestResult.bot_name ? '(' + hubTestResult.bot_name + ')' : ''"></span></span>
                         </template>
-                        <template x-if="!hubTestResult?.success">
+                        <template x-if="hubTestResult && !hubTestResult.success">
                             <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="hubTestResult.error"></span></span>
                         </template>
                     </div>
@@ -1747,7 +1747,7 @@
             <div x-show="shortcutConflicts.length > 0" style="padding:12px;background:rgba(210,153,34,0.08);border:1px solid var(--warning);border-radius:var(--radius);margin-bottom:16px" x-cloak>
                 <div style="color:var(--warning);font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:6px"><span class="ki" data-icon="alert" aria-hidden="true"></span> {{ t('settings.conflicts_detected') }}</div>
                 <template x-for="c in shortcutConflicts" :key="c.action1 + c.action2">
-                    <div style="font-size:0.85rem;color:var(--text-secondary)" x-text="`"${c.action1}" ` + t('settings.kb_and') + ` "${c.action2}" ` + t('settings.kb_both_use') + ` ${c.keys}`"></div>
+                    <div style="font-size:0.85rem;color:var(--text-secondary)" x-text="conflictLine(c)"></div>
                 </template>
             </div>
 

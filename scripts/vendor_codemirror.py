@@ -19,10 +19,22 @@ Order in the lists below is load order and it matters:
 ``closetag``, ``annotatescrollbar`` must precede ``matchesonscrollbar``, and a
 mode that embeds another (``htmlmixed``, ``php``, ``jsx``, ``markdown``) must
 come after the modes it embeds.
+
+The build checks that rule instead of trusting it: every ``require("...")`` in
+a file's UMD header must name a file bundled EARLIER (``_check_dependencies``).
+The bundle is one script, so one missing dependency throws at load and every
+file after it never registers -- the Rust and Dockerfile modes needed
+``addon/mode/simple.js``, which was not in the list, and took Go, Ruby,
+Dockerfile, TOML, diff, PowerShell, properties and Lua down with them
+(2026-09-26).
+
+The package comes from the npm cache when it is there (``--prefer-offline``).
 """
 
 from __future__ import annotations
 
+import posixpath
+import re
 import shutil
 import subprocess
 import tarfile
@@ -88,7 +100,9 @@ JS_FILES = [
     # Sublime bindings are what make it feel like an editor people already know
     # (Ctrl-D multi-select, Ctrl-/ comment, Alt-Up/Down move line).
     "keymap/sublime.js",
-    # Modes. meta.js gives findModeByExtension / findModeByName.
+    # Modes. meta.js gives findModeByExtension / findModeByName; simple.js is
+    # defineSimpleMode, which the Rust and Dockerfile modes are written in.
+    "addon/mode/simple.js",
     "mode/meta.js",
     "mode/xml/xml.js",
     "mode/javascript/javascript.js",
@@ -132,7 +146,7 @@ def _fetch(workdir: Path) -> Path:
     if npm is None:
         raise SystemExit("npm not found on PATH -- install Node.js to vendor CodeMirror")
     proc = subprocess.run(
-        [npm, "pack", f"codemirror@{CM_VERSION}", "--silent"],
+        [npm, "pack", f"codemirror@{CM_VERSION}", "--silent", "--prefer-offline"],
         cwd=str(workdir),
         capture_output=True,
         text=True,
@@ -166,7 +180,7 @@ def _minify_js(text: str, workdir: Path) -> str:
         print("  npx not found — shipping unminified")
         return text
     proc = subprocess.run(
-        [npx, "--yes", "terser@5", str(src), "-c", "-m", "-o", str(out)],
+        [npx, "--yes", "--prefer-offline", "terser@5", str(src), "-c", "-m", "-o", str(out)],
         capture_output=True,
         text=True,
         check=False,
@@ -178,6 +192,40 @@ def _minify_js(text: str, workdir: Path) -> str:
     minified = out.read_text(encoding="utf-8")
     print(f"  minified: {len(text) // 1024} KB -> {len(minified) // 1024} KB")
     return minified
+
+
+_REQUIRE = re.compile(r"""require\(\s*["']([^"']+)["']\s*\)""")
+
+
+def module_dependencies(name: str, source: str) -> list[str]:
+    """Package paths a bundled file requires, e.g. ``addon/mode/simple.js``."""
+    deps = []
+    for rel in _REQUIRE.findall(source):
+        if not rel.startswith("."):
+            continue  # not a sibling file of the package
+        dep = posixpath.normpath(posixpath.join(posixpath.dirname(name), rel))
+        deps.append(dep if dep.endswith(".js") else dep + ".js")
+    return deps
+
+
+def dependency_problems(names: list[str], sources: dict[str, str]) -> list[str]:
+    """Every require() that names a file not bundled before the file needing it."""
+    problems = []
+    for i, name in enumerate(names):
+        earlier = set(names[:i])
+        for dep in module_dependencies(name, sources[name]):
+            if dep in earlier:
+                continue
+            where = "after it" if dep in names else "not bundled"
+            problems.append(f"{name} requires {dep} ({where})")
+    return problems
+
+
+def _check_dependencies(pkg: Path, names: list[str]) -> None:
+    sources = {n: (pkg / n).read_text(encoding="utf-8") for n in names if n.endswith(".js")}
+    problems = dependency_problems([n for n in names if n.endswith(".js")], sources)
+    if problems:
+        raise SystemExit("bundle order is broken:\n  " + "\n  ".join(problems))
 
 
 def _bundle(pkg: Path, names: list[str], kind: str) -> str:
@@ -200,6 +248,7 @@ def _bundle(pkg: Path, names: list[str], kind: str) -> str:
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         pkg = _fetch(Path(tmp))
+        _check_dependencies(pkg, JS_FILES)
         js = _minify_js(_bundle(pkg, JS_FILES, "js "), Path(tmp))
         css = _bundle(pkg, CSS_FILES, "css")
         license_text = (pkg / "LICENSE").read_text(encoding="utf-8")

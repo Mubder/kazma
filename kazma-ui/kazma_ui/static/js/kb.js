@@ -66,6 +66,11 @@ function knowledgePage() {
   }
 
   return {
+    // The page's own strings, for the template's `S.tab_active` and friends.
+    // `S` was a closure constant only, so those bindings threw "S is not
+    // defined" on every load and the tab labels fell to nothing (2026-09-26,
+    // tests/e2e/test_pages_load_clean.py).
+    S,
     loading: false,
     creating: false,
     libraries: [],
