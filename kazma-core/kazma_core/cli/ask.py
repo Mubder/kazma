@@ -524,7 +524,9 @@ async def _invoke_supervisor(
         if hitl:
             from langgraph.checkpoint.memory import MemorySaver
 
-            checkpointer = MemorySaver()
+            from kazma_core.checkpoint_serde import kazma_checkpoint_serde
+
+            checkpointer = MemorySaver(serde=kazma_checkpoint_serde())
 
     graph = build_supervisor_graph(
         llm=agent.llm,

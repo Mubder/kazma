@@ -398,6 +398,17 @@ def test_a_watching_tab_shows_each_turn_in_its_own_block(two_tabs, socket_only) 
     )
     assert watch_diag == [], f"the watching tab reported turns it could not show: {watch_diag}"
 
+    # The line under each answer the watcher saw live is the one the sender
+    # shows. The socket bridge updated the badges only, so a watching tab
+    # never showed it (2026-09-26); both mouths now paint it.
+    stats_js = (
+        "() => Array.from(document.querySelectorAll('.message-assistant .message-meta'))"
+        ".map((m) => m.getAttribute('data-stats') || '')"
+    )
+    sender_stats, watcher_stats = sender.evaluate(stats_js), watcher.evaluate(stats_js)
+    assert all(sender_stats[1:]), f"the sender painted no stats line: {sender_stats}"
+    assert watcher_stats[1:] == sender_stats[1:], (watcher_stats, sender_stats)
+
     # And the sender never painted its own question twice.
     sent = sender.evaluate("() => document.querySelectorAll('.message-user').length")
     assert sent == 3, f"the sending tab shows {sent} user rows for three sends"

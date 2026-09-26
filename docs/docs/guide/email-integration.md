@@ -39,6 +39,13 @@ Common args: `provider` (`auto`\|`sandbox`\|`gmail`\|`microsoft`\|`imap`\|`pop`)
 3. First configured real account (Gmail → Microsoft → generic IMAP/POP → multi-account aliases)  
 4. **Sandbox**
 
+A provider or account named in steps 1–2 that is **not connected is refused**
+("Gmail is not connected. Settings → Email → …"), never answered from the
+sandbox — the same rule Calendar follows. An unknown provider name or a
+mistyped account alias is refused too. The sandbox answers only `auto` with
+nothing connected, `provider=sandbox`, or an account whose `TYPE` is
+`sandbox`.
+
 ## Connect email (Settings UI)
 
 Open **Settings → Email** (`/settings?tab=email`).

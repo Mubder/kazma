@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## Email refuses a mailbox that is not connected; a fresh install's first question is quiet (2026-09-26)
+
+**Asking for a mailbox that is not connected no longer "works".** Naming
+Gmail, Outlook, IMAP, POP or an account that is not connected used to fall
+back to the demo sandbox mailbox -- "Sandbox sent to …" for an email that
+never left. A mistyped account name did the same. Kazma now says the
+mailbox is not connected and where to connect it, the way Calendar already
+does. Asking without naming a mailbox still uses the sandbox when nothing
+is connected.
+
+**Approval steps no longer spin on a finished answer.** "Approved" and
+"Approval resolved" rows kept a spinner forever, live and after a reload.
+
+**A second tab shows the line under each answer too.** A tab watching a
+chat that another tab was driving showed the answers but never their
+tokens, cost and duration. A model that reports no usage now shows just
+the duration instead of "0 tokens · $0.0000".
+
+**A new install's first question no longer logs an error.** Before
+anything had been remembered, the memory lookup failed on missing tables
+(an ERROR in the log, and the dashboard could flag memory as degraded) and
+created an empty memory file as a side effect. It now simply finds nothing.
+
+**Saved conversations are read back the same way everywhere.** Every part
+of Kazma now reads conversation checkpoints with one strict reader that
+only rebuilds Kazma's and LangGraph's own types. Two components used a
+permissive default, so which one opened the store first decided how strict
+the whole server was.
+
 ## A reloaded answer keeps its stats, its time and its finished state (2026-09-26)
 
 **Reloading a chat dropped the line under each answer.** The tokens, cost

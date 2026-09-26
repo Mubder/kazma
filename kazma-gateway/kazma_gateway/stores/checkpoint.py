@@ -22,6 +22,7 @@ from typing import Any
 
 import aiosqlite
 from langchain_core.runnables import RunnableConfig
+from kazma_core.checkpoint_serde import kazma_checkpoint_serde
 from kazma_core.config_store import apply_sqlite_pragmas_async
 from kazma_core.tenant_context import get_current_tenant_id
 from langgraph.checkpoint.base import (
@@ -31,8 +32,6 @@ from langgraph.checkpoint.base import (
     CheckpointMetadata,
 )
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-from langgraph.checkpoint.serde._msgpack import SAFE_MSGPACK_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -109,17 +108,8 @@ class CheckpointManager(BaseCheckpointSaver):
                 conn = await aiosqlite.connect(str(db_path))
                 await apply_sqlite_pragmas_async(conn)
 
-                # Copy the serde from self._saver or use JsonPlusSerializer with custom settings
-                serde = getattr(self._saver, "serde", None)
-                if serde is None:
-                    serde = JsonPlusSerializer(
-                        allowed_msgpack_modules=list(SAFE_MSGPACK_TYPES) + [
-                            ("kazma_core.agent.state", "NodeName"),
-                            ("kazma_core.agent.intent.types", "ActKind"),
-                        ]
-                    )
-
-                saver = AsyncSqliteSaver(conn, serde=serde)
+                # The one strict serializer (kazma_core/checkpoint_serde.py).
+                saver = AsyncSqliteSaver(conn, serde=kazma_checkpoint_serde())
                 await saver.setup()
                 self._tenant_savers[tenant_id] = saver
                 # Bound the saver cache (audit M-G3): one open SQLite
@@ -540,13 +530,6 @@ async def create_checkpoint_manager(
     Returns:
         Initialized CheckpointManager ready for graph.compile(checkpointer=...).
     """
-    serde = JsonPlusSerializer(
-        allowed_msgpack_modules=list(SAFE_MSGPACK_TYPES) + [
-            ("kazma_core.agent.state", "NodeName"),
-            ("kazma_core.agent.intent.types", "ActKind"),
-        ]
-    )
-
     # ── Postgres checkpointer (multi-replica) ──────────────────────
     try:
         from kazma_core.db.backend import get_database_url, is_postgres
@@ -575,7 +558,7 @@ async def create_checkpoint_manager(
                     open=False,
                 )
                 await pool.open()
-                saver = AsyncPostgresSaver(conn=pool, serde=serde)  # type: ignore[arg-type]
+                saver = AsyncPostgresSaver(conn=pool, serde=kazma_checkpoint_serde())  # type: ignore[arg-type]
 
                 if hasattr(saver, "setup"):
                     await saver.setup()
@@ -618,7 +601,7 @@ async def create_checkpoint_manager(
         retain_shared_checkpoints,
     )
 
-    saver = await get_shared_sqlite_saver(str(path), serde=serde)
+    saver = await get_shared_sqlite_saver(str(path))
     # Lifetime retention (audit M-G5): the server's CheckpointManager holds
     # this saver for the process lifetime and never releases — transient
     # holders (KazmaAgent) can release without closing it out from under

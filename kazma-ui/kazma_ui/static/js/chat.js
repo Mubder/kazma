@@ -3228,12 +3228,7 @@
             cost: Number(data.cost) || 0,
             durationMs: Number(data.duration_ms) || 0,
           };
-          if (currentMsgEl) {
-            var meta = currentMsgEl.querySelector('.message-meta');
-            var metaFields = { stats: _turnStatsText(data.tokens, data.cost, data.duration_ms) };
-            if (data.model) metaFields.model = data.model;
-            _paintMetaTail(meta, metaFields);
-          }
+          _paintTurnStatsFor(data, currentMsgEl);
           updateContextBadgeSoon();
         }
         // Typed-chat replies stay silent. Speak is the 🔊 on the message
@@ -4323,9 +4318,14 @@
       var kind = row.kind === 'tool' ? 'tool'
         : (row.kind === 'thought' ? 'thought'
           : (row.kind === 'error' ? 'error' : 'status'));
+      // A row spins only when it SAYS it is running. Gate rows ("Approved",
+      // "Approval resolved", "Waiting for approval") carry `info`, and this
+      // used to draw every status row without running/failed/done as
+      // running -- so a decided gate spun forever, live and after every
+      // reload (2026-09-26). `info` is the step template's own default.
       var state = row.state === 'running' ? 'running'
-        : (row.state === 'failed' ? 'failed'
-          : (row.state === 'done' ? 'done' : (kind === 'status' ? 'running' : 'done')));
+        : ((row.state === 'failed' || row.state === 'error') ? 'failed'
+          : (row.state === 'done' ? 'done' : (kind === 'status' ? 'info' : 'done')));
       var rawTitle = String(row.title || '').trim() || '\u2026';
       var title = kind === 'tool' ? _friendlyToolName(rawTitle) : rawTitle;
       // Same canonicalization as the live path: thinking heartbeats localized,
@@ -4535,13 +4535,34 @@
   // A turn's stats -- "1,234 tokens · $0.0042 · 3.1s". ONE format for the
   // live terminal frame and for a reload: the reload used to drop the line,
   // and the live frame used to overwrite the time with it (2026-09-26).
+  // Usage shows when there is some (a model that reports none is not "0
+  // tokens · $0.0000"); the duration whenever it is known.
   function _turnStatsText(tokens, cost, durationMs) {
-    var bits = [
-      KS.formatTokens(Number(tokens) || 0) + ' ' + ti('tokens', 'tokens'),
-      KS.formatCost(Number(cost) || 0),
-    ];
+    var bits = [];
+    if (Number(tokens) > 0 || Number(cost) > 0) {
+      bits.push(KS.formatTokens(Number(tokens) || 0) + ' ' + ti('tokens', 'tokens'));
+      bits.push(KS.formatCost(Number(cost) || 0));
+    }
     if (Number(durationMs) > 0) bits.push(KS.formatDuration(Number(durationMs)));
     return bits.join(' · ');
+  }
+
+  // The stats line under the bubble of the turn a terminal frame ends. BOTH
+  // mouths call this: the WebSocket bridge used to update the badges only,
+  // so a second tab never showed the line under an answer it watched
+  // (2026-09-26). A frame with no usage fields (a bare turn_complete) leaves
+  // the line alone rather than clearing it.
+  function _paintTurnStatsFor(data, fallbackEl) {
+    if (!data || (data.tokens == null && data.cost == null && data.duration_ms == null)) return;
+    var TV = _turnView();
+    var tid = String(data.turn_id || '');
+    var el = (tid && TV && typeof TV.elFor === 'function') ? TV.elFor(tid) : null;
+    el = el || fallbackEl || null;
+    var meta = (el && el.querySelector) ? el.querySelector('.message-meta') : null;
+    if (!meta) return;
+    var fields = { stats: _turnStatsText(data.tokens, data.cost, data.duration_ms) };
+    if (data.model) fields.model = data.model;
+    _paintMetaTail(meta, fields);
   }
 
   // The ONE writer of a bubble's meta line after its time:
@@ -4599,7 +4620,7 @@
     // Without it a reload kept only the time and the model (2026-09-26).
     var statsText = '';
     var usage = (opts && opts.usage) || null;
-    if (role === 'assistant' && usage && (Number(usage.tokens) > 0 || Number(usage.cost) > 0)) {
+    if (role === 'assistant' && usage) {
       statsText = _turnStatsText(usage.tokens, usage.cost, usage.duration_ms);
     }
     if (role === 'assistant' && opts && opts.turn_id) {
@@ -8357,6 +8378,8 @@
           durationMs: Number(data.duration_ms) || 0,
         };
       }
+      // The line under the answer, as the stream paints it.
+      _paintTurnStatsFor(data, currentMsgEl);
       updateContextBadgeSoon();
     },
     isGenerating: function() { return _isGenerating; },

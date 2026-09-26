@@ -1,4 +1,12 @@
-"""Resolve email provider → backend (auto / sandbox / gmail / microsoft / imap / pop)."""
+"""Resolve email provider → backend (auto / sandbox / gmail / microsoft / imap / pop).
+
+The sandbox mailbox answers only when nothing was named and nothing is
+connected, or when the sandbox itself was asked for. A provider or account
+named explicitly -- in the call, by ``EMAIL_DEFAULT_PROVIDER``, or as an
+account alias -- that is not connected raises :class:`EmailNotConnectedError`
+instead: "Sandbox sent to …" after asking for Gmail is a send that did not
+happen, reported as one that did (the AGENTS.md §34 rule, already Calendar's).
+"""
 
 from __future__ import annotations
 
@@ -18,6 +26,42 @@ from kazma_skills.native.email_manager.credentials import (
 from kazma_skills.native.email_manager.presets import get_preset
 
 logger = logging.getLogger(__name__)
+
+GMAIL_NOT_CONNECTED = (
+    "Gmail is not connected. Settings → Email → Connect with Google, or set an "
+    "app password for IMAP/POP."
+)
+MICROSOFT_NOT_CONNECTED = (
+    "Microsoft mail is not connected. Settings → Email → Connect with Microsoft, "
+    "or set an address and password for IMAP/POP."
+)
+IMAP_NOT_CONNECTED = (
+    "IMAP is not configured. Set the address, password and IMAP host "
+    "(EMAIL_ADDRESS, EMAIL_PASSWORD, EMAIL_IMAP_HOST) in Settings → Email."
+)
+POP_NOT_CONNECTED = (
+    "POP is not configured. Set the address, password and POP host "
+    "(EMAIL_ADDRESS, EMAIL_PASSWORD, EMAIL_POP_HOST) in Settings → Email."
+)
+_KNOWN_PROVIDERS = (
+    "sandbox", "gmail", "microsoft", "microsoft_graph", "outlook", "imap", "pop",
+)
+
+
+class EmailNotConnectedError(RuntimeError):
+    """An email provider or account was named explicitly and is not connected."""
+
+    def __init__(self, target: str, hint: str) -> None:
+        super().__init__(hint)
+        self.target = target
+        self.hint = hint
+
+
+def _account_hint(alias: str, detail: str) -> str:
+    return (
+        f"Email account '{alias}' {detail}. Configure it in Settings → Email "
+        "(EMAIL_ACCOUNTS + EMAIL_ACCOUNT_<ALIAS>_*), or name another account."
+    )
 
 
 def _env(name: str, default: str = "") -> str:
@@ -113,19 +157,16 @@ def resolve_provider(provider: str | None = None, account: str | None = None) ->
     aliases = list_account_aliases()
     if p in {a.lower() for a in aliases}:
         return f"account:{p}"
-    if p in (
-        "sandbox",
-        "gmail",
-        "microsoft",
-        "microsoft_graph",
-        "outlook",
-        "imap",
-        "pop",
-    ):
+    if p in _KNOWN_PROVIDERS:
         if p in ("microsoft_graph", "outlook"):
             return "microsoft"
         return p
-    return "sandbox"
+    # Neither a provider nor a configured alias: say so, never the sandbox.
+    raise EmailNotConnectedError(
+        p,
+        f"Unknown email provider or account '{p}'. Use auto, gmail, microsoft, "
+        f"imap, pop, sandbox, or a configured account ({', '.join(aliases) or 'none'}).",
+    )
 
 
 def _imap_backend(
@@ -196,7 +237,15 @@ def _gmail_oauth_backend(name: str = "gmail_oauth") -> Any:
     )
 
 
-def _gmail_backend() -> Any:
+def _unconnected(target: str, hint: str, explicit: bool) -> Any:
+    """The sandbox for an auto choice; a refusal for an explicit one."""
+    if explicit:
+        raise EmailNotConnectedError(target, hint)
+    logger.info("[email] %s not connected → sandbox (nothing was named)", target)
+    return SandboxBackend()
+
+
+def _gmail_backend(explicit: bool = True) -> Any:
     mode = gmail_auth_mode()
     # Explicit IMAP/POP wins over OAuth when user chose protocol
     if mode in ("imap", "pop") and _gmail_password_ready():
@@ -245,11 +294,10 @@ def _gmail_backend() -> Any:
         )
     if oauth_b is not None:
         return oauth_b
-    logger.info("[email] gmail requested but missing OAuth/IMAP/POP creds → sandbox")
-    return SandboxBackend()
+    return _unconnected("gmail", GMAIL_NOT_CONNECTED, explicit)
 
 
-def _microsoft_backend() -> Any:
+def _microsoft_backend(explicit: bool = True) -> Any:
     mode = microsoft_auth_mode()
     if mode in ("imap", "pop") and _ms_password_ready():
         address = cred("EMAIL_MS_ADDRESS", "email.microsoft.address")
@@ -324,11 +372,18 @@ def _microsoft_backend() -> Any:
             smtp_port=int(preset.get("smtp_port") or 587),
         )
 
-    logger.info("[email] microsoft requested but missing tokens/password → sandbox")
-    return SandboxBackend()
+    return _unconnected("microsoft", MICROSOFT_NOT_CONNECTED, explicit)
 
 
 def get_backend(provider: str | None = None, account: str | None = None) -> Any:
+    """Return the backend for *provider* / *account*. Explicit choices fail closed.
+
+    Explicit = an account alias, or a provider other than ``auto`` named in the
+    call or by ``EMAIL_DEFAULT_PROVIDER``. Only ``auto`` with nothing connected,
+    or ``sandbox`` itself, answers from the sandbox mailbox.
+    """
+    requested = (provider or _env("EMAIL_DEFAULT_PROVIDER", "auto") or "auto").strip().lower()
+    explicit = bool(account and str(account).strip()) or requested not in ("", "auto")
     name = resolve_provider(provider, account)
 
     if name == "sandbox":
@@ -337,7 +392,21 @@ def get_backend(provider: str | None = None, account: str | None = None) -> Any:
     if name.startswith("account:"):
         alias = name.split(":", 1)[1]
         cfg = account_config(alias)
-        t = (cfg.get("type") or "sandbox").lower()
+        t = (cfg.get("type") or "").lower()
+        if not t:
+            # No TYPE: a typo'd alias, or one set up without it. Both used to
+            # default to the sandbox and "send" there.
+            configured = any(v for k, v in cfg.items() if k != "alias")
+            raise EmailNotConnectedError(
+                alias,
+                _account_hint(
+                    alias,
+                    "has no TYPE (gmail, microsoft, imap, pop or sandbox)"
+                    if configured else "is not configured",
+                ),
+            )
+        if t == "sandbox":
+            return SandboxBackend()
         if t == "gmail":
             if cfg.get("access_token") or cfg.get("refresh_token"):
                 from kazma_skills.native.email_manager.backends.gmail_api import (
@@ -354,8 +423,9 @@ def get_backend(provider: str | None = None, account: str | None = None) -> Any:
                     email_address=cfg.get("address") or "",
                 )
             if not cfg.get("address") or not cfg.get("password"):
-                logger.info("[email] account %s gmail incomplete → sandbox", alias)
-                return SandboxBackend()
+                raise EmailNotConnectedError(
+                    alias, _account_hint(alias, "(Gmail) has no token and no address/password")
+                )
             # Optional: TYPE=gmail with POP_HOST → pop
             if cfg.get("pop_host") and not cfg.get("imap_host"):
                 return _pop_backend(
@@ -421,10 +491,14 @@ def get_backend(provider: str | None = None, account: str | None = None) -> Any:
                     or "smtp.office365.com",
                     smtp_port=int(cfg.get("smtp_port") or "587"),
                 )
-            return SandboxBackend()
+            raise EmailNotConnectedError(
+                alias, _account_hint(alias, "(Microsoft) has no token and no address/password")
+            )
         if t == "imap":
             if not cfg.get("address") or not cfg.get("password") or not cfg.get("imap_host"):
-                return SandboxBackend()
+                raise EmailNotConnectedError(
+                    alias, _account_hint(alias, "(IMAP) needs an address, password and IMAP host")
+                )
             return _imap_backend(
                 name=f"imap:{alias}",
                 address=cfg["address"],
@@ -438,7 +512,9 @@ def get_backend(provider: str | None = None, account: str | None = None) -> Any:
         if t == "pop":
             host = cfg.get("pop_host") or cfg.get("imap_host") or ""
             if not cfg.get("address") or not cfg.get("password") or not host:
-                return SandboxBackend()
+                raise EmailNotConnectedError(
+                    alias, _account_hint(alias, "(POP) needs an address, password and POP host")
+                )
             return _pop_backend(
                 name=f"pop:{alias}",
                 address=cfg["address"],
@@ -448,18 +524,19 @@ def get_backend(provider: str | None = None, account: str | None = None) -> Any:
                 smtp_host=cfg.get("smtp_host") or host.replace("pop", "smtp"),
                 smtp_port=int(cfg.get("smtp_port") or "587"),
             )
-        return SandboxBackend()
+        raise EmailNotConnectedError(
+            alias, _account_hint(alias, f"has an unknown type '{t}'")
+        )
 
     if name == "gmail":
-        return _gmail_backend()
+        return _gmail_backend(explicit)
 
     if name == "imap":
         address = cred("EMAIL_ADDRESS") or vault_retrieve("email.generic.address")
         password = cred("EMAIL_PASSWORD", "email.imap.password")
         host = _env("EMAIL_IMAP_HOST")
         if not address or not password or not host:
-            logger.info("[email] imap requested but missing creds → sandbox")
-            return SandboxBackend()
+            return _unconnected("imap", IMAP_NOT_CONNECTED, explicit)
         return _imap_backend(
             name="imap",
             address=address,
@@ -476,8 +553,7 @@ def get_backend(provider: str | None = None, account: str | None = None) -> Any:
         password = cred("EMAIL_PASSWORD", "email.imap.password")
         host = _env("EMAIL_POP_HOST")
         if not address or not password or not host:
-            logger.info("[email] pop requested but missing creds → sandbox")
-            return SandboxBackend()
+            return _unconnected("pop", POP_NOT_CONNECTED, explicit)
         return _pop_backend(
             name="pop",
             address=address,
@@ -490,9 +566,9 @@ def get_backend(provider: str | None = None, account: str | None = None) -> Any:
         )
 
     if name == "microsoft":
-        return _microsoft_backend()
+        return _microsoft_backend(explicit)
 
-    return SandboxBackend()
+    raise EmailNotConnectedError(name, f"Unknown email provider '{name}'.")
 
 
 def mode_banner(backend: Any) -> str:

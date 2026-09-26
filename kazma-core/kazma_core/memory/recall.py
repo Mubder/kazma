@@ -119,7 +119,10 @@ def recall(
         try:
             from kazma_core.paths import primary_memory_db
 
-            conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+            conn = _connect_existing(primary_memory_db())
+            if conn is None:
+                logger.debug("[recall] no memory database yet -- nothing to recall")
+                return RecallResult([], [])
             # Apply WAL + busy_timeout so the access-bump UPDATE below doesn't
             # fail instantly with "database is locked" when a background
             # macro_sleep sweep holds the write lock (which silently skipped
@@ -143,6 +146,12 @@ def recall(
             do_explain = False
 
     try:
+        if not _memory_schema_present(conn):
+            # The schema is created by the first write (an episode after a
+            # turn), so a fresh install's first question lands here. Nothing
+            # has been remembered yet: not a failure, not a degraded store.
+            logger.debug("[recall] no memory schema yet -- nothing to recall")
+            return RecallResult([], [])
         # Two-phase: episodes first (hybrid FTS5+dense+PPR), then beliefs
         # bridged by the entities the episodes surface. This is how
         # "where do I live" → episode "I just moved to Paris" → belief
@@ -193,6 +202,37 @@ def recall(
                 conn.close()
             except Exception:
                 pass
+
+
+def _connect_existing(path: str) -> sqlite3.Connection | None:
+    """Open the memory database only if it exists.
+
+    A plain ``sqlite3.connect`` creates an empty file: a read made the
+    database, and then failed on its missing tables at ERROR (2026-09-26).
+    """
+    from pathlib import Path
+
+    target = Path(path)
+    if not target.is_file():
+        return None
+    return sqlite3.connect(
+        f"{target.resolve().as_uri()}?mode=rw", uri=True, check_same_thread=False
+    )
+
+
+#: The tables recall reads. Written by ``schema_v2.ensure_primary_schema``.
+_RECALL_TABLES = frozenset({"episodes", "beliefs"})
+
+
+def _memory_schema_present(conn: sqlite3.Connection) -> bool:
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?)",
+            tuple(sorted(_RECALL_TABLES)),
+        ).fetchall()
+    except sqlite3.Error:
+        return False
+    return {r[0] for r in rows} >= _RECALL_TABLES
 
 
 def _recall_postgres_primary(
