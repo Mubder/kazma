@@ -36,6 +36,7 @@ __all__ = [
     "pump_is_stalled",
     "reap_stale_turn",
     "register_turn",
+    "running_turn_count",
     "unbind_live_socket",
     "unregister_turn",
     "active_turns",
@@ -65,6 +66,21 @@ logger = logging.getLogger(__name__)
 
 # Back-compat alias: sse_chat historically exposed ``_active_turns``.
 active_turns = _turns
+
+
+def running_turn_count() -> int:
+    """How many registered turns are still running, on every transport.
+
+    SSE, WebSocket and the chat-platform gateway all register here, so this
+    is the one answer to "would a restart interrupt someone right now?"
+    (``/health/activity``, read by ``kazma_guard.py --reload --when-idle``).
+    """
+    with _lock:
+        tasks = list(_turns.values())
+    return sum(
+        1 for task in tasks
+        if not (callable(getattr(task, "done", None)) and task.done())
+    )
 
 
 def register_turn(thread_id: str, task: Any) -> None:

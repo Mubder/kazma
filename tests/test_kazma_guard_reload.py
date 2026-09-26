@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import ast
-from pathlib import Path
-
 import importlib.util
+from pathlib import Path
 
 _GUARD = Path("scripts/service/kazma_guard.py")
 _spec = importlib.util.spec_from_file_location("kazma_guard_under_test", _GUARD)
@@ -29,18 +28,27 @@ def test_guard_cli_has_reload() -> None:
 
 def test_reload_clears_pause_and_reaps_port() -> None:
     src = Path("scripts/service/kazma_guard.py").read_text(encoding="utf-8")
-    body = src.split("def _cmd_reload()", 1)[1].split("\ndef ", 1)[0]
+    body = src.split("def _cmd_reload(", 1)[1].split("\ndef ", 1)[0]
+    boot = src.split("def _wait_for_new_boot(", 1)[1].split("\ndef ", 1)[0]
     assert "clear_pause" in body
+    # The running guard is asked first; the shell-side stop is the fallback
+    # for a guard from before guard-side reloads.
+    assert "_guard_alive()" in body and "_wait_for_reload_ack" in body
     assert "reap_port_holder" in body
     assert "_stop_recorded_child" in body
-    assert "/health" in body or "_live_commit" in body
-    assert "START_TIMEOUT_S" in body
+    assert "_live_commit" in body
     assert "_kick_os_supervisor" in body
+    # A request no guard will act on is withdrawn, never left behind (an
+    # old guard woke on it every second: 47 hours of probes, 2026-09-20).
+    assert "consume_reload_request()" in body
+    assert "_wait_for_new_boot" in body and "START_TIMEOUT_S" in boot
     # Must not give up at 180s — cold start is 3–5 minutes.
-    assert "min(START_TIMEOUT_S, 180" not in body
-    # Flag must be written before the kill, or the running guard climbs
-    # the crash backoff (live 2026-08-31: 300s of connection-refused).
+    assert "min(START_TIMEOUT_S, 180" not in boot
+    # The request must exist before anything is stopped, or the running
+    # guard climbs the crash backoff (live 2026-08-31: 300s of
+    # connection-refused).
     assert body.index("request_reload") < body.index("_stop_recorded_child")
+    assert body.index("request_reload") < body.index("_kick_os_supervisor")
 
 
 def test_operator_reload_flag_is_consumed_once(tmp_path, monkeypatch) -> None:
@@ -58,12 +66,14 @@ def test_operator_reload_flag_is_consumed_once(tmp_path, monkeypatch) -> None:
 
 def test_run_loop_skips_crash_backoff_on_operator_reload() -> None:
     src = Path("scripts/service/kazma_guard.py").read_text(encoding="utf-8")
-    body = src.split("def run(self)", 1)[1].split("def _await_resume", 1)[0]
-    assert "consume_reload_request" in body
+    body = src.split("def run(self)", 1)[1].split("def _internal_error", 1)[0]
+    # The guard's own stop (RELOAD_REASON) and a child stopped by an older
+    # --reload (_fresh_reload_request) both skip the ladder.
+    assert "reason == RELOAD_REASON or self._fresh_reload_request()" in body
     assert "guard.operator_reload" in body
     # Negative control: a real crash still increments the ladder.
     assert "self.restarts += 1" in body
-    assert body.index("consume_reload_request") < body.index("self.restarts += 1")
+    assert body.index("self._fresh_reload_request()") < body.index("self.restarts += 1")
 
 
 def test_tasklist_info_line_is_not_a_process_name() -> None:

@@ -12,7 +12,7 @@ import subprocess
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from kazma_core.diagnostic_scope import read_only_diagnostic
 
@@ -63,8 +63,8 @@ def get_health_dependencies():
     Returns a dict of component checkers that can be called.
     """
     from kazma_core.config_store import get_config_store
-    from kazma_core.swarm import get_swarm_engine
     from kazma_core.model_registry import get_registry
+    from kazma_core.swarm import get_swarm_engine
 
     return {
         "config_store": get_config_store,
@@ -356,6 +356,49 @@ async def liveness():
         return {"status": "alive", "timestamp": time.time(), "build": get_build_info()}
 
 
+def _is_local_client(host: str) -> bool:
+    import ipaddress
+
+    try:
+        return ipaddress.ip_address((host or "").strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+@router.get("/health/activity")
+async def activity(request: Request):
+    """What a restart would interrupt right now -- for callers on THIS machine.
+
+    ``kazma_guard.py --reload --when-idle`` waits here until no turn is
+    running: a reload mid-turn drops the reply in flight, and once cost a
+    finished answer that existed only in memory. Counts only -- no thread ids,
+    no content -- and only to a local caller: behind a tunnel or proxy the
+    resolved client is the visitor (auth.client_address), and whether
+    someone is mid-turn is not a visitor's business. A pending approval is
+    reported but is not "busy": a paused turn is in the checkpoint and its
+    card survives a restart.
+    """
+    import sqlite3
+
+    with read_only_diagnostic("/health/activity"):
+        from kazma_ui.auth import client_address
+
+        if not _is_local_client(client_address(request)):
+            return JSONResponse({"detail": "local callers only"}, status_code=403)
+        from kazma_ui.active_turns import running_turn_count
+
+        running = running_turn_count()
+        pending: int | None
+        try:
+            from kazma_core.safety.hitl_gates import pending_gates_async
+
+            pending = len(await pending_gates_async())
+        except (ImportError, OSError, RuntimeError, sqlite3.Error):
+            logger.debug("[health] pending approvals unreadable", exc_info=True)
+            pending = None
+        return {"active_turns": running, "pending_approvals": pending, "idle": running == 0}
+
+
 # Every /health route runs inside read_only_diagnostic: a probe that writes
 # can change -- or destroy -- what it is probing (kazma_core.diagnostic_scope).
 # tests/test_diagnostics_are_read_only.py enforces it for each route here.
@@ -412,7 +455,7 @@ async def _readiness():
         checks["database"] = await asyncio.wait_for(
             asyncio.to_thread(check_database), timeout=3.0
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         checks["database"] = {
             "status": "failed",
             "component": "database",
@@ -481,8 +524,8 @@ def _health_details():
     checks["agent_runner"] = check_agent_runner()
 
     # Add system info
-    import sys
     import platform
+    import sys
 
     active_model = str(checks.get("model_registry", {}).get("active_model") or "")
     active_provider = str(checks.get("model_registry", {}).get("active_provider") or "")

@@ -190,10 +190,21 @@ def windows_task_ps1(*, elevated: bool = True) -> str:
     agent comes back at logon -- but it does NOT survive a reboot into the
     login screen, so it is a stepping stone, not the destination.
     """
+    # The repeating trigger is what brings a guard back after it exits.
+    # Restart-on-failure does not: Task Scheduler counts a process that ran
+    # and exited as a completed run, whatever its exit code. Live 2026-09-26
+    # the guard died, the task sat "Ready" with result 1, and Kazma ran with
+    # nobody supervising it. With IgnoreNew a running guard is left alone,
+    # so the trigger only ever starts a guard that is not there.
+    keep_alive = (
+        "(New-ScheduledTaskTrigger -Once -At (Get-Date) "
+        "-RepetitionInterval (New-TimeSpan -Minutes 5))"
+    )
     if elevated:
-        triggers = """@(
+        triggers = f"""@(
     (New-ScheduledTaskTrigger -AtStartup),
-    (New-ScheduledTaskTrigger -AtLogOn)
+    (New-ScheduledTaskTrigger -AtLogOn),
+    {keep_alive}
 )"""
         principal = (
             "New-ScheduledTaskPrincipal -UserId $env:USERNAME "
@@ -206,7 +217,7 @@ def windows_task_ps1(*, elevated: bool = True) -> str:
 # Run from an ELEVATED PowerShell:
 #     powershell -ExecutionPolicy Bypass -File install_windows_task.ps1"""
     else:
-        triggers = "@( (New-ScheduledTaskTrigger -AtLogOn) )"
+        triggers = f"@( (New-ScheduledTaskTrigger -AtLogOn), {keep_alive} )"
         principal = (
             "New-ScheduledTaskPrincipal -UserId $env:USERNAME "
             "-LogonType Interactive -RunLevel Limited"

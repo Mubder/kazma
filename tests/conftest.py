@@ -198,6 +198,19 @@ def _reset_swarm_singletons(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_guard_files(tmp_path, monkeypatch):
+    """The guard's state, reload and pause files point into the test's tmp dir.
+
+    Unset, they resolve to ``<checkout>/.kazma``: a test driving the guard
+    would read a developer's real flags there, or leave its own behind (the
+    guard writes a heartbeat and reload acknowledgements into its state).
+    """
+    monkeypatch.setenv("KAZMA_GUARD_STATE", str(tmp_path / "guard.state.json"))
+    monkeypatch.setenv("KAZMA_GUARD_RELOAD_FILE", str(tmp_path / "guard.reload"))
+    monkeypatch.setenv("KAZMA_GUARD_PAUSE_FILE", str(tmp_path / "guard.paused"))
+
+
+@pytest.fixture(autouse=True)
 def _isolated_hitl_gate_registry(tmp_path):
     """Give every test its own gate registry, and keep tests off the real one.
 
