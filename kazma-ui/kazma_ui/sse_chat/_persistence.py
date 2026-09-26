@@ -199,9 +199,26 @@ async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
         tid = getattr(session, "thread_id", "") or ""
         if not live or not tid or not getattr(live, "checkpointer", None):
             return messages
+        # Only a turn whose run has ENDED can be stranded. While the drive
+        # runs, or while it waits on an approval, the checkpoint's last AI
+        # message is the narration attached to its tool calls and the pump
+        # owns the reply. Healing then wrote that narration over the open
+        # row as a FINISHED reply (interrupted=False), on the page's own
+        # /messages reconcile: the turn read "Completed" beside a live
+        # approval card, and the next send superseded the real answer
+        # (reproduced 2026-09-26 on a turn that narrated before each tool).
+        from kazma_ui.active_turns import is_turn_running
+        from kazma_ui.sse_chat._streaming import is_thread_paused
+
+        if is_turn_running(tid) or is_thread_paused(tid):
+            return messages
         snap = await live.aget_state(
             {"configurable": {"thread_id": tid, "checkpoint_ns": ""}}
         )
+        # The checkpoint's own answer, and the one that survives a restart:
+        # a graph with a next node is paused or cut off mid-run, not done.
+        if snap is not None and getattr(snap, "next", None):
+            return messages
         vals = (snap.values or {}) if snap else {}
         cp_msgs = [m for m in (vals.get("messages") or []) if isinstance(m, dict)]
         cp_last = next(

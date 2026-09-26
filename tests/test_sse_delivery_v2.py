@@ -73,11 +73,31 @@ class TestFrameFormatting:
 
     def test_frame_from_journaled_stamps_seq(self):
         out = _frame_from_journaled(
-            {"type": "llm_delta", "data": {"content": "x"}, "seq": 12}
+            {"type": "llm_delta", "data": {"content": "x"}, "seq": 12}, replay=True
         )
         assert _ids(out) == [12]
         assert '"seq": 12' in out
         assert out.startswith("id: 12\nevent: llm_delta\ndata: ")
+
+    def test_only_history_is_stamped_replay(self):
+        """The stamp says HISTORY. A live frame carrying it is refused by
+        every pending-approval painter in the client, so a brand-new card
+        waited for the reconciler (2026-09-26)."""
+        frame = {"type": "approval_required", "data": {"tool": "python_exec"}, "seq": 3}
+        assert '"replay": true' in _frame_from_journaled(frame, replay=True)
+        live = _frame_from_journaled(frame, replay=False)
+        assert '"replay"' not in live
+        # A stamp already in the stored data is not carried onto a live send.
+        stored = {"type": "approval_required", "data": {"tool": "x", "replay": True}, "seq": 4}
+        assert '"replay"' not in _frame_from_journaled(stored, replay=False)
+
+    def test_provenance_has_no_default(self):
+        """Both renderers make every caller decide; the unconditional stamp
+        was a default nobody chose."""
+        with pytest.raises(TypeError):
+            _frame_from_journaled({"type": "token", "data": {}, "seq": 1})  # type: ignore[call-arg]
+        with pytest.raises(TypeError):
+            _sse_attach_stream("t", "s", 0)  # type: ignore[call-arg]
 
 
 # ── Attach stream behaviour ───────────────────────────────────────────────
@@ -97,7 +117,7 @@ class TestAttachStream:
 
         register_turn("tA", fake_turn)
         try:
-            gen = _sse_attach_stream("tA", "sess-A", 0)
+            gen = _sse_attach_stream("tA", "sess-A", 0, replay_is_history=True)
             collector = asyncio.create_task(_collect(gen))
             # Let the generator subscribe + start replaying.
             await asyncio.sleep(0.08)
@@ -132,12 +152,35 @@ class TestAttachStream:
         # Terminal closed the stream.
         assert frames[-1].startswith("id: 4\nevent: turn_complete")
 
+        # Provenance: what was journaled before the attach is history, what
+        # arrived after it is live. Every frame used to be stamped replay,
+        # so a live approval on this tail was refused by the client.
+        by_id = {(_ids(f) or [0])[0]: f for f in frames[1:]}
+        assert '"replay": true' in by_id[1] and '"replay": true' in by_id[2]
+        assert '"replay"' not in by_id[3] and '"replay"' not in by_id[4]
+
+    @pytest.mark.asyncio
+    async def test_a_senders_own_opening_frames_are_live(self):
+        """The tab that started the turn attaches at the head it captured
+        before the drive; anything journaled between that capture and the
+        subscribe is its own turn's first frames, not history."""
+        broker = get_turn_broker()
+        head = broker.head_seq("tS")
+        await broker.emit("tS", {"type": "approval_required", "data": {"tool": "python_exec"}})
+        await broker.emit("tS", {"type": "done", "data": {"content": "ok", "interrupted": False}})
+        frames = await _collect(
+            _sse_attach_stream("tS", "sess-S", head, replay_is_history=False), timeout=5.0
+        )
+        body = [f for f in frames if f.startswith("id: ")]
+        assert len(body) == 2
+        assert all('"replay"' not in f for f in body)
+
     @pytest.mark.asyncio
     async def test_cursor_midstream_replays_only_missed_window(self):
         broker = get_turn_broker()
         for i in range(5):
             await broker.emit("tB", {"type": "llm_delta", "data": {"i": i}})
-        frames = await _collect(_sse_attach_stream("tB", "sess-B", 3))
+        frames = await _collect(_sse_attach_stream("tB", "sess-B", 3, replay_is_history=True))
         assert frames[0].startswith("event: resumed")
         body_ids = []
         for f in frames[1:]:
@@ -149,7 +192,7 @@ class TestAttachStream:
         broker = get_turn_broker()
         await broker.emit("tC", {"type": "llm_delta"})
         frames = await _collect(
-            _sse_attach_stream("tC", "sess-C", 1), timeout=5.0
+            _sse_attach_stream("tC", "sess-C", 1, replay_is_history=True), timeout=5.0
         )
         resumed = frames[0]
         assert '"count": 0' in resumed and '"running": false' in resumed
@@ -165,7 +208,9 @@ class TestAttachStream:
             await small.emit("tGap", {"type": "llm_delta"})
         monkeypatch.setattr(sse_streaming, "get_turn_broker", lambda: small)
 
-        frames = await _collect(_sse_attach_stream("tGap", "sess-G", 1), timeout=5.0)
+        frames = await _collect(
+            _sse_attach_stream("tGap", "sess-G", 1, replay_is_history=True), timeout=5.0
+        )
         joined = "\n".join(frames)
         assert '"gap": true' in joined
         assert '"status": "resync"' in joined
@@ -176,7 +221,7 @@ class TestAttachStream:
     async def test_stale_cursor_after_empty_journal_resyncs(self):
         """Client re-attaches with last_event_id from a previous process."""
         frames = await _collect(
-            _sse_attach_stream("tRestart", "sess-R", 77), timeout=5.0
+            _sse_attach_stream("tRestart", "sess-R", 77, replay_is_history=True), timeout=5.0
         )
         joined = "\n".join(frames)
         assert '"gap": true' in joined
@@ -210,7 +255,7 @@ class TestAttachStream:
         register_turn("tHitl", fake)
         mark_thread_paused("tHitl")
         try:
-            gen = _sse_attach_stream("tHitl", "sess-H", 0)
+            gen = _sse_attach_stream("tHitl", "sess-H", 0, replay_is_history=True)
             collector = asyncio.create_task(_collect(gen, timeout=6.0))
             await asyncio.sleep(0.08)
             await broker.emit(

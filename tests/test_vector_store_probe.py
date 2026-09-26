@@ -513,6 +513,38 @@ def test_the_test_button_probes_postgres_not_http(monkeypatch):
     assert "error" not in result
 
 
+def test_the_test_button_tests_the_store_in_use_when_pgvector_was_auto(monkeypatch, tmp_path):
+    """Live 2026-09-25, Settings -> Memory: the banner read "Vector: full
+    (local)" and the Test button beside it read "Vector failed: this
+    Postgres has no 'vector' extension". Kazma picked pgvector from the DSN;
+    local sqlite-vec serves memory. The button tests that store and names
+    why pgvector is not in use -- and a pgvector the operator CHOSE still
+    fails (the test above)."""
+    monkeypatch.delenv("KAZMA_PGVECTOR", raising=False)
+    monkeypatch.setattr("kazma_core.paths.primary_memory_db", lambda: str(tmp_path / "memory_state.db"))
+    cfg = _cfg(provider="sqlite_vec", url="", mode="local")
+    cfg["state"] = {"provider": "postgres", "url": _DSN, "role": "mirror"}
+    backends._apply_pgvector_scale_defaults(cfg)
+    assert cfg["vector_auto"] is True
+
+    server = _Server()
+    monkeypatch.setattr(PgvectorBackend, "_connect", lambda self: (_Conn(server)))
+    result = backends.test_vector_backend(cfg)
+    assert result["ok"] is True, result
+    assert result["provider"] == "sqlite_vec" and result["state"] == "missing"
+    assert result["note"].startswith("pgvector not used:"), result["note"]
+    assert "error" not in result
+    assert result["capability"]["vector_status"] == "full"
+
+    # Negative control: the same server with pgvector CHOSEN is a failure.
+    chosen = _cfg(provider="pgvector", url=_DSN, mode="hybrid")
+    backends._apply_pgvector_scale_defaults(chosen)
+    assert "vector_auto" not in chosen
+    failed = backends.test_vector_backend(chosen)
+    assert failed["ok"] is False and "no 'vector' extension" in failed["error"]
+    assert "note" not in failed
+
+
 def test_the_boot_probe_fills_the_state(monkeypatch):
     server = _Server()
     monkeypatch.setattr(PgvectorBackend, "_connect", lambda self: (_Conn(server)))

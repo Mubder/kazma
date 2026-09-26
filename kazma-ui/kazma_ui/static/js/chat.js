@@ -413,6 +413,32 @@
     }
   }
 
+  /**
+   * How far THIS page has read the thread's journal when no stream of its
+   * own has: the WebSocket's tracker, else its persisted cursor, else 0.
+   *
+   * `_lastSeqSeen` only follows SSE frames, so a tab that did not send the
+   * turn -- or one just reloaded -- attached from seq 0 and replayed every
+   * earlier turn of the thread through the projector: finished blocks went
+   * back to "working" and showed an interim narration as their answer
+   * (2026-09-26, the watching tab of a three-turn run).
+   */
+  function _pageDeliveryCursor() {
+    try {
+      var st = window.Alpine && Alpine.store && Alpine.store('agent');
+      if (st && st._cursor && typeof st._cursor.last === 'function'
+          && String(st.sessionId || '') === String(chatSessionId || '')) {
+        var live = Number(st._cursor.last());
+        if (live > 0) return live;
+      }
+      if (window.KazmaDeliveryCursor && chatSessionId) {
+        var kept = Number(KazmaDeliveryCursor.loadPersisted(chatSessionId));
+        if (kept > 0) return kept;
+      }
+    } catch (e) { /* no cursor is a cursor of 0 */ }
+    return 0;
+  }
+
   function _attachJournal(reason) {
     if (!chatSessionId) return;
     // A dead handle is not a live stream. Treating `activeStream` as
@@ -443,7 +469,11 @@
     }
     _reopenCount++;
     _attachInFlight = true;
-    var cursor = _lastSeqSeen > 0 ? _lastSeqSeen : 0;
+    // The furthest this page has read on EITHER mouth. `_lastSeqSeen` lags:
+    // no terminal callback records a seq, so after the previous turn's
+    // attach it pointed before that turn's done -- and the replay then fed
+    // the next turn's untagged frames to the previous turn's finished block.
+    var cursor = Math.max(_lastSeqSeen || 0, _pageDeliveryCursor());
     console.warn('[KazmaChat] Attaching journal (' + (reason || '?') + ') from seq=' + cursor);
     try { noteTurnActivity(); } catch (eN) { /* ignore */ }
     var epoch = ++_sseEpoch;
@@ -460,9 +490,28 @@
       _attachInFlight = false;
     }
   }
+  /**
+   * A frame the stream could not apply: its handler threw, or its data was
+   * not JSON. KazmaStream has already moved on to the next frame (one bad
+   * frame used to stop the whole stream), so what that frame would have
+   * painted comes back from server truth -- one resync, not one per frame.
+   */
+  var _frameErrorResyncAt = 0;
+  function _onSseFrameError(type, err) {
+    diag('sse-frame-error', String(type) + ': ' + String((err && err.message) || err || ''));
+    var now = Date.now();
+    if (now - _frameErrorResyncAt < 3000) return;
+    _frameErrorResyncAt = now;
+    try { _resyncDelivery('sse-frame-error'); } catch (eR) { /* never fatal */ }
+  }
+
   function _defaultAttachCallbacks(epoch) {
     function _mine() { return epoch === _sseEpoch; }
     return {
+      onFrameError: function(type, err) {
+        if (!_mine()) return;
+        _onSseFrameError(type, err);
+      },
       onToken: function(data) {
         if (!_mine()) return;
         _noteSeq();
@@ -2879,6 +2928,9 @@
         model: selectedModel || '',
         workspace_id: _activeWorkspaceId || '',
         attachments: attachmentsPayload,
+        // Echoed on the user_message frame the other tabs paint; ours is
+        // dropped by it (beginObservedTurn).
+        client_msg_id: _newClientMsgId(),
       };
       if (extraBody) {
         for (var k in extraBody) {
@@ -2897,6 +2949,11 @@
       // AFTER a successful reply (2026-08-26).
       function _mine() { return epoch === _sseEpoch; }
       return {
+      onFrameError: function(type, err) {
+        if (!_mine()) return;
+        _onSseFrameError(type, err);
+      },
+
       onToken: function(data) {
         if (!_mine()) return;
         noteTurnActivity();
@@ -6471,6 +6528,11 @@
             // Do not collapse ordinary repeated chat ("hello" twice).
             if (_uTrim && prevUserContent === _uTrim && _uTrim.charAt(0) === '/') return;
             prevUserContent = _uTrim || null;
+            // A question between two replies makes them two turns, however
+            // alike: asking twice and getting the same answer twice is not a
+            // double-persist. Without this reset the second answer vanished
+            // on every reload (seen 2026-09-26 on three identical replies).
+            prevAssistantContent = null;
           }
           // Collapse identical consecutive assistant rows left by older
           // double-persist bugs (same answer twice after YOLO/refresh).
@@ -8051,6 +8113,50 @@
    *  grow it (the 2026-09-02 crossed-bubble class). Mirrors the typed-chat
    *  pre-graph sequence; never submits a second graph turn — the server
    *  already ran the transcript. */
+  /** Ids of the sends THIS tab made. The server fans each question out to
+   *  every tab on the thread as a user_message frame; ours comes back to
+   *  our own WebSocket too and must not be painted a second time. */
+  var _ownClientMsgIds = [];
+  function _newClientMsgId() {
+    var id = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+    _ownClientMsgIds.push(id);
+    while (_ownClientMsgIds.length > 32) _ownClientMsgIds.shift();
+    return id;
+  }
+
+  /**
+   * Another tab or device started a turn on the thread this tab shows.
+   *
+   * The user row is what separates one turn's block from the next: the reply
+   * binds to the assistant bubble after the LAST user row. A tab that did not
+   * send had no row for the new question, so the new turn's frames found the
+   * previous turn's bubble as "the open turn", renamed it, and painted into
+   * it -- three turns became one block holding three approval cards, until a
+   * reload read the transcript (2026-09-26). Same contract as the voice
+   * mouth below: add the user row, then let the projector mint the bubble.
+   * Returns true when a row was added.
+   */
+  function beginObservedTurn(data) {
+    data = data || {};
+    if (data.replay) return false; // history: the reload already has the row
+    var cmid = String(data.client_msg_id || '');
+    if (cmid && _ownClientMsgIds.indexOf(cmid) !== -1) return false; // our own send
+    var text = String(data.content || '');
+    if (!text.trim()) return false;
+    var tid = String(data.turn_id || '');
+    var TVo = _turnView();
+    if (tid && TVo && TVo.elFor(tid)) return false; // that turn is already on screen
+    appendMessage('user', text);
+    scrollToBottom();
+    currentMsgEl = null;
+    _liveRenderEl = null;
+    _turnPainted = false;
+    // Frames of this turn that arrive without an id belong to it, not to
+    // the previous turn this tab last painted.
+    if (tid) _liveTurnId = tid;
+    return true;
+  }
+
   function beginVoiceTurn(text) {
     var said = String(text || '').trim();
     if (!said) return;
@@ -8084,6 +8190,7 @@
     hitlCardExistsFor: hitlCardExistsFor,
     beginTurn: beginTurn,
     beginVoiceTurn: beginVoiceTurn,
+    beginObservedTurn: beginObservedTurn,
     endTurn: endTurn,
     forceEndTurn: forceEndTurn,
     pauseForApproval: pauseForApproval,

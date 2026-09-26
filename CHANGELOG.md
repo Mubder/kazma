@@ -1,5 +1,52 @@
 # CHANGELOG
 
+## Web chat over Cloudflare Tunnel: no more lost cards or merged turns (2026-09-26)
+
+Over the tunnel, a message could show no thinking at all, the Stop button went
+back to Send within seconds, and the approval card appeared only after a
+refresh. Another run logged "Cannot read properties of null (reading
+'tool_name')" mid-turn. Everything worked on a direct connection, which is why
+no test ever caught it. Found by recording the live page while it failed:
+
+- **The page lost any update that arrived in two pieces.** The server sends
+  each update (a line of text, a tool call, an approval) as one frame, and the
+  page's reader kept a half-read frame only until the next network read. A
+  direct connection almost never splits a frame; Cloudflare re-chunks the
+  stream, so frames were dropped and the leftover half was glued onto the next
+  one, which then failed to parse. The reader now keeps a frame until its end
+  arrives, whatever the chunking. One update that cannot be shown no longer
+  stops the rest of the stream.
+- **New approval cards waited for a background check.** The server labelled
+  every live update on the stream as "history", and the page (correctly)
+  refuses to draw a pending card from history, so each card appeared only
+  when the page's slower check found it — up to six seconds later, with the
+  header reading "Resuming". Only re-sent history is labelled now.
+- **A second window on the same chat merged the turns into one block** until
+  refreshed. It never learned that another tab had asked something, so each
+  new reply was painted into the previous reply's block. The server now tells
+  the chat's other tabs about each new question, and a tab that catches up
+  after a hiccup starts from what it has already read instead of from the
+  beginning (which had also flipped finished turns back to "working").
+- **A turn waiting for approval could be saved as finished with only its
+  narration.** A recovery step meant for turns that crashed after answering
+  ran on the page's own refresh of the message list, so a paused turn that
+  had narrated before several tools was saved as "done". The next message then
+  replaced the real answer. That step now leaves running and paused turns
+  alone.
+- **Two identical replies to two questions showed as one after a reload**
+  (the second vanished as a "duplicate").
+- **Settings → Memory → Test vector** said "Vector failed" when Kazma had
+  chosen pgvector by itself and your Postgres has no `vector` extension. It
+  now tests the local store that actually serves memory and adds a one-line
+  note about pgvector.
+
+Tests: a node test cuts a real stream at every byte position (and a copy of
+the old reader fails it); a browser test runs chat turns through a server
+wrapper that cuts every stream into 1–40 byte pieces, the way Cloudflare
+does, including a second tab watching the same chat. The nine-approval
+browser test, which had run in no CI job since 2026-09-20, runs again, and a
+new check fails the build when any browser test file is left out of CI.
+
 ## Fewer freezes when the database is slow (2026-09-26)
 
 Kazma serves every chat stream, approval card and health check from one event

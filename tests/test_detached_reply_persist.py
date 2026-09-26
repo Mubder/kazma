@@ -417,3 +417,97 @@ def test_record_instant_turn_does_not_stack_duplicate_slash(monkeypatch):
     assts = [c for r, c in roles if r == "assistant"]
     assert users == ["/unrestricted"]
     assert assts == [reply]
+
+
+def _paused_turn_session():
+    """The reproduced shape: a turn that narrated before each of three tool
+    calls and is now waiting on the third one's approval. The open row holds
+    all three narrations; the checkpoint's last AI message holds only the
+    one attached to the pending call."""
+    session = SimpleNamespace(
+        session_id="s-pause",
+        thread_id="t-pause",
+        messages=[
+            {"role": "user", "content": "what is my resets"},
+            {
+                "role": "assistant",
+                "content": "Checking the time first.Looking up stored resets.Computing the next dates.",
+                "turn_id": "turn-p",
+                "open": True,
+            },
+        ],
+    )
+    checkpoint = [
+        {"role": "user", "content": "what is my resets"},
+        {"role": "assistant", "content": "Checking the time first."},
+        {"role": "tool", "content": "2026-09-26T02:11"},
+        {"role": "assistant", "content": "Looking up stored resets."},
+        {"role": "tool", "content": "[]"},
+        {"role": "assistant", "content": "Computing the next dates."},
+    ]
+    return session, checkpoint
+
+
+def _graph_with_next(messages, next_nodes):
+    g = MagicMock()
+    g.aget_state = MagicMock(
+        return_value=_async_return(SimpleNamespace(values={"messages": messages}, next=next_nodes))
+    )
+    return g
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("how", ["checkpoint_next", "paused_flag", "running_turn"])
+async def test_backfill_leaves_an_unfinished_turn_alone(monkeypatch, how):
+    """2026-09-26: the page's own /messages reconcile ran this on a turn
+    paused at an approval, wrote the last narration over the open row as a
+    FINISHED reply, and the page painted "Completed" beside the live card.
+    A running or paused turn's reply belongs to its pump."""
+    import asyncio
+
+    from kazma_ui import sse_chat
+    from kazma_ui.active_turns import register_turn, unregister_turn
+    from kazma_ui.sse_chat._streaming import mark_thread_paused, mark_thread_unpaused
+
+    session, checkpoint = _paused_turn_session()
+    store = _FakeStore(session)
+    _install(monkeypatch, store)
+    nodes = ("tool_worker",) if how == "checkpoint_next" else ()
+    monkeypatch.setattr(_sse_helpers, "_module_graph", lambda: _graph_with_next(checkpoint, nodes))
+    before = [dict(m) for m in session.messages]
+
+    fake = None
+    if how == "paused_flag":
+        mark_thread_paused("t-pause")
+    if how == "running_turn":
+        fake = asyncio.ensure_future(asyncio.sleep(3600))
+        register_turn("t-pause", fake)
+    try:
+        out = await sse_chat._checkpoint_backfill_unanswered(session)
+    finally:
+        mark_thread_unpaused("t-pause")
+        if fake is not None:
+            unregister_turn("t-pause", fake)
+            fake.cancel()
+
+    assert out == before, f"{how}: an unfinished turn was rewritten: {out[-1]}"
+    assert store.puts == 0 and session.messages == before
+
+
+@pytest.mark.asyncio
+async def test_backfill_still_heals_a_finished_turn(monkeypatch):
+    """Negative control for the guard above: the same stranded row, with a
+    checkpoint whose graph ENDED on a longer answer, is healed as before."""
+    from kazma_ui import sse_chat
+
+    session, checkpoint = _paused_turn_session()
+    final = checkpoint + [
+        {"role": "tool", "content": "42"},
+        {"role": "assistant", "content": "Here are your resets: Grok on Monday, Claude on Tuesday."},
+    ]
+    store = _FakeStore(session)
+    _install(monkeypatch, store)
+    monkeypatch.setattr(_sse_helpers, "_module_graph", lambda: _graph_with_next(final, ()))
+
+    out = await sse_chat._checkpoint_backfill_unanswered(session)
+    assert out[-1]["content"].startswith("Here are your resets"), out[-1]

@@ -351,6 +351,21 @@ jobs:
         run: python -m pytest tests/e2e/test_unified_turn_browser.py -q --timeout=1200
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: A stream cut the way Cloudflare cuts it (2026-09-26)
+        # Loopback delivers every frame whole, so a reader that lost frames
+        # split across network reads passed every other browser test while
+        # the live install, behind Cloudflare Tunnel, dropped approval
+        # cards. The app is wrapped in RechunkedStreams here.
+        run: python -m pytest tests/e2e/test_chunked_stream_browser.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Nine gates in one turn (ordering and thoughts, 2026-09-20)
+        # Ran in no job from 2026-09-20 to 2026-09-26: the e2e listing test
+        # named files by hand. test_every_e2e_file_runs_in_a_ci_job now
+        # enumerates the directory.
+        run: python -m pytest tests/e2e/test_unified_turn_many_gates.py -q --timeout=900
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Two tabs, one gate (registry CAS through the real route)
         # A CAS that holds while the turn resumes twice passes the unit
         # test and loses the user's work. This races real HTTP clients

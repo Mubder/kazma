@@ -280,8 +280,11 @@
                     headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 });
                 const data = await resp.json();
+                // A note rides on an OK: the store that serves memory passed,
+                // and the one Kazma picked automatically is not in use.
                 this.memoryBackendsStatus = data.ok
-                    ? ('Vector OK · ' + (data.provider || '') + ' · ' + (data.latency_ms || 0) + 'ms')
+                    ? ('Vector OK · ' + (data.provider || '') + ' · ' + (data.latency_ms || 0) + 'ms'
+                        + (data.note ? ' — ' + data.note : ''))
                     : ('Vector failed: ' + (data.error || 'unknown'));
                 // A remote test re-probes the store; the banner reads that probe.
                 if (data.capability) {

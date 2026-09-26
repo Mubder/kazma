@@ -292,6 +292,8 @@ class Harness:
     base: str
     data_dir: str
     script: Script
+    #: The ASGI app uvicorn serves -- the wrapper when one was given.
+    app: Any = None
 
 
 def isolated_config(tmp_dir: str) -> str:
@@ -383,13 +385,85 @@ def _isolate_workspace_store(tmp_dir: str) -> None:
         pass
 
 
+class RechunkedStreams:
+    """ASGI wrapper that cuts every chat stream body into small random pieces.
+
+    What Cloudflare Tunnel does to ``/api/chat/stream`` on the live install:
+    the frames uvicorn writes whole arrive in reads that start and end
+    anywhere -- between a frame's ``event:`` and ``data:`` lines, inside the
+    JSON, between CR and LF. A direct loopback connection almost never cuts
+    a frame, so a browser test without this never exercises the reader's
+    half-frame state (the 2026-09-26 dropped-cards incident). The pause
+    between pieces is what makes the browser see them as separate reads.
+    Seeded, so a failing cut pattern replays.
+    """
+
+    def __init__(
+        self,
+        app: Any,
+        *,
+        seed: int = 20260926,
+        max_piece: int = 40,
+        pause_s: float = 0.003,
+    ) -> None:
+        import random
+
+        self.app = app
+        self._rng = random.Random(seed)
+        self.max_piece = max_piece
+        self.pause_s = pause_s
+        #: (pieces written, bodies cut) -- the test checks the instrument ran.
+        self.pieces = 0
+        self.bodies = 0
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        import asyncio
+
+        if scope.get("type") != "http" or not str(scope.get("path", "")).startswith(
+            "/api/chat/stream"
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        async def _send(message: dict[str, Any]) -> None:
+            body = message.get("body") or b""
+            if message.get("type") != "http.response.body" or len(body) < 2:
+                await send(message)
+                return
+            self.bodies += 1
+            more = bool(message.get("more_body", False))
+            at = 0
+            while at < len(body):
+                step = self._rng.randint(1, self.max_piece)
+                piece = body[at : at + step]
+                at += step
+                self.pieces += 1
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": piece,
+                        "more_body": True if at < len(body) else more,
+                    }
+                )
+                await asyncio.sleep(self.pause_s)
+
+        await self.app(scope, receive, _send)
+
+
 @contextlib.contextmanager
-def unified_turn_server(script: Script | None = None) -> Iterator[Harness]:
+def unified_turn_server(
+    script: Script | None = None,
+    *,
+    asgi_wrapper: Any = None,
+) -> Iterator[Harness]:
     """Boot the real app with an isolated data directory and a scripted model.
 
     Isolation is not politeness: plan §14.1 forbids using the operator's
     active approvals as fixtures, and an approved ``file_write`` in this
     harness really writes.
+
+    ``asgi_wrapper`` wraps the app before uvicorn serves it (for example
+    :class:`RechunkedStreams`); the wrapped app is on ``Harness.app``.
     """
     import uvicorn
     from kazma_core.config_store import ConfigStore, set_config_store
@@ -434,8 +508,22 @@ def unified_turn_server(script: Script | None = None) -> Iterator[Harness]:
         with scripted_provider(script):
             port = free_port()
             app = create_app(isolated_config(tmp_dir))
+            if asgi_wrapper is not None:
+                app = asgi_wrapper(app)
             config = uvicorn.Config(
-                app, host="127.0.0.1", port=port, log_level="warning"
+                app,
+                host="127.0.0.1",
+                port=port,
+                log_level="warning",
+                # Bounds uvicorn's own wait for connections. It ends in
+                # asyncio.Server.wait_closed(), which on Python 3.12 waits
+                # for every client connection and does not look at
+                # force_exit: a browser connection whose close the loop had
+                # not processed held the second of two tests' servers open
+                # past both joins (2026-09-26, test_chunked_stream_browser).
+                # After this, uvicorn cancels what is left and runs the
+                # lifespan shutdown -- inside this test, not the next.
+                timeout_graceful_shutdown=5,
             )
             server = uvicorn.Server(config)
             thread = threading.Thread(target=server.run, daemon=True)
@@ -443,7 +531,7 @@ def unified_turn_server(script: Script | None = None) -> Iterator[Harness]:
             base = f"http://127.0.0.1:{port}"
             try:
                 wait_live(base)
-                yield Harness(base=base, data_dir=tmp_dir, script=script)
+                yield Harness(base=base, data_dir=tmp_dir, script=script, app=app)
             finally:
                 # The server must be FULLY down before this test ends.
                 #
@@ -466,11 +554,14 @@ def unified_turn_server(script: Script | None = None) -> Iterator[Harness]:
                 if thread.is_alive():
                     server.force_exit = True
                     thread.join(timeout=15.0)
-                assert not thread.is_alive(), (
-                    "the harness server did not stop; its shutdown would "
-                    "run during the next test and close that test's "
-                    "SessionManager"
-                )
+                if thread.is_alive():
+                    raise AssertionError(
+                        "the harness server did not stop; its shutdown would "
+                        "run during the next test and close that test's "
+                        "SessionManager. Where the server's own task waits "
+                        "(an idle thread stack says nothing):\n"
+                        + _server_await_chain()
+                    )
                 cs.close()
                 # Restore the environment BEFORE resetting the singletons,
                 # and both before this `with` block deletes `tmp_dir`.
@@ -496,6 +587,40 @@ def unified_turn_server(script: Script | None = None) -> Iterator[Harness]:
                     else:
                         os.environ[key] = val
                 _reset_process_singletons()
+
+
+def _server_await_chain() -> str:
+    """The await chain of uvicorn's ``Server.serve`` task, for a stuck stop.
+
+    A server that will not stop has an idle thread (parked in the
+    selector); the task's chain says what it waits for. Found through the
+    garbage collector because the harness never holds the server's loop.
+    Diagnostic only -- it never raises.
+    """
+    import asyncio
+    import gc
+
+    lines: list[str] = []
+    try:
+        for obj in gc.get_objects():
+            if not isinstance(obj, asyncio.AbstractEventLoop) or not obj.is_running():
+                continue
+            for task in list(asyncio.all_tasks(obj)):
+                coro = task.get_coro()
+                chain: list[str] = []
+                while coro is not None:
+                    frame = getattr(coro, "cr_frame", None) or getattr(coro, "gi_frame", None)
+                    if frame is not None:
+                        chain.append(
+                            f"  {frame.f_code.co_filename}:{frame.f_lineno} {frame.f_code.co_name}"
+                        )
+                    coro = getattr(coro, "cr_await", None) or getattr(coro, "gi_yieldfrom", None)
+                if chain and "uvicorn" in chain[0]:
+                    lines.append(f"task {task.get_name()!r}:")
+                    lines.extend(chain)
+    except Exception as exc:  # noqa: BLE001 - never mask the real failure
+        lines.append(f"(await chain unavailable: {exc!r})")
+    return "\n".join(lines) or "(no uvicorn task found)"
 
 
 def _reset_process_singletons() -> None:

@@ -927,6 +927,22 @@ every time. That happened three times on 2026-09-12 alone.
 
 ## Operational tripwires
 
+**Most chat frames do not say which turn they belong to** (2026-09-26).
+Token, tool, status and approval frames are journaled without a `turn_id`;
+only `done`, `turn_complete` and `hitl` carry one (measured on a journal
+replay: 60 frames, three with an id). Every client files the rest under "the
+current turn", so correctness depends on the client knowing where one turn
+ends and the next begins. On 2026-09-26 that guess went wrong twice: a
+watching tab with no user row for a turn another tab sent, and a catch-up
+attach that replayed across a turn boundary (the boundary frame,
+`user_message`, is not replayable). Both are fixed where they happened
+(AGENTS.md §31, "Delivery over a proxy that re-chunks") and pinned by
+`tests/e2e/test_chunked_stream_browser.py`. The class is not: any new
+delivery path that reorders or skips a boundary will misfile frames again.
+The fix is to stamp `current_turn_id()` on every journaled frame, which
+changes what both transports send and how the projector adopts a turn id
+mid-turn, and wants the whole unified-turn browser suite behind it.
+
 **A Postgres install leaves a dead `settings` TABLE behind in
 `kazma-data/settings.db` — and live data in the same file.** Switching backends
 does not remove the table, nothing reads it again, and it looks exactly like

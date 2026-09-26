@@ -7,6 +7,81 @@ var KazmaStream = (function() {
   'use strict';
 
   // ── SSE (Server-Sent Events) ──────────────────────────
+
+  /**
+   * Incremental ``text/event-stream`` parser: text in, whole frames out.
+   *
+   * A frame is dispatched at its blank line and not before, however the
+   * bytes were cut on the way. The reader used to keep the half-built frame
+   * (event type, data lines, id) in variables local to ONE network read, so
+   * a frame split across two reads lost its event type -- and its orphaned
+   * data line was then joined onto the NEXT frame, whose JSON no longer
+   * parsed and reached the handlers as ``null``. A direct connection almost
+   * never splits a frame, so it never showed locally. Cloudflare Tunnel
+   * re-chunks the body, so on the live install it dropped tool rows and
+   * approval cards and threw ``Cannot read properties of null (reading
+   * 'tool_name')`` in the middle of turns (2026-09-26).
+   *
+   * Field rules follow the WHATWG event-stream format: lines end in LF, CR
+   * or CRLF (a CR at the end of a read is held, it may be half of a CRLF),
+   * ``:`` starts a comment (the server's keepalive), one space after the
+   * colon is dropped, repeated ``data:`` lines join with ``\n``, and a
+   * frame with no ``data:`` line is not dispatched. ``id`` is per frame
+   * here, because the caller only records the ids of journaled frames.
+   *
+   * @param {function(string, string, (string|null))} onFrame
+   *   Called with (event type, raw data, id or null) once per frame.
+   */
+  function createSseParser(onFrame) {
+    var buffer = '';
+    var eventType = '';
+    var dataLines = [];
+    var frameId = null;
+
+    function reset() {
+      eventType = '';
+      dataLines = [];
+      frameId = null;
+    }
+
+    function takeLine(line) {
+      if (line === '') {
+        if (dataLines.length) onFrame(eventType || 'message', dataLines.join('\n'), frameId);
+        reset();
+        return;
+      }
+      if (line.charCodeAt(0) === 58) return; // ':' comment -- keepalive
+      var colon = line.indexOf(':');
+      var field = colon === -1 ? line : line.slice(0, colon);
+      var value = colon === -1 ? '' : line.slice(colon + 1);
+      if (value.charCodeAt(0) === 32) value = value.slice(1);
+      if (field === 'event') eventType = value;
+      else if (field === 'data') dataLines.push(value);
+      else if (field === 'id') frameId = value.indexOf('\u0000') === -1 ? value : frameId;
+      // 'retry' and unknown fields are ignored, as the format requires.
+    }
+
+    return {
+      /** Feed decoded text; complete frames are dispatched synchronously. */
+      push: function(text) {
+        if (!text) return;
+        buffer += text;
+        var holdCR = buffer.charCodeAt(buffer.length - 1) === 13;
+        var lines = (holdCR ? buffer.slice(0, -1) : buffer).split(/\r\n|\r|\n/);
+        buffer = lines.pop() + (holdCR ? '\r' : '');
+        for (var i = 0; i < lines.length; i++) takeLine(lines[i]);
+      },
+      /** End of body: a held CR finishes its line; an unfinished frame is
+       *  discarded (the format never dispatches a frame without its blank
+       *  line -- the stream's own end handling covers a cut-off turn). */
+      end: function() {
+        if (buffer.charCodeAt(buffer.length - 1) === 13) takeLine(buffer.slice(0, -1));
+        buffer = '';
+        reset();
+      },
+    };
+  }
+
   function ssePost(url, body, callbacks) {
     var controller = new AbortController();
     // Turn Delivery V2: journaled SSE frames carry an ``id: <seq>`` line.
@@ -79,40 +154,46 @@ var KazmaStream = (function() {
       }
       var reader = response.body.getReader();
       var decoder = new TextDecoder();
-      var buffer = '';
+
+      // One frame's failure is that frame's. A handler that threw used to
+      // escape into pump()'s .catch, which stopped reading the stream for
+      // good and reported the whole turn as a lost connection; data that is
+      // not JSON used to reach the handlers as null and make one of them
+      // throw. Both are now reported through onFrameError and the stream
+      // carries on with the next frame -- what a re-attach from this
+      // frame's id would have delivered anyway.
+      function reportFrameError(type, err) {
+        console.error('[KazmaStream] ' + type + ' frame failed; the stream continues', err);
+        if (callbacks.onFrameError) {
+          try { callbacks.onFrameError(type, err); } catch (eReport) { /* never stop the stream */ }
+        }
+      }
+      var parser = createSseParser(function(type, raw, id) {
+        if (id != null && id !== '') lastEventId = id;
+        var payload;
+        try {
+          payload = JSON.parse(raw);
+        } catch (eParse) {
+          reportFrameError(type, eParse);
+          return;
+        }
+        try {
+          dispatch(type, payload);
+        } catch (eHandler) {
+          reportFrameError(type, eHandler);
+        }
+      });
 
       function pump() {
         reader.read().then(function(result) {
           if (result.done) {
+            parser.push(decoder.decode());
+            parser.end();
             // Only fire if the server never sent ``event: done`` (truncated stream)
             finishStream(undefined);
             return;
           }
-          buffer += decoder.decode(result.value, { stream: true });
-          var lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          var eventType = null;
-          var dataLines = [];
-          var frameId = null;
-          for (var i = 0; i < lines.length; i++) {
-            var line = lines[i];
-            if (line.startsWith('event: ')) {
-              eventType = line.slice(7).trim();
-            } else if (line.startsWith('id: ')) {
-              frameId = line.slice(4).trim();
-            } else if (line.startsWith('data: ')) {
-              dataLines.push(line.slice(6));
-            } else if (line === '' && eventType) {
-              if (frameId != null && frameId !== '') lastEventId = frameId;
-              var payload = null;
-              try { payload = JSON.parse(dataLines.join('\n')); } catch(e) {}
-              dispatch(eventType, payload);
-              eventType = null;
-              dataLines = [];
-              frameId = null;
-            }
-          }
+          parser.push(decoder.decode(result.value, { stream: true }));
           pump();
         }).catch(function(err) {
           if (err.name === 'AbortError') return;
@@ -866,6 +947,7 @@ var KazmaStream = (function() {
   return {
     sse: ssePost,
     ssePost: ssePost,
+    createSseParser: createSseParser,
     ws: wsConnect,
     markdown: mdRender,
     copyCode: copyCode,

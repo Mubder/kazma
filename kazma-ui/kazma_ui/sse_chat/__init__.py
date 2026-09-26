@@ -316,6 +316,10 @@ def create_sse_chat_router(
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
+        # The sending tab's id for this send, echoed on the user_message
+        # frame so that tab can tell its own words from another tab's.
+        # Opaque to the server; bounded so it cannot carry anything.
+        _client_msg_id = str(body.get("client_msg_id") or "")[:64]
         # Optional attachments uploaded via /api/chat/upload. The upload ID,
         # not a client filesystem path, is the server-side byte reference.
         raw_attachments = body.get("attachments") or []
@@ -368,7 +372,11 @@ def create_sse_chat_router(
         # checkpointer. This is SSE parity with the WS live-socket rebind.
         if _attach_seq is not None:
             return StreamingResponse(
-                _sse_attach_stream(thread_id, session_id, _attach_seq),
+                # A reconnect: what it missed is history; the registry
+                # confirms any pending approval in it.
+                _sse_attach_stream(
+                    thread_id, session_id, _attach_seq, replay_is_history=True,
+                ),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -1100,6 +1108,31 @@ def create_sse_chat_router(
                 # reply", 2026-09-02). Frames the drive emits after this
                 # capture carry seq > head and arrive via resume(head) ∪ the
                 # live queue, deduplicated by seq inside _sse_attach_stream.
+                #
+                # Before the head is captured, tell the thread's OTHER tabs
+                # that a turn started and what was asked. They had no user
+                # row for a turn another tab sent, so the reply's frames
+                # found the previous turn's block as "the open turn" and
+                # painted into it: three turns, one block, three approval
+                # cards (2026-09-26). This request's own stream starts after
+                # this frame; the sender's WebSocket drops it by
+                # client_msg_id. Live only: REPLAY_SKIP_TYPES keeps it out of
+                # replays, and a reload reads the user row from the store.
+                # emit() raises only for an empty thread id, which this
+                # path cannot have; socket failures are isolated inside it.
+                await get_turn_broker().emit(
+                    thread_id,
+                    {
+                        "type": "user_message",
+                        "data": {
+                            "content": user_message,
+                            "turn_id": _reply_turn,
+                            "client_msg_id": _client_msg_id,
+                            "session_id": session_id,
+                            "ts": _ts,
+                        },
+                    },
+                )
                 _journal_head = get_turn_broker().head_seq(thread_id)
                 _drive = asyncio.create_task(
                     _drive_graph_to_journal(
@@ -1118,7 +1151,11 @@ def create_sse_chat_router(
 
                 _drive.add_done_callback(_on_drive_done)
 
-                async for frame in _sse_attach_stream(thread_id, session_id, _journal_head):
+                # Everything after _journal_head is the turn this request just
+                # started: live to this tab, including a pending approval.
+                async for frame in _sse_attach_stream(
+                    thread_id, session_id, _journal_head, replay_is_history=False,
+                ):
                     parsed = _parse_frame(frame)
                     if parsed is None:
                         yield frame

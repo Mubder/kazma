@@ -850,6 +850,19 @@ function registerAgentStore() {
       }
 
       switch (type) {
+        case 'user_message': {
+          // Another tab or device asked a question on this thread; the
+          // server fans it out before the reply's first frame so this tab
+          // opens a new block for it (chat.beginObservedTurn drops our own
+          // sends). Replayed copies are history -- a reload has the row.
+          if (frame.replay || data.replay) break;
+          const chat = this._chat();
+          if (chat && typeof chat.beginObservedTurn === 'function') {
+            try { chat.beginObservedTurn(data); } catch (e) { /* never break the socket */ }
+          }
+          break;
+        }
+
         case 'context_compacted': {
           // Context-integrity S3-1: same chip as the SSE path (streaming.js),
           // mirrored here for WS telemetry frames.

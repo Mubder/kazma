@@ -126,11 +126,19 @@ def test_new_prompt_stream_subscribes_at_journal_head() -> None:
     ("my answer appeared above the previous reply", 2026-09-02). The new
     prompt path must subscribe at the head captured BEFORE the drive task
     starts (its frames carry seq > head and arrive via resume ∪ live queue)."""
+    import re
+
     src = _src(_UI / "sse_chat" / "__init__.py")
     assert "_journal_head = get_turn_broker().head_seq(thread_id)" in src
-    assert "_sse_attach_stream(thread_id, session_id, _journal_head)" in src
+    # The call names its provenance since 2026-09-26 (what it catches up on
+    # is this turn's own frames: live), so it spans lines -- match the call.
+    assert re.search(
+        r"_sse_attach_stream\(\s*thread_id,\s*session_id,\s*_journal_head\s*,"
+        r"\s*replay_is_history=False",
+        src,
+    )
     # Negative: the literal from-0 subscribe on the new-prompt path is the bug.
-    assert "_sse_attach_stream(thread_id, session_id, 0)" not in src
+    assert not re.search(r"_sse_attach_stream\(\s*thread_id,\s*session_id,\s*0\b", src)
     # Ordering: the head capture must precede the drive creation.
     assert src.index("_journal_head = get_turn_broker().head_seq(thread_id)") < src.index(
         "_drive = asyncio.create_task("

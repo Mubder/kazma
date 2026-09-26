@@ -1723,6 +1723,48 @@ screenshots on failure, a recording of the four-gate turn either way, and
 a build-identity file written before anything runs so a failed job still
 says which build failed. It uploads `test-artifacts/unified-turn`.
 
+**Delivery over a proxy that re-chunks (2026-09-26).** Behind Cloudflare
+Tunnel the live chat dropped tool rows and approval cards, reverted Stop to
+Send in seconds, and threw `Cannot read properties of null (reading
+'tool_name')`; loopback delivers frames whole, so every test passed. Rules:
+
+- **One SSE reader, state per STREAM.** `KazmaStream.createSseParser`
+  (`streaming.js`) keeps a half-read frame until its blank line, whatever
+  the network cut; it held event/data/id per network READ, lost cut frames
+  and glued their orphaned data onto the next frame. A handler that throws or
+  data that is not JSON costs that frame only (`onFrameError`; chat.js
+  resyncs once) -- it used to stop the reader for good. Gates:
+  `tests/js/test_sse_parser.js` (every cut position, CR/LF/CRLF, a copy of
+  the old reader as the negative control) and
+  `tests/e2e/test_chunked_stream_browser.py`, which wraps the app in
+  `RechunkedStreams` (1-40 byte pieces). A browser test that only ever runs
+  on loopback does not test delivery.
+- **`replay` means history, stamped per call site.**
+  `_frame_from_journaled(frame, replay=...)` and
+  `_sse_attach_stream(..., replay_is_history=...)` have no default. The stamp
+  was unconditional, so the live tail -- which is how a sent turn reaches its
+  own tab since the journal drive -- labelled a new approval history, the
+  client refused it (correctly), and the card waited for the reconciler.
+- **Other tabs learn about a question.** The send journals a `user_message`
+  frame (content, turn_id, `client_msg_id`) BEFORE capturing the head, so
+  the sender's stream never carries it and its WebSocket drops it by id;
+  `chat.beginObservedTurn` adds the user row in the other tabs. Without it a
+  watching tab painted each new turn into the previous turn's block. It is in
+  `REPLAY_SKIP_TYPES`: a reload reads the row from the store.
+- **A page attaches from what it has READ**, on either mouth
+  (`_pageDeliveryCursor`: the WebSocket tracker, else the persisted cursor).
+  `_lastSeqSeen` follows SSE only and no terminal callback records a seq, so
+  attaches replayed from 0 or from before the previous turn's end and flipped
+  finished blocks back to "working".
+- **Only an ENDED turn may be healed from the checkpoint.**
+  `_checkpoint_backfill_unanswered` returns early while the thread's turn
+  runs, is paused, or its snapshot has a `next` node; it had written a paused
+  turn's narration as a finished reply on the page's own `/messages` poll.
+- **Open (KNOWN_GAPS):** token, tool and status frames carry no `turn_id`
+  (only done/turn_complete/hitl do), so every client files them under "the
+  current turn". The rules above keep that guess right; stamping the id on
+  every journaled frame is the thorough fix and changes both transports.
+
 
 ### 32. SSRF pin-IP (Wave 8 H-7)
 

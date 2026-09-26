@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import pathlib
+import re
 
 import pytest
 
@@ -429,6 +430,39 @@ def test_ci_security_and_readme_gates_can_fail():
             "the bandit gate ends in `|| true`, so the Security Scan job is "
             "green no matter what it finds (audit F-7)."
         )
+
+
+def _e2e_files_no_ci_job_runs(ci_text: str, names: list[str]) -> list[str]:
+    """The names no ``run:`` line of ci.yml passes to pytest.
+
+    Comments are dropped first: the workflow's comments name test files to
+    explain history, and a file that is only explained runs nowhere.
+    """
+    live = "\n".join(
+        re.sub(r"\s#.*$", "", line)
+        for line in ci_text.splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    return [name for name in names if f"tests/e2e/{name}" not in live]
+
+
+def test_every_e2e_file_runs_in_a_ci_job():
+    """The directory is the list. fast_test.py excludes tests/e2e, so a
+    browser test not named in ci.yml runs in no job at all. The list below
+    this test named four files by hand; test_unified_turn_many_gates.py (the
+    nine-gate ordering incident, 2026-09-20) was added after it and ran
+    nowhere for six days (found 2026-09-26)."""
+    ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    names = sorted(p.name for p in (REPO_ROOT / "tests" / "e2e").glob("test_*.py"))
+    assert len(names) >= 10, names  # the enumeration itself is not blind
+    missing = _e2e_files_no_ci_job_runs(ci, names)
+    assert not missing, f"tests/e2e files no CI job runs: {missing}"
+    # Negative control: a file named only in a comment is caught.
+    assert _e2e_files_no_ci_job_runs(
+        "      # tests/e2e/test_only_explained.py ran nowhere\n"
+        "        run: python -m pytest tests/e2e/test_smoke.py\n",
+        ["test_only_explained.py", "test_smoke.py"],
+    ) == ["test_only_explained.py"]
 
 
 def test_postgres_and_e2e_have_ci_coverage():
