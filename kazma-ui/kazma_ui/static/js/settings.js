@@ -12,7 +12,9 @@ function settingsApp() {
     var parts = names.map(function (n) {
         return typeof bag[n] === "function" ? bag[n]() : {};
     });
-    var app = Object.assign.apply(Object, [{}].concat(parts));
+    // Descriptors, not values: Object.assign froze every mixin getter (tests/js/test_settings_mixins.js).
+    var app = {};
+    parts.forEach(function (p) { Object.defineProperties(app, Object.getOwnPropertyDescriptors(p)); });
     // Alpine x-init can lose `this` after the first await on mixin methods
     // (soft-nav initTree path). Capture the component and always clear
     // loading on the same object the template reads.

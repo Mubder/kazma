@@ -449,6 +449,14 @@ jobs:
         run: python -m pytest tests/e2e/test_hitl_view_model.py -q --timeout=180
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: Every page loads clean (2026-09-26)
+        # Each page the navigation links to, in its own tab: no uncaught
+        # error, every Alpine directive compiles, every bundled CodeMirror
+        # mode registered. Four pages threw on every load until then (IDE,
+        # workspace, knowledge, settings) and no test opened them.
+        run: python -m pytest tests/e2e/test_pages_load_clean.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Remaining e2e suites
         # scripts/fast_test.py excludes everything under tests/e2e, and this
         # job only ever ran test_smoke.py — so test_delivery_v2_e2e.py,

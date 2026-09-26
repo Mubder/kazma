@@ -248,7 +248,7 @@
       </button>
       <span class="toolbar-sep" aria-hidden="true"></span>
       <select class="form-input ide-skill-select" x-model="selectedSkill" x-show="skills.length" x-cloak>
-        <template x-for="s in skills" :key="s.name" :value="s.name">
+        <template x-for="s in skills" :key="s.name">
           <option :value="s.name" x-text="s.name"></option>
         </template>
       </select>

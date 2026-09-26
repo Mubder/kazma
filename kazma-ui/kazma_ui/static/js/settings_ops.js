@@ -189,6 +189,15 @@
             return conflicts;
         },
 
+        // One conflict as a sentence. The template built it inline with
+        // double quotes inside a double-quoted x-text, which the browser cut
+        // at the first quote: the warning threw and never rendered
+        // (2026-09-26, tests/test_alpine_templates.py).
+        conflictLine(c) {
+            return '"' + c.action1 + '" ' + _t('settings.kb_and', 'and') + ' "' + c.action2 + '" '
+                + _t('settings.kb_both_use', 'both use') + ' ' + c.keys;
+        },
+
         async loadAccount() {
             const [tokens, sessions] = await Promise.all([
                 this._fetch('/api/settings/account/tokens?_=' + Date.now()),
