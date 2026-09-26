@@ -167,6 +167,16 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+#: A library's chunk count, counted whenever a library is read. The
+#: chunk_count column is a cache several writers keep, and one missed: on
+#: 2026-09-26 the live Knowledge page listed a library at 365 chunks while it
+#: held 366. The column is still written, for older readers.
+_CHUNK_COUNT_SQL = (
+    "(SELECT COUNT(*) FROM knowledge_chunks c WHERE c.library_id = knowledge_libraries.id"
+    " AND c.active = 1 AND c.tombstoned = 0) AS chunk_count"
+)
+
+
 class KnowledgeStore:
     """SQLite-backed store for Knowledge Libraries and their chunks.
 
@@ -416,7 +426,7 @@ class KnowledgeStore:
             if include_archived:
                 rows = conn.execute(
                     f"""SELECT id, name, description, seed_url, auto_inject, archived,
-                              chunk_count, created_at, updated_at, tenant_id
+                              {_CHUNK_COUNT_SQL}, created_at, updated_at, tenant_id
                        FROM knowledge_libraries
                        WHERE 1=1{tenant_clause}
                        ORDER BY created_at""",
@@ -425,7 +435,7 @@ class KnowledgeStore:
             else:
                 rows = conn.execute(
                     f"""SELECT id, name, description, seed_url, auto_inject, archived,
-                              chunk_count, created_at, updated_at, tenant_id
+                              {_CHUNK_COUNT_SQL}, created_at, updated_at, tenant_id
                        FROM knowledge_libraries WHERE archived = 0{tenant_clause}
                        ORDER BY created_at""",
                     params,
@@ -443,7 +453,7 @@ class KnowledgeStore:
             conn = self._get_conn()
             rows = conn.execute(
                 f"""SELECT id, name, description, seed_url, auto_inject, archived,
-                          chunk_count, created_at, updated_at, tenant_id
+                          {_CHUNK_COUNT_SQL}, created_at, updated_at, tenant_id
                    FROM knowledge_libraries WHERE archived = 1{tenant_clause}
                    ORDER BY updated_at DESC""",
                 params,
@@ -476,8 +486,8 @@ class KnowledgeStore:
         with self._lock:
             conn = self._get_conn()
             row = conn.execute(
-                """SELECT id, name, description, seed_url, auto_inject, archived,
-                          chunk_count, created_at, updated_at, tenant_id
+                f"""SELECT id, name, description, seed_url, auto_inject, archived,
+                          {_CHUNK_COUNT_SQL}, created_at, updated_at, tenant_id
                    FROM knowledge_libraries WHERE id = ?""",
                 (library_id,),
             ).fetchone()
@@ -500,8 +510,8 @@ class KnowledgeStore:
             raise ValueError("tenant_id must not be empty")
         with self._lock:
             row = self._get_conn().execute(
-                """SELECT id, name, description, seed_url, auto_inject, archived,
-                          chunk_count, created_at, updated_at, tenant_id
+                f"""SELECT id, name, description, seed_url, auto_inject, archived,
+                          {_CHUNK_COUNT_SQL}, created_at, updated_at, tenant_id
                    FROM knowledge_libraries WHERE id = ? AND tenant_id = ?""",
                 (library_id, tenant),
             ).fetchone()
@@ -596,7 +606,7 @@ class KnowledgeStore:
             conn = self._get_conn()
             rows = conn.execute(
                 f"""SELECT id, name, description, seed_url, auto_inject, archived,
-                          chunk_count, created_at, updated_at, tenant_id
+                          {_CHUNK_COUNT_SQL}, created_at, updated_at, tenant_id
                    FROM knowledge_libraries
                    WHERE auto_inject = 1 AND archived = 0{tenant_clause}
                    ORDER BY created_at""",
@@ -616,16 +626,20 @@ class KnowledgeStore:
             ).fetchall()
         return [r["id"] if isinstance(r, sqlite3.Row) else r[0] for r in rows]
 
-    def active_chunk_ids(self, library_id: str) -> set[str]:
-        """Ids of the library's searchable chunks (active, not tombstoned)."""
+    def active_chunk_sizes(self, library_id: str) -> dict[str, int]:
+        """The library's searchable chunks (active, not tombstoned): id -> characters."""
         with self._lock:
             conn = self._get_conn()
             rows = conn.execute(
-                """SELECT id FROM knowledge_chunks
+                """SELECT id, char_count FROM knowledge_chunks
                    WHERE library_id = ? AND active = 1 AND tombstoned = 0""",
                 (library_id,),
             ).fetchall()
-        return {str(r["id"] if isinstance(r, sqlite3.Row) else r[0]) for r in rows}
+        return {str(r[0]): int(r[1] or 0) for r in rows}
+
+    def active_chunk_ids(self, library_id: str) -> set[str]:
+        """Ids of the library's searchable chunks (active, not tombstoned)."""
+        return set(self.active_chunk_sizes(library_id))
 
     def list_source_urls(self, library_id: str) -> list[str]:
         """Distinct source URLs indexed for a library (for refresh prune)."""
