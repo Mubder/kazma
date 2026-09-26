@@ -122,7 +122,9 @@ async def _mute_server():
         request = await reader.readuntil(b"\r\n\r\n")
         key = re.search(rb"Sec-WebSocket-Key: (\S+)", request, re.IGNORECASE).group(1)
         accept = base64.b64encode(
-            hashlib.sha1(key + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest()  # noqa: S324 - RFC 6455
+            hashlib.sha1(  # the accept key RFC 6455 mandates, not a security use
+                key + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11", usedforsecurity=False
+            ).digest()
         )
         writer.write(
             b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
