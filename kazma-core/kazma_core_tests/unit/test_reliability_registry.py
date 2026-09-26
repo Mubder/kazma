@@ -47,7 +47,7 @@ class TestCircuitBreakerRegistry:
 
     def test_get_hydrates_shared_breaker(self):
         """When a shared breaker exists, it is hydrated instead of a fresh one."""
-        shared = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.01)
+        shared = CircuitBreaker(failure_threshold=1, cooldown_seconds=60.0)
         shared.record_failure()
         with patch("kazma_core.swarm.reliability.CircuitBreaker.load_shared",
                    return_value=shared):
@@ -57,7 +57,7 @@ class TestCircuitBreakerRegistry:
 
     def test_set_config_replaces_and_persists(self, registry):
         """set_circuit_breaker_config replaces the breaker and persists it."""
-        registry.set_circuit_breaker_config("alpha", failure_threshold=2, cooldown_seconds=0.05)
+        registry.set_circuit_breaker_config("alpha", failure_threshold=2, cooldown_seconds=60.0)
         breaker = registry.get_circuit_breaker("alpha")
         breaker.record_failure()
         breaker.record_failure()
@@ -65,7 +65,7 @@ class TestCircuitBreakerRegistry:
 
     def test_reset_circuit_breaker_closes(self, registry):
         """reset_circuit_breaker forces a breaker back to CLOSED."""
-        registry.set_circuit_breaker_config("alpha", failure_threshold=1, cooldown_seconds=0.05)
+        registry.set_circuit_breaker_config("alpha", failure_threshold=1, cooldown_seconds=60.0)
         registry.get_circuit_breaker("alpha").record_failure()
         assert registry.get_circuit_breaker("alpha").state == CircuitState.OPEN
         registry.reset_circuit_breaker("alpha")
@@ -85,7 +85,7 @@ class TestCircuitBreakerRegistry:
 
     def test_save_load_round_trip(self, registry):
         """save_breaker_state/load_breaker_state preserve open/closed states."""
-        registry.set_circuit_breaker_config("alpha", failure_threshold=1, cooldown_seconds=0.05)
+        registry.set_circuit_breaker_config("alpha", failure_threshold=1, cooldown_seconds=60.0)
         registry.get_circuit_breaker("alpha").record_failure()
         registry.get_circuit_breaker("beta")
         snapshot = registry.save_breaker_state()

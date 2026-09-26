@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,38 @@ async def _loop(poll_interval: float | None) -> None:
                 wait = _BACKOFF_S
                 errors = 0
         await asyncio.sleep(wait)
+
+
+#: X ids are snowflakes: ``(id >> 22)`` is milliseconds since this epoch.
+_TWITTER_EPOCH_MS = 1288834974657
+
+
+def _snowflake_start_time(tweet_id: str) -> str:
+    """The second a tweet id was minted in, as X's ``start_time``, or "".
+
+    The mentions cursor asks X for mentions FROM this moment instead of
+    "after this id". X answers ``since_id=<deleted tweet>`` with
+    ``result_count: 0`` forever (live 2026-09-18), and the fallback that
+    recovered from it re-read the latest window on EVERY quiet poll, because
+    a quiet account and a dead cursor look the same: 25 billed tweet reads
+    every 10 minutes, with a WARNING each time (live 2026-09-26). A time
+    cannot be deleted. Floored to the second, so the boundary tweet itself
+    comes back (X's start_time is inclusive) and is dropped by id.
+    """
+    try:
+        n = int(str(tweet_id or "").strip())
+    except ValueError:
+        return ""
+    if n <= 0:
+        return ""
+    ms = (n >> 22) + _TWITTER_EPOCH_MS
+    return datetime.fromtimestamp(ms / 1000, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _id_key(tweet_id: str) -> tuple[int, str]:
+    """Order snowflake ids as numbers (they are longer when newer)."""
+    s = str(tweet_id or "").strip()
+    return (len(s), s)
 
 
 def _index_users(includes: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -306,24 +339,18 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
 
     stored_since = await asyncio.to_thread(store.get_since_id)
     since_id = "" if ignore_cursor else stored_since
+    start_time = _snowflake_start_time(since_id) if since_id else ""
     try:
-        tweets, includes = await client.get_mentions(uid, since_id=since_id)
-        if (
-            not tweets
-            and since_id
-            and not ignore_cursor
-            and await asyncio.to_thread(store.get, since_id) is not None
-        ):
-            # Live 2026-09-18: since_id was a deleted mention. Every cursor
-            # poll returned result_count=0 while a new @KazmaAI mention sat
-            # on X. Looking at the latest window recovers it; seen() drops
-            # the ones we already handled.
-            logger.warning(
-                "[x-mentions] since_id %s is a handled summon and X returned "
-                "nothing — looking at the latest window (deleted cursors stall)",
-                since_id,
-            )
-            tweets, includes = await client.get_mentions(uid, since_id="")
+        # One read per poll. The cursor is the time the last handled mention
+        # was minted (see _snowflake_start_time), never its id.
+        if start_time:
+            tweets, includes = await client.get_mentions(uid, start_time=start_time)
+        else:
+            tweets, includes = await client.get_mentions(uid)
+        if since_id:
+            # start_time is inclusive and second-grained: drop the boundary
+            # mention and anything older in the same second.
+            tweets = [t for t in tweets if _id_key(str(t.get("id") or "")) > _id_key(since_id)]
     except XApiError as exc:
         if exc.status in (401, 403):
             logger.error(
@@ -353,7 +380,7 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
         tid = str(tweet.get("id") or "")
         if not tid:
             continue
-        newest = max(newest, tid, key=lambda s: (len(s), s))
+        newest = max(newest, tid, key=_id_key)
 
         text = str(tweet.get("text") or "")
         author = users.get(str(tweet.get("author_id") or ""))

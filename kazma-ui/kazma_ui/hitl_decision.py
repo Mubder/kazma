@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -72,6 +73,37 @@ def _resolve_turn(thread_id: str, session_id: str, turn_id: str) -> tuple[str, s
     return session_id, turn_id
 
 
+def _open_gate_id(thread_id: str) -> str:
+    """The id of the gate this thread is waiting on, as the card knows it.
+
+    The watchdog reads the pending interrupt from the checkpoint, and that
+    raw payload carries no ``interrupt_id``: the id is assigned when the
+    approval frame is built. Recorded without it, the timeout became a
+    SECOND part next to the card -- "Approval timed out" beside "No longer
+    pending" for one gate, and an orphaned-gate render invariant (live,
+    2026-09-26). The transcript's pending part is what the card is keyed by;
+    the registry's oldest pending row is the fallback. "" when neither has
+    one.
+    """
+    try:
+        from kazma_ui.hitl_status import persisted_hitl_for_thread
+
+        part = persisted_hitl_for_thread(thread_id) or {}
+        if str(part.get("state") or "pending") == "pending":
+            payload = part.get("payload") if isinstance(part.get("payload"), dict) else {}
+            iid = str(part.get("interrupt_id") or payload.get("interrupt_id") or "")
+            if iid:
+                return iid
+        from kazma_core.safety.hitl_gates import live_gates
+
+        for row in live_gates(thread_id):
+            if row.state == "pending":
+                return str(row.gate_id or "")
+    except (sqlite3.Error, OSError):
+        logger.warning("[gate-decision] open gate lookup failed", exc_info=True)
+    return ""
+
+
 async def _step(label: str, run: Callable[[], Awaitable[None]]) -> None:
     """Run one recording step; a failure is logged and the next step runs.
 
@@ -95,8 +127,8 @@ async def record_gate_decision(
     interrupt_id: str = "",
     session_id: str = "",
     turn_id: str = "",
-) -> None:
-    """Write one gate decision everywhere it is read.
+) -> str:
+    """Write one gate decision everywhere it is read; returns the gate id used.
 
     A failed step is logged and the next still runs; an unknown ``decision``
     is a programmer error and raises ValueError.
@@ -104,17 +136,23 @@ async def record_gate_decision(
     if decision not in DECISIONS:
         raise ValueError(f"unknown gate decision {decision!r}")
     if not thread_id:
-        return
+        return ""
     state, registry_decision = DECISIONS[decision]
     body = dict(payload) if isinstance(payload, dict) else {}
     iid = str(interrupt_id or body.get("interrupt_id") or "")
+    if not iid:
+        iid = await asyncio.to_thread(_open_gate_id, thread_id)
+    if iid:
+        body["interrupt_id"] = iid
     tool = str(tool or body.get("tool") or "")
 
     session_id, turn_id = await asyncio.to_thread(_resolve_turn, thread_id, session_id, turn_id)
 
     async def _stamp() -> None:
         # 1. The transcript: what every reload paints.
-        if not (session_id and turn_id):
+        # Without a gate id the stamp would be a new id-less part: a stray
+        # row beside the real card. The registry claim still happens.
+        if not (session_id and turn_id and iid):
             return
         from kazma_ui.sse_chat._streaming import stamp_hitl_part_state
 
@@ -149,6 +187,8 @@ async def record_gate_decision(
 
     async def _tell() -> None:
         # 3. The journal: every open tab, whichever tab (or platform) decided.
+        if not iid:
+            return  # an id-less frame would paint a stray row in every tab
         from kazma_ui.delivery import get_turn_broker
 
         await get_turn_broker().emit(thread_id, {
@@ -168,3 +208,4 @@ async def record_gate_decision(
     await _step("journal frame", _tell)
     logger.info("[gate-decision] %s thread=%s gate=%s by %s",
                 state, thread_id[:12], iid[:12] or "?", actor)
+    return iid

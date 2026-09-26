@@ -66,7 +66,7 @@ STRUCTURAL_BASELINE = {
     "module_local_public_symbols": 604,
     "patched_value_imports": 82,
     "sleep_then_assert": 53,
-    "bare_module_attr_assignments": 140,
+    "bare_module_attr_assignments": 138,
 }
 
 

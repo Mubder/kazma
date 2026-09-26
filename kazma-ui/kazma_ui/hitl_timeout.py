@@ -123,7 +123,9 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
         # answer missing (turn 9bdd89fd93cb).
         from kazma_ui.hitl_decision import record_gate_decision
 
-        await record_gate_decision(
+        # The id the card is keyed by: the checkpoint payload has none, and a
+        # timeout recorded without it became a second, stray row.
+        _iid = await record_gate_decision(
             thread_id,
             decision="timeout",
             actor="watchdog:timeout",
