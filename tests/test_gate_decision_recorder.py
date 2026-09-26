@@ -48,8 +48,12 @@ def wired(monkeypatch):
 
     class _Broker:
         async def emit(self, thread_id, frame):
-            rec.calls.append(("emit", (thread_id, frame["type"], frame["data"]["state"],
-                                       frame["data"]["interrupt_id"])))
+            data = frame.get("data") or {}
+            if frame["type"] == "hitl":
+                rec.calls.append(("emit", (thread_id, frame["type"], data["state"],
+                                           data["interrupt_id"])))
+            else:
+                rec.calls.append((frame["type"], data))
             return frame
 
     monkeypatch.setattr(streaming, "stamp_hitl_part_state", _stamp)
@@ -93,10 +97,38 @@ async def test_an_unknown_decision_is_a_programmer_error(wired):
 
 
 async def test_a_platform_button_without_an_id_claims_the_threads_gate(wired, monkeypatch):
+    """No id anywhere (no web turn, no registry row): the registry is still
+    claimed for the thread, and nothing id-less is written -- an id-less part
+    or frame is a stray row beside the real card."""
     monkeypatch.setattr(hd, "_resolve_turn", lambda t, s, u: ("", ""))
+    monkeypatch.setattr(hd, "_open_gate_id", lambda t: "")
     await hd.record_gate_decision("gw-telegram-1", decision="denied", actor="telegram:9")
-    kinds = [c[0] for c in wired.calls]
-    assert kinds == ["claim_thread", "emit"], "no session: no stamp, still claimed and told"
+    assert [c[0] for c in wired.calls] == ["claim_thread"]
+
+
+async def test_a_decision_without_an_id_uses_the_gate_the_card_shows(wired, monkeypatch):
+    """The watchdog reads the interrupt from the checkpoint, which carries no
+    id: recorded without one, the timeout was a second row next to the card
+    (live 2026-09-26, "Approval timed out" + "No longer pending")."""
+    import kazma_ui.hitl_status as hs
+
+    monkeypatch.setattr(hs, "persisted_hitl_for_thread",
+                        lambda t: {"state": "pending", "interrupt_id": "g-card"})
+    used = await hd.record_gate_decision("t1", decision="timeout", actor="watchdog:timeout",
+                                         session_id="s1", turn_id="u1")
+    assert used == "g-card"
+    by = dict((k, v) for k, v in wired.calls)
+    assert by["stamp"][3] == "g-card" and by["emit"][3] == "g-card"
+    assert by["claim"][1] == "g-card"
+
+
+def test_the_registry_names_the_gate_when_the_transcript_cannot():
+    from kazma_core.safety.hitl_gates import GateRow, register_gate
+
+    register_gate(GateRow(gate_id="g-reg", thread_id="t-reg", tool="file_write"))
+    assert hd._open_gate_id("t-reg") == "g-reg"
+    # Negative control: another thread's gate is not this thread's.
+    assert hd._open_gate_id("t-other") == ""
 
 
 async def test_one_failing_writer_does_not_stop_the_others(wired, monkeypatch):
@@ -170,6 +202,39 @@ async def test_the_watchdog_stamps_the_transcript_timeout(wired, monkeypatch):
     assert by["stamp"] == ("sess-wd", "turn-wd", "timeout", "gwd9")
     assert by["claim"] == ("t-wd-9", "gwd9", "deny", "watchdog:timeout")
     assert by["emit"] == ("t-wd-9", "hitl", "timeout", "gwd9")
+    # The toast frame names the same gate, so the page updates THAT card.
+    assert by["approval_timeout"]["interrupt_id"] == "gwd9"
+
+
+async def test_the_watchdog_names_the_card_when_the_checkpoint_does_not(wired, monkeypatch):
+    import kazma_core.safety.commitment.resume as resume_mod
+    import kazma_ui.hitl_status as hs
+    import kazma_ui.hitl_timeout as wd
+    import kazma_ui.reply_sink as reply_sink
+    import kazma_ui.sse_chat._streaming as streaming
+    import kazma_ui.turn_runtime as tr_mod
+
+    async def _read_pending(graph, cfg):
+        return {"tool": "python_exec", "kind": "security"}  # no interrupt_id
+
+    async def _no_drive(*a, **k):
+        return None
+
+    monkeypatch.setattr(resume_mod, "read_pending_interrupt", _read_pending)
+    monkeypatch.setattr(resume_mod, "build_resume_command", lambda *a, **k: object())
+    monkeypatch.setattr(hs, "is_resume_claimed", lambda t: False)
+    monkeypatch.setattr(hs, "persisted_hitl_for_thread",
+                        lambda t: {"state": "pending", "interrupt_id": "23ecd31b"})
+    monkeypatch.setattr(tr_mod, "ensure_session_for_thread", lambda t: "sess-wd")
+    monkeypatch.setattr(reply_sink, "resolve_reply_turn", lambda *a, **k: "turn-wd")
+    monkeypatch.setattr(streaming, "_drive_graph_to_journal", _no_drive)
+    monkeypatch.setattr(streaming, "mark_thread_unpaused", lambda t: None)
+
+    await wd._auto_deny(object(), "t-wd-10", 300.0)
+
+    by = dict((k, v) for k, v in wired.calls)
+    assert by["stamp"][3] == "23ecd31b" and by["emit"][3] == "23ecd31b"
+    assert by["approval_timeout"]["interrupt_id"] == "23ecd31b"
 
 
 # ── the class gate: every decision site goes through the recorder ─────────

@@ -4843,18 +4843,22 @@
     data = data || {};
     var text = String(msg || 'Approval timed out — continuing without this tool.');
     var iid = String(data.interrupt_id || '');
-    // The gate's id and tool, so the timeout lands on ITS card. Without them
-    // the event was a separate part keyed 'hitl:' -- a stray row next to a
-    // card left saying "Approval required".
-    applyTurnEvent({
-      type: 'hitl',
-      state: 'timeout',
-      interrupt_id: iid,
-      tool: String(data.tool || ''),
-      payload: iid ? { message: text, interrupt_id: iid } : { message: text },
-      turn_id: data.turn_id || _liveTurnId,
-      source: 'timeout',
-    });
+    // Only a timeout that names its gate may touch the document. Without an
+    // id the event became a separate part keyed 'hitl:' -- a stray row next
+    // to a card still saying "Approval required". The server's `hitl`
+    // timeout frame (kazma_ui/hitl_decision.py) carries the id; this frame
+    // is the toast.
+    if (iid) {
+      applyTurnEvent({
+        type: 'hitl',
+        state: 'timeout',
+        interrupt_id: iid,
+        tool: String(data.tool || ''),
+        payload: { message: text, interrupt_id: iid },
+        turn_id: data.turn_id || _liveTurnId,
+        source: 'timeout',
+      });
+    }
     // Chrome comes from TurnView after the document update. Do not
     // className-stamp cards here (HITL_VIEW_MODEL C).
     _awaitingApproval = false;
