@@ -73,10 +73,10 @@ def test_golden_set_pass_rate(mem_db):
             )
         mem_db.commit()
         # Seed episodes via dual-write mirror (singleton uses primary_memory_db)
-        from kazma_core.memory.dual_write import get_mirror, reset_mirror
+        from kazma_core.memory.dual_write import _get_mirror, _reset_mirror
 
-        reset_mirror()
-        mirror = get_mirror()
+        _reset_mirror()
+        mirror = _get_mirror()
         for turn, msg in enumerate(case.get("setup") or [], start=1):
             if msg.get("role") == "user":
                 mirror.mirror_episode(

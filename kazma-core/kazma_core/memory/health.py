@@ -93,6 +93,49 @@ def _comp(
     }
 
 
+def _findability_component(fnd: dict[str, Any]) -> dict[str, Any]:
+    """The "every memory findable" row: meaning vectors waiting for repair,
+    and memories an old archive rule erased that wait for recovery."""
+    vec = fnd.get("vectors") or {}
+    erased = fnd.get("erased") or {}
+    waiting = sum(int((vec.get(k) or {}).get("pending") or 0) for k in ("episodes", "beliefs"))
+    total = sum(int((vec.get(k) or {}).get("total") or 0) for k in ("episodes", "beliefs"))
+    pending = int(erased.get("pending") or 0)
+    unrecovered = int(erased.get("unrecovered") or 0)
+    restored = int(erased.get("restored") or 0) + int(erased.get("restored_question_only") or 0)
+    parts: list[str] = []
+    if waiting:
+        parts.append(
+            f"{waiting} of {total} memories wait for their meaning vector "
+            "(re-encoded every 15 min; word search already finds them)."
+        )
+    else:
+        parts.append(f"All {total} memories searchable by meaning and by words.")
+    if pending:
+        parts.append(f"{pending} memories erased by the old archive rule wait for recovery.")
+    if restored:
+        parts.append(f"{restored} erased memories recovered.")
+    if unrecovered:
+        parts.append(
+            f"{unrecovered} kept only as their short stub: no copy of the full text survives."
+        )
+    reconcile = fnd.get("turn_reconcile") or {}
+    catching_up = bool(reconcile) and not reconcile.get("done", True)
+    if catching_up:
+        parts.append(
+            f"Adding past conversation turns from the chat history: "
+            f"{int(reconcile.get('turns_written') or 0)} in the last pass, more to come."
+        )
+    return _comp(
+        "memory_findability",
+        "Every memory findable",
+        ok=not waiting and not pending and not catching_up,
+        status="warn" if (waiting or pending or catching_up) else "ok",
+        detail=" ".join(parts),
+        meta=fnd,
+    )
+
+
 def build_memory_health() -> dict[str, Any]:
     """Return overall status + per-component health rows."""
     # Declare the TTL-cache globals: _health_embed_cache_ts is REBOUND below
@@ -173,7 +216,7 @@ def build_memory_health() -> dict[str, Any]:
     emb_cfg = (cfg.get("embedding") or {}) if isinstance(cfg.get("embedding"), dict) else {}
     _emb_cfg: dict[str, Any] = {}
     try:
-        from kazma_core.memory.embedder import get_embedding_config, DEFAULT_MODEL
+        from kazma_core.memory.embedder import get_embedding_config
 
         _emb_cfg = get_embedding_config()
         provider = str(_emb_cfg["provider"])
@@ -333,6 +376,9 @@ def build_memory_health() -> dict[str, Any]:
         ),
         meta={"recall": ep.get("recall", 0), "episodic": ep.get("episodic", 0)},
     ))
+    fnd = v2.get("findability") if isinstance(v2.get("findability"), dict) else {}
+    if v2_ok and fnd:
+        components.append(_findability_component(fnd))
     components.append(_comp(
         "layer_l3", "V2 procedural + queue",
         ok=v2_ok, status=v2_status,

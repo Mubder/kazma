@@ -13,9 +13,11 @@ untrusted block next to the memory block — zero extra iterations, no danger
 tools, no permissions.
 
 Design notes:
-  * Opens ``kazma-data/chat_sessions.db`` READ-ONLY by path — kazma-core must
-    not import kazma-ui's SessionManager (layering); the schema is the
-    documented ``sessions`` table (tenant_id, session_id, messages, title…).
+  * Reads the chat store wherever it is -- Postgres ``kazma_chat_sessions``
+    or SQLite ``chat_sessions.db`` -- read-only, through
+    :mod:`kazma_core.memory.chat_history` (kazma-core must not import
+    kazma-ui's SessionManager). Until 2026-09-26 it opened only the SQLite
+    file, which on a Postgres install is a leftover from before the switch.
   * Best-effort and NEVER raises — a missing DB, a locked file, or a schema
     drift returns ``[]`` and the turn proceeds exactly as before.
   * Kill-switch: ``KAZMA_TRANSCRIPT_RECALL=0`` env or ConfigStore
@@ -29,7 +31,6 @@ from __future__ import annotations
 import logging
 import os
 import re
-import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +43,6 @@ __all__ = [
 ]
 
 _MAX_HITS = 3
-_CANDIDATE_SCAN = 400  # recent rows pulled for python-side scoring
 _SNIPPET_CHARS = 320
 _MIN_TERM = 3
 
@@ -120,74 +120,46 @@ def search_transcripts(
 ) -> list[dict[str, Any]]:
     """Rank past chat sessions by query-term overlap. Never raises.
 
-    Returns up to ``limit`` hits: {session_id, thread_id, title, created_at,
-    score, snippet}. Empty list when the store is missing/locked/empty or no
-    term matches.
+    Every session of the tenant is ranked -- in whichever store holds the
+    chats (:func:`kazma_core.memory.chat_history.search_sessions`) -- title
+    matches 5, message occurrences up to 4 per term. ``db_path`` searches that
+    SQLite file instead. Returns up to ``limit`` hits: {session_id, thread_id,
+    title, created_at, score, matched, snippet}; empty when the store is
+    missing or no term matches.
     """
     try:
         terms = _terms(query)
         if not terms:
             return []
-        if db_path is None:
-            from kazma_core.paths import data_dir
+        from kazma_core.memory.chat_history import search_sessions
 
-            db_path = data_dir() / "chat_sessions.db"
-        path = Path(db_path)
-        if not path.exists():
-            return []
-        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=3.0)
-        try:
-            conn.row_factory = sqlite3.Row
-            like = " OR ".join(
-                ["title LIKE ? OR messages LIKE ?"] * len(terms)
-            )
-            params: list[Any] = []
-            for t in terms:
-                pat = f"%{t}%"
-                params.extend([pat, pat])
-            rows = conn.execute(
-                "SELECT session_id, thread_id, title, created_at, messages "
-                f"FROM sessions WHERE ({like}) "
-                "ORDER BY created_at DESC LIMIT ?",
-                (*params, _CANDIDATE_SCAN),
-            ).fetchall()
-        finally:
-            conn.close()
-
+        rows = search_sessions(
+            terms,
+            tenant_id=tenant_id,
+            exclude_session_id=exclude_session_id,
+            limit=max(1, limit),
+            sqlite_path=Path(db_path) if db_path is not None else None,
+        )
         hits: list[dict[str, Any]] = []
         for r in rows:
-            sid = str(r["session_id"])
-            if exclude_session_id and sid == exclude_session_id:
-                continue
-            title = str(r["title"])
-            messages = str(r["messages"])
+            title = str(r.get("title") or "")
+            messages = str(r.get("messages") or "")
             low_title, low_msgs = title.lower(), messages.lower()
-            score = 0
-            matched: list[str] = []
-            for t in terms:
-                tl = t.lower()
-                if tl in low_title:
-                    score += 5  # title matches are the strongest signal
-                n = low_msgs.count(tl)
-                if n:
-                    score += min(n, 4)
-                if tl in low_title or n:
-                    matched.append(t)
+            matched = [t for t in terms if t.lower() in low_title or t.lower() in low_msgs]
             if not matched:
                 continue
             hits.append(
                 {
-                    "session_id": sid,
-                    "thread_id": str(r["thread_id"]),
+                    "session_id": str(r.get("session_id") or ""),
+                    "thread_id": str(r.get("thread_id") or ""),
                     "title": title or "(untitled session)",
-                    "created_at": str(r["created_at"]),
-                    "score": score,
+                    "created_at": str(r.get("created_at") or ""),
+                    "score": int(r.get("score") or 0),
                     "matched": matched,
                     "snippet": _snippet(messages if len(messages) < 200000 else title, matched),
                 }
             )
-        hits.sort(key=lambda h: h["score"], reverse=True)
-        return hits[: max(1, limit)]
+        return hits
     except Exception:
         logger.debug("[transcript-recall] search failed — returning no hits", exc_info=True)
         return []

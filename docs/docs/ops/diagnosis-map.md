@@ -310,7 +310,7 @@ V2 is the **only** chat memory stack (`recall()` in `memory/recall.py`). The V1
 | Recall | FTS5 + dense (sqlite-vec, or **pgvector** when a Postgres DSN is set) + belief/episode PPR + session bias |
 | Write | `mutate_belief` (single INSERT choke) + optional PG mirror + Neo4j dual-write |
 | Per-turn | Supervisor inject when `memory.per_turn_retrieval` (ConfigStore ← yaml) |
-| Post-turn | `schedule_post_turn_memory` → extractor → `mutate_belief` + ego-anchor |
+| Post-turn | `turn_runtime.close_turn` → `consolidator.remember_turn` → extractor → `mutate_belief` + ego-anchor; missed turns: `turn_reconcile` |
 | Health | `build_memory_health()` / `build_v2_health()` on Dashboard |
 | Graph UI | `GET /api/memory/v2/graph` · `/memory` · `memory_console.js` |
 | Entity rename / hub | `POST …/entities/{id}/rename` · `memory/self_hub.py` (User shells → hub `user`) |

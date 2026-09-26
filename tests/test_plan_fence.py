@@ -431,7 +431,7 @@ async def test_respond_synthesizes_over_plan_only_without_tools(monkeypatch):
     from kazma_core.agent.graph_respond import respond_node
 
     monkeypatch.setattr(
-        "kazma_core.memory.consolidator.schedule_post_turn_memory",
+        "kazma_core.memory.consolidator._schedule_post_turn_memory",
         lambda *_a, **_k: None,
     )
     seen_prompts: list[list[dict]] = []
@@ -468,7 +468,7 @@ async def test_respond_unglues_terminal_plan_fence(monkeypatch):
     from kazma_core.agent.graph_respond import respond_node
 
     monkeypatch.setattr(
-        "kazma_core.memory.consolidator.schedule_post_turn_memory",
+        "kazma_core.memory.consolidator._schedule_post_turn_memory",
         lambda *_a, **_k: None,
     )
     state = {

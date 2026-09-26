@@ -40,10 +40,8 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "DualWriteMirror",
-    "get_mirror",
     "mirror_belief",
     "mirror_episode",
-    "reset_mirror",
 ]
 
 
@@ -251,17 +249,20 @@ class DualWriteMirror:
         tier: str = "episodic",
         importance: int = 1,
         source: str = "dual_write_mirror",
+        created_at: float | None = None,
     ) -> str | None:
         """Mirror a legacy turn/fact into the V2 ``episodes`` table.
 
-        Returns the V2 episode id, or None if inactive/failed.
+        *created_at* is when the turn happened, for a turn written after the
+        fact (``turn_reconcile``); it defaults to now. Returns the V2 episode
+        id, or None if inactive/failed.
         """
         if not self._ensure():
             return None
         # Build a content blob for the stable id when texts are empty
         content = (user_text or assistant_text or summary_text or "").strip()
         eid = _episode_id(session_id, turn_number, content)
-        now = time.time()
+        now = time.time() if created_at is None else float(created_at)
         meta = {"source": source}
         # Explicit "remember" turns go straight to recall tier so dense search
         # finds them immediately (Phase A — avoid episodic-only dense miss).
@@ -287,6 +288,8 @@ class DualWriteMirror:
         elif tier == "episodic" and source not in (
             "knowledge_library_promote",
             "kb_promote",
+            # A turn written after the fact is not the live session's buffer.
+            "turn_reconcile",
         ):
             # Default post-turn path uses tier=episodic — promote to working
             # buffer so active-thread recall prefers the current session.
@@ -417,7 +420,7 @@ _mirror: DualWriteMirror | None = None
 _mirror_lock = threading.Lock()
 
 
-def get_mirror() -> DualWriteMirror:
+def _get_mirror() -> DualWriteMirror:
     """Return the process-wide dual-write mirror singleton."""
     global _mirror
     if _mirror is not None:
@@ -428,7 +431,7 @@ def get_mirror() -> DualWriteMirror:
         return _mirror
 
 
-def reset_mirror() -> None:
+def _reset_mirror() -> None:
     """Close + drop the singleton (tests)."""
     global _mirror
     with _mirror_lock:
@@ -447,11 +450,11 @@ def mirror_belief(
     **kwargs: Any,
 ) -> str | None:
     """Module-level convenience: mirror a triple into V2 beliefs."""
-    return get_mirror().mirror_belief(subject, predicate, obj, **kwargs)
+    return _get_mirror().mirror_belief(subject, predicate, obj, **kwargs)
 
 
 def mirror_episode(*, session_id: str, turn_number: int, **kwargs: Any) -> str | None:
     """Module-level convenience: mirror a turn into V2 episodes."""
-    return get_mirror().mirror_episode(
+    return _get_mirror().mirror_episode(
         session_id=session_id, turn_number=turn_number, **kwargs
     )

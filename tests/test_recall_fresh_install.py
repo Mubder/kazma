@@ -26,9 +26,9 @@ def data_dir(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("KAZMA_MEMORY_STATE_DB", raising=False)
     from kazma_core.memory import dual_write
 
-    dual_write.reset_mirror()
+    dual_write._reset_mirror()
     yield tmp_path
-    dual_write.reset_mirror()
+    dual_write._reset_mirror()
 
 
 @pytest.fixture

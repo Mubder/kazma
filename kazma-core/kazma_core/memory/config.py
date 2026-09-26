@@ -61,8 +61,11 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
         # Phase B: tag hit sources (fts5/dense/ppr/session_boost) in metadata.
         # Industry default ON so operators see chat Memory context without a hunt.
         "explain_recall": True,
-        # Phase B: max belief rows scanned for dense cosine (prefilter cap)
-        "dense_belief_candidate_cap": 400,
+        # Archived memories stay recallable, their fused score times this
+        # (0.1-1.0). Fused scores are reciprocal ranks 1.6 % apart at the top:
+        # 0.98 is about one place behind an active memory that matches as well.
+        # (The 400-row dense_belief_candidate_cap is gone: every belief is scored.)
+        "archived_recall_weight": 0.98,
         # Working-tier TTL (hours) — macro_sleep demotes stale working → episodic
         "working_ttl_hours": 24,
         # Tier-3 LLM entity disambiguation (opt-in; costs tokens)
@@ -178,7 +181,7 @@ def _read_store_overlay() -> dict[str, Any]:
             "access_bump_enabled",
             "session_boost",
             "explain_recall",
-            "dense_belief_candidate_cap",
+            "archived_recall_weight",
             "working_ttl_hours",
             "entity_llm_disambiguate",
             "merge_knowledge_into_chat",
@@ -285,6 +288,7 @@ _V2_FLOAT_KEYS = (
     "entity_vector_merge_threshold",
     "ppr_alpha",
     "session_boost",
+    "archived_recall_weight",
 )
 # Integers (TTLs, days, counts, iteration caps)
 _V2_INT_KEYS = (
@@ -302,7 +306,6 @@ _V2_INT_KEYS = (
     "ppr_seed_k",
     "ppr_hop_radius",
     "extraction_every_n_turns",
-    "dense_belief_candidate_cap",
     "working_ttl_hours",
 )
 

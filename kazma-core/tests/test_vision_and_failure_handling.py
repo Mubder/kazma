@@ -207,7 +207,7 @@ async def test_respond_node_skips_synthesis_when_turn_failed(monkeypatch):
             return type("_Resp", (), {"content": "FABRICATED ANSWER"})()
 
     monkeypatch.setattr(
-        "kazma_core.memory.consolidator.schedule_post_turn_memory",
+        "kazma_core.memory.consolidator._schedule_post_turn_memory",
         lambda *_a, **_k: None,
     )
 
@@ -250,7 +250,7 @@ async def test_respond_node_synthesizes_when_turn_not_failed(monkeypatch):
             return type("_Resp", (), {"content": "Here is the synthesized report."})()
 
     monkeypatch.setattr(
-        "kazma_core.memory.consolidator.schedule_post_turn_memory",
+        "kazma_core.memory.consolidator._schedule_post_turn_memory",
         lambda *_a, **_k: None,
     )
 

@@ -9,12 +9,13 @@ path, so the legacy functions were deleted.
 
 What remains is the V2 post-turn entry point and its helpers:
 
-- :func:`schedule_post_turn_memory` — the post-turn entry point (called by
-  graph_builder). Spawns a dedicated OS thread that runs the V2 mirror +
-  sync heuristic belief extraction, and enqueues a deferred
-  ``micro_consolidation`` task for the LLM deep-pass.
-- :func:`extract_turn_texts` — V2-shared helper that pulls the last
-  user/assistant pair from a message list.
+- :func:`remember_turn` — THE hand-over of a finished turn to long-term
+  memory, called once per turn by ``kazma_ui.turn_runtime.close_turn`` (the
+  closer every transport runs). It calls :func:`_schedule_post_turn_memory`,
+  which spawns a dedicated OS thread for the V2 mirror + sync heuristic
+  belief extraction and enqueues a deferred ``micro_consolidation`` task.
+- :func:`extract_turn_texts` — the last question and ITS answer.
+- :func:`user_turn_index` — which turn of the conversation that is.
 - :func:`_mirror_turn_to_v2` / :func:`_v2_extract_sync` — V2 helpers.
 - :func:`reset_turn_counter`, :func:`_bump_turn`, :func:`_cons_block`,
   :func:`_min_chars` — config/turn-counter helpers.
@@ -24,16 +25,19 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import OrderedDict
 from typing import Any
 
 from kazma_core.config_store import apply_sqlite_pragmas
 
 __all__ = [
     "reset_turn_counter",
-    "schedule_post_turn_memory",
+    "remember_turn",
     "clear_working_memory",
     "extract_turn_texts",
     "get_post_turn_metrics",
+    "message_text",
+    "user_turn_index",
 ]
 
 logger = logging.getLogger(__name__)
@@ -117,42 +121,117 @@ def _min_chars(cfg: dict[str, Any]) -> int:
         return 24
 
 
-def extract_turn_texts(messages: list[dict[str, Any]]) -> tuple[str, str]:
-    """Return (last_user, last_assistant) content from the message list.
+def _message(m: Any) -> dict[str, Any]:
+    if isinstance(m, dict):
+        return m
+    from kazma_core.memory.chat_history import normalize_message
 
-    Lifted here from the deleted ``auto_store.py`` so the V2 post-turn path
-    (``_mirror_turn_to_v2`` / ``_v2_extract_sync``) doesn't depend on a V1
-    module. Pure stdlib — no transitive V1 dependencies.
+    return normalize_message(m)
+
+
+def message_text(content: Any) -> str:
+    """A message's text, stripped: the string, or a multimodal message's text
+    parts joined."""
+    if not isinstance(content, str):
+        if isinstance(content, list):
+            parts = [
+                p.get("text", "")
+                for p in content
+                if isinstance(p, dict) and p.get("type") in (None, "text")
+            ]
+            content = " ".join(p for p in parts if p)
+        else:
+            content = ""
+    return str(content or "").strip()
+
+
+def extract_turn_texts(messages: list[dict[str, Any]]) -> tuple[str, str]:
+    """The last question in *messages* and its answer: the last non-empty
+    assistant message AFTER that question (empty when the turn produced none).
+
+    Until 2026-09-26 the scan went on past the question, so a turn that
+    produced no answer was stored with the previous turn's answer. Rows made
+    that way are still reproduced by ``memory.rehydrate`` (its own copy of
+    the old rule). Messages may be dicts or LangChain messages.
     """
     user = ""
     assistant = ""
     for m in reversed(messages or []):
+        m = _message(m)
         role = m.get("role")
-        content = m.get("content")
-        if not isinstance(content, str):
-            # Multimodal: take first text part if present.
-            if isinstance(content, list):
-                parts = [
-                    p.get("text", "")
-                    for p in content
-                    if isinstance(p, dict) and p.get("type") in (None, "text")
-                ]
-                content = " ".join(p for p in parts if p)
-            else:
-                content = ""
-        content = str(content or "").strip()
+        content = message_text(m.get("content"))
         if not content:
             continue
+        if role == "user":
+            user = content
+            break
         if role == "assistant" and not assistant:
             assistant = content
-        elif role == "user" and not user:
-            user = content
-        if user and assistant:
-            break
     return user, assistant
 
 
-def schedule_post_turn_memory(
+def user_turn_index(messages: list[Any]) -> int:
+    """Which turn of the conversation *messages* ends on: its user messages,
+    counted. ``respond_node`` stamps it on ``_post_turn_memory`` and
+    :func:`remember_turn` recomputes it from the closing state -- one helper,
+    so the two always count alike. As the episode's ``turn_number`` it keeps
+    a question asked twice in one thread two memories (the iteration count
+    used before made the second one's id collide with the first)."""
+    return sum(1 for m in messages or [] if _message(m).get("role") == "user")
+
+
+#: Turns already handed to memory in this process: close_turn runs after every
+#: settlement of a turn (complete, disconnect, a late resume), and a turn is
+#: remembered once.
+_remembered: OrderedDict[tuple[str, int, str], None] = OrderedDict()
+_remembered_lock = threading.Lock()
+_REMEMBERED_MAX = 4096
+
+
+def remember_turn(values: dict[str, Any] | None, *, thread_id: str = "") -> bool:
+    """Hand a finished turn to long-term memory. True when it was scheduled.
+
+    *values* is the graph's terminal state (``snapshot.values``); the caller
+    has checked the run is finished, not paused. ``respond_node`` marks the
+    turn it finalized with ``_post_turn_memory``; a record whose turn index
+    is not the state's current one belongs to an earlier turn (this one
+    ended some other way) and is ignored. Never raises.
+
+    Called by ``kazma_ui.turn_runtime.close_turn`` alone. Until 2026-09-26
+    the gateway handler was the only caller, so no web chat turn reached
+    memory from 2026-08-08 (877 turns); tests/test_memory_every_turn.py holds
+    the single call site.
+    """
+    values = values if isinstance(values, dict) else {}
+    post = values.get("_post_turn_memory")
+    if not isinstance(post, dict):
+        return False
+    messages = list(values.get("messages") or [])
+    turn = user_turn_index(messages)
+    try:
+        if int(post.get("turn") or 0) != turn:
+            return False
+    except (TypeError, ValueError):
+        return False
+    session = str(post.get("session_id") or thread_id or "")
+    question, _answer = extract_turn_texts(messages)
+    key = (session, turn, question[:512])
+    with _remembered_lock:
+        if key in _remembered:
+            return False
+        _remembered[key] = None
+        while len(_remembered) > _REMEMBERED_MAX:
+            _remembered.popitem(last=False)
+    _schedule_post_turn_memory(
+        messages,
+        session_id=session or None,
+        turn=turn,
+        tenant_id=str(post.get("tenant_id") or "default"),
+    )
+    return True
+
+
+def _schedule_post_turn_memory(
     messages: list[dict[str, Any]],
     *,
     session_id: str | None = None,

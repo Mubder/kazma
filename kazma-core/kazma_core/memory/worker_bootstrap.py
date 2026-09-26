@@ -836,6 +836,36 @@ def _prune_swarm_tasks() -> None:
     prune_finished_tasks()
 
 
+def _repair_memory_vectors() -> None:
+    # Memories meaning search cannot compare -- no vector, another size,
+    # another embedding model -- re-encoded in place, newest first, ~20 s a
+    # pass (docs/plans/MEMORY_NOTHING_LOST_PLAN.md, item F). Until 2026-09-26
+    # this ran once a day for 100 missing vectors, and a model switch waited
+    # for someone to click Rebuild. Logs what it re-encodes.
+    from kazma_core.memory.reembed import run_vector_repair_pass
+
+    run_vector_repair_pass()
+
+
+def _recover_erased_memories() -> None:
+    # Memories the pre-2026-09-26 archive rule erased, restored from the
+    # sources that still hold them, verified (item D). Rows get one verdict
+    # each, so once they have one this pass is a single SELECT. Logs its report.
+    from kazma_core.memory.rehydrate import run_rehydrate_pass
+
+    run_rehydrate_pass()
+
+
+def _reconcile_memory_turns() -> None:
+    # Every conversation turn in the chat store gets its episode (item H):
+    # the web chat wrote none from 2026-08-08 to 2026-09-26, and a turn the
+    # live pipeline misses for any reason is caught here. Episodes only,
+    # with the turn's own time; resumable, ~60 s a pass. Logs what it adds.
+    from kazma_core.memory.turn_reconcile import run_turn_reconcile_pass
+
+    run_turn_reconcile_pass()
+
+
 def _watch_supervisor() -> None:
     # Is the guard that started this server still alive? Its heartbeat is in
     # the state file named by KAZMA_GUARD_STATE_FILE. The guard died on
@@ -856,6 +886,9 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("task queue purge", _purge_task_queue),
     ("swarm task retention", _prune_swarm_tasks),
     ("supervisor watch", _watch_supervisor),
+    ("memory vector repair", _repair_memory_vectors),
+    ("memory recovery", _recover_erased_memories),
+    ("memory turn reconcile", _reconcile_memory_turns),
 )
 
 

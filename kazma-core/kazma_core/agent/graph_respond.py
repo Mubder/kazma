@@ -344,10 +344,14 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     # CommonMark code block (````Saved.`` incident, 2026-08-26).
     messages = rewrite_terminal_assistant_message(messages)
 
-    # Post-turn memory: signal that memory work is pending so the gateway
-    # handler can fire it AFTER the graph reaches terminal state (preventing
-    # the CoT "active again" flicker — the memory thread's SQLite writes
-    # would otherwise re-trigger the CoT panel while it's showing "Done").
+    # Post-turn memory: mark this turn as finished so the turn's closer
+    # (kazma_ui.turn_runtime.close_turn, which every transport runs) hands
+    # it to memory AFTER the graph is terminal -- memory writes never run
+    # inside the turn. ``turn`` is the conversation's turn index
+    # (consolidator.user_turn_index), not the iteration count: that made a
+    # question asked twice in one thread collide into one memory.
+    from kazma_core.memory.consolidator import user_turn_index
+
     return {
         "messages": messages,
         "iteration": iteration,
@@ -356,7 +360,7 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
         "next_node": "end",
         "_post_turn_memory": {
             "session_id": state.get("thread_id"),
-            "turn": iteration,
+            "turn": user_turn_index(messages),
             "tenant_id": state.get("tenant_id", "default"),
         },
     }

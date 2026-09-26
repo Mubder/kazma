@@ -8,7 +8,7 @@ Covers:
   - swarm_bridge.store_compaction_summary → episode (source="compaction_summary")
   - recall.search dict-shape compat shim (the linchpin read contract)
 
-All tests use tmp_path + KAZMA_DATA_DIR override + dual_write.reset_mirror().
+All tests use tmp_path + KAZMA_DATA_DIR override + dual_write._reset_mirror().
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ def isolated_data(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     from kazma_core.memory import dual_write
 
-    dual_write.reset_mirror()
+    dual_write._reset_mirror()
     yield tmp_path
-    dual_write.reset_mirror()
+    dual_write._reset_mirror()
 
 
 def _primary_conn() -> sqlite3.Connection:
@@ -209,7 +209,7 @@ async def test_p3_index_worker_l4_sets_worker_meta(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     from kazma_core.memory import dual_write
 
-    dual_write.reset_mirror()
+    dual_write._reset_mirror()
     try:
         from kazma_core.swarm import worker_dispatch as wd
 
@@ -239,7 +239,7 @@ async def test_p3_index_worker_l4_sets_worker_meta(tmp_path: Path, monkeypatch):
         assert not bel, "swarm results must NOT create worker→produced beliefs"
         conn.close()
     finally:
-        dual_write.reset_mirror()
+        dual_write._reset_mirror()
 
 
 @pytest.mark.asyncio
@@ -249,7 +249,7 @@ async def test_p3_index_skips_empty_output(tmp_path: Path, monkeypatch):
     from kazma_core.memory import dual_write
     from kazma_core.memory.schema_v2 import ensure_primary_schema
 
-    dual_write.reset_mirror()
+    dual_write._reset_mirror()
     try:
         from kazma_core.swarm import worker_dispatch as wd
 
@@ -267,4 +267,4 @@ async def test_p3_index_skips_empty_output(tmp_path: Path, monkeypatch):
         conn.close()
         assert n == 0
     finally:
-        dual_write.reset_mirror()
+        dual_write._reset_mirror()

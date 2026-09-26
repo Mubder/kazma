@@ -8,10 +8,13 @@ Every move is a rule on TTLs, importance and use:
   - **Episodic → recall** — important (``promote_to_recall_min_importance``)
     and used (``promote_to_recall_min_access``) episodes are promoted.
   - **Recall → episodic** — recall rows idle for ``recall_demote_idle_days``.
-  - **Archive** — raw text is dropped and a stub kept (see
-    ``_ARCHIVE_EPISODE_SQL``). Only rows stale on BOTH clocks are archived —
-    created past the TTL *and* not recalled within it — and below the
-    promote floor. A memory still being recalled is never archived.
+  - **Archive** — the memory moves to the cold ``archived`` tier and keeps
+    its text and its vector (``_ARCHIVE_EPISODE_SQL``). Recall still reaches
+    it, one step behind active memories, and a recalled archived memory
+    returns to ``episodic`` at the next sweep. Only rows stale on BOTH clocks
+    are archived — created past the TTL *and* not recalled within it — and
+    below the promote floor. Until 2026-09-26 archiving DELETED the text and
+    recall never searched the tier: a month of disuse lost the memory.
   - **Archive beliefs** — superseded beliefs older than
     ``archive_after_days`` move to ``beliefs_archive`` cold storage.
 
@@ -34,26 +37,20 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["run_macro_sleep"]
 
-# Archiving drops the raw text; what survives is ``summary_text``, so it must
-# never be left empty. Ordinary chat turns are written with summary_text = ''
-# (not NULL) and COALESCE only replaces NULL, so every archived chat turn used
-# to keep nothing at all — no question, no answer, no summary (2026-09-23).
-# The stub is the start of the question and of the answer.
+# Archiving moves the tier and nothing else of substance: the question, the
+# answer and the vector all stay. An empty summary is filled with the start of
+# the question and of the answer so the row has a one-line gist in lists.
+# (Until 2026-09-26 this statement also set user_text and assistant_text to
+# NULL; memory/rehydrate.py recovers those rows from the chat history.)
 _ARCHIVE_EPISODE_SQL = (
     "UPDATE episodes SET tier='archived', "
     "summary_text=COALESCE(NULLIF(TRIM(summary_text), ''), TRIM("
     "SUBSTR(COALESCE(user_text, ''), 1, 200) || "
     "CASE WHEN TRIM(COALESCE(user_text, '')) <> '' "
     "AND TRIM(COALESCE(assistant_text, '')) <> '' THEN ' — ' ELSE '' END || "
-    "SUBSTR(COALESCE(assistant_text, ''), 1, 300))), "
-    "user_text=NULL, assistant_text=NULL WHERE id=?"
+    "SUBSTR(COALESCE(assistant_text, ''), 1, 300))) "
+    "WHERE id=?"
 )
-
-_EPISODE_MIRROR_COLUMNS = (
-    "id, tenant_id, session_id, turn_number, user_text, assistant_text, "
-    "summary_text, tier, structural_importance, created_at, metadata_json"
-)
-
 
 def _propagate_episode_moves(
     conn: sqlite3.Connection,
@@ -65,28 +62,22 @@ def _propagate_episode_moves(
     """Carry this sweep's tier moves to the optional shared mirrors.
 
     SQLite is the source of truth, but the Postgres state mirror and a remote
-    vector index (pgvector / Qdrant) each hold their own copy. Nothing here
-    used to reach them: with a mirror on, an archived episode kept its full
-    text and its old tier there, and stayed searchable in the remote index.
-    Beliefs already had this (``unmirror_belief_to_state``). Both mirrors are
-    best-effort and swallow their own failures; the default local setup has
-    neither, and this returns without touching anything.
+    vector index (pgvector / Qdrant) each hold their own copy, and both must
+    learn the new tier. Both mirrors are best-effort and swallow their own
+    failures; the default local setup has neither, and this returns without
+    touching anything.
     """
     if not moved and not archived:
         return
     from kazma_core.memory.state_backend import (
         NullStateBackend,
         get_state_backend,
-        mirror_episode_to_state,
+        remirror_episode_by_id,
     )
 
     if not isinstance(get_state_backend(), NullStateBackend):
         for eid in dict.fromkeys([*moved, *archived]):
-            row = conn.execute(
-                f"SELECT {_EPISODE_MIRROR_COLUMNS} FROM episodes WHERE id=?", (eid,)
-            ).fetchone()
-            if row is not None:
-                mirror_episode_to_state(dict(row))
+            remirror_episode_by_id(conn, eid)
 
     if not archived:
         return
@@ -101,11 +92,30 @@ def _propagate_episode_moves(
             len(archived),
         )
         return
-    # The local index filters on episodes.tier in SQL, so archived rows are
-    # already out of it; only a remote index keeps a stale copy.
-    if not isinstance(backend, LocalSqliteVectorBackend):
-        for eid in archived:
-            backend.delete(eid, tenant_id=tenant_id)
+    # Archived memories stay searchable by meaning. The local index is the row
+    # itself, so it keeps the vector with no work; a remote index is re-tagged
+    # with the new tier. (Until 2026-09-26 it was told to DELETE archived rows,
+    # which made them unreachable by meaning on every remote-index install.)
+    if isinstance(backend, LocalSqliteVectorBackend):
+        return
+    import struct
+
+    for eid in archived:
+        row = conn.execute(
+            "SELECT embedding, session_id FROM episodes WHERE id=?", (eid,)
+        ).fetchone()
+        blob = bytes(row[0]) if row is not None and row[0] else b""
+        if not blob or len(blob) % 4:
+            continue  # no vector yet: the repair sweep re-encodes and upserts it
+        vec = list(struct.unpack(f"{len(blob) // 4}f", blob))
+        # A backend reports a failed write by returning False.
+        if not backend.upsert(
+            eid,
+            vec,
+            tenant_id=tenant_id,
+            meta={"kind": "episode", "tier": "archived", "session_id": row[1]},
+        ):
+            logger.warning("[macro_sleep] remote index kept %s under its old tier", eid)
 
 
 def run_macro_sleep(
@@ -140,6 +150,7 @@ def run_macro_sleep(
         "archived_beliefs": 0,
         "scored_episodes": 0,
         "promoted_to_recall": 0,
+        "revived_archived": 0,
     }
     try:
         # ── Episode decay + tier transitions ──
@@ -159,6 +170,7 @@ def run_macro_sleep(
         _archive_recall: list[str] = []
         _idle_to_episodic: list[str] = []
         _archive_episodic: list[str] = []
+        _revive: list[str] = []
         for r in rows:
             eid = r["id"]
             tier = r["tier"]
@@ -169,8 +181,14 @@ def run_macro_sleep(
             created_age = max(0.0, now - float(r["created_at"] or now))
             stats["scored_episodes"] += 1
 
+            # A recalled archived memory comes back: it was archived because
+            # nobody used it, and recall bumps last_accessed, so a fresh touch
+            # means it is in use again.
+            if tier == "archived" and age < episodic_ttl:
+                _revive.append(eid)
+                stats["revived_archived"] += 1
             # Working-tier TTL → episodic (active buffer must not grow forever)
-            if tier == "working" and created_age > working_ttl:
+            elif tier == "working" and created_age > working_ttl:
                 _to_episodic.append(eid)
                 stats["demoted_working"] += 1
             # Promote episodic→recall when important + accessed
@@ -215,10 +233,10 @@ def run_macro_sleep(
                 _archive_episodic.append(eid)
                 stats["demoted_episodic"] += 1
 
-        if _to_episodic or _idle_to_episodic:
+        if _to_episodic or _idle_to_episodic or _revive:
             primary_conn.executemany(
                 "UPDATE episodes SET tier='episodic' WHERE id=?",
-                [(eid,) for eid in _to_episodic + _idle_to_episodic],
+                [(eid,) for eid in _to_episodic + _idle_to_episodic + _revive],
             )
         if _to_recall:
             primary_conn.executemany(
@@ -267,7 +285,7 @@ def run_macro_sleep(
         _propagate_episode_moves(
             primary_conn,
             tenant_id=tenant_id,
-            moved=_to_episodic + _idle_to_episodic + _to_recall,
+            moved=_to_episodic + _idle_to_episodic + _to_recall + _revive,
             archived=_archive_recall + _archive_episodic,
         )
     except Exception:

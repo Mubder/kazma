@@ -141,10 +141,10 @@ def test_e2e_remember_style_episode_and_recall(monkeypatch, tmp_path):
     path = tmp_path / "e2e_state.db"
     monkeypatch.setattr("kazma_core.paths.primary_memory_db", lambda: str(path))
 
-    from kazma_core.memory.dual_write import mirror_episode, reset_mirror
+    from kazma_core.memory.dual_write import mirror_episode, _reset_mirror
     from kazma_core.memory.recall import recall
 
-    reset_mirror()
+    _reset_mirror()
     eid = mirror_episode(
         session_id="chat-1",
         turn_number=1,
@@ -173,4 +173,4 @@ def test_e2e_remember_style_episode_and_recall(monkeypatch, tmp_path):
     ).fetchone()
     assert int(acc["access_count"] or 0) >= 1
     conn2.close()
-    reset_mirror()
+    _reset_mirror()

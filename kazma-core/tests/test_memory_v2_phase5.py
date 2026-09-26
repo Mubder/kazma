@@ -41,9 +41,9 @@ def isolated_data(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("KAZMA_DEMO_MODE", "1")
     from kazma_core.memory import dual_write
 
-    dual_write.reset_mirror()
+    dual_write._reset_mirror()
     yield tmp_path
-    dual_write.reset_mirror()
+    dual_write._reset_mirror()
 
 
 def _open_dbs(isolated_data):

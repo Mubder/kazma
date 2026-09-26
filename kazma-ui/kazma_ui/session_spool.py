@@ -39,10 +39,9 @@ def spool_path_for(db_path: str) -> str:
     """The spool file that belongs to a sessions DB (``:memory:`` stays in memory)."""
     if not db_path or db_path == ":memory:":
         return ":memory:"
-    from pathlib import Path
+    from kazma_core.paths import chat_spool_db
 
-    p = Path(db_path)
-    return str(p.with_name(f"{p.stem}_spool.db"))
+    return str(chat_spool_db(db_path))
 
 
 class SessionSpool:

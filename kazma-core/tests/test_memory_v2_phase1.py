@@ -32,9 +32,9 @@ def isolated_data(tmp_path: Path, monkeypatch):
     # Reset singletons that may have cached the old data dir
     from kazma_core.memory import dual_write
 
-    dual_write.reset_mirror()
+    dual_write._reset_mirror()
     yield tmp_path
-    dual_write.reset_mirror()
+    dual_write._reset_mirror()
 
 
 # ── 1. Schema tests ────────────────────────────────────────────────────────
@@ -179,7 +179,7 @@ def test_memory_v2_gated_by_master_switch():
 def test_dual_write_mirror_belief_functional(isolated_data):
     from kazma_core.memory import dual_write
 
-    m = dual_write.get_mirror()
+    m = dual_write._get_mirror()
     bid = m.mirror_belief(
         "John Smith", "lives_in", "Paris",
         importance=4, source_session="s1", source_turn=1,
@@ -197,7 +197,7 @@ def test_dual_write_mirror_belief_functional(isolated_data):
 def test_dual_write_mirror_belief_set_valued(isolated_data):
     from kazma_core.memory import dual_write
 
-    m = dual_write.get_mirror()
+    m = dual_write._get_mirror()
     bid = m.mirror_belief("user", "uses_tool", "git")
     assert bid is not None
     row = m._primary.execute(
@@ -209,7 +209,7 @@ def test_dual_write_mirror_belief_set_valued(isolated_data):
 def test_dual_write_mirror_episode(isolated_data):
     from kazma_core.memory import dual_write
 
-    m = dual_write.get_mirror()
+    m = dual_write._get_mirror()
     eid = m.mirror_episode(
         session_id="s1", turn_number=1,
         user_text="I live in Paris", assistant_text="Noted.",
@@ -229,7 +229,7 @@ def test_dual_write_idempotent(isolated_data):
     """Same content + turn must produce the same episode id (INSERT OR IGNORE)."""
     from kazma_core.memory import dual_write
 
-    m = dual_write.get_mirror()
+    m = dual_write._get_mirror()
     eid1 = m.mirror_episode(
         session_id="s1", turn_number=1, user_text="hello", assistant_text="hi"
     )
@@ -247,7 +247,7 @@ def test_dual_write_best_effort_no_raise(isolated_data):
     """Mirror must never raise — failures are logged, not propagated."""
     from kazma_core.memory import dual_write
 
-    m = dual_write.get_mirror()
+    m = dual_write._get_mirror()
     # Close the connection to force a failure path
     m.close()
     # These should return None, not raise

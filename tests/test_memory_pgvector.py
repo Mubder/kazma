@@ -126,7 +126,16 @@ def test_get_backends_cfg_respects_kill_switch(monkeypatch) -> None:
     assert cfg["vector"]["provider"] in ("sqlite_vec", "local", "local_sqlite")
 
 
-def test_hybrid_belief_search_does_not_fall_back_to_episodes() -> None:
+def test_hybrid_belief_search_falls_back_to_local_beliefs_never_episodes() -> None:
+    """A belief search returns beliefs only, wherever it is answered.
+
+    The local index used to be the episodes table alone, so the hybrid
+    returned NOTHING for a belief search the remote index could not answer
+    (rather than leak episode ids). The local index searches beliefs itself
+    since 2026-09-26 (``LocalSqliteVectorBackend`` honours ``kind``), so a
+    remote index with no hits -- empty, or still filling -- falls back to it.
+    """
+
     class _Remote:
         available = True
 
@@ -136,12 +145,12 @@ def test_hybrid_belief_search_does_not_fall_back_to_episodes() -> None:
     class _Local:
         available = True
 
-        def search(self, *a, **k):
-            return [("ep-should-not-leak", 0.99)]
+        def search(self, query_vec, *, tenant_id="default", tier=None, limit=10, kind=None):
+            return [("b-local", 0.9)] if kind == "belief" else [("ep-1", 0.99)]
 
     hybrid = HybridVectorBackend(_Remote(), _Local())
-    assert hybrid.search([0.1], kind="belief") == []
-    assert hybrid.search([0.1], kind="episode") == [("ep-should-not-leak", 0.99)]
+    assert hybrid.search([0.1], kind="belief") == [("b-local", 0.9)]
+    assert hybrid.search([0.1], kind="episode") == [("ep-1", 0.99)]
 
 
 def test_postgres_primary_fuses_pgvector_dense(monkeypatch) -> None:

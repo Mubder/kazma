@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import threading
 import time
 
@@ -42,6 +43,7 @@ __all__ = [
     "search_state_beliefs",
     "unmirror_belief_to_state",
     "remirror_belief_by_id",
+    "remirror_episode_by_id",
     "reconcile_state_beliefs",
     "mirror_drift_summary",
 ]
@@ -770,6 +772,26 @@ def unmirror_belief_to_state(row_id: str) -> bool:
         return bool(get_state_backend().delete_belief(row_id))
     except Exception:
         return False
+
+
+#: The episode columns the state mirror holds (``PostgresStateBackend.mirror_episode``).
+_EPISODE_MIRROR_COLUMNS = (
+    "id, tenant_id, session_id, turn_number, user_text, assistant_text, "
+    "summary_text, tier, structural_importance, created_at, metadata_json"
+)
+
+
+def remirror_episode_by_id(conn: Any, episode_id: str) -> bool:
+    """Push an episode's CURRENT local row to the mirror (a tier move, restored
+    text). A row that no longer exists is left alone. Never raises."""
+    try:
+        row = conn.execute(
+            f"SELECT {_EPISODE_MIRROR_COLUMNS} FROM episodes WHERE id = ?", (episode_id,)
+        ).fetchone()
+    except sqlite3.Error:
+        logger.debug("[state_backend] remirror failed for %s", episode_id, exc_info=True)
+        return False
+    return mirror_episode_to_state(dict(row)) if row is not None else False
 
 
 def remirror_belief_by_id(conn: Any, belief_id: str) -> bool:

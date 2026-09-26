@@ -30,7 +30,6 @@ from __future__ import annotations
 import logging
 import os
 import socket
-import sqlite3
 import time
 import uuid
 from dataclasses import dataclass
@@ -77,15 +76,11 @@ class InstallRecord:
 
 
 def store_errors() -> tuple[type[BaseException], ...]:
-    """The failures a settings round trip can legitimately raise."""
-    errs: list[type[BaseException]] = [OSError, RuntimeError, ValueError, TypeError, sqlite3.Error]
-    try:
-        import psycopg
+    """The failures a settings round trip can legitimately raise
+    (:func:`kazma_core.db.pg_helpers.store_errors`, the one list)."""
+    from kazma_core.db.pg_helpers import store_errors as _store_errors
 
-        errs.append(psycopg.Error)
-    except ImportError:
-        pass
-    return tuple(errs)
+    return _store_errors()
 
 
 def _is_id(value: str) -> bool:

@@ -196,6 +196,24 @@ def persist_reply(
         return False
 
 
+def _remember_finished_turn(snap: Any, thread_id: str) -> None:
+    """Hand a finished turn to long-term memory -- the one call site
+    (``consolidator.remember_turn``; AGENTS §15G). Every transport closes its
+    turns here, so every conversation is remembered: until 2026-09-26 only
+    the gateway handler did it, and no web chat turn reached memory from
+    2026-08-08. A memory problem never stops the reply from being saved."""
+    try:
+        from kazma_core.memory.consolidator import remember_turn
+
+        remember_turn(getattr(snap, "values", None) or {}, thread_id=thread_id)
+    except (TypeError, ValueError, KeyError, AttributeError, RuntimeError, ImportError):
+        logger.warning(
+            "[turn] finished turn not handed to memory thread=%s",
+            (thread_id or "")[:12],
+            exc_info=True,
+        )
+
+
 async def close_turn(
     graph: Any = None,
     config: dict[str, Any] | None = None,
@@ -319,6 +337,9 @@ async def close_turn(
             interrupted = bool(paused) and not stale_pause
         else:
             interrupted = bool(interrupted) or (bool(paused) and not stale_pause)
+
+        if snap is not None and not paused and not interrupted:
+            _remember_finished_turn(snap, thread_id)
 
         from kazma_ui.reply_sink import resolve_reply_text, resolve_reply_turn
 

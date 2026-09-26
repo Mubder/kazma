@@ -26,9 +26,9 @@ def isolated_data(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     from kazma_core.memory import dual_write
 
-    dual_write.reset_mirror()
+    dual_write._reset_mirror()
     yield tmp_path
-    dual_write.reset_mirror()
+    dual_write._reset_mirror()
 
 
 @pytest.fixture()
@@ -287,8 +287,13 @@ def test_a_chat_turn_still_being_recalled_is_not_archived(dbs):
     assert row["assistant_text"] == "QR 1071, departing 09:40."
 
 
-def test_an_archived_chat_turn_keeps_a_stub(dbs):
-    """summary_text '' is not NULL, so COALESCE kept nothing at all."""
+def test_an_archived_chat_turn_keeps_its_text_and_gains_a_stub(dbs):
+    """Archiving moves a memory to cold storage; it never deletes a word.
+
+    Until 2026-09-26 it nulled the question and the answer and kept only this
+    stub (76 memories on the live install). summary_text '' is not NULL, so a
+    COALESCE once kept nothing at all: the empty summary is filled.
+    """
     from kazma_core.memory.config import DEFAULT_MEMORY_CFG
     from kazma_core.memory.macro_sleep import run_macro_sleep
 
@@ -299,7 +304,8 @@ def test_an_archived_chat_turn_keeps_a_stub(dbs):
         "SELECT tier, user_text, assistant_text, summary_text FROM episodes WHERE id='stale'"
     ).fetchone()
     assert row["tier"] == "archived"
-    assert row["user_text"] is None and row["assistant_text"] is None
+    assert row["user_text"] == "What is my flight number to Doha?"
+    assert row["assistant_text"] == "QR 1071, departing 09:40."
     assert row["summary_text"] == "What is my flight number to Doha? — QR 1071, departing 09:40."
 
 
@@ -315,8 +321,15 @@ def test_an_archived_turn_keeps_its_own_summary(dbs):
 
 
 def test_sweep_moves_reach_the_shared_mirrors(dbs, monkeypatch):
-    """Archived rows used to keep full text in the Postgres state mirror and
-    stay searchable in a remote vector index; nothing propagated."""
+    """Tier moves reach the Postgres state mirror, and a remote vector index
+    keeps an archived row's vector, re-tagged ``archived``.
+
+    Until 2026-09-26 the remote index was told to DELETE archived rows, so on
+    a pgvector/Qdrant install an archived memory could not be found by
+    meaning at all, and the mirror received the erased (NULL) text.
+    """
+    import struct
+
     import kazma_core.memory.backends as backends
     import kazma_core.memory.state_backend as state_backend
     from kazma_core.memory.config import DEFAULT_MEMORY_CFG
@@ -324,6 +337,7 @@ def test_sweep_moves_reach_the_shared_mirrors(dbs, monkeypatch):
 
     mirrored: dict[str, dict] = {}
     deleted: list[str] = []
+    upserted: dict[str, tuple[int, dict]] = {}
 
     class _Mirror:
         def mirror_episode(self, row):
@@ -335,11 +349,16 @@ def test_sweep_moves_reach_the_shared_mirrors(dbs, monkeypatch):
             deleted.append(item_id)
             return True
 
+        def upsert(self, item_id, vec, *, tenant_id="default", meta=None):
+            upserted[item_id] = (len(vec), dict(meta or {}))
+            return True
+
     monkeypatch.setattr(state_backend, "get_state_backend", lambda: _Mirror())
     monkeypatch.setattr(backends, "get_vector_backend", lambda conn=None: _RemoteIndex())
 
     p, _ = dbs
     now = _chat_turn(p, "gone", created_days=60)
+    p.execute("UPDATE episodes SET embedding=? WHERE id='gone'", (struct.pack("4f", 1, 0, 0, 0),))
     p.execute(
         "INSERT INTO episodes (id, tenant_id, session_id, turn_number, user_text, tier, "
         "structural_importance, created_at) VALUES ('fresh','default','s1',2,'hi','working',1,?)",
@@ -347,9 +366,11 @@ def test_sweep_moves_reach_the_shared_mirrors(dbs, monkeypatch):
     )
     p.commit()
     run_macro_sleep(p, cfg=DEFAULT_MEMORY_CFG, now=now)
-    assert mirrored["gone"]["tier"] == "archived" and mirrored["gone"]["user_text"] is None
+    assert mirrored["gone"]["tier"] == "archived"
+    assert mirrored["gone"]["user_text"] == "What is my flight number to Doha?"
     assert mirrored["fresh"]["tier"] == "episodic"  # a plain tier move reaches it too
-    assert deleted == ["gone"]  # only archived rows leave the remote index
+    assert deleted == []  # nothing leaves the remote index
+    assert upserted == {"gone": (4, {"kind": "episode", "tier": "archived", "session_id": "s1"})}
 
 
 def test_the_local_setup_touches_no_mirror(dbs, monkeypatch):
@@ -435,7 +456,7 @@ def test_macro_sleep_recall_ttl_archives_stale_low_importance(dbs):
         "SELECT tier, user_text FROM episodes WHERE id='r_stale'"
     ).fetchone()
     assert row["tier"] == "archived"
-    assert row["user_text"] is None
+    assert row["user_text"] == "stale note"  # archived is cold storage, not deletion
     assert stats["demoted_recall"] >= 1
 
 

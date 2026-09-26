@@ -208,7 +208,7 @@ DYNAMIC_NAME_SITES: dict[str, str] = {
     "kazma-gateway/kazma_gateway/stores/checkpoint.py": "checkpoints_*.db",
     "kazma-core/kazma_core/code_index/store.py": "code-index/*.db",
     "kazma-ui/kazma_ui/session_manager.py": "chat_sessions_test_*.db",
-    "kazma-ui/kazma_ui/session_spool.py": "chat_sessions_spool.db",
+    "kazma-core/kazma_core/paths.py": "chat_sessions_spool.db",
     "kazma-core/kazma_core/memory/backup.py": "backup copies (backups dir)",
     "kazma-core/kazma_core/migration/vault_pairing.py": "vault backup before a key reset",
 }

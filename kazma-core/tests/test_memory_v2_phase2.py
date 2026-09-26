@@ -26,9 +26,9 @@ def isolated_data(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     from kazma_core.memory import dual_write
 
-    dual_write.reset_mirror()
+    dual_write._reset_mirror()
     yield tmp_path
-    dual_write.reset_mirror()
+    dual_write._reset_mirror()
 
 
 def _seed_primary(isolated_data):
@@ -228,14 +228,16 @@ def test_format_recall_block_empty_result(isolated_data):
     assert format_recall_block(RecallResult([], [])) == ""
 
 
-# ── schedule_post_turn_memory signature tests ─────────────────────────────
+# ── post-turn scheduler signature tests ───────────────────────────────────
 
 
 def test_schedule_post_turn_memory_backward_compatible():
-    """Old callers passing only `messages` must still work (resolution #3)."""
-    from kazma_core.memory.consolidator import schedule_post_turn_memory
+    """Old callers passing only `messages` must still work (resolution #3).
+    The scheduler is private since 2026-09-26: ``remember_turn`` is its only
+    caller (tests/test_memory_every_turn.py)."""
+    from kazma_core.memory.consolidator import _schedule_post_turn_memory
 
-    sig = inspect.signature(schedule_post_turn_memory)
+    sig = inspect.signature(_schedule_post_turn_memory)
     params = list(sig.parameters.values())
     assert params[0].name == "messages"
     # session_id and turn must be keyword-only with defaults
@@ -250,20 +252,18 @@ def test_schedule_post_turn_memory_backward_compatible():
 async def test_post_turn_mirrors_episode_to_v2(isolated_data):
     """The widened hook must mirror the turn into V2 episodes."""
     from kazma_core.memory import dual_write
-    from kazma_core.memory.consolidator import schedule_post_turn_memory
-
-    dual_write.reset_mirror()
+    dual_write._reset_mirror()
     messages = [
         {"role": "user", "content": "Remember my favorite color is teal"},
         {"role": "assistant", "content": "Got it, teal."},
     ]
-    # schedule_post_turn_memory fires a background task; run it directly
+    # The scheduler fires a background thread; run its mirror step directly
     # by invoking the inner logic through the module's mirror helper.
     from kazma_core.memory.consolidator import _mirror_turn_to_v2
 
     _mirror_turn_to_v2(messages, session_id="sess-123", turn=7)
 
-    m = dual_write.get_mirror()
+    m = dual_write._get_mirror()
     rows = m._primary.execute(
         "SELECT session_id, turn_number, user_text FROM episodes"
     ).fetchall()

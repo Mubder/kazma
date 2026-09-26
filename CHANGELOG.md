@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## Kazma's memory keeps everything and can find all of it (2026-09-26)
+
+Some memories could not be found, some were being thrown away, and most
+conversations were never remembered at all. Since 8 August nothing said in
+the web chat had been saved to long-term memory -- only Telegram, Slack and
+Discord were -- and even those missed some turns: of 1,174 conversation
+turns on the live install, 1,004 had no memory. Searching by meaning looked
+at only part of what Kazma did remember (the 60 most recent conversation
+memories out of 300 were never searched, and facts only among the 400 marked
+most important). And after a month without use a memory was archived, which
+deleted its text: 76 were lost that way.
+
+Now every conversation turn is remembered, whichever app it came from, and
+every 15 minutes Kazma checks its chat history for any turn memory is
+missing and adds it with its original date -- which also brought back the
+turns missed since July. Every memory is searched, every time. Archived
+memories keep their text and still come back when they are what the
+question is about. The 76 erased memories were recovered from earlier
+backups and from the conversations they came from, each checked against a
+fingerprint of its original text -- nothing is restored on a guess.
+Memories whose meaning vectors went missing or came from an older model are
+refreshed every 15 minutes instead of waiting for a manual rebuild. When
+memory finds nothing, the search of past chats now reads the chats you
+actually have (it had been reading an old file from July) and only your
+own. The Dashboard's memory panel shows how many memories are searchable,
+waiting for repair, recovered, or kept only as a short summary -- and its
+"run the memory check" button no longer risks sending new memories into a
+throwaway test file (it used to, while the check ran and after).
+
 ## A test's result no longer depends on which tests ran before it (2026-09-26)
 
 The test suite runs in several processes, and which tests share a process
