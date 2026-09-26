@@ -128,7 +128,7 @@ jobs:
       # Answers "was this really built from Mubder/kazma at this commit?".
       # Verify with: gh attestation verify <file> --repo Mubder/kazma
       - name: Attest build provenance (SLSA)
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: "dist/kazma-*.whl,dist/kazma-*.tar.gz,dist/kazma-*.cdx.json"
 
