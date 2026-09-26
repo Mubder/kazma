@@ -1468,34 +1468,47 @@ def test_embedder_backend(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)[:300], "latency_ms": round(ms, 1)}
 
 
+def _test_local_vector_store(provider: str, t0: float) -> dict[str, Any]:
+    """Open the primary memory DB and report what VectorEngine can use."""
+    import sqlite3
+
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+    from kazma_core.memory.vector_engine import VectorEngine
+    from kazma_core.paths import primary_memory_db
+
+    conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
+    try:
+        ensure_primary_schema(conn)
+        ve = VectorEngine(conn)
+        ms = (time.perf_counter() - t0) * 1000
+        return {
+            "ok": True,
+            "provider": provider,
+            "available": ve.available,
+            "sqlite_vec": ve.has_sqlite_vec,
+            "numpy": ve.has_numpy,
+            "latency_ms": round(ms, 1),
+        }
+    finally:
+        conn.close()
+
+
 def test_vector_backend(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Probe vector path: open primary DB + VectorEngine availability."""
+    """Test the vector store that serves memory now.
+
+    For a remote store that is its own fresh probe. The exception is a
+    pgvector KAZMA picked from the DSN on a Postgres without the extension:
+    local sqlite-vec serves every search and write there (the banner says
+    "full (local)"), so the button tests that store and adds the pgvector
+    note. It used to report "Vector failed" for the fallback working as
+    designed (2026-09-25). A pgvector the operator chose stays a failure.
+    """
     t0 = time.perf_counter()
     c = cfg or get_backends_cfg()
     provider = (c.get("vector") or {}).get("provider") or "sqlite_vec"
     try:
-        if provider in ("sqlite_vec", "local", "local_sqlite"):
-            import sqlite3
-
-            from kazma_core.memory.schema_v2 import ensure_primary_schema
-            from kazma_core.memory.vector_engine import VectorEngine
-            from kazma_core.paths import primary_memory_db
-
-            conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
-            try:
-                ensure_primary_schema(conn)
-                ve = VectorEngine(conn)
-                ms = (time.perf_counter() - t0) * 1000
-                return {
-                    "ok": True,
-                    "provider": provider,
-                    "available": ve.available,
-                    "sqlite_vec": ve.has_sqlite_vec,
-                    "numpy": ve.has_numpy,
-                    "latency_ms": round(ms, 1),
-                }
-            finally:
-                conn.close()
+        if provider in _LOCAL_VECTOR:
+            return _test_local_vector_store(provider, t0)
         # Remote providers: the backend's own probe, run fresh. This used to
         # GET "<url>/collections" for every provider, which cannot reach a
         # postgresql:// DSN, and passed Qdrant on a refused key (401 < 500).
@@ -1511,6 +1524,19 @@ def test_vector_backend(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
                 "latency_ms": 0,
             }
         state = remote.probe(force=True)
+        auto = bool(c.get("vector_auto"))
+        if provider == "pgvector" and auto and state == "missing":
+            # The store in use is local; test it, and say why pgvector is not.
+            local = _test_local_vector_store("sqlite_vec", t0)
+            local.update(
+                {
+                    "state": state,
+                    "remote_provider": provider,
+                    "note": f"{provider} {_remote_state_detail(provider, state, auto=True)}",
+                    "capability": vector_capability(c),
+                }
+            )
+            return local
         ms = (time.perf_counter() - t0) * 1000
         result: dict[str, Any] = {
             "ok": state in _USABLE_REMOTE_STATES,
@@ -1521,7 +1547,7 @@ def test_vector_backend(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             "capability": vector_capability(c),
         }
         if not result["ok"]:
-            result["error"] = _remote_state_detail(provider, state)
+            result["error"] = _remote_state_detail(provider, state, auto=auto)
         return result
     except Exception as exc:
         ms = (time.perf_counter() - t0) * 1000

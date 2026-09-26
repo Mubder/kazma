@@ -1004,6 +1004,26 @@ def _resolve_exec_act(profile, tool_name, args, *, audit, thread_id, tenant_id, 
         logger.warning("[commitment] DENY exec — opens Kazma store %s", _store)
         return EffectDecision("deny", store_refusal(_store, door=tool_name),
                               profile, audit, commitment_id=cid)
+    # 1c. Same lesson for the sandbox itself: a snippet that imports a blocked
+    #     module or calls exec/eval/compile directly can never run under the
+    #     Docker/local runner, so the operator must not be asked to approve it.
+    #     E2B runs the code raw, without that runner, so it is not refused
+    #     there.
+    if isinstance(_code, str) and _code.strip() and tool_name in ("python_exec", "code_exec"):
+        from kazma_core.sandbox.e2b import e2b_enabled
+        from kazma_core.tools.code_exec import sandbox_refusal
+
+        _refused = None if e2b_enabled() else sandbox_refusal(_code)
+        if _refused:
+            c = Commitment(thread_id=thread_id or "", act="exec", tool_name=tool_name,
+                           goal_text=_code[:200], args_digest=_args_digest(args),
+                           request_at=time.time(), tenant_id=tenant_id,
+                           slots={"code": _code[:500], "why": _refused}, confidence=0.0)
+            c.status = "aborted"
+            c.policy_decision = "deny"
+            cid = create_commitment(c, cfg=cfg)
+            logger.info("[commitment] DENY python exec before the card — %s", _refused[:120])
+            return EffectDecision("deny", _refused, profile, audit, commitment_id=cid)
     # 2. cwd pin: if a cwd is provided, verify it's within the workspace root.
     cwd = args.get("cwd")
     if cwd:

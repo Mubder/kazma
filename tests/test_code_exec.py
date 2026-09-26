@@ -106,6 +106,77 @@ for i in range(5):
         assert "[Exit code: 0]" in result
         assert "4.0" in result
 
+    # math was the one import this file checked -- and one of the three that
+    # still worked while the process-wide block broke the rest (2026-09-26:
+    # 17 of 20 ordinary snippets died, an approved date calculation three
+    # times). The standard library runs; the snippet's own escapes do not.
+    STDLIB = {
+        "from datetime import datetime, timedelta; print((datetime(2026, 9, 26) + timedelta(days=2)).strftime('%a'))": "Mon",
+        "from datetime import datetime; print(datetime.strptime('2026-09-26', '%Y-%m-%d').year)": "2026",
+        "import zoneinfo, datetime; print(datetime.datetime(2026, 9, 26, tzinfo=zoneinfo.ZoneInfo('UTC')).isoformat())": "2026-09-26T00:00:00+00:00",
+        "import json; print(json.dumps({'a': [1, 2]}))": '{"a": [1, 2]}',
+        "import re; print(re.findall(r'[0-9]+', 'a1b22'))": "['1', '22']",
+        "import statistics; print(statistics.median([3, 1, 2]))": "2",
+        "from decimal import Decimal; print(Decimal('1.10') + Decimal('2.20'))": "3.30",
+        "import random; random.seed(7); print(len([random.random() for _ in range(3)]))": "3",
+        "from collections import namedtuple; P = namedtuple('P', 'x'); print(P(5).x)": "5",
+        "from dataclasses import dataclass\n@dataclass\nclass P:\n    x: int\nprint(P(6))": "P(x=6)",
+        "from typing import NamedTuple\nclass P(NamedTuple):\n    x: int\nprint(P(7).x)": "7",
+    }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("code", sorted(STDLIB))
+    async def test_the_standard_library_runs_in_the_sandbox(self, code: str) -> None:
+        result = await python_exec(code)
+        assert "[Exit code: 0]" in result, result
+        assert self.STDLIB[code] in result, result
+
+    REFUSED = {
+        "import os": "blocked",
+        "from os import path": "blocked",
+        "__import__('subprocess')": "blocked",
+        "import builtins": "blocked",
+        "exec('print(1)')": "exec() is disabled",
+        "print(eval('1 + 1'))": "eval() is disabled",
+        "compile('1', 'x', 'eval')": "compile() is disabled",
+    }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("code", sorted(REFUSED))
+    async def test_the_snippets_own_escapes_stay_refused(self, code: str) -> None:
+        result = await python_exec(code)
+        assert "[Exit code: 0]" not in result, result
+        assert self.REFUSED[code] in result, result
+
+    @pytest.mark.asyncio
+    async def test_tracebacks_count_the_snippets_own_lines(self) -> None:
+        result = await python_exec("x = 1\nraise ValueError('on line two')")
+        assert 'File "snippet.py", line 2' in result, result
+
+    @pytest.mark.asyncio
+    async def test_a_main_guard_runs(self) -> None:
+        result = await python_exec("if __name__ == '__main__':\n    print('ran as main')")
+        assert "ran as main" in result, result
+
+    def test_negative_control_a_process_wide_block_breaks_the_stdlib(self) -> None:
+        """The pre-2026-09-26 design, reduced to its core: patch the builtins
+        MODULE instead of the snippet's builtins, and `import json` dies in
+        the import system's own exec. This is what the tests above catch."""
+        import subprocess
+
+        process_wide = (
+            "import builtins as _b\n"
+            "def _deny(*a, **k):\n"
+            "    raise RuntimeError('exec() is disabled in the code_exec sandbox')\n"
+            "_b.exec = _deny\n_b.compile = _deny\n"
+            "import json\n"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-I", "-c", process_wide],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert proc.returncode != 0 and "exec() is disabled" in proc.stderr
+
     @pytest.mark.asyncio
     async def test_python_exec_cleanup(self) -> None:
         """Temp directory is cleaned up after execution."""

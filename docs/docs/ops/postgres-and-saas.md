@@ -41,7 +41,11 @@ The server must ship the extension. `postgres:16-alpine` — the image in
    - pgvector **chosen** in Settings but unusable (no extension, role may not
      create it, table of another vector size, server down): one WARNING
      naming the fix, and the Settings banner says the same.
-   - **Test vector** in Settings → Memory runs the same check on demand.
+   - **Test vector** in Settings → Memory runs the same check on demand. When
+     pgvector was picked automatically and the extension is missing, it tests
+     the store actually in use (local sqlite-vec) and reports *Vector OK*
+     with a note saying why pgvector is not used; a pgvector you chose that
+     cannot work still reports *Vector failed* with the fix.
 3. Rebuild embeddings once if you already have history:
    Settings → Memory → Rebuild embeddings (upserts into pgvector).
 4. Changing embedder size: the table is sized by the embedder and never

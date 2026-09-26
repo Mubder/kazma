@@ -640,6 +640,7 @@ async def _stream_langgraph_events(
                     })
                     async for frame in _sse_attach_stream(
                         thread_id, session_id or "", 0,
+                        replay_is_history=True,
                     ):
                         yield frame
                     return
@@ -1492,8 +1493,11 @@ async def _stream_langgraph_events(
                         head = int(get_turn_broker().resume(thread_id, 0)[2] or 0)
                     except Exception:
                         head = 0
+                    # From head - 1: the approval this stream just journaled,
+                    # which its own client has not seen -- live.
                     async for frame in _sse_attach_stream(
-                        thread_id, session_id or "", max(0, head - 1)
+                        thread_id, session_id or "", max(0, head - 1),
+                        replay_is_history=False,
                     ):
                         yield frame
                 return
@@ -1563,7 +1567,7 @@ async def _stream_langgraph_events(
             reset_current_thread_id(token)
         reset_turn_id(_turn_token)
 
-def _frame_from_journaled(frame: dict[str, Any]) -> str:
+def _frame_from_journaled(frame: dict[str, Any], *, replay: bool) -> str:
     """Render a journal entry as an id:-lined SSE frame.
 
     Replay provenance (2026-09-03): re-delivered frames carry
@@ -1571,11 +1575,23 @@ def _frame_from_journaled(frame: dict[str, Any]) -> str:
     paint PENDING approval state from them (a settled approval's retained
     ``approval_required`` frame flashed a ghost card on every refresh);
     the gate registry stays the only authority for live questions.
+
+    ``replay`` is required and has no default: every caller says which
+    one it is sending. The stamp used to be unconditional here, so the LIVE
+    tail of the attach stream -- which since Turn Delivery V2 is also how a
+    freshly sent turn reaches its own tab -- labelled a brand-new approval
+    as history. The client refused it, and the card waited for the
+    reconciler's pending-approvals poll: up to a reconcile tick with no
+    card and a header reading "Resuming" (2026-09-26). The WebSocket
+    resume already stamped only its replay loop.
     """
     data = dict(frame.get("data") or {})
     seq = frame.get("seq")
     data["seq"] = seq
-    data["replay"] = True
+    if replay:
+        data["replay"] = True
+    else:
+        data.pop("replay", None)
     return _sse_frame(str(frame.get("type") or "message"), data, id=seq)
 
 async def _journal_fast_path(thread_id: str, event: str, data: dict[str, Any]) -> str:
@@ -1593,7 +1609,8 @@ async def _journal_fast_path(thread_id: str, event: str, data: dict[str, Any]) -
             stamped = await get_turn_broker().emit(
                 thread_id, {"type": event, "data": data}
             )
-            return _frame_from_journaled(stamped)
+            # This request's own answer, sent now: live.
+            return _frame_from_journaled(stamped, replay=False)
         except Exception:
             logger.debug("[SSE] fast-path journal failed event=%s", event, exc_info=True)
     return _sse_frame(event, data)
@@ -1602,8 +1619,18 @@ async def _sse_attach_stream(
     thread_id: str,
     session_id: str,
     after_seq: int,
+    *,
+    replay_is_history: bool,
 ) -> AsyncGenerator[str, None]:
     """Reattach a reconnecting SSE client to a live (or finished) turn.
+
+    ``replay_is_history`` says what the frames after ``after_seq`` that are
+    already in the journal are to THIS client. For a reconnect they are
+    history (True): a pending approval among them is the gate registry's to
+    confirm, not the frame's. For the tab that just started the turn, or a
+    stream serving the approval it just emitted, they are its own turn's
+    first frames and are live (False). Frames that arrive after the attach
+    are always live. Required, so a new caller has to decide.
 
     The swarm-bus ordering discipline: subscribe FIRST so nothing emitted
     between replay and live streaming can be lost, then replay the journal
@@ -1637,7 +1664,9 @@ async def _sse_attach_stream(
             return
         for frame in frames:
             if is_replayable(frame):
-                yield _frame_from_journaled(frame)
+                # Already journaled when this client attached: history for a
+                # reconnect, this turn's own opening frames for a sender.
+                yield _frame_from_journaled(frame, replay=replay_is_history)
                 last_yielded = max(last_yielded, int(frame.get("seq") or 0))
         if not running and not is_thread_paused(thread_id):
             # Nothing live to attach to — replay covered everything missed.
@@ -1670,7 +1699,9 @@ async def _sse_attach_stream(
             if seq <= last_yielded:
                 continue  # emitted during the replay window — already served
             last_yielded = seq
-            yield _frame_from_journaled(frame)
+            # Emitted while this client was attached: live, and a pending
+            # approval in it must paint as one.
+            yield _frame_from_journaled(frame, replay=False)
             if _attach_frame_is_terminal(frame):
                 return
     finally:

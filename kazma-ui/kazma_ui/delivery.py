@@ -81,7 +81,10 @@ SUBSCRIBER_QUEUE_MAX = 1000
 #: re-triggered the client's onError → attach → replayed-error loop (the
 #: 2026-08-26 retry storm). The ``done`` that follows an error carries the
 #: durable outcome a reconnecting client needs.
-REPLAY_SKIP_TYPES = frozenset({"capacity", "steer", "error"})
+#: ``user_message`` tells the thread's other tabs that a turn started; a
+#: reconnecting or reloading client already has that row from the store, and
+#: replaying it would add the question a second time.
+REPLAY_SKIP_TYPES = frozenset({"capacity", "steer", "error", "user_message"})
 
 
 def is_replayable(frame: dict[str, Any]) -> bool:

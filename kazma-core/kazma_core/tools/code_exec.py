@@ -38,6 +38,7 @@ __all__ = [
     "jail_note_for_tool",
     "python_exec",
     "reset_docker_probe",
+    "sandbox_refusal",
     "use_docker_jail",
 ]
 
@@ -73,41 +74,117 @@ _BLOCKED_IMPORT_ROOTS: frozenset[str] = frozenset({
     "pickle", "marshal", "shelve", "sqlite3",
 })
 
-_SANDBOX_PREAMBLE = f'''\
-# Auto-injected by kazma code_exec — import blocklist (defense-in-depth)
+#: Builtins the snippet may not call itself: the import blocklist is worthless
+#: while they stay reachable, since a snippet needs no import to run arbitrary
+#: logic through them (audit M-P10).
+_BLOCKED_BUILTINS: tuple[str, ...] = ("exec", "eval", "compile", "breakpoint")
+
+# The runner the snippet is embedded in. The restrictions apply to the
+# SNIPPET'S OWN code -- its builtins are a copy with __import__ guarded and
+# exec/eval/compile/breakpoint replaced -- and not to the process.
+#
+# They used to be applied to the process, by patching the builtins module.
+# Python's import system loads every pure-Python module through those same
+# builtins, and the standard library imports sys and os internally, so
+# `import datetime`, `json`, `re`, `random`, `decimal`, `typing` and most of
+# the rest died with "exec() is disabled" or "Import of 'sys' is blocked":
+# 17 of 20 ordinary snippets failed (measured 2026-09-26), and an operator
+# approved one date calculation three times before the model gave up on
+# imports. None of that stopped a determined snippet -- in-process Python
+# reaches os through the interpreter's own objects either way; the Docker and
+# E2B tiers are the boundary (THREAT_MODEL.md section 2). What it is for is
+# the snippet that writes `import os` or `exec(...)` itself, and that is
+# still refused.
+_SANDBOX_RUNNER = '''\
+# Auto-injected by kazma code_exec: the snippet runs with its own builtins.
 import builtins as _b
-_real_import = _b.__import__
 
-def _safe_import(name, globals=None, locals=None, fromlist=(), level=0,
-                 _blocked=frozenset({sorted(_BLOCKED_IMPORT_ROOTS)!r}),
-                 _imp=_real_import):
-    root = (name or "").split(".", 1)[0]
-    if root in _blocked:
-        raise ImportError(
-            f"Import of {{name!r}} is blocked in the code_exec sandbox"
-        )
-    return _imp(name, globals, locals, fromlist, level)
+def _make_snippet_builtins(_blocked, _blocked_calls, _real_import=_b.__import__):
+    def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+        root = (name or "").split(".", 1)[0]
+        if level == 0 and root in _blocked:
+            raise ImportError(
+                f"Import of {{name!r}} is blocked in the code_exec sandbox"
+            )
+        return _real_import(name, globals, locals, fromlist, level)
 
-_b.__import__ = _safe_import
+    def _blocked_builtin(_name):
+        def _deny(*_a, **_kw):
+            raise RuntimeError(f"{{_name}}() is disabled in the code_exec sandbox")
+        return _deny
 
-# The import blocklist is worthless while exec/eval/compile stay reachable:
-# a snippet needs ZERO imports to run arbitrary logic through them
-# (defense-in-depth for the documented not-a-jail local fallback,
-# audit M-P10).
-def _blocked_builtin(_name):
-    def _deny(*_a, **_kw):
-        raise RuntimeError(
-            f"{{_name}}() is disabled in the code_exec sandbox"
-        )
-    return _deny
+    table = dict(vars(_b))
+    table["__import__"] = _safe_import
+    for _name in _blocked_calls:
+        table[_name] = _blocked_builtin(_name)
+    return table
 
-_b.exec = _blocked_builtin("exec")
-_b.eval = _blocked_builtin("eval")
-_b.compile = _blocked_builtin("compile")
-_b.breakpoint = _blocked_builtin("breakpoint")
-
-del _b, _real_import, _safe_import, _blocked_builtin
+_snippet_globals = {{
+    "__builtins__": _make_snippet_builtins(
+        frozenset({blocked!r}), {blocked_calls!r},
+    ),
+    "__name__": "__main__",
+    "__file__": "snippet.py",
+}}
+_snippet_code = compile({source!r}, "snippet.py", "exec")
+del _b, _make_snippet_builtins
+exec(_snippet_code, _snippet_globals)
 '''
+
+
+def _build_sandbox_script(code: str) -> str:
+    """The file ``python_exec`` runs: the runner with *code* embedded.
+
+    Tracebacks name ``snippet.py`` with the snippet's own line numbers.
+    """
+    return _SANDBOX_RUNNER.format(
+        blocked=sorted(_BLOCKED_IMPORT_ROOTS),
+        blocked_calls=_BLOCKED_BUILTINS,
+        source=code,
+    )
+
+
+def sandbox_refusal(code: str) -> str | None:
+    """Why the sandbox would refuse *code*, or None.
+
+    Read from the AST, so a comment or a string that merely mentions
+    ``import os`` is not a refusal. Only what the snippet itself writes:
+    a top-level ``import`` of a blocked module and a direct call to a
+    blocked builtin. The commitment layer asks this BEFORE the approval
+    card, so the operator is never asked to approve a snippet that cannot
+    run (the sandbox refuses the same things at run time regardless).
+    """
+    import ast
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return None  # the run reports the syntax error itself
+    imports: list[str] = []
+    calls: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports += [a.name for a in node.names if a.name.split(".", 1)[0] in _BLOCKED_IMPORT_ROOTS]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            if node.module.split(".", 1)[0] in _BLOCKED_IMPORT_ROOTS:
+                imports.append(node.module)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in _BLOCKED_BUILTINS
+        ):
+            calls.append(node.func.id + "()")
+    if not imports and not calls:
+        return None
+    named = ", ".join(dict.fromkeys(imports + calls))
+    return (
+        f"python_exec's sandbox refuses {named}: snippets may not import "
+        f"{', '.join(sorted(_BLOCKED_IMPORT_ROOTS))} or call "
+        f"{', '.join(n + '()' for n in _BLOCKED_BUILTINS)}. The rest of the "
+        "standard library (datetime, zoneinfo, json, re, math, statistics, "
+        "decimal, collections, ...) works; for files use file_read / "
+        "file_write, for commands shell_exec."
+    )
 
 # Cached docker availability probe
 _docker_available: bool | None = None
@@ -604,8 +681,9 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     code_file = Path(tmp_dir) / "snippet.py"
 
     try:
-        # Preamble + user code (import blocklist still applies inside Docker)
-        code_file.write_text(_SANDBOX_PREAMBLE + "\n" + code, encoding="utf-8")
+        # The runner with the snippet embedded (its blocklist applies inside
+        # Docker too, where it is belt-and-braces).
+        code_file.write_text(_build_sandbox_script(code), encoding="utf-8")
         # Container runs as nobody — ensure world-readable
         try:
             os.chmod(tmp_dir, 0o755)

@@ -273,7 +273,10 @@ async def run_voice_user_turn(
     drive.add_done_callback(_on_drive_done)
 
     try:
-        async for frame in _sse_attach_stream(thread_id, session_id, journal_head):
+        # The utterance's own turn, from before it started: live.
+        async for frame in _sse_attach_stream(
+            thread_id, session_id, journal_head, replay_is_history=False,
+        ):
             parsed = _parse_sse_frame(frame)
             if parsed is None:
                 continue
@@ -398,7 +401,10 @@ async def watch_voice_resume(
             head = int(get_turn_broker().resume(thread_id, 0)[2] or 0)
         except Exception:
             head = 0
-        async for frame in _sse_attach_stream(thread_id, session_id, head):
+        # Attached at the head: nothing to replay; what follows is live.
+        async for frame in _sse_attach_stream(
+            thread_id, session_id, head, replay_is_history=True,
+        ):
             parsed = _parse_sse_frame(frame)
             if parsed is None:
                 continue

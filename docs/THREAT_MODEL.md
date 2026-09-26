@@ -103,13 +103,22 @@ write to your disk, cannot exhaust your RAM, and cannot read outside the
 workspace.
 
 **An import blocklist applies on top, in the container as well as locally.**
-`os`, `sys`, `socket`, `subprocess`, `ctypes`, `pathlib`, `pickle` and about
-thirty-three more are refused, and `exec`/`eval`/`compile` are disabled — an import
-blocklist is worthless while those stay reachable. This is belt-and-braces
-inside Docker, where escape is already the kernel's problem rather than
-Python's, and it is the *only* protection in the local tier below. It also
-means a snippet in the container cannot list the workspace it can see: the
-mount is there, `os.listdir` is not.
+The snippet may not import `os`, `sys`, `socket`, `subprocess`, `ctypes`,
+`pathlib`, `pickle` and about thirty-three more, and may not call
+`exec`/`eval`/`compile` itself — an import blocklist is worthless while those
+stay reachable. Both apply to **the snippet's own code**: it runs with its own
+builtins, and the modules it imports run normally, so the standard library
+(`datetime`, `json`, `re`, `zoneinfo`, `decimal`, …) works. Until 2026-09-26
+the block was applied to the whole process, which broke the import system
+itself — 17 of 20 ordinary snippets died with "exec() is disabled". That
+never made the block stronger: in-process Python can reach `os` through the
+interpreter's own objects whichever way the block is applied, so this stops
+the snippet that *writes* `import os` or `exec(...)`, not a snippet built to
+escape. A snippet the blocklist would refuse is refused before the approval
+card, with the reason. This is belt-and-braces inside Docker, where escape is
+already the kernel's problem rather than Python's, and it is the *only*
+protection in the local tier below. It also means a snippet in the container
+cannot list the workspace it can see by writing `os.listdir`.
 
 **It is still not a security boundary against a capable adversary.** Docker
 shares your kernel. A container escape is a kernel bug away, and kernel bugs
