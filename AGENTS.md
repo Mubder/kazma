@@ -2353,6 +2353,13 @@ types plus `KAZMA_MSGPACK_TYPES`, anything else back as raw data.
   - **Declare every field a template reads in the component's initial
     data**, and expose a closure constant the template uses (`kb.js`'s `S`).
     A field set only by a loader throws until the loader runs.
+  - **Never `x-init="init()"` beside `x-data`.** Alpine 3 calls the
+    component's `init()` itself; eleven templates called it again, the app
+    shell in `base.html` among them, so every page ran its init twice —
+    every load fetched twice and every `setInterval` poller ran twice.
+  - **One poller per endpoint per page.** The system-alerts banner reads
+    `$store.notifications` (which polls `/api/alerts/recent`) instead of a
+    10 s poller of its own (`tests/js/test_alert_banner_link.js`).
   - **Settings mixins compose by descriptor** (`settings.js`):
     `Object.assign` evaluated every getter once and froze it, so the
     Packages, Skills and Tools filters never worked.
@@ -2362,7 +2369,7 @@ types plus `KAZMA_MSGPACK_TYPES`, anything else back as raw data.
   Gates: `tests/e2e/test_pages_load_clean.py` (every nav page in its own
   tab: no uncaught error, every directive compiles, every bundled mode
   registered), `tests/test_alpine_templates.py` (every directive in every
-  template compiles in node; `<template x-for>` scope),
+  template compiles in node; `<template x-for>` scope; no second `init()`),
   `tests/js/test_settings_mixins.js`, `tests/test_vendor_codemirror.py` —
   each with a negative control.
 - **A polled route never calls a rate-limited API per poll.**
