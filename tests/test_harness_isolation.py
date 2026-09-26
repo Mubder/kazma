@@ -60,9 +60,9 @@ def isolated(tmp_path, monkeypatch):
 
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("KAZMA_WORKSPACE", str(tmp_path))
-    _isolate_workspace_store(str(tmp_path))
     try:
-        yield tmp_path
+        with _isolate_workspace_store(str(tmp_path)):
+            yield tmp_path
     finally:
         import kazma_core.stores.workspaces as ws
         from kazma_core.workspace.binding import configure_workspace
@@ -133,13 +133,13 @@ def test_the_store_singleton_is_restored_afterwards(tmp_path) -> None:
     from tests.e2e._unified_turn_harness import _isolate_workspace_store
 
     before = os.environ.get("KAZMA_WORKSPACE")
-    _isolate_workspace_store(str(tmp_path))
-    swapped = ws._workspace_store
-    assert swapped is not None
+    before_store = ws._workspace_store
+    with _isolate_workspace_store(str(tmp_path)):
+        swapped = ws._workspace_store
+        assert swapped is not None and swapped is not before_store
 
-    ws.reset_workspace_store()
-    assert ws._workspace_store is None, (
-        "reset_workspace_store left the harness's store installed"
+    assert ws._workspace_store is before_store, (
+        "the harness's store outlived the harness"
     )
     assert os.environ.get("KAZMA_WORKSPACE") == before, (
         "_isolate_workspace_store is writing environment variables; the "
@@ -168,18 +168,19 @@ def test_the_harness_teardown_clears_the_workspace_pin(tmp_path) -> None:
         _reset_process_singletons,
     )
 
-    _isolate_workspace_store(str(tmp_path))
-    pinned = binding.resolve_active_root()
-    assert Path(pinned).resolve() == tmp_path.resolve(), (
-        "the isolation helper did not take effect, so this test is not "
-        "exercising the leak it names"
-    )
-    assert binding._WORKSPACE_ROOT is not None, (
-        "resolve_active_root no longer memoises; if that is deliberate, "
-        "this test and the teardown it guards can both go"
-    )
+    with _isolate_workspace_store(str(tmp_path)):
+        pinned = binding.resolve_active_root()
+        assert Path(pinned).resolve() == tmp_path.resolve(), (
+            "the isolation helper did not take effect, so this test is not "
+            "exercising the leak it names"
+        )
+        assert binding._WORKSPACE_ROOT is not None, (
+            "resolve_active_root no longer memoises; if that is deliberate, "
+            "this test and the teardown it guards can both go"
+        )
 
-    _reset_process_singletons()
+        # The harness resets inside the isolation, as unified_turn_server does.
+        _reset_process_singletons()
 
     assert binding._WORKSPACE_ROOT is None, (
         "the harness teardown leaves a workspace pin behind; every test "

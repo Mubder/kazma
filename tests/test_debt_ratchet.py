@@ -40,7 +40,17 @@ riskier than the debt — but which nothing stopped from growing:
   restores it, so every later test in the process sees the fake:
   ``rs._db_path = ...`` hid another file's check once a new test shifted the
   chunk boundaries. Some restore it in ``finally``; ``monkeypatch.setattr``
-  is the fix either way.
+  is the fix either way. All 138 were converted on 2026-09-26, so the
+  baseline is zero: a new one fails here, whoever wrote it
+  (tests/test_order_independence.py has the other two routes).
+* ``shared_temp_names`` (2026-09-26, zero from the start) -- a test that names
+  a fixed path under the machine's temp directory, or lists it. Every process
+  on the machine shares that directory: the other fast_test chunks, a second
+  suite run, the live server. A listing counts their files as the test's own
+  (``test_python_exec_cleanup`` failed whenever another chunk ran
+  ``python_exec``), and a fixed name can be someone else's file
+  (``test_path_anchoring`` unlinked ``%TEMP%/test.txt``, whoever made it).
+  Use ``tmp_path``, ``mkdtemp``/``mkstemp``, or a uuid in the name.
 """
 
 from __future__ import annotations
@@ -65,8 +75,9 @@ STRUCTURAL_BASELINE = {
     "async_route_never_awaits": 189,
     "module_local_public_symbols": 603,
     "patched_value_imports": 82,
-    "sleep_then_assert": 53,
-    "bare_module_attr_assignments": 138,
+    "sleep_then_assert": 52,
+    "bare_module_attr_assignments": 0,
+    "shared_temp_names": 0,
 }
 
 
@@ -337,6 +348,74 @@ def bare_module_attr_assignments(tests: dict[str, str]) -> list[str]:
     return sorted(found)
 
 
+_LISTING_CALLS = frozenset({"listdir", "scandir", "walk", "glob", "iglob"})
+_LISTING_METHODS = frozenset({"iterdir", "glob", "rglob"})
+
+
+def _is_gettempdir(node: ast.AST) -> bool:
+    return isinstance(node, ast.Call) and (
+        (isinstance(node.func, ast.Attribute) and node.func.attr == "gettempdir")
+        or (isinstance(node.func, ast.Name) and node.func.id == "gettempdir")
+    )
+
+
+def _temp_root(node: ast.AST, names: set[str]) -> bool:
+    """``gettempdir()``, a Path or str around it, its resolve(), or a name bound to one."""
+    if _is_gettempdir(node):
+        return True
+    if isinstance(node, ast.Name):
+        return node.id in names
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Attribute) and func.attr in ("resolve", "absolute"):
+        return _temp_root(func.value, names)
+    callee = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+    return callee in ("Path", "PurePath", "str") and bool(node.args) and _temp_root(node.args[0], names)
+
+
+def shared_temp_names(tests: dict[str, str]) -> list[str]:
+    """A fixed name under, or a listing of, the machine's temp directory."""
+    found: set[str] = set()
+    for rel, text in tests.items():
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        scopes = [tree, *(n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))]
+        for scope in scopes:
+            names: set[str] = set()
+            grew = True
+            while grew:  # a = gettempdir(); b = Path(a) -- both are the temp root
+                grew = False
+                for node in ast.walk(scope):
+                    if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                            and isinstance(node.targets[0], ast.Name)
+                            and node.targets[0].id not in names and _temp_root(node.value, names)):
+                        names.add(node.targets[0].id)
+                        grew = True
+            for node in ast.walk(scope):
+                fixed_name = (
+                    isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)
+                    and _temp_root(node.left, names)
+                    and isinstance(node.right, ast.Constant) and isinstance(node.right.value, str)
+                )
+                if isinstance(node, ast.Call) and node.args and _temp_root(node.args[0], names):
+                    callee = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+                    if callee == "join" and any(
+                        isinstance(a, ast.Constant) and isinstance(a.value, str) for a in node.args[1:]
+                    ):
+                        fixed_name = True
+                    if callee in _LISTING_CALLS:
+                        fixed_name = True
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                        and node.func.attr in _LISTING_METHODS and _temp_root(node.func.value, names)):
+                    fixed_name = True
+                if fixed_name:
+                    found.add(f"{rel}:{node.lineno}")
+    return sorted(found, key=lambda e: (e.rsplit(":", 1)[0], int(e.rsplit(":", 1)[1])))
+
+
 def _tracked(patterns: list[str]) -> dict[str, str]:
     files = subprocess.run(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard", *patterns],
@@ -370,6 +449,7 @@ def structural_debt() -> dict[str, list[str]]:
         "patched_value_imports": patched_value_imports(product, tests),
         "sleep_then_assert": sleep_then_assert(tests),
         "bare_module_attr_assignments": bare_module_attr_assignments(tests),
+        "shared_temp_names": shared_temp_names(tests),
     }
 
 
@@ -438,4 +518,20 @@ def test_structural_scanners_count_what_they_say():
     }
     assert bare_module_attr_assignments(leaky) == [
         "tests/test_l.py:3 rs._db_path", "tests/test_l.py:8 paths.data_dir",
+    ]
+
+    shared = {
+        "tests/test_tmp.py": (
+            "import os, tempfile, uuid\nfrom pathlib import Path\n"
+            "def test_a():\n    Path(tempfile.gettempdir()) / 'fixed.txt'\n"
+            "def test_b():\n    base = tempfile.gettempdir()\n    os.listdir(base)\n"
+            "def test_c():\n    os.path.join(tempfile.gettempdir(), 'x')\n"
+            "def test_d():\n    Path(tempfile.gettempdir()).resolve().iterdir()\n"
+            "def test_ok(tmp_path):\n    Path(tempfile.gettempdir()) / f'x-{uuid.uuid4().hex}'\n"
+            "    root = Path(tempfile.gettempdir()).resolve()\n    tempfile.mkstemp()\n"
+            "    os.listdir(tmp_path)\n"
+        )
+    }
+    assert shared_temp_names(shared) == [
+        "tests/test_tmp.py:4", "tests/test_tmp.py:7", "tests/test_tmp.py:9", "tests/test_tmp.py:11",
     ]

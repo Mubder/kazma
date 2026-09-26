@@ -345,11 +345,11 @@ class TestTtl:
 
 
 class TestPersistence:
-    def test_rows_survive_schema_reinit(self, tmp_path):
+    def test_rows_survive_schema_reinit(self, monkeypatch: pytest.MonkeyPatch, tmp_path):
         register_gate(_gate())
         claim_gate("g1", "approve", "a")
         # Simulate process restart: force schema re-init on same file.
-        hg._schema_ready = False
+        monkeypatch.setattr(hg, "_schema_ready", False)
         row = gate_for("g1")
         assert row.state == "claimed" and row.decision == "approve"
 

@@ -1152,6 +1152,16 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   (`ModuleNotFoundError`). **Rule: deleting a module requires green
   `tests/test_imports.py` in the SAME commit, and importers removed in the
   same change.** Optional pre-commit hook: `.pre-commit-config.yaml`.
+- **Every product module also imports ON ITS OWN**, in a fresh interpreter
+  (`scripts/check_fresh_imports.py`, CI job "Every module imports on its
+  own"). The one-process gate above cannot see an import cycle that works
+  only when entered at the right module: each import finds the earlier ones
+  loaded. `kazma_core.routing_engine` was one until 2026-09-26 -- the swarm
+  package's `__init__` imports it, and it imported `kazma_core.swarm.task`
+  back at module level. A module that a package's `__init__` imports must
+  not import that package at module level; take annotation-only types under
+  `TYPE_CHECKING` and the rest at call time. Both gates walk one list
+  (the script's `iter_modules`).
 - `tools/read_url.fetch_full_text` is the PUBLIC ladder entry point
   (alias of `_fetch_full_text`); the `web_acquire.fetch` façade and KB
   ingest fallback use the public name — do not import the underscored one.
@@ -2137,8 +2147,17 @@ Read the named test before changing the code it guards.
   **Tests patch attributes with `monkeypatch.setattr`, never `mod.attr =
   fake`**: nothing restores the assignment, and a later test in the same
   process inherits it (`rs._db_path = ...` hid another file's check once a
-  new file shifted fast_test's chunks, 2026-09-26). The debt ratchet counts
-  them (`bare_module_attr_assignments`), and the count only goes down.
+  new file shifted fast_test's chunks, 2026-09-26). The debt ratchet holds
+  them (`bare_module_attr_assignments`) at zero since all 138 were converted.
+  **A test starts from the same state whatever ran before it**: the root
+  conftest imports every product module before collection, so no module is
+  first imported under a test's patches or environment, and restores the
+  environment after every test (a bare `os.environ` write no longer reaches
+  the next test). `fast_test.py` deals files to processes round-robin, so
+  anything a test inherits from its neighbours changes whenever a test file
+  is added. Gate: `tests/test_order_independence.py` (each guard's negative
+  control runs the same tests with it off: `KAZMA_TEST_ISOLATION=0`,
+  `KAZMA_TEST_PREIMPORT=0`).
   **No test reads a real `.env`** — two Postgres tests did, one the LIVE
   install's by hard-coded path. **`@pytest.mark.postgres` is the Postgres
   job's list** (`scripts/postgres_suite.py`), per test, verified on a real

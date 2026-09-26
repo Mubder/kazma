@@ -66,7 +66,7 @@ class TestAnEmptyIdIsInstantRejection:
 
 
 class TestTheCardGetsARealId:
-    def test_check_mints_an_id_when_the_caller_has_none(self) -> None:
+    def test_check_mints_an_id_when_the_caller_has_none(self, monkeypatch) -> None:
         """What actually reaches the bus adapter, captured."""
         from kazma_core.swarm import safety as safety_mod
 
@@ -87,14 +87,10 @@ class TestTheCardGetsARealId:
 
         import kazma_core.swarm.bus as bus_mod
 
-        real_get = bus_mod.get_message_bus
-        bus_mod.get_message_bus = lambda: _Bus()  # type: ignore[assignment]
-        try:
-            approved = asyncio.run(
-                mw.check("shell_exec", "rm -rf /tmp/x", force_danger=True)
-            )
-        finally:
-            bus_mod.get_message_bus = real_get  # type: ignore[assignment]
+        monkeypatch.setattr(bus_mod, "get_message_bus", lambda: _Bus())
+        approved = asyncio.run(
+            mw.check("shell_exec", "rm -rf /tmp/x", force_danger=True)
+        )
 
         assert approved is True
         assert seen, "the bus was never asked"
@@ -102,7 +98,7 @@ class TestTheCardGetsARealId:
         assert task_id, "an empty task_id is an unanswerable card"
         assert len(task_id) >= 8, task_id
 
-    def test_two_parallel_requests_get_different_ids(self) -> None:
+    def test_two_parallel_requests_get_different_ids(self, monkeypatch) -> None:
         """Two calls to the same tool are two questions, not one."""
         from kazma_core.swarm import safety as safety_mod
 
@@ -120,21 +116,17 @@ class TestTheCardGetsARealId:
 
         import kazma_core.swarm.bus as bus_mod
 
-        real_get = bus_mod.get_message_bus
-        bus_mod.get_message_bus = lambda: _Bus()  # type: ignore[assignment]
-        try:
-            mw = safety_mod.SafetyMiddleware()
-            mw.enabled = True
+        monkeypatch.setattr(bus_mod, "get_message_bus", lambda: _Bus())
+        mw = safety_mod.SafetyMiddleware()
+        mw.enabled = True
 
-            async def both():
-                await asyncio.gather(
-                    mw.check("shell_exec", "a", force_danger=True),
-                    mw.check("shell_exec", "b", force_danger=True),
-                )
+        async def both():
+            await asyncio.gather(
+                mw.check("shell_exec", "a", force_danger=True),
+                mw.check("shell_exec", "b", force_danger=True),
+            )
 
-            asyncio.run(both())
-        finally:
-            bus_mod.get_message_bus = real_get  # type: ignore[assignment]
+        asyncio.run(both())
 
         assert len(ids) == 2 and all(ids), ids
         assert ids[0] != ids[1], "parallel calls collided on one approval key"

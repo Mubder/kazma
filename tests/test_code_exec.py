@@ -178,23 +178,29 @@ for i in range(5):
         assert proc.returncode != 0 and "exec() is disabled" in proc.stderr
 
     @pytest.mark.asyncio
-    async def test_python_exec_cleanup(self) -> None:
-        """Temp directory is cleaned up after execution."""
-        # Track temp dirs before
-        tmp_base = tempfile.gettempdir()
-        before = {d for d in os.listdir(tmp_base) if d.startswith("kazma_exec_")}
+    async def test_python_exec_cleanup(self, monkeypatch) -> None:
+        """The temp directory python_exec makes is gone when it returns.
 
+        Checks the directory it made, not a listing of the machine's temp
+        directory: another process running python_exec at the same moment --
+        another fast_test chunk, a second suite run -- used to show up here as
+        "not cleaned" (2026-09-26, a 7-way split). Cleanup is in python_exec's
+        `finally`, so there is nothing to wait for.
+        """
+        made: list[str] = []
+        real_mkdtemp = tempfile.mkdtemp
+
+        def recording_mkdtemp(*args, **kwargs):
+            path = real_mkdtemp(*args, **kwargs)
+            made.append(path)
+            return path
+
+        monkeypatch.setattr(code_exec.tempfile, "mkdtemp", recording_mkdtemp)
         await python_exec("print('cleanup test')")
 
-        # Small delay for cleanup
-        import asyncio
-
-        await asyncio.sleep(0.1)
-
-        after = {d for d in os.listdir(tmp_base) if d.startswith("kazma_exec_")}
-        # No new temp dirs should remain
-        new_dirs = after - before
-        assert len(new_dirs) == 0, f"Temp dirs not cleaned: {new_dirs}"
+        assert made, "python_exec made no temp directory -- this no longer measures cleanup"
+        leftover = [p for p in made if os.path.exists(p)]
+        assert not leftover, f"Temp dirs not cleaned: {leftover}"
 
     @pytest.mark.asyncio
     async def test_python_exec_empty_code(self) -> None:

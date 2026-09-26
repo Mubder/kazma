@@ -49,6 +49,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
+from unittest import mock
 
 # ══════════════════════════════════════════════════════════════════════════
 # The script
@@ -178,15 +179,11 @@ def scripted_provider(script: Script) -> Iterator[Script]:
             yield StreamDelta(content=text[i : i + 24])
         yield StreamDelta(response=resp)
 
-    orig_chat = LLMProvider.chat
-    orig_stream = LLMProvider.chat_stream
-    LLMProvider.chat = _chat  # type: ignore[assignment]
-    LLMProvider.chat_stream = _chat_stream  # type: ignore[assignment]
-    try:
+    with (
+        mock.patch.object(LLMProvider, "chat", _chat),
+        mock.patch.object(LLMProvider, "chat_stream", _chat_stream),
+    ):
         yield script
-    finally:
-        LLMProvider.chat = orig_chat  # type: ignore[assignment]
-        LLMProvider.chat_stream = orig_stream  # type: ignore[assignment]
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -341,8 +338,9 @@ def isolated_config(tmp_dir: str) -> str:
     return str(out)
 
 
-def _isolate_workspace_store(tmp_dir: str) -> None:
-    """Point the WorkspaceStore singleton at the isolated tree.
+@contextlib.contextmanager
+def _isolate_workspace_store(tmp_dir: str) -> Iterator[None]:
+    """Point the WorkspaceStore singleton at the isolated tree, for the harness's life.
 
     ``KAZMA_DATA_DIR`` is not enough. ``stores/workspaces.py`` computes
     its default database path at IMPORT time, so by the time a fixture
@@ -377,12 +375,19 @@ def _isolate_workspace_store(tmp_dir: str) -> None:
         store = _ws.WorkspaceStore(
             db_path=os.path.join(tmp_dir, "workspaces.db")
         )
-        _ws._workspace_store = store
-        created = store.create_workspace("unified-turn-harness", tmp_dir)
-        store.set_active_workspace(str(created["id"]))
     except Exception:  # noqa: BLE001 - an un-isolated store is caught by
         # test_approved_tools_actually_execute, which is where it belongs.
-        pass
+        yield
+        return
+    # Installed for the harness's life only: the store's file is in a temp
+    # tree that is gone once the harness exits.
+    with mock.patch.object(_ws, "_workspace_store", store):
+        try:
+            created = store.create_workspace("unified-turn-harness", tmp_dir)
+            store.set_active_workspace(str(created["id"]))
+        except Exception:  # noqa: BLE001 - as above
+            pass
+        yield
 
 
 class RechunkedStreams:
@@ -478,7 +483,7 @@ def unified_turn_server(
     os.environ["KAZMA_DB_BACKEND"] = "sqlite"
     os.environ[HARNESS_ENV_FLAG] = "1"
 
-    with TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+    with TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir, contextlib.ExitStack() as stack:
         os.environ["KAZMA_DATA_DIR"] = tmp_dir
         # The agent's workspace, not just its database. Without this the
         # scripted paths sit OUTSIDE `resolve_active_root()`'s default
@@ -503,7 +508,7 @@ def unified_turn_server(
         # and the chat route refused the turn. Write the same three keys
         # Settings > Models writes.
         seed_provider_config(cs)
-        _isolate_workspace_store(tmp_dir)
+        stack.enter_context(_isolate_workspace_store(tmp_dir))
         script = script or four_gate_script(tmp_dir)
         with scripted_provider(script):
             port = free_port()

@@ -154,7 +154,7 @@ def _repo_config_is_not_a_test_fixture():
 
 
 @pytest.fixture(autouse=True)
-def _reset_swarm_singletons(tmp_path):
+def _reset_swarm_singletons(tmp_path, monkeypatch):
     """Reset swarm engine and worker registry singletons before each test.
 
     Without this, the SwarmEngine singleton (set via ``set_swarm_engine``)
@@ -165,6 +165,9 @@ def _reset_swarm_singletons(tmp_path):
     Also redirects the registry file to an isolated temp file so that
     ``create_app()`` does not load workers from the real
     ``swarm_registry.json`` (which may contain data from prior runs).
+    Both go through ``monkeypatch``: the redirect used to be left pointing
+    at the last test's deleted temp directory, for every suite that ran
+    after ``tests/`` in the same process.
     """
     # Reset swarm engine singleton
     try:
@@ -176,8 +179,8 @@ def _reset_swarm_singletons(tmp_path):
     # Reset worker registry singleton and redirect to temp file
     try:
         import kazma_core.swarm.registry as _reg_mod
-        _reg_mod._REGISTRY_SINGLETON = None
-        _reg_mod._DEFAULT_PATH = tmp_path / "test_swarm_registry.json"
+        monkeypatch.setattr(_reg_mod, "_REGISTRY_SINGLETON", None)
+        monkeypatch.setattr(_reg_mod, "_DEFAULT_PATH", tmp_path / "test_swarm_registry.json")
     except Exception:
         pass
 
@@ -187,12 +190,6 @@ def _reset_swarm_singletons(tmp_path):
     try:
         from kazma_core.swarm.engine import set_swarm_engine
         set_swarm_engine(None)
-    except Exception:
-        pass
-
-    try:
-        import kazma_core.swarm.registry as _reg_mod
-        _reg_mod._REGISTRY_SINGLETON = None
     except Exception:
         pass
 

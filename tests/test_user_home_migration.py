@@ -19,6 +19,7 @@ somewhere that still exists tomorrow.
 from __future__ import annotations
 
 import tempfile
+import uuid
 from pathlib import Path
 
 import pytest
@@ -29,8 +30,8 @@ from kazma_core.paths import _is_throwaway, migrate_legacy_user_home
 
 def test_a_temp_scratchpad_is_throwaway():
     """The exact shape that caused the loss."""
-    p = (Path(tempfile.gettempdir()) / "claude" / "sess" / "scratchpad"
-         / "base" / ".kazma")
+    p = (Path(tempfile.gettempdir()) / f"claude-{uuid.uuid4().hex}" / "sess"
+         / "scratchpad" / "base" / ".kazma")
     assert _is_throwaway(p) is True
 
 
@@ -44,7 +45,7 @@ def test_a_real_install_is_not_throwaway(tmp_path, monkeypatch):
 def test_detection_survives_a_missing_path():
     """The target does not exist yet at decision time -- that is the point
     of deciding before the move."""
-    p = Path(tempfile.gettempdir()) / "does-not-exist-yet" / ".kazma"
+    p = Path(tempfile.gettempdir()) / f"does-not-exist-{uuid.uuid4().hex}" / ".kazma"
     assert _is_throwaway(p) is True
 
 
@@ -65,7 +66,7 @@ def test_migration_refuses_a_temp_target(tmp_path, monkeypatch, caplog):
 
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
     monkeypatch.setattr("kazma_core.paths.get_project_root",
-                        lambda: Path(tempfile.gettempdir()) / "throwaway-copy")
+                        lambda: Path(tempfile.gettempdir()) / f"throwaway-copy-{uuid.uuid4().hex}")
     monkeypatch.delenv("KAZMA_USER_HOME", raising=False)
 
     with caplog.at_level(logging.WARNING):
@@ -85,7 +86,9 @@ def test_an_explicit_override_is_still_honoured(tmp_path, monkeypatch):
     legacy = tmp_path / "home" / ".kazma"
     legacy.mkdir(parents=True)
     (legacy / "marker").write_text("x", encoding="utf-8")
-    target = Path(tempfile.gettempdir()) / "explicit-target-kazma"
+    # Under the machine's temp dir, as the point requires -- but a name of
+    # its own: a fixed one is shared with every other run on the machine.
+    target = Path(tempfile.gettempdir()) / f"explicit-target-kazma-{uuid.uuid4().hex}"
 
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
     monkeypatch.setenv("KAZMA_USER_HOME", str(target))

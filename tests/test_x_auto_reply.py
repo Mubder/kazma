@@ -2103,14 +2103,13 @@ async def test_poll_once_direct_mention_drafts(_no_llm, monkeypatch):
         async def get_tweet(self, tid):
             raise AssertionError("direct mention must not fetch a parent")
 
-    mf._identity = None
+    monkeypatch.setattr(mf, "_identity", None)
     monkeypatch.setattr("kazma_core.x_api.client.XClient", _Client)
     monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
     _stub_draft(monkeypatch)
     rows = await mf.poll_once(cfg=_cfg(subjects=()))
     assert rows and rows[0]["action"] == "awaiting_approval"
     assert rows[0]["mention"] == "99"
-    mf._identity = None
 
 
 @pytest.mark.asyncio
@@ -2138,13 +2137,12 @@ async def test_poll_once_ignore_cursor_does_not_pass_since_id(_no_llm, monkeypat
             return [], {}
 
     get_reply_store().set_since_id("2100705922142073166")
-    mf._identity = None
+    monkeypatch.setattr(mf, "_identity", None)
     monkeypatch.setattr("kazma_core.x_api.client.XClient", _Client)
     monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
     rows = await mf.poll_once(cfg=_cfg(subjects=()), ignore_cursor=True)
     assert rows == []
     assert seen["since_id"] == "" and seen["start_time"] == ""
-    mf._identity = None
 
 
 @pytest.mark.asyncio
@@ -2303,14 +2301,13 @@ async def test_poll_once_skips_replies_to_our_own_posts(_no_llm, monkeypatch):
                 {"users": [{"id": "1", "username": "KazmaAI"}]},
             )
 
-    mf._identity = None
+    monkeypatch.setattr(mf, "_identity", None)
     monkeypatch.setattr("kazma_core.x_api.client.XClient", _Client)
     monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
     _stub_draft(monkeypatch)
     rows = await mf.poll_once(cfg=_cfg(subjects=()))
     assert rows and rows[0]["action"] == "skipped"
     assert "own post" in rows[0]["reason"]
-    mf._identity = None
 
 
 @pytest.mark.asyncio
@@ -2378,7 +2375,7 @@ async def test_poll_once_trusted_followup_walks_to_the_original(
                 )
             raise AssertionError(tid)
 
-    mf._identity = None
+    monkeypatch.setattr(mf, "_identity", None)
     monkeypatch.setattr("kazma_core.x_api.client.XClient", _Client)
     monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
@@ -2387,7 +2384,6 @@ async def test_poll_once_trusted_followup_walks_to_the_original(
     assert "Whisper" in seen.get("parent", "") or "speech model" in seen.get("parent", "")
     assert seen.get("handle") == "spacexai"
     assert "44" in fetched and "10" in fetched
-    mf._identity = None
 
 
 @pytest.mark.asyncio
@@ -2446,7 +2442,7 @@ async def test_poll_once_reacts_to_a_quoted_tweet_under_our_reply(
         async def get_tweet(self, tid):
             raise AssertionError(f"quoted tweet was in includes, not {tid}")
 
-    mf._identity = None
+    monkeypatch.setattr(mf, "_identity", None)
     monkeypatch.setattr("kazma_core.x_api.client.XClient", _Client)
     monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
@@ -2454,7 +2450,6 @@ async def test_poll_once_reacts_to_a_quoted_tweet_under_our_reply(
     assert rows and rows[0]["action"] == "awaiting_approval"
     assert "50.7" in seen["parent"]
     assert seen["handle"] == "3li3"
-    mf._identity = None
 
 
 @pytest.mark.asyncio
@@ -2510,7 +2505,7 @@ async def test_poll_once_reads_status_url_in_a_reply_to_us(_no_llm, monkeypatch)
                 {"users": [{"id": "1", "username": "KazmaAI"}]},
             )
 
-    mf._identity = None
+    monkeypatch.setattr(mf, "_identity", None)
     monkeypatch.setattr("kazma_core.x_api.client.XClient", _Client)
     monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
@@ -2518,7 +2513,6 @@ async def test_poll_once_reads_status_url_in_a_reply_to_us(_no_llm, monkeypatch)
     assert rows and rows[0]["action"] == "awaiting_approval"
     assert fetched == ["2101070000000000099"]
     assert "classifier" in seen["parent"]
-    mf._identity = None
 
 
 @pytest.mark.asyncio

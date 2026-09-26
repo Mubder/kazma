@@ -22,7 +22,7 @@ async def test_set_active_workspace_repins_file_write(tmp_path, monkeypatch):
     db = str(tmp_path / "settings.db")
     reset_workspace_store()
     store = wsmod.WorkspaceStore(db)
-    wsmod._workspace_store = store
+    monkeypatch.setattr(wsmod, "_workspace_store", store)
 
     kazma = tmp_path / "kazma"
     shipx = tmp_path / "ShipX"

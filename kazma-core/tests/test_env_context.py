@@ -44,7 +44,7 @@ def tmp_ws(tmp_path, monkeypatch):
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     reset_workspace_store()
     store = wsmod.WorkspaceStore(str(tmp_path / "settings.db"))
-    wsmod._workspace_store = store
+    monkeypatch.setattr(wsmod, "_workspace_store", store)
     rec = store.create_workspace("test-ws", str(ws))
     store.set_active_workspace(rec["id"])
     configure_workspace(workspace=str(ws))
@@ -106,7 +106,7 @@ async def test_workspace_scope_pins_resolution(tmp_path, monkeypatch):
 
     reset_workspace_store()
     store = wsmod.WorkspaceStore(db_path)
-    wsmod._workspace_store = store  # patch singleton for this test
+    monkeypatch.setattr(wsmod, "_workspace_store", store)
 
     repo_a = tmp_path / "repoA"
     repo_b = tmp_path / "repoB"

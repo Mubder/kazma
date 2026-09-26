@@ -321,7 +321,7 @@ class TestBusAdapterCallbacks:
         assert adapter._pending_results[task_id] is True
 
     @pytest.mark.asyncio
-    async def test_approval_timeout_returns_false_discord(self):
+    async def test_approval_timeout_returns_false_discord(self, monkeypatch):
         """request_approval returns False on timeout (no callback)."""
         from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
         from kazma_core.swarm.bus import ApprovalRequest
@@ -332,19 +332,15 @@ class TestBusAdapterCallbacks:
 
         # Use a very short timeout for the test
         import kazma_gateway.adapters.discord_bus as db_mod
-        original_timeout = db_mod._APPROVAL_TIMEOUT
-        db_mod._APPROVAL_TIMEOUT = 0.5
-        try:
-            approval = ApprovalRequest(
-                worker_name="test",
-                task_description="test task",
-                proposed_output="danger tool",
-                task_id="timeout-task",
-            )
-            result = await adapter.request_approval(approval)
-            assert result is False  # timed out
-        finally:
-            db_mod._APPROVAL_TIMEOUT = original_timeout
+        monkeypatch.setattr(db_mod, "_APPROVAL_TIMEOUT", 0.5)
+        approval = ApprovalRequest(
+            worker_name="test",
+            task_description="test task",
+            proposed_output="danger tool",
+            task_id="timeout-task",
+        )
+        result = await adapter.request_approval(approval)
+        assert result is False  # timed out
 
 
 # ══════════════════════════════════════════════════════════════════════════

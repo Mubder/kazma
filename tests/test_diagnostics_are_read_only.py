@@ -64,8 +64,8 @@ def vault(tmp_path, monkeypatch):
     monkeypatch.setenv("KAZMA_VAULT_KEY", "diagnostic-scope-test-key-0123456789")
     vault_mod.reset_vault()
     v = vault_mod.SecretVault(db_path=str(tmp_path / "vault.db"))
-    vault_mod._vault = v
-    vault_mod._vault_init_attempted = True
+    monkeypatch.setattr(vault_mod, "_vault", v)
+    monkeypatch.setattr(vault_mod, "_vault_init_attempted", True)
     yield v
     vault_mod.reset_vault()
 

@@ -39,22 +39,18 @@ class _Bus:
         return self._answer
 
 
-async def _run_check(answer: bool) -> bool:
+async def _run_check(monkeypatch, answer: bool) -> bool:
     import kazma_core.swarm.bus as bus_mod
     from kazma_core.swarm.safety import SafetyMiddleware
 
     sm = SafetyMiddleware(enabled=True)
     bus = _Bus(answer)
-    orig = bus_mod.get_message_bus
-    bus_mod.get_message_bus = lambda: bus
-    try:
-        return await sm.check("shell_exec", "rm -rf /tmp/x", task_id="task-1")
-    finally:
-        bus_mod.get_message_bus = orig
+    monkeypatch.setattr(bus_mod, "get_message_bus", lambda: bus)
+    return await sm.check("shell_exec", "rm -rf /tmp/x", task_id="task-1")
 
 
-async def test_swarm_approval_registers_and_settles_approve():
-    assert await _run_check(True) is True
+async def test_swarm_approval_registers_and_settles_approve(monkeypatch):
+    assert await _run_check(monkeypatch, True) is True
     assert pending_gates() == []
     # Row is terminal with the decision recorded.
     assert live_gates("task-1") == [] or True  # thread may be task/thread id
@@ -72,8 +68,8 @@ async def test_swarm_approval_registers_and_settles_approve():
     assert rows[0]["mechanism"] == "swarm_bus"
 
 
-async def test_swarm_denial_settles_deny():
-    assert await _run_check(False) is False
+async def test_swarm_denial_settles_deny(monkeypatch):
+    assert await _run_check(monkeypatch, False) is False
     conn = hg._connect()
     try:
         rows = conn.execute("SELECT state, decision FROM hitl_gates").fetchall()
@@ -96,12 +92,8 @@ async def test_swarm_gate_failure_never_blocks_the_bus(monkeypatch):
             return True
 
     sm = SafetyMiddleware(enabled=True)
-    orig = bus_mod.get_message_bus
-    bus_mod.get_message_bus = lambda: _PlainBus()
-    try:
-        assert await sm.check("shell_exec", "x", task_id="t") is True
-    finally:
-        bus_mod.get_message_bus = orig
+    monkeypatch.setattr(bus_mod, "get_message_bus", lambda: _PlainBus())
+    assert await sm.check("shell_exec", "x", task_id="t") is True
 
 
 # ── pipeline checkpoints (§7C) ──────────────────────────────────────────────

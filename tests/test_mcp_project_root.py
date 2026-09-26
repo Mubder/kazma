@@ -35,8 +35,6 @@ def clean_root(monkeypatch):
     monkeypatch.setattr(paths, "_project_root", None)
     monkeypatch.delenv("KAZMA_PROJECT_ROOT", raising=False)
     monkeypatch.delenv("KAZMA_DATA_DIR", raising=False)
-    yield
-    paths._project_root = None
 
 
 # ── the resolver ────────────────────────────────────────────────────────────
@@ -57,7 +55,7 @@ def test_the_installed_root_ignores_the_working_directory(clean_root, tmp_path, 
     monkeypatch.chdir(decoy)
 
     assert paths.get_project_root() == decoy, "cwd walk finds the decoy, as designed"
-    paths._project_root = None
+    monkeypatch.setattr(paths, "_project_root", None)
     assert paths.installed_project_root() != decoy
     assert (paths.installed_project_root() / "kazma-core").exists()
 

@@ -334,7 +334,7 @@ def test_the_wire_format_is_pure_ascii() -> None:
     json.loads(raw.splitlines()[0])
 
 
-def test_non_ascii_arguments_are_accepted() -> None:
+def test_non_ascii_arguments_are_accepted(monkeypatch) -> None:
     """stdin is reconfigured to UTF-8 so Arabic arguments arrive intact."""
     seen: dict[str, Any] = {}
 
@@ -349,21 +349,17 @@ def test_non_ascii_arguments_are_accepted() -> None:
 
     import kazma_core.agent.tool_registry as reg
 
-    original = reg.get_tool_registry
-    reg.get_tool_registry = lambda: _Registry()  # type: ignore[assignment]
-    try:
-        _drive(
-            [
-                {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {"name": "file_read", "arguments": {"path": "مجلد/ملف.txt"}},
-                }
-            ]
-        )
-    finally:
-        reg.get_tool_registry = original  # type: ignore[assignment]
+    monkeypatch.setattr(reg, "get_tool_registry", lambda: _Registry())
+    _drive(
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "file_read", "arguments": {"path": "مجلد/ملف.txt"}},
+            }
+        ]
+    )
     assert seen["path"] == "مجلد/ملف.txt"
 
 

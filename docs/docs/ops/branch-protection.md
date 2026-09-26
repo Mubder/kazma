@@ -30,6 +30,7 @@ checks for `.github/workflows/ci.yml`:
 | `Playwright smoke` | health, composer, HITL view model, every page loads clean |
 | `Windows selector-loop subset` | the Windows event-loop rules (§23) |
 | `Compile Check` | `py_compile` over every `.py` |
+| `Every module imports on its own` | each product module imported alone, in a fresh interpreter (`scripts/check_fresh_imports.py`) |
 | `JS Syntax Check` | `node --check` over the static JS |
 | `Lint (Ruff)` | advisory findings reported; the step itself must pass |
 | `Security Scan` | bandit HIGH gate over product, `tests/`, `scripts/` |
@@ -44,7 +45,8 @@ checks for `.github/workflows/ci.yml`:
   the way this repository works (AGENTS.md, and the agent pushes with the
   owner's credentials) — while everyone else must pass the checks.
 - **Rules:** Restrict deletions; Block force pushes; Require status checks
-  to pass, with the ten checks above. Leave "require branches to be up to
+  to pass, with the eleven checks above (`tests/test_branch_protection_runbook.py`
+  keeps that table equal to the CI jobs). Leave "require branches to be up to
   date" off: with direct pushes it would force a rebase-and-wait on every
   push for no extra safety (the checks run on the pushed commit itself).
 

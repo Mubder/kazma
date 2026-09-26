@@ -15,6 +15,7 @@ tool, then a long answer streamed over ~20 seconds.
 from __future__ import annotations
 
 import asyncio
+from unittest import mock
 
 import pytest
 
@@ -47,7 +48,6 @@ def slow_task_server():
         final=LONG,
     )
     with unified_turn_server(script) as h:
-        orig = LLMProvider.chat_stream
 
         async def _slow(self, messages, *a, **kw):
             resp = script.respond(list(messages or []))
@@ -57,11 +57,8 @@ def slow_task_server():
                 yield StreamDelta(content=text[i : i + 30])
             yield StreamDelta(response=resp)
 
-        LLMProvider.chat_stream = _slow
-        try:
+        with mock.patch.object(LLMProvider, "chat_stream", _slow):
             yield h
-        finally:
-            LLMProvider.chat_stream = orig
 
 
 def _click_session(pg, sid: str) -> None:

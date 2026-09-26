@@ -34,7 +34,8 @@ def _quiet_worker():
     yield
     tr._stop_procedural_worker(timeout=3.0)
     tr._PROCEDURAL_STOPPING.clear()
-    tr._PROCEDURAL_WORKER = None
+    # The stopped thread stays in _PROCEDURAL_WORKER; the next outcome sees
+    # it is not alive and starts a fresh one.
 
 
 def test_many_outcomes_use_one_worker_thread():
