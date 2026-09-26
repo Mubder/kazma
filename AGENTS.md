@@ -2296,6 +2296,13 @@ code) and Kazma ran with nobody supervising it.
   heartbeat for 5 minutes, it pages `guard.gone` (critical, every 6 hours
   while it lasts) and logs once when the guard is back. A server started
   without the guard is not watched.
+- **A reload's stop is fast because nothing waits out a timeout.** The
+  gateway stops its adapters together, and the Discord and Slack readers
+  close their websocket the moment shutdown is set
+  (`kazma_gateway/adapters/ws_shutdown.closes_on_shutdown`); they used to sit
+  in `recv()` until the platform next spoke, costing 5 s each, in sequence, on
+  every reload (`tests/test_gateway_prompt_shutdown.py`, real websockets).
+  A new socket-reading adapter uses the same helper.
 - **The OS brings a dead guard back:** `install_service.py` registers a
   5-minute repeating trigger with `MultipleInstances IgnoreNew`. An existing
   task gets it only when re-registered from an elevated shell (owner action).

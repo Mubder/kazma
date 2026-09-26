@@ -202,7 +202,11 @@ class DiscordAdapter(BaseAdapter):
         try:
             import websockets
 
-            async with websockets.connect(_DISCORD_GATEWAY) as ws:
+            from kazma_gateway.adapters.ws_shutdown import closes_on_shutdown
+
+            async with websockets.connect(_DISCORD_GATEWAY) as ws, closes_on_shutdown(
+                ws, shutdown_event
+            ):
                 self._ws = ws
                 logger.info("[discord] Connected to Discord Gateway")
 
