@@ -7452,11 +7452,24 @@
 
   // ── Slot painters ──────────────────────────────────────────────────
 
+  /** The document of the turn that is running now, not one on the page. */
+  function _isRunningDoc(doc) {
+    if (!doc) return false;
+    var status = String(doc.status || '');
+    if (status === 'done' || status === 'error') return false;
+    var tid = String(doc.turnId || '');
+    return !!tid && (tid === 'live' || tid === String(_liveTurnId || ''));
+  }
+
   function _paintTextSlot(textEl, doc, meta) {
     var TD = window.KazmaTurnDocument;
     var text = _answerFromDoc(TD, doc);
     if (!text) return;
-    tryIngestPlanFromText(text);
+    // A plan feeds the RUNNING turn's workbench. This painter paints every
+    // turn -- each finished one on every reload -- and ingesting from those
+    // logged "Plan locked" as progress on the live turn, which painted a
+    // "Kazma is thinking…" header under a finished answer (2026-09-26).
+    if (_isRunningDoc(doc)) tryIngestPlanFromText(text);
     var display = _scrubDsml(stripPlanFenceForDisplay(text));
     // A slot is never hidden by its own painter. (_rescueTurnDom used to
     // sweep the whole bubble for a text node left display:none by an

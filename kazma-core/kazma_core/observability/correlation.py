@@ -35,6 +35,8 @@ __all__ = [
     "reset_turn_id",
 ]
 
+logger = logging.getLogger(__name__)
+
 _current_turn_id: ContextVar[str] = ContextVar("kazma_turn_id", default="")
 
 
@@ -52,8 +54,10 @@ def reset_turn_id(token: Token) -> None:
     """Restore the previous turn id (pass the token from :func:`bind_turn_id`)."""
     try:
         _current_turn_id.reset(token)
-    except Exception:  # noqa: BLE001 — token misuse must never break a turn
-        pass
+    except (ValueError, RuntimeError):
+        # ContextVar.reset's two failure modes: a token from another context,
+        # or one already used. Token misuse must never break a turn.
+        logger.debug("[correlation] turn id token not reset", exc_info=True)
 
 
 def current_turn_id() -> str:
@@ -69,8 +73,6 @@ class TurnIdFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        try:
-            record.turn_id = current_turn_id()
-        except Exception:  # noqa: BLE001
-            record.turn_id = ""
+        # ContextVar.get with a default cannot raise.
+        record.turn_id = current_turn_id()
         return True
