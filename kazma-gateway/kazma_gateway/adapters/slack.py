@@ -535,7 +535,7 @@ class SlackAdapter(BaseAdapter):
         """Connect to Slack Socket Mode and receive events in real-time."""
         import websockets
 
-        from kazma_gateway.adapters.ws_shutdown import closes_on_shutdown
+        from kazma_gateway.adapters.ws_shutdown import CLOSE_TIMEOUT_S, closes_on_shutdown
 
         reconnect_delay = _SOCKET_RECONNECT_DELAY
 
@@ -562,7 +562,9 @@ class SlackAdapter(BaseAdapter):
                 logger.info("[Slack] Socket Mode connecting to WSS endpoint")
                 reconnect_delay = _SOCKET_RECONNECT_DELAY  # reset on successful connection
 
-                async with websockets.connect(wss_url) as ws, closes_on_shutdown(
+                async with websockets.connect(
+                    wss_url, close_timeout=CLOSE_TIMEOUT_S
+                ) as ws, closes_on_shutdown(
                     ws, self._shutdown
                 ):
                     logger.info("[Slack] Socket Mode connected — listening for events")
