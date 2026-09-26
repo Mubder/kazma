@@ -267,7 +267,11 @@ def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
         # (e.g. "Alice and" / "London now" would be absorbed). Triggers use
         # explicit [Mm]/[Ii] alternation for case tolerance.
         (re.compile(r"\b(?:[Mm]y name is|[Ii](?:'m| am) (?:called|named)|[Cc]all me)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})"), "name"),
-        (re.compile(r"\b[Ii] (?:live|work) (?:in|at)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})(?:\s+(?:now|too|also|currently)\b|[.,!]|\s+and\s|\s+[Ii]\s|$)"), "location"),
+        (re.compile(r"\b[Ii] live (?:in|at)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})(?:\s+(?:now|too|also|currently)\b|[.,!]|\s+and\s|\s+[Ii]\s|$)"), "location"),
+        # "I work at X" is where the user works, not where they live: it was
+        # one pattern with "I live in" and stored the employer as lives_in.
+        # "I work in X" names a place or a field -- too ambiguous to store.
+        (re.compile(r"\b[Ii] work (?:at|for)\s+([A-Z][a-zA-Z0-9&]+(?:\s+[A-Z][a-zA-Z0-9&]+){0,2})(?:\s+(?:now|too|also|currently)\b|[.,!]|\s+and\s|\s+[Ii]\s|$)"), "employer"),
         (re.compile(r"\b[Mm]y (?:favorite|favourite)\s+(\w+)\s+is\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2})", re.IGNORECASE), "favorite"),
         (re.compile(r"\b[Ii] (?:prefer|like|love|use|need)\s+([a-z][a-zA-Z]+(?:\s+[a-z][a-zA-Z]+){0,2})", re.IGNORECASE), "prefers"),
     ]
@@ -282,6 +286,10 @@ def extract_beliefs_heuristic(user_text: str) -> list[dict[str, Any]]:
         elif kind == "location":
             val = m.group(1).strip().rstrip(".,!")
             beliefs.append({"subject": "user", "predicate": "lives_in", "predicate_type": "functional",
+                            "object": val, "confidence": 0.85, "importance": 4})
+        elif kind == "employer":
+            val = m.group(1).strip().rstrip(".,!")
+            beliefs.append({"subject": "user", "predicate": "works_at", "predicate_type": "functional",
                             "object": val, "confidence": 0.85, "importance": 4})
         elif kind == "favorite":
             cat, val = m.group(1).strip(), m.group(2).strip().rstrip(".,!")
@@ -418,8 +426,12 @@ def _apply_beliefs_to_v2(
     tenant_id: str = "default",
     cfg: dict[str, Any] | None = None,
     extraction_method: str | None = None,
+    now: float | None = None,
 ) -> dict[str, Any]:
     """Sync helper: fence + entity-resolve + mutate a list of raw beliefs.
+
+    *now* is when the beliefs were stated (default: this moment); a turn
+    replayed from the chat store passes its own time (see mutate_belief).
 
     Pure SQLite + embedder — NO LLM call, NO httpx. Safe to run from a
     worker thread (the post-turn hook spawns this in a thread; the LLM
@@ -524,6 +536,7 @@ def _apply_beliefs_to_v2(
             source_session=session_id,
             source_turn=turn,
             cfg=cfg,
+            now=now,
         )
         if action["action"] != "noop":
             stats["applied"] += 1
@@ -560,6 +573,7 @@ def extract_and_apply_beliefs_sync(
     tenant_id: str = "default",
     cfg: dict[str, Any] | None = None,
     extraction_method: str | None = None,
+    now: float | None = None,
 ) -> dict[str, Any]:
     """SYNC extraction pipeline (heuristic only — NO LLM, NO httpx).
 
@@ -600,4 +614,5 @@ def extract_and_apply_beliefs_sync(
         tenant_id=tenant_id,
         cfg=cfg,
         extraction_method=extraction_method,
+        now=now,
     )

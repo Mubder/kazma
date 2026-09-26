@@ -39,7 +39,8 @@ every change is inside the existing V2 engine.
 | X2 | Found building R7: writes to a private database reached the process-wide stores (`mutate_belief(private=True)`), and the golden eval stored facts without vectors | ☑ `tests/test_memory_benchmark.py`, `kazma-core/tests/test_memory_eval_golden.py` |
 | S2 | Memory calls off the event loop (supervisor knowledge search, probe, federated search, health card) | ☑ `tests/test_static_gates.py` |
 | W2 | A turn the extraction pool cannot take goes to the durable queue (episode and facts), never dropped | ☑ `tests/test_memory_every_turn.py` |
-| S2+ | Remaining Stage 2 items, in the approved order: W1, then R3, R5, R8, W4, W5, then C1, U1, W6, R6, C2 | ☐ |
+| W1 | Facts follow the order they were said in: an older statement is history, never a replacement; every late writer (queue, deep pass, reconcile) passes the turn's time; reconciled turns get their facts (heuristic + queued deep pass, 60 a pass) | ☑ `tests/test_memory_event_time.py` |
+| S2+ | Remaining Stage 2 items, in the approved order: R3, R5, R8, W4, W5, then C1, U1, W6, R6, C2 | ☐ |
 
 ---
 

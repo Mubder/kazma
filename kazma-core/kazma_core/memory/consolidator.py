@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections import OrderedDict
 from typing import Any
 
@@ -270,6 +271,9 @@ def _schedule_post_turn_memory(
         asyncio.get_running_loop()
     except RuntimeError:
         return
+    # When the turn happened: its episode and every fact it states carry this
+    # time, however long the pool or the queue takes to get to it (W1).
+    at = time.time()
 
     # V2 path runs in a DEDICATED OS thread (not the loop's executor) so
     # blocking sync calls cannot starve or gate V2 writes. A plain Thread
@@ -278,7 +282,7 @@ def _schedule_post_turn_memory(
     # unbounded → thread/connection storm).
     def _run_v2_bounded() -> None:
         try:
-            _run_turn_memory(messages, session_id=session_id, turn=turn, tenant_id=tenant_id)
+            _run_turn_memory(messages, session_id=session_id, turn=turn, tenant_id=tenant_id, at=at)
         finally:
             _v2_extract_sem.release()
 
@@ -313,6 +317,7 @@ def _defer_turn_memory(
     turn: int | None,
     tenant_id: str,
     why: str,
+    at: float | None = None,
 ) -> None:
     """Hand one turn to the durable queue (``post_turn_memory``)."""
     from kazma_core.memory.task_queue import enqueue_task
@@ -328,6 +333,7 @@ def _defer_turn_memory(
             "session_id": session_id,
             "turn": turn,
             "tenant_id": tenant_id,
+            "at": time.time() if at is None else float(at),
         },
     )
     if task_id:
@@ -351,11 +357,13 @@ def run_deferred_turn_memory(payload: dict[str, Any]) -> bool:
     if payload.get("assistant_text"):
         messages.append({"role": "assistant", "content": str(payload["assistant_text"])})
     turn = payload.get("turn")
+    at = payload.get("at")  # absent in tasks queued before 2026-09-27
     return _run_turn_memory(
         messages,
         session_id=payload.get("session_id"),
         turn=int(turn) if turn is not None else None,
         tenant_id=str(payload.get("tenant_id") or "default"),
+        at=float(at) if at is not None else None,
     )
 
 
@@ -365,8 +373,14 @@ def _run_turn_memory(
     session_id: str | None,
     turn: int | None,
     tenant_id: str = "default",
+    at: float | None = None,
 ) -> bool:
     """Synchronous V2 mirror + heuristic belief extraction for one turn.
+
+    *at* is when the turn happened (default: now). The episode is stamped
+    with it and the facts are stated at it, so a turn run late -- from the
+    queue after a full pool or a restart -- never overwrites what a later
+    turn said (W1). The LLM deep pass uses the episode's time too.
 
     Runs in the post-turn thread, or in the memory worker's thread for a
     deferred turn. Deliberately SYNC and httpx-free: it never touches the
@@ -386,6 +400,7 @@ def _run_turn_memory(
     deferred turn is then retried by the queue).
     """
     ok = True
+    at = time.time() if at is None else float(at)
     # ── Phase C: promote prior working → episodic for this session ─
     try:
         promote_working_memory(session_id, tenant_id=tenant_id)
@@ -393,14 +408,15 @@ def _run_turn_memory(
         logger.debug("[post_turn] working→episodic promote failed", exc_info=True)
     # ── V2 dual-write mirror ─────────────────────────────────────
     try:
-        _mirror_turn_to_v2(messages, session_id=session_id, turn=turn, tenant_id=tenant_id)
+        _mirror_turn_to_v2(messages, session_id=session_id, turn=turn, tenant_id=tenant_id,
+                           created_at=at)
     except Exception as exc:
         logger.warning("[post_turn] V2 mirror failed: %s", exc, exc_info=True)
         _metric_fail("mirror", exc)
         ok = False
     # ── Stage 1: sync heuristic extraction ───────────────────────
     try:
-        _v2_extract_sync(messages, session_id=session_id, turn=turn, tenant_id=tenant_id)
+        _v2_extract_sync(messages, session_id=session_id, turn=turn, tenant_id=tenant_id, now=at)
     except Exception as exc:
         logger.warning("[post_turn] V2 heuristic extraction failed: %s", exc, exc_info=True)
         _metric_fail("extract", exc)
@@ -481,6 +497,7 @@ def _mirror_turn_to_v2(
     session_id: str | None,
     turn: int | None,
     tenant_id: str = "default",
+    created_at: float | None = None,
 ) -> None:
     """Best-effort mirror of the just-finished turn into the V2 schema.
 
@@ -502,6 +519,7 @@ def _mirror_turn_to_v2(
         user_text=user_text,
         assistant_text=assistant_text,
         tenant_id=tenant_id,
+        created_at=created_at,
     )
 
 
@@ -511,8 +529,11 @@ def _v2_extract_sync(
     session_id: str | None,
     turn: int | None,
     tenant_id: str = "default",
+    now: float | None = None,
 ) -> None:
     """SYNC heuristic belief extraction (runs in the V2 thread).
+
+    *now* is when the turn's facts were stated (see mutate_belief).
 
     Uses :func:`extract_and_apply_beliefs_sync` which is heuristic-only —
     NO LLM call, NO httpx client, so it is safe to run from a worker
@@ -562,6 +583,7 @@ def _v2_extract_sync(
             turn=turn,
             tenant_id=tenant_id,
             cfg=cfg,
+            now=now,
         )
         if stats.get("applied"):
             logger.info(

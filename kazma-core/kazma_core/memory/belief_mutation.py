@@ -5,9 +5,13 @@ The single source of truth for writing beliefs into the bi-temporal
 specification:
 
   - **functional** (single-valued: lives_in, name_is, works_at, ...):
-    the prior active belief's ``valid_until`` is closed to NOW, and the
-    new belief links back via ``supersedes_id``. This is how "I moved to
-    London" supersedes "I live in Paris" without losing history.
+    the prior active belief's ``valid_until`` is closed to when the new
+    statement was made, and the new belief links back via
+    ``supersedes_id``. This is how "I moved to London" supersedes "I live in
+    Paris" without losing history. A statement OLDER than the current fact
+    (a reconciled old turn, a slow extraction) never replaces it: it is
+    recorded as history in its place on the timeline, so the order facts
+    are written in never changes what is true now.
   - **set** (multi-valued: uses_tool, knows_language, ...): the new
     belief appends alongside existing ones — no invalidation.
   - **state** (transitions: issue_status, pipeline_state): the prior
@@ -30,6 +34,7 @@ score that no rule ever read, removed on 2026-09-23 (``macro_sleep.py``).
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -276,10 +281,12 @@ def mutate_belief(
 ) -> dict[str, Any]:
     """Apply a belief mutation per the predicate-type rules.
 
-    *now* is when the fact was stated (default: this moment). Something that
-    records a fact after the fact -- the retrieval benchmark on its fixed
-    clock -- passes the statement's own time, so validity and supersession
-    follow the order the facts were said in.
+    *now* is when the fact was stated (default: this moment): the valid
+    time (``valid_from`` / ``valid_until``). Something that records a fact
+    after the fact -- turn reconcile, the retrieval benchmark on its fixed
+    clock -- passes the statement's own time, and validity and supersession
+    follow the order the facts were SAID in, whatever order they are written
+    in. ``ingested_at`` / ``invalidated_at`` are when this write happened.
 
     *private*: *primary_conn* is a private database (the retrieval
     benchmark's), and nothing may leave it -- no state mirror, graph backend,
@@ -355,7 +362,8 @@ def mutate_belief(
         pass
     trust = _trust_weight(extraction_method, cfg)
     mem_class = derive_memory_class(ptype, importance, cfg=cfg)
-    now = time.time() if now is None else float(now)
+    recorded = time.time()
+    now = recorded if now is None else float(now)
 
     try:
         with _mutation_lock:
@@ -365,7 +373,8 @@ def mutate_belief(
                     confidence=confidence, importance=importance, trust=trust,
                     extraction_method=extraction_method, tenant_id=tenant_id,
                     source_session=source_session, source_turn=source_turn,
-                    mem_class=mem_class, now=now, cfg=cfg, private=private,
+                    mem_class=mem_class, now=now, recorded=recorded, cfg=cfg,
+                    private=private,
                 )
             elif ptype == "state":
                 result = _mutate_state(
@@ -373,7 +382,8 @@ def mutate_belief(
                     confidence=confidence, importance=importance, trust=trust,
                     extraction_method=extraction_method, tenant_id=tenant_id,
                     source_session=source_session, source_turn=source_turn,
-                    mem_class=mem_class, now=now, cfg=cfg, private=private,
+                    mem_class=mem_class, now=now, recorded=recorded, cfg=cfg,
+                    private=private,
                 )
             else:
                 result = _mutate_set(
@@ -381,7 +391,8 @@ def mutate_belief(
                     confidence=confidence, importance=importance, trust=trust,
                     extraction_method=extraction_method, tenant_id=tenant_id,
                     source_session=source_session, source_turn=source_turn,
-                    mem_class=mem_class, now=now, cfg=cfg, private=private,
+                    mem_class=mem_class, now=now, recorded=recorded, cfg=cfg,
+                    private=private,
                 )
         # Phase 0 instrumentation (Commitment Layer): surface every functional
         # supersede so ``belief.supersede_without_user_assert`` (plan §8.1) is
@@ -403,7 +414,11 @@ def mutate_belief(
                     )
             except Exception:
                 pass
-        # Best-effort dual-write to shared state / graph backends (P2-2/P2-3)
+        # Best-effort dual-write to shared state / graph backends (P2-2/P2-3).
+        # A history row (W1) and the neighbours it re-bounded reach the state
+        # mirror with their validity; the graph and the unified index hold
+        # current facts only, so a history row goes to neither.
+        history = result.get("action") == "history"
         if not private and result.get("action") not in ("noop", None) and result.get("belief_id"):
             try:
                 from kazma_core.memory.graph_backend import upsert_belief_edge
@@ -415,17 +430,21 @@ def mutate_belief(
                 # a hand-built "definitely alive" dict. (2026-08-26 audit: was
                 # `conn`, an undefined name — the NameError was swallowed and
                 # the new-belief mirror/graph dual-write never ran.)
-                remirror_belief_by_id(primary_conn, bid)
-                upsert_belief_edge(
-                    subject=sub,
-                    predicate=pred,
-                    obj=obj,
-                    belief_id=bid,
-                    tenant_id=tenant_id,
-                    confidence=float(confidence or 0.5),
-                )
+                for mirrored in [bid, *(result.get("touched") or [])]:
+                    remirror_belief_by_id(primary_conn, str(mirrored))
+                if not history:
+                    upsert_belief_edge(
+                        subject=sub,
+                        predicate=pred,
+                        obj=obj,
+                        belief_id=bid,
+                        tenant_id=tenant_id,
+                        confidence=float(confidence or 0.5),
+                    )
             except Exception:
                 logger.debug("[belief_mutate] dual-write backends failed", exc_info=True)
+        if (not private and not history and result.get("action") not in ("noop", None)
+                and result.get("belief_id")):
             try:
                 from kazma_core.memory.unified_index import upsert_unified
 
@@ -488,6 +507,7 @@ def _insert_belief(
     now: float,
     supersedes_id: str | None = None,
     private: bool = False,
+    recorded: float | None = None,
 ) -> dict[str, Any]:
     meta = {"memory_class": mem_class}
     try:
@@ -501,7 +521,7 @@ def _insert_belief(
     params = (
         bid, tenant_id, sub, pred, ptype, obj,
         float(confidence), int(importance), float(trust),
-        now, now, supersedes_id, source_session, source_turn,
+        now, now if recorded is None else recorded, supersedes_id, source_session, source_turn,
         extraction_method, json.dumps(meta, ensure_ascii=False),
         emb_version,
     )
@@ -604,6 +624,7 @@ def _insert_kw(kw: dict[str, Any]) -> dict[str, Any]:
         "source_turn": kw.get("source_turn"),
         "mem_class": kw["mem_class"],
         "private": bool(kw.get("private")),
+        "recorded": kw.get("recorded"),
     }
 
 
@@ -633,12 +654,15 @@ def _mutate_functional(
         pass  # already in a transaction
     # Find the currently-active belief for this (subject, predicate)
     existing = conn.execute(
-        """SELECT id, object, extraction_method FROM beliefs
+        """SELECT id, object, extraction_method, valid_from FROM beliefs
            WHERE subject=? AND predicate=? AND tenant_id=?
              AND valid_until IS NULL AND invalidated_at IS NULL
            LIMIT 1""",
         (sub, pred, tenant_id),
     ).fetchone()
+    if existing is not None and now < float(_col(existing, "valid_from", 3) or 0.0):
+        # Said before the current fact was: history, never a replacement.
+        return _record_earlier_statement(conn, ops_conn, sub, pred, obj, began=_began, **kw)
     superseded_id = None
     state_before = None
     if existing:
@@ -699,7 +723,7 @@ def _mutate_functional(
         beliefs_write(
             conn,
             "UPDATE beliefs SET valid_until=?, invalidated_at=? WHERE id=?",
-            (now, now, superseded_id),
+            (now, kw.get("recorded") or now, superseded_id),
         )
         if not kw.get("private"):
             # Dual-write cleanup: drop superseded edge from Neo4j
@@ -754,6 +778,95 @@ def _mutate_functional(
         state_before=state_before, state_after=state_after,
     )
     return {"action": "supersede", "belief_id": bid, "superseded_id": superseded_id}
+
+
+def _col(row: Any, name: str, index: int) -> Any:
+    """A column of a row read with or without ``sqlite3.Row``."""
+    return row[name] if isinstance(row, sqlite3.Row) else row[index]
+
+
+def _record_earlier_statement(
+    conn: sqlite3.Connection,
+    ops_conn: sqlite3.Connection | None,
+    sub: str, pred: str, obj: str, *, began: bool, **kw: Any,
+) -> dict[str, Any]:
+    """Record a statement made before the current fact, as history.
+
+    The values of a single-valued (subject, predicate) form a timeline
+    ordered by when each was stated. A statement that arrives late -- an old
+    turn reconciled from the chat store, a slow extraction -- is placed where
+    it belongs: it holds until the next statement and cuts the one before it
+    short. The current fact is never touched, so writing "I live in Paris"
+    (said in March) after "I moved to London" (said in May) leaves London
+    current; until 2026-09-27 the later write won (plan W1).
+
+    Nothing is recorded when the statement adds nothing -- the value before
+    it or after it is the same -- or when it would cut short a user-stated
+    value with a lower-trust source (the trust gate of the supersede path).
+    """
+    tenant_id, now = kw["tenant_id"], kw["now"]
+
+    def _nothing(extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        if began:
+            with contextlib.suppress(sqlite3.Error):
+                conn.rollback()
+        return {"action": "noop", "belief_id": "", "superseded_id": None, **(extra or {})}
+
+    rows = conn.execute(
+        """SELECT id, object, extraction_method, valid_from, valid_until FROM beliefs
+           WHERE subject=? AND predicate=? AND tenant_id=?
+           ORDER BY valid_from, ingested_at""",
+        (sub, pred, tenant_id),
+    ).fetchall()
+    before = [r for r in rows if float(_col(r, "valid_from", 3)) <= now]
+    after = [r for r in rows if float(_col(r, "valid_from", 3)) > now]
+    prev = before[-1] if before else None
+    nxt = after[0]  # the current fact at the latest
+    if prev is not None and _col(prev, "object", 1) == obj:
+        return _nothing({"belief_id": _col(prev, "id", 0), "already": "recorded"})
+    if _col(nxt, "object", 1) == obj:
+        return _nothing({"belief_id": _col(nxt, "id", 0), "already": "stated_later"})
+    gate_cfg = ((kw.get("cfg") or {}).get("v2") or {})
+    if (prev is not None
+            and bool(gate_cfg.get("functional_supersede_requires_user_assert", True))
+            and _col(prev, "extraction_method", 2) == "user_explicit"
+            and kw["extraction_method"] != "user_explicit"):
+        logger.info(
+            "[belief_mutate] blocked_history predicate=%s subject=%s -- a %s statement "
+            "cannot cut short a user_explicit one", pred, sub, kw["extraction_method"],
+        )
+        return _nothing({"blocked": "lower_trust_source"})
+    from kazma_core.memory.hygiene import beliefs_write
+
+    prev_id = str(_col(prev, "id", 0)) if prev is not None else None
+    next_id = str(_col(nxt, "id", 0))
+    ends = float(_col(nxt, "valid_from", 3))
+    bid = _belief_id(tenant_id, sub, pred, now)
+    try:
+        state_after = _insert_belief(
+            conn, bid, tenant_id, sub, pred, "functional", obj,
+            supersedes_id=prev_id, now=now, **_insert_kw(kw),
+        )
+    except sqlite3.IntegrityError:
+        return _nothing({"blocked": "insert_ignored"})
+    bid = str(state_after.get("id") or bid)
+    beliefs_write(conn, "UPDATE beliefs SET valid_until=?, invalidated_at=? WHERE id=?",
+                  (ends, kw.get("recorded") or now, bid))
+    if prev is not None:
+        prev_until = _col(prev, "valid_until", 4)
+        if prev_until is None or float(prev_until) > now:
+            beliefs_write(conn, "UPDATE beliefs SET valid_until=?, invalidated_at=COALESCE("
+                          "invalidated_at, ?) WHERE id=?", (now, kw.get("recorded") or now, prev_id))
+    beliefs_write(conn, "UPDATE beliefs SET supersedes_id=? WHERE id=?", (bid, next_id))
+    conn.commit()
+    _write_audit(
+        ops_conn, tenant_id=tenant_id, event_type="history",
+        target_id=bid, actor="post_turn_worker",
+        reason=f"earlier statement {sub} {pred} -> {obj}, before {next_id}",
+        state_after={**state_after, "valid_until": ends},
+    )
+    return {"action": "history", "belief_id": bid, "superseded_id": None,
+            "touched": [i for i in (prev_id, next_id) if i]}
 
 
 def _mutate_state(

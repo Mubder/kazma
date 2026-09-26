@@ -588,11 +588,13 @@ came up short, and archiving had erased 76 memories.
   repeated question collide into one memory.
 - **Turn reconcile** (`turn_reconcile.run_turn_reconcile_pass`, 15 min, ~60
   s): every chat-store turn older than 10 minutes without an episode gets
-  one, with its own time, through `mirror_episode`. Episodes only: facts are
-  not re-extracted from old turns (functional supersede orders by ingestion,
-  so an old statement would overwrite a newer fact). Repeated questions are
-  counted, erased-row stubs count as present, and the cursor passes only
-  settled sessions. On live it found 1,004 of 1,174 chat turns missing.
+  one, with its own time, through `mirror_episode`. Then the turns it wrote
+  get their facts as a live turn does -- the heuristic pass at once, the LLM
+  deep pass queued (`micro_consolidation`, at most `_DEEP_PER_PASS` = 60 a
+  pass) -- at the turn's own time (§15H; a rowid cursor, `facts_after`).
+  Repeated questions are counted, erased-row stubs count as present, and the
+  cursor passes only settled sessions. On live it found 1,004 of 1,174 chat
+  turns missing.
 - **Nothing repoints live memory** (item I): no product code rebinds a
   `kazma_core.paths` function or resets the shared `dual_write` writer
   (`_reset_mirror` is a test helper; gate in `tests/test_memory_every_turn.py`).
@@ -687,6 +689,30 @@ four injected were noise.
   busy (or no thread) the turn's question and answer go to the durable queue
   as `post_turn_memory`, which the memory worker runs with retries. A queue
   that refuses too is a WARNING and a counted `enqueue_fail`.
+
+**H. Facts follow the order they were said in (W1, 2026-09-27).**
+- **`mutate_belief(now=...)` is when the fact was STATED** (valid time:
+  `valid_from` / `valid_until`); `ingested_at` / `invalidated_at` are when
+  the write happened. A single-valued (functional or state) statement older
+  than the current fact is recorded as HISTORY in its place on the timeline
+  (`belief_mutation._record_earlier_statement`): it holds until the next
+  statement, cuts the previous one short, and never becomes current. It adds
+  nothing when a neighbour says the same, and the trust gate applies to the
+  value it would cut short. History rows reach the state mirror, never the
+  graph or the unified index. Until 2026-09-27 the last WRITE won, so any
+  late writer could put an old "I live in Paris" over "I moved to London".
+- **Every writer that runs after its turn passes the turn's time.** The
+  post-turn scheduler stamps `at` when the turn closes; the durable queue
+  carries it (`post_turn_memory` payload `at`); the episode, the heuristic
+  facts and the LLM deep pass (`micro_consolidation`, from the episode's
+  `created_at`) all use it; turn reconcile uses the turn's. Same time for the
+  heuristic and the deep pass means the deep pass may still correct its own
+  turn. Gate: `tests/test_memory_event_time.py::test_every_late_writer_passes_the_turn_time`
+  (every call in the late-writer modules names its time).
+- The heuristic reads "I work at/for X" as `works_at` (it shared a pattern
+  with "I live in" and stored the employer as `lives_in`), and the local
+  embedder remembers short texts (<= 256 characters, 4,096 of them): each
+  extraction with a fact re-embedded every entity name of the tenant.
 
 ### 16. Cron Scheduler & Reminder Delivery (`kazma-core/kazma_core/cron/`)
 
