@@ -1014,7 +1014,11 @@ class KazmaAgent:
                         open=False,
                     )
                     await pool.open()
-                    self._checkpointer = AsyncPostgresSaver(conn=pool)  # type: ignore[arg-type]
+                    from kazma_core.checkpoint_serde import kazma_checkpoint_serde
+
+                    self._checkpointer = AsyncPostgresSaver(  # type: ignore[arg-type]
+                        conn=pool, serde=kazma_checkpoint_serde()
+                    )
                     await self._checkpointer.setup()
                     logger.info("KazmaAgent checkpointer: AsyncPostgresSaver")
             except Exception as exc:
@@ -1052,7 +1056,11 @@ class KazmaAgent:
                     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
                     self._checkpoint_conn = await aiosqlite.connect(db_path)
                     await apply_sqlite_pragmas_async(self._checkpoint_conn)
-                    self._checkpointer = AsyncSqliteSaver(self._checkpoint_conn)
+                    from kazma_core.checkpoint_serde import kazma_checkpoint_serde
+
+                    self._checkpointer = AsyncSqliteSaver(
+                        self._checkpoint_conn, serde=kazma_checkpoint_serde()
+                    )
                     await self._checkpointer.setup()
                     logger.info("KazmaAgent checkpointer: AsyncSqliteSaver path=%s", db_path)
 

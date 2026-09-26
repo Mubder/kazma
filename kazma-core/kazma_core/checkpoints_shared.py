@@ -86,17 +86,18 @@ def retain_shared_checkpoints(db_path: str | None = None) -> None:
     _refcounts[_key(db_path)] = _refcounts.get(_key(db_path), 0) + 1
 
 
-async def get_shared_sqlite_saver(
-    db_path: str | None = None,
-    *,
-    serde: Any = None,
-) -> Any:
+async def get_shared_sqlite_saver(db_path: str | None = None) -> Any:
     """Return the ONE live AsyncSqliteSaver for *db_path* on this loop.
 
     Reuses a still-alive saver from a previous acquisition; constructs a
     fresh one (WAL pragmas + ``setup()``) otherwise. The caller OWNS a
     reference and must either :func:`retain_shared_checkpoints` (lifetime
     holders) or keep the object alive for as long as it uses it.
+
+    It always deserializes with :func:`kazma_checkpoint_serde`. It used to
+    take the serializer of whichever caller opened it first -- the server's
+    strict one or KazmaAgent's none (LangGraph's permissive default) -- so the
+    process's posture depended on boot order (2026-09-26).
     """
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
@@ -116,7 +117,9 @@ async def get_shared_sqlite_saver(
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = await aiosqlite.connect(key)
         await apply_sqlite_pragmas_async(conn)
-        saver = AsyncSqliteSaver(conn, serde=serde) if serde is not None else AsyncSqliteSaver(conn)
+        from kazma_core.checkpoint_serde import kazma_checkpoint_serde
+
+        saver = AsyncSqliteSaver(conn, serde=kazma_checkpoint_serde())
         await saver.setup()
         cache[key] = weakref.ref(saver)
         logger.info("[checkpoints_shared] shared AsyncSqliteSaver for %s", key)
