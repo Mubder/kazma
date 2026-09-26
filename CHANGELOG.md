@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Updates and restarts are about ten seconds quicker (2026-09-26)
+
+Every restart spent about ten seconds waiting for the Discord and Slack
+connections to notice they should stop, one after the other. They now close
+straight away and stop together, so Kazma is back sooner after every update.
+
 ## Every chat update says which answer it belongs to (2026-09-26)
 
 Kazma's live chat updates -- words of an answer, tool steps, progress --

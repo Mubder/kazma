@@ -365,7 +365,10 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
   (checked 2026-09-25). A ruleset requiring the Tests job with the repository
   admin as a bypass actor would block unreviewed red pushes from anyone else
   while keeping the owner's direct pushes — the objection recorded in AGENTS
-  §31. It changes GitHub settings, so it is not done here.
+  §31. It changes GitHub settings, so it is not done here. The checklist is
+  ready: `docs/docs/ops/branch-protection.md` (the ten required checks by
+  name, the ruleset, and the metrics bot's direct push, which the ruleset
+  would reject -- decide that first).
 - **The shared-store peer registry is advisory.** It names installs; it does
   not stop one from writing. An acknowledged id silences only that id.
 - **The restore rehearsal is off by default.** Until it is turned on

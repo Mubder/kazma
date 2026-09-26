@@ -62,7 +62,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 ### Ops (production)
 
 - [Production checklist](ops/production-checklist) · [**Full-system battery**](ops/full-battery) · [Kazma Update](ops/kazma-update) · [Smoke matrix](ops/smoke-matrix) · [**Diagnosis map**](ops/diagnosis-map) (multi-path X↔Y)
-- [Postgres & SaaS](ops/postgres-and-saas) · [Disaster recovery](ops/disaster-recovery)
+- [Postgres & SaaS](ops/postgres-and-saas) · [Disaster recovery](ops/disaster-recovery) · [Branch protection](ops/branch-protection)
 - [Document processing ops](ops/document-processing) · [Multi-region / HA](ops/multi-region) · [OIDC](ops/oidc-setup)
 - [Portability](ops/portability) · [Migration (`kazma migrate`)](ops/migration) · [WSL fixed access](ops/wsl-fixed-access)
 

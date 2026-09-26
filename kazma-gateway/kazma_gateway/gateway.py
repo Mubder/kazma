@@ -619,9 +619,15 @@ class GatewayManager:
         # 1. Signal all adapters to stop
         self._shutdown.set()
 
-        # 2. Wait for all adapters to exit
-        for adapter in self.adapters:
-            await adapter.stop()
+        # 2. Wait for all adapters to exit -- together: each may take up to its
+        # 5 s grace, and one after another they added up on every reload. One
+        # adapter's failure must not skip the drain and consumer steps below.
+        results = await asyncio.gather(
+            *(adapter.stop() for adapter in self.adapters), return_exceptions=True
+        )
+        for adapter, result in zip(self.adapters, results, strict=True):
+            if isinstance(result, Exception):
+                logger.warning("[%s] Adapter stop failed: %s", adapter.name, result)
 
         # 3. Drain remaining messages (best-effort, don't block)
         drained = 0
