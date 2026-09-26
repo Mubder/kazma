@@ -17,6 +17,11 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from kazma_core.config_store import ConfigStore, is_vault_ref
 from kazma_core.model_registry import get_model_registry
+from kazma_core.security.url_credentials import (
+    mask_url_credentials,
+    restore_masked_url,
+    url_password_is_masked,
+)
 
 from kazma_ui.models import (
     ConnectorTestResponse,
@@ -114,11 +119,34 @@ def _activate_tested_provider(registry: Any, name: str) -> None:
 
 
 def _mask_provider_entry(provider: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of a provider entry with the API key masked."""
+    """Return a copy of a provider entry with the API key and any password in
+    its base URL masked (the save restores an unchanged masked URL)."""
     safe = dict(provider)
     if safe.get("api_key"):
         safe["api_key"] = _mask_secret(str(safe["api_key"]))
+    if safe.get("base_url"):
+        safe["base_url"] = mask_url_credentials(safe["base_url"])
     return safe
+
+
+def _restore_url(field: str, posted: Any, stored: Any) -> Any:
+    """*posted* with a masked URL password restored from *stored*, or a 400.
+
+    The display masks a password inside a URL. Posted back unchanged, the
+    stored URL is kept; posted with the stars but another host, user or path,
+    it is refused -- the stored password is never carried to a new server,
+    and stars are never stored as a password.
+    """
+    value = restore_masked_url(posted, stored)
+    if url_password_is_masked(value):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{field}: the password in this URL is masked. Enter it again -- "
+                "the saved one is kept only when the URL itself is unchanged."
+            ),
+        )
+    return value
 
 
 def _mask_connector_entry(name: str, config: dict[str, Any]) -> dict[str, Any]:
@@ -134,6 +162,9 @@ def _mask_connector_entry(name: str, config: dict[str, Any]) -> dict[str, Any]:
         str_value = str(value)
         if _is_secret_key(key):
             str_value = _mask_secret(str_value)
+        else:
+            # A webhook or endpoint URL can carry a password of its own.
+            str_value = mask_url_credentials(str_value)
         if key in ("incoming_url", "outgoing_url", "webhook_url", "base_url"):
             endpoint = str_value
         extras[key] = str_value
@@ -227,10 +258,10 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         data = req.model_dump()
         data["api_key"] = _sanitize_api_key(str(data.get("api_key") or ""))
 
-        if _is_masked_placeholder(data.get("api_key", "")):
-            existing = registry.get_provider(data["name"])
-            if existing and existing.get("api_key"):
-                data["api_key"] = existing["api_key"]
+        existing = registry.get_provider(data["name"]) or {}
+        if _is_masked_placeholder(data.get("api_key", "")) and existing.get("api_key"):
+            data["api_key"] = existing["api_key"]
+        data["base_url"] = _restore_url("base_url", data.get("base_url"), existing.get("base_url"))
 
         result = registry.upsert_provider(data)
         if "error" in result:
@@ -616,6 +647,9 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         existing = registry.get_model_profile(profile_name)
         if _is_masked_placeholder(data.get("api_key", "")) and existing:
             data["api_key"] = existing.get("api_key", "")
+        data["base_url"] = _restore_url(
+            "base_url", data.get("base_url"), (existing or {}).get("base_url")
+        )
 
         profile: dict[str, Any] = {
             "provider": data.get("provider", "custom"),
@@ -670,6 +704,12 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             config_store.set(f"connectors.{name}.token", token, category="connectors")
         config_store.set(f"connectors.{name}.enabled", req.enabled, category="connectors")
         for key, value in req.extras.items():
+            # A URL with a masked password: unchanged, the stored URL stays;
+            # changed, the save is refused rather than moving the stored
+            # password to the new URL or storing the stars.
+            if url_password_is_masked(str(value)):
+                if _restore_url(key, str(value), existing_config.get(key)) != str(value):
+                    continue
             # Masked-extras round-trip (2026-09-03 v4): GET /api/connectors
             # masks secret extras (e.g. slack app_token → "****abcd"). A save
             # that did not touch that field sends the mask back — writing it

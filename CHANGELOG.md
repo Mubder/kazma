@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## A password inside a provider or connector URL is hidden too (2026-09-26)
+
+Settings showed a password written inside a provider's base URL, a saved
+model profile's URL or a connector's webhook URL in plain text. It now shows
+`****` there, like the API key. Saving the form unchanged keeps the stored
+password; changing the address while the password still shows `****` asks
+you to enter the password again, so a saved password is never sent to a
+different server.
+
 ## Every page starts once (2026-09-26)
 
 Eleven pages -- and the app frame around every page -- started themselves

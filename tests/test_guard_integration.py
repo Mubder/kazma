@@ -94,22 +94,35 @@ class GuardRun:
 
     # -- observation helpers ------------------------------------------
 
-    def events(self) -> list[dict]:
+    @staticmethod
+    def _json_lines(path: Path) -> list[dict]:
+        """Every complete JSON line in *path*. A line still being written --
+        the guard appends while the test reads -- is skipped, not allowed to
+        void the whole read: one partial line used to return [] and hid the
+        event being waited for ("guard never logged ...; saw []", a full-suite
+        run on 2026-09-26)."""
         try:
-            return [json.loads(x) for x in
-                    self.log.read_text(encoding="utf-8").splitlines() if x.strip()]
-        except Exception:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
             return []
+        out = []
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                continue
+        return out
+
+    def events(self) -> list[dict]:
+        return self._json_lines(self.log)
 
     def event_names(self) -> list[str]:
         return [e.get("event", "") for e in self.events()]
 
     def generations(self) -> list[dict]:
-        try:
-            return [json.loads(x) for x in
-                    self.marker.read_text(encoding="utf-8").splitlines() if x.strip()]
-        except Exception:
-            return []
+        return self._json_lines(self.marker)
 
     def wait_for(self, event: str, timeout: float = 90.0) -> dict:
         end = time.time() + timeout

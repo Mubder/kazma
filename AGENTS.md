@@ -1335,8 +1335,11 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   `tests/test_url_credentials.py::test_every_key_name_masker_also_masks_url_passwords`;
   a new one needs a probe there. The mask is `****`, which
   `is_masked_secret_placeholder` refuses to write back, so a form can round-trip
-  it — but only where the save refuses it: provider/profile/connector displays
-  are listed as open until their saves restore a masked URL.
+  it. Provider, profile and connector saves go further
+  (`url_credentials.restore_masked_url`, 2026-09-26): a URL posted back
+  exactly as shown keeps its stored password; stars with any other change
+  (host, user, path) are refused with a 400 — a stored password is never
+  moved to a URL someone just typed (`tests/test_url_password_round_trip.py`).
 
 **E. Nothing blocking on the event loop; nothing fire-and-forget.**
 - A sync `sqlite3.connect` inside `async def` pins the loop that serves

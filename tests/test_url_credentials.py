@@ -430,6 +430,24 @@ def _probe_pg_argv():
     return _redact_cmd(["pg_dump", "--dbname", DSN])
 
 
+def _probe_provider_entry():
+    from kazma_ui.providers import _mask_provider_entry
+
+    return _mask_provider_entry({"name": "p", "base_url": DSN, "api_key": "k-123456"})
+
+
+def _probe_connector_entry():
+    from kazma_ui.providers import _mask_connector_entry
+
+    return _mask_connector_entry("slack", {"token": "xoxb-1", "webhook_url": DSN})
+
+
+def _probe_profile():
+    from kazma_core.model_registry import ModelRegistry
+
+    return ModelRegistry._mask_profile(None, {"base_url": DSN, "api_key": "k"})  # type: ignore[arg-type]
+
+
 PROBES = {
     "kazma-ui/kazma_ui/settings.py::mask_deep": _probe_mask_deep,
     "kazma-core/kazma_core/memory/backends.py::mask_backends_cfg": _probe_mask_backends_cfg,
@@ -438,17 +456,15 @@ PROBES = {
     "kazma-gateway/kazma_gateway/slash_commands.py::_redact_secrets": _probe_config_export_command,
     "kazma-gateway/kazma_gateway/agent_handler/hitl.py::_build_approval_prompt._redact": _probe_approval_card,
     "kazma-core/kazma_core/migration/pg_bridge.py::_redact_cmd": _probe_pg_argv,
+    # Masked since 2026-09-26: their saves restore an unchanged masked URL and
+    # refuse a changed one (tests/test_url_password_round_trip.py).
+    "kazma-ui/kazma_ui/providers.py::_mask_provider_entry": _probe_provider_entry,
+    "kazma-ui/kazma_ui/providers.py::_mask_connector_entry": _probe_connector_entry,
+    "kazma-core/kazma_core/model_registry.py::ModelRegistry._mask_profile": _probe_profile,
 }
 
 #: Found by the census and deliberately not probed — each with its reason.
-NOT_PROBED = {
-    # Open (docs/KNOWN_GAPS.md): these displays round-trip through a save
-    # that restores a masked api_key but not a masked URL password, so
-    # masking the URL here first would let a save store the stars.
-    "kazma-ui/kazma_ui/providers.py::_mask_provider_entry": "round-trips; see KNOWN_GAPS",
-    "kazma-ui/kazma_ui/providers.py::_mask_connector_entry": "round-trips; see KNOWN_GAPS",
-    "kazma-core/kazma_core/model_registry.py::ModelRegistry._mask_profile": "round-trips; see KNOWN_GAPS",
-}
+NOT_PROBED: dict[str, str] = {}
 
 
 def test_every_key_name_masker_also_masks_url_passwords():

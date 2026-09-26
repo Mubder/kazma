@@ -1244,7 +1244,12 @@ def create_sse_chat_router(
                     )
 
             except asyncio.CancelledError:
-                logger.warning("SSE generator cancelled for session=%s (client refresh/tab switch?)", session_id)
+                # The client went away: a reload, a tab switch, or the approval
+                # flow reopening the stream. Normal traffic, not a warning --
+                # it logged WARNING on every approval (live, 2026-09-26).
+                logger.info(
+                    "SSE client left session=%s; the turn keeps running detached", session_id
+                )
                 # Flush whatever partial content we have so the user's question
                 # isn't left without an answer on reload. The turn stays OPEN:
                 # the pump is detached and still running, and its callback
