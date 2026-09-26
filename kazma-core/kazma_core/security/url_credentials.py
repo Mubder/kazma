@@ -23,6 +23,7 @@ __all__ = [
     "mask_url_credentials",
     "mask_url_credentials_deep",
     "mask_urls_in_text",
+    "restore_masked_url",
     "url_has_credentials",
     "url_password_is_masked",
 ]
@@ -160,3 +161,19 @@ def url_password_is_masked(value: Any) -> bool:
                 return False
             found = True
     return found
+
+
+def restore_masked_url(posted: Any, stored: Any) -> Any:
+    """The stored URL when *posted* is exactly its masked form, else *posted*.
+
+    A form that showed ``https://u:****@host/v1`` and posts it back unchanged
+    means "keep the password", and gets the stored URL back. Posted with any
+    other change -- a new host, user, path -- the stored password is NOT
+    carried over: moving a credential to a server someone just typed in is
+    the leak the mask exists to prevent. The caller refuses a URL that still
+    holds a masked password (``url_password_is_masked``).
+    """
+    if not url_password_is_masked(posted) or not url_has_credentials(stored):
+        return posted
+    return stored if mask_url_credentials(stored) == posted else posted
+

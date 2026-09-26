@@ -486,11 +486,12 @@ logs were checked, rotations included: the DSN was never written there.
 
 **Still open from those:**
 
-- **Provider, model-profile and connector displays mask the key, not a
-  password in their URLs.** Their saves restore a masked `api_key` from the
-  stored entry but not a masked `base_url`, so masking the URL first would let
-  a save store the stars. Provider URLs carrying a password are rare; the
-  three are named in the gate's `NOT_PROBED` until the saves learn to restore.
+- **~~Provider, model-profile and connector displays mask the key, not a
+  password in their URLs.~~** Closed 2026-09-26: the three displays mask a
+  URL password too, and their saves restore it only when the URL is posted
+  back exactly as shown (`restore_masked_url`); the stars with any other
+  change are refused, so a stored password never moves to a new host.
+  `NOT_PROBED` is empty; `tests/test_url_password_round_trip.py`.
 - **A credential URL under a name that is not install-scoped stays in
   plaintext** (masked on every way out). Vaulting it would put it under the
   saving request's tenant, where background readers cannot see it.

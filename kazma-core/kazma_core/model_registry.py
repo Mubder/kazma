@@ -1465,9 +1465,15 @@ class ModelRegistry:
         return normalize_models(models)
 
     def _mask_profile(self, profile: dict[str, Any]) -> dict[str, Any]:
+        from kazma_core.security.url_credentials import mask_url_credentials
+
         safe = dict(profile)
         if safe.get("api_key"):
             safe["api_key"] = "***"
+        if safe.get("base_url"):
+            # The profile save restores an unchanged masked URL
+            # (kazma_ui.providers._restore_url).
+            safe["base_url"] = mask_url_credentials(safe["base_url"])
         return safe
 
     def _collect_task_defaults(self) -> dict[str, str]:
