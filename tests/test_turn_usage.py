@@ -201,6 +201,11 @@ def test_the_done_frame_reports_the_whole_turn(ledger, tmp_path, monkeypatch):
     assert done["cost"] == pytest.approx(0.022)
     assert done["duration_ms"] >= 239_000, "the clock runs from the question"
     assert charged == [(50, 0.002)], "the session is charged this segment only"
+    # ...and the row keeps the turn's numbers, so a reload shows them too.
+    row = next(m for m in get_session_manager().get("sess-u").messages
+               if m.get("role") == "assistant" and m.get("turn_id") == "turn-u")
+    assert row["tokens"] == 2250 and row["cost"] == pytest.approx(0.022)
+    assert row["duration_ms"] >= 239_000
 
 
 def test_negative_control_without_the_ledger_the_last_call_is_all_there_is(

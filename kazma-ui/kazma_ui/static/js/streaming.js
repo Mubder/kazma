@@ -921,10 +921,20 @@ var KazmaStream = (function() {
     return Number(tokens).toLocaleString();
   }
 
+  // Same rules as KazmaUtils.formatDuration (modules/util.js); the two are
+  // held equal by tests/js/test_format_duration.js. A four-minute turn read
+  // "240.0s" here (2026-09-26). Each unit is rounded before it is compared,
+  // so 59.96 s reads "1m 0s", never "60.0s".
   function formatDuration(ms) {
-    if (!ms) return '0ms';
-    if (ms < 1000) return Math.round(ms) + 'ms';
-    return (ms / 1000).toFixed(1) + 's';
+    ms = Number(ms) || 0;
+    if (ms <= 0) return '0s';
+    if (ms < 999.5) return Math.round(ms) + 'ms';
+    var tenths = Math.round(ms / 100) / 10;
+    if (tenths < 60) return tenths.toFixed(1) + 's';
+    var secs = Math.round(ms / 1000);
+    if (secs < 3600) return Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+    var mins = Math.round(ms / 60000);
+    return Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm';
   }
 
   function timeAgo(dateStr) {

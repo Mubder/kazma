@@ -1396,7 +1396,9 @@ async def _stream_langgraph_events(
                     pass
 
             # ── Turn complete ──────────────────────────────────────────
-            duration_ms = (_turn_offset_s + (time.monotonic() - turn_start)) * 1000
+            # Whole milliseconds, once: the frame and the stored row carry the
+            # same number (a reload read 343ms where the live line said 344).
+            duration_ms = round((_turn_offset_s + (time.monotonic() - turn_start)) * 1000)
             # The turn's usage, every segment and every LLM call (the
             # respond synthesis too), from the per-call ledger. This
             # segment's share goes to the session totals, so a turn that
@@ -1477,7 +1479,7 @@ async def _stream_langgraph_events(
             _done_payload = {
                 "tokens": total_tokens,
                 "cost": round(total_cost, 6),
-                "duration_ms": round(duration_ms, 0),
+                "duration_ms": duration_ms,
                 "interrupted": interrupted,
                 "empty": (not content_acc and not interrupted),
                 "content": content_acc or "",
@@ -1506,6 +1508,7 @@ async def _stream_langgraph_events(
                 model=_done_model,
                 tokens=total_tokens,
                 cost=total_cost,
+                duration_ms=duration_ms,
                 parts=_hitl_persist_parts(
                     content_acc,
                     interrupted,

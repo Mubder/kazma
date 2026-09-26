@@ -94,12 +94,18 @@ export const KazmaUtils = {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i];
     },
 
+    // Same rules as formatDuration in streaming.js (the chat's copy); the
+    // two are held equal by tests/js/test_format_duration.js.
     formatDuration(ms) {
-        if (!ms) return '0s';
-        if (ms < 1000) return ms + 'ms';
-        if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
-        if (ms < 3600000) return Math.floor(ms / 60000) + 'm ' + Math.floor((ms % 60000) / 1000) + 's';
-        return Math.floor(ms / 3600000) + 'h ' + Math.floor((ms % 3600000) / 60000) + 'm';
+        ms = Number(ms) || 0;
+        if (ms <= 0) return '0s';
+        if (ms < 999.5) return Math.round(ms) + 'ms';
+        const tenths = Math.round(ms / 100) / 10;
+        if (tenths < 60) return tenths.toFixed(1) + 's';
+        const secs = Math.round(ms / 1000);
+        if (secs < 3600) return Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+        const mins = Math.round(ms / 60000);
+        return Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm';
     },
 
     formatTime(date) {
