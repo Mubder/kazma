@@ -2740,7 +2740,12 @@ Read the named test before changing the code it guards.
   (`get_dashboard_context`), and ends a session whose non-daemon thread is
   still running with an `ERROR conftest.py::thread_left_running` line naming
   the test it first appeared after (`KAZMA_TEST_THREAD_GUARD=0` is the
-  negative control's switch).
+  negative control's switch). **The workspace binding is restored after
+  every test too** (2026-09-27): the process pin, the binding bus's
+  subscribers, the bound MCP root and the MCP rebind's executor and asyncio
+  lock are module globals, and an agent-building test left its rebind
+  subscribed for every later test (the probe pair in
+  `tests/test_order_independence.py`, with its negative control).
   **No test reads a real `.env`** — two Postgres tests did, one the LIVE
   install's by hard-coded path. **`@pytest.mark.postgres` is the Postgres
   job's list** (`scripts/postgres_suite.py`), per test, verified on a real
@@ -2989,7 +2994,11 @@ writes.
   `window.kazmaAlert(opts)` (→ `Promise<void>`), `window.kazmaPrompt(opts)`
   (→ `Promise<string|null>`). All backed by `$store.modal`
   (`static/js/modules/stores.js`) + `components/modal.html`. Each has a
-  native fallback if Alpine hasn't booted. The modal is single-instance.
+  native fallback if Alpine hasn't booted. The modal is single-instance:
+  `close()` clears its content 200 ms later (after the leave transition)
+  only if no dialog opened meanwhile -- it cleared regardless, and an alert
+  shown right after a confirm sat open with no text and no buttons
+  (`tests/js/test_modal_store.js`, 2026-09-27).
 - **Toasts:** use `window.showToast(msg, type, duration)` or
   `Alpine.store('toast').add(...)`. `streaming.js`'s `KazmaStream.toast`
   delegates to `$store.toast` — there is one toast system.

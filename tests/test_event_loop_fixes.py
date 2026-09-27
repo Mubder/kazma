@@ -79,8 +79,18 @@ async def test_env_context_async_matches_sync(isolated_ws):
     assert str(isolated_ws) in result  # graceful degradation names the root
 
 
-async def test_env_context_async_workspace_id_passthrough(tmp_path, monkeypatch):
-    """The workspace_id kwarg flows through to the blocking builder."""
+async def test_env_context_async_workspace_id_passthrough(tmp_path, monkeypatch, caplog):
+    """The workspace_id kwarg flows through to the blocking builder.
+
+    On CI (2026-09-26, 09-27) the threaded build named the PREVIOUS test's
+    root: its lookup of this id had failed and the fallback read state an
+    earlier test left behind (the root conftest now restores the workspace
+    binding after each test). A failure says why: the builder's warnings,
+    the process pin and the task scope go in the message.
+    """
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="kazma_core.ide.env_context")
     ws_a = tmp_path / "repoA"
     ws_b = tmp_path / "repoB"
     ws_a.mkdir()
@@ -102,8 +112,17 @@ async def test_env_context_async_workspace_id_passthrough(tmp_path, monkeypatch)
     try:
         async_block = await build_env_context(workspace_id=rec_b["id"])
         sync_block = _build_env_context_sync(workspace_id=rec_b["id"])
-        assert async_block == sync_block
-        assert str(ws_b) in async_block
+
+        def why() -> str:
+            from kazma_core.ide.workspace_scope import current_workspace_id, current_workspace_path
+            from kazma_core.workspace.binding import get_process_pin
+
+            return (f"warnings={[r.getMessage() for r in caplog.records]} pin={get_process_pin()} "
+                    f"scope_id={current_workspace_id()} scope_path={current_workspace_path()} "
+                    f"store_is_ours={wsmod._workspace_store is store}")
+
+        assert async_block == sync_block, why()
+        assert str(ws_b) in async_block, why()
     finally:
         store.close()
         reset_workspace_store()

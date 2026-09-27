@@ -110,8 +110,14 @@ export function registerStores() {
                     } catch (e) { /* ignore */ }
                     this._previousActiveElement = null;
                 }
-                // Reset after transition
+                // Reset after the leave transition -- unless a dialog opened
+                // meanwhile. The reset used to run regardless, so a dialog
+                // opened within 200 ms of the last one closing (an alert
+                // right after a confirm, a second delete) lost its text and
+                // buttons and sat open and empty (tests/js/test_modal_store.js;
+                // the delete-forget browser test hit it on CI, 2026-09-27).
                 setTimeout(() => {
+                    if (this.open) return;
                     this.title = '';
                     this.body = '';
                     this.actions = [];

@@ -27,6 +27,13 @@ from the database. The 60 seconds a restart allows ran out, the server was
 stopped by force, and the owner got an alert. Shutdown now closes only what
 is there.
 
+**A dialog opened right after another one keeps its text and buttons.**
+Closing a dialog cleared its content a fifth of a second later, whatever had
+opened since, so an alert shown right after a confirm -- a delete that failed,
+say -- appeared empty, with no button to press. A test of the dialog now
+checks exactly that, and the browser test that caught it on CI runs it
+through the real page.
+
 ## The reminder store no longer holds its database locked (2026-09-27)
 
 **Reminders' database is no longer locked while the server idles.** The
