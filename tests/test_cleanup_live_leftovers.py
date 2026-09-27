@@ -127,7 +127,8 @@ def test_the_dry_run_changes_nothing(install):
 
 def test_apply_removes_what_it_names_and_only_that(install):
     mod = _script()
-    done = mod.apply(mod.build_plan(install, "", ""), install, "", "")
+    done, left = mod.apply(mod.build_plan(install, "", ""), install, "", "")
+    assert left == {}
     folder = Path(done["folder"])
     assert (folder / "memory_state.db").is_file()  # the backup was taken
     receipt = [json.loads(line) for line in (folder / "removed.jsonl").read_text(encoding="utf-8").splitlines()]
@@ -150,3 +151,57 @@ def test_apply_removes_what_it_names_and_only_that(install):
                            ("swarm_tasks.db", "swarm_worker_metrics")):
         assert _count(install / db_name, table) == 1, f"{db_name}/{table}: the real row must stay"
     assert not (install / "kazma.db").exists() and (folder / "files" / "kazma.db").exists()
+
+
+def _hold_write_lock(path: Path) -> sqlite3.Connection:
+    """Another program's open write transaction on *path* (the live server's
+    cron store held one on 2026-09-27)."""
+    holder = sqlite3.connect(str(path), isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    probe = sqlite3.connect(str(path), timeout=0, isolation_level=None)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            probe.execute("BEGIN IMMEDIATE")
+    finally:
+        probe.close()
+    return holder
+
+
+def test_a_locked_store_is_left_unchanged_and_the_rest_still_runs(install, monkeypatch):
+    """The first live run stopped at cron.db with a traceback: the stores
+    after it, the stray files and the report were never reached."""
+    mod = _script()
+    monkeypatch.setattr(mod, "LOCK_WAIT_S", 0.2)
+    holder = _hold_write_lock(install / "cron.db")
+    try:
+        done, left = mod.apply(mod.build_plan(install, "", ""), install, "", "")
+    finally:
+        holder.rollback()
+        holder.close()
+    assert list(left) == ["cron.db/cron_jobs"] and "locked" in left["cron.db/cron_jobs"]
+    assert _count(install / "cron.db", "cron_jobs") == 2  # nothing in it changed
+    for db_name, table in (("agent_artifacts.db", "agent_artifacts"), ("swarm_tasks.db", "swarm_tasks"),
+                           ("swarm_tasks.db", "swarm_worker_metrics")):
+        assert _count(install / db_name, table) == 1, f"{db_name}/{table} comes after the locked store"
+    assert not (install / "kazma.db").exists()
+    report = json.loads((Path(done["folder"]) / "report.json").read_text(encoding="utf-8"))
+    assert report["left"] == left and report["done"]["files_moved"]
+
+
+def test_running_it_again_finishes_what_was_left(install, monkeypatch):
+    mod = _script()
+    monkeypatch.setattr(mod, "LOCK_WAIT_S", 0.2)
+    holder = _hold_write_lock(install / "cron.db")
+    try:
+        mod.apply(mod.build_plan(install, "", ""), install, "", "")
+    finally:
+        holder.rollback()
+        holder.close()
+
+    plan = mod.build_plan(install, "", "")
+    assert set(plan.chat_memories.values()) == {0} and not plan.notes and not plan.facts and not plan.copies
+    assert [k for k, rows in plan.sqlite_rows.items() if rows] == [("cron.db", "cron_jobs")]
+    done, left = mod.apply(plan, install, "", "")
+    assert left == {} and done["cron.db/cron_jobs"] == 1
+    assert _count(install / "cron.db", "cron_jobs") == 1
+    assert set(done["chats_forgotten"].values()) == {0} and done["copies_retired"] == 0

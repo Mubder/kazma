@@ -367,7 +367,16 @@ class SQLiteCronStore:
         from pathlib import Path
 
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._db = await aiosqlite.connect(self._db_path)
+        # Autocommit: every statement is its own transaction, so no path --
+        # a write that changed nothing, or one that raised -- returns with
+        # the write lock held. In Python's default mode a DELETE opens a
+        # transaction even when it matches nothing, and the purge committed
+        # only when it had deleted something: from each boot until the next
+        # reminder fired, the server held cron.db's write lock, and every
+        # other writer (a second instance, a maintenance script) waited out
+        # its timeout and failed (live 2026-09-27). Every method here is one
+        # write statement, so none needs a transaction of its own.
+        self._db = await aiosqlite.connect(self._db_path, isolation_level=None)
         from kazma_core.config_store import apply_sqlite_pragmas_async
 
         await apply_sqlite_pragmas_async(self._db)
@@ -377,7 +386,6 @@ class SQLiteCronStore:
             await self._db.execute(
                 "ALTER TABLE cron_jobs ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
             )
-            await self._db.commit()
         except Exception as exc:
             # "duplicate column name" is the expected idempotency path; anything
             # else (locked/corrupt DB, permission error) must be visible.
@@ -389,7 +397,6 @@ class SQLiteCronStore:
             await self._db.execute(
                 "ALTER TABLE cron_jobs ADD COLUMN delivery_target TEXT NOT NULL DEFAULT ''"
             )
-            await self._db.commit()
         except Exception as exc:
             if "duplicate column" not in str(exc).lower():
                 logger.warning("[CronStore] delivery_target migration failed: %s", exc)
@@ -398,11 +405,9 @@ class SQLiteCronStore:
             await self._db.execute(
                 "ALTER TABLE cron_jobs ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
             )
-            await self._db.commit()
         except Exception as exc:
             if "duplicate column" not in str(exc).lower():
                 logger.warning("[CronStore] failure_count migration failed: %s", exc)
-        await self._db.commit()
         logger.info("[CronStore] Initialized at %s", self._db_path)
 
     async def insert(self, job: ScheduledJob) -> None:
@@ -417,7 +422,6 @@ class SQLiteCronStore:
              job.status.value, job.created_at, job.next_run, job.tenant_id,
              job.delivery_target, getattr(job, "failure_count", 0)),
         )
-        await self._db.commit()
 
     def _row_to_job(self, row: Any) -> ScheduledJob:
         tenant = "default"
@@ -528,10 +532,9 @@ class SQLiteCronStore:
             )
             deleted += cursor2.rowcount or 0
             if deleted > 0:
-                await self._db.commit()
                 logger.info("[CronStore] Purged %d old terminal job rows", deleted)
         except Exception:
-            logger.debug("[CronStore] purge_terminal_jobs error", exc_info=True)
+            logger.warning("[CronStore] purge_terminal_jobs failed", exc_info=True)
         return deleted
 
     async def update_status(self, job_id: str, status: JobStatus) -> None:
@@ -542,7 +545,6 @@ class SQLiteCronStore:
             "UPDATE cron_jobs SET status = ? WHERE job_id = ?",
             (status.value, job_id),
         )
-        await self._db.commit()
 
     async def claim_job(self, job_id: str) -> bool:
         """Atomically claim a due job: pending→running. False if lost the race.
@@ -557,7 +559,6 @@ class SQLiteCronStore:
             "UPDATE cron_jobs SET status = 'running' WHERE job_id = ? AND status = 'pending'",
             (job_id,),
         )
-        await self._db.commit()
         return bool(cursor.rowcount)
 
     async def update_result(self, job_id: str, result: str) -> None:
@@ -568,7 +569,6 @@ class SQLiteCronStore:
             "UPDATE cron_jobs SET last_result = ? WHERE job_id = ?",
             (result[:5000], job_id),
         )
-        await self._db.commit()
 
     async def update_next_run(self, job_id: str, next_run: str) -> None:
         """Update the next run time for a job."""
@@ -578,7 +578,6 @@ class SQLiteCronStore:
             "UPDATE cron_jobs SET next_run = ?, status = 'pending' WHERE job_id = ?",
             (next_run, job_id),
         )
-        await self._db.commit()
 
     async def bump_failure(self, job_id: str) -> int:
         """Increment failure_count for a job and return the updated count."""
@@ -588,7 +587,6 @@ class SQLiteCronStore:
             "UPDATE cron_jobs SET failure_count = failure_count + 1 WHERE job_id = ?",
             (job_id,),
         )
-        await self._db.commit()
         async with self._db.execute(
             "SELECT failure_count FROM cron_jobs WHERE job_id = ?", (job_id,)
         ) as cur:
@@ -603,7 +601,6 @@ class SQLiteCronStore:
             "UPDATE cron_jobs SET failure_count = 0 WHERE job_id = ?",
             (job_id,),
         )
-        await self._db.commit()
 
     async def update_job(
         self,
@@ -640,7 +637,6 @@ class SQLiteCronStore:
             f"UPDATE cron_jobs SET {', '.join(sets)} WHERE job_id = ?",
             tuple(params),
         )
-        await self._db.commit()
         return cursor.rowcount > 0
 
     async def job_exists(self, job_id: str) -> bool:
@@ -660,7 +656,6 @@ class SQLiteCronStore:
             "UPDATE cron_jobs SET delivery_target = ? WHERE job_id = ?",
             (str(delivery_target or "").strip(), job_id),
         )
-        await self._db.commit()
 
     async def sibling_delivery_target(self, thread_id: str) -> str:
         """A VALID delivery_target from any other job on the same thread.
@@ -694,7 +689,6 @@ class SQLiteCronStore:
             "UPDATE cron_jobs SET status = 'cancelled' WHERE job_id = ? AND status = 'pending'",
             (job_id,),
         )
-        await self._db.commit()
         return cursor.rowcount > 0
 
     async def close(self) -> None:

@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## The reminder store no longer holds its database locked (2026-09-27)
+
+**Reminders' database is no longer locked while the server idles.** The
+store's hourly clean-up of old reminders opened a write transaction and
+committed it only when it had removed something, so from every start until
+the next reminder fired Kazma held `cron.db`'s write lock. Nothing in Kazma
+itself noticed, because it writes that file through the same connection, but
+every other writer did: the live-data cleanup stopped half way with "database
+is locked". The store now commits every statement as it runs. A test calls
+each of its methods -- the clean-up with nothing to clean, an insert that
+fails -- and checks after each that another program can write at once, and a
+new check finds every SQLite connection Kazma keeps open and requires either
+this mode or a commit after every write.
+
+**The cleanup script finishes what it can and says what is left.** A store
+another program keeps locked is left unchanged and named, the other steps
+still run, the report is always written, and running it again completes the
+rest without repeating anything.
+
 ## The docs say what the code does (2026-09-27)
 
 A pass over the documentation against the code. **`docs/FEATURES.md`** is new:

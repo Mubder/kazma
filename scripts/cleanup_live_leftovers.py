@@ -36,6 +36,13 @@ The chats, notes and facts are named here (found by a read-only inventory,
 2026-09-27), not matched by pattern, so nothing else can be caught. Reload
 the server afterwards (``kazma_guard.py --reload --when-idle``) so its chat
 list drops the removed chats.
+
+Running it again is safe: every step reads what is still there, so what was
+done is not done twice. A store another program keeps locked for longer than
+``LOCK_WAIT_S`` is left unchanged and reported; the other steps still run,
+the report is written, and the exit code is 1 until nothing is left. (The
+first run on 2026-09-27 stopped at ``cron.db``, whose write lock the server
+held -- fixed in the cron store the same day.)
 """
 
 from __future__ import annotations
@@ -90,6 +97,8 @@ SWARM_TEST_DAY = "2026-08-01"
 STRAY_FILES = ("chat_sessions_test.db-wal", "chat_sessions_test.db-shm", "kazma.db", "ops.db")
 
 _CHECKPOINT_TABLES = ("checkpoints", "checkpoint_writes", "checkpoint_blobs")
+#: How long a store's delete waits for another program's write lock.
+LOCK_WAIT_S = 30.0
 
 
 @dataclass
@@ -258,23 +267,93 @@ def _write_receipt(folder: Path, plan: Plan) -> None:
                 put(db_name, table, row)
 
 
-def apply(plan: Plan, data: Path, db_url: str, mirror_url: str) -> dict[str, Any]:
-    from kazma_core.memory import forget
+def _delete_rows(path: Path, table: str, where: str, params: tuple[Any, ...]) -> int:
+    """Delete in one short write transaction, waiting up to ``LOCK_WAIT_S``
+    for another program's write lock; nothing changes unless it commits."""
+    conn = sqlite3.connect(str(path), timeout=LOCK_WAIT_S, isolation_level=None)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        committed = False
+        try:
+            removed = conn.execute(f"DELETE FROM {table} WHERE {where}", params).rowcount
+            conn.execute("COMMIT")
+            committed = True
+        finally:
+            if not committed and conn.in_transaction:
+                conn.execute("ROLLBACK")
+        return removed
+    finally:
+        conn.close()
+
+
+def apply(plan: Plan, data: Path, db_url: str, mirror_url: str) -> tuple[dict[str, Any], dict[str, str]]:
+    """Make the changes. Returns what was done and, per step, what was left
+    and why."""
+    folder, done, left = _backup(plan)
+    try:
+        done.update(_apply_memory(plan))
+    except sqlite3.Error as exc:
+        # Nothing further: the stores keep their rows until memory is done,
+        # so the next run does every step in order.
+        left["memory"] = f"{exc}; no other store was changed"
+        _write_report(folder, done, left)
+        return done, left
+    _apply_postgres(plan, db_url, mirror_url, done, left)
+    for db_name, table, where, params in _sqlite_targets(data):
+        if not plan.sqlite_rows.get((db_name, table)):
+            continue
+        key = f"{db_name}/{table}"
+        try:
+            done[key] = _delete_rows(data / db_name, table, where, params)
+        except sqlite3.OperationalError as exc:
+            left[key] = f"{exc} after waiting {LOCK_WAIT_S:.0f} s; nothing in it was changed"
+    moved = folder / "files"
+    moved.mkdir(exist_ok=True)
+    done["files_moved"] = []
+    for path in plan.files:
+        try:
+            shutil.move(str(path), str(moved / path.name))
+            done["files_moved"].append(path.name)
+        except OSError as exc:
+            left[path.name] = f"not moved: {exc}"
+    _write_report(folder, done, left)
+    return done, left
+
+
+def _write_report(folder: Path, done: dict[str, Any], left: dict[str, str]) -> None:
+    report = {"done": done, "left": left}
+    (folder / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _backup(plan: Plan) -> tuple[Path, dict[str, Any], dict[str, str]]:
     from kazma_core.memory.backup import backup_one
-    from kazma_core.memory.hygiene import invalidate_belief
-    from kazma_core.memory.state_backend import remirror_belief_by_id, remirror_episode_by_id
     from kazma_core.paths import backups_dir, memory_ops_db, primary_memory_db
 
-    folder = backups_dir() / f"cleanup-{int(time.time())}"
-    folder.mkdir(parents=True)
+    stamp, n = int(time.time()), 1
+    while True:  # each run its own folder, even two runs in one second
+        folder = backups_dir() / (f"cleanup-{stamp}" if n == 1 else f"cleanup-{stamp}-{n}")
+        try:
+            folder.mkdir(parents=True)
+            break
+        except FileExistsError:
+            n += 1
     for src in (primary_memory_db(), memory_ops_db()):
         if not backup_one(Path(src), folder / Path(src).name):
             raise SystemExit(f"ABORT: could not back up {src}; nothing was changed")
     _write_receipt(folder, plan)
     print(f"Backup and receipt: {folder}")
-    done: dict[str, Any] = {"folder": str(folder)}
+    return folder, {"folder": str(folder)}, {}
 
-    mem = sqlite3.connect(primary_memory_db(), timeout=30)
+
+def _apply_memory(plan: Plan) -> dict[str, Any]:
+    """Steps 1-4 in local memory: forget, invalidate, retire, restore."""
+    from kazma_core.memory import forget
+    from kazma_core.memory.hygiene import invalidate_belief
+    from kazma_core.memory.state_backend import remirror_belief_by_id, remirror_episode_by_id
+    from kazma_core.paths import primary_memory_db
+
+    done: dict[str, Any] = {}
+    mem = sqlite3.connect(primary_memory_db(), timeout=LOCK_WAIT_S)
     mem.row_factory = sqlite3.Row
     try:
         done["chats_forgotten"] = {
@@ -315,34 +394,33 @@ def apply(plan: Plan, data: Path, db_url: str, mirror_url: str) -> dict[str, Any
         done["mirror_restored"] = restored
     finally:
         mem.close()
+    return done
+
+
+def _apply_postgres(plan: Plan, db_url: str, mirror_url: str, done: dict[str, Any], left: dict[str, str]) -> None:
+    """Steps 4-5 in Postgres: each database in one transaction, which a
+    failure rolls back whole."""
+    import psycopg
 
     if mirror_url and plan.mirror_junk:
-        with _pg(mirror_url) as conn, conn.cursor() as cur:
-            cur.execute("DELETE FROM kazma_episodes WHERE id = ANY(%s)", ([r["id"] for r in plan.mirror_junk],))
-            done["mirror_removed"] = cur.rowcount
-    if db_url:
-        with _pg(db_url) as conn, conn.cursor() as cur:
-            for table in (*_CHECKPOINT_TABLES, ):
-                cur.execute(f"DELETE FROM {table} WHERE thread_id = ANY(%s)", (list(TEST_CHATS),))
-                done[table] = cur.rowcount
-            cur.execute("DELETE FROM kazma_chat_sessions WHERE session_id = ANY(%s)", (list(TEST_CHATS),))
-            done["kazma_chat_sessions"] = cur.rowcount
-
-    from kazma_core.db.sqlite_session import committed_and_closed
-
-    for db_name, table, where, params in _sqlite_targets(data):
-        if (db_name, table) not in plan.sqlite_rows or not plan.sqlite_rows[(db_name, table)]:
-            continue
-        with committed_and_closed(sqlite3.connect(str(data / db_name), timeout=30)) as conn:
-            done[f"{db_name}/{table}"] = conn.execute(f"DELETE FROM {table} WHERE {where}", params).rowcount
-
-    moved = folder / "files"
-    moved.mkdir()
-    for path in plan.files:
-        shutil.move(str(path), str(moved / path.name))
-    done["files_moved"] = [p.name for p in plan.files]
-    (folder / "report.json").write_text(json.dumps(done, indent=2, ensure_ascii=False), encoding="utf-8")
-    return done
+        try:
+            with _pg(mirror_url) as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM kazma_episodes WHERE id = ANY(%s)", ([r["id"] for r in plan.mirror_junk],))
+                done["mirror_removed"] = cur.rowcount
+        except psycopg.Error as exc:
+            left["postgres memory mirror"] = f"{exc}; nothing in it was changed"
+    if db_url and any(plan.pg_rows.values()):
+        try:
+            with _pg(db_url) as conn, conn.cursor() as cur:
+                removed: dict[str, int] = {}
+                for table in _CHECKPOINT_TABLES:
+                    cur.execute(f"DELETE FROM {table} WHERE thread_id = ANY(%s)", (list(TEST_CHATS),))
+                    removed[table] = cur.rowcount
+                cur.execute("DELETE FROM kazma_chat_sessions WHERE session_id = ANY(%s)", (list(TEST_CHATS),))
+                removed["kazma_chat_sessions"] = cur.rowcount
+            done.update(removed)
+        except psycopg.Error as exc:
+            left["postgres chat store"] = f"{exc}; nothing in it was changed"
 
 
 def main() -> int:
@@ -386,10 +464,16 @@ def main() -> int:
     if not args.apply:
         print("\nDry run: nothing was changed. Run again with --apply to make these changes.")
         return 0
-    done = apply(plan, data, db_url, mirror_url)
+    done, left = apply(plan, data, db_url, mirror_url)
     print("\nDone:")
     for key, value in done.items():
         print(f"   {key}: {value}")
+    if left:
+        print("\nNOT finished -- left unchanged:")
+        for key, why in left.items():
+            print(f"   {key}: {why}")
+        print("\nRun the same command again (when the server is idle): what is done is not repeated.")
+        return 1
     print("\nReload the server when idle so its chat list drops the removed chats.")
     return 0
 

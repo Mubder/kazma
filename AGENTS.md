@@ -975,6 +975,18 @@ out would miss. Legacy rows with empty `delivery_target` fall back to
 (§2) is preserved — `chat_id` never enters graph state; `delivery_target`
 joins `thread_id`/`platform` in the internal `_gateway` routing sub-dict.
 
+**C. The store's connection is autocommit (2026-09-27).** `SQLiteCronStore`
+opens cron.db with `isolation_level=None`, so every statement is its own
+transaction. In Python's default mode a DELETE opens a transaction even when
+it matches nothing, and the purge (at start and hourly) committed only when
+it had deleted something: from each boot until the next reminder fired the
+server held cron.db's write lock, and the live-data cleanup stopped half way
+with "database is locked". Every store method is one write statement; one
+that needs two writes together takes an explicit `BEGIN IMMEDIATE ... COMMIT`.
+Gates: `tests/test_cron_store_write_lock.py` (every public method, then
+another connection must take the write lock at once) and §35's kept-connection
+gate.
+
 **Multi-tenant memory:** tenants are enforced with
 `KAZMA_MEMORY_ENFORCE_TENANT=1`, in production (`KAZMA_PRODUCTION=1`) and with
 multi-user on (`memory_api._memory_tenant_id`). Then every `/api/memory` route
@@ -2519,6 +2531,16 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   request in the gate's table or fails. See §16's multi-tenant note.
 - **Every product module is reached** (`tests/test_orphan_modules.py`); a
   module only its own tests import fails, unless allowlisted with a reason.
+- **A SQLite connection kept across calls cannot sit on the write lock**
+  (`tests/test_sqlite_kept_connections.py`, 2026-09-27). Every
+  `sqlite3.connect`/`aiosqlite.connect` product code keeps on an attribute or
+  a global is found from the source. It opens in autocommit mode
+  (`isolation_level=None`), or it is declared in `DEFAULT_MODE_KEPT` with its
+  reason and every write made on it is committed on every normal path (a
+  commit after it in the same or an enclosing block, or `with conn:` around
+  it). The declared list only shrinks. The cron store (§16 C) was the
+  instance: in the default mode a write that changes nothing still opens a
+  transaction.
 - **Debt ratchet:** `tests/test_debt_ratchet.py` holds the blind/silent
   exception-handler counts; they may only go down, and lowering them means
   updating the baseline in the same change. It counts untracked files too:
