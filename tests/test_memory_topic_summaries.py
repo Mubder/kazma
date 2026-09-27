@@ -240,6 +240,32 @@ def test_small_talk_and_copies_are_left_out(mem):
     assert len(ids & {"ship0", "ship0_copy"}) == 1
 
 
+def test_a_migration_copy_of_a_turn_memory_holds_is_left_out(mem):
+    """The V1 migration wrote old memories as "User: ... Assistant: ..."
+    turns of legacy-* sessions; turn reconcile wrote the same turns from the
+    chat store. Version 1 summarized both and wrote July's topics twice."""
+    _turn(mem, "chat_turn", chat="c9", n=1, topic="repos", question="what private repos do I have",
+          answer="Fifteen private repos.")
+    _turn(mem, "legacy_copy", chat="legacy-abcd1234", n=0, topic="repos", answer="",
+          question="User: What private repos do I have\nAssistant: You have fifteen private repos.")
+    _turn(mem, "legacy_only", chat="legacy-ef567890", n=0, topic="colour", answer="",
+          question="User: what is my favourite colour\nAssistant: Teal.")
+    turns = {t.id: t for t in ts._load_turns(mem.db, "default", start=WEEK_START, end=WEEK_END)}
+    assert "chat_turn" in turns and "legacy_copy" not in turns
+    assert (turns["legacy_only"].question, turns["legacy_only"].answer) == ("what is my favourite colour", "Teal.")
+
+
+def test_without_the_copy_check_the_migration_copy_would_count_twice(mem, monkeypatch):
+    """Negative control."""
+    monkeypatch.setattr(ts, "_legacy_copies", lambda conn, tenant_id, rows: set())
+    _turn(mem, "chat_turn", chat="c9", n=1, topic="repos", question="what private repos do I have",
+          answer="Fifteen private repos.")
+    _turn(mem, "legacy_copy", chat="legacy-abcd1234", n=0, topic="repos", answer="",
+          question="User: What private repos do I have\nAssistant: You have fifteen private repos.")
+    assert {t.id for t in ts._load_turns(mem.db, "default", start=WEEK_START, end=WEEK_END)} == {
+        "chat_turn", "legacy_copy"}
+
+
 def test_without_enough_memories_the_rest_is_not_grouped(mem):
     for i in range(4):
         _turn(mem, f"one{i}", chat=f"o{i}", n=1, topic="hitl", question=f"trigger an approval card round {i}")
@@ -354,6 +380,45 @@ def test_a_week_is_due_only_a_day_after_it_ends(mem):
     assert mem.queued == []
     ts.queue_due_work(now=end + ts._WEEK_GRACE_S + 60)
     assert [p["period_key"] for _, p in mem.queued] == [key]
+
+
+def _as_version_one(mem):
+    """What the first release left: no version on the week or its summaries."""
+    mem.db.execute("UPDATE memory_summaries SET metadata_json = '{}' WHERE status != 'forgotten'")
+    mem.db.execute("UPDATE memory_summary_periods SET detail_json = '{}'")
+    mem.db.commit()
+
+
+def test_a_week_an_older_version_summarized_is_summarized_again(mem):
+    ship = _summarized(mem)
+    fitness = next(r["id"] for r in _summaries(mem) if r["title"] == "Fitness app names")
+    ts.forget_summary(fitness, tenant_id="default")
+    _as_version_one(mem)
+    before = len(mem.queued)
+    ts.queue_due_work()
+    assert [p["period_key"] for _, p in mem.queued[before:]] == [WEEK_KEY]  # due again at once
+    calls: list = []
+    assert _run(ts.summarize_period("default", WEEK_KEY, WEEK_START, WEEK_END, chat=_fake_chat(calls)))
+    row = mem.db.execute("SELECT status, metadata_json FROM memory_summaries WHERE id = ?", (ship,)).fetchone()
+    assert row["status"] == "active" and ts._version_of(row["metadata_json"]) == ts._VERSION
+    # The summary the user forgot stays forgotten, and still keeps its topic unwritten.
+    assert mem.db.execute("SELECT status FROM memory_summaries WHERE id = ?", (fitness,)).fetchone()[0] == "forgotten"
+    assert all("fitness" not in c[-1]["content"] for c in calls)
+    period = mem.db.execute("SELECT status, summaries, detail_json FROM memory_summary_periods").fetchone()
+    assert (period["status"], period["summaries"]) == ("done", 2)
+    assert ts._version_of(period["detail_json"]) == ts._VERSION
+    ts.queue_due_work()
+    assert len(mem.queued) == before + 1  # this version's week: done
+
+
+def test_a_week_this_version_summarized_is_left_alone(mem, monkeypatch):
+    """Negative control: without a newer version the done week is not due."""
+    _summarized(mem)
+    _as_version_one(mem)
+    monkeypatch.setattr(ts, "_VERSION", 1)
+    before = len(mem.queued)
+    ts.queue_due_work()
+    assert len(mem.queued) == before
 
 
 def test_a_week_that_never_finishes_is_given_up(mem):

@@ -18,6 +18,11 @@ run works through your past weeks two at a time.
 Kazma does not use them to answer questions yet: that follows once they have
 been measured on real summaries.
 
+The first run on the author's install wrote three July topics twice: memory
+held those conversations both as the chats and as copies from the July
+memory upgrade. The copies are now left out when the conversation itself is
+in memory, and weeks summarized before the fix are rewritten.
+
 ## Kazma keeps one version of a fact (2026-09-27)
 
 Kazma could hold the same fact twice under two names -- "timezone" and
