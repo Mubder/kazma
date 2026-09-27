@@ -164,6 +164,29 @@ PERSONA: list[tuple[str, int, list[tuple[str, str]]]] = [
         ("Decided: we're keeping the Octavia for another year.",
          "Sensible, the Octavia still has plenty of life."),
     ]),
+    # A topic returned to every week (v4): the half marathon training.
+    ("r00", 7, [("First week of the plan: three easy 5 km runs, and the Sunday long run was 8 km.",
+                 "Right on plan. Keep the easy runs truly easy, conversation pace.")]),
+    ("r01", 14, [("Training check-in: this week's long run was 10 km, easy pace, knees felt fine.",
+                  "Good start. Keep the long runs conversational and add 1-2 km a week.")]),
+    ("r02", 21, [("Long run 12 km on Sunday, but my left calf was tight afterwards.",
+                  "Stretch and foam-roll the calf; if it is still tight by Wednesday, swap one easy run for cycling.")]),
+    ("r03", 28, [("Calf is fine now. Did 13 km at 5:40 per km.",
+                  "Nice, 5:40 is a good steady pace for your goal.")]),
+    ("r04", 35, [("Skipped the long run this week, work on the retrofit was crazy.",
+                  "One missed week is fine; don't try to make up the distance, just pick up the plan.")]),
+    ("r05", 42, [("Back on track: 14 km long run, and I added one interval session.",
+                  "Great. Keep the intervals to once a week so the long run stays fresh.")]),
+    ("r06", 49, [("16 km long run done, felt strong at the end.",
+                  "That's the sign the base is there. Two more build weeks, then the taper.")]),
+    ("r07", 56, [("Long run 18 km, my longest ever! Averaged 5:35 per km.",
+                  "Excellent, 18 km means race day is well within reach. Taper starts next week.")]),
+    ("r08", 63, [("Taper week: only 10 km on Sunday and legs feel fresh. Race goal is under 2 hours.",
+                  "A sub-2-hour half is realistic from your long runs. Rest well and trust the taper.")]),
+    ("r09", 70, [("Last long run before the race: 8 km easy, and I booked a sports massage for Thursday.",
+                  "Perfect taper, and a massage two days before the race is well timed.")]),
+    ("r10", 77, [("Race result: I finished the Lisbon half marathon in 1:56:40!",
+                  "Congratulations, a sub-2-hour half marathon on your first attempt!")]),
     # Gulf-Arabic thread: the same user, in Arabic.
     ("a01", 4, [
         ("أخوي اسمه فهد ويشتغل في بنك الكويت الوطني.",
@@ -331,6 +354,54 @@ SUMMARIES: list[tuple[str, int, str, str, list[str]]] = [
      "a Kia EV6; Kazma noted its good range and said to check home charging first. A few days "
      "later he decided to keep the Octavia for another year.",
      ["p29#1", "p30#1"]),
+    # The same topic every week (v4): eight summaries of it, as a real install
+    # holds for anything the user returns to -- the case where a question's
+    # background among the summaries used to be the topic itself.
+    ("sr0", 7, "Half marathon training: week one",
+     "Week one of the 12-week plan for the Lisbon half marathon: three easy 5 km runs and an 8 km "
+     "Sunday long run. Kazma: keep the easy runs truly easy.",
+     ["r00#1"]),
+    ("sr1", 14, "Half marathon training: first check-in",
+     "Sami's long run this week was 10 km at an easy pace, knees fine. Kazma advised keeping long "
+     "runs conversational and adding 1-2 km a week toward the Lisbon half marathon.",
+     ["r01#1"]),
+    ("sr2", 21, "Half marathon training: 12 km and a tight calf",
+     "Sami ran 12 km on Sunday for the Lisbon half marathon, and his left calf was tight "
+     "afterwards. Kazma suggested stretching and foam-rolling, and cycling instead of one easy run "
+     "if it stayed tight. Left open: whether the calf recovers.",
+     ["r02#1"]),
+    ("sr3", 28, "Half marathon training: 13 km, calf recovered",
+     "The calf recovered. Sami ran 13 km at 5:40 per km, a good steady pace for his half "
+     "marathon goal.",
+     ["r03#1"]),
+    ("sr4", 35, "Half marathon training: a missed long run",
+     "Sami skipped this week's long run because of work on the Tagus retrofit. Kazma said one "
+     "missed week is fine: pick the plan up again without making up the distance.",
+     ["r04#1"]),
+    ("sr5", 42, "Half marathon training: 14 km and intervals",
+     "Back on track with a 14 km long run and one interval session added. Kazma: keep intervals "
+     "to once a week so the long run stays fresh.",
+     ["r05#1"]),
+    ("sr6", 49, "Half marathon training: 16 km, felt strong",
+     "Sami ran 16 km and felt strong at the end; two more build weeks, then the taper before the "
+     "Lisbon half marathon.",
+     ["r06#1"]),
+    ("sr7", 56, "Half marathon training: longest run, 18 km",
+     "Sami's longest run ever: 18 km at an average 5:35 per km. Kazma said race day is well within "
+     "reach; the taper starts next week.",
+     ["r07#1"]),
+    ("sr8", 63, "Half marathon training: taper week",
+     "Taper week: only 10 km on Sunday and fresh legs. Sami's goal for the Lisbon half marathon is "
+     "under two hours, which Kazma judged realistic from his long runs.",
+     ["r08#1"]),
+    ("sr9", 70, "Half marathon training: last long run and a massage",
+     "The last long run before the Lisbon half marathon: 8 km easy. Sami booked a sports massage "
+     "for Thursday, which Kazma judged well timed.",
+     ["r09#1"]),
+    ("sr10", 77, "Lisbon half marathon: finished in 1:56:40",
+     "Sami finished the Lisbon half marathon in 1:56:40, under his two-hour goal, on his first "
+     "attempt.",
+     ["r10#1"]),
     ("sw6", 21, "رحلة إسطنبول في ديسمبر",
      "رحلة العائلة إلى إسطنبول في ديسمبر، وحجزوا فندق قريب من ساحة تقسيم. نصح كاظمة بأخذ "
      "جاكيتات لأن الجو في ديسمبر بارد شوي.",
@@ -607,6 +678,13 @@ QUESTIONS: list[tuple[str, str, str, list[str], list[str]]] = [
     ("q955", "What did I tell you about myself when we first talked?", "overview",
      ["sw1|p01#1|f01", "sw1|p01#2|f05"], []),
     ("q956", "شنو خطتنا لرحلة إسطنبول؟", "overview", ["sw6|a04#1|g05"], []),
+    # a topic with a summary every week (v4): its own summaries must not hide it
+    ("q957", "How is my half marathon training going?", "overview",
+     ["sr10|sr9|sr8|r10#1|r09#1|r08#1"], []),
+    ("q960", "How did the half marathon race go in the end?", "overview", ["sr10|r10#1"], []),
+    ("q958", "What long runs have I done for the half marathon so far?", "overview",
+     ["sr7|r07#1|sr6|r06#1|sr5|r05#1"], []),
+    ("q959", "What happened with my calf during training?", "overview", ["sr2|sr3|r02#1|r03#1"], []),
 ]
 
 
@@ -656,7 +734,7 @@ def build() -> dict[str, Any]:
             if ref not in refs and ref not in fact_ids and ref not in summary_ids:
                 raise ValueError(f"{qid}: unknown memory {ref}")
         questions.append({"id": qid, "text": text, "category": cat, "gold": gold, "below": below})
-    return {"version": 3, "seed": SEED, "sessions": sessions, "facts": facts,
+    return {"version": 4, "seed": SEED, "sessions": sessions, "facts": facts,
             "summaries": summaries, "questions": questions}
 
 

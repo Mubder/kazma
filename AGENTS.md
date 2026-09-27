@@ -862,16 +862,19 @@ queued by the maintenance sweep with at most two weeks in flight.
   the local database): every active summary of the tenant, ranked on
   evidence with the summary thresholds (`recall._SUMMARY_*`), at most two,
   shown AFTER the history ("## Weekly Summaries", week and title first, cut
-  at 900 characters). The background is the question's among the summaries:
-  bge-m3 puts a paragraph 0.14-0.19 below a turn, so the episodes'
-  background sank true summaries below zero. Floor 0.16, measured on 67
-  summaries the live model wrote (every "catch me up" question 0.160-0.372,
-  every unrelated one at or under 0.132) and on benchmark v3's 117 (all 18
-  no-answer questions clean; 0.15 let one in). Shown above the history they
-  pushed answering turns down (MRR 0.875 -> 0.868); below it the benchmark's
-  MRR is unchanged and precision rose 0.673 -> 0.681. Only `active` is ever
-  recalled -- forgotten, `rebuild` (a forgotten turn's) and retired rows
-  never are (`tests/test_memory_summary_recall.py`).
+  at 900 characters). The background is the MEDIAN of the question's
+  similarity with every summary (`_summary_background`): bge-m3 puts a
+  paragraph 0.14-0.19 below a turn, so the episodes' background sank true
+  summaries below zero, and the episodes' "ranks 4-15" window fills with a
+  topic summarized every week -- at 97 live summaries "list me all my
+  subscription resets" (ten reset summaries) found none. Against the median
+  every "catch me up" question of 23 real ones scored 0.235-0.439 and every
+  unrelated one at most 0.170; floor 0.21. Benchmark v4 carries such a topic
+  (eleven weekly training summaries): the ranks window hid the race result,
+  the median finds it. Shown above the history, summaries pushed answering
+  turns down (MRR 0.875 -> 0.868), so they come after it. Only `active` is
+  ever recalled -- forgotten, `rebuild` (a forgotten turn's) and retired
+  rows never are (`tests/test_memory_summary_recall.py`).
 - Gate: `tests/test_memory_topic_summaries.py` (grouping identical to
   scipy's average linkage; each rule with a negative control).
 
