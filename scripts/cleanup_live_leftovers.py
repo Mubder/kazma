@@ -399,7 +399,10 @@ def _apply_memory(plan: Plan) -> dict[str, Any]:
 
 def _apply_postgres(plan: Plan, db_url: str, mirror_url: str, done: dict[str, Any], left: dict[str, str]) -> None:
     """Steps 4-5 in Postgres: each database in one transaction, which a
-    failure rolls back whole."""
+    failure rolls back whole. With nothing to do there -- no Postgres, or a
+    second run -- the driver is not even imported."""
+    if not (mirror_url and plan.mirror_junk) and not (db_url and any(plan.pg_rows.values())):
+        return
     import psycopg
 
     if mirror_url and plan.mirror_junk:

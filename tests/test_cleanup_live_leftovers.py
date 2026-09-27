@@ -48,6 +48,10 @@ def _db(path: Path, ddl: str, rows: list[tuple]) -> None:
 def install(tmp_path, monkeypatch):
     from kazma_core.memory import dual_write
 
+    # CI's test install has no Postgres driver, and these runs have no
+    # Postgres: an import of it on a path that does not need it failed CI
+    # (2026-09-27) while every local run, with the driver installed, passed.
+    monkeypatch.setitem(sys.modules, "psycopg", None)
     data = tmp_path / "kazma-data"
     data.mkdir()
     monkeypatch.setenv("KAZMA_DATA_DIR", str(data))
