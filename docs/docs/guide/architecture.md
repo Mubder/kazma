@@ -304,12 +304,17 @@ See [Arabic & Cultural Features](arabic-cultural-features).
 | Web research tools | `read_url` / `web_search` / `crawl_site` / research save+digest (`tools/read_url.py`, `web_research.py`) | ✅ Active — [Web research](web-research) |
 | SSE telemetry | `/api/chat/stream` events; telemetry router | ✅ Active |
 | **Langfuse** | `KazmaTracer` with `backend="langfuse"`; `logging.langfuse.enabled: auto` turns on when keys exist | ✅ **Wired** (`KAZMA_LANGFUSE=0` kill-switch) |
-| **OpenTelemetry** | — | 🔴 **Removed** (dead code + dead deps purged; Langfuse + Console remain) |
+| **OpenTelemetry** | GenAI spans for every LLM call and tool execution (`observability/genai_otel.py`) | ✅ **Opt-in** — install `opentelemetry-sdk` + the OTLP exporter and set `OTEL_EXPORTER_OTLP_ENDPOINT` ([ops guide](../ops/opentelemetry)) |
 | **Prometheus** | `/metrics` + `/api/metrics` (`kazma_ui/metrics.py`) | ✅ Active |
 
-### OpenTelemetry — removed (Option A)
+### OpenTelemetry — GenAI spans (opt-in), after the old backend's removal
 
-OpenTelemetry was **declared as a dependency with real code, but was never reachable at runtime** — no config path selected `backend="opentelemetry"`. The `[tracing]` extra (6 packages) was pure dead weight (never imported).
+Since 2026-09-14 Kazma emits OpenTelemetry GenAI semantic-convention spans for
+every LLM call and tool execution when the SDK is installed and an OTLP
+endpoint is set; nothing is a Kazma dependency ([ops guide](../ops/opentelemetry)).
+What follows is the record of the earlier backend, which was removed.
+
+The old OpenTelemetry backend was **declared as a dependency with real code, but was never reachable at runtime** — no config path selected `backend="opentelemetry"`. The `[tracing]` extra (6 packages) was pure dead weight (never imported).
 
 **Removed in the July 2026 cleanup:**
 - `_init_opentelemetry()` method + all four `_trace_*_otel()` methods from `KazmaTracer`

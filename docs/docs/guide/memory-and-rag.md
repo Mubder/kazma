@@ -502,7 +502,7 @@ not a hardcoded “You”.
 | Multi-region + conflicts | [#77](https://github.com/Mubder/kazma/issues/77) |
 | Hosted embed-only fleet | [#78](https://github.com/Mubder/kazma/issues/78) |
 
-Postgres dual-mirror and sparse ILIKE assist already exist as **optional** foundations. Tombstones now propagate; nightly drift warns if the mirror still holds dead facts.
+Postgres dual-mirror and sparse ILIKE assist already exist as **optional** foundations. Tombstones propagate, and the 15-minute mirror sync pushes whatever the mirror is missing or holds stale (a row only the mirror holds is counted, never deleted).
 
 ---
 

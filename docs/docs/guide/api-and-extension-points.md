@@ -304,7 +304,8 @@ conn.row_factory = sqlite3.Row
 
 result = recall("what does the user prefer?", conn=conn, limit=5)
 # result.beliefs  -> list[RecallHit] of currently-valid beliefs
-# result.episodes -> list[RecallHit] of ranked episodes (FTS5 + dense + PPR, RRF-fused)
+# result.episodes -> list[RecallHit], ranked by evidence (meaning above the question's
+#   background + content words covered); empty when nothing clears the threshold
 ```
 
 Writing a belief (functional predicates supersede; set predicates append):

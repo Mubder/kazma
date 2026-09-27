@@ -49,7 +49,7 @@ description: Disaster Recovery — production ops
 |-------------|------------|--------|
 | Lab / personal | Best effort | Daily or before upgrades |
 | Production single-node | ≤ 24h | Daily automated zip + offsite copy |
-| Production multi-replica | ≤ 1h | Continuous Postgres backups + nightly app snapshot |
+| Production multi-replica | ≤ 1h | Continuous Postgres backups + the 6-hourly app snapshot |
 
 ### How it works now (restic, since 2026-08-29)
 

@@ -7,6 +7,22 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 # Recent features guide
 
+**New in 2026-09-26/27 — memory you can see and steer.** A turn that used
+memory shows a **Memory used** row in its activity: what the model was given,
+in order, stored with the turn (below). **Settings → Memory → About me** is a
+short text you write about yourself, read at the start of every reply.
+**Deleting a chat** asks whether to also forget what Kazma learned from it;
+the chat menu's **Memory…** keeps a chat out of memory altogether. Recall
+injects only memories that clear an evidence threshold -- nothing when
+nothing matches -- reads **weekly topic summaries**, and archiving never
+erases a memory ([Memory](./memory-and-rag)). **Chat step history** (the
+checkpoints undo and resume use) is bounded on Postgres too: every chat
+keeps its newest 200 steps and a chat idle for 30 days its newest 10
+(**Settings → System → Chat step history**; 0 keeps everything). With
+Postgres, the weekly backup check restores the newest dump into a scratch
+database by default ([Disaster recovery](../ops/disaster-recovery)). Pages
+stay quiet while the server restarts and keep rendering when an API fails.
+
 **New in 2026-09-22/23 — reliability, not features.** Chat memories are no
 longer archived while you still recall them, and an archived one keeps a
 short stub instead of nothing ([Memory — episode lifecycle](./memory-and-rag)).
@@ -129,7 +145,7 @@ resolution + git-write blast radius), transcript recall fallback
 | **Codebase index (2026-08-25)** | `codebase_search` finds functions/classes (tree-sitter or regex) plus live ripgrep. Index refreshes on write/patch. | extra `kazma[index]`; `KAZMA_CODE_INDEX=0`; [IDE](../products/ide) |
 | **E2B + Temporal (2026-08-25)** | Opt-in Firecracker `python_exec` (`E2B_API_KEY`) and Temporal-wrapped swarm dispatch (`KAZMA_TEMPORAL_HOST`). Defaults unchanged. | extras `kazma[sandbox]` / `kazma[durable]`; [env vars](../reference/environment-variables) |
 | **apply-patch (2026-08-25; Hands 0.11 set)** | Agent edits use `file_apply_patch` / `file_apply_patch_set` (HITL) instead of rewriting whole files. Web `/ide` is CodeMirror 5, not Monaco. | `/ide`; [IDE](../products/ide); [Tools catalog](../reference/tools-catalog) |
-| **pgvector memory search (2026-08-25)** | When Postgres is on, dense recall uses pgvector (auto). Postgres-primary is ILIKE + vector RRF, not ILIKE-only. `KAZMA_PGVECTOR=0` keeps sqlite-vec. | Settings → Memory; [Memory & RAG](./memory-and-rag); [Postgres & SaaS](../ops/postgres-and-saas) |
+| **pgvector memory search (2026-08-25)** | When Postgres is on and the server has the pgvector extension, dense recall uses it (auto); otherwise sqlite-vec, exact. Postgres-primary recall ranks like local recall (by evidence, since 2026-09-26). `KAZMA_PGVECTOR=0` keeps sqlite-vec. | Settings → Memory; [Memory & RAG](./memory-and-rag); [Postgres & SaaS](../ops/postgres-and-saas) |
 | **Memory system audit (2026-08-24)** | Ego-graph hub anchors (no more floating concept nodes), PG-mirror tombstones + `scripts/reconcile_memory_mirror.py`, tenant-scoped graph-clear (no all-tenants wipe), FTS drift rebuild on the 6h sweep, merge-ledger archive, Ungroup, honest truncation banner | `/memory`; restart after `git pull` |
 | **Universal backup** | One unified backup of ALL data: every SQLite DB (WAL-safe), all assets (document-store, workspace, attachments, vectors). Auto **6h** + manual; **checks** PG dump freshness (does not dump twice). Progress bar, delete/archive/download | Settings → **Backup tab**; `POST /api/backup/now` |
 | **Postgres backup** | Automatic `pg_dump` of `KAZMA_PG_TABLES` (atomic, validated; local staging retention **3**, restic keeps history) + boot-time schema verification + one-command restore | `kazma-data/backups/pg/`; `python scripts/pg_backup.py backup\|restore --latest\|list` |

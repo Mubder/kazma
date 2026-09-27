@@ -38,8 +38,7 @@ def on_postgres(monkeypatch):
 
 
 def test_on_by_default(on_postgres, monkeypatch):
-    """Opt-in, it had never run on an install that did not ask -- the live
-    one among them."""
+    """Opt-in, it never ran on an install that did not ask."""
     for unset in (None, "", "  "):
         monkeypatch.setattr("kazma_core.config_store.get_config_store", lambda v=unset: _Store(v))
         assert rr.rehearsal_enabled() is True

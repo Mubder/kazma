@@ -154,7 +154,7 @@ def render(builtin: list[dict], modules: list[str], native: list[dict]) -> str:
         "| Unified executor | MCP + local | MCP non-allowlist tools force danger under production |",
         "| IDE path | `IdeService._call_tool` | Same registry — no bypass |",
         "| Native skills | `kazma-skills/kazma_skills/native/*` | Loaded via skill manifests |",
-        "| MCP spec (client) | `mcp_list_resources` / `mcp_read_resource` / `mcp_list_prompts` / `mcp_get_prompt` | Resources fenced; prompts user-visible; sampling HITL. Not an MCP server. |",
+        "| MCP spec (client) | `mcp_list_resources` / `mcp_read_resource` / `mcp_list_prompts` / `mcp_get_prompt` | Resources fenced; prompts user-visible; sampling HITL. Kazma is also an MCP server: `kazma mcp`. |",
         "| Computer use | `computer_use` | Screenshot→action (Playwright). Native Anthropic CUA / Gemini function when that model is active; else vision-JSON. HITL **danger**. `KAZMA_COMPUTER_USE=0`. `KAZMA_CUA_PLANNER=0`. |",
         "",
         "## Built-in tools (LocalToolRegistry)",

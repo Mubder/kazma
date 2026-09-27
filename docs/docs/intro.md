@@ -46,7 +46,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 - [Swarm](guide/swarm-orchestration) · [Memory & RAG](guide/memory-and-rag) · [Memory best path](guide/memory-best-path) · [Security](guide/security-and-safety) · [Commitment Layer](guide/commitment-layer)
 - [Web research](guide/web-research) · [Knowledge Library](guide/knowledge-library) · [**Document Intelligence**](guide/document-intelligence) · [Document phases](guide/document-phases) · [**Recent features**](guide/recent-features) · [Email](guide/email-integration) · [X publisher](guide/x-publisher) · [X auto-reply](guide/x-auto-reply)
 - [Arabic & cultural](guide/arabic-cultural-features) · [Deployment](guide/deployment) · [Development](guide/development)
-- [Troubleshooting](guide/troubleshooting-and-workarounds) · [FAQ](guide/faq) · [Glossary](guide/glossary) · [Roadmap](guide/roadmap-and-future)
+- [Troubleshooting](guide/troubleshooting-and-workarounds) · [FAQ](guide/faq) · [Glossary](guide/glossary) · [Roadmap](guide/roadmap-and-future) · [What Kazma does — a plain list](https://github.com/Mubder/kazma/blob/main/docs/FEATURES.md)
 
 ### Products (UI surfaces)
 

@@ -535,7 +535,7 @@ cross_division_rules:
 | `bug_bounty` | **`enabled: false`** — no paid program. Payout fields are reserved/zeroed; do not advertise tiers as active. See root `SECURITY.md`. |
 | `hardening` | `run_on_startup`, `fail_on_critical`, `auto_fix: false`, `checks` (8: `secrets_in_logs`, `input_validation`, `rbac_enforcement`, `tls_required`, `dependency_audit`, `least_privilege`, `audit_trail`, `config_integrity`). |
 
-> These files declare a security **policy posture**. Whether every check is actively enforced at runtime should be verified against the hardening runner before relying on it in production — see [Security & Safety](security-and-safety).
+> **No code reads `kazma-security.yaml`** (checked 2026-09-27): it declares the security program (disclosure contacts, no paid bounty) for people. Its `scanning` and `hardening` keys schedule nothing; the hardening report and the dependency scan run on demand through `GET /api/security/hardening` and `GET /api/security/deps`. See [Security & Safety](security-and-safety).
 
 ### 7.3 `services.yaml`
 

@@ -201,7 +201,7 @@ The invariant that `chat_id`/`user_id`/`message_id` etc. never enter the graph s
 ## R
 
 **RRF**
-Reciprocal Rank Fusion — a rank-blending algorithm. The V1 `UnifiedMemoryAdapter` used it to fuse its 4 layers (`_RRF_K = 60`); that stack was removed in the V1→V2 cutover. V2 recall still fuses belief + episode + PPR hits via an internal RRF step in `memory/recall.py`.
+Reciprocal Rank Fusion — a rank-blending algorithm. The V1 `UnifiedMemoryAdapter` used it to fuse its 4 layers (`_RRF_K = 60`); that stack was removed in the V1→V2 cutover. V2 memory recall does not rank by position since 2026-09-26: every candidate is scored on its evidence (`recall._rank_by_evidence`), and a test fails if rank fusion comes back. The Knowledge Library's hybrid search still fuses its keyword and meaning results with RRF.
 
 **ReliabilityRegistry**
 `swarm/reliability_registry.py` — a config holder for per-worker breakers, retries, timeouts, validators, concurrency. The state machines live in `reliability.py`.

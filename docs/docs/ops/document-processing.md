@@ -149,7 +149,7 @@ See [Document security](../security/document-security.md).
 
 ## Backup
 
-The nightly native backup snapshots `documents.db` **first**
+The native backup (every 6 hours) snapshots `documents.db` **first**
 (`sqlite3.backup()` → point-in-time) when metadata is SQLite, then copies the
 content it references and verifies every blob/manifest checksum — a torn
 DB/blob snapshot is impossible because blob files are always written before
