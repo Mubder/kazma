@@ -61,7 +61,7 @@ Use this before exposing Kazma beyond loopback. Aligns with
 - [ ] OIDC vars if SSO
 - [ ] `KAZMA_PUBLIC_URL` correct for redirects
 - [ ] HA compose / LB only if Postgres shared state verified
-- [ ] Memory: `KAZMA_MEMORY_ENFORCE_TENANT=1` when more than one tenant exists
+- [ ] Memory: tenant scoping is automatic with `KAZMA_PRODUCTION=1`; set `KAZMA_MEMORY_ENFORCE_TENANT=1` for a multi-tenant install that is not flagged production
 - [ ] Before `KAZMA_MEMORY_STATE_ROLE=primary`: `python scripts/reconcile_memory_mirror.py --dry-run` is clean (no dead-in-mirror rows)
 - [ ] Document catalog tables are on `KAZMA_PG_TABLES` when metadata backend is Postgres (H-13)
 

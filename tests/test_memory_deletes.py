@@ -28,7 +28,7 @@ _DELETE = re.compile(r"DELETE\s+FROM\s+(episodes|beliefs|entities)\b", re.IGNORE
 DECLARED = {
     ("kazma-core/kazma_core/memory/macro_sleep.py", "run_macro_sleep"):
         "superseded beliefs past the archive age: copied into beliefs_archive first",
-    ("kazma-ui/kazma_ui/memory_api.py", "hygiene_run"):
+    ("kazma-ui/kazma_ui/memory_api.py", "_archive_invalidated_sync"):
         "operator's archive_invalidated action: copied into beliefs_archive first",
     ("kazma-ui/kazma_ui/memory_api.py", "delete_entity"):
         "operator deletes one graph node by id; its facts stay, the merge ledger is "

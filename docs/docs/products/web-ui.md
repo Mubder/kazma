@@ -79,7 +79,7 @@ Dedicated ops page (not the chat sidebar):
 | Hygiene | Purge empty, dedupe noted, archive dead (preview counts before run) |
 | Hub identity | Person **User** / `ent_…` rename to **Mubder** updates canvas hub (not a second “You” node) |
 
-Multi-tenant isolation: set `KAZMA_MEMORY_ENFORCE_TENANT=1` to scope memory (including graph-clear) by the request tenant (off by default). APIs under `/api/memory/v2/*`. Full guide: [Memory & RAG](../guide/memory-and-rag) · [Memory best path](../guide/memory-best-path). Audit: [`AUDIT_MEMORY_SYSTEM_2026-08-24.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md). Scale leftovers: [`MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
+Multi-tenant isolation: memory is scoped by the request tenant with `KAZMA_MEMORY_ENFORCE_TENANT=1`, in production and with multi-user on -- every `/api/memory` route, counts and hygiene included; the memory task queue, reconsolidation and golden eval are admin-only. APIs under `/api/memory/v2/*`. Full guide: [Memory & RAG](../guide/memory-and-rag) · [Memory best path](../guide/memory-best-path). Audit: [`AUDIT_MEMORY_SYSTEM_2026-08-24.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md). Scale leftovers: [`MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
 
 Research / scrape runs through **chat tools** and the **Research panel** start form + live SSE sessions (see [Web research](../guide/web-research)). Tour of the latest stack: [Recent features](../guide/recent-features).
 

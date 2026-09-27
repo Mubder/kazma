@@ -16,7 +16,12 @@ from fastapi import Depends, Request
 from kazma_core.errors import safe_error
 
 from kazma_ui.rate_limit import rate_limit
-from kazma_ui.routes_direct._shared import _mem_tid, _tenant_clause, open_memory_db
+from kazma_ui.routes_direct._shared import (
+    _install_view,
+    _mem_tid,
+    _tenant_clause,
+    open_memory_db,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -252,18 +257,23 @@ def register_memory_routes(self: Any) -> None:
             },
         )
     @self.app.get("/api/memory/v2/health")
-    def _memory_v2_health():
+    def _memory_v2_health(request: Request):
         """V2 cognitive-engine health snapshot (beliefs, episodes, queue).
 
         A plain ``def``: the snapshot is SQLite reads over the memory DBs,
         and as ``async def`` with no await they ran on the event loop
         (AGENTS §35). Read-only by scope, like every probe.
+
+        The counts are the caller's tenant's; the engine's own state (queue,
+        errors, findability, graph address) goes to the install's own tenant
+        and to an admin only.
         """
         from kazma_core.diagnostic_scope import read_only_diagnostic
         from kazma_core.memory.v2_health import build_v2_health
 
+        tid = _mem_tid()
         with read_only_diagnostic("/api/memory/v2/health"):
-            return build_v2_health()
+            return build_v2_health(tenant_id=tid, install_details=_install_view(request, tid))
     @self.app.post("/api/memory/v2/federated-search")
     async def _memory_v2_federated_search(request: Request):
         """Federated search: cognitive memory + Knowledge Library (labeled, not merged)."""
@@ -482,8 +492,9 @@ def register_memory_routes(self: Any) -> None:
                         fts_ids = None
                 # else: no usable tokens → LIKE fallback below.
 
+            # base_where carries the tenant predicate: its value binds first.
             where = base_where
-            params: list = []
+            params: list = [*tparams]
             if fts_ids is not None:
                 if not fts_ids:
                     # FTS matched nothing — short-circuit to empty.
@@ -492,12 +503,12 @@ def register_memory_routes(self: Any) -> None:
                     return {"beliefs": [], "total": 0, "offset": max(0, int(offset or 0)), "limit": lim, "matched_via": "fts"}
                 ph = ",".join("?" for _ in fts_ids)
                 where += f" AND id IN ({ph})"
-                params = list(fts_ids)
+                params.extend(fts_ids)
             elif query:
                 # LIKE fallback (FTS unavailable or no usable tokens).
                 ql = f"%{query.lower()}%"
                 where += " AND (LOWER(subject) LIKE ? OR LOWER(predicate) LIKE ? OR LOWER(object) LIKE ?)"
-                params = [ql, ql, ql]
+                params.extend([ql, ql, ql])
 
             # Total count for the pager (same WHERE).
             total = conn.execute(f"SELECT COUNT(*){where}", params).fetchone()[0]
@@ -674,11 +685,15 @@ def register_memory_routes(self: Any) -> None:
             except Exception:
                 pass  # already closed / never opened
     @self.app.post("/api/memory/v2/beliefs/{belief_id}/invalidate")
-    async def _memory_v2_belief_invalidate(belief_id: str):
-        """Soft-invalidate a belief and best-effort remove its Neo4j edge."""
+    def _memory_v2_belief_invalidate(belief_id: str):
+        """Soft-invalidate the caller's belief and best-effort remove its Neo4j edge.
+
+        Another tenant's id reads as not found. A plain ``def``: the write
+        is SQLite, and it ran on the event loop.
+        """
         from kazma_core.memory.hygiene import invalidate_belief
 
-        return invalidate_belief(belief_id, remove_graph=True)
+        return invalidate_belief(belief_id, remove_graph=True, tenant_id=_mem_tid())
     @self.app.get("/api/memory/v2/entity-merges")
     def _memory_v2_entity_merges(limit: int = 50, offset: int = 0):
         """Pending entity merge quarantine list."""
@@ -692,8 +707,12 @@ def register_memory_routes(self: Any) -> None:
             conn = open_memory_db()
             lim = max(1, min(limit, 200))
             off = max(0, int(offset or 0))
-            merges = list_pending_merges(conn, limit=lim, offset=off, tenant_id=_mem_tid())
-            total = count_pending_merges(conn)
+            # The page and its "of N" count the same rows: the caller's
+            # tenant's, or the whole install for the install's own tenant.
+            tid = _mem_tid()
+            scope = None if tid in ("", "default") else tid
+            merges = list_pending_merges(conn, limit=lim, offset=off, tenant_id=scope)
+            total = count_pending_merges(conn, tenant_id=scope)
             conn.close()
             return {"merges": merges, "total": total, "offset": off, "limit": lim}
         except Exception as exc:
@@ -708,6 +727,7 @@ def register_memory_routes(self: Any) -> None:
         """Approve or reject a pending entity merge. Body: {action: approve|reject}."""
 
         from kazma_core.memory.entity_resolution import decide_entity_merge
+        from kazma_ui.memory_api import _row_tenant_ok
 
         body = {}
         try:
@@ -722,6 +742,9 @@ def register_memory_routes(self: Any) -> None:
             conn = None
             try:
                 conn = open_memory_db()
+                if not _row_tenant_ok(conn, "entity_merges", merge_id):
+                    # Another tenant's merge: ids are global, rows are not.
+                    return {"ok": False, "error": "not_found_or_resolved"}
                 return decide_entity_merge(conn, merge_id, approve=approve)
             except Exception as exc:
                 logger.exception("[memory] entity merge decision failed")
@@ -845,8 +868,9 @@ def register_memory_routes(self: Any) -> None:
 
         try:
             conn = open_memory_db()
-            where = " FROM episodes WHERE 1=1"
-            params: list = []
+            tsql, tparams = _tenant_clause(_mem_tid())
+            where = " FROM episodes WHERE 1=1" + tsql
+            params: list = [*tparams]
             if tier and tier.strip():
                 where += " AND tier = ?"
                 params.append(tier.strip())
@@ -959,14 +983,20 @@ def register_memory_routes(self: Any) -> None:
             except Exception:
                 pass  # already closed / never opened
     @self.app.get("/api/memory/v2/quality")
-    def _memory_v2_quality():
-        """Lightweight memory quality score for Dashboard (no LLM)."""
-        import os
-        import sqlite3
+    def _memory_v2_quality(request: Request):
+        """Lightweight memory quality score for Dashboard (no LLM).
 
-        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        Counts the caller's tenant's memories. The database path and the
+        vector backend's detail are the install's: shown to the install's own
+        tenant and to an admin only.
+        """
+        import os
+
         from kazma_core.paths import primary_memory_db
 
+        tid = _mem_tid()
+        tsql, tparams = _tenant_clause(tid)
+        install = _install_view(request, tid)
         checks: list[dict] = []
         score = 0
         total = 0
@@ -980,16 +1010,17 @@ def register_memory_routes(self: Any) -> None:
 
         try:
             dbp = primary_memory_db()
-            _check("db_exists", os.path.exists(dbp), dbp)
+            _check("db_exists", os.path.exists(dbp), dbp if install else "")
             if os.path.exists(dbp):
-                conn = sqlite3.connect(dbp, check_same_thread=False)
-                ensure_primary_schema(conn)
+                conn = open_memory_db(dbp)
                 bel = conn.execute(
                     "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+                    + tsql,
+                    tparams,
                 ).fetchone()[0]
-                ep = conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+                ep = conn.execute("SELECT COUNT(*) FROM episodes WHERE 1=1" + tsql, tparams).fetchone()[0]
                 emb = conn.execute(
-                    "SELECT COUNT(*) FROM episodes WHERE embedding IS NOT NULL"
+                    "SELECT COUNT(*) FROM episodes WHERE embedding IS NOT NULL" + tsql, tparams
                 ).fetchone()[0]
                 conn.close()
                 _check("has_beliefs_or_episodes", (bel + ep) > 0, f"beliefs={bel} episodes={ep}")
@@ -1011,7 +1042,7 @@ def register_memory_routes(self: Any) -> None:
                 _check(
                     "vector_capability",
                     bool(cap.get("vector_search_ready")),
-                    cap.get("vector_status_detail") or "",
+                    (cap.get("vector_status_detail") or "") if install else "",
                 )
             except Exception:
                 _check("vector_capability", False)
@@ -1400,16 +1431,16 @@ def register_memory_routes(self: Any) -> None:
 
             # F: graph groupings — read BEFORE conn.close() (the block below
             # operates on a closed connection otherwise → ProgrammingError).
-            # Purely advisory; recall/extraction never read this. /graph does
-            # not tenant-scope beliefs today (admin overview is operator-wide),
-            # so read groupings unscoped for consistency (audit C2 tracks the
-            # tenant scope separately).
+            # Purely advisory; recall/extraction never read this. Scoped like
+            # the beliefs above: the caller's tenant's groupings only.
             groups: list[dict] = []
             member_tier: dict[str, int] = {}
             try:
+                gsql, gparams = _tenant_clause(_gtid)
                 grows = conn.execute(
                     "SELECT group_root, member, member_tier, label "
-                    "FROM graph_associations"
+                    "FROM graph_associations WHERE 1=1" + gsql,
+                    gparams,
                 ).fetchall()
                 groups = [dict(r) for r in grows]
                 member_tier = {r["member"]: int(r["member_tier"]) for r in grows}

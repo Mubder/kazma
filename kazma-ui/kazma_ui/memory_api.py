@@ -43,38 +43,46 @@ def _is_protected(conn: sqlite3.Connection, eid: str) -> bool:
         return False
 
 
-def _would_orphan(conn: sqlite3.Connection, belief_ids: list[str]) -> list[str]:
+def _would_orphan(
+    conn: sqlite3.Connection, belief_ids: list[str], *, tenant_id: str | None = None
+) -> list[str]:
     """F3: return entity ids that would have ZERO live edges if the given
     beliefs were invalidated. Used to warn the operator before an
     unlink/invalidate/repoint strands a node. A node is "orphaned" only if it
     currently has live edges AND all of them are in `belief_ids`.
+
+    Pass only the caller's own belief ids, and its ``tenant_id``: the answer
+    names the beliefs' endpoints, and an endpoint may be a fact's text.
     """
     if not belief_ids:
         return []
     try:
         placeholders = ",".join("?" * len(belief_ids))
+        scoped = tenant_id not in (None, "", "default")
+        scope = " AND tenant_id = ?" if scoped else ""
+        params = (*belief_ids, tenant_id) if scoped else tuple(belief_ids)
         # Active beliefs NOT in the to-remove set — endpoints here stay anchored.
         surviving = conn.execute(
             f"""SELECT DISTINCT subject AS eid FROM beliefs
                 WHERE invalidated_at IS NULL AND valid_until IS NULL
-                  AND id NOT IN ({placeholders})
+                  AND id NOT IN ({placeholders}){scope}
                 UNION
                 SELECT DISTINCT object AS eid FROM beliefs
                 WHERE invalidated_at IS NULL AND valid_until IS NULL
-                  AND id NOT IN ({placeholders})""",
-            tuple(belief_ids) * 2,
+                  AND id NOT IN ({placeholders}){scope}""",
+            params * 2,
         ).fetchall()
         surviving_ids = {r["eid"] for r in surviving if r["eid"]}
         # Endpoints touched by the to-remove beliefs — candidates for orphaning.
         touched = conn.execute(
             f"""SELECT DISTINCT subject AS eid FROM beliefs
                 WHERE invalidated_at IS NULL AND valid_until IS NULL
-                  AND id IN ({placeholders})
+                  AND id IN ({placeholders}){scope}
                 UNION
                 SELECT DISTINCT object AS eid FROM beliefs
                 WHERE invalidated_at IS NULL AND valid_until IS NULL
-                  AND id IN ({placeholders})""",
-            tuple(belief_ids) * 2,
+                  AND id IN ({placeholders}){scope}""",
+            params * 2,
         ).fetchall()
         return sorted(
             r["eid"] for r in touched
@@ -213,37 +221,43 @@ def _memory_tenant_id() -> str:
     return "default"
 
 
-def _entity_tenant_ok(conn: sqlite3.Connection, eid: str) -> bool:
-    """Fail-closed tenant gate for id-keyed entity mutations (audit M-05).
+#: The id-keyed memory tables a route may be handed an id for, and the query
+#: that names the row's tenant.
+_OWNER_SQL = {
+    "entities": "SELECT tenant_id FROM entities WHERE id=?",
+    "beliefs": "SELECT tenant_id FROM beliefs WHERE id=?",
+    "entity_merges": "SELECT tenant_id FROM entity_merges WHERE id=?",
+    "graph_associations": "SELECT tenant_id FROM graph_associations WHERE id=?",
+}
 
-    Single-user ('default') always passes — legacy behavior preserved. Under
-    enforcement, a bare global-PK id belonging to another tenant reads as
-    not-found instead of being mutated/returned.
+
+def _row_tenant_ok(conn: sqlite3.Connection, table: str, row_id: str) -> bool:
+    """Fail-closed tenant gate for an id-keyed memory route (audit M-05).
+
+    The install's own tenant ('default') always passes -- single-user
+    behaviour. Under enforcement, a row of another tenant, a missing row and a
+    failed lookup all read as not found: ids are global, rows are not.
+    ``tests/test_memory_routes_tenant_scope.py`` calls every memory route with
+    another tenant's ids.
     """
     tid = _memory_tenant_id()
     if tid == "default":
         return True
     try:
-        row = conn.execute(
-            "SELECT tenant_id FROM entities WHERE id=?", (eid,)
-        ).fetchone()
-    except Exception:
+        row = conn.execute(_OWNER_SQL[table], (row_id,)).fetchone()
+    except sqlite3.Error:
         return False
     return bool(row) and str(row[0] or "default") == tid
+
+
+def _entity_tenant_ok(conn: sqlite3.Connection, eid: str) -> bool:
+    """:func:`_row_tenant_ok` for an entity id."""
+    return _row_tenant_ok(conn, "entities", eid)
 
 
 def _belief_tenant_ok(conn: sqlite3.Connection, bid: str) -> bool:
-    """Same gate for belief-id-keyed endpoints."""
-    tid = _memory_tenant_id()
-    if tid == "default":
-        return True
-    try:
-        row = conn.execute(
-            "SELECT tenant_id FROM beliefs WHERE id=?", (bid,)
-        ).fetchone()
-    except Exception:
-        return False
-    return bool(row) and str(row[0] or "default") == tid
+    """:func:`_row_tenant_ok` for a belief id."""
+    return _row_tenant_ok(conn, "beliefs", bid)
 
 
 def _belief_count_sql() -> str:
@@ -631,6 +645,10 @@ async def rename_entity(entity_id: str, request: Request) -> dict[str, Any]:
             "SELECT id, type, name, aliases_json FROM entities WHERE id=?",
             (eid,),
         ).fetchone()
+        if row and not _entity_tenant_ok(conn, eid):
+            # Another tenant's entity: ids are global, rows are not.
+            conn.close()
+            return {"ok": False, "error": "not_found"}
         created = False
         if not row:
             # Promote a graph node / hub id into a real entity so the
@@ -1154,7 +1172,7 @@ def _link_entities_sync(body: Any) -> dict[str, Any]:
             async def _restore_link() -> dict[str, Any]:
                 from kazma_core.memory.hygiene import invalidate_belief
 
-                return invalidate_belief(captured_bid, remove_graph=True)
+                return await asyncio.to_thread(invalidate_belief, captured_bid, remove_graph=True)
 
             undo_token = register_undo(
                 _restore_link,
@@ -1202,10 +1220,14 @@ async def unlink_entities(request: Request) -> dict[str, Any]:
 
     from kazma_core.memory.hygiene import invalidate_belief
 
+    tid = _memory_tenant_id()
     id_err: str | None = None
-    # 1) Direct id path
+    # 1) Direct id path. Another tenant's id reads as not found, and the
+    # triple path below is scoped the same way.
     if belief_id:
-        r = invalidate_belief(belief_id, remove_graph=True)
+        r = await asyncio.to_thread(
+            invalidate_belief, belief_id, remove_graph=True, tenant_id=tid
+        )
         if r.get("ok") or r.get("already"):
             return {
                 "ok": True,
@@ -1229,7 +1251,6 @@ async def unlink_entities(request: Request) -> dict[str, Any]:
     sub_id = _entity_slug(subject)
     try:
         conn = await asyncio.to_thread(_conn)
-        tid = _memory_tenant_id()
         tsql = " AND tenant_id=?" if tid != "default" else ""
         tparams: list = [tid] if tid != "default" else []
         row = conn.execute(
@@ -1271,7 +1292,7 @@ async def unlink_entities(request: Request) -> dict[str, Any]:
                 "object": obj,
             }
         bid = str(row["id"] if isinstance(row, sqlite3.Row) else row[0])
-        r = invalidate_belief(bid, remove_graph=True)
+        r = await asyncio.to_thread(invalidate_belief, bid, remove_graph=True, tenant_id=tid)
         if not r.get("ok"):
             # Idempotent: already soft-deleted counts as success
             if r.get("error") == "not found":
@@ -1536,7 +1557,7 @@ async def repoint_belief(belief_id: str, request: Request) -> dict[str, Any]:
         # F3: surface orphan warning for the OLD subject if it lost its last edge.
         try:
             conn = await asyncio.to_thread(_conn)
-            warn = _would_orphan(conn, [bid])
+            warn = _would_orphan(conn, [bid], tenant_id=_memory_tenant_id())
             conn.close()
             if warn:
                 result["warn_orphaned"] = warn
@@ -1554,39 +1575,38 @@ async def invalidate_batch(request: Request) -> dict[str, Any]:
     ids = (body or {}).get("ids") or (body or {}).get("belief_ids") or []
     if not isinstance(ids, list) or not ids:
         return {"ok": False, "error": "ids[] required"}
+    return await asyncio.to_thread(_invalidate_batch_sync, [str(b) for b in ids[:200]])
+
+
+def _invalidate_batch_sync(wanted: list[str]) -> dict[str, Any]:
+    """Blocking half of :func:`invalidate_batch` -- runs off the event loop."""
     from kazma_core.memory.hygiene import invalidate_belief
 
-    # F3: compute the orphan warning BEFORE the invalidations — once the rows
-    # are soft-deleted the "which endpoints would be stranded" query can no
-    # longer see them as active. The beliefs are still live here.
-    warn_orphaned: list[str] = []
+    tid = _memory_tenant_id()
+    conn = _conn()
     try:
-        conn = await asyncio.to_thread(_conn)
-        warn_orphaned = _would_orphan(conn, [str(b) for b in ids[:200]])
+        # M-05: an id from another tenant is reported as not found, and it
+        # never reaches the orphan warning, which names its beliefs' endpoints.
+        owned = {bid for bid in wanted if _belief_tenant_ok(conn, bid)}
+        # F3: the warning is computed BEFORE the invalidations -- once the rows
+        # are soft-deleted the "which endpoints would be stranded" query can
+        # no longer see them as active.
+        warn_orphaned = _would_orphan(conn, [b for b in wanted if b in owned], tenant_id=tid)
+    finally:
         conn.close()
-    except Exception:
-        logger.debug("[memory_api] orphan warning failed", exc_info=True)
 
     results = []
     invalidated_ids: list[str] = []
-    # M-05: per-id tenant gate — a bare global-PK id from another tenant is
-    # skipped (reported as not-found) instead of invalidated.
-    gate_conn = await asyncio.to_thread(_conn)
-    try:
-        for bid in ids[:200]:
-            bid_s = str(bid)
-            if not _belief_tenant_ok(gate_conn, bid_s):
-                results.append({"ok": False, "updated": 0,
-                                "error": "not_found", "belief_id": bid_s})
-                continue
-            r = invalidate_belief(bid_s, remove_graph=True)
-            results.append(r)
-            # Track only rows we actually flipped (not idempotent "already" ones)
-            # so the undo restores exactly what this call changed.
-            if r.get("ok") and not r.get("already"):
-                invalidated_ids.append(bid_s)
-    finally:
-        gate_conn.close()
+    for bid in wanted:
+        if bid not in owned:
+            results.append({"ok": False, "updated": 0, "error": "not_found", "belief_id": bid})
+            continue
+        r = invalidate_belief(bid, remove_graph=True, tenant_id=tid)
+        results.append(r)
+        # Track only rows we actually flipped (not idempotent "already" ones)
+        # so the undo restores exactly what this call changed.
+        if r.get("ok") and not r.get("already"):
+            invalidated_ids.append(bid)
 
     undo_token = None
     if invalidated_ids:
@@ -1595,17 +1615,22 @@ async def invalidate_batch(request: Request) -> dict[str, Any]:
         # (edge re-sync happens on the next dual-write / reconsolidation).
         captured = list(invalidated_ids)
 
+        def _reactivate() -> dict[str, Any]:
+            conn = _conn()
+            try:
+                placeholders = ",".join("?" for _ in captured)
+                cur = conn.execute(
+                    f"UPDATE beliefs SET valid_until=NULL, invalidated_at=NULL "
+                    f"WHERE id IN ({placeholders})",
+                    captured,
+                )
+                conn.commit()
+                return {"restored": int(cur.rowcount or 0)}
+            finally:
+                conn.close()
+
         async def _restore() -> dict[str, Any]:
-            conn = await asyncio.to_thread(_conn)
-            placeholders = ",".join("?" for _ in captured)
-            cur = conn.execute(
-                f"UPDATE beliefs SET valid_until=NULL, invalidated_at=NULL "
-                f"WHERE id IN ({placeholders})",
-                captured,
-            )
-            conn.commit()
-            conn.close()
-            return {"restored": int(cur.rowcount or 0)}
+            return await asyncio.to_thread(_reactivate)
 
         undo_token = register_undo(
             _restore,
@@ -1628,17 +1653,22 @@ async def invalidate_batch(request: Request) -> dict[str, Any]:
 # See docs/plans/MEMORY_GRAPH_GROUPING_PLAN.md. The operator clusters nodes
 # into a tiered tree (main/major/sub/leaf) for canvas layout + per-tier
 # colors. recall/extraction never read this table; it is purely advisory.
+# Each tenant has its own tree: every read and write below names the tenant,
+# because a node id (an entity id or a fact's text) can be in several trees.
 
 
-def _group_tier_of(conn: sqlite3.Connection, node_id: str) -> int:
+def _group_tier_of(conn: sqlite3.Connection, node_id: str, tenant_id: str) -> int:
     """Return the tier of a node that is already a member somewhere, or -1."""
     row = conn.execute(
-        "SELECT member_tier FROM graph_associations WHERE member=?", (node_id,)
+        "SELECT member_tier FROM graph_associations WHERE member=? AND tenant_id=?",
+        (node_id, tenant_id),
     ).fetchone()
     return int(row["member_tier"]) if row else -1
 
 
-def _group_creates_cycle(conn: sqlite3.Connection, member: str, new_root: str) -> bool:
+def _group_creates_cycle(
+    conn: sqlite3.Connection, member: str, new_root: str, tenant_id: str
+) -> bool:
     """True if making `member` a child of `new_root` would create a cycle
     (i.e. new_root is already a descendant of member, or member == new_root).
     Walks the ancestor chain of new_root."""
@@ -1651,7 +1681,8 @@ def _group_creates_cycle(conn: sqlite3.Connection, member: str, new_root: str) -
             return True  # pre-existing cycle (defensive)
         seen.add(cur)
         row = conn.execute(
-            "SELECT group_root FROM graph_associations WHERE member=?", (cur,)
+            "SELECT group_root FROM graph_associations WHERE member=? AND tenant_id=?",
+            (cur, tenant_id),
         ).fetchone()
         cur = row["group_root"] if row else None
         if cur == member:
@@ -1659,7 +1690,7 @@ def _group_creates_cycle(conn: sqlite3.Connection, member: str, new_root: str) -
     return False
 
 
-def _group_descendants(conn: sqlite3.Connection, root: str) -> list[str]:
+def _group_descendants(conn: sqlite3.Connection, root: str, tenant_id: str) -> list[str]:
     """All transitive member ids under `root` (for subtree re-tiering)."""
     out: list[str] = []
     queue = [root]
@@ -1667,7 +1698,8 @@ def _group_descendants(conn: sqlite3.Connection, root: str) -> list[str]:
     while queue:
         cur = queue.pop()
         rows = conn.execute(
-            "SELECT member FROM graph_associations WHERE group_root=?", (cur,)
+            "SELECT member FROM graph_associations WHERE group_root=? AND tenant_id=?",
+            (cur, tenant_id),
         ).fetchall()
         for r in rows:
             m = r["member"]
@@ -1716,21 +1748,22 @@ async def graph_groups_create(request: Request) -> dict[str, Any]:
     if root == member:
         return {"ok": False, "error": "group_root and member must differ"}
     label = str(body.get("label") or "").strip() or None
+    tid = _memory_tenant_id()
     try:
         conn = await asyncio.to_thread(_conn)
-        if _group_creates_cycle(conn, member, root):
+        if _group_creates_cycle(conn, member, root, tid):
             conn.close()
             return {"ok": False, "error": "cycle: member is an ancestor of group_root"}
         # Existing membership? Update in place (move within same root / re-tier).
         existing = conn.execute(
-            "SELECT id FROM graph_associations WHERE member=?", (member,)
+            "SELECT id FROM graph_associations WHERE member=? AND tenant_id=?", (member, tid)
         ).fetchone()
         # Derive tier: explicit override > parent's tier + 1 > implicit.
         # The hub ('user') is always tier 0. An ungrouped root that is NOT the
         # hub is treated as an implicit tier-1 major (so grouping kazma_app
         # under kazma — where kazma isn't yet grouped — yields tier 2, matching
         # the A/B/C/D model). This lets operators build the tree middle-out.
-        parent_tier = 0 if str(root).lower() in ("user", "you", "me") else _group_tier_of(conn, root)
+        parent_tier = 0 if str(root).lower() in ("user", "you", "me") else _group_tier_of(conn, root, tid)
         if parent_tier < 0:
             parent_tier = 1  # ungrouped non-hub root → implicit major
         explicit_tier = body.get("tier")
@@ -1747,7 +1780,7 @@ async def graph_groups_create(request: Request) -> dict[str, Any]:
                VALUES (?, ?, ?, ?, ?, ?, ?, 'operator')
                ON CONFLICT(tenant_id, group_root, member) DO UPDATE SET
                  member_tier=excluded.member_tier, label=excluded.label""",
-            (gid, _memory_tenant_id(), root, member, tier, label, now),
+            (gid, tid, root, member, tier, label, now),
         )
         conn.commit()
         conn.close()
@@ -1770,10 +1803,9 @@ async def graph_groups_delete(group_id: str) -> dict[str, Any]:
         row = conn.execute(
             "SELECT member, tenant_id FROM graph_associations WHERE id=?", (gid,)
         ).fetchone()
-        if not row:
-            conn.close()
-            return {"ok": False, "error": "not_found"}
-        if not _entity_tenant_ok(conn, str(row["member"] or "")):
+        # The grouping's own tenant decides -- not its member's: another
+        # tenant may group this tenant's node (ids are global, rows are not).
+        if not row or not _row_tenant_ok(conn, "graph_associations", gid):
             conn.close()
             return {"ok": False, "error": "not_found"}
         cur = conn.execute("DELETE FROM graph_associations WHERE id=?", (gid,))
@@ -1802,30 +1834,31 @@ async def graph_groups_move(member_id: str, request: Request) -> dict[str, Any]:
         return {"ok": False, "error": "new_root required"}
     if new_root == member:
         return {"ok": False, "error": "new_root must differ from member"}
+    tid = _memory_tenant_id()
     try:
         conn = await asyncio.to_thread(_conn)
         if not _entity_tenant_ok(conn, member) or not _entity_tenant_ok(conn, new_root):
             conn.close()
             return {"ok": False, "error": "not_found"}
-        if _group_creates_cycle(conn, member, new_root):
+        if _group_creates_cycle(conn, member, new_root, tid):
             conn.close()
             return {"ok": False, "error": "cycle: member is an ancestor of new_root"}
         # Capture the member's old tier + its subtree (member + descendants),
         # so we can shift them by the delta after the move.
         old_row = conn.execute(
-            "SELECT member_tier FROM graph_associations WHERE member=?", (member,)
+            "SELECT member_tier FROM graph_associations WHERE member=? AND tenant_id=?",
+            (member, tid),
         ).fetchone()
         old_tier = int(old_row["member_tier"]) if old_row else 1
-        subtree = [member] + _group_descendants(conn, member)
+        subtree = [member] + _group_descendants(conn, member, tid)
         # New tier for the moved member (same implicit-tier rule as create).
-        parent_tier = 0 if str(new_root).lower() in ("user", "you", "me") else _group_tier_of(conn, new_root)
+        parent_tier = 0 if str(new_root).lower() in ("user", "you", "me") else _group_tier_of(conn, new_root, tid)
         if parent_tier < 0:
             parent_tier = 1  # ungrouped non-hub root → implicit major
         explicit = body.get("tier")
         new_tier = int(explicit) if explicit is not None else parent_tier + 1
         new_tier = max(0, min(new_tier, 4))
         delta = new_tier - old_tier
-        tid = _memory_tenant_id()
         now = time.time()
         # Upsert the member's new root + tier.
         conn.execute(
@@ -1838,8 +1871,8 @@ async def graph_groups_move(member_id: str, request: Request) -> dict[str, Any]:
         )
         # But the member may have had a different root — delete the old edge.
         conn.execute(
-            "DELETE FROM graph_associations WHERE member=? AND group_root!=?",
-            (member, new_root),
+            "DELETE FROM graph_associations WHERE member=? AND group_root!=? AND tenant_id=?",
+            (member, new_root, tid),
         )
         # Re-tier descendants by the same delta (keep relative depth).
         if delta != 0:
@@ -1847,12 +1880,13 @@ async def graph_groups_move(member_id: str, request: Request) -> dict[str, Any]:
                 if desc == member:
                     continue
                 row = conn.execute(
-                    "SELECT member_tier FROM graph_associations WHERE member=?", (desc,)
+                    "SELECT member_tier FROM graph_associations WHERE member=? AND tenant_id=?",
+                    (desc, tid),
                 ).fetchone()
                 if row:
                     conn.execute(
-                        "UPDATE graph_associations SET member_tier=? WHERE member=?",
-                        (max(0, min(int(row["member_tier"]) + delta, 4)), desc),
+                        "UPDATE graph_associations SET member_tier=? WHERE member=? AND tenant_id=?",
+                        (max(0, min(int(row["member_tier"]) + delta, 4)), desc, tid),
                     )
         conn.commit()
         conn.close()
@@ -1888,8 +1922,8 @@ async def graph_groups_set_tier(node_id: str, request: Request) -> dict[str, Any
             conn.close()
             return {"ok": False, "error": "not_found"}
         cur = conn.execute(
-            "UPDATE graph_associations SET member_tier=? WHERE member=?",
-            (tier, node),
+            "UPDATE graph_associations SET member_tier=? WHERE member=? AND tenant_id=?",
+            (tier, node, _memory_tenant_id()),
         )
         conn.commit()
         conn.close()
@@ -1906,10 +1940,22 @@ async def graph_groups_set_tier(node_id: str, request: Request) -> dict[str, Any
 
 
 @router.get("/api/memory/v2/hygiene/preview")
-async def hygiene_preview() -> dict[str, Any]:
-    """Preview safe cleanup candidates (no writes)."""
+def hygiene_preview() -> dict[str, Any]:
+    """Preview safe cleanup candidates in the caller's tenant (no writes).
+
+    A plain ``def``: FastAPI runs it in its threadpool, and every line is
+    SQLite. The install's own tenant ("default") sees the whole install, like
+    every memory list; any other tenant sees its own rows only -- this listed
+    every tenant's entities and notes until 2026-09-27.
+    """
+    tid = _memory_tenant_id()
+    scoped = tid != "default"
+    e_scope = " AND e.tenant_id = ?" if scoped else ""
+    b_scope = " AND tenant_id = ?" if scoped else ""
+    tparams: tuple = (tid,) if scoped else ()
+    conn = None
     try:
-        conn = await asyncio.to_thread(_conn)
+        conn = _conn()
         empty = [
             dict(r)
             for r in conn.execute(
@@ -1917,10 +1963,11 @@ async def hygiene_preview() -> dict[str, Any]:
                 SELECT e.id, e.type, e.name, {_belief_count_sql()} AS belief_count
                 FROM entities e
                 WHERE {_belief_count_sql()} = 0
-                  AND LOWER(e.id) NOT IN ('user','assistant','kazma','mubder')
+                  AND LOWER(e.id) NOT IN ('user','assistant','kazma','mubder'){e_scope}
                 ORDER BY e.name
                 LIMIT 200
-                """
+                """,
+                tparams,
             ).fetchall()
         ]
         isolated = [
@@ -1933,21 +1980,23 @@ async def hygiene_preview() -> dict[str, Any]:
                 FROM entities e
                 WHERE {_belief_count_sql()} > 0
                   AND {_entity_degree_sql()} = 0
-                  AND LOWER(e.id) NOT IN ('user','assistant')
+                  AND LOWER(e.id) NOT IN ('user','assistant'){e_scope}
                 ORDER BY belief_count DESC
                 LIMIT 100
-                """
+                """,
+                tparams,
             ).fetchall()
         ]
         # Near-dup noted (same first 160 normalized chars)
         noted = conn.execute(
-            """
+            f"""
             SELECT id, object, valid_from FROM beliefs
             WHERE valid_until IS NULL AND invalidated_at IS NULL
-              AND predicate = 'noted'
+              AND predicate = 'noted'{b_scope}
             ORDER BY valid_from DESC
             LIMIT 500
-            """
+            """,
+            tparams,
         ).fetchall()
         groups: dict[str, list[sqlite3.Row]] = {}
         import re
@@ -1973,9 +2022,10 @@ async def hygiene_preview() -> dict[str, Any]:
                 }
             )
         dead = conn.execute(
-            "SELECT COUNT(*) FROM beliefs WHERE invalidated_at IS NOT NULL OR valid_until IS NOT NULL"
+            "SELECT COUNT(*) FROM beliefs "
+            f"WHERE (invalidated_at IS NOT NULL OR valid_until IS NOT NULL){b_scope}",
+            tparams,
         ).fetchone()[0]
-        conn.close()
         return {
             "ok": True,
             "empty_entities": empty,
@@ -1986,11 +2036,66 @@ async def hygiene_preview() -> dict[str, Any]:
     except Exception as exc:
         logger.exception("[memory_api] hygiene preview failed")
         return {"ok": False, "error": safe_error(exc)}
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _invalidate_owned(belief_ids: list[str]) -> int:
+    """Invalidate the caller's beliefs among *belief_ids*; how many flipped."""
+    from kazma_core.memory.hygiene import invalidate_belief
+
+    tid = _memory_tenant_id()
+    return sum(
+        1 for bid in belief_ids if invalidate_belief(bid, remove_graph=True, tenant_id=tid).get("ok")
+    )
+
+
+def _archive_invalidated_sync() -> dict[str, Any]:
+    """Soft-hard: move the caller's invalidated beliefs to beliefs_archive, then DELETE.
+
+    The install's own tenant archives the install's; any other tenant, its own.
+    """
+    tid = _memory_tenant_id()
+    scope = " AND tenant_id = ?" if tid != "default" else ""
+    conn = None
+    try:
+        conn = _conn()
+        now = time.time()
+        rows = conn.execute(
+            "SELECT * FROM beliefs "
+            f"WHERE (invalidated_at IS NOT NULL OR valid_until IS NOT NULL){scope} "
+            "LIMIT 2000",
+            (tid,) if scope else (),
+        ).fetchall()
+        n = 0
+        for r in rows:
+            payload = {k: r[k] for k in r.keys()}
+            conn.execute(
+                """INSERT OR IGNORE INTO beliefs_archive
+                   (id, tenant_id, original_belief_json, archived_at)
+                   VALUES (?, ?, ?, ?)""",
+                (
+                    r["id"],
+                    r["tenant_id"] if "tenant_id" in r.keys() else "default",
+                    json.dumps(payload, default=str),
+                    now,
+                ),
+            )
+            conn.execute("DELETE FROM beliefs WHERE id=?", (r["id"],))
+            n += 1
+        conn.commit()
+        return {"archived": n}
+    except Exception as exc:
+        return {"error": safe_error(exc)}
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 @router.post("/api/memory/v2/hygiene/run")
 async def hygiene_run(request: Request) -> dict[str, Any]:
-    """Run selected hygiene actions.
+    """Run selected hygiene actions on the caller's tenant.
 
     Body::
       {
@@ -2007,7 +2112,7 @@ async def hygiene_run(request: Request) -> dict[str, Any]:
     out: dict[str, Any] = {"ok": True, "actions": {}}
 
     if body.get("purge_empty_entities"):
-        preview = await hygiene_preview()
+        preview = await asyncio.to_thread(hygiene_preview)
         deleted = []
         for e in preview.get("empty_entities") or []:
             r = await delete_entity(e["id"])
@@ -2019,55 +2124,18 @@ async def hygiene_run(request: Request) -> dict[str, Any]:
         }
 
     if body.get("invalidate_near_dup_noted"):
-        preview = await hygiene_preview()
+        preview = await asyncio.to_thread(hygiene_preview)
         drop_ids: list[str] = []
         for g in preview.get("near_dup_noted") or []:
             drop_ids.extend(g.get("drop_ids") or [])
-        from kazma_core.memory.hygiene import invalidate_belief
-
-        n = 0
-        for bid in drop_ids:
-            r = invalidate_belief(bid, remove_graph=True)
-            if r.get("ok"):
-                n += 1
+        n = await asyncio.to_thread(_invalidate_owned, drop_ids)
         out["actions"]["invalidate_near_dup_noted"] = {
             "invalidated": n,
             "ids": drop_ids[:100],
         }
 
     if body.get("archive_invalidated"):
-        # Soft-hard: move invalidated rows to beliefs_archive then DELETE
-        try:
-            conn = await asyncio.to_thread(_conn)
-            now = time.time()
-            rows = conn.execute(
-                """
-                SELECT * FROM beliefs
-                WHERE invalidated_at IS NOT NULL OR valid_until IS NOT NULL
-                LIMIT 2000
-                """
-            ).fetchall()
-            n = 0
-            for r in rows:
-                payload = {k: r[k] for k in r.keys()}
-                conn.execute(
-                    """INSERT OR IGNORE INTO beliefs_archive
-                       (id, tenant_id, original_belief_json, archived_at)
-                       VALUES (?, ?, ?, ?)""",
-                    (
-                        r["id"],
-                        r["tenant_id"] if "tenant_id" in r.keys() else "default",
-                        json.dumps(payload, default=str),
-                        now,
-                    ),
-                )
-                conn.execute("DELETE FROM beliefs WHERE id=?", (r["id"],))
-                n += 1
-            conn.commit()
-            conn.close()
-            out["actions"]["archive_invalidated"] = {"archived": n}
-        except Exception as exc:
-            out["actions"]["archive_invalidated"] = {"error": safe_error(exc)}
+        out["actions"]["archive_invalidated"] = await asyncio.to_thread(_archive_invalidated_sync)
 
     return out
 

@@ -703,18 +703,23 @@
       setEl('v2-kpi-episodes-meta', (h.episodes.episodic||0) + ' episodic · ' + (h.episodes.archived||0) + ' archived');
       setEl('v2-kpi-entities', fmtNum(h.entities));
       setEl('v2-kpi-procedural-meta', (h.procedural_dags.active||0) + ' active · ' + (h.procedural_dags.quarantine||0) + ' quarantined');
-      const qPending = (h.queue.pending||0) + (h.queue.processing||0);
-      setEl('v2-kpi-queue', fmtNum(qPending));
-      setEl('v2-kpi-queue-meta', (h.queue.failed||0) + ' failed · ' + (h.recent_audits||0) + ' audits/24h');
+      // A tenant's view (scope "tenant") counts that tenant's memories and
+      // leaves out the install's own state: queue, post-turn, reconsolidation.
+      const installView = h.scope !== 'tenant';
+      const q = h.queue || null;
+      setEl('v2-kpi-queue', q ? fmtNum((q.pending||0) + (q.processing||0)) : '–');
+      setEl('v2-kpi-queue-meta', q
+        ? (q.failed||0) + ' failed · ' + (h.recent_audits||0) + ' audits/24h'
+        : 'install queue: admins only');
       // Post-turn / embedder strip
       const pt = h.post_turn || {};
       const okEl = document.getElementById('v2-post-turn-ok');
-      if (okEl) okEl.textContent = 'ok: ' + (pt.ok || 0) + ' · fail m/e/q: ' +
+      if (okEl) okEl.textContent = !installView ? 'post-turn: –' : 'ok: ' + (pt.ok || 0) + ' · fail m/e/q: ' +
         (pt.mirror_fail||0) + '/' + (pt.extract_fail||0) + '/' + (pt.enqueue_fail||0);
       const errEl = document.getElementById('v2-post-turn-err');
       if (errEl) {
         const le = pt.last_error || h.last_error;
-        errEl.textContent = le ? ('last error: ' + String(le).slice(0, 80)) : 'last error: none';
+        errEl.textContent = !installView ? '' : (le ? ('last error: ' + String(le).slice(0, 80)) : 'last error: none');
         errEl.style.color = le ? '#f87171' : 'var(--text-muted)';
       }
       const embEl = document.getElementById('v2-embedder-ready');
@@ -722,7 +727,9 @@
       const rc = document.getElementById('v2-reconsol-meta');
       if (rc) {
         const lr = h.last_reconsolidation;
-        if (lr && lr.finished_at) {
+        if (!installView) {
+          rc.textContent = 'reconsol: –';
+        } else if (lr && lr.finished_at) {
           rc.textContent = 'reconsol: merged ' + (lr.duplicate_beliefs_merged||0) +
             ' · emb ' + ((lr.episodes_embedded||0)+(lr.beliefs_embedded||0));
         } else {
@@ -984,6 +991,7 @@
     if (!el) return;
     try {
       const resp = await fetch('/api/memory/v2/queue?limit=20');
+      if (resp.status === 403) { el.textContent = 'The task queue is the install\'s: admins only.'; return; }
       const data = await resp.json();
       const tasks = data.tasks || [];
       if (!tasks.length) { el.textContent = 'Queue empty.'; return; }
@@ -1016,7 +1024,7 @@
     try {
       const r = await fetch('/api/memory/v2/queue/clear-failed', { method: 'POST' });
       const d = await r.json();
-      if (window.showToast) window.showToast(d.ok ? ('Cleared ' + (d.deleted || 0) + ' failed') : (d.error || 'Failed'), d.ok ? 'success' : 'error');
+      if (window.showToast) window.showToast(d.ok ? ('Cleared ' + (d.deleted || 0) + ' failed') : (d.error || d.detail || 'Failed'), d.ok ? 'success' : 'error');
       loadV2Queue();
       pollV2Health();
     } catch (e) { /* silent */ }
@@ -1126,6 +1134,11 @@
       });
       const data = await resp.json();
       if (!out) return;
+      if (!resp.ok) {
+        // 403: the benchmark is the install's, admins only.
+        out.textContent = data.detail || data.error || ('Eval failed: HTTP ' + resp.status);
+        return;
+      }
       if (!data.ok && data.error && !data.total) {
         out.textContent = data.error || 'Eval failed';
         return;
@@ -1161,7 +1174,7 @@
     try {
       const r = await fetch('/api/memory/v2/reconsolidate', { method: 'POST' });
       const d = await r.json();
-      if (window.showToast) window.showToast(d.ok ? 'Reconsolidation enqueued' : (d.error || 'Failed'), d.ok ? 'success' : 'error');
+      if (window.showToast) window.showToast(d.ok ? 'Reconsolidation enqueued' : (d.error || d.detail || 'Failed'), d.ok ? 'success' : 'error');
       loadV2Queue();
     } catch (e) { /* silent */ }
   });

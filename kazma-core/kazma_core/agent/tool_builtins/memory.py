@@ -131,12 +131,15 @@ def register_memory_tools(registry: Any) -> None:
             return f"Error: memory_list_entities failed — {exc}"
     def _mem_invalidate(belief_id: str) -> str:
         from kazma_core.memory.hygiene import invalidate_belief
+        from kazma_core.safety.hitl import get_current_tenant_id
 
         bid = (belief_id or "").strip()
         if not bid:
             return "Error: belief_id required (from list_beliefs)"
         try:
-            result = invalidate_belief(bid, remove_graph=True)
+            # The turn's tenant, like the list tools above: an id from another
+            # tenant reads as not found.
+            result = invalidate_belief(bid, remove_graph=True, tenant_id=get_current_tenant_id())
             return json.dumps(result, ensure_ascii=False, indent=2)
         except Exception as exc:
             logger.warning("[memory_invalidate] failed: %s", exc)

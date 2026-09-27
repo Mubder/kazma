@@ -1,8 +1,9 @@
 """Shared helpers for the routes_direct package (audit O5).
 
-Holds the two pieces every memory route needs — the tenant predicate and the
-SQLite connection factory — so tenant scoping has one enforcement point and
-schema setup is not re-run on every request (audit O4).
+Holds what every memory route needs — the tenant predicate, who sees the
+install's own state, and the SQLite connection factory — so tenant scoping has
+one enforcement point and schema setup is not re-run on every request (audit
+O4).
 """
 
 from __future__ import annotations
@@ -12,10 +13,11 @@ import sqlite3
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["_mem_tid", "_tenant_clause", "open_memory_db", "memory_db"]
+__all__ = ["_install_view", "_mem_tid", "_tenant_clause", "open_memory_db", "memory_db"]
 
 
 def _mem_tid() -> str:
@@ -39,6 +41,22 @@ def _mem_tid() -> str:
             "[tenant] resolution failed — scoping query to nothing", exc_info=True
         )
         return "__unscoped__"
+
+
+def _install_view(request: Any, tid: str) -> bool:
+    """May this caller see the install's own state, not only its tenant's rows?
+
+    The install's own tenant ("default": single-user, or a principal bound to
+    no tenant) and an admin may. A principal bound to another tenant is shown
+    its tenant's rows and none of the install's internals -- the maintenance
+    queue, engine errors, the database path. Blocking (the admin decision
+    reads the session store): call it from a plain ``def`` route or a thread.
+    """
+    if tid in ("", "default"):
+        return True
+    from kazma_ui.auth import admin_decision
+
+    return admin_decision(request) == "ok"
 
 
 def _tenant_clause(tid: str, col: str = "tenant_id") -> tuple[str, list]:

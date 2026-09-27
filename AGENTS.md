@@ -784,9 +784,18 @@ out would miss. Legacy rows with empty `delivery_target` fall back to
 (§2) is preserved — `chat_id` never enters graph state; `delivery_target`
 joins `thread_id`/`platform` in the internal `_gateway` routing sub-dict.
 
-**Multi-tenant memory flag:** `KAZMA_MEMORY_ENFORCE_TENANT=1` (off by default)
-scopes `/memory` operator reads/writes by the request-scoped tenant. See
-§8 ConfigStore + the env-var reference. Note: `entities.id` is a global PK,
+**Multi-tenant memory:** tenants are enforced with
+`KAZMA_MEMORY_ENFORCE_TENANT=1`, in production (`KAZMA_PRODUCTION=1`) and with
+multi-user on (`memory_api._memory_tenant_id`). Then every `/api/memory` route
+reads, counts and changes only the request tenant's rows -- another tenant's
+id reads as not found (`memory_api._row_tenant_ok`,
+`hygiene.invalidate_belief(tenant_id=)`) -- and the engine's own maintenance
+(task queue, reconsolidation, golden eval) is admin-only
+(`platform_rbac._ADMIN_PREFIXES`). The install's own tenant (`default`: no
+binding) is the install's view (`_tenant_clause`). Gate:
+`tests/test_memory_routes_tenant_scope.py` -- every route, enumerated from the
+app, called as one tenant with another's ids; nothing of the other shown or
+changed, and the caller's own rows shown. Note: `entities.id` is a global PK,
 not per-tenant.
 
 ### 17. Lifecycle Status Notifier (`kazma-core/kazma_core/lifecycle_notifier.py`)
@@ -2295,6 +2304,13 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   `verify=shared_ssl_context()` (`kazma_core.http_tls`, one context built in
   a thread at boot) -- the default loads the CA bundle in the constructor,
   on the loop (`test_async_http_clients_share_the_tls_context`).
+- **Every memory route keeps to the caller's tenant**
+  (`tests/test_memory_routes_tenant_scope.py`, 2026-09-27). Until then twelve
+  took any tenant's ids or counted every tenant's rows -- invalidate, merge
+  decisions, graph groupings, rename, unlink, hygiene, health, quality, the
+  episode list -- and the beliefs list failed outright for a tenant-bound
+  caller (its tenant predicate had no value bound). A new route needs a
+  request in the gate's table or fails. See §16's multi-tenant note.
 - **Every product module is reached** (`tests/test_orphan_modules.py`); a
   module only its own tests import fails, unless allowlisted with a reason.
 - **Debt ratchet:** `tests/test_debt_ratchet.py` holds the blind/silent
