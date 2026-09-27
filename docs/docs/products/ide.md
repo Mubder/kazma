@@ -41,15 +41,20 @@ industrial editor loop, use `kazma acp` in Zed.
 
 ## Workspace resolution (must stay consistent)
 
-Both `file_write._get_workspace()` and `IdeService._resolve_workspace_root()` use:
+Every file tool, the IDE service, the workspace API and the environment block
+ask one function, `kazma_core.workspace.binding.resolve_active_root()`
+(`file_write._get_workspace()` is its compatibility name):
 
-1. Per-task `workspace_scope` ContextVar  
-2. `configure_workspace()` global  
-3. `KAZMA_WORKSPACE` env  
-4. Active **WorkspaceStore** row  
-5. Default `cwd/kazma-data/workspace`  
+1. Per-task `workspace_scope` ContextVar (a swarm task aimed at one repository)
+2. Active **WorkspaceStore** row (what Switch Repo or a clone chose)
+3. The process pin from `configure_workspace()`
+4. `KAZMA_WORKSPACE` env
+5. Default sandbox: `<data dir>/workspace`
 
-Production may require an explicit workspace root. Path traversal is blocked with `normpath` + containment checks.
+A relative path given to an agent tool means this folder, never the server
+process's working directory (`binding.resolve_tool_path`). Production may
+require an explicit workspace root. Path traversal is blocked with `normpath` +
+containment checks.
 
 ### Path grants (outside-workspace access)
 

@@ -450,6 +450,23 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
   and `scripts/sync_site_metrics.py` reads the open pull request back or
   fails (`tests/test_site_metrics_sync.py`, `tests/test_generate_metrics.py`,
   `docs/docs/ops/website-metrics.md`).
+- **Closed 2026-09-28: the website's pages drifted from their sources, with
+  no way to tell which.** The site's docs were copied by a one-off script on
+  2026-09-24 and nothing recorded what it had copied. 28 pages had changed
+  here since, two were never published, three site pages had no source (a
+  stale MCP IDE page listing 4 of its 7 tools, an IDE page with the wrong
+  workspace order, a roadmap deleted here), 27 Arabic pages were short
+  versions of their English ones, and 19 had code altered in translation. Now `docs/website-pages.json` gives every
+  page its place (`tests/test_website_pages.py`: a page added here without
+  one fails), `scripts/website_sync_plan.py` lists the work from recorded
+  content ids (`tests/test_website_sync_plan.py`), and
+  `docs/docs/ops/website-sync.md` is the procedure. Found on the way and
+  fixed: the IDE page's workspace order (the site copied it from here), no
+  page for time travel or chaos testing, three pages missing from the docs
+  sidebar (`tests/test_docs_sidebar.py`), and a 500 from a custom chaos
+  injection with an unknown parameter (`tests/test_chaos_routes.py`).
+  **Open, on the website:** the sync itself. The plan lists it; the website
+  agent does it (the owner's repository).
 - **Accepted: the shared-store peer registry is advisory.** It names
   installs; it does not stop one from writing -- replicas share the store
   legitimately, and a fence would need an identity they cannot forge. An acknowledged id silences only that id.
