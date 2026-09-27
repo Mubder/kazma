@@ -22,13 +22,21 @@ holds it), **accepted** (a limit kept on purpose, with the reason), or an
 - **Branch protection on `main`.** It changes GitHub settings; the checklist
   is `docs/docs/ops/branch-protection.md`.
 - **The first prune of the live install's chat step history.** Checkpoint
-  retention covers Postgres since 2026-09-27 (§41 of AGENTS.md); the live
-  install holds 2.9 GB of old steps, and deleting them is the owner's call.
-  It is set to keep everything there (`checkpoints.retention_days` = 0)
-  until the owner sets a number of days in Settings -> System -> Chat step
-  history. New installs prune from day one (30 days).
+  retention covers Postgres since 2026-09-27 (§41 of AGENTS.md). The live
+  install's checkpoint tables are 2.9 GB; at 30 days the prune would remove
+  17,554 of its 22,808 checkpoints (measured read-only that day), and
+  deleting them is the owner's call. It is set to keep everything there
+  (`checkpoints.retention_days` = 0) until the owner sets a number of days in
+  Settings -> System -> Chat step history. New installs prune from day one
+  (30 days).
+- **Removing the test data found on the live install**
+  (`scripts/cleanup_live_leftovers.py --apply`, run from the install folder):
+  it deletes, so the owner runs it; its dry run matched the inventory.
 - **pgvector** was decided 2026-09-27: it stays out. Meaning search is exact
   and local (sqlite-vec / NumPy); see "Exact meaning search is linear" below.
+
+**Watching:** two event-loop stalls right after one boot (2026-09-27 00:50),
+start-up contention with no single cause; see "Operational tripwires".
 
 **Accepted limits** (each is explained where it is recorded below):
 the Postgres CI job runs the marked tests, and every module that opens
