@@ -34,31 +34,43 @@ _SHOW_ANSWER = 300
 _SHOW_ONE = 500
 
 
-#: A greeting, thanks or acknowledgement -- the whole message (plan W5). The
-#: words themselves, not a length: "Pixel's age?" is short and a question.
-#: Arabic is matched folded (documents.arabic.fold_for_search).
-_SMALL_TALK_RE = re.compile(
-    r"^\W*(?:(?:hi|hello|hey|hiya|yo|thanks|thank you|thx|ok|okay|got it|noted|sure|yes|yep|no|nope"
-    r"|cool|nice|great|perfect|lol|haha|bye|good (?:morning|afternoon|evening|night)"
-    r"|مرحبا|اهلا|هلا|هلا والله|السلام عليكم|وعليكم السلام|شكرا|مشكور|يعطيك العافيه|تمام"
-    r"|طيب|اوك|اوكي|ممتاز|حلو|زين)(?:\W+(?:kazma|there|you|a lot|so much|very much|جزيلا))*)\W*$",
+#: The whole message is small talk (plan W5) -- the words themselves, never a
+#: length: "Pixel's age?" is short and a question. Arabic is matched folded
+#: (documents.arabic.fold_for_search). Two kinds, told apart by what follows:
+#: a greeting, thanks or goodbye is answered in kind -- on the live install
+#: such replies ran to 531 characters (median 141, 2026-09-27) -- while "ok",
+#: "yes" or "تمام" is often the go-ahead for a report.
+_TAIL = r"(?:\W+(?:kazma|there|you|all|a lot|so much|very much|again|جزيلا))*\W*$"
+_GREETING_RE = re.compile(
+    r"^\W*(?:hi|hello|hey|hiya|yo|thanks|thank you|thx|bye|goodbye"
+    r"|good (?:morning|afternoon|evening|night)"
+    r"|مرحبا|اهلا|هلا|هلا والله|السلام عليكم|وعليكم السلام|صباح الخير|مساء الخير"
+    r"|شكرا|مشكور|يعطيك العافيه|مع السلامه)" + _TAIL,
     re.IGNORECASE,
 )
-#: A reply longer than this says something, whatever the user said.
-_SMALL_TALK_REPLY = 200
+_ACKNOWLEDGEMENT_RE = re.compile(
+    r"^\W*(?:ok|okay|got it|noted|sure|yes|yep|no|nope|cool|nice|great|perfect|lol|haha"
+    r"|تمام|طيب|اوك|اوكي|ممتاز|حلو|زين)" + _TAIL,
+    re.IGNORECASE,
+)
+#: A reply at least this long says something, whatever the user said.
+_GREETING_REPLY = 1000
+_ACKNOWLEDGEMENT_REPLY = 200
 
 
 def is_small_talk(user_text: str | None, assistant_text: str | None) -> bool:
-    """A turn with nothing to recall: small talk and a short reply.
+    """A turn with nothing to recall: small talk and a reply in kind.
 
     Kept in memory (plan W5 -- nothing is deleted); recall leaves it out of
-    the history it shows. "ok" followed by a long report is not small talk.
+    the history it shows. "ok" followed by a report is not small talk.
     """
     from kazma_core.documents.arabic import fold_for_search
 
-    if len(_flat(assistant_text)) >= _SMALL_TALK_REPLY:
-        return False
-    return bool(_SMALL_TALK_RE.match(fold_for_search(user_text or "")))
+    said = fold_for_search(user_text or "")
+    reply = len(_flat(assistant_text))
+    if _GREETING_RE.match(said):
+        return reply < _GREETING_REPLY
+    return bool(_ACKNOWLEDGEMENT_RE.match(said)) and reply < _ACKNOWLEDGEMENT_REPLY
 
 
 def _flat(text: str | None) -> str:

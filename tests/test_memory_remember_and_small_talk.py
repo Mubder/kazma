@@ -77,7 +77,14 @@ def test_a_short_arabic_request_to_remember_is_not_filler():
     ("Hello Kazma", "Hi there!", True),
     ("مرحبا", "أهلاً! كيف أقدر أساعدك؟", True),
     ("شكراً جزيلاً", "العفو!", True),
-    ("ok", "x" * 300, False),  # "ok" and then a report
+    ("صباح الخير", "صباح النور!", True),
+    # A greeting is answered in kind, at length on the live install (531
+    # characters at most, 2026-09-27); a report after a greeting is not.
+    ("hello", "Hey there! Anything you'd like me to do with those emails? " * 5, True),
+    ("hello", "Here is your morning briefing. " * 40, False),
+    # "ok" is often the go-ahead for a report.
+    ("ok", "Done.", True),
+    ("ok", "x" * 300, False),
     ("Pixel's age?", "Four years old.", False),  # short, and a question
     ("hi, what is my dog called?", "Pixel.", False),
 ])
