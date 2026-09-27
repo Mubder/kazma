@@ -126,7 +126,11 @@ def search_transcripts(
     when the store is missing or no session is about the question.
     """
     try:
-        terms = _terms(query)
+        from kazma_core.memory.episode_text import is_small_talk
+
+        # An empty recall runs this fallback: a greeting must not bring
+        # back every past chat that said hello (plan W5).
+        terms = [] if is_small_talk(query, None) else _terms(query)
         if not terms:
             return []
         from kazma_core.memory.chat_history import search_sessions

@@ -139,16 +139,34 @@ def conn(tmp_path, monkeypatch):
     c.close()
 
 
-def test_a_greeting_is_not_recalled_when_the_user_greets_again(conn, monkeypatch):
+def test_a_greeting_is_not_shown_as_history(conn, monkeypatch):
+    """A question that meets the greeting by meaning ("help") still does not
+    get it back."""
     from kazma_core.memory import recall as recall_mod
 
-    found = recall_mod.recall("hello there", conn=conn)
+    found = recall_mod.recall("can you help with this", conn=conn)
     assert "e0" not in {h.id for h in found.episodes}
     assert conn.execute("SELECT count(*) FROM episodes").fetchone()[0] == 3  # kept, not deleted
     # Negative control: without the rule the greeting is what recall finds.
     monkeypatch.setattr(recall_mod, "is_small_talk", lambda user, answer: False)
-    again = recall_mod.recall("hello there", conn=conn)
+    again = recall_mod.recall("can you help with this", conn=conn)
     assert "e0" in {h.id for h in again.episodes}
+
+
+def test_a_greeting_looks_nothing_up(conn, monkeypatch):
+    """"hello" needs no memory, and an empty recall runs the past-chats
+    fallback -- which searched every old chat that said hello."""
+    from kazma_core.memory import recall as recall_mod
+    from kazma_core.memory import transcript_recall
+
+    assert recall_mod.recall("hello there", conn=conn).empty
+    searched: list[object] = []
+    monkeypatch.setattr("kazma_core.memory.chat_history.search_sessions",
+                        lambda *a, **k: searched.append(a) or [])
+    assert transcript_recall.search_transcripts("thanks a lot!") == []
+    assert searched == []
+    transcript_recall.search_transcripts("what did we decide about the migration report?")
+    assert searched  # negative control: a real question is searched
 
 
 def test_an_ok_before_a_report_is_still_history(conn):

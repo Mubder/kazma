@@ -118,6 +118,10 @@ def recall(
         Empty lists (not exceptions) on any failure — recall is
         best-effort so a broken path degrades silently.
     """
+    if is_small_talk(query, None):
+        # "hello", "thanks", "ok": nothing to look up (plan W5). A greeting
+        # brought back earlier greetings, by meaning and by the word.
+        return RecallResult(beliefs=[], episodes=[])
     try:
         from kazma_core.memory.state_backend import is_state_primary
 
@@ -1629,53 +1633,21 @@ def _belief_graph_ppr(
     except Exception:
         pass
 
-    # Load active beliefs as graph edges (capped)
-    try:
-        rows = conn.execute(
-            """
-            SELECT id, subject, predicate, object, confidence, structural_importance
-            FROM beliefs
-            WHERE valid_until IS NULL AND invalidated_at IS NULL
-              AND tenant_id = ?
-            ORDER BY structural_importance DESC, confidence DESC
-            LIMIT ?
-            """,
-            (tenant_id, max(max_nodes * 4, 400)),
-        ).fetchall()
-    except Exception:
-        return {}
-    if not rows:
-        return {}
-
-    edges: list[tuple[str, str, float]] = []
-    entity_to_beliefs: dict[str, list[str]] = {}
-    node_set: set[str] = set()
-
     def _norm(s: str) -> str:
         return " ".join((s or "").strip().lower().split())
 
-    for r in rows:
-        sub = _norm(r["subject"])
-        obj = _norm(r["object"])
-        if not sub or not obj:
-            continue
-        bid = r["id"]
-        # Weight edges by confidence × importance (stronger multi-hop paths)
-        try:
-            conf = float(r["confidence"] or 0.5)
-            imp = float(r["structural_importance"] or 1.0)
-            w = max(0.15, min(2.0, conf * (0.5 + imp / 5.0)))
-        except Exception:
-            w = 1.0
-        # Directed subject→object (strong) + reverse (weaker) for undirected walk
-        edges.append((sub, obj, w))
-        edges.append((obj, sub, w * 0.5))
-        node_set.add(sub)
-        node_set.add(obj)
-        entity_to_beliefs.setdefault(sub, []).append(bid)
-        entity_to_beliefs.setdefault(obj, []).append(bid)
-
-    if not edges:
+    # Every entity name, to find the seeds -- the names only, not the facts.
+    try:
+        node_set = {
+            _norm(name) for (name,) in conn.execute(
+                f"SELECT subject FROM beliefs WHERE {BELIEF_ACTIVE_SQL} AND tenant_id = ? "
+                f"UNION SELECT object FROM beliefs WHERE {BELIEF_ACTIVE_SQL} AND tenant_id = ?",
+                (tenant_id, tenant_id),
+            )
+        } - {""}
+    except sqlite3.Error:
+        return {}
+    if not node_set:
         return {}
 
     # Seeds: query tokens + multi-word entity names that appear in the graph
@@ -1714,6 +1686,44 @@ def _belief_graph_ppr(
     if not uniq_seeds:
         return {}
 
+    # The facts around the seeds, hop by hop -- the walk's own reach. It
+    # loaded the most important facts of the tenant (800 at the defaults) and
+    # walked those: any fact below that cut was out of reach, however close
+    # to the question (plan R5). One round more than the walk's radius, so
+    # the edges between its outermost nodes are there too.
+    try:
+        rows = _belief_neighbourhood(conn, tenant_id, set(uniq_seeds), rounds=hop_radius + 1,
+                                     cap=max(max_nodes * 4, 400), norm=_norm)
+    except sqlite3.Error:
+        return {}
+    if not rows:
+        return {}
+
+    edges: list[tuple[str, str, float]] = []
+    entity_to_beliefs: dict[str, list[str]] = {}
+
+    for r in rows:
+        sub = _norm(r["subject"])
+        obj = _norm(r["object"])
+        if not sub or not obj:
+            continue
+        bid = r["id"]
+        # Weight edges by confidence × importance (stronger multi-hop paths)
+        try:
+            conf = float(r["confidence"] or 0.5)
+            imp = float(r["structural_importance"] or 1.0)
+            w = max(0.15, min(2.0, conf * (0.5 + imp / 5.0)))
+        except Exception:
+            w = 1.0
+        # Directed subject→object (strong) + reverse (weaker) for undirected walk
+        edges.append((sub, obj, w))
+        edges.append((obj, sub, w * 0.5))
+        entity_to_beliefs.setdefault(sub, []).append(bid)
+        entity_to_beliefs.setdefault(obj, []).append(bid)
+
+    if not edges:
+        return {}
+
     try:
         entity_scores = compute_local_ppr(
             uniq_seeds,
@@ -1733,6 +1743,52 @@ def _belief_graph_ppr(
             # Accumulate mass across multi-entity beliefs (richer multi-hop)
             belief_scores[bid] = prev + float(mass)
     return belief_scores
+
+
+def _belief_neighbourhood(
+    conn: sqlite3.Connection,
+    tenant_id: str,
+    seeds: set[str],
+    *,
+    rounds: int,
+    cap: int,
+    norm: Any,
+) -> list[sqlite3.Row]:
+    """The tenant's current facts within *rounds* hops of *seeds*, nearest first.
+
+    Each round reads the facts touching the last round's new names, until
+    *cap* facts. Names are compared lower-cased (the graph's normal form
+    also collapses whitespace; an entity slug has none).
+    """
+    found: list[sqlite3.Row] = []
+    seen: set[str] = set()
+    reached = set(seeds)
+    frontier = sorted(seeds)
+    for _ in range(max(1, rounds)):
+        new_names: set[str] = set()
+        for start in range(0, len(frontier), 400):
+            chunk = frontier[start:start + 400]
+            marks = ",".join("?" * len(chunk))
+            for row in conn.execute(
+                "SELECT id, subject, predicate, object, confidence, structural_importance "
+                f"FROM beliefs WHERE {BELIEF_ACTIVE_SQL} AND tenant_id = ? "
+                f"AND (lower(subject) IN ({marks}) OR lower(object) IN ({marks}))",
+                (tenant_id, *chunk, *chunk),
+            ):
+                if row["id"] in seen:
+                    continue
+                seen.add(row["id"])
+                found.append(row)
+                for name in (norm(row["subject"]), norm(row["object"])):
+                    if name and name not in reached:
+                        reached.add(name)
+                        new_names.add(name)
+                if len(found) >= cap:
+                    return found
+        if not new_names:
+            break
+        frontier = sorted(new_names)
+    return found
 
 
 # ── Access accounting + session bias (Phase A) ────────────────────────────

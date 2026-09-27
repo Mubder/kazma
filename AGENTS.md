@@ -683,7 +683,21 @@ four injected were noise.
   under 1,000 characters (live greeting replies ran to 531, median 141); an
   acknowledgement ("ok", "yes", "تمام") only with a reply under 200 -- it is
   often the go-ahead for a report. Every episode candidate path of recall
-  (local, Postgres-primary, mirror top-up) leaves it out; the row stays.
+  (local, Postgres-primary, mirror top-up) leaves it out; the row stays. A
+  small-talk MESSAGE looks nothing up: `recall` returns empty at once and
+  `search_transcripts` (the past-chats fallback an empty recall runs) too.
+- **The graph walk reads the seeds' neighbourhood (R5).** It loaded the
+  tenant's most important facts (800 at the defaults) and walked those: a
+  fact below the cut was out of reach however close to the question.
+  `recall._belief_neighbourhood` reads the facts around the seeds hop by hop
+  (one round past the walk's radius, so the edges between its outermost
+  nodes are there); the seeds come from every entity name. Same graph as
+  before whenever the old cut held everything.
+- **Hybrid vector search merges (R8).** `HybridVectorBackend.search`
+  returned the remote index's hits alone whenever it had any, so a memory
+  not yet in the remote index was invisible to meaning search. Both are
+  searched and merged by id; the local store's score wins (it is the source
+  of truth).
 - **Measured, not asserted (R7):** `kazma_core/memory/benchmark.py` seeds a
   private database the product's way -- turns via `episode_row`, facts via
   `mutate_belief(private=True)`, which keeps every write in that database (no

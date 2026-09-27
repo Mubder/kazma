@@ -44,7 +44,11 @@ every change is inside the existing V2 engine.
 | X3 | Found building R3: the memory Rebuild deleted `data_dir/vector_memory` -- now the Knowledge Library's live store. Removed; the Knowledge Library re-embeds another model's vectors and rebuilds a collection of another size itself | ☑ `tests/test_knowledge_meaning_search.py` |
 | W4 | "Remember this" heard in Arabic too (folded, whole words: a ticket, تذكرة, is not تذكر); promotes the turn and is a durable cue | ☑ `tests/test_memory_remember_and_small_talk.py` |
 | W5 | Small talk (the words and a short reply) is kept but never recalled, on every episode path; benchmark unchanged | ☑ same file |
-| S2+ | Remaining Stage 2 items, in the approved order: R5, R8, then C1, U1, W6, R6, C2 | ☐ |
+| R5 | The graph walk reads the facts around its seeds hop by hop instead of the 800 most important; 1,102-fact test where the old cut missed the chain | ☑ `tests/test_memory_graph_reach_and_hybrid.py` |
+| R8 | Hybrid vector search merges the remote index with the local store (local score wins) | ☑ same file |
+| C1 | Measured before building (2026-09-27): the live install holds 6 current, user-stated, single-valued facts about the user -- all subscription reset dates, 4 of them past. A profile "from user_explicit facts" would put stale dates in front of the model every turn. Not built: it needs the owner to say what the profile holds (for example an editable "About me" in Settings) | ☐ owner |
+| R6 | A reranker (bge-reranker-v2-m3) is a ~2 GB model download: needs the owner's go-ahead before anything is fetched | ☐ owner |
+| S2+ | Remaining Stage 2 items, in the approved order: U1, W6, C2 | ☐ |
 
 ---
 
