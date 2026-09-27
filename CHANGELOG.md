@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## An old "skip approvals" flag no longer lasts forever (2026-09-28)
+
+**One chat of the live install had skipped approvals since July.** YOLO
+mode lets a chat run dangerous tools without asking for a limited time. Flags
+set before those time limits existed (July 2026) had no end time, and Kazma
+kept honouring them for good. One such flag, from 2026-07-19, was still in
+place. Had that chat been reopened, its dangerous tools would have run
+unasked. A flag with no end time now counts as ended and is removed.
+
+**Ended YOLO windows are cleaned up.** A window was removed only when its own
+chat was opened again, so 90 ended windows had built up in the settings since
+July. The 15-minute maintenance pass now removes every ended window. A
+running window is never cut short.
+
 ## A standing procedure keeps kazma.ai in step with the code (2026-09-28)
 
 **Anyone updating the website now starts from one page and one command.**

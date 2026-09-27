@@ -207,6 +207,10 @@ auto-approve repo mutations** (a misread intent must cost a dialog, never a
 commit; 2026-08-27 incident). Read-only git (`status`/`log`/`diff`) is
 exempt. YOLO windows also default to **1 hour** (was 4) —
 `KAZMA_YOLO_TTL_SECONDS` overrides. See [Task Ledger](task-ledger).
+An ended window is removed within 15 minutes whether or not its chat is
+opened again, and a flag from before windows had an end time counts as
+ended: until 2026-09-28 such a flag was honoured for good, and one chat of
+the live install had skipped approvals under it since July.
 
 Code fallback if unset: `DEFAULT_DANGER_TOOLS = ["file_write", "file_delete", "shell_exec", "vault_retrieve", "vault_delete"]` (`safety/hitl.py:41`). The vault tools protect secret retrieval/deletion.
 

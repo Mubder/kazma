@@ -207,6 +207,55 @@ def is_yolo_active(thread_id: str | None) -> bool:
     return bool(st.get("active"))
 
 
+def _is_legacy_flag(raw: Any) -> bool:
+    """A pre-TTL "YOLO on" value: a bare True, 1 or "true" with no end time."""
+    return raw is True or (not isinstance(raw, dict) and raw in (1, "1", "true", "True", "yes"))
+
+
+#: Where YOLO windows are stored: ``enable_yolo`` writes ``safety``; the
+#: writer before it used ConfigStore's default ``general`` (one such flag was
+#: still on the live install on 2026-09-28).
+_YOLO_CATEGORIES = ("safety", "general")
+
+
+def _window_ended(raw: Any, now: float) -> bool:
+    """Whether a stored YOLO value no longer grants anything."""
+    if _is_legacy_flag(raw):
+        return True
+    if not isinstance(raw, dict) or not raw.get("enabled"):
+        return True
+    expires = raw.get("expires_at")
+    if expires is None:
+        return False  # KAZMA_YOLO_TTL_SECONDS=off: no end, on purpose
+    try:
+        return now > float(expires)
+    except (TypeError, ValueError):
+        return False  # yolo_status ignores an unreadable end time too
+
+
+def purge_expired_yolo(now: float | None = None) -> int:
+    """Delete every YOLO window that has ended; returns how many.
+
+    ``yolo_status`` removes an ended window only when its own chat asks
+    again, so a chat nobody reopened kept its row for good: 90 on the live
+    install, from July to September 2026, one of them a legacy flag that
+    still counted as active. Runs on the 15-minute maintenance cadence
+    (``worker_bootstrap._MAINTENANCE_SWEEPS``).
+    """
+    from kazma_core.config_store import get_config_store
+
+    cs = get_config_store()
+    moment = time.time() if now is None else now
+    removed = 0
+    for category in _YOLO_CATEGORIES:
+        for key, raw in cs.get_category(category).items():
+            if key.startswith("yolo.") and _window_ended(raw, moment) and cs.delete(key):
+                removed += 1
+    if removed:
+        logger.info("[yolo] removed %d ended YOLO window(s)", removed)
+    return removed
+
+
 def yolo_status(thread_id: str) -> dict[str, Any]:
     """Return structured YOLO status; auto-disables on expiry."""
     from kazma_core.config_store import get_config_store
@@ -216,15 +265,18 @@ def yolo_status(thread_id: str) -> dict[str, Any]:
     if not raw:
         return {"active": False, "thread_id": thread_id}
 
-    # Legacy: bare True / "true" / 1
-    if raw is True or raw in (1, "1", "true", "True", "yes"):
-        return {
-            "active": True,
-            "thread_id": thread_id,
-            "legacy": True,
-            "ttl_seconds": _ttl_seconds(),
-            "actor": "unknown",
-        }
+    # Legacy: a bare True / "true" / 1 from before windows had an end time.
+    # It was honoured as active when TTLs arrived (2026-07-21) so running
+    # windows kept working -- and so it never ended: on 2026-09-28 one chat
+    # of the live install still skipped approvals under a flag set on
+    # 2026-07-19. A window with no end time of its own is over.
+    if _is_legacy_flag(raw):
+        cs.delete(f"yolo.{thread_id}")
+        logger.warning(
+            "[SECURITY] YOLO legacy flag without an end time removed thread=%s",
+            thread_id,
+        )
+        return {"active": False, "thread_id": thread_id, "expired": True, "legacy": True}
 
     if not isinstance(raw, dict) or not raw.get("enabled"):
         return {"active": False, "thread_id": thread_id}

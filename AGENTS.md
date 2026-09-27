@@ -514,7 +514,9 @@ left backups/export inert). Current boot list:
   beliefs, subject-hash partitioned).
 - **15-min commitment GC:** TTL expiry + tiered retention (§20). Every
   sweep on this cadence is one entry of `_MAINTENANCE_SWEEPS` (commitment GC,
-  artifact GC, HITL-gate TTL, memory task-queue purge, swarm task retention —
+  artifact GC, HITL-gate TTL, ended YOLO windows -- `safety/yolo.py`; a
+  pre-TTL flag with no end time counts as ended, it had kept one live chat's
+  approvals off since July --, memory task-queue purge, swarm task retention —
   `swarm.task_retention_days`, default 30, 0 keeps all — checkpoint
   retention, §41, the supervisor
   watch, §39, memory vector repair, knowledge vector repair (§24F), memory
