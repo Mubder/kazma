@@ -1408,6 +1408,18 @@ tbody tr:last-child td {
   font-size: 0.95rem;
   white-space: pre-wrap;
 }
+/* kazmaConfirm's optional checkbox (e.g. "also forget what Kazma learned"). */
+.modal-checkbox-row { padding-top: 0; flex: 0 0 auto; }
+.modal-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+.modal-checkbox input { accent-color: var(--accent); width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; }
 .modal-footer {
   display: flex;
   align-items: center;

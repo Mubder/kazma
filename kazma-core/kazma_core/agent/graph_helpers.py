@@ -487,3 +487,25 @@ def _ensure_personality(
 
     return msgs
 
+
+def _ensure_about_user(messages: list[dict[str, Any]], block: str) -> list[dict[str, Any]]:
+    """Place the user's "About me" (``memory/profile.py``, plan C1) right after
+    the base system prompt and the personality, replacing any earlier copy;
+    with an empty *block* the earlier copy goes. Every call of every turn gets
+    the current text, so an edit in Settings takes effect on the next call.
+    """
+    from kazma_core.memory.profile import ABOUT_MARKER
+
+    msgs = [m for m in messages if ABOUT_MARKER not in str(m.get("content", ""))]
+    if not block:
+        return msgs
+    at = 0
+    while (
+        at < len(msgs)
+        and msgs[at].get("role") == "system"
+        and (at == 0 or _PERSONALITY_MARKER in str(msgs[at].get("content", "")))
+    ):
+        at += 1
+    msgs.insert(at, {"role": "system", "content": block})
+    return msgs
+

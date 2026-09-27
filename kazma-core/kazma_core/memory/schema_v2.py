@@ -215,6 +215,15 @@ CREATE TABLE IF NOT EXISTS memory_forgotten (
   PRIMARY KEY (tenant_id, session_key, turn_number, question_sha)
 );
 
+-- "About me" (plan C1, memory/profile.py): what the user wants Kazma to know
+-- about them, in their own words, shown to the model on every call. One row
+-- per tenant; an empty text removes it.
+CREATE TABLE IF NOT EXISTS memory_profile (
+  tenant_id   TEXT PRIMARY KEY,
+  about       TEXT NOT NULL,
+  updated_at  REAL NOT NULL
+);
+
 -- Weekly topic summaries (plan C2, topic_summaries.py): what one week of
 -- conversations said about one topic, written by the model from those turns.
 -- Derived memory: memory_summary_sources names the turns, and forgetting one

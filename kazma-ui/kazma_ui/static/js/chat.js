@@ -6937,27 +6937,35 @@
     }
   }
 
+  // Deleting a chat keeps what Kazma learned from it (plan S3, the owner's
+  // rule 2026-09-27: memory outlives chats) unless the box is ticked. Ticked,
+  // the chat is kept out of memory and what it left is forgotten FIRST --
+  // the forget finds the chat's other key through the chat store, which the
+  // delete empties -- and a failed forget stops the delete.
   async function deleteSession(sessionId) {
-    if (!(await window.kazmaConfirm({
-      title: 'Delete session',
-      message: 'Delete session ' + sessionId.slice(0, 8) + '? This cannot be undone.',
-      confirmText: 'Delete',
+    var choice = await window.kazmaConfirm({
+      title: ti('delete_chat_title', 'Delete chat'),
+      message: ti('delete_chat_body', 'Delete this chat? This cannot be undone. What Kazma learned from it stays in its memory unless you tick the box below.'),
+      confirmText: ti('delete_chat_confirm', 'Delete'),
       danger: true,
-    }))) return;
-    fetch('/api/chat/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' })
-      .then(function(resp) {
-        if (!resp.ok) {
-          if (window.showToast) window.showToast('Delete failed (' + resp.status + ')', 'error', 3000);
-          else if (KS.toast) KS.toast('Delete failed (' + resp.status + ')', 'error', 3000);
-          return;
-        }
-        KS.toast('Session deleted', 'success', 2000);
-        loadSessions();
-        if (sessionId === chatSessionId) newSession();
-      })
-      .catch(function() {
-        KS.toast('Failed to delete session', 'error', 3000);
-      });
+      checkbox: ti('delete_chat_forget', 'Also forget what Kazma learned from this chat'),
+    });
+    if (!choice || !choice.ok) return;
+    try {
+      if (choice.checked) {
+        var forgot = await window.kazmaSave(
+          '/api/memory/v2/chats/' + encodeURIComponent(sessionId) + '/memory',
+          { method: 'PUT', body: { remember: false, forget_past: true } });
+        if (!forgot || !forgot.ok) throw new Error((forgot && forgot.error) || 'forget failed');
+      }
+      await window.kazmaSave('/api/chat/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' });
+      KS.toast(choice.checked ? ti('delete_chat_forgot', 'Chat deleted, and what Kazma learned from it forgotten')
+                              : ti('delete_chat_done', 'Chat deleted'), 'success', 2500);
+      loadSessions();
+      if (sessionId === chatSessionId) newSession();
+    } catch (e) {
+      KS.toast(ti('delete_chat_failed', 'Delete failed') + ((e && e.message) ? ': ' + e.message : ''), 'error', 3500);
+    }
   }
 
   /**
@@ -8409,6 +8417,8 @@
   window.KazmaChat = {
     sendMessage: sendMessage,
     newSession: newSession,
+    /** The sidebar's delete, with its "also forget" choice (plan S3). */
+    deleteSession: deleteSession,
     retry: retry,
     destroy: destroyChatMouth,
     toggleArchivedView: toggleArchivedView,

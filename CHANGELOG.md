@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## "About me", and a choice when deleting a chat (2026-09-27)
+
+**Settings → Memory → About me** is a short text you write about yourself:
+your name, your work, where you are, how you like to be answered. Kazma reads
+it at the start of every reply, in every chat; an edit applies to the next
+reply. Kazma never fills it in itself -- built from the facts it had learned,
+it would have shown four past subscription dates on every turn -- and what you
+say in a conversation wins over it. It is part of the memory export.
+
+**Deleting a chat** now says what happens to what Kazma learned from it: it
+stays in memory, unless you tick **Also forget what Kazma learned from this
+chat** in the dialog. Then those memories and facts are forgotten first, and
+the chat is deleted only if that worked.
+
 ## Test data out of the live install, and the gaps that let it in (2026-09-27)
 
 A read-only inventory of the author's live install found data that tests and

@@ -833,6 +833,20 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   second record of the chat under the session "compaction" and the tenant
   "default", out of reach of both controls above; every turn already
   reaches memory (F) and the weekly summaries hold the gist (J).
+- **"About me" (C1, `memory/profile.py`)** is the user's own text (Settings
+  → Memory, `GET/PUT /api/memory/v2/profile`, 2,000 characters, refused --
+  never cut -- past that), one row per tenant in `memory_profile`, in the
+  export. The supervisor reads it on every call (`get_about`, off the loop)
+  and `graph_helpers._ensure_about_user` places it right after the system
+  prompt and personality, replacing an earlier copy. Never inferred: a
+  profile built from facts would have shown 4 past reset dates every turn.
+  `tests/test_memory_about_me.py`.
+- **Deleting a chat keeps its memories (S3, the owner's rule)** unless the
+  dialog's "Also forget what Kazma learned from this chat" is ticked: then
+  the page asks `PUT .../chats/{id}/memory {remember: false, forget_past:
+  true}` FIRST (the forget finds the chat's other key through the chat
+  store, which the delete empties) and deletes only if that succeeded.
+  `tests/e2e/test_chat_delete_forget.py` (unticked makes no forget request).
 - **Export** (`GET /api/memory/v2/export`): the caller's tenant's facts
   (with provenance), memories, weekly summaries, entities and what was
   forgotten (when, never what). The Memory page's "Memories of
@@ -2866,7 +2880,8 @@ types plus `KAZMA_MSGPACK_TYPES`, anything else back as raw data.
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser
-  dialogs. `window.kazmaConfirm(opts)` (→ `Promise<boolean>`),
+  dialogs. `window.kazmaConfirm(opts)` (→ `Promise<boolean>`; with a
+  `checkbox` label it shows that box unticked and answers `{ok, checked}`),
   `window.kazmaAlert(opts)` (→ `Promise<void>`), `window.kazmaPrompt(opts)`
   (→ `Promise<string|null>`). All backed by `$store.modal`
   (`static/js/modules/stores.js`) + `components/modal.html`. Each has a

@@ -51,10 +51,15 @@ export function registerStores() {
             input: null,        // null = no input; a string = placeholder text
             inputValue: '',
             inputType: 'text',
+            // Checkbox support (for kazmaConfirm's `checkbox` option). When
+            // `checkbox` is a label, the modal renders a checkbox bound to
+            // `checkboxValue`, unticked by default.
+            checkbox: '',
+            checkboxValue: false,
 
             /**
              * Open a modal.
-             * @param {Object} opts - { title, body, size, actions, onClose, input, inputValue, inputType }
+             * @param {Object} opts - { title, body, size, actions, onClose, input, inputValue, inputType, checkbox }
              *   onClose is invoked when the modal is dismissed via overlay
              *   click or Escape (i.e. without an explicit action button).
              */
@@ -67,6 +72,8 @@ export function registerStores() {
                 this.input = opts.input !== undefined ? opts.input : null;
                 this.inputValue = opts.inputValue !== undefined ? opts.inputValue : '';
                 this.inputType = opts.inputType || 'text';
+                this.checkbox = opts.checkbox || '';
+                this.checkboxValue = false;
                 this._onClose = opts.onClose || null;
                 this.open = true;
                 if (typeof document !== 'undefined' && document.documentElement) {
@@ -111,6 +118,8 @@ export function registerStores() {
                     this.input = null;
                     this.inputValue = '';
                     this.inputType = 'text';
+                    this.checkbox = '';
+                    this.checkboxValue = false;
                 }, 200);
             },
 
@@ -138,10 +147,18 @@ export function registerStores() {
             /**
              * Promise-based confirm dialog — replaces native window.confirm.
              * Resolves true on Confirm, false on Cancel / overlay / Escape.
-             * @param {Object} opts - { title, message, confirmText, cancelText, danger }
-             * @returns {Promise<boolean>}
+             * With `checkbox` (a label) it also shows that checkbox, unticked,
+             * and resolves `{ ok, checked }` instead: `checked` is the box as
+             * it was when Confirm was pressed (false on Cancel).
+             * @param {Object} opts - { title, message, confirmText, cancelText, danger, checkbox }
+             * @returns {Promise<boolean|{ok: boolean, checked: boolean}>}
              */
             confirmAsync(opts = {}) {
+                const self = this;
+                const withBox = !!opts.checkbox;
+                const answer = function (ok) {
+                    return withBox ? { ok: ok, checked: ok && !!self.checkboxValue } : ok;
+                };
                 const title = opts.title || 'Confirm';
                 const message = opts.message || '';
                 const confirmText = opts.confirmText || 'Confirm';
@@ -150,7 +167,6 @@ export function registerStores() {
                 const danger = opts.danger !== false;
                 const entityMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
                 const escapedMsg = String(message).replace(/[&<>"']/g, function (c) { return entityMap[c]; });
-                const self = this;
                 return new Promise(function (resolve) {
                     let settled = false;
                     const settle = function (val) {
@@ -165,19 +181,20 @@ export function registerStores() {
                         title: title,
                         body: `<p class="confirm-message">${escapedMsg}</p>`,
                         size: 'sm',
-                        onClose: function () { settle(false); },
+                        checkbox: opts.checkbox || '',
+                        onClose: function () { settle(answer(false)); },
                         actions: [
                             {
                                 label: cancelText,
                                 variant: 'btn-secondary',
                                 close: true,
-                                handler: function () { settle(false); },
+                                handler: function () { settle(answer(false)); },
                             },
                             {
                                 label: confirmText,
                                 variant: danger ? 'btn-danger' : 'btn-primary',
                                 close: true,
-                                handler: function () { settle(true); },
+                                handler: function () { settle(answer(true)); },
                             },
                         ],
                     });
@@ -260,7 +277,10 @@ export function registerStores() {
                 return Alpine.store('modal').confirmAsync(opts || {});
             }
             // Fallback if Alpine hasn't booted yet (shouldn't happen on user action).
-            return Promise.resolve(_nativeConfirm(opts && opts.message ? opts.message : ''));
+            // Same shape as confirmAsync: a checkbox option answers {ok, checked},
+            // and the native dialog has no box to tick.
+            const nativeOk = _nativeConfirm(opts && opts.message ? opts.message : '');
+            return Promise.resolve(opts && opts.checkbox ? { ok: nativeOk, checked: false } : nativeOk);
         };
 
         // Global promise-based alert — drop-in replacement for window.alert().

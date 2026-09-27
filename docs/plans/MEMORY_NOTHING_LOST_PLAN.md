@@ -1,9 +1,10 @@
 # Memory: nothing lost, everything found
 
 **Owner-approved:** 2026-09-26 ("move on ... never stop until we have everything in place").
-**Status:** Stage 1 shipped 2026-09-26. Stage 2 shipped 2026-09-27 through C2b; S1's gates
-shipped the same day and its one-off cleanup waits for the owner to run it; what is left
-(C1, R6, S3) waits on the owner's decision -- each row says what. This file is the
+**Status:** Stage 1 shipped 2026-09-26. Stage 2 shipped 2026-09-27 through C2b, with C1
+("About me") and S3 (the delete rule) as the owner chose; S1's gates shipped the same day and
+its one-off cleanup waits for the owner to run it. R6 (a reranker, a 2 GB download) stays
+out by the owner's choice. This file is the
 checklist: every item is ticked here in the same commit that lands it, with the test that holds
 it. A new session resumes from the first unticked item.
 
@@ -48,7 +49,8 @@ every change is inside the existing V2 engine.
 | W5 | Small talk (the words and a short reply) is kept but never recalled, on every episode path; benchmark unchanged | ☑ same file |
 | R5 | The graph walk reads the facts around its seeds hop by hop instead of the 800 most important; 1,102-fact test where the old cut missed the chain | ☑ `tests/test_memory_graph_reach_and_hybrid.py` |
 | R8 | Hybrid vector search merges the remote index with the local store (local score wins) | ☑ same file |
-| C1 | Measured before building (2026-09-27): the live install holds 6 current, user-stated, single-valued facts about the user -- all subscription reset dates, 4 of them past. A profile "from user_explicit facts" would put stale dates in front of the model every turn. Not built: it needs the owner to say what the profile holds (for example an editable "About me" in Settings) | ☐ owner |
+| C1 | Measured before building (2026-09-27): the live install holds 6 current, user-stated, single-valued facts about the user -- all subscription reset dates, 4 of them past, so a profile built from facts would put stale dates in front of the model every turn. Built the owner's way: an "About me" the user writes in Settings -> Memory (2,000 characters, per tenant, in the export), shown to the model on every call right after the system prompt and personality; never inferred | ☑ `tests/test_memory_about_me.py` |
+| S3 | Deleting a chat keeps what Kazma learned from it (the owner's rule); the delete dialog says so and offers "Also forget what Kazma learned from this chat", unticked. Ticked, the chat is kept out of memory and its memories forgotten before it is deleted | ☑ `tests/e2e/test_chat_delete_forget.py` |
 | R6 | A reranker (bge-reranker-v2-m3) is a ~2 GB model download: needs the owner's go-ahead before anything is fetched | ☐ owner |
 | U1 | The user decides what is kept: forget a memory (a tombstone plus the forget ledger every writer asks -- turn reconcile, recovery, the legacy restore and the past-chats search never bring it back), "don't remember this chat" (web menu, `/memory off`), export | ☑ `tests/test_memory_forget.py` |
 | W6 | One fact, one predicate name. Measured on live first: 281 extra current facts shared a subject and value with another under a different name; by meaning (bge-m3) true pairs and different facts overlap ("grok_next_reset" / "grok_personal_next_reset", two accounts, at 0.94), so the rule is the same WORDS -- 15 pairs on live, all true. New facts take the subject's existing name (`mutate_belief`), reconsolidation retires the 13 stored twice among equal sources (the user's word against an inference stays for the user), and the deep pass reuses the names in use and skips one run's status and internal ids. The LLM-judged ADD/UPDATE/DELETE step was not built: what the measurement found is either this rule's or the prompt's | ☑ `tests/test_memory_predicate_names.py` |
@@ -283,7 +285,7 @@ Severity: **H** = memory is wrong, missing or unsafe; **M** = quality or cost; *
 |---|---|---|---|---|---|
 | S1 | Test and probe data live in the production stores. | Live memory: episodes in `rt-thread-1/2` ("run echo -- Done. Tool said: git version…"); Postgres chat store: tenants `t1`, `tenant-alpha`, `tenant-beta` (2026-08-14); an episode under tenant `web:<uuid>`. Swarm store: `task-hitl-1`, `task-paused-2`, `task-hitl-restart` from `tests/test_swarm_task_store.py`, created 2026-08-14 18:58 -- the incident the root `conftest.py` DB shield was built for, so that route is closed (the shield pins SQLite; no test reads a `.env` since 2026-09-25; processes tools start no longer inherit the DSN since 2026-09-26, AGENTS §26 I). | M | One-off cleanup (owner's call -- it deletes); then trace how each got there and gate it (tests may not reach a live DSN; tenant ids come from one resolver). | Gate per route found. |
 | S2 | Several memory paths block the event loop: the supervisor's per-turn knowledge search, the `memory_search` tool, the memory probe and federated-search routes. | graph_supervisor.py:1053; tool_builtins/memory.py:588; routes_direct/memory.py (probe, federated-search). | H | Add `recall`, `federated_search`, `build_v2_health` to `_LOOP_STALL_HELPERS`; the gate then finds every call site; each moves to `asyncio.to_thread`. | tests/test_static_gates.py. |
-| S3 | Deleting a chat keeps its memories. | No memory cleanup on session delete. | M | Owner decision: keep (memory outlives chats, like ChatGPT) or cascade; either way the UI says which, and "forget this chat" exists. | Test of the chosen rule. |
+| S3 | Deleting a chat keeps its memories. | No memory cleanup on session delete. | M | Owner decision: keep (memory outlives chats, like ChatGPT) or cascade; either way the UI says which, and "forget this chat" exists. Chosen 2026-09-27: keep, and the delete dialog offers "Also forget what Kazma learned from this chat". | `tests/e2e/test_chat_delete_forget.py`. |
 | S4 | The embedding config is re-read -- YAML parsed from the process's working directory -- on every recall. | embedder.py:483 `Path("kazma.yaml")`. | M | Resolve kazma.yaml from the install root (AGENTS §38 CWD rule) and cache the config with the ConfigStore's invalidation. | CWD gate entry; a timing test. |
 | S5 | Every recall's access bump rewrites 10 FTS rows: `episodes_fts_au` fires on ANY column update. | schema_v2.py:461. | M | `AFTER UPDATE OF user_text, assistant_text, summary_text` (and the same for beliefs); migration recreates the triggers. | FTS integrity + a row-count test. |
 

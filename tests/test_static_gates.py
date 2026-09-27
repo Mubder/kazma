@@ -935,6 +935,8 @@ _LOOP_STALL_HELPERS = frozenset({
     "sync_state_mirror", "remirror_episodes", "remirror_episode_by_id",
     "remirror_belief_by_id", "retire_copy", "legacy_copies", "forget_chat",
     "forget_episode", "chat_remembered", "_chat_kept_out",
+    # "About me" (plan C1): the supervisor reads it on every model call.
+    "get_about", "set_about",
 })
 
 

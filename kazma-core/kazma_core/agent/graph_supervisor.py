@@ -10,6 +10,7 @@ import time
 from typing import Any
 
 from kazma_core.agent.graph_helpers import (
+    _ensure_about_user,
     _ensure_personality,
     _memory_explain_cv,
     _rag_top_k,
@@ -292,6 +293,21 @@ async def supervisor_node(
         messages = _ensure_personality(messages, system_prompt, personality_prompt)
     elif not any(m.get("role") == "system" for m in messages):
         messages.insert(0, {"role": "system", "content": system_prompt})
+
+    # ── The user's "About me" (plan C1), on every call of every turn ──
+    # Read per call (one SQLite row, off the loop) so an edit in Settings
+    # reaches the next call. A read failure costs this call the block, never
+    # the turn.
+    import sqlite3
+
+    from kazma_core.memory.profile import about_block, get_about
+
+    try:
+        _about = await asyncio.to_thread(get_about, str(state.get("tenant_id") or "default"))
+    except sqlite3.Error:
+        logger.warning("[Supervisor] About me unreadable; this call goes without it", exc_info=True)
+        _about = {"about": ""}
+    messages = _ensure_about_user(messages, about_block(_about.get("about", "")))
 
     # ── LLM call ──────────────────────────────────────────────────
     # Extract the latest user message (used by both the model router and

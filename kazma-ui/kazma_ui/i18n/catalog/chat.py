@@ -28,6 +28,34 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الذاكرة…",
         "en": "Memory…",
     },
+    "chat.delete_chat_title": {
+        "ar": "حذف المحادثة",
+        "en": "Delete chat",
+    },
+    "chat.delete_chat_body": {
+        "ar": "حذف هذه المحادثة؟ لا يمكن التراجع عن ذلك. ما تعلّمه Kazma منها يبقى في ذاكرته إلا إذا اخترت المربع أدناه.",
+        "en": "Delete this chat? This cannot be undone. What Kazma learned from it stays in its memory unless you tick the box below.",
+    },
+    "chat.delete_chat_confirm": {
+        "ar": "حذف",
+        "en": "Delete",
+    },
+    "chat.delete_chat_forget": {
+        "ar": "انسَ أيضًا ما تعلّمه Kazma من هذه المحادثة",
+        "en": "Also forget what Kazma learned from this chat",
+    },
+    "chat.delete_chat_done": {
+        "ar": "حُذفت المحادثة",
+        "en": "Chat deleted",
+    },
+    "chat.delete_chat_forgot": {
+        "ar": "حُذفت المحادثة ونُسي ما تعلّمه Kazma منها",
+        "en": "Chat deleted, and what Kazma learned from it forgotten",
+    },
+    "chat.delete_chat_failed": {
+        "ar": "تعذّر الحذف",
+        "en": "Delete failed",
+    },
     "chat.memory_off_title": {
         "ar": "ألا يتذكر Kazma هذه المحادثة؟",
         "en": "Don't remember this chat?",

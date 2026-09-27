@@ -2329,10 +2329,34 @@ def forget_weekly_summary(summary_id: str) -> dict[str, Any]:
         return {"ok": False, "error": safe_error(exc)}
 
 
+@router.get("/api/memory/v2/profile")
+def about_me() -> dict[str, Any]:
+    """The caller's "About me" (plan C1): what they want Kazma to know about
+    them, shown to the model on every call."""
+    from kazma_core.memory.profile import ABOUT_MAX_CHARS, get_about
+
+    return {"ok": True, **get_about(_memory_tenant_id()), "max_chars": ABOUT_MAX_CHARS}
+
+
+@router.put("/api/memory/v2/profile")
+async def set_about_me(request: Request) -> dict[str, Any]:
+    """Save the caller's "About me". Body: ``{"about": "..."}``; empty clears it."""
+    return await asyncio.to_thread(_set_about_me_sync, await _read_json(request))
+
+
+def _set_about_me_sync(payload: Any) -> dict[str, Any]:
+    """Blocking half of :func:`set_about_me` -- runs off the event loop."""
+    from kazma_core.memory.profile import set_about
+
+    if payload is _INVALID_JSON or not isinstance(payload, dict) or not isinstance(payload.get("about"), str):
+        return {"ok": False, "error": "body must be {\"about\": \"...\"}"}
+    return set_about(_memory_tenant_id(), payload["about"])
+
+
 @router.get("/api/memory/v2/export")
 def export_memory() -> Any:
     """Everything the caller's tenant's memory holds, as a JSON download:
-    facts (current and past, with the chat and turn they came from),
+    the user's "About me", facts (current and past, with the chat and turn they came from),
     memories of conversations, weekly summaries (with the memories each was
     written from), entities, and what was forgotten (when -- never what)."""
     from datetime import UTC, datetime
@@ -2380,6 +2404,7 @@ def export_memory() -> Any:
                 "SELECT episode_id FROM memory_summary_sources WHERE summary_id = ? ORDER BY episode_id",
                 (s["id"],),
             )]
+        about = rows("SELECT tenant_id, about, updated_at FROM memory_profile" + scope)
     finally:
         conn.close()
     now = datetime.now(UTC)
@@ -2387,6 +2412,7 @@ def export_memory() -> Any:
         {
             "exported_at": now.isoformat(),
             "tenant": tid,
+            "about_me": about,
             "facts": facts,
             "memories": episodes,
             "weekly_summaries": summaries,
