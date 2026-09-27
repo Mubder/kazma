@@ -7,6 +7,7 @@ If any of these tests fail, the corresponding bug has regressed.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import re
 from datetime import date
 from unittest.mock import AsyncMock, patch
@@ -166,7 +167,7 @@ class TestBug07_BusinessAppropriateUsesTestableHour:
 class TestBug08_DBPathAligned:
     """kazma.yaml storage.path must match CHECKPOINT_DB in agent.py."""
 
-    def test_paths_aligned(self):
+    def test_paths_aligned(self, tmp_path, monkeypatch):
         """kazma.yaml and the code default must name the SAME database.
 
         Compared as RESOLVED paths, not as raw strings. ``CHECKPOINT_DB`` used
@@ -178,15 +179,23 @@ class TestBug08_DBPathAligned:
         The invariant this test exists for is unchanged and is the one that
         matters: config and code must not drift onto two different files. A
         string compare would now be asserting how the path is *spelled*.
+
+        Checked for a default install rooted in a temp folder: the suite pins
+        its own data folder (root conftest), and a test may not resolve the
+        checkout's, which on a live install is the live one.
         """
         from pathlib import Path
 
-        from kazma_core.agent import CHECKPOINT_DB
+        from kazma_core import agent_runner, paths
 
+        monkeypatch.delenv("KAZMA_DATA_DIR", raising=False)
+        monkeypatch.setattr(paths, "_project_root", tmp_path)
         with open("kazma.yaml") as f:
             cfg = yaml.safe_load(f)
-        yaml_path = Path(cfg["storage"]["path"]).resolve()
-        code_path = Path(CHECKPOINT_DB).resolve()
+        yaml_path = (tmp_path / cfg["storage"]["path"]).resolve()
+        code_path = Path(paths.checkpoints_db()).resolve()
+        # The constant is that function's answer at import time.
+        assert "CHECKPOINT_DB = str(_checkpoints_db())" in inspect.getsource(agent_runner)
         assert yaml_path == code_path, (
             f"YAML path '{yaml_path}' != code path '{code_path}' — kazma.yaml "
             "and the code default resolve to different checkpoint databases"

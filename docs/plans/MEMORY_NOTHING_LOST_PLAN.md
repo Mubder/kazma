@@ -1,8 +1,9 @@
 # Memory: nothing lost, everything found
 
 **Owner-approved:** 2026-09-26 ("move on ... never stop until we have everything in place").
-**Status:** Stage 1 shipped 2026-09-26. Stage 2 shipped 2026-09-27 through C2b; what is left
-(C1, R6, S1, S3) waits on the owner's decision -- each row says what. This file is the
+**Status:** Stage 1 shipped 2026-09-26. Stage 2 shipped 2026-09-27 through C2b; S1's gates
+shipped the same day and its one-off cleanup waits for the owner to run it; what is left
+(C1, R6, S3) waits on the owner's decision -- each row says what. This file is the
 checklist: every item is ticked here in the same commit that lands it, with the test that holds
 it. A new session resumes from the first unticked item.
 
@@ -53,6 +54,7 @@ every change is inside the existing V2 engine.
 | W6 | One fact, one predicate name. Measured on live first: 281 extra current facts shared a subject and value with another under a different name; by meaning (bge-m3) true pairs and different facts overlap ("grok_next_reset" / "grok_personal_next_reset", two accounts, at 0.94), so the rule is the same WORDS -- 15 pairs on live, all true. New facts take the subject's existing name (`mutate_belief`), reconsolidation retires the 13 stored twice among equal sources (the user's word against an inference stays for the user), and the deep pass reuses the names in use and skips one run's status and internal ids. The LLM-judged ADD/UPDATE/DELETE step was not built: what the measurement found is either this rule's or the prompt's | ☑ `tests/test_memory_predicate_names.py` |
 | C2 | Weekly topic summaries (§5.7): once a week has ended, one summary per topic -- a chat of 4+ turns, or short chats and notes grouped by meaning (average linkage against the tenant's own bar, identical to scipy's) -- written by the model on the durable queue, two weeks in flight; forgetting a turn empties every summary made from it and rewrites it without; a forgotten summary never returns; fenced and credential-masked; Memory page panel, export, health | ☑ `tests/test_memory_topic_summaries.py` |
 | C2b | Recall reads the summaries (§5.7): every active summary ranked on evidence against the MEDIAN of the question's similarity with all summaries, floor 0.21 -- measured on 97 live summaries (every "catch me up" question 0.235-0.439, every unrelated one at most 0.170) and on benchmark v4 (125 summaries, a topic summarized every week, "overview" questions, all no-answer questions clean); shown after the history (above it they cost MRR); only active rows | ☑ `tests/test_memory_summary_recall.py`, `tests/test_memory_benchmark.py` (v4) |
+| S1 | Test data in the live stores (§5.3), inventoried read-only on 2026-09-27 and traced. The earlier tenants (`t1`, `tenant-alpha`, `web:<uuid>`, `rt-thread-*`) were already gone; left: 16 live-test chats (memory, chat store, 2,510 checkpoint rows, snapshots, approval rows, ledgers, a reminder, a draft), 3 test notes and facts stored through the memory tool, 52 test rows in the Postgres mirror, 25 swarm rows and 2 approval rows a test run wrote into the live SQLite stores, 4 stray files -- plus 181 V1 migration copies. The cleanup is `scripts/cleanup_live_leftovers.py` (dry run by default; `--apply` backs up and writes a receipt first), run by the owner. Every route found is gated: tests pin their own data folders (`tests/test_install_data_shield.py`); the mirror no longer resurfaces removed rows and stays whole (§15K, `tests/test_memory_mirror_sync.py`); what the memory tools store names its chat, so forgetting the chat reaches it (`tests/test_memory_tool_provenance.py`); compaction stores nothing; copies are one rule (`tests/test_memory_legacy_copies.py`) | ☑ gates; cleanup ☐ owner runs `--apply` |
 
 ---
 
@@ -389,7 +391,9 @@ from whichever five turns ranked first.
 - Found on the first live run (week 30: 12 summaries, three topics twice):
   the V1 migration's single-turn copies ("User: ... Assistant: ..." in
   `legacy-*` sessions) repeat turns turn reconcile later wrote from the chat
-  store -- 206 of 269. A copy of a turn memory holds is left out (week 30:
+  store -- 206 of 269 by the question alone; 181 by the question and the
+  start of the answer, the rule since 2026-09-27 (the same question with
+  another answer is another occasion). A copy of a turn memory holds is left out (week 30:
   121 turns became 82, 12 topics 9), and runs carry a version: a week an
   older version did is summarized again, its summaries retired first.
 - Result on live history: 104 topics over ten weeks (24 at most a week),

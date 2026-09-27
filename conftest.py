@@ -40,6 +40,38 @@ os.environ.setdefault(
     str(Path(_tempfile.mkdtemp(prefix="kazma-test-log-")) / "kazma.log"),
 )
 
+# Install-data shield (2026-09-27). ``paths.data_dir()`` defaults to
+# ``<checkout>/kazma-data`` and ``paths.user_home()`` to ``<checkout>/.kazma``
+# -- and a live install IS a checkout of this repository. A test run started
+# inside one (Kazma's agent runs the tests of its workspace, and the live
+# workspace is the install folder) wrote into that install's own stores: two
+# pipeline test gates in its hitl_gates.db (2026-09-01), a chat store named
+# chat_sessions_test.db beside its real one, fourteen "test task" rows in its
+# swarm store. tests/conftest.py isolates a few stores one by one and the
+# package suites get none of that; every store follows these two directories,
+# so pinning them covers them all. It runs before anything below imports a
+# product module, and the per-store overrides that would point around it are
+# cleared. A test that needs a directory of its own still sets the variable.
+# tests/test_install_data_shield.py holds it.
+_TEST_DATA_DIR = _tempfile.mkdtemp(prefix="kazma-test-data-")
+_TEST_USER_HOME = _tempfile.mkdtemp(prefix="kazma-test-home-")
+os.environ["KAZMA_DATA_DIR"] = _TEST_DATA_DIR
+os.environ["KAZMA_USER_HOME"] = _TEST_USER_HOME
+#: Every per-store path override ``kazma_core/paths.py`` reads.
+_STORE_PATH_OVERRIDES = (
+    "KAZMA_BACKUPS_DIR",
+    "KAZMA_EXPORTS_DIR",
+    "KAZMA_FTS5_PATH",
+    "KAZMA_HUB_DB",
+    "KAZMA_KNOWLEDGE_GRAPH_DB",
+    "KAZMA_MEMORY_OPS_DB",
+    "KAZMA_MEMORY_STATE_DB",
+    "KAZMA_VECTOR_DB",
+    "KAZMA_VECTOR_PATH",
+)
+for _override in _STORE_PATH_OVERRIDES:
+    os.environ.pop(_override, None)
+
 # Deliberate, explicit opt-out for a real-Postgres run (audit 2026-09-16 F-7).
 #
 # Everything below force-pins sqlite and strips every DSN so a developer's

@@ -18,6 +18,7 @@ instead of hoping a model agrees.
 
 from __future__ import annotations
 
+import json
 import math
 import sqlite3
 import struct
@@ -31,6 +32,8 @@ from kazma_core.memory.schema_v2 import ensure_primary_schema
 
 DIM = 64
 MODEL = "relevance-test-model"
+THIS_INSTALL = "a" * 32
+OTHER_INSTALL = "b" * 32
 Q_AXIS = 0  # the question's own direction
 OFF_AXIS = DIM - 1  # a question about something no memory mentions
 T0 = 1_780_000_000.0
@@ -81,9 +84,12 @@ class _Store:
     def add(self, eid: str, text: str, vec: list[float] | None, *, age_days: float = 10.0,
             tier: str = "episodic", local: bool = True) -> None:
         created = T0 - age_days * 86400
+        # A row local recall holds was mirrored by this install; one only the
+        # mirror holds was written by another (state_backend.written_elsewhere).
+        writer = THIS_INSTALL if local else OTHER_INSTALL
         self.rows[eid] = {"id": eid, "user_text": text, "assistant_text": "",
                           "summary_text": "", "tier": tier, "created_at": created,
-                          "vec": vec}
+                          "vec": vec, "metadata_json": json.dumps({"install": writer})}
         if local:
             self.conn.execute(
                 "INSERT INTO episodes (id, tenant_id, session_id, turn_number, user_text, "
@@ -298,6 +304,7 @@ def test_with_no_vectors_the_words_decide(store, monkeypatch):
 def _mirror_on(store: _Store, monkeypatch) -> None:
     mirror = store.mirror()
     monkeypatch.setattr("kazma_core.memory.state_backend.get_state_backend", lambda: mirror)
+    monkeypatch.setattr("kazma_core.memory.state_backend._this_install_id", lambda: THIS_INSTALL)
 
 
 def test_the_mirror_does_not_re_add_what_local_recall_rejected(store, monkeypatch):
@@ -307,9 +314,14 @@ def test_the_mirror_does_not_re_add_what_local_recall_rejected(store, monkeypatc
     _mirror_on(store, monkeypatch)
     assert [h.id for h in recall(PASSPORT_Q, conn=store.conn).episodes] == ["e_passport"]
 
-    # Negative control: the same row held only by the mirror IS a top-up.
+    # Removed here, the row this install mirrored stays out: it was removed
+    # (2026-09-27: 53 such rows on live, test data among them).
     store.conn.execute("DELETE FROM episodes WHERE id = 'e_morning_run'")
     store.conn.commit()
+    assert [h.id for h in recall(PASSPORT_Q, conn=store.conn).episodes] == ["e_passport"]
+
+    # Negative control: the same row, written by another install, IS a top-up.
+    store.rows["e_morning_run"]["metadata_json"] = json.dumps({"install": OTHER_INSTALL})
     hits = recall(PASSPORT_Q, conn=store.conn).episodes
     assert [h.id for h in hits] == ["e_passport", "e_morning_run"]
     assert hits[1].metadata["strength"] == "weak"

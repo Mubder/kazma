@@ -242,26 +242,32 @@ def test_small_talk_and_copies_are_left_out(mem):
 
 def test_a_migration_copy_of_a_turn_memory_holds_is_left_out(mem):
     """The V1 migration wrote old memories as "User: ... Assistant: ..."
-    turns of legacy-* sessions; turn reconcile wrote the same turns from the
-    chat store. Version 1 summarized both and wrote July's topics twice."""
+    turns of legacy-* sessions, the answer cut at about 300 characters and
+    marked "…"; turn reconcile wrote the same turns from the chat store.
+    Version 1 summarized both and wrote July's topics twice. The same
+    question with another answer is another occasion, and stays."""
+    full = "You have fifteen private repos: kazma, shipx, kca, cortexswarm and eleven more."
     _turn(mem, "chat_turn", chat="c9", n=1, topic="repos", question="what private repos do I have",
-          answer="Fifteen private repos.")
+          answer=full)
     _turn(mem, "legacy_copy", chat="legacy-abcd1234", n=0, topic="repos", answer="",
-          question="User: What private repos do I have\nAssistant: You have fifteen private repos.")
+          question=f"User: What private repos do I have\nAssistant: {full[:40]}…")
+    _turn(mem, "legacy_other_time", chat="legacy-12345678", n=0, topic="repos", answer="",
+          question="User: What private repos do I have\nAssistant: I indexed them earlier: nine.")
     _turn(mem, "legacy_only", chat="legacy-ef567890", n=0, topic="colour", answer="",
           question="User: what is my favourite colour\nAssistant: Teal.")
     turns = {t.id: t for t in ts._load_turns(mem.db, "default", start=WEEK_START, end=WEEK_END)}
-    assert "chat_turn" in turns and "legacy_copy" not in turns
+    assert "chat_turn" in turns and "legacy_copy" not in turns and "legacy_other_time" in turns
     assert (turns["legacy_only"].question, turns["legacy_only"].answer) == ("what is my favourite colour", "Teal.")
 
 
 def test_without_the_copy_check_the_migration_copy_would_count_twice(mem, monkeypatch):
     """Negative control."""
     monkeypatch.setattr(ts, "_legacy_copies", lambda conn, tenant_id, rows: set())
+    full = "You have fifteen private repos: kazma, shipx, kca, cortexswarm and eleven more."
     _turn(mem, "chat_turn", chat="c9", n=1, topic="repos", question="what private repos do I have",
-          answer="Fifteen private repos.")
+          answer=full)
     _turn(mem, "legacy_copy", chat="legacy-abcd1234", n=0, topic="repos", answer="",
-          question="User: What private repos do I have\nAssistant: You have fifteen private repos.")
+          question=f"User: What private repos do I have\nAssistant: {full[:40]}…")
     assert {t.id for t in ts._load_turns(mem.db, "default", start=WEEK_START, end=WEEK_END)} == {
         "chat_turn", "legacy_copy"}
 

@@ -241,14 +241,14 @@ def test_postgres_primary_fuses_pgvector_dense(monkeypatch) -> None:
 
 
 def test_postgres_primary_still_fail_closed(monkeypatch) -> None:
-    from kazma_core.memory.state_backend import NullStateBackend
+    from kazma_core.memory.state_backend import _NullStateBackend
 
     monkeypatch.setattr(
         "kazma_core.memory.state_backend.is_state_primary", lambda cfg=None: True
     )
     monkeypatch.setattr(
         "kazma_core.memory.state_backend.get_state_backend",
-        lambda: NullStateBackend(),
+        lambda: _NullStateBackend(),
     )
     result = recall("where do I live")
     assert result.beliefs == []

@@ -103,39 +103,13 @@ class CompactionEngine:
         # Step 2: Summarize the conversation
         summary = await self.summarize(messages)
 
-        # Step 2.5: Auto-store the summary in memory for long-term retention
-        # This ensures conversation facts survive context window compaction.
-        # Audit AC4: the summary is LLM-generated over untrusted conversation
-        # content, so it MUST be run through filter_injection before it lands
-        # in memory — otherwise attacker text bypasses the consolidator's
-        # sanitization and is retrieved + re-injected on future turns.
-        try:
-            import time
-            safe_summary = summary
-            try:
-                from kazma_core.safety.prompt_fence import filter_injection
-
-                safe_summary = filter_injection(summary)
-                if safe_summary is None:
-                    logger.warning(
-                        "[Compaction] summary matched an injection marker — "
-                        "NOT auto-storing to memory (would poison future prompts)"
-                    )
-            except Exception:
-                pass
-            if safe_summary is not None:
-                # V2-native: store the summary as a V2 episode. The
-                # filter_injection guard above MUST run first (audit
-                # AC4 / A9 — unsanitized summaries poison future prompts).
-                from kazma_core.memory.swarm_bridge import store_compaction_summary
-
-                store_compaction_summary(
-                    safe_summary,
-                    metadata={"type": "compaction_summary", "ts": time.time(), "source": "compaction"},
-                )
-                logger.debug("Auto-stored compaction summary to V2 memory")
-        except Exception:
-            logger.debug("Auto-store failed (non-fatal)", exc_info=True)
+        # The summary is not stored in memory (2026-09-27). Every turn of the
+        # conversation already is (AGENTS.md §15F, "every turn reaches
+        # memory"), and the weekly summaries hold its gist (§15J). The stored
+        # copy was a second record of the chat under the session
+        # "compaction" and the tenant "default", out of reach of "forget this
+        # chat" and "don't remember this chat" -- a chat the user kept out of
+        # memory still left its summary there.
 
         # Step 3: Retrieve relevant memories based on the summary
         memories = await self.retrieve_memories(summary, limit=5)

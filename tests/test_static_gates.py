@@ -930,6 +930,11 @@ _LOOP_STALL_HELPERS = frozenset({
     # Deleting a Knowledge Library: every chunk and FTS row, then the Chroma
     # collection (which may start the client). /kb delete ran it on the loop.
     "delete_library",
+    # The memory mirror and forget paths (2026-09-27): each reads SQLite and
+    # makes Postgres round trips, one per row it pushes or removes.
+    "sync_state_mirror", "remirror_episodes", "remirror_episode_by_id",
+    "remirror_belief_by_id", "retire_copy", "legacy_copies", "forget_chat",
+    "forget_episode", "chat_remembered", "_chat_kept_out",
 })
 
 

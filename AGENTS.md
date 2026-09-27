@@ -517,7 +517,8 @@ left backups/export inert). Current boot list:
   artifact GC, HITL-gate TTL, memory task-queue purge, swarm task retention —
   `swarm.task_retention_days`, default 30, 0 keeps all — the supervisor
   watch, §39, memory vector repair, knowledge vector repair (§24F), memory
-  recovery and memory turn reconcile, §15F, weekly topic summaries, §15J),
+  recovery and memory turn reconcile, §15F, memory mirror sync, §15K,
+  weekly topic summaries, §15J),
   run by ONE isolated
   runner so a failing sweep never stops the rest -- and is logged at WARNING
   (it was DEBUG: a sweep failing every pass is a feature that is off). A new periodic cleanup is a
@@ -817,6 +818,21 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   without their forgotten turns. Web: the chat's menu (Memory...); chat
   apps: `/memory off` / `/memory on`. Turning it off also forgets what the
   chat left (`forget_past`).
+- **What the agent stores with its memory tools belongs to the chat**
+  (2026-09-27). `memory_store` and `memory_link_entities` name the chat and
+  turn they run in (`tool_builtins/memory._chat_of_call`: the bound thread
+  and `user_turn_index` of the turn's messages) -- on the note
+  (`metadata.chat` / `chat_turn`) and on every fact (`source_session` /
+  `source_turn`) -- and refuse in a chat kept out of memory. Forgetting a
+  turn takes that turn's notes with it; forgetting a chat takes every note
+  and every fact naming it (`_chat_notes`, `_forget_chat_facts`). Before,
+  a test chat's token ("pebble-live") outlived the chat as a current fact.
+  Gate: `tests/test_memory_tool_provenance.py` (every memory write in the
+  agent's tool code names its chat).
+- **Compaction stores nothing in memory** (2026-09-27). Its summary was a
+  second record of the chat under the session "compaction" and the tenant
+  "default", out of reach of both controls above; every turn already
+  reaches memory (F) and the weekly summaries hold the gist (J).
 - **Export** (`GET /api/memory/v2/export`): the caller's tenant's facts
   (with provenance), memories, weekly summaries, entities and what was
   forgotten (when, never what). The Memory page's "Memories of
@@ -841,8 +857,14 @@ queued by the maintenance sweep with at most two weeks in flight.
   week's own percentile split weeks of few topics). A question with fewer
   than two content words follows the previous turn of its chat. A V1
   migration copy of a turn memory also holds (`legacy-*`, "User: ...
-  Assistant: ...": 206 of 269 on live) is left out -- the first run wrote
-  three July topics twice.
+  Assistant: ...": 181 of 269 on live) is left out -- the first run wrote
+  three July topics twice. One rule decides what a copy is, here and in the
+  live cleanup: `legacy_tables.legacy_copies`, the question AND the start of
+  the answer (the migration cut answers at ~300 characters, "…"); the same
+  question with another answer is another occasion. `forget.retire_copy`
+  empties a copy without a ledger row and keeps its facts -- the original
+  stays remembered, and the kept id stops the legacy restore bringing it
+  back (`tests/test_memory_legacy_copies.py`).
 - **Versioned:** a week done by an older `_VERSION` of these rules is
   summarized again, its summaries retired first; a forgotten summary stays a
   tombstone and still keeps its topic unwritten.
@@ -877,6 +899,32 @@ queued by the maintenance sweep with at most two weeks in flight.
   rows never are (`tests/test_memory_summary_recall.py`).
 - Gate: `tests/test_memory_topic_summaries.py` (grouping identical to
   scipy's average linkage; each rule with a negative control).
+
+**K. The Postgres memory mirror stays whole (2026-09-27, `memory/state_backend.py`).**
+Found on live that day: 116 turns still "working" in the mirror (the
+working-turn promotion never told it), 17 facts that never reached it, and 53
+rows only the mirror held -- test data written before the database shield and
+memories removed here since -- which recall's top-up could bring back into
+an answer ("User prefers dark mode").
+- **Every tier or text change reaches the mirror.** `remirror_episodes` is the
+  one call after a local change (macro_sleep's moves, the working-turn
+  promotion, forget, retire). Every `UPDATE episodes SET tier/text` in product
+  code is declared with its path (`tests/test_memory_mirror_sync.py`, like
+  the delete gate). `remirror_*_by_id` work on any connection (they used to
+  need `row_factory = Row` and raised on the promotion's tuples).
+- **The mirror sync** (maintenance entry "memory mirror sync",
+  `sync_state_mirror`): compares the whole mirror with the local store -- id,
+  tier and an md5 of the texts; for a fact, current or not and the value --
+  and pushes what differs, newest first, at most 500 rows a pass. A row only
+  the mirror holds is counted (memory health `mirror`) and left alone, never
+  deleted or copied back. Skipped with no mirror and when Postgres is the
+  primary store. Digests match Postgres's own (real-Postgres test, Arabic,
+  emoji, NULLs); NUL bytes are dropped on every mirror write.
+- **The top-up reads only other installs' rows.** Mirror writes carry the
+  writer's install id (`metadata.install`, `<data dir>/install_id`);
+  `written_elsewhere` admits a remote-only row only when another install
+  wrote it. A row this install wrote and no longer holds was removed here;
+  untagged rows (mirrored before the tag) count as this install's.
 
 ### 16. Cron Scheduler & Reminder Delivery (`kazma-core/kazma_core/cron/`)
 
@@ -2918,6 +2966,14 @@ new *guard* (its own code, or other OS-level variables) still needs the
 
 ## Testing & Validation
 
+- **A test run never touches an install's data** (2026-09-27). The root
+  `conftest.py` pins `KAZMA_DATA_DIR` and `KAZMA_USER_HOME` to fresh temp
+  folders before any product module is imported and clears the per-store
+  path overrides: a live install IS a checkout, and a run inside it (Kazma's
+  agent tests its own workspace) wrote test gates, a test chat store and
+  test swarm tasks into the live stores. A test that needs a folder of its
+  own still sets the variable. Gate: `tests/test_install_data_shield.py`
+  (every location `paths.py` resolves, from its source).
 - **Compile check (Python):** `& '.venv\Scripts\python.exe' -c "import py_compile; py_compile.compile(r'<file>', doraise=True); print('OK')"`
 - **Syntax check (JS):** `node --check "<file>"`
 - **Run tests (single file):** `& '.venv\Scripts\python.exe' -m pytest <path> -v`

@@ -174,12 +174,14 @@ def test_chat_session_thread_id_persistence_and_update(tmp_path):
 
 @pytest.mark.asyncio
 async def test_checkpoint_manager_multi_tenant_isolation(tmp_path):
-    """Verify checkpoints are saved in isolated databases per tenant."""
-    # Ensure kazma-data dir exists
-    Path("kazma-data").mkdir(parents=True, exist_ok=True)
-    
-    # create default checkpoint manager
-    base_db = "kazma-data/checkpoints_test.db"
+    """Verify checkpoints are saved in isolated databases per tenant.
+
+    In the suite's own data folder (root conftest pin), never the checkout's
+    ``kazma-data``: a run inside a live install wrote its test tenants there.
+    """
+    from kazma_core.paths import data_dir
+
+    base_db = str(tmp_path / "checkpoints_test.db")
     manager = await create_checkpoint_manager(base_db)
 
     try:
@@ -219,8 +221,8 @@ async def test_checkpoint_manager_multi_tenant_isolation(tmp_path):
             await manager.aput(config_beta, cp_beta, metadata_beta, {})
 
         # 3. Check that isolated database files were created
-        assert Path("kazma-data/checkpoints_tenant-alpha.db").exists()
-        assert Path("kazma-data/checkpoints_tenant-beta.db").exists()
+        assert (data_dir() / "checkpoints_tenant-alpha.db").exists()
+        assert (data_dir() / "checkpoints_tenant-beta.db").exists()
 
         # 4. Verify list_checkpoints isolates correctly
         with tenant_context("tenant-alpha"):

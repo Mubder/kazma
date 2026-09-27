@@ -72,11 +72,15 @@ def test_merge_remote_state_hits_dedupes(monkeypatch):
     monkeypatch.setattr(
         "kazma_core.memory.state_backend.get_state_backend", lambda: _BE()
     )
+    # The top-up reads rows another install wrote (state_backend.written_elsewhere).
+    monkeypatch.setattr("kazma_core.memory.state_backend._this_install_id", lambda: "a" * 32)
+    other = '{"install": "%s"}' % ("b" * 32)
     monkeypatch.setattr(
         "kazma_core.memory.state_backend.search_state_episodes",
         lambda q, tenant_id="default", limit=10: [
-            {"id": "ep-local", "user_text": "already have", "tier": "episodic"},
-            {"id": "ep-remote", "user_text": "from postgres teal", "tier": "episodic"},
+            {"id": "ep-local", "user_text": "already have", "tier": "episodic", "metadata_json": other},
+            {"id": "ep-remote", "user_text": "from postgres teal", "tier": "episodic",
+             "metadata_json": other},
         ],
     )
     monkeypatch.setattr(
@@ -89,6 +93,7 @@ def test_merge_remote_state_hits_dedupes(monkeypatch):
                 "object": "teal",
                 "confidence": 0.9,
                 "structural_importance": 3,
+                "metadata_json": other,
             }
         ],
     )

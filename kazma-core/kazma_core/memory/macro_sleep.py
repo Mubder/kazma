@@ -69,15 +69,9 @@ def _propagate_episode_moves(
     """
     if not moved and not archived:
         return
-    from kazma_core.memory.state_backend import (
-        NullStateBackend,
-        get_state_backend,
-        remirror_episode_by_id,
-    )
+    from kazma_core.memory.state_backend import remirror_episodes
 
-    if not isinstance(get_state_backend(), NullStateBackend):
-        for eid in dict.fromkeys([*moved, *archived]):
-            remirror_episode_by_id(conn, eid)
+    remirror_episodes(conn, [*moved, *archived])
 
     if not archived:
         return

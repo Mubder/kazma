@@ -250,11 +250,19 @@ class TestWorkspacePathConfigRelative:
         )
         assert "kazma-data/workspace" in app_source
 
-    def test_file_write_workspace_not_drive_root(self) -> None:
-        """When no workspace is configured, the default must NOT be the drive root."""
+    def test_file_write_workspace_not_drive_root(self, tmp_path, monkeypatch) -> None:
+        """When no workspace is configured, the default must NOT be the drive root.
+
+        In a default install rooted in a temp folder: the suite pins its own
+        data folder (root conftest), and a test may not resolve the checkout's.
+        """
         from unittest.mock import patch
+        from kazma_core import paths
         from kazma_core.tools.file_write import _get_workspace, configure_workspace
         import os
+
+        monkeypatch.delenv("KAZMA_DATA_DIR", raising=False)
+        monkeypatch.setattr(paths, "_project_root", tmp_path)
 
         # Reset to unconfigured state
         configure_workspace(workspace=None, allow_absolute=False)

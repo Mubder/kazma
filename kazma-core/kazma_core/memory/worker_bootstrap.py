@@ -907,6 +907,25 @@ def _reconcile_memory_turns() -> None:
     run_turn_reconcile_pass()
 
 
+def _sync_memory_mirror() -> None:
+    # The Postgres mirror made whole again: every memory and fact it is
+    # missing or holds stale is pushed, newest first (live on 2026-09-27: 116
+    # turns still "working" there, 17 facts never mirrored). Nothing is
+    # deleted from it. No mirror, nothing to do; logs what it pushes.
+    import sqlite3
+
+    from kazma_core.config_store import apply_sqlite_pragmas
+    from kazma_core.memory.state_backend import sync_state_mirror
+    from kazma_core.paths import primary_memory_db
+
+    conn = sqlite3.connect(primary_memory_db(), timeout=30)
+    try:
+        apply_sqlite_pragmas(conn)
+        sync_state_mirror(conn)
+    finally:
+        conn.close()
+
+
 def _queue_topic_summaries() -> None:
     # Weekly topic summaries (plan C2): the weeks that ended over a day ago
     # (two a pass, oldest first) and the summaries a forgotten turn emptied.
@@ -957,6 +976,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("memory vector repair", _repair_memory_vectors),
     ("memory recovery", _recover_erased_memories),
     ("memory turn reconcile", _reconcile_memory_turns),
+    ("memory mirror sync", _sync_memory_mirror),
     ("memory topic summaries", _queue_topic_summaries),
     ("knowledge vector repair", _embed_knowledge_chunks),
 )

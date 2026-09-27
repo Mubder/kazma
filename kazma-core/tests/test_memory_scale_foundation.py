@@ -9,7 +9,7 @@ import pytest
 
 def test_state_backend_null_default():
     from kazma_core.memory.state_backend import (
-        NullStateBackend,
+        _NullStateBackend,
         get_state_backend,
         state_capability,
     )
@@ -19,7 +19,7 @@ def test_state_backend_null_default():
     )
     assert cap["status"] == "local"
     be = get_state_backend()
-    assert isinstance(be, NullStateBackend) or be.name in ("null", "postgres")
+    assert isinstance(be, _NullStateBackend) or be.name in ("null", "postgres")
 
 
 def test_state_capability_postgres_needs_url():
@@ -75,14 +75,14 @@ def test_conflict_policy_origin_and_fail_closed():
 
 def test_recall_primary_fail_closed_when_backend_down(monkeypatch):
     from kazma_core.memory.recall import recall
-    from kazma_core.memory.state_backend import NullStateBackend
+    from kazma_core.memory.state_backend import _NullStateBackend
 
     monkeypatch.setattr(
         "kazma_core.memory.state_backend.is_state_primary", lambda cfg=None: True
     )
     monkeypatch.setattr(
         "kazma_core.memory.state_backend.get_state_backend",
-        lambda: NullStateBackend(),
+        lambda: _NullStateBackend(),
     )
     result = recall("where do I live")
     assert result.beliefs == []

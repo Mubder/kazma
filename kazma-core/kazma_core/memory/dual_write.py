@@ -136,16 +136,18 @@ def episode_row(
     importance: int = 1,
     source: str = "dual_write_mirror",
     created_at: float | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The episode row the writer stores for one turn.
 
     Its id, tier, importance and metadata, and ``embed_text`` -- the text the
     meaning vector is computed from. Everything that writes an episode (this
     mirror, the golden eval, the retrieval benchmark) builds the row here, so
-    none of them can drift from what live chat turns get.
+    none of them can drift from what live chat turns get. *metadata* adds to
+    the row's (the chat an agent's note was written in, for example).
     """
     content = (user_text or assistant_text or summary_text or "").strip()
-    meta: dict[str, Any] = {"source": source}
+    meta: dict[str, Any] = {**(metadata or {}), "source": source}
     effective_tier = tier
     effective_importance = int(importance)
     if is_remember_request(user_text):  # English or Arabic (W4)
@@ -314,6 +316,7 @@ class DualWriteMirror:
         importance: int = 1,
         source: str = "dual_write_mirror",
         created_at: float | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> str | None:
         """Mirror a legacy turn/fact into the V2 ``episodes`` table.
 
@@ -334,6 +337,7 @@ class DualWriteMirror:
             importance=importance,
             source=source,
             created_at=created_at,
+            metadata=metadata,
         )
         eid = row["id"]
         now = row["created_at"]

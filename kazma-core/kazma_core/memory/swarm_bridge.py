@@ -12,7 +12,9 @@ and map it onto the V2 schema:
 
   - ``store_swarm_result``  → episode (source="swarm_result") + belief
   - ``log_evolution_v2``    → episode (source="soul_evolution")
-  - ``store_compaction_summary`` → episode (source="compaction_summary")
+
+A compaction summary is no longer stored (2026-09-27): every turn reaches
+memory on its own, and the copy escaped "forget this chat".
 
 This module is the migration target for the three V1 write paths documented
 in the V1→V2 migration plan. The read counterparts use ``recall.search``.
@@ -32,7 +34,6 @@ __all__ = [
     "bridge_episode_id",
     "store_swarm_result",
     "log_evolution_v2",
-    "store_compaction_summary",
 ]
 
 
@@ -252,44 +253,3 @@ def log_evolution_v2(
         logger.debug("[swarm_bridge] log_evolution_v2 failed", exc_info=True)
         return None
 
-
-def store_compaction_summary(
-    summary: str,
-    metadata: dict[str, Any] | None = None,
-    tenant_id: str = "default",
-) -> str | None:
-    """Persist a compaction summary as a V2 episode (source="compaction_summary").
-
-    Replaces ``compaction.memory_store.store(summary, metadata={"type":
-    "compaction_summary", ...})``. The ``is_override_delta`` injection guard
-    stays at the call site (it must run BEFORE this function is invoked).
-
-    Returns the V2 episode id, or None on failure. Never raises.
-    """
-    if not summary or not summary.strip():
-        return None
-    try:
-        meta = dict(metadata or {})
-        meta.setdefault("type", "compaction_summary")
-        meta.setdefault("source", "compaction")
-        meta.setdefault("ts", time.time())
-        conn = _open_primary()
-        if conn is None:
-            return None
-        try:
-            return _insert_episode(
-                conn,
-                session_id="compaction",
-                turn_number=int(time.time()) % 10_000_000,
-                user_text="",
-                summary_text=summary,
-                source="compaction_summary",
-                importance=2,
-                metadata=meta,
-                tenant_id=tenant_id,
-            )
-        finally:
-            conn.close()
-    except Exception:
-        logger.debug("[swarm_bridge] store_compaction_summary failed", exc_info=True)
-        return None
