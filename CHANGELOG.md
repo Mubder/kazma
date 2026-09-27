@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Kazma keeps one version of a fact (2026-09-27)
+
+Kazma could hold the same fact twice under two names -- "timezone" and
+"timezone_is", or a daily cap of 16 under one name and 8 under another -- and
+then an outdated value never went away. A fact is now written under the name
+Kazma already uses for it, so a new value replaces the old one, and the daily
+memory maintenance retires facts it already holds twice, keeping the latest.
+When your own words and something Kazma inferred disagree, both stay.
+
+Kazma is also told which names it already uses, so it stops inventing new
+ones, and it no longer stores the status of a single run or internal ids as
+facts about you.
+
 ## You decide what Kazma remembers (2026-09-27)
 
 - **Forget a memory.** The Memory page now lists what Kazma remembers of your

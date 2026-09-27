@@ -367,6 +367,19 @@ def mutate_belief(
 
     try:
         with _mutation_lock:
+            # W6: the name the subject already uses for the same words and
+            # type (memory/predicates.py) -- so the same value is a no-op, a
+            # new value supersedes and a set appends, instead of a second
+            # name holding a second, conflicting value.
+            from kazma_core.memory.predicates import canonical_predicate
+
+            try:
+                pred = canonical_predicate(
+                    primary_conn, tenant_id=tenant_id, subject=sub,
+                    predicate=pred, predicate_type=ptype,
+                )
+            except sqlite3.Error:
+                logger.debug("[belief_mutate] predicate names unreadable; keeping %r", pred)
             if ptype == "functional":
                 result = _mutate_functional(
                     primary_conn, ops_conn, sub, pred, obj,

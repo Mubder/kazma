@@ -49,7 +49,8 @@ every change is inside the existing V2 engine.
 | C1 | Measured before building (2026-09-27): the live install holds 6 current, user-stated, single-valued facts about the user -- all subscription reset dates, 4 of them past. A profile "from user_explicit facts" would put stale dates in front of the model every turn. Not built: it needs the owner to say what the profile holds (for example an editable "About me" in Settings) | ☐ owner |
 | R6 | A reranker (bge-reranker-v2-m3) is a ~2 GB model download: needs the owner's go-ahead before anything is fetched | ☐ owner |
 | U1 | The user decides what is kept: forget a memory (a tombstone plus the forget ledger every writer asks -- turn reconcile, recovery, the legacy restore and the past-chats search never bring it back), "don't remember this chat" (web menu, `/memory off`), export | ☑ `tests/test_memory_forget.py` |
-| S2+ | Remaining Stage 2 items, in the approved order: W6, C2 | ☐ |
+| W6 | One fact, one predicate name. Measured on live first: 281 extra current facts shared a subject and value with another under a different name; by meaning (bge-m3) true pairs and different facts overlap ("grok_next_reset" / "grok_personal_next_reset", two accounts, at 0.94), so the rule is the same WORDS -- 15 pairs on live, all true. New facts take the subject's existing name (`mutate_belief`), reconsolidation retires the 13 stored twice among equal sources (the user's word against an inference stays for the user), and the deep pass reuses the names in use and skips one run's status and internal ids. The LLM-judged ADD/UPDATE/DELETE step was not built: what the measurement found is either this rule's or the prompt's | ☑ `tests/test_memory_predicate_names.py` |
+| S2+ | Remaining Stage 2 item: C2 | ☐ |
 
 ---
 

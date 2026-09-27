@@ -59,8 +59,12 @@ def test_only_the_llm_call_runs_on_the_loop(episode, monkeypatch):
         where["prepare"] = _on_loop()
         return real_schema(conn)
 
-    async def extract(user_text, assistant_text="", *, use_llm=True, ignore_filler=False):
+    async def extract(user_text, assistant_text="", *, use_llm=True, ignore_filler=False,
+                      vocabulary=None):
         where["extract"] = _on_loop()
+        # The predicate names in use (W6) were read in the prepare half, off
+        # the loop, and arrive as a plain list.
+        where["vocabulary"] = isinstance(vocabulary, list)
         # The real extraction with the LLM off (heuristic path, no network).
         return await real_extract(user_text, assistant_text, use_llm=False, ignore_filler=ignore_filler)
 
@@ -73,7 +77,7 @@ def test_only_the_llm_call_runs_on_the_loop(episode, monkeypatch):
     monkeypatch.setattr(be, "_apply_beliefs_to_v2", apply_spy)
 
     assert asyncio.run(wb._handle_micro_consolidation({"episode_id": episode})) is True
-    assert where == {"prepare": False, "extract": True, "apply": False}
+    assert where == {"prepare": False, "extract": True, "vocabulary": True, "apply": False}
 
 
 def test_extract_and_apply_beliefs_is_unchanged_for_its_callers():

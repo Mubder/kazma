@@ -352,8 +352,15 @@ def _micro_consolidation_prepare(episode_id: str) -> dict[str, Any] | None:
                     use_llm = False
             except Exception:
                 logger.debug("[memory_worker] heuristic pre-pass failed; using the LLM", exc_info=True)
+        # The names already in use, for the extractor to reuse (W6).
+        vocabulary: list[str] = []
+        if use_llm:
+            from kazma_core.memory.predicates import predicate_vocabulary
+
+            vocabulary = predicate_vocabulary(primary, tenant_id=row["tenant_id"] or "default")
         keep = True
-        return {"primary": primary, "ops": ops, "row": dict(row), "use_llm": use_llm}
+        return {"primary": primary, "ops": ops, "row": dict(row), "use_llm": use_llm,
+                "vocabulary": vocabulary}
     finally:
         if not keep:
             primary.close()
@@ -385,6 +392,7 @@ async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
         try:
             raw, stats = await extract_beliefs_for_turn(
                 row["user_text"] or "", row["assistant_text"] or "", use_llm=prep["use_llm"],
+                vocabulary=prep.get("vocabulary"),
             )
             if raw:
                 # The facts were stated when the turn happened, not when this
