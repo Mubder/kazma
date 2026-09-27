@@ -18,6 +18,11 @@ roadmap was re-checked row by row, and the recent-features tour, the README's
 capability list and the Postgres, production and web UI pages cover this
 week's changes.
 
+**The documentation site builds again.** It had not built since 2026-09-25:
+one tool description in the generated tools catalog read as a JSX tag to
+the site's MDX parser. The generator escapes such characters now, and a test
+reads every page the way the site does.
+
 ## Every "still open" known gap closed or accepted, and what closing them found (2026-09-27)
 
 **Chat step history is bounded on Postgres too.** Kazma keeps each chat's

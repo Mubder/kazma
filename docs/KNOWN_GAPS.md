@@ -647,6 +647,7 @@ turning one of them into the next `routing_engine`.
 | Three guard tests failed whenever the CI process that ran them was pid 4242, the number they planted as "another process" | `test_the_fabricated_pid_is_never_the_test_process` |
 | A test run could hang at exit, all tests passed: a test opened an aiosqlite connection on a store another test's app build left in a module global | the dashboard context restored after every test (root conftest); a thread still running at the end of a session fails the run and names its test (`tests/test_order_independence.py`, negative control: the run with the guard off never ends) |
 | Under `origin_wins` / `fail_closed`, a row another region wrote would have been pushed and counted as a failed push on every mirror sync pass, spending the push budget | `tests/test_memory_mirror_sync.py` (both policies, the budget, `last_write_wins` as the negative control) |
+| The documentation site had not built since 2026-09-25: a tool description in the generated tools catalog (`proposal_id=<that item's id>`) is a JSX tag to MDX, and nothing ran the build | the catalog generator escapes `<`, `>`, `{`, `}` in table cells; `tests/test_docs_mdx_safe.py` reads every page the way MDX would (negative control: the line that broke it); a local `docusaurus build` passes |
 
 ## Prompt injection
 
