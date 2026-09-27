@@ -4,19 +4,28 @@ In Python's default transaction mode every INSERT, UPDATE, DELETE and REPLACE
 opens a transaction that lasts until a commit -- also when the statement
 changes nothing, and also when it raises. On a connection that lives on an
 object, a path that misses the commit keeps the database's write lock for as
-long as the connection stays idle. The cron store did exactly that from each
+long as the connection sits idle. The cron store did exactly that from each
 boot until the next reminder fired, and the live-data cleanup stopped half
 way with "database is locked" (2026-09-27; tests/test_cron_store_write_lock.py).
+The same shape was on the error path of fourteen more stores -- the memory
+writer, the LLM ledger, the semantic cache among them: a write that raised
+left its transaction open until the next commit on that connection, and a
+store that wrote two rows could commit the first alone at its next write.
 
-In autocommit mode (``isolation_level=None``) a statement is its own
-transaction, and a longer one is an explicit BEGIN that a reader sees. Every
-connection product code keeps -- ``sqlite3.connect`` or ``aiosqlite.connect``
-assigned to an attribute or a module global -- is found from the source. One
-in the default mode must be declared in ``DEFAULT_MODE_KEPT`` with its reason,
-and every write made on it must be committed on every normal path: a commit
-after it in the same or an enclosing block, or a ``with conn:`` around it (the
-connection's own context manager commits, and rolls back on an error). The
-declared list only shrinks.
+Every connection product code keeps -- ``sqlite3.connect`` or
+``aiosqlite.connect`` assigned to an attribute, a module global, or a name a
+function declares ``global`` -- is found from the source, and it is one of:
+
+- in autocommit mode (``isolation_level=None``): a statement is its own
+  transaction, and a group of writes is an explicit ``BEGIN IMMEDIATE`` whose
+  error path rolls back (``test_every_explicit_begin_rolls_back_on_error``;
+  ``db.sqlite_session.write_transaction`` for aiosqlite);
+- a ``sqlite3`` connection every write on which runs inside ``with conn:``,
+  whose exit commits, or rolls back when the block raises;
+- LangGraph's saver connection, on which Kazma runs no write of its own.
+
+An aiosqlite connection has no such context manager (``async with`` closes
+it), so one kept in the default mode is refused.
 """
 
 from __future__ import annotations
@@ -35,47 +44,23 @@ PRODUCT_DIRS = (
     REPO / "kazma-skills" / "kazma_skills",
 )
 
-_ONE_WRITE_EACH = (
-    "Default mode; each write on it is committed on every normal path "
-    "(test_every_write_on_a_default_mode_connection_is_committed)."
-)
-#: (module, the attribute or global holding the connection) -> why it may stay
-#: in the default mode.
-DEFAULT_MODE_KEPT: dict[tuple[str, str], str] = {
+#: (module, holder) -> why a default-mode aiosqlite connection may be kept.
+THIRD_PARTY_KEPT: dict[tuple[str, str], str] = {
     ("kazma-core/kazma_core/agent_runner.py", "self._checkpoint_conn"): (
-        "LangGraph's AsyncSqliteSaver runs its own statements on this connection "
-        "and commits each write itself; the agent only opens and closes it."
-    ),
-    ("kazma-core/kazma_core/audit_logger.py", "self._db"): _ONE_WRITE_EACH,
-    ("kazma-core/kazma_core/hub/registry.py", "self._conn"): _ONE_WRITE_EACH,
-    ("kazma-core/kazma_core/memory/dual_write.py", "self._primary"): (
-        "The memory writer: an episode's rows, index entries and vector are "
-        "written together and committed together. " + _ONE_WRITE_EACH
-    ),
-    ("kazma-core/kazma_core/memory/dual_write.py", "self._ops"): _ONE_WRITE_EACH,
-    ("kazma-core/kazma_core/observability/llm_ledger.py", "_conn"): _ONE_WRITE_EACH,
-    ("kazma-core/kazma_core/rbac.py", "self._db"): _ONE_WRITE_EACH,
-    ("kazma-core/kazma_core/security/audit_trail.py", "self._conn"): _ONE_WRITE_EACH,
-    ("kazma-core/kazma_core/security/certification.py", "self._conn"): _ONE_WRITE_EACH,
-    ("kazma-core/kazma_core/security/dependency_scanner.py", "self._conn"): _ONE_WRITE_EACH,
-    ("kazma-core/kazma_core/security/disclosure.py", "self._conn"): _ONE_WRITE_EACH,
-    ("kazma-core/kazma_core/swarm/memory/pipeline_logger.py", "_conn"): _ONE_WRITE_EACH,
-    ("kazma-core/kazma_core/swarm/semantic_cache.py", "self._conn"): _ONE_WRITE_EACH,
-    ("kazma-core/kazma_core/swarm/task_store.py", "self._conn"): _ONE_WRITE_EACH,
-    ("kazma-core/kazma_core/time_travel.py", "self._conn"): _ONE_WRITE_EACH,
-    ("kazma-gateway/kazma_gateway/stores/sqlite.py", "self._db"): _ONE_WRITE_EACH,
-    ("kazma-ui/kazma_ui/session_manager.py", "self._conn"): (
-        "Every write runs inside `with self._conn:`, which commits, or rolls "
-        "back on an error."
-    ),
-    ("kazma-ui/kazma_ui/session_spool.py", "self._conn"): (
-        "Every write runs inside `with self._conn:`, which commits, or rolls "
-        "back on an error."
+        "LangGraph's AsyncSqliteSaver runs its statements on this connection, "
+        "under its own lock, and commits each write; Kazma runs no write of "
+        "its own on it (the two that bypassed the saver's lock were deleted "
+        "2026-09-27)."
     ),
 }
 
-_CONNECT = re.compile(r"\b(?:sqlite3|aiosqlite)\.connect$")
+_CONNECT = re.compile(r"\b(sqlite3|aiosqlite)\.connect$")
 _WRITE_SQL = re.compile(r"^\s*(?:INSERT|UPDATE|DELETE|REPLACE)\b", re.I)
+_BEGIN_SQL = re.compile(r"^\s*BEGIN\b", re.I)
+_ROLLBACK_SQL = re.compile(r"^\s*ROLLBACK\b", re.I)
+#: A call that hands back a store's kept connection: ``_get_conn()``,
+#: ``self._get_db()``. Not ``sqlite3.connect(...)``, which opens a new one.
+_OPENER_CALL = re.compile(r"\b(?!connect\()\w*(?:conn|db)\w*\(", re.I)
 
 
 def _product_sources() -> dict[str, str]:
@@ -88,17 +73,19 @@ def _product_sources() -> dict[str, str]:
     return out
 
 
-def _connect_call(value: ast.expr | None) -> ast.Call | None:
+def _connect_call(value: ast.expr | None) -> tuple[ast.Call, str] | None:
     node = value.value if isinstance(value, ast.Await) else value
-    if isinstance(node, ast.Call) and _CONNECT.search(ast.unparse(node.func)):
-        return node
+    if isinstance(node, ast.Call):
+        m = _CONNECT.search(ast.unparse(node.func))
+        if m:
+            return node, m.group(1)
     return None
 
 
-def kept_connections(src: str) -> list[tuple[str, int, bool]]:
-    """``(holder, line, autocommit)`` for each connection the module keeps:
-    one assigned to an attribute, a module global, or a name a function
-    declares ``global``."""
+def kept_connections(src: str) -> list[tuple[str, int, bool, str]]:
+    """``(holder, line, autocommit, driver)`` for each connection the module
+    keeps: one assigned to an attribute, a module global, or a name a
+    function declares ``global``."""
     tree = ast.parse(src)
     top = {id(n) for n in tree.body}
     globals_of: dict[int, set[str]] = {}
@@ -107,13 +94,31 @@ def kept_connections(src: str) -> list[tuple[str, int, bool]]:
             names = {n for g in ast.walk(fn) if isinstance(g, ast.Global) for n in g.names}
             for inner in ast.walk(fn):
                 globals_of[id(inner)] = names
+    # A connection opened into a local first (``db = await aiosqlite.connect(...)``
+    # ... ``self._db = db``) is kept by the later assignment.
+    opened_into: dict[int, dict[str, tuple[ast.Call, str]]] = {}
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            locals_ = {}
+            for n in ast.walk(fn):
+                if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):
+                    found = _connect_call(n.value)
+                    if found is not None:
+                        locals_[n.targets[0].id] = found
+            for n in ast.walk(fn):
+                opened_into[id(n)] = locals_
     out = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
-        call = _connect_call(node.value)
-        if call is None:
+        found = _connect_call(node.value)
+        via = None
+        if found is None and isinstance(node.value, ast.Name):
+            found = opened_into.get(id(node), {}).get(node.value.id)
+            via = node.value.id
+        if found is None:
             continue
+        call, driver = found
         for target in node.targets if isinstance(node, ast.Assign) else [node.target]:
             holder = ast.unparse(target)
             kept = isinstance(target, ast.Attribute) or (
@@ -125,8 +130,11 @@ def kept_connections(src: str) -> list[tuple[str, int, bool]]:
             autocommit = any(
                 k.arg == "isolation_level" and isinstance(k.value, ast.Constant) and k.value.value is None
                 for k in call.keywords
-            ) or bool(re.search(rf"{re.escape(holder)}\.isolation_level\s*=\s*None\b", src))
-            out.append((holder, node.lineno, autocommit))
+            ) or any(
+                re.search(rf"(?<![\w.]){re.escape(name)}\.isolation_level\s*=\s*None\b", src)
+                for name in (holder, via) if name
+            )
+            out.append((holder, node.lineno, autocommit, driver))
     return out
 
 
@@ -158,39 +166,6 @@ def _sql_names(tree: ast.AST) -> dict[str, str]:
     return out
 
 
-def _is_commit(node: ast.AST) -> bool:
-    node = node.value if isinstance(node, ast.Await) else node
-    return isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "commit"
-
-
-def _commits(stmt: ast.stmt) -> bool:
-    """Does running ``stmt`` normally always call ``.commit()``?"""
-    if isinstance(stmt, ast.Expr):
-        return _is_commit(stmt.value)
-    if isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-        return stmt.value is not None and _is_commit(stmt.value)
-    if isinstance(stmt, (ast.With, ast.AsyncWith)):
-        return any(_commits(s) for s in stmt.body)
-    if isinstance(stmt, ast.Try):
-        return any(_commits(s) for s in stmt.body) or any(_commits(s) for s in stmt.finalbody)
-    return False
-
-
-def _may_leave(stmt: ast.stmt) -> bool:
-    """Can ``stmt`` return, or leave its loop, before what follows it runs?"""
-    if isinstance(stmt, (ast.Return, ast.Continue, ast.Break)):
-        return True
-    for node in ast.walk(stmt):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            continue
-        if isinstance(node, (ast.Return, ast.Continue, ast.Break)):
-            return True
-    return False
-
-
-_OPENER_CALL = re.compile(r"\b\w*(?:conn|db)\w*\(", re.I)
-
-
 def _module_holders(src: str, holders: set[str]) -> set[str]:
     """The holders plus each attribute the module copies one into
     (``self._conn = _get_conn()`` in a class that shares a global)."""
@@ -198,7 +173,9 @@ def _module_holders(src: str, holders: set[str]) -> set[str]:
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Attribute):
             rhs = ast.unparse(node.value)
-            if any(re.search(rf"(?<![\w.]){re.escape(h)}\b", rhs) for h in holders) or _OPENER_CALL.search(rhs):
+            if _connect_call(node.value) is None and (
+                any(re.search(rf"(?<![\w.]){re.escape(h)}\b", rhs) for h in holders) or _OPENER_CALL.search(rhs)
+            ):
                 out.add(ast.unparse(node.targets[0]))
     return out
 
@@ -230,14 +207,15 @@ def _connection_names(fn: ast.AST, holders: set[str]) -> set[str]:
     return names
 
 
-def uncommitted_writes(src: str, holders: set[str]) -> list[str]:
-    """``function:line`` of each write on a kept connection after which a
-    normal path leaves the function without a commit."""
+def _writes_on(src: str, holders: set[str]) -> list[tuple[ast.AST, ast.Call, bool]]:
+    """``(function, call, inside with conn:)`` for each data-changing
+    statement run on a kept connection -- the holder, an alias, a cursor of
+    it. A connection a function is handed is its caller's, judged there."""
     tree = ast.parse(src)
     holders = _module_holders(src, holders)
     sql_names = _sql_names(tree)
     parents = {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
-    found = []
+    out = []
     for fn in ast.walk(tree):
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -258,200 +236,329 @@ def uncommitted_writes(src: str, holders: set[str]) -> list[str]:
             receiver = ast.unparse(call.func.value)
             root = re.split(r"[.(\[]", receiver, maxsplit=1)[0]
             if root in params:
-                continue  # the caller's connection, the caller's transaction
-            if receiver not in names and root not in names and not any(
-                receiver.startswith(n + ".") for n in names
-            ):
                 continue
-            if not _committed_after(call, fn, parents, names):
-                found.append(f"{fn.name}:{call.lineno}")
-    return found
+            if receiver in names or root in names or any(receiver.startswith(n + ".") for n in names):
+                out.append((fn, call, _inside_connection_context(call, fn, parents, names)))
+    return out
 
 
-def _committed_after(call: ast.AST, fn: ast.AST, parents: dict, names: set[str]) -> bool:
-    child, node = call, parents.get(call)
+def _inside_connection_context(call: ast.AST, fn: ast.AST, parents: dict, names: set[str]) -> bool:
+    """Is ``call`` inside ``with conn:`` for one of the connection's names?
+    (``async with`` on aiosqlite closes the connection; it is not this.)"""
+    node = parents.get(call)
     while node is not None and node is not fn:
         if isinstance(node, ast.With) and any(ast.unparse(i.context_expr) in names for i in node.items):
-            return True  # sqlite3's `with conn:` commits, or rolls back on an error
-        if _commit_follows(node, child):
             return True
-        child, node = node, parents.get(node)
-    return node is fn and _commit_follows(fn, child)
-
-
-def _commit_follows(block_owner: ast.AST, child: ast.AST) -> bool:
-    for field in ("body", "orelse", "finalbody"):
-        block = getattr(block_owner, field, None)
-        if isinstance(block, list) and child in block:
-            for later in block[block.index(child) + 1:]:
-                if _commits(later):
-                    return True
-                if _may_leave(later):
-                    return False
-            return False
+        node = parents.get(node)
     return False
 
 
-def test_every_kept_connection_is_autocommit_or_declared():
-    found: set[tuple[str, str]] = set()
-    undeclared = []
-    for rel, src in _product_sources().items():
-        for holder, line, autocommit in kept_connections(src):
-            if autocommit:
+def module_problems(rel: str, src: str) -> list[str]:
+    """What breaks the rule in one module (empty when it keeps to it)."""
+    problems = []
+    for holder, line, autocommit, driver in kept_connections(src):
+        if autocommit:
+            continue
+        writes = _writes_on(src, {holder})
+        if driver == "aiosqlite":
+            if (rel, holder) not in THIRD_PARTY_KEPT:
+                problems.append(
+                    f"{rel}:{line} {holder}: an aiosqlite connection kept in the default mode -- "
+                    "open it with isolation_level=None (a group of writes: db.sqlite_session.write_transaction)"
+                )
+            elif writes:
+                problems += [
+                    f"{rel}:{call.lineno} {fn.name}: a write of Kazma's own on {holder}, which only its "
+                    "third-party owner may write through"
+                    for fn, call, _guarded in writes
+                ]
+            continue
+        problems += [
+            f"{rel}:{call.lineno} {fn.name}: a write on {holder} outside `with conn:` -- if it raises, "
+            "its transaction stays open with the write lock"
+            for fn, call, guarded in writes
+            if not guarded
+        ]
+    return problems
+
+
+def _returns_committed_and_closed(tree: ast.AST) -> set[str]:
+    """Names of the module's functions that hand back ``committed_and_closed``."""
+    out = set()
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for n in ast.walk(fn):
+                if isinstance(n, ast.Return) and isinstance(n.value, ast.Call) and ast.unparse(
+                    n.value.func
+                ).endswith("committed_and_closed"):
+                    out.add(fn.name)
+    return out
+
+
+def _rolls_back(statements: list[ast.stmt]) -> bool:
+    for stmt in statements:
+        for n in ast.walk(stmt):
+            if not isinstance(n, ast.Call):
                 continue
-            found.add((rel, holder))
-            if (rel, holder) not in DEFAULT_MODE_KEPT:
-                undeclared.append(f"{rel}:{line} {holder}")
-    assert undeclared == [], (
-        "a SQLite connection kept across calls opens in autocommit mode "
-        "(isolation_level=None; a longer transaction is an explicit BEGIN IMMEDIATE ... COMMIT):\n  "
-        + "\n  ".join(undeclared)
+            func = n.func
+            name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+            if "rollback" in name.lower():
+                return True
+            if name == "execute" and n.args and (sql := _sql(n.args[0])) and _ROLLBACK_SQL.match(sql):
+                return True
+    return False
+
+
+def _sets_a_flag(stmt: ast.stmt) -> bool:
+    """``name = <constant>``: set-up that runs nothing."""
+    return isinstance(stmt, (ast.Assign, ast.AnnAssign)) and isinstance(stmt.value, ast.Constant)
+
+
+def _try_rolls_back(node: ast.AST) -> bool:
+    return isinstance(node, ast.Try) and (
+        any(_rolls_back(h.body) for h in node.handlers) or _rolls_back(node.finalbody)
     )
-    stale = sorted(set(DEFAULT_MODE_KEPT) - found)
-    assert stale == [], f"declared but no longer a default-mode kept connection; remove: {stale}"
 
 
-def test_every_write_on_a_default_mode_connection_is_committed():
+def begins_without_rollback(src: str) -> list[str]:
+    """``function:line`` of each explicit BEGIN whose error path does not end
+    the transaction: it runs in the body of a ``try`` that rolls back, or the
+    statement right after it is one, or it runs inside a context that ends
+    the transaction (``with conn:``, ``committed_and_closed``,
+    ``write_transaction``)."""
+    tree = ast.parse(src)
+    parents = {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
+    closers = _returns_committed_and_closed(tree)
+    closer_call = re.compile(
+        r"(?:committed_and_closed|write_transaction)\(|\b(?:" + "|".join(map(re.escape, closers or {"-"})) + r")\("
+    )
+    found = []
+    for call in ast.walk(tree):
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "execute" and call.args):
+            continue
+        sql = _sql(call.args[0])
+        if sql is None or not _BEGIN_SQL.match(sql):
+            continue
+        receiver = ast.unparse(call.func.value)
+        guarded = False
+        child, node = call, parents.get(call)
+        while node is not None and not guarded:
+            if _try_rolls_back(node) and child in node.body:
+                guarded = True
+            elif isinstance(node, (ast.With, ast.AsyncWith)) and any(
+                closer_call.search(ast.unparse(i.context_expr))
+                or (isinstance(node, ast.With) and ast.unparse(i.context_expr) == receiver)
+                for i in node.items
+            ):
+                guarded = True
+            else:
+                for field in ("body", "orelse", "finalbody"):
+                    block = getattr(node, field, None)
+                    if isinstance(block, list) and child in block:
+                        # The next statement past any flag set-up (`committed = False`).
+                        after = [s for s in block[block.index(child) + 1:] if not _sets_a_flag(s)][:1]
+                        guarded = bool(after) and _try_rolls_back(after[0])
+                        break
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                break
+            child, node = node, parents.get(node)
+        if not guarded:
+            fn = node.name if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else "<module>"
+            found.append(f"{fn}:{call.lineno}")
+    return found
+
+
+def test_every_kept_connection_ends_its_transactions():
     sources = _product_sources()
-    holders: dict[str, set[str]] = {}
-    for rel, holder in DEFAULT_MODE_KEPT:
-        holders.setdefault(rel, set()).add(holder)
-    left_open = {
-        rel: bad for rel, hs in holders.items() if (bad := uncommitted_writes(sources[rel], hs))
+    problems = [p for rel, src in sources.items() for p in module_problems(rel, src)]
+    assert problems == [], "\n".join(problems)
+
+
+def test_the_exemptions_are_still_there():
+    sources = _product_sources()
+    for rel, holder in THIRD_PARTY_KEPT:
+        kept = {(h, driver, autocommit) for h, _line, autocommit, driver in kept_connections(sources[rel])}
+        assert (holder, "aiosqlite", False) in kept, f"{rel} {holder}: gone or changed; remove the exemption"
+
+
+def test_the_gate_reads_the_stores_it_judges():
+    """Not blind: the default-mode sqlite3 stores' writes are found, and each
+    one of them is judged."""
+    sources = _product_sources()
+    kept = {
+        rel: {h for h, _line, autocommit, driver in kept_connections(src) if not autocommit and driver == "sqlite3"}
+        for rel, src in sources.items()
     }
-    assert left_open == {}, f"a write on a kept default-mode connection without a commit after it: {left_open}"
+    counted = {rel: len(_writes_on(sources[rel], hs)) for rel, hs in kept.items() if hs}
+    assert sum(counted.values()) >= 15, counted
+    for rel in ("kazma-core/kazma_core/memory/dual_write.py", "kazma-core/kazma_core/security/disclosure.py",
+                "kazma-ui/kazma_ui/session_manager.py"):
+        assert counted.get(rel), f"{rel}: no write found on its kept connection -- the gate went blind"
 
 
-# The cron store's purge as it was until 2026-09-27, in its class as it opened
-# its connection then.
+def test_every_explicit_begin_rolls_back_on_error():
+    found = {rel: bad for rel, src in _product_sources().items() if "BEGIN" in src and (bad := begins_without_rollback(src))}
+    assert found == {}, f"an explicit BEGIN whose error path leaves the transaction open: {found}"
+
+
+# The cron store as it was until 2026-09-27: its connection in the default
+# mode, and a purge that committed only when it had deleted something.
 _OLD_CRON_STORE = '''
 class SQLiteCronStore:
     async def init(self):
         self._db = await aiosqlite.connect(self._db_path)
 
     async def purge_terminal_jobs(self, *, older_than_days=14, keep_last=500):
-        if self._db is None:
-            return 0
-        cutoff = "x"
         deleted = 0
-        try:
-            cursor = await self._db.execute(
-                "DELETE FROM cron_jobs WHERE status IN ('done', 'completed', 'failed', 'cancelled') "
-                "AND created_at < ?",
-                (cutoff,),
-            )
-            deleted += cursor.rowcount or 0
-            cursor2 = await self._db.execute(
-                "DELETE FROM cron_jobs WHERE job_id IN (SELECT job_id FROM cron_jobs LIMIT -1 OFFSET ?)",
-                (keep_last,),
-            )
-            deleted += cursor2.rowcount or 0
-            if deleted > 0:
-                await self._db.commit()
-        except Exception:
-            pass
+        cursor = await self._db.execute("DELETE FROM cron_jobs WHERE status = 'done' AND created_at < ?", ("x",))
+        deleted += cursor.rowcount or 0
+        if deleted > 0:
+            await self._db.commit()
         return deleted
-
-    async def update_status(self, job_id, status):
-        await self._db.execute("UPDATE cron_jobs SET status = ? WHERE job_id = ?", (status, job_id))
-        await self._db.commit()
 '''
 
 
-def test_negative_control_the_old_cron_store_is_caught():
-    assert kept_connections(_OLD_CRON_STORE) == [("self._db", 4, False)]
-    assert uncommitted_writes(_OLD_CRON_STORE, {"self._db"}) == [
-        "purge_terminal_jobs:12", "purge_terminal_jobs:18",
-    ]
+def test_negative_control_the_old_cron_store_is_refused():
+    assert kept_connections(_OLD_CRON_STORE) == [("self._db", 4, False, "aiosqlite")]
+    problems = module_problems("kazma-core/kazma_core/cron/scheduler.py", _OLD_CRON_STORE)
+    assert len(problems) == 1 and "aiosqlite connection kept in the default mode" in problems[0]
     fixed = _OLD_CRON_STORE.replace("connect(self._db_path)", "connect(self._db_path, isolation_level=None)")
-    assert kept_connections(fixed) == [("self._db", 4, True)]
+    assert module_problems("kazma-core/kazma_core/cron/scheduler.py", fixed) == []
 
 
-def test_negative_control_the_commit_rules():
+def test_negative_control_a_sqlite3_store_writes_inside_its_connection():
     src = '''
 import sqlite3
 _CONN = sqlite3.connect("x.db")
+_UPSERT = "INSERT INTO t VALUES (?)"
 
-def written_then_committed():
+def committed_but_not_guarded():
     _CONN.execute("INSERT INTO t VALUES (1)")
     _CONN.commit()
 
-def committed_after_the_branch(flag):
-    if flag:
-        _CONN.execute("DELETE FROM t")
-    _CONN.commit()
-
-def returns_before_the_commit(flag):
-    _CONN.execute("UPDATE t SET a = 1")
-    if flag:
-        return
-    _CONN.commit()
-
-def inside_the_connection_context():
+def guarded():
     with _CONN:
-        _CONN.execute("INSERT INTO t VALUES (2)")
+        _CONN.execute("DELETE FROM t")
+
+def guarded_with_a_lock(lock):
+    with lock, _CONN:
+        _CONN.execute("UPDATE t SET a = 1")
 
 def through_an_alias():
     conn = _CONN
-    cur = conn.cursor()
-    cur.execute("REPLACE INTO t VALUES (3)")
+    with conn:
+        cur = conn.cursor()
+        cur.execute("REPLACE INTO t VALUES (3)")
+
+def sql_held_in_a_name():
+    _CONN.execute(_UPSERT, (4,))
+    _CONN.commit()
 
 def the_callers_connection(conn):
-    conn.execute("INSERT INTO t VALUES (4)")
-
-def keeps_one_in_a_global():
-    global _OTHER
-    _OTHER = sqlite3.connect("y.db", isolation_level=None)
-'''
-    assert kept_connections(src) == [("_CONN", 3, False), ("_OTHER", 34, True)]
-    assert uncommitted_writes(src, {"_CONN"}) == ["returns_before_the_commit:15", "through_an_alias:27"]
-    shared = '''
-_conn = None
-
-def _get_conn():
-    global _conn
-    _conn = sqlite3.connect("z.db")
-    return _conn
-
-def record():
-    conn = _get_conn()
     conn.execute("INSERT INTO t VALUES (5)")
 
-class Logger:
-    def __init__(self):
-        self._conn = _get_conn()
-
-    def log(self):
-        self._conn.execute("INSERT INTO t VALUES (6)")
+def a_new_connection_is_not_the_kept_one():
+    conn = sqlite3.connect("y.db")
+    conn.execute("INSERT INTO t VALUES (6)")
+    conn.commit()
+    conn.close()
 '''
-    assert kept_connections(shared) == [("_conn", 6, False)]
-    assert uncommitted_writes(shared, {"_conn"}) == ["record:11", "log:18"]
+    assert kept_connections(src) == [("_CONN", 3, False, "sqlite3")]
+    problems = module_problems("kazma-core/kazma_core/x.py", src)
+    assert [p.split(" ")[1] for p in problems] == ["committed_but_not_guarded:", "sql_held_in_a_name:"], problems
 
 
-def test_negative_control_sql_held_in_a_name():
-    """The gateway's session store passes its SQL as module constants; a
-    gate that read only literals could not see those writes."""
+def test_negative_control_the_third_party_connection_takes_no_write_of_ours():
     src = '''
-_UPSERT = "INSERT INTO sessions (thread_id, context) VALUES (?, ?) ON CONFLICT DO UPDATE SET context = excluded.context"
-_READ = "SELECT context FROM sessions WHERE thread_id = ?"
+class Agent:
+    async def open(self):
+        self._checkpoint_conn = await aiosqlite.connect(path)
 
-class Store:
-    async def _ensure_db(self):
-        self._db = await aiosqlite.connect("s.db")
-        return self._db
-
-    async def put(self, thread_id, context):
-        db = await self._ensure_db()
-        await db.execute(_UPSERT, (thread_id, context))
-
-    async def put_committed(self, thread_id, context):
-        db = await self._ensure_db()
-        await db.execute(_UPSERT, (thread_id, context))
-        await db.commit()
-
-    async def get(self, thread_id):
-        db = await self._ensure_db()
-        await db.execute(_READ, (thread_id,))
+    async def summary(self):
+        cur = await self._checkpoint_conn.execute("SELECT DISTINCT thread_id FROM checkpoints")
+        return await cur.fetchall()
 '''
-    assert kept_connections(src) == [("self._db", 7, False)]
-    assert uncommitted_writes(src, {"self._db"}) == ["put:12"]
+    rel = "kazma-core/kazma_core/agent_runner.py"
+    assert module_problems(rel, src) == []
+    bypass = src + '''
+    async def delete_thread(self, thread_id):
+        await self._checkpoint_conn.execute("DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,))
+        await self._checkpoint_conn.commit()
+'''
+    problems = module_problems(rel, bypass)
+    assert len(problems) == 1 and "delete_thread" in problems[0]
+
+
+def test_negative_control_the_begin_rules():
+    src = '''
+def no_rollback(conn):
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute("INSERT INTO t VALUES (1)")
+    conn.execute("COMMIT")
+
+def rolls_back_in_its_try(conn):
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("INSERT INTO t VALUES (1)")
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+def rolls_back_right_after(conn):
+    conn.execute("BEGIN")
+    try:
+        conn.execute("INSERT INTO t VALUES (1)")
+    finally:
+        conn.rollback()
+
+def a_named_rollback(self):
+    with self._lock:
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._rollback_if_needed()
+            raise
+
+def _connect(self):
+    return committed_and_closed(sqlite3.connect("x.db"))
+
+def in_a_closing_context(self):
+    with self._lock, self._connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("INSERT INTO t VALUES (1)")
+
+def in_its_connection(conn):
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("INSERT INTO t VALUES (1)")
+
+def a_try_that_does_not_roll_back(conn):
+    try:
+        conn.execute("BEGIN")
+        conn.execute("INSERT INTO t VALUES (1)")
+    except Exception:
+        pass
+'''
+    assert begins_without_rollback(src) == ["no_rollback:3", "a_try_that_does_not_roll_back:47"]
+
+
+def test_negative_control_a_connection_kept_through_a_local():
+    """RBAC opens into a local and publishes it once seeded; the gate follows
+    the connection to the attribute that keeps it."""
+    src = '''
+class Store:
+    async def _get_db(self):
+        db = await aiosqlite.connect(self.path)
+        await db.execute("PRAGMA foreign_keys=ON")
+        self._db = db
+        return self._db
+'''
+    rel = "kazma-core/kazma_core/x.py"
+    assert kept_connections(src) == [("self._db", 6, False, "aiosqlite")]
+    assert len(module_problems(rel, src)) == 1
+    fixed = src.replace("connect(self.path)", "connect(self.path, isolation_level=None)")
+    assert kept_connections(fixed) == [("self._db", 6, True, "aiosqlite")]
+    assert module_problems(rel, fixed) == []

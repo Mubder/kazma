@@ -107,31 +107,34 @@ def record_llm_call(
             turn_id = current_turn_id()
         with _lock:
             conn = _get_conn()
-            conn.execute(
-                """INSERT INTO llm_calls
-                   (ts, thread_id, iteration, provider, model,
-                    prompt_tokens, completion_tokens, total_tokens,
-                    cost_usd, duration_ms, status, error_kind, failover_from,
-                    turn_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    datetime.now(UTC).isoformat(),
-                    thread_id,
-                    int(iteration or 0),
-                    provider,
-                    model,
-                    int(prompt_tokens or 0),
-                    int(completion_tokens or 0),
-                    int(prompt_tokens or 0) + int(completion_tokens or 0),
-                    float(cost_usd or 0.0),
-                    float(duration_ms or 0.0),
-                    status,
-                    error_kind,
-                    failover_from,
-                    str(turn_id or ""),
-                ),
-            )
-            conn.commit()
+            # Commits, or rolls back when the insert raises: an open
+            # transaction on this shared connection would hold the ledger's
+            # write lock until the next call.
+            with conn:
+                conn.execute(
+                    """INSERT INTO llm_calls
+                       (ts, thread_id, iteration, provider, model,
+                        prompt_tokens, completion_tokens, total_tokens,
+                        cost_usd, duration_ms, status, error_kind, failover_from,
+                        turn_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        datetime.now(UTC).isoformat(),
+                        thread_id,
+                        int(iteration or 0),
+                        provider,
+                        model,
+                        int(prompt_tokens or 0),
+                        int(completion_tokens or 0),
+                        int(prompt_tokens or 0) + int(completion_tokens or 0),
+                        float(cost_usd or 0.0),
+                        float(duration_ms or 0.0),
+                        status,
+                        error_kind,
+                        failover_from,
+                        str(turn_id or ""),
+                    ),
+                )
     except Exception as exc:  # noqa: BLE001 — observability must be invisible
         logger.debug("[llm-ledger] record failed (non-fatal): %s", exc)
 

@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## A failed database write no longer leaves its database locked (2026-09-27)
+
+Following the reminder store below, every database connection Kazma keeps
+open was checked for the same fault on the error path, and fourteen had it: a
+write that failed (a lock timeout, a full disk) left its transaction open,
+so the database stayed locked for every other writer until the next
+successful write on that connection. The memory writer, which every chat turn
+goes through, was one; others were the record of model calls, the response
+cache, the security audit trail and the swarm task store. One store could
+also commit half of a two-part record at its next write (a vulnerability
+report without its first status entry), and the memory's fact updates could
+leave their transaction open if anything but a duplicate failed. Each now
+ends its transaction whatever happens: most write one statement at a time,
+the rest wrap each group of writes so it lands whole or not at all. A test
+makes each of these writes fail on purpose and checks that another program
+can write straight after, and a check on the source keeps every connection
+Kazma holds open to one of the safe patterns. Two old methods that deleted
+chat history directly under the chat engine's feet, and had no callers, are
+gone.
+
 ## The reminder store no longer holds its database locked (2026-09-27)
 
 **Reminders' database is no longer locked while the server idles.** The

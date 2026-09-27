@@ -652,19 +652,39 @@ def _mutate_functional(
     state-predicate path can record a ``"transition"`` audit row via the same
     code path instead of mislabeling every state change as a supersede.
     """
-    tenant_id = kw["tenant_id"]
-    now = kw["now"]
-    audit_event_type = kw.get("audit_event_type", "supersede")
     # BEGIN IMMEDIATE acquires a write lock up front so the read below
     # sees ALL prior committed writes (no stale WAL snapshot). This is
     # essential when mutations run across separate connections/threads —
     # a deferred read transaction could miss a just-committed supersede.
-    _began = False
+    began = False
     try:
         conn.execute("BEGIN IMMEDIATE")
-        _began = True
-    except Exception:
-        pass  # already in a transaction
+        began = True
+    except sqlite3.Error:
+        pass  # already in the caller's transaction, which the caller ends
+    ended = False
+    try:
+        result = _mutate_functional_locked(conn, ops_conn, sub, pred, obj, began=began, **kw)
+        ended = True
+        return result
+    finally:
+        # A transaction this call began ends here, whatever went wrong in
+        # it: left open it held memory_state.db's write lock until the
+        # connection closed (tests/test_sqlite_kept_connections.py).
+        if not ended and began and conn.in_transaction:
+            conn.rollback()
+
+
+def _mutate_functional_locked(
+    conn: sqlite3.Connection,
+    ops_conn: sqlite3.Connection | None,
+    sub: str, pred: str, obj: str, *, began: bool, **kw: Any,
+) -> dict[str, Any]:
+    """:func:`_mutate_functional` inside its transaction (``began``: this
+    call opened it, so its early exits end it)."""
+    tenant_id = kw["tenant_id"]
+    now = kw["now"]
+    audit_event_type = kw.get("audit_event_type", "supersede")
     # Find the currently-active belief for this (subject, predicate)
     existing = conn.execute(
         """SELECT id, object, extraction_method, valid_from FROM beliefs
@@ -675,7 +695,7 @@ def _mutate_functional(
     ).fetchone()
     if existing is not None and now < float(_col(existing, "valid_from", 3) or 0.0):
         # Said before the current fact was: history, never a replacement.
-        return _record_earlier_statement(conn, ops_conn, sub, pred, obj, began=_began, **kw)
+        return _record_earlier_statement(conn, ops_conn, sub, pred, obj, began=began, **kw)
     superseded_id = None
     state_before = None
     if existing:
@@ -692,7 +712,7 @@ def _mutate_functional(
             # already had one open, leave it to the caller (audit finding:
             # early returns leaked the write lock until the connection closed
             # if the caller's later commit raised).
-            if _began:
+            if began:
                 try:
                     conn.rollback()
                 except Exception:
@@ -723,7 +743,7 @@ def _mutate_functional(
                 state_before={"id": superseded_id, "object": old_obj},
                 state_after={"id": superseded_id, "object": old_obj, "blocked": True},
             )
-            if _began:
+            if began:
                 try:
                     conn.rollback()
                 except Exception:
@@ -771,7 +791,7 @@ def _mutate_functional(
             "[belief_mutate] insert ignored after supersede close — rolling back "
             "subject=%s pred=%s", sub, pred,
         )
-        if _began:
+        if began:
             try:
                 conn.rollback()
             except Exception:

@@ -203,12 +203,14 @@ class SnapshotStore:
         # corrupt the C-level handle (native access violations downstream).
         self._conn_lock = threading.RLock()
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        # Autocommit: every write here is one statement, and one that raises
+        # cannot leave snapshots.db's write lock held
+        # (tests/test_sqlite_kept_connections.py).
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False, isolation_level=None)
         with self._conn_lock:
             apply_sqlite_pragmas(self._conn)
             self._conn.execute(_CREATE_TABLE_SQL)
             self._conn.execute(_CREATE_INDEX_SQL)
-            self._conn.commit()
 
     @property
     def db_path(self) -> str:
@@ -223,7 +225,6 @@ class SnapshotStore:
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (record.id, record.thread_id, record.iteration, record.state_json, record.timestamp, record.model_used),
             )
-            self._conn.commit()
 
     def get(self, thread_id: str, iteration: int) -> SnapshotRecord | None:
         """Retrieve a single snapshot by thread + iteration."""
@@ -263,7 +264,6 @@ class SnapshotStore:
                 "DELETE FROM snapshots WHERE thread_id = ?",
                 (thread_id,),
             )
-            self._conn.commit()
             return cursor.rowcount
 
     def list_distinct_threads(self) -> list[str]:
@@ -293,7 +293,6 @@ class SnapshotStore:
                 f"DELETE FROM snapshots WHERE id IN ({placeholders})",
                 ids_to_delete,
             )
-            self._conn.commit()
             return cursor.rowcount
 
     def close(self) -> None:

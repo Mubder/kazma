@@ -41,8 +41,10 @@ def _get_conn(db_path: str = _DEFAULT_DB) -> sqlite3.Connection:
         # check_same_thread=False: pipeline logging is invoked from worker
         # threads other than the connection's creator; the default would raise
         # sqlite3.ProgrammingError. Write safety is provided by WAL +
-        # busy_timeout (apply_sqlite_pragmas) (audit finding).
-        _conn = sqlite3.connect(db_path, check_same_thread=False)
+        # busy_timeout (apply_sqlite_pragmas) (audit finding). Autocommit:
+        # every write is one INSERT, and one that raises cannot leave the
+        # write lock held (tests/test_sqlite_kept_connections.py).
+        _conn = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None)
         from kazma_core.config_store import apply_sqlite_pragmas
 
         apply_sqlite_pragmas(_conn)
@@ -66,7 +68,6 @@ def _get_conn(db_path: str = _DEFAULT_DB) -> sqlite3.Connection:
         _conn.execute("CREATE INDEX IF NOT EXISTS idx_correlation ON pipeline_logs(correlation_id)")
         _conn.execute("CREATE INDEX IF NOT EXISTS idx_worker ON pipeline_logs(worker_name)")
         _conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON pipeline_logs(timestamp)")
-        _conn.commit()
     return _conn
 
 
@@ -112,7 +113,6 @@ class PipelineLogger:
                 json.dumps(metadata or {}),
             ),
         )
-        self._conn.commit()
 
     def log_tool_exec(
         self,
@@ -135,7 +135,6 @@ class PipelineLogger:
                 tool_output[:5000],
             ),
         )
-        self._conn.commit()
 
     def log_output(
         self,
@@ -157,7 +156,6 @@ class PipelineLogger:
                 output[:10000],
             ),
         )
-        self._conn.commit()
 
     def query_by_correlation(self, correlation_id: str, limit: int = 100) -> list[dict[str, Any]]:
         """Return all logs for a given correlation ID."""

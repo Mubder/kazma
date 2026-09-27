@@ -76,7 +76,10 @@ class SecurityAuditTrail:
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
-            self._conn = sqlite3.connect(str(self._db_path))
+            # Autocommit: each event is one INSERT, and one that raises
+            # cannot leave the write lock held
+            # (tests/test_sqlite_kept_connections.py).
+            self._conn = sqlite3.connect(str(self._db_path), isolation_level=None)
             from kazma_core.config_store import apply_sqlite_pragmas
 
             apply_sqlite_pragmas(self._conn)
@@ -103,7 +106,6 @@ class SecurityAuditTrail:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_se_type ON security_events(event_type)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_se_severity ON security_events(severity)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_se_timestamp ON security_events(timestamp)")
-            conn.commit()
 
     # ------------------------------------------------------------------
     # Public API
@@ -148,7 +150,6 @@ class SecurityAuditTrail:
                 """,
                 (event.id, event.event_type, event.skill_id, event.details, event.severity, event.timestamp),
             )
-            conn.commit()
 
         return event
 

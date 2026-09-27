@@ -80,7 +80,10 @@ class SQLiteSessionStore(SessionStore):
             if self._db_path != ":memory:":
                 Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
 
-            self._db = await aiosqlite.connect(self._db_path)
+            # Autocommit: every write here is one statement, and one that
+            # raises cannot leave the write lock held
+            # (tests/test_sqlite_kept_connections.py).
+            self._db = await aiosqlite.connect(self._db_path, isolation_level=None)
             await apply_sqlite_pragmas_async(self._db)
             await self._db.execute(_CREATE_TABLE)
             # Schema auto-migration: add tenant_id if not present
@@ -88,7 +91,6 @@ class SQLiteSessionStore(SessionStore):
                 await self._db.execute("ALTER TABLE sessions ADD COLUMN tenant_id TEXT")
             except Exception:
                 pass  # Ignore error if column is already present
-            await self._db.commit()
             logger.info("[SQLiteSessionStore] Opened %s and auto-migrated schema if needed", self._db_path)
             return self._db
 
@@ -122,7 +124,6 @@ class SQLiteSessionStore(SessionStore):
         serialized = json.dumps(context, ensure_ascii=False)
         resolved_tenant = tenant_id if tenant_id is not None else (get_current_tenant_id() or context.get("tenant_id"))
         await db.execute(_UPSERT, (thread_id, serialized, resolved_tenant))
-        await db.commit()
 
     async def delete(self, thread_id: str, tenant_id: str | None = None) -> None:
         """Remove stored context for a thread_id, optionally scoped by tenant_id. No-op if not found."""
@@ -140,7 +141,6 @@ class SQLiteSessionStore(SessionStore):
             )
         else:
             await db.execute(_DELETE, (thread_id,))
-        await db.commit()
 
     async def update(
         self,
@@ -180,7 +180,6 @@ class SQLiteSessionStore(SessionStore):
         db = await self._ensure_db()
         cutoff = int(time.time()) - int(seconds)
         cursor = await db.execute(_EVICT_OLDER_THAN, (cutoff,))
-        await db.commit()
         return cursor.rowcount or 0
 
     async def list_active(self, tenant_id: str | None = None) -> list[dict[str, Any]]:

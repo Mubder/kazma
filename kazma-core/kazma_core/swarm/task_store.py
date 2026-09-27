@@ -134,7 +134,10 @@ class TaskStore:
         if self._pg:
             raise RuntimeError("SQLite connection requested while Postgres backend active")
         if self._conn is None:
-            self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            # Autocommit: every write here is one statement, and one that
+            # raises cannot leave the write lock held
+            # (tests/test_sqlite_kept_connections.py).
+            self._conn = sqlite3.connect(self._db_path, check_same_thread=False, isolation_level=None)
             self._conn.row_factory = sqlite3.Row
             apply_sqlite_pragmas(self._conn)
         return self._conn
@@ -205,7 +208,6 @@ class TaskStore:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_swarm_tasks_sort_at ON swarm_tasks(sort_at DESC)")
             except Exception:
                 pass
-            conn.commit()
 
     def close(self) -> None:
         """Close the database connection."""
@@ -225,7 +227,6 @@ class TaskStore:
             conn = self._get_conn()
             conn.execute("DELETE FROM swarm_tasks")
             conn.execute("DELETE FROM swarm_worker_metrics")
-            conn.commit()
 
     # ------------------------------------------------------------------
     # Task CRUD
@@ -331,7 +332,6 @@ class TaskStore:
                     getattr(task, "workspace_id", None),
                 ),
             )
-            conn.commit()
 
     def get_task(self, task_id: str) -> SwarmTask | None:
         """Retrieve a persisted task by its id, or ``None``."""
@@ -526,7 +526,6 @@ class TaskStore:
                      AND COALESCE(sort_at, completed_at, created_at) < ?""",
                 (*_FINISHED_STATUSES, cutoff),
             )
-            conn.commit()
             deleted = cur.rowcount
             if deleted:
                 logger.info("[TaskStore] pruned %d terminal tasks older than %d days", deleted, retention_days)
@@ -548,7 +547,6 @@ class TaskStore:
                 ))
             conn = self._get_conn()
             cur = conn.execute("DELETE FROM swarm_tasks WHERE id = ?", (task_id,))
-            conn.commit()
             return (cur.rowcount or 0) > 0
 
     def get_paused_tasks(self) -> list[SwarmTask]:
@@ -738,7 +736,6 @@ class TaskStore:
                      END""",
                 params,
             )
-            conn.commit()
 
     def get_worker_metrics(self, worker: str) -> list[dict[str, Any]]:
         """Return daily metrics for a given worker, newest first."""
