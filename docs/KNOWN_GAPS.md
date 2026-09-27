@@ -8,7 +8,42 @@ say against it. Every entry names the evidence, so a reader can check it rather
 than take our word — and so the gap stops being invisible when the person who
 found it forgets.
 
-**Reviewed 2026-09-25.** An entry with no date has not been re-checked since.
+**Reviewed 2026-09-27.** An entry with no date has not been re-checked since.
+
+## Where things stand (2026-09-27)
+
+**Open defects: none known.** Every "still open" item below is now one of
+three things: **closed** (struck through, with the evidence and the gate that
+holds it), **accepted** (a limit kept on purpose, with the reason), or an
+**owner decision** (it changes the owner's accounts or data).
+
+**Owner decisions:**
+
+- **Branch protection on `main`.** It changes GitHub settings; the checklist
+  is `docs/docs/ops/branch-protection.md`.
+- **The first prune of the live install's chat step history.** Checkpoint
+  retention covers Postgres since 2026-09-27 (§41 of AGENTS.md); the live
+  install holds 2.9 GB of old steps, and deleting them is the owner's call.
+  It is set to keep everything there (`checkpoints.retention_days` = 0)
+  until the owner sets a number of days in Settings -> System -> Chat step
+  history. New installs prune from day one (30 days).
+- **pgvector** was decided 2026-09-27: it stays out. Meaning search is exact
+  and local (sqlite-vec / NumPy); see "Exact meaning search is linear" below.
+
+**Accepted limits** (each is explained where it is recorded below):
+the Postgres CI job runs the marked tests, and every module that opens
+Postgres has one; `KAZMA_DATA_DIR` does not isolate a Postgres settings
+store; unreferenced public symbols are ratcheted, not mass-deleted; X
+credentials stay per tenant; the shared-store peer registry names installs
+and stops none; `python_exec`'s denylist reads literals; a credential URL
+outside the install-scoped names stays in the settings store, masked on
+every way out; the Web approval card shows raw arguments to the operator;
+module-level import cycles are held by a fresh-import CI job; exact meaning
+search is linear; the prompt-injection figures are one model's; MCP clients
+without a chat thread get no session grants; the date guard's matching
+limits; a dead `settings` table in a Postgres install's `settings.db`;
+timing-based tests are ratcheted; the control-plane write guard is
+path-based; Kazma is built for a single trusted operator.
 
 ---
 
@@ -39,9 +74,18 @@ closed by default (an unclassified public tool coroutine *fails*), but that
 discipline has been applied to the modules the audit touched, not to the whole
 tree. Assume the same class exists elsewhere.
 
-**Still open from that audit:**
+**What that audit left open, and where it stands (2026-09-27):**
 
-- **Postgres has one CI job, not coverage.** The job runs every test marked
+- **Accepted, and gated per module: the Postgres CI job runs the marked
+  tests, not the whole suite.** Since 2026-09-27 every product module that
+  opens Postgres has a marked test: `tests/test_postgres_coverage.py` fails
+  on one that has none. Its first run named three -- the agent's and the
+  gateway's checkpointers (now one opener, `kazma_core/checkpoints_pg.py`,
+  whose real-Postgres test found that the agent never closed its pool) and
+  the research panel's Delete, which ran its own SQL against the task tables
+  (now `TaskStore.delete_task`, tested on both backends). Everything
+  unmarked still runs on SQLite only; that is the accepted part. The record:
+  the job runs every test marked
   `@pytest.mark.postgres` (`scripts/postgres_suite.py`): 287 tests in 32 files
   on 2026-09-25 (night; 5 skip on a plain `postgres:16` — one needs
   pgvector), each file passing twice on a throwaway Postgres
@@ -67,7 +111,7 @@ tree. Assume the same class exists elsewhere.
   `test_swarm_task_store.py` is also where the `task-hitl-1` / `task-paused-1`
   rows in the live database came from (2026-08-14, before `conftest.py`
   stripped DSNs).
-- **The suite can only reach a real Postgres through one deliberate switch.**
+- **By design: the suite can only reach a real Postgres through one deliberate switch.**
   `conftest.py` force-pins `KAZMA_DB_BACKEND=sqlite` and strips every DSN at
   import, with a guard that removes the DSN again if anything re-adds it — so
   a developer's `.env` can never point the suite at a live database. Only
@@ -75,8 +119,8 @@ tree. Assume the same class exists elsewhere.
   opens it. The first version of that CI job did **not** set it and would have
   run entirely on SQLite while looking like Postgres coverage; that is why
   `test_conftest_db_guard_is_failsafe_by_default` exists.
-- **`KAZMA_DATA_DIR` does not isolate a Postgres-backed ConfigStore — by
-  design, now said out loud twice.** `_use_postgres()` keys off
+- **Accepted: `KAZMA_DATA_DIR` does not isolate a Postgres-backed
+  ConfigStore — by design, now said out loud twice.** `_use_postgres()` keys off
   `KAZMA_DB_BACKEND` / `KAZMA_DATABASE_URL` only, so a script that sets only
   the data dir on a box with `.env` loaded reads — and can write — the real
   settings store (verified by accident during the audit). Making the data
@@ -93,10 +137,10 @@ tree. Assume the same class exists elsewhere.
   each written from its call site, and the ratchet in
   `tests/test_env_reference.py` is at 0. What reading them turned up is in
   "Found while describing every variable" below.
-- **175 public symbols have no reference outside their own module** (a
-  broader count, which includes helpers used only inside their module, is now
-  on the `module_local_public_symbols` ratchet in `tests/test_debt_ratchet.py`
-  and may only go down). Not removed: mass-deleting unreferenced public API is how you break downstream
+- **Accepted, ratcheted: 175 public symbols have no reference outside their
+  own module** (a broader count, which includes helpers used only inside
+  their module, is on the `module_local_public_symbols` ratchet in
+  `tests/test_debt_ratchet.py` and may only go down: 599 on 2026-09-27). Not removed: mass-deleting unreferenced public API is how you break downstream
   importers, and the audit proved the point — `ruff --fix` removing "unused"
   imports silently broke every native skill via a re-export contract no linter
   could see (caught by `tests/test_imports.py`).
@@ -108,7 +152,12 @@ tree. Assume the same class exists elsewhere.
   same justified `# nosec B402` as the backend they test.
   `tests/test_security_scan_scope.py` keeps both directories in the gate and
   every `# nosec` naming its rule and a reason.
-- **Nothing asserts that an entry point installs a tenant context.** Vault
+- **Accepted, held at the storage and by a tripwire: nothing asserts that an
+  entry point installs a tenant context.** Provider keys, mail and calendar
+  secrets are install-scoped (so no tenant is needed to read them), a
+  tenant-less miss of a per-tenant secret logs a WARNING naming the tenants,
+  and the per-tenant ones that remain (X credentials) are read by background
+  code that binds its tenant (see "X connector credentials" below). Vault
   secrets are tenant-scoped and everything saved through Settings is written
   under the web request's tenant (`"default"` on a single-user install).
   `Vault.retrieve` falls back tenant → global and deliberately **not** the
@@ -236,16 +285,20 @@ tree. Assume the same class exists elsewhere.
   to read the matcher to disprove it. An entry that opens a path with no route
   is a pre-opened door for whoever adds that route next.
   → `tests/test_auth_middleware.py::test_telemetry_subpaths_are_gated`.
-- **`kazma_core/tools/__init__.py` shadows its own submodules.** It exports a
-  function named `read_url`, so `import kazma_core.tools.read_url as ru` binds
-  the *function*, not the module (Python resolves `import a.b as c` by
-  attribute since 3.7). Anything reaching for the module must use
-  `importlib.import_module`. Not renamed — the call sites are many and the
-  breakage is loud rather than silent — but it costs a contributor an hour
-  the first time. Measured and written at the imports (2026-09-25): pytest's
-  `monkeypatch.setattr("kazma_core.tools.read_url.X", …)` raises
-  AttributeError on the function, while `mock.patch` (which imports) reaches
-  the module.
+- **~~`kazma_core/tools/__init__.py` shadows its own submodules.~~** Closed
+  2026-09-27, and the breakage was not always loud: a fixture in
+  `tests/test_file_read_cache_invalidation.py` did
+  `from kazma_core.tools import file_write as fw` and patched
+  `check_path_access` onto the FUNCTION -- nothing at all -- and passed. Every
+  name in the package is its submodule now (nine were rebound), and
+  `kazma_core.web_acquire`'s `search.py` became `serp.py` so its `search` is
+  one thing, the function. `tests/test_package_namespaces.py` checks every
+  product package, with a negative control. The record: it exported a
+  function named `read_url`, so `import kazma_core.tools.read_url as ru`
+  bound the *function*, not the module (Python resolves `import a.b as c` by
+  attribute since 3.7); pytest's `monkeypatch.setattr("kazma_core.tools.read_url.X", …)`
+  raised AttributeError on the function, while `mock.patch` (which imports)
+  reached the module.
 
 ---
 
@@ -322,15 +375,20 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
 | Per-tenant gateway checkpoints written relative to the process CWD | `test_no_store_path_is_built_from_the_working_directory` |
 | The tools catalog generator scanned the pre-split `tool_builtins.py` and found 1 built-in tool; the hand-kept catalog lacked 20 registered tools and called 31 approval-gated tools (`x_post`, `send_file`, `git_push`, the memory deletions…) "safe/read" | The generator reads the live registry; `tests/test_tools_catalog.py` (every registered tool listed once; every danger label checked against `requires_approval`) |
 
-**Still open — honest list:**
+**What that left open, and where it stands:**
 
 - **~~Stores open a connection per call and leave it to the GC.~~** Closed
   2026-09-25: store `_connect()` helpers return
   `db.sqlite_session.committed_and_closed(conn)`, and
   `test_no_raw_connection_opener_is_used_as_a_context` fails on any helper
   that hands a raw connection to a `with` block.
-- **Port exhaustion: TCP mitigated, UDP still open — culprit unnamed.**
-  The TCP dynamic range is widened (`netsh … dynamicport tcp`: 10000 + 55535,
+- **~~Port exhaustion: TCP mitigated, UDP still open.~~** Closed 2026-09-27,
+  measured on the operator's box: the UDP dynamic range is widened too
+  (`netsh int ipv4|ipv6 show dynamicport udp`: 10000 + 55535, like TCP), and
+  the System log has no `4266` (UDP port space full) since 2026-09-25 13:30
+  and no `4231` (TCP) since 2026-09-22 23:31. The culprit was never named;
+  the guard's `health.port_exhaustion` line names the socket holders if it
+  recurs. The record: the TCP dynamic range is widened (`netsh … dynamicport tcp`: 10000 + 55535,
   IPv4 and IPv6) and no TCP event has been logged since 2026-09-22 23:31. UDP
   was not widened (still 49152 + 16384) and `4266` (UDP port space full)
   fired on 2026-09-23 17:23 and 2026-09-24 17:35; the same `netsh` for `udp`
@@ -359,9 +417,9 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
 | The Postgres lazy plaintext→vault migration raised inside a debug-logged except and never landed | `tests/test_diagnostics_are_read_only.py` (runs in the Postgres job) |
 | Nothing restored a dump to prove it restores | opt-in `backup/restore_rehearsal.py`; `tests/test_restore_rehearsal.py` (real round trip marked `postgres`) |
 
-**Still open from that pass:**
+**What that pass left open, and where it stands:**
 
-- **Branch protection is the owner's call.** `main` has none and no ruleset
+- **Owner decision: branch protection.** `main` has none and no ruleset
   (checked 2026-09-25). A ruleset requiring the Tests job with the repository
   admin as a bypass actor would block unreviewed red pushes from anyone else
   while keeping the owner's direct pushes — the objection recorded in AGENTS
@@ -369,16 +427,20 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
   ready: `docs/docs/ops/branch-protection.md` (the eleven required checks by
   name, the ruleset, and the metrics bot's direct push, which the ruleset
   would reject -- decide that first).
-- **The shared-store peer registry is advisory.** It names installs; it does
-  not stop one from writing. An acknowledged id silences only that id.
-- **The restore rehearsal is off by default.** Until it is turned on
-  (`KAZMA_PG_RESTORE_REHEARSAL=1` or `backups.pg.restore_rehearsal`), "the
-  dump restores" is still inferred from "the dump reads". It needs
-  `CREATEDB`; the live install's role has it (checked read-only 2026-09-25).
-  `python -m kazma_core.backup.restore_drill --deep` runs the weekly deep
-  drill — the rehearsal included, when on — on demand.
-- **The `python_exec` denylist sees literals only.** A path or command built
-  at run time goes to the card, which is the control for it.
+- **Accepted: the shared-store peer registry is advisory.** It names
+  installs; it does not stop one from writing -- replicas share the store
+  legitimately, and a fence would need an identity they cannot forge. An acknowledged id silences only that id.
+- **~~The restore rehearsal is off by default.~~** Closed 2026-09-27: it is
+  on by default with Postgres (`backups.pg.restore_rehearsal=false` or
+  `KAZMA_PG_RESTORE_REHEARSAL=0` turns it off), so the weekly deep drill
+  proves the newest dump restores into a scratch database and drops it. It
+  needs `CREATEDB`, which the live install's role has (checked read-only
+  2026-09-25 and 2026-09-27; 889 GB free on the database volume); without it
+  the drill reports UNVERIFIED with the grant. `python -m
+  kazma_core.backup.restore_drill --deep` runs it on demand.
+- **Accepted: the `python_exec` denylist sees literals only.** A path or
+  command built at run time goes to the approval card, which is the control
+  for it; static analysis cannot see a value the code computes.
 
 ### Found on the live install on 2026-09-25, after the hardening pass, and fixed
 
@@ -399,12 +461,16 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
 The proxy fix was confirmed live on a page load through the tunnel
 (2026-09-25 14:19 UTC): no alarm.
 
-**Still open from those:**
+**What those left open, and where it stands:**
 
-- **X connector credentials still need a tenant bound to read.** Provider
-  keys, mail and calendar are install-scoped; X stays per tenant, because
-  moving an account the agent posts as is an authorization question, not a
-  storage fix.
+- **Accepted, by design: X connector credentials need a tenant bound to
+  read.** Provider keys, mail and calendar are install-scoped; X stays per
+  tenant, because the account the agent posts as is an authorization
+  question, not a storage one. Every background reader binds its tenant:
+  scheduled posts their post's (`x_api/scheduled_fire.py`), the mentions
+  poller, replies and stance checks the install's own (`mentions_fire.py`,
+  `reply.py`, `stance.py`); a tenant-less miss still logs the vault's
+  tripwire WARNING.
 
 ### Found while describing every variable (2026-09-25), and fixed
 
@@ -418,7 +484,7 @@ Writing each of the 148 undescribed variables from its call site:
 | Twenty-one switches that turn a protection off — the WebSocket Origin check, the tenant filter, the commitment layer's kill-switch, `KAZMA_MCP_INHERIT_ENV` among them — were invisible to the name-based security gate | `test_static_gates.py::SECURITY_ENV_NAMES`: listed, on both surfaces, and still read |
 | The YOLO, grant and `/long` TTL parsers promised "0 = no expiry" but always clamped 0 to 60 s. The short reading is the safe one for approval dials, so the behaviour stays and the code now says it | `tests/test_ttl_env_parsing.py` (every knob with a no-expiry word pins what 0 means) |
 
-**Still open from those:**
+**What those left open, and where it stands:**
 
 - **~~Email does not fail closed the way Calendar does.~~** Closed
   2026-09-26: a provider named in the call or by `EMAIL_DEFAULT_PROVIDER`, or
@@ -427,13 +493,21 @@ Writing each of the 148 undescribed variables from its call site:
   provider and a typo'd alias are refused too — both used to default to the
   sandbox. `tests/test_email_fail_closed.py` (every tool enumerated from the
   module; a connected provider as the negative control).
-- **`KAZMA_CHECKPOINT_RETENTION_DAYS` is only an on/off switch.** Its value is
-  never used as days; the policy (200 per thread, 10 after 30 idle days) is
-  fixed. Documented as such rather than given a meaning, because a new
-  meaning would change what gets deleted.
-- **`KAZMA_MEMORY_CONFLICT_POLICY=origin_wins` and `fail_closed` behave the
-  same** (both skip a write to a row another region owns; only the logged
-  reason differs).
+- **~~`KAZMA_CHECKPOINT_RETENTION_DAYS` is only an on/off switch.~~** Closed
+  2026-09-27: it is the number of days (0 keeps everything) and wins over the
+  new setting `checkpoints.retention_days` (Settings -> System, default 30).
+  The same change found that retention had never run on Postgres ("Found on
+  2026-09-27 while closing this list", below), and that on SQLite its idle rule read `metadata.ts`, which
+  LangGraph never writes, so the 30-day rule never applied. Deleting is still
+  guarded: a chat written in the last ten minutes is left alone, and the live
+  install keeps everything until its owner decides (top of this page).
+- **~~`KAZMA_MEMORY_CONFLICT_POLICY=origin_wins` and `fail_closed` behave the
+  same.~~** Closed 2026-09-27: `origin_wins` keeps the other region's row
+  quietly (memory health counts `kept_by_origin`); `fail_closed` refuses the
+  same write and reports it (`region_conflicts`, a WARNING each sync pass and
+  the ops alert `memory.region_conflict`). The mirror sync reads each row's
+  writing region and no longer counts a refusal as a failed push or spends
+  its push budget on one. `tests/test_memory_mirror_sync.py`.
 - **~~Swarm task history is never pruned.~~** Closed 2026-09-25 (owner's
   choice: a setting, 30 days). `swarm.task_retention_days` (Settings → System;
   0 keeps all) is applied by the 15-minute maintenance sweep, which now counts
@@ -461,9 +535,10 @@ code logs 140 server errors for 80 calls, the new code none.
 | The Qdrant probe cache was per instance, and instances are built per call | `test_qdrant_probe_is_cached_across_instances` |
 | Nine memory-backend Settings routes ran database and network work on the event loop (seven are plain `def`s now; the two that read a body await it, then `to_thread`) | `test_the_settings_routes_report_the_probe_off_the_loop`; the debt ratchet (`async_route_never_awaits` 267 → 260) |
 
-**Still open from those:**
+**What those left open, and where it stands:**
 
-- **The shipped compose files still run `postgres:16-alpine`** (no pgvector),
+- **Owner decision, made 2026-09-27 -- it stays: the shipped compose files run
+  `postgres:16-alpine`** (no pgvector),
   so a compose install gets sqlite-vec plus one INFO line at boot. Switching
   the default image is not a one-line change: a volume initialised on Alpine
   (musl) has text indexes ordered by musl's collation, and the pgvector image
@@ -478,16 +553,19 @@ code logs 140 server errors for 80 calls, the new code none.
   archiving no longer deletes text (76 memories it had erased were
   recovered from verified sources). `docs/plans/MEMORY_NOTHING_LOST_PLAN.md`;
   AGENTS.md §15F; gates in `tests/test_memory_nothing_lost.py`.
-- **Exact meaning search is linear in the number of memories.** About 1 ms
+- **Accepted, measured: exact meaning search is linear in the number of memories.** About 1 ms
   per 1,000 rows of 1024-dim vectors (20,000 rows: ~21 ms, measured
   2026-09-26), so it stays exact well past 100k memories on one node. An
   approximate index (sqlite-vec's vec0 or pgvector HNSW) is the next step
   when a tenant nears that, with recall@k measured against this exact scan.
-- **Recall's keyword channel matches stopwords.** `_fts_match_query` ORs every
-  token of two or more characters ("is", "the", "at"), so memories that only
-  share common words take keyword ranks, and fusion is rank-based. Stage 2 of
-  the memory plan (query rewriting, stopwords, a reranker) owns it, with a
-  measured benchmark rather than the 6-case golden set.
+- **~~Recall's keyword channel matches stopwords.~~** Closed by Stage 2 of
+  the memory plan (2026-09-26): the keyword query is the question's content
+  words (`memory/query_terms.py`, English and Gulf/MSA stopwords), and recall
+  ranks by evidence -- meaning above the question's background plus content
+  words covered -- not by rank fusion (AGENTS.md §15G), measured on the
+  retrieval benchmark (`kazma_core/memory/benchmark.py`). The record:
+  `_fts_match_query` ORed every token of two or more characters ("is",
+  "the", "at").
 - **~~A Postgres DSN with its password is kept as a plain setting and
   echoed.~~** Closed 2026-09-25, next section.
 
@@ -506,7 +584,7 @@ logs were checked, rotations included: the DSN was never written there.
 | A masked URL posted back would have stored the stars as the password | `is_masked_secret_placeholder` knows a masked URL password; the backends form skips it (`test_a_masked_url_posted_back_keeps_the_stored_one`) |
 | The Memory form saved what Kazma had filled in — an auto-selected pgvector, the DSN it borrowed, its mode — as the operator's choice, after which `KAZMA_PGVECTOR=0` no longer undid it | `test_the_form_posted_back_saves_only_what_the_operator_changed` |
 
-**Still open from those:**
+**What those left open, and where it stands:**
 
 - **~~Provider, model-profile and connector displays mask the key, not a
   password in their URLs.~~** Closed 2026-09-26: the three displays mask a
@@ -514,11 +592,14 @@ logs were checked, rotations included: the DSN was never written there.
   back exactly as shown (`restore_masked_url`); the stars with any other
   change are refused, so a stored password never moves to a new host.
   `NOT_PROBED` is empty; `tests/test_url_password_round_trip.py`.
-- **A credential URL under a name that is not install-scoped stays in
-  plaintext** (masked on every way out). Vaulting it would put it under the
-  saving request's tenant, where background readers cannot see it.
-- **The Web approval card shows tool arguments raw** — by design, to the
-  operator's own authenticated session (chat-platform cards are redacted).
+- **Accepted: a credential URL under a name that is not install-scoped stays
+  in the settings store** (masked on every way out). Vaulting it would put it
+  under the saving request's tenant, where background readers cannot see it;
+  the names that hold one (the memory backends') are install-scoped and
+  vaulted.
+- **By design: the Web approval card shows tool arguments raw**, to the
+  operator's own authenticated session (chat-platform cards are redacted):
+  what is approved must be what is read.
 
 ### A module that imported only in the right order (2026-09-26), and fixed
 
@@ -540,12 +621,29 @@ CI runs it over all of them in its own job ("Every module imports on its
 own"), and `tests/test_fresh_imports.py` shows it catching the same cycle in
 miniature, with the deferred import as the negative control.
 
-**Still open from that:** 311 of the 794 modules sit in module-level import
-cycles, nearly all a package re-exporting its own submodules. Each imports on
-its own today; the job is what stops a new import edge from turning one of
-them into the next `routing_engine`.
+**Accepted, held by the CI job:** 311 of the 794 modules sit in module-level
+import cycles, nearly all a package re-exporting its own submodules. Each
+imports on its own today; the job is what stops a new import edge from
+turning one of them into the next `routing_engine`.
+
+### Found on 2026-09-27 while closing this list, and fixed
+
+| Closed | Gate |
+|---|---|
+| Chat step history (LangGraph checkpoints) was never pruned on Postgres, skipped as "ops-owned": on the live install the checkpoint tables held 2.9 GB of a 3.0 GB database, one chat 3,969 checkpoints. On SQLite a pruned checkpoint's writes stayed behind, and the idle rule read a field LangGraph never writes | `tests/test_checkpoint_retention.py` (real graphs on both savers: state and every kept checkpoint unchanged, the next turn works; on a real Postgres a blob of a checkpoint still being written stays, and without the version rule -- the negative control -- it would go) |
+| The agent's Postgres checkpointer never closed its pool (it called `aclose()`, which psycopg's pool does not have), so every model switch left a pool and a connection open | `tests/test_checkpoints_pg.py` (through `_close_checkpointer`; one opener for both checkpointers, enumerated from the source) |
+| The research panel's Delete ran its own SQL against both task tables, and no test ran it on either | `tests/test_research_task_delete.py`; `TaskStore.delete_task` on both backends in `tests/test_task_store_backends.py` |
+| X Studio kept an error answer as its status and threw on every render; CI found it where the X store could not open | `tests/e2e/test_pages_load_clean.py::test_every_page_survives_its_apis_failing` (every page with its APIs answering 500; Alpine expression errors counted, which a fake clock would otherwise hide), with a negative control page |
+| Three guard tests failed whenever the CI process that ran them was pid 4242, the number they planted as "another process" | `test_the_fabricated_pid_is_never_the_test_process` |
+| A test run could hang at exit, all tests passed: a test opened an aiosqlite connection on a store another test's app build left in a module global | the dashboard context restored after every test (root conftest); a thread still running at the end of a session fails the run and names its test (`tests/test_order_independence.py`, negative control: the run with the guard off never ends) |
+| Under `origin_wins` / `fail_closed`, a row another region wrote would have been pushed and counted as a failed push on every mirror sync pass, spending the push budget | `tests/test_memory_mirror_sync.py` (both policies, the budget, `last_write_wins` as the negative control) |
 
 ## Prompt injection
+
+**Accepted: the entries in this section are limits of a measurement, not
+defects in the product.** The fence ships, its containment is proven in code
+(56/56), and what a given model does with it is reported as measured, with
+the spread.
 
 **Every live number on the injection page carries a measured 5.7-point spread.**
 Running the *unchanged* fence configuration four times on AgentDojo's `slack`
@@ -683,6 +781,9 @@ answer is a reduction rather than an elimination.
 
 ## The MCP bridge
 
+**Decided and accepted: each entry here is a deliberate boundary** (and the
+reason it is kept).
+
 **An MCP server names its own tools. The name does not decide the call.**
 `classify_mcp_tool` still labels `get_file`, `read_env`, `get_ssh_key` and
 `list_env_vars` as **safe**. That label is not a gate. The tool runs only
@@ -728,7 +829,7 @@ configuration where it can be audited — instead of a time window nobody
 remembers opening. Documented in `.env.example`, `THREAT_MODEL.md` and
 `ARCHITECTURE_AND_SYSTEM_MAP.md`.
 
-**The watcher heartbeat proves a process is alive, not that a human is.**
+**Accepted, fails safe: the watcher heartbeat proves a process is alive, not that a human is.**
 A running Kazma instance with nobody at the keyboard still heartbeats, so
 danger tools are published and the approval simply times out (and denies). That
 is the safe direction, but "someone is watching" is a weaker claim than the
@@ -742,6 +843,9 @@ attempts produced three different wrong numbers before the probe settled it.
 ---
 
 ## The commitment / date guard
+
+**Accepted trade-offs:** each is the friction the guard keeps so that it never
+lets a wrong date through; none lets one through.
 
 **Short relative reminders are unchecked when the text names no subject.**
 "Remind me in 10 minutes" still schedules. An offset longer than 24 hours is
@@ -766,7 +870,21 @@ date can still be refused after a bare confirmation.
 
 ## Test baseline
 
-**A chunk hangs on CI — not reproducible on Linux either, as of 2026-09-25.**
+**~~A chunk hangs on CI~~ — closed (2026-09-27), with one cause found and a
+guard for the class.** A local 7-way split hung one chunk at exit, every test
+passed: the interpreter was joining an aiosqlite connection's worker thread.
+A test's session delete had opened a gateway session store that another
+test's app build left in the dashboard's module global, and nothing closed
+it (`py-spy dump` showed the main thread in `threading._shutdown`). pytest-
+timeout covers tests, not that wait, and the chunk's last output lines were
+never flushed, so the log pointed at the wrong file. Now the root conftest
+restores the dashboard context after every test, and a non-daemon thread
+still running at the end of a session fails the run with an `ERROR
+conftest.py::thread_left_running` line naming the test after which it first
+appeared, and ends the process (`tests/test_order_independence.py`: the probe,
+and the same run with the guard off hanging as the negative control). None of
+the 12 CI runs up to 2026-09-27 lost a chunk either. The record, as of
+2026-09-25: not reproducible on Linux.
 
 The experiment below asked for was run in `python:3.11-slim` (CI's Python),
 from a `git archive` of main, `KAZMA_DB_BACKEND=sqlite`: the four files that
@@ -833,7 +951,8 @@ unbounded wait that only manifests on Linux — as the teardown tax that cost
 twelve red runs and a wrongly reverted vault tripwire.
 
 
-**Two hypotheses from the earlier write-up, still unchecked.** Kept because
+**Two hypotheses from the earlier write-up, never needed** (the hang stopped
+recurring; kept in case it returns). Kept because
 they are the only concrete leads anyone has, and they pre-date the dump above
 rather than being answered by it. First: whether `_git_sync` makes a FIFTH
 subprocess call on CI, exhausting that `side_effect` list, because some git
@@ -858,8 +977,10 @@ tests behave identically for the calls they do script, so this costs nothing
 if it turns out to be the wrong lead.
 
 
-**On CI (Linux), 2026-09-17: 9,019 passed, 0 failed, 67 skipped, 3 xfailed —
-job green** (run `35152707624`, commit `a1cb6650`). Local Windows runs give
+**Current (2026-09-27): 11,197 passed, 0 failed, 35 skipped locally
+(Windows, `fast_test.py --chunks 7`); CI (Linux) 11,149 passed on
+`4fed012b`.** Earlier: **on CI (Linux), 2026-09-17: 9,019 passed, 0 failed, 67
+skipped, 3 xfailed — job green** (run `35152707624`, commit `a1cb6650`). Local Windows runs give
 9,0xx passed with three extra failures in
 `tests/test_docx_rtl_visual.py`, which need a working LibreOffice; CI installs
 one, so they pass there and fail on a typical dev box.
@@ -1075,7 +1196,7 @@ refusal. Fixed on 2026-09-14, but the class is wider than the instance: a
 sentinel return value is only as good as the callers that check it, and
 nothing lints for the ones that do not.
 
-**Adding a read inside a lock-holding method can deadlock it.** The same fix
+**Accepted, mitigated: adding a read inside a lock-holding method can deadlock it.** The same fix
 gave `_prepare_value_for_storage` a call to `_stored_raw`, which takes the
 ConfigStore lock. `atomic_update` already held it. `threading.Lock` is not
 reentrant, so the thread blocked on its own lock forever and never released
@@ -1104,9 +1225,9 @@ Measured on the operator's machine after the fix:
 
 So recoverability is measured now, not asserted. Two caveats worth keeping:
 the drill proves the archive READS BACK, and only `scripts/restore_rehearsal.py`
-proves it APPLIES — and that rehearsal is operator-invoked, not scheduled,
-because it creates and drops a database on the live server. Automating it is a
-decision nobody has made yet.
+proves it APPLIES. That rehearsal runs in the weekly deep drill by default
+since 2026-09-27 (it was operator-invoked until then, because it creates and
+drops a database on the server).
 
 **~~`snapshots.db` will prune but not shrink~~ — measured 2026-09-20, there is
 nothing to shrink.** The retention fix commits its deletes, and the worry was
@@ -1285,6 +1406,8 @@ A same-tick same-length rewrite anywhere in the file changes the digest.
 The hash runs in a worker thread so it does not pin the server loop.
 
 ## Scope
+
+**By design** -- the boundary the rest of this page is written inside.
 
 **Single-operator trusted host.** Multi-user, network-exposed and multi-tenant
 deployments need work that is listed in `SECURITY.md` and not all done.

@@ -427,8 +427,29 @@ def _isolate_process_singletons(tmp_path):
     except Exception:
         pass
 
+    # The dashboard's context (tracer, cost breaker, checkpoint manager,
+    # gateway session store) is restored after the test: an app one test
+    # built left its session store there, and a later test's session delete
+    # opened that store's aiosqlite connection, whose thread then kept the
+    # process from exiting -- a fast_test chunk hung to its timeout
+    # (2026-09-27).
+    try:
+        from kazma_ui.dashboard import get_dashboard_context
+
+        _prev_dashboard = get_dashboard_context()
+    except Exception:
+        _prev_dashboard = None
+
     # ---- teardown: restore + park (never close/GC — see _PARKED) ---------
     yield
+
+    if _prev_dashboard is not None:
+        try:
+            from kazma_ui.dashboard import set_dashboard_context
+
+            set_dashboard_context(**_prev_dashboard)
+        except Exception:
+            pass
 
     try:
         from kazma_ui.session_manager import set_session_manager
@@ -491,3 +512,80 @@ def _isolate_process_singletons(tmp_path):
         set_safety(_prev_safety)
     except Exception:
         pass
+
+
+# ── A thread left running is named, and the run ends ────────────────────────
+# A process cannot exit while a non-daemon thread runs: the interpreter joins
+# them before it finishes, and pytest-timeout covers tests, not that wait. On
+# 2026-09-27 a test opened an aiosqlite connection on a store another test's
+# app build had left in a module global, and never closed it; its worker
+# thread kept the chunk's process alive after the last test until fast_test's
+# 25-minute timeout, with the output's last lines never flushed -- the shape of
+# the "chunk hangs on CI" record in docs/KNOWN_GAPS.md. Now each non-daemon
+# thread is traced to the test after which it first appeared; one still
+# running at the end of the session (after a 10-second grace) is reported as
+# an ERROR line fast_test counts, and the process ends with exit 1 instead of
+# waiting forever. Thread-pool workers are left out: the interpreter stops
+# them itself before that join. KAZMA_TEST_THREAD_GUARD=0 turns it off
+# (tests/test_order_independence.py runs the negative control).
+import threading as _threading  # noqa: E402
+
+_thread_first_seen: dict[int, str] = {}
+_threads_left_running: list[tuple[str, str]] = []
+
+
+def _thread_guard_on() -> bool:
+    return os.environ.get("KAZMA_TEST_THREAD_GUARD") != "0"
+
+
+def _blocking_threads() -> list:
+    return [
+        t for t in _threading.enumerate()
+        if t is not _threading.main_thread()
+        and not t.daemon
+        and t.is_alive()
+        and not t.name.startswith(("ThreadPoolExecutor-", "asyncio_"))
+    ]
+
+
+def pytest_runtest_logfinish(nodeid, location):
+    if _thread_guard_on():
+        for t in _blocking_threads():
+            _thread_first_seen.setdefault(t.ident, nodeid)
+
+
+@_pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session, exitstatus):
+    if not _thread_guard_on():
+        return
+    import time as _time
+
+    deadline = _time.monotonic() + 10.0
+    for t in _blocking_threads():
+        t.join(max(0.0, deadline - _time.monotonic()))
+    for t in _blocking_threads():
+        _threads_left_running.append(
+            (t.name, _thread_first_seen.get(t.ident, "session setup or teardown"))
+        )
+    if _threads_left_running:
+        session.exitstatus = int(_pytest.ExitCode.TESTS_FAILED)
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    if not _threads_left_running:
+        return
+    terminalreporter.section("threads left running", red=True)
+    for name, test in _threads_left_running:
+        slug = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
+        terminalreporter.write_line(
+            f"ERROR conftest.py::thread_left_running[{slug}] - a non-daemon thread "
+            f"{name!r} was still running at the end of the session, so the process "
+            f"could never exit; it first appeared after {test}"
+        )
+
+
+def pytest_unconfigure(config):
+    if _threads_left_running:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(int(_pytest.ExitCode.TESTS_FAILED))

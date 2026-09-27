@@ -111,7 +111,7 @@ async def test_pipeline_fail_closed_deep(monkeypatch, tmp_path):
     monkeypatch.setattr(rp, "_register_paper", lambda meta: None)
 
     async def _search(q, max_results=8, purpose="research"):
-        from kazma_core.web_acquire.search import SearchResult
+        from kazma_core.web_acquire.serp import SearchResult
 
         return SearchResult(
             ok=True,

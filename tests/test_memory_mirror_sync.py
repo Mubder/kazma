@@ -81,6 +81,15 @@ class _Mirror:
             for bid, r in self.beliefs.items()
         }
 
+    def row_regions(self, table: str) -> dict:
+        rows = self.episodes if table == "kazma_episodes" else self.beliefs
+        out = {}
+        for rid, r in rows.items():
+            region = json.loads(r.get("metadata_json") or "{}").get("region")
+            if region:
+                out[rid] = region
+        return out
+
 
 @pytest.fixture()
 def world(tmp_path, monkeypatch):
@@ -310,6 +319,125 @@ def test_the_top_up_still_reads_another_installs_memory(world, monkeypatch):
 
 
 # ── digest parity with a real Postgres ────────────────────────────────────
+
+
+# ── region conflict policies (origin_wins and fail_closed differ) ─────────
+
+
+def _theirs(mirror: _Mirror, conn, n: int, *, region: str = "eu-1") -> list[str]:
+    """Rows another region wrote to the mirror, changed here since."""
+    ids = [f"theirs{i}" for i in range(n)]
+    for rid in ids:
+        _episode(conn, rid, f"changed here {rid}")
+        mirror.episodes[rid] = {"user_text": "their text", "assistant_text": "answer",
+                                "summary_text": None, "tier": "episodic",
+                                "metadata_json": json.dumps({"region": region})}
+    return ids
+
+
+@pytest.fixture()
+def pages(monkeypatch):
+    sent: list[tuple] = []
+    monkeypatch.setattr("kazma_core.observability.ops_alerts.alert",
+                        lambda *a, **k: sent.append((a, k)) or True)
+    return sent
+
+
+def _policy(monkeypatch, policy: str, region: str = "us-1") -> None:
+    monkeypatch.setattr(sb, "state_conflict_policy", lambda cfg=None: policy)
+    monkeypatch.setattr(sb, "state_region", lambda cfg=None: region)
+
+
+def test_origin_wins_keeps_the_other_regions_row_quietly(world, monkeypatch, pages, caplog):
+    conn, mirror = world
+    _policy(monkeypatch, "origin_wins")
+    theirs = _theirs(mirror, conn, 3)
+    _episode(conn, "mine0", "new here")
+
+    caplog.set_level("WARNING", logger=sb.__name__)
+    stats = sb.sync_state_mirror(conn)
+
+    assert stats["kept_by_origin"] == 3 and stats["failed"] == 0 and "region_conflicts" not in stats
+    assert all(mirror.episodes[t]["user_text"] == "their text" for t in theirs)
+    assert "mine0" in mirror.episodes
+    assert pages == [] and not [r for r in caplog.records if r.name == sb.__name__]
+
+
+def test_fail_closed_refuses_the_same_rows_and_says_so(world, monkeypatch, pages, caplog):
+    conn, mirror = world
+    _policy(monkeypatch, "fail_closed")
+    theirs = _theirs(mirror, conn, 3)
+
+    caplog.set_level("WARNING", logger=sb.__name__)
+    stats = sb.sync_state_mirror(conn)
+
+    assert stats["region_conflicts"] == 3 and stats["failed"] == 0 and "kept_by_origin" not in stats
+    assert all(mirror.episodes[t]["user_text"] == "their text" for t in theirs)
+    assert [a[0] for a, _k in pages] == ["memory.region_conflict"]
+    assert any("fail_closed" in r.getMessage() for r in caplog.records if r.name == sb.__name__)
+    assert sb.last_mirror_sync()["region_conflicts"] == 3, "memory health shows it"
+
+
+def test_a_refused_row_spends_none_of_the_push_budget(world, monkeypatch, pages):
+    """Counted as pushes, 500 refused rows would stop every other push."""
+    conn, mirror = world
+    _policy(monkeypatch, "origin_wins")
+    _theirs(mirror, conn, 3)
+    _episode(conn, "mine0", "a")
+    _episode(conn, "mine1", "b")
+    stats = sb.sync_state_mirror(conn, limit=2)
+    assert stats["episodes_pushed"] == 2 and {"mine0", "mine1"} <= set(mirror.episodes)
+
+
+def test_negative_control_last_write_wins_pushes_them(world, monkeypatch, pages):
+    conn, mirror = world
+    _policy(monkeypatch, "last_write_wins")
+    theirs = _theirs(mirror, conn, 3)
+    stats = sb.sync_state_mirror(conn)
+    assert stats["episodes_pushed"] == 3 and pages == []
+    assert all(mirror.episodes[t]["user_text"].startswith("changed here") for t in theirs)
+
+
+def test_the_same_region_is_never_a_conflict(world, monkeypatch, pages):
+    conn, mirror = world
+    _policy(monkeypatch, "fail_closed", region="eu-1")
+    _theirs(mirror, conn, 2, region="eu-1")
+    stats = sb.sync_state_mirror(conn)
+    assert stats["episodes_pushed"] == 2 and stats["region_conflicts"] == 0 and pages == []
+
+
+@pytest.mark.postgres
+def test_the_region_of_a_mirrored_row_is_read_from_postgres():
+    """``row_regions`` reads the writer's region from the stored metadata,
+    and a row whose metadata is not JSON does not fail the read."""
+    dsn = os.environ.get("KAZMA_DATABASE_URL") or ""
+    if not dsn:
+        pytest.skip("no Postgres configured")
+    backend = sb.PostgresStateBackend(dsn)
+    if not backend.available:
+        pytest.skip("Postgres not reachable")
+    tag = uuid.uuid4().hex[:8]
+    rows = {f"e_region_{tag}_a": '{"region": "eu-1", "install": "x"}',
+            f"e_region_{tag}_b": '{"install": "x"}',
+            f"e_region_{tag}_c": 'not json "region": at all {'}
+    pg = backend._connect()
+    try:
+        backend._ensure(pg)
+        cur = pg.cursor()
+        for rid, meta in rows.items():
+            cur.execute("INSERT INTO kazma_episodes (id, tenant_id, session_id, turn_number, user_text, "
+                        "assistant_text, summary_text, tier, structural_importance, created_at, metadata_json) "
+                        "VALUES (%s, 'default', 's', 1, 'q', 'a', NULL, 'episodic', 1, %s, %s)",
+                        (rid, time.time(), meta))
+        pg.commit()
+        got = {k: v for k, v in backend.row_regions("kazma_episodes").items() if k.startswith(f"e_region_{tag}")}
+        assert got == {f"e_region_{tag}_a": "eu-1"}
+        assert backend.row_regions("not_a_mirror_table") == {}
+    finally:
+        cur = pg.cursor()
+        cur.execute("DELETE FROM kazma_episodes WHERE id = ANY(%s)", (list(rows),))
+        pg.commit()
+        pg.close()
 
 
 @pytest.mark.postgres

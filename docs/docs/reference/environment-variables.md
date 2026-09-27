@@ -156,7 +156,7 @@ curl -s https://your.domain/api/auth/status
 | `KAZMA_SWARM_MAX_ACTIVE` | swarm `max_concurrent_tasks` (`10`) | No | How many swarm tasks may run at once; the next one is refused ("Swarm at capacity"). Pipelines paused at a checkpoint do not count. |
 | `KAZMA_MIGRATE_CHECK_PORT` | off | Migration | `1` makes `kazma migrate import` also refuse while something listens on `KAZMA_PORT` / `PORT` (default `9090`). The main check is the running server's heartbeat; the port probe is off by default because an unrelated dev server on that port would block every import. |
 | `KAZMA_DB_BACKEND_SOURCE` | — | Not an input | Written, never read: `kazma migrate export` records the source database backend under this name in the bundle's `meta.env`. |
-| `KAZMA_PG_RESTORE_REHEARSAL` | unset (off) | Optional | `1` turns ON the weekly restore rehearsal: the newest `pg_dump` is restored into a scratch database `kazma_restore_rehearsal_<epoch>` on the SAME server, checked (Kazma's tables present, `kazma_settings` not empty) and dropped. `0` vetoes the setting `backups.pg.restore_rehearsal`. The user needs `CREATEDB`; without it the drill reports UNVERIFIED with the grant to add. Leftover scratch databases older than a day are removed by the next run; nothing else is ever created or dropped. |
+| `KAZMA_PG_RESTORE_REHEARSAL` | unset (on with Postgres) | Optional | `0` turns OFF the weekly restore rehearsal (on by default since 2026-09-27), whatever the setting says; `1` turns it on over a setting of false. The rehearsal: the newest `pg_dump` is restored into a scratch database `kazma_restore_rehearsal_<epoch>` on the SAME server, checked (Kazma's tables present, `kazma_settings` not empty) and dropped. The user needs `CREATEDB`; without it the drill reports UNVERIFIED with the grant to add. Leftover scratch databases older than a day are removed by the next run; nothing else is ever created or dropped. |
 
 ---
 
@@ -230,7 +230,7 @@ and extras `kazma[sandbox]` / `kazma[durable]`.
 | `KAZMA_WORKSPACE_ROOT` | unset | Multi-project hardening | When set, a workspace picked in the UI (Switch Repo, the path picker) must live under this directory. It is also a base under which cloned workspaces may be deleted. |
 | `KAZMA_CLONE_DIR` | `~/kazma-repos` | No | Where repositories cloned from the UI or `/ide clone` are put; cloned workspaces under it may be deleted from the UI. |
 | `KAZMA_MEMORY_STATE_REGION` | unset | Multi-region only | Region id stamped on the rows this install mirrors to the Postgres state backend. |
-| `KAZMA_MEMORY_CONFLICT_POLICY` | `last_write_wins` | Multi-region only | What a mirrored write does to a row that another region wrote first: `last_write_wins` overwrites it; `origin_wins` and `fail_closed` both skip the write (they differ only in the logged reason). |
+| `KAZMA_MEMORY_CONFLICT_POLICY` | `last_write_wins` | Multi-region only | What a mirrored write does to a row that another region wrote first: `last_write_wins` overwrites it; `origin_wins` keeps the other region's row, quietly (memory health counts it as `kept_by_origin`); `fail_closed` refuses the same write and reports it: memory health counts `region_conflicts`, and the mirror sync logs a warning each pass and pages the operator (`memory.region_conflict`, at most every 6 hours). |
 | `KAZMA_GRAPH_PROVIDER` | `sqlite` | No | `neo4j` puts the knowledge graph on Neo4j, as does setting `KAZMA_NEO4J_URL` / `NEO4J_URI` or `KAZMA_NEO4J_DEFAULT=1`. These only fill settings that are empty: a provider already chosen in Settings wins. |
 | `KAZMA_NEO4J_URL` | `bolt://localhost:7687` | No | Neo4j address (`NEO4J_URI` / `NEO4J_URL` are accepted too); setting it selects Neo4j. |
 | `KAZMA_NEO4J_USER` | `neo4j` | No | Neo4j user (`NEO4J_USER` is accepted too). |
@@ -520,7 +520,7 @@ whole.
 | `KAZMA_PG_BACKUP_ENABLED` | on with Postgres | `0` stops the 6-hourly `pg_dump` of Kazma's Postgres tables, whatever `backups.pg.enabled` says. |
 | `KAZMA_PG_BACKUP_RETENTION` | `3` | Local Postgres dumps kept (restic keeps the history). Wins over `backups.pg.retention`. |
 | `KAZMA_RESTIC_PASSWORD` | `<.kazma>/restic.pass` | Passphrase of the restic repository; wins over that file. A missing passphrase is reported as an error — Kazma does not invent one, since a key kept only on the disk the backup protects is no key. Keep a copy off this machine. |
-| `KAZMA_CHECKPOINT_RETENTION_DAYS` | on | `0` (or less) stops the daily pruning of the SQLite chat-checkpoint store. Any other value leaves the policy unchanged: the newest 200 checkpoints per thread, 10 for threads idle 30 days. Postgres checkpoints are not pruned. |
+| `KAZMA_CHECKPOINT_RETENTION_DAYS` | the setting (30) | Days a chat's step history (its LangGraph checkpoints) is kept in full after the chat's last message; wins over `checkpoints.retention_days` (Settings → System). Every chat keeps its newest 200 checkpoints and a chat idle that long its newest 10, on SQLite and Postgres (since 2026-09-27; Postgres was never pruned before); `0` keeps every checkpoint. A value that is not a whole number from 0 to 3650 is ignored, with one warning. |
 
 ---
 

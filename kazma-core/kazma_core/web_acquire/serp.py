@@ -1,4 +1,9 @@
-"""Centralized web search for research, agents, and future KB discovery."""
+"""Centralized web search for research, agents, and future KB discovery.
+
+The package re-exports :func:`search`; this module is ``serp`` (the results
+page it returns) so that ``kazma_core.web_acquire.search`` names one thing,
+the function (``tests/test_package_namespaces.py``).
+"""
 
 from __future__ import annotations
 
@@ -72,7 +77,7 @@ async def search(
         md = await web_search(q, max_results=max_results)
     except Exception as exc:
         ms = (time.perf_counter() - t0) * 1000
-        logger.debug("[web_acquire.search] failed purpose=%s", purpose, exc_info=True)
+        logger.debug("[web_acquire] search failed purpose=%s", purpose, exc_info=True)
         return SearchResult(
             ok=False,
             query=q,

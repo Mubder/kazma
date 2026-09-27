@@ -994,32 +994,11 @@ class KazmaAgent:
                 from kazma_core.db.backend import get_database_url, is_postgres
 
                 if is_postgres():
-                    dsn = get_database_url() or ""
-                    if dsn.startswith("postgres://"):
-                        dsn = "postgresql://" + dsn[len("postgres://") :]
-                    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore
-                    from psycopg_pool import AsyncConnectionPool  # type: ignore
+                    from kazma_core.checkpoints_pg import open_postgres_checkpointer
 
-                    from psycopg.rows import dict_row  # type: ignore
-
-                    pool = AsyncConnectionPool(
-                        conninfo=dsn,
-                        min_size=1,
-                        max_size=8,
-                        kwargs={
-                            "autocommit": True,
-                            "prepare_threshold": 0,
-                            "row_factory": dict_row,
-                        },
-                        open=False,
+                    self._checkpointer = await open_postgres_checkpointer(
+                        get_database_url() or "", max_size=8
                     )
-                    await pool.open()
-                    from kazma_core.checkpoint_serde import kazma_checkpoint_serde
-
-                    self._checkpointer = AsyncPostgresSaver(  # type: ignore[arg-type]
-                        conn=pool, serde=kazma_checkpoint_serde()
-                    )
-                    await self._checkpointer.setup()
                     logger.info("KazmaAgent checkpointer: AsyncPostgresSaver")
             except Exception as exc:
                 logger.warning(
@@ -1270,13 +1249,14 @@ class KazmaAgent:
             # here — it is process-lifetime (audit M-G5) — and an owned
             # SQLite conn is handled by the branch above.
             if type(self._checkpointer).__name__ != "AsyncSqliteSaver":
-                pool = getattr(self._checkpointer, "conn", None)
-                aclose = getattr(pool, "aclose", None)
-                if aclose is not None:
-                    try:
-                        await aclose()
-                    except Exception as e:  # noqa: BLE001
-                        logger.debug("Error closing stale PG checkpointer pool: %s", e)
+                # It called pool.aclose(), which psycopg's pool does not have:
+                # every model switch left a pool open (2026-09-27).
+                from kazma_core.checkpoints_pg import close_postgres_checkpointer
+
+                try:
+                    await close_postgres_checkpointer(self._checkpointer)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Error closing stale PG checkpointer pool: %s", e)
         self._checkpointer = None
 
     async def shutdown(self) -> None:

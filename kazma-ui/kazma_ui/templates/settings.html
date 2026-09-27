@@ -2088,6 +2088,18 @@
             <button class="btn btn-primary" @click="saveSwarmRetention()" :disabled="swarmRetentionSaving">{{ t('settings.save_swarm_retention') }}</button>
         </div>
 
+        <!-- Chat step history (LangGraph checkpoints) retention -->
+        <div class="settings-group" id="checkpoint-retention-section">
+            <h3>{{ t('settings.checkpoint_retention_title') }}</h3>
+            <div class="form-group">
+                <label>{{ t('settings.checkpoint_retention_days') }}</label>
+                <input type="number" class="form-input" x-model.number="checkpointRetention.days" min="0" :max="checkpointRetention.max" step="1" style="max-width:200px" :disabled="checkpointRetention.source === 'env'">
+                <div class="form-hint">{{ t('settings.checkpoint_retention_hint') }}</div>
+                <div class="form-hint" x-show="checkpointRetention.source === 'env'" x-cloak>{{ t('settings.checkpoint_retention_env') }}</div>
+            </div>
+            <button class="btn btn-primary" @click="saveCheckpointRetention()" :disabled="checkpointRetentionSaving || checkpointRetention.source === 'env'">{{ t('settings.save_checkpoint_retention') }}</button>
+        </div>
+
         <!-- Proxy Provider -->
         <div class="settings-group">
             <h3>{{ t('settings.proxy_title') }}</h3>

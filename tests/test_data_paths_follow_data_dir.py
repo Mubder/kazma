@@ -28,9 +28,10 @@ Measured 2026-09-21, importing everything first and *then* changing
 ``KAZMA_DATA_DIR``:
 
 * **Resolved at USE** (follows a late change): ``stores.knowledge._default_db``,
-  ``stores.bookmarks._default_db`` — these are functions.
+  ``stores.bookmarks._default_db`` and ``checkpoint_retention._sqlite_checkpoint_files``
+  (2026-09-27; it was the frozen ``DEFAULT_DB``) — these are functions.
 * **Frozen at IMPORT** (cannot): ``agent_runner.CHECKPOINT_DB``,
-  ``checkpoint_retention.DEFAULT_DB``, ``time_travel.DEFAULT_DB_PATH``,
+  ``time_travel.DEFAULT_DB_PATH``,
   ``swarm.task_store._DEFAULT_DB``, ``observability.llm_ledger._DEFAULT_DB``,
   ``swarm.semantic_cache._DEFAULT_DB``, ``tools.image_gen.IMAGE_DIR``,
   ``chat_attachments.ATTACHMENT_DIR``.
@@ -63,7 +64,6 @@ import pytest
 #: (import statement, expression) for each path that must follow the data dir.
 PROBES: list[tuple[str, str]] = [
     ("from kazma_core.agent_runner import CHECKPOINT_DB", "CHECKPOINT_DB"),
-    ("from kazma_core.checkpoint_retention import DEFAULT_DB", "DEFAULT_DB"),
     ("from kazma_core.time_travel import DEFAULT_DB_PATH", "DEFAULT_DB_PATH"),
     ("from kazma_core.swarm.task_store import _DEFAULT_DB", "_DEFAULT_DB"),
     ("from kazma_core.observability.llm_ledger import _DEFAULT_DB", "_DEFAULT_DB"),

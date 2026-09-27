@@ -120,7 +120,6 @@ def test_every_endless_loop_declares_itself() -> None:
 
     root = Path(__file__).resolve().parents[1]
     expected = {
-        "kazma-core/kazma_core/checkpoint_retention.py": "checkpoint-retention",
         "kazma-core/kazma_core/time_travel.py": "snapshot-maintenance",
         "kazma-core/kazma_core/swarm/engine.py": "swarm-maintenance",
         "kazma-core/kazma_core/x_api/mentions_fire.py": "x-mentions-poll",

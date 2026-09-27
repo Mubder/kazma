@@ -59,7 +59,7 @@
   <div class="xs-head">
     <div class="xs-meta">
       <span x-text="status.handle || 'X'"></span>
-      <span class="xs-pill" x-text="(status.caps.posts_today || 0) + '/' + (status.caps.max_posts_per_day || 8) + ' ' + t('x_studio.quota')"></span>
+      <span class="xs-pill" x-text="((status.caps && status.caps.posts_today) || 0) + '/' + ((status.caps && status.caps.max_posts_per_day) || 8) + ' ' + t('x_studio.quota')"></span>
     </div>
     <a class="btn btn-secondary btn-sm" href="/scheduled">{{ t('x_studio.all_clocks') }}</a>
   </div>

@@ -112,3 +112,50 @@ def test_without_the_preimport_they_are_not():
     )
     assert proc.returncode == 1, proc.stdout[-2000:]
     assert "product modules not imported up front" in proc.stdout, proc.stdout[-2000:]
+
+
+# ── a thread left running ──────────────────────────────────────────────────
+
+_THREAD_PROBE = "KAZMA_THREAD_GUARD_PROBE"
+
+
+def test_a_thread_left_running_is_started_here():
+    """Only under the probe variable (a child run below): starts a
+    non-daemon thread that never ends -- an unclosed aiosqlite connection's
+    worker, in miniature."""
+    import threading
+
+    if os.environ.get(_THREAD_PROBE) != "1":
+        return
+    threading.Thread(target=threading.Event().wait, name="probe-left-running", daemon=False).start()
+
+
+def test_a_thread_left_running_is_named_and_the_run_ends():
+    """The guard: the run ends, fails, and names the test (2026-09-27)."""
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+         f"{HERE}::test_a_thread_left_running_is_started_here"],
+        cwd=str(REPO), env={**os.environ, _THREAD_PROBE: "1", "KAZMA_TEST_PREIMPORT": "0"},
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+    )
+    assert proc.returncode == 1, proc.stdout[-2000:]
+    line = next((ln for ln in proc.stdout.splitlines() if ln.startswith("ERROR conftest.py::thread_left_running")), "")
+    assert "probe-left-running" in line and "test_a_thread_left_running_is_started_here" in line, proc.stdout[-2000:]
+
+
+def test_without_the_guard_the_run_never_ends():
+    """Negative control: the same child run with the guard off is still
+    running long after its one test passed -- the hang the guard ends."""
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+             f"{HERE}::test_a_thread_left_running_is_started_here"],
+            cwd=str(REPO),
+            env={**os.environ, _THREAD_PROBE: "1", "KAZMA_TEST_PREIMPORT": "0", "KAZMA_TEST_THREAD_GUARD": "0"},
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=45,
+        )
+    except subprocess.TimeoutExpired as exc:
+        assert "1 passed" in (exc.stdout or b"").decode("utf-8", "replace") if isinstance(exc.stdout, bytes) \
+            else "1 passed" in (exc.stdout or "")
+        return
+    raise AssertionError("with the guard off the child run exited, so the probe proves nothing")

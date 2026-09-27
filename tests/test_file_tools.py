@@ -180,8 +180,15 @@ class TestImports:
     """Verify tools are importable from the package."""
 
     def test_imports(self) -> None:
-        """Both tools are importable from kazma_core.tools."""
-        from kazma_core.tools import file_read, file_write
+        """Both tools are importable from their modules, and the package names
+        the modules themselves (tests/test_package_namespaces.py)."""
+        import types
+
+        from kazma_core import tools
+        from kazma_core.tools.file_read import file_read
+        from kazma_core.tools.file_write import file_write
 
         assert callable(file_read)
         assert callable(file_write)
+        assert isinstance(tools.file_read, types.ModuleType)
+        assert isinstance(tools.file_write, types.ModuleType)

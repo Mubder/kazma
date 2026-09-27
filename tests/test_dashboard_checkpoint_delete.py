@@ -33,7 +33,10 @@ def _request() -> Request:
 @pytest.mark.asyncio
 async def test_delete_session_calls_adelete_thread() -> None:
     manager = _Manager()
-    set_dashboard_context(checkpoint_manager=manager)
+    # No gateway session store: one another test's app build left there was
+    # opened by this delete, and its aiosqlite thread kept the process from
+    # exiting (2026-09-27).
+    set_dashboard_context(checkpoint_manager=manager, session_store=None)
     try:
         response = await delete_session(_request(), "battery-20260922-parta")
     finally:
@@ -55,7 +58,7 @@ async def test_delete_session_requires_admin_when_auth_is_on(monkeypatch) -> Non
         auth, "get_request_principal", lambda request: {"role": "operator", "source": "session"}
     )
     manager = _Manager()
-    set_dashboard_context(checkpoint_manager=manager)
+    set_dashboard_context(checkpoint_manager=manager, session_store=None)
     try:
         response = await delete_session(_request(), "someone-elses-thread")
     finally:

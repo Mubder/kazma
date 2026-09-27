@@ -515,7 +515,8 @@ left backups/export inert). Current boot list:
 - **15-min commitment GC:** TTL expiry + tiered retention (§20). Every
   sweep on this cadence is one entry of `_MAINTENANCE_SWEEPS` (commitment GC,
   artifact GC, HITL-gate TTL, memory task-queue purge, swarm task retention —
-  `swarm.task_retention_days`, default 30, 0 keeps all — the supervisor
+  `swarm.task_retention_days`, default 30, 0 keeps all — checkpoint
+  retention, §41, the supervisor
   watch, §39, memory vector repair, knowledge vector repair (§24F), memory
   recovery and memory turn reconcile, §15F, memory mirror sync, §15K,
   weekly topic summaries, §15J),
@@ -939,6 +940,14 @@ an answer ("User prefers dark mode").
   `written_elsewhere` admits a remote-only row only when another install
   wrote it. A row this install wrote and no longer holds was removed here;
   untagged rows (mirrored before the tag) count as this install's.
+- **Region conflicts are counted, never pushed** (multi-region only). Under
+  `origin_wins` a row another region wrote keeps its value quietly
+  (`kept_by_origin`); under `fail_closed` the same refusal is reported
+  (`region_conflicts`, a WARNING each pass, ops alert `memory.region_conflict`).
+  The sync reads the writer's region (`row_regions`, a pattern read -- one
+  malformed metadata row must not fail the query) and never spends the push
+  budget on a refused row. The two policies behaved the same until
+  2026-09-27. `tests/test_memory_mirror_sync.py`.
 
 ### 16. Cron Scheduler & Reminder Delivery (`kazma-core/kazma_core/cron/`)
 
@@ -2691,6 +2700,15 @@ Read the named test before changing the code it guards.
   is added. Gate: `tests/test_order_independence.py` (each guard's negative
   control runs the same tests with it off: `KAZMA_TEST_ISOLATION=0`,
   `KAZMA_TEST_PREIMPORT=0`).
+  **A thread left running fails the run, named** (2026-09-27): a process
+  cannot exit while a non-daemon thread runs, and pytest-timeout does not
+  cover that wait -- an aiosqlite connection opened on a store another
+  test's app build left in the dashboard's module global hung a chunk to its
+  timeout. The root conftest restores the dashboard context after every test
+  (`get_dashboard_context`), and ends a session whose non-daemon thread is
+  still running with an `ERROR conftest.py::thread_left_running` line naming
+  the test it first appeared after (`KAZMA_TEST_THREAD_GUARD=0` is the
+  negative control's switch).
   **No test reads a real `.env`** — two Postgres tests did, one the LIVE
   install's by hard-coded path. **`@pytest.mark.postgres` is the Postgres
   job's list** (`scripts/postgres_suite.py`), per test, verified on a real
@@ -2724,8 +2742,10 @@ Read the named test before changing the code it guards.
   resolver step 1c; not under E2B, which runs code raw). Gates:
   `tests/test_code_exec.py` (the stdlib runs; the snippet's escapes do not;
   negative control) and `tests/test_python_exec_denylist.py`.
-- **Restore rehearsal: opt-in, scratch-only** (`backup/restore_rehearsal.py`,
-  `backups.pg.restore_rehearsal` / `KAZMA_PG_RESTORE_REHEARSAL`): the weekly
+- **Restore rehearsal: on by default with Postgres, scratch-only**
+  (`backup/restore_rehearsal.py`; `backups.pg.restore_rehearsal=false` or
+  `KAZMA_PG_RESTORE_REHEARSAL=0` turns it off -- it was opt-in until
+  2026-09-27, so nothing had ever proven a dump restores): the weekly
   pass restores the newest dump into `kazma_restore_rehearsal_<epoch>`,
   checks it, drops it; every CREATE/DROP re-checks that exact pattern and
   refuses the live database. Gate: `tests/test_restore_rehearsal.py`.
@@ -2886,6 +2906,38 @@ types plus `KAZMA_MSGPACK_TYPES`, anything else back as raw data.
   product source, the one construction site, every state enum round-tripped
   as itself, and a class off the list never constructed (negative control:
   LangGraph's permissive mode builds it).
+
+### 41. Every chat's step history is bounded, on both backends (`kazma_core/checkpoint_retention.py`)
+
+LangGraph writes a checkpoint per superstep (audit M-G1). Live on 2026-09-27
+the Postgres checkpoint tables held 2.9 GB of a 3.0 GB database (one chat
+3,969 checkpoints): retention skipped Postgres as "ops-owned". On SQLite it
+named `checkpoint_writes` (the Postgres table), so a pruned checkpoint's
+`writes` stayed, and its idle rule read `metadata.ts`, which LangGraph never
+writes.
+
+- **One policy:** every chat (thread + namespace) keeps its newest 200
+  checkpoints; one idle for `checkpoints.retention_days` (Settings -> System,
+  default 30) keeps 10; `0` keeps everything. `KAZMA_CHECKPOINT_RETENTION_DAYS`
+  wins when set (it was an on/off switch whose value meant nothing). A
+  checkpoint's age comes from its uuid6 id. A chat written in the last ten
+  minutes is left for the next pass.
+- **Postgres blobs are shared** by every checkpoint that did not change the
+  channel. One goes only when no kept checkpoint names its version AND a kept
+  checkpoint names a NEWER version of the channel: the saver writes a new
+  checkpoint's blobs before the checkpoint (autocommit), and that blob is
+  newer than every named one. One transaction per chat; a chat that fails is
+  rolled back and named in a WARNING, the others still pruned.
+- **Runs on the 15-minute maintenance cadence** ("checkpoint retention",
+  §15B). It was a daily loop that logged failures at DEBUG.
+- **No graph state may use a LangGraph `DeltaChannel`** until the prune is
+  made delta-aware: a delta value is rebuilt by walking back to a snapshot
+  checkpoint, and LangGraph warns a keep-newest prune empties it silently.
+- Gate: `tests/test_checkpoint_retention.py` -- real graphs on the product's
+  savers (state and every kept checkpoint unchanged, the next turn works),
+  orphaned writes (old shape as the negative control), the setting and the
+  API, and on a real Postgres the in-flight blob (the rule removed as the
+  negative control would delete it).
 
 ## UI Conventions (Web)
 
