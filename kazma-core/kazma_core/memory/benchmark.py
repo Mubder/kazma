@@ -6,13 +6,14 @@ is written into a PRIVATE database the way the product writes it: chat turns
 through ``dual_write.episode_row`` (the row, tier and embedded text the live
 writer computes), and the facts extraction stores from them through
 ``mutate_belief`` (linked to their turn, superseding in the order they were
-said, and kept private: nothing reaches a mirror or a shared index). Every
+said, and kept private: nothing reaches a mirror or a shared index), and
+(dataset v3) weekly topic summaries as ``topic_summaries`` stores them. Every
 question then goes through ``recall()`` and is scored against the memories
-that answer it -- a turn or a fact, in the order recall shows them (facts
-first, then history).
+that answer it -- a turn, a fact, or a weekly summary standing for one, in
+the order recall shows them (facts, history, then weekly summaries).
 
 Scores per category (single, paraphrase, assistant, multi, update, keyword,
-noise, arabic, fact, abstain):
+noise, arabic, fact, overview, abstain):
 
 * ``hit_rate`` -- every piece of the answer injected (for ``abstain``:
   nothing injected at all);
@@ -110,20 +111,72 @@ def _seed(conn: sqlite3.Connection, dataset: dict[str, Any]) -> dict[str, str]:
         if not result.get("belief_id"):
             raise RuntimeError(f"fact {fact['id']} was not stored: {result}")
         refs[fact["id"]] = str(result["belief_id"])
+    _seed_summaries(conn, dataset, refs)
     return refs
 
 
-def _score(question: dict[str, Any], refs: dict[str, str], injected: list[str]) -> dict[str, Any]:
+def _seed_summaries(conn: sqlite3.Connection, dataset: dict[str, Any], refs: dict[str, str]) -> None:
+    """Write the weekly topic summaries (dataset v3) as ``topic_summaries``
+    stores them: the same text embedded, the turns they came from linked."""
+    from kazma_core.memory.embedder import encode_text_to_blob, get_embedding_model_name
+
+    model = get_embedding_model_name()
+    for s in dataset.get("summaries", []):
+        start = BASE_TIME + s["day"] * 86400
+        blob = encode_text_to_blob(f"{s['title']}\n{s['text']}")
+        row_id = f"bench-{s['id']}"
+        conn.execute(
+            "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, "
+            "title, summary_text, status, turn_count, chat_count, created_at, updated_at, "
+            "embedding, embedding_model_version) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, 1, ?, ?, ?, ?)",
+            (row_id, BENCH_TENANT, f"bench-week-{s['day'] // 7}", start, start + 7 * 86400,
+             s["title"], s["text"], len(s["sources"]), start + 8 * 86400, start + 8 * 86400,
+             blob, model if blob else None),
+        )
+        conn.executemany(
+            "INSERT INTO memory_summary_sources (summary_id, episode_id) VALUES (?, ?)",
+            [(row_id, refs[r]) for r in s["sources"]],
+        )
+        refs[s["id"]] = row_id
+    conn.commit()
+
+
+def _covers(dataset: dict[str, Any], refs: dict[str, str]) -> dict[str, set[str]]:
+    """Summary row id -> the memories it stands for: its turns, and the facts
+    extracted from them."""
+    by_turn: dict[str, set[str]] = {}
+    for f in dataset.get("facts", []):
+        if f["session"]:
+            by_turn.setdefault(f"{f['session']}#{f['turn']}", set()).add(refs[f["id"]])
+    return {
+        refs[s["id"]]: {refs[t] for t in s["sources"]} | set().union(*(by_turn.get(t, set()) for t in s["sources"]))
+        for s in dataset.get("summaries", [])
+    }
+
+
+def _score(
+    question: dict[str, Any], refs: dict[str, str], injected: list[str],
+    covers: dict[str, set[str]] | None = None,
+) -> dict[str, Any]:
     """Score one question against what recall injected, in the order it is shown.
 
     Each gold entry is one piece of the answer, "a|b" when either memory
-    gives it (the turn, or the fact extracted from it).
+    gives it (the turn, the fact extracted from it, or a weekly summary). A
+    weekly summary that stands for an answering turn or fact (*covers*)
+    answers too: the model reads the answer in it.
     """
+    covers = covers or {}
     pieces = [[refs[a] for a in piece.split("|")] for piece in question["gold"]]
     below = [refs[r] for r in question.get("below", [])]
     rank: dict[str, int] = {}
     for i, item in enumerate(injected, 1):
         rank.setdefault(item, i)
+    # Where each memory's content is shown: itself, or a summary standing for it.
+    shown = dict(rank)
+    for i, item in enumerate(injected, 1):
+        for covered in covers.get(item, ()):
+            shown.setdefault(covered, i)
     out: dict[str, Any] = {
         "id": question["id"],
         "category": question["category"],
@@ -133,10 +186,13 @@ def _score(question: dict[str, Any], refs: dict[str, str], injected: list[str]) 
         out["hit"] = not injected
         return out
     answers = {a for piece in pieces for a in piece}
-    ranks = [rank[a] for a in answers if a in rank]
-    out["hit"] = all(any(a in rank for a in piece) for piece in pieces)
+    ranks = [shown[a] for a in answers if a in shown]
+    out["hit"] = all(any(a in shown for a in piece) for piece in pieces)
     out["rr"] = 1.0 / min(ranks) if ranks else 0.0
-    out["precision"] = sum(1 for i in injected if i in answers) / len(injected) if injected else 0.0
+    out["precision"] = (
+        sum(1 for i in injected if i in answers or covers.get(i, set()) & answers) / len(injected)
+        if injected else 0.0
+    )
     if below:
         best = min(ranks) if ranks else None
         out["order"] = best is not None and all(best < rank[b] for b in below if b in rank)
@@ -214,15 +270,19 @@ def run_benchmark(
     try:
         ensure_primary_schema(conn)
         refs = _seed(conn, data)
+        covers = _covers(data, refs)
         results, latencies = [], []
         for q in data["questions"]:
             started = time.perf_counter()
             res = recall(q["text"], conn=conn, tenant_id=BENCH_TENANT, limit=limit,
                          local_only=True)
             latencies.append(time.perf_counter() - started)
-            # Facts first, then history: the order format_recall_block shows.
-            injected = [h.id for h in res.beliefs[:limit]] + [h.id for h in res.episodes[:limit]]
-            results.append(_score(q, refs, injected))
+            # Facts, history, then weekly summaries: the order format_recall_block shows.
+            injected = (
+                [h.id for h in res.beliefs[:limit]] + [h.id for h in res.episodes[:limit]]
+                + [h.id for h in res.summaries]
+            )
+            results.append(_score(q, refs, injected, covers))
         report = _summarise(results, latencies)
         report["memories"] = len(refs)
         if keep_results:

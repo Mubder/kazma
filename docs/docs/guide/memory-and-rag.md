@@ -345,6 +345,11 @@ left open.
 - **Settings** (`memory.v2`): `summaries_enabled` (on), `summaries_min_turns`
   (4), `summaries_max_per_week` (24 topics, largest first). One model call per
   topic.
+- **When they are used:** a question about a topic brings back its week's
+  summary (at most two), shown to the model after the conversation turns
+  that match. A summary has to be clearly about the question: on the
+  author's install every "where are we with ..." question found its topic,
+  and no unrelated question brought one in.
 - Summaries are included in the memory export. They are kept in the memory
   database on this install and rebuilt from the conversations; they are not
   copied to the Postgres memory mirror.

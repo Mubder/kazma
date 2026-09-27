@@ -64,8 +64,13 @@ def test_probe_uses_authenticated_tenant_not_json(monkeypatch) -> None:
     captured: list[str] = []
 
     def fake_recall(query: str, **kwargs):
+        from kazma_core.memory.recall import RecallHit, RecallResult
+
         captured.append(kwargs["tenant_id"])
-        return SimpleNamespace(empty=False, beliefs=[], episodes=[])
+        # The real result type, so a field recall gains (weekly summaries,
+        # C2b) is here too: a hand-made stand-in lacked it.
+        return RecallResult(beliefs=[RecallHit(id="b1", content="a fact", score=1.0, kind="belief")],
+                            episodes=[])
 
     monkeypatch.setattr("kazma_core.memory.recall.recall", fake_recall)
     response = _tenant_client(monkeypatch).post(

@@ -994,8 +994,9 @@ async def supervisor_node(
                     if mem_block:
                         messages.insert(1, {"role": "system", "content": mem_block})
                         logger.info(
-                            "[Supervisor] V2 recall: %d beliefs, %d episodes for turn",
-                            len(result.beliefs), len(result.episodes),
+                            "[Supervisor] V2 recall: %d beliefs, %d weekly summaries, "
+                            "%d episodes for turn",
+                            len(result.beliefs), len(result.summaries), len(result.episodes),
                         )
                 elif not _suppress_recall:
                     # Transcript fallback (2026-08-27 "green names" incident):

@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Kazma answers "where are we with ..." from its weekly summaries (2026-09-27)
+
+Ask Kazma where a long-running topic stands and it now brings back that
+topic's weekly summaries, not just the few conversation turns that match best.
+A summary has to be clearly about the question: on the author's install every
+"catch me up" question found its topic and no unrelated question brought one
+in. At most two are shown, after the matching turns.
+
 ## Kazma writes a summary of each week's topics (2026-09-27)
 
 A topic you work on for weeks can fill a hundred conversation turns a week --

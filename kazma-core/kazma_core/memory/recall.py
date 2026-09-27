@@ -15,9 +15,13 @@ Pipeline:
      belief thresholds. Only currently-valid beliefs.
   Postgres-primary (``state.role=primary``): the mirror's keyword matches and
   the vector index's nearest memories, ranked on the same evidence.
-  3. **Access bump** — on non-empty hits, increment access_count /
+  3. **Weekly summaries** (plan C2b) — every active topic summary of the
+     tenant (``topic_summaries``), ranked on the same evidence with the
+     summary thresholds; at most two. Read from the local database on every
+     path: summaries are not mirrored.
+  4. **Access bump** — on non-empty hits, increment access_count /
      last_accessed (Phase A; toggle ``access_bump_enabled``).
-  4. **Format** — beliefs first, then episodes, prompt-fenced.
+  5. **Format** — beliefs, then summaries, then episodes, prompt-fenced.
 
 Optional ``explain=True`` (or ``memory.v2.explain_recall``) tags each hit
 with source channels: fts5 / dense / ppr / session_boost / belief_match.
@@ -73,10 +77,12 @@ class RecallResult:
 
     beliefs: list[RecallHit]
     episodes: list[RecallHit]
+    #: Weekly topic summaries about the question, best first (plan C2b).
+    summaries: list[RecallHit] = field(default_factory=list)
 
     @property
     def empty(self) -> bool:
-        return not self.beliefs and not self.episodes
+        return not self.beliefs and not self.episodes and not self.summaries
 
 
 # ── Public entry point ────────────────────────────────────────────────────
@@ -202,7 +208,10 @@ def recall(
                 )
             except Exception:
                 logger.debug("[recall] remote state merge skipped", exc_info=True)
-        result = RecallResult(beliefs=beliefs, episodes=episodes)
+        result = RecallResult(
+            beliefs=beliefs, episodes=episodes,
+            summaries=_recall_summaries(conn, query, tenant_id),
+        )
         # Phase A: bump access so macro_sleep promotion/retention is real.
         if not result.empty:
             _bump_access(conn, beliefs, episodes)
@@ -330,7 +339,9 @@ def _recall_postgres_primary(
                 if "postgres_primary" not in srcs:
                     srcs.append("postgres_primary")
                 hit.metadata["sources"] = srcs
-        return RecallResult(beliefs=beliefs, episodes=episodes)
+        return RecallResult(
+            beliefs=beliefs, episodes=episodes, summaries=_local_summaries(query, tenant_id),
+        )
     except Exception as exc:
         logger.warning("[recall] postgres-primary search failed: %s", exc)
         try:
@@ -1087,6 +1098,23 @@ _BACKGROUND_MIN_SAMPLES = 5
 #: question's content words, and stay within one word in three of the best.
 _WORDS_ONLY_FLOOR = 0.5
 _WORDS_ONLY_GAP = 0.34
+#: Weekly topic summaries (plan C2b). The background is the question's among
+#: the summaries (ranks 4-15): a summary is a paragraph, and bge-m3 puts it
+#: 0.14-0.19 below a turn for the same question, so the episodes' background
+#: left most true summaries below zero. Measured 2026-09-27 on 67 summaries
+#: the live model wrote and 23 real questions -- every "catch me up" question
+#: at 0.160-0.372, every unrelated one at or under 0.132 -- and on the
+#: benchmark's 117 (all 18 no-answer questions clean at this floor; 0.15 let
+#: one in, 0.12 three).
+_SUMMARY_COVERAGE_WEIGHT = 0.12
+_SUMMARY_FLOOR = 0.16
+_SUMMARY_STRONG = 0.20
+_SUMMARY_GAP = 0.10
+_SUMMARY_RECENCY_WEIGHT = 0.02
+#: At most this many summaries are shown, each cut to this many characters
+#: (the Memory page has the whole text).
+_SUMMARY_LIMIT = 2
+_SUMMARY_SHOW_CHARS = 900
 
 
 @dataclass(frozen=True, slots=True)
@@ -1126,6 +1154,9 @@ def _evidence_rules(kind: str) -> tuple[float, float, float, float, float, float
     if kind == "belief":
         return (_BELIEF_COVERAGE_WEIGHT, _BELIEF_FLOOR, _BELIEF_STRONG, _BELIEF_GAP,
                 _BELIEF_RECENCY_WEIGHT, _BELIEF_STANDING_WEIGHT)
+    if kind == "summary":
+        return (_SUMMARY_COVERAGE_WEIGHT, _SUMMARY_FLOOR, _SUMMARY_STRONG, _SUMMARY_GAP,
+                _SUMMARY_RECENCY_WEIGHT, 0.0)
     return (_COVERAGE_WEIGHT, _EVIDENCE_FLOOR, _EVIDENCE_STRONG, _EVIDENCE_GAP,
             _RECENCY_WEIGHT, 0.0)
 
@@ -1254,6 +1285,104 @@ def _rank_episodes_by_evidence(
         if (row := rows.get(eid)) is not None and not is_small_talk(row[1], row[2])
     ]
     return _rank_by_evidence(query, candidates, _question_background(h.score for h in dense))
+
+
+# ── Weekly topic summaries (plan C2b) ──────────────────────────────────────
+
+
+def _summaries_enabled() -> bool:
+    """``memory.v2.summaries_enabled``: off, no summary is written or recalled."""
+    from kazma_core.memory.config import read_memory_cfg
+
+    return bool(((read_memory_cfg() or {}).get("v2") or {}).get("summaries_enabled", True))
+
+
+def _cosines(qvec: list[float], rows: list[Any], model: str) -> dict[str, float]:
+    """Cosine of the question with each row's stored vector -- comparable
+    vectors only (this size; this model, or a legacy row with none)."""
+    import struct
+
+    dim = len(qvec)
+    qnorm = sum(x * x for x in qvec) ** 0.5 or 1.0
+    out: dict[str, float] = {}
+    for row in rows:
+        blob, version = row["embedding"], row["embedding_model_version"]
+        if not blob or len(blob) != dim * 4 or (version and model and version != model):
+            continue
+        vec = struct.unpack(f"<{dim}f", bytes(blob))
+        norm = sum(x * x for x in vec) ** 0.5
+        if norm:
+            out[str(row["id"])] = sum(a * b for a, b in zip(qvec, vec)) / (qnorm * norm)
+    return out
+
+
+def _summary_display(row: Any) -> str:
+    """What the model is shown of a summary: its week, title and text, bounded."""
+    from datetime import datetime
+
+    week = datetime.fromtimestamp(float(row["period_start"] or 0)).strftime("%b %d, %Y")
+    text = " ".join(str(row["summary_text"] or "").split())
+    if len(text) > _SUMMARY_SHOW_CHARS:
+        text = text[: _SUMMARY_SHOW_CHARS - 1].rstrip() + "…"
+    return f"Week of {week} -- {row['title']}: {text}"
+
+
+def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> list[RecallHit]:
+    """The weekly topic summaries about the question, best first; [] when none is.
+
+    Every active summary of the tenant is a candidate -- about ten a week, so
+    a year is a few hundred -- ranked on evidence like every other memory
+    (:func:`_rank_by_evidence`, the summary thresholds), against the
+    question's background among the summaries.
+    """
+    if is_small_talk(query, None) or not _summaries_enabled():
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT id, period_start, title, summary_text, embedding, embedding_model_version "
+            "FROM memory_summaries WHERE tenant_id = ? AND status = 'active'",
+            (tenant_id or "default",),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []  # a database from before summaries
+    if not rows:
+        return []
+    from kazma_core.memory.embedder import get_embedding_model_name
+
+    qvec = _encode_query(query)
+    sims = _cosines(qvec, rows, get_embedding_model_name()) if qvec else {}
+    candidates = [
+        _Candidate(
+            id=str(row["id"]),
+            text=f"{row['title']} {row['summary_text']}",
+            created_at=float(row["period_start"] or 0),
+            similarity=sims.get(str(row["id"])),
+            by_meaning=str(row["id"]) in sims,
+            content=str(row["title"] or ""),
+            display=_summary_display(row),
+        )
+        for row in rows
+    ]
+    hits = _rank_by_evidence(query, candidates, _question_background(sims.values()), kind="summary")
+    return hits[:_SUMMARY_LIMIT]
+
+
+def _local_summaries(query: str, tenant_id: str) -> list[RecallHit]:
+    """:func:`_recall_summaries` on the local memory database, for the
+    Postgres-primary path: summaries are local only."""
+    from kazma_core.paths import primary_memory_db
+
+    conn = _connect_existing(primary_memory_db())
+    if conn is None:
+        return []
+    try:
+        conn.row_factory = sqlite3.Row
+        return _recall_summaries(conn, query, tenant_id)
+    except sqlite3.Error:
+        logger.warning("[recall] weekly summaries unreadable", exc_info=True)
+        return []
+    finally:
+        conn.close()
 
 
 _ARCHIVED_WEIGHT_DEFAULT = 0.98
@@ -1957,14 +2086,16 @@ def format_recall_block(
     fence_source: str = "memory_v2_recall",
     max_beliefs: int = 5,
     max_episodes: int = 5,
+    max_summaries: int = _SUMMARY_LIMIT,
     max_tokens: int = 1500,
     explain: bool | None = None,
 ) -> str:
     """Render a RecallResult into a prompt-fenced context block.
 
-    Beliefs are rendered as "Known Facts", episodes as "Relevant
-    History". When ``explain`` is True (or ``memory.v2.explain_recall``),
-    append compact source chips per line for debug.
+    Beliefs are rendered as "Known Facts", weekly topic summaries as "Weekly
+    Summaries", episodes as "Relevant History". When ``explain`` is True (or
+    ``memory.v2.explain_recall``), append compact source chips per line for
+    debug.
 
     A hard ``max_tokens`` budget (default ~1500, ≈4 chars/token) caps
     the total injected context so PPR/RRF can't overrun the prompt.
@@ -2010,6 +2141,7 @@ def format_recall_block(
 
     n_beliefs = 0
     n_episodes = 0
+    n_summaries = 0
 
     if result.beliefs:
         lines: list[str] = []
@@ -2037,6 +2169,24 @@ def format_recall_block(
         if lines:
             header = "## Relevant History\n"
             parts.append(header + "\n".join(lines))
+            used += len(header)
+
+    if result.summaries and used < char_budget:
+        lines = []
+        for h in result.summaries[:max_summaries]:
+            line = _line(h)
+            if used + len(line) + 1 > char_budget:
+                break
+            lines.append(line)
+            used += len(line) + 1
+            n_summaries += 1
+        if lines:
+            # What a week of conversations said about a topic, written by Kazma
+            # afterwards (plan C2): the gist, after the turns themselves -- on
+            # the benchmark, summaries above the history pushed answering
+            # turns down (MRR 0.875 -> 0.868) and added nothing there.
+            header = "## Weekly Summaries\n"
+            parts.append(header + "\n".join(lines))
 
     if not parts:
         return ""
@@ -2045,13 +2195,13 @@ def format_recall_block(
     try:
         from kazma_core.memory.federated_search import format_source_footer
 
-        footer = format_source_footer(beliefs=n_beliefs, episodes=n_episodes)
+        footer = format_source_footer(beliefs=n_beliefs, episodes=n_episodes, summaries=n_summaries)
         if footer:
             parts.append(footer)
     except Exception:
         parts.append(
-            f"Sources used: {n_beliefs} beliefs, {n_episodes} episodes "
-            "(memory stack — untrusted observation)."
+            f"Sources used: {n_beliefs} beliefs, {n_summaries} weekly summaries, "
+            f"{n_episodes} episodes (memory stack — untrusted observation)."
         )
     body = "\n\n".join(parts)
     rules = (
@@ -2103,6 +2253,7 @@ def build_memory_explain_payload(
 
     beliefs = [_hit(h) for h in (result.beliefs if result else [])[:max_items]]
     episodes = [_hit(h) for h in (result.episodes if result else [])[:max_items]]
+    weekly = [_hit(h) for h in (result.summaries if result else [])[:max_items]]
     knowledge: list[dict[str, Any]] = []
     for h in (kb_hits or [])[: max(3, max_items - 2)]:
         if not isinstance(h, dict):
@@ -2119,17 +2270,19 @@ def build_memory_explain_payload(
                 "provenance": h.get("provenance") or {},
             }
         )
-    empty = not beliefs and not episodes and not knowledge
+    empty = not beliefs and not episodes and not knowledge and not weekly
     return {
         "query": (query or "")[:200],
         "empty": empty,
         "detail": detail,
         "beliefs": beliefs,
         "episodes": episodes,
+        "weekly_summaries": weekly,
         "knowledge": knowledge,
         "summary": {
             "beliefs": len(beliefs),
             "episodes": len(episodes),
+            "weekly_summaries": len(weekly),
             "knowledge": len(knowledge),
         },
     }

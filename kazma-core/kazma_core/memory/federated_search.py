@@ -143,6 +143,20 @@ def federated_search(
                     }
                 )
                 mem_n += 1
+            for h in result.summaries:
+                hits.append(
+                    {
+                        "store": "memory",
+                        "kind": "weekly_summary",
+                        "id": h.id,
+                        "content": ((h.metadata or {}).get("display") or h.content or "")[:500],
+                        "score": float(h.score or 0),
+                        "source": h.source or "summary",
+                        "sources": (h.metadata or {}).get("sources"),
+                        "provenance": {"title": h.content},
+                    }
+                )
+                mem_n += 1
             for h in result.episodes:
                 hits.append(
                     {
@@ -269,11 +283,14 @@ def format_source_footer(
     episodes: int = 0,
     knowledge: int = 0,
     procedural: int = 0,
+    summaries: int = 0,
 ) -> str:
     """One-line operator/chat footer describing what was injected."""
     parts: list[str] = []
     if beliefs:
         parts.append(f"{beliefs} belief{'s' if beliefs != 1 else ''}")
+    if summaries:
+        parts.append(f"{summaries} weekly summar{'ies' if summaries != 1 else 'y'}")
     if episodes:
         parts.append(f"{episodes} episode{'s' if episodes != 1 else ''}")
     if knowledge:

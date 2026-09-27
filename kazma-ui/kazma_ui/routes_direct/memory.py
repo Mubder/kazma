@@ -440,6 +440,17 @@ def register_memory_routes(self: Any) -> None:
                     }
                     for h in result.episodes
                 ],
+                # Weekly topic summaries (plan C2b), as the model is shown them.
+                "weekly_summaries": [
+                    {
+                        "id": h.id,
+                        "content": shown_text(h),
+                        "score": h.score,
+                        "source": h.source,
+                        "metadata": h.metadata,
+                    }
+                    for h in result.summaries
+                ],
             }
         except Exception as exc:
             return {"ok": False, "error": safe_error(exc), "beliefs": [], "episodes": []}
