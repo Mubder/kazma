@@ -187,6 +187,32 @@ def test_the_postgres_primary_path_reads_them_from_the_local_database(mem, monke
     assert _ids(result.summaries)[:1] == ["s0"]
 
 
+def test_the_turns_memory_panel_names_a_weekly_summary(mem):
+    """What the chat's "memory used this turn" panel receives: a turn that
+    recalled only a summary is not "no memory" (live 2026-09-27: the panel
+    listed facts, turns and KB, and would have said nothing was used)."""
+    hits = R._recall_summaries(mem.db, "Where are we with the ShipX platform phases?", "default")
+    payload = R.build_memory_explain_payload(
+        query="Where are we with ShipX?", result=R.RecallResult(beliefs=[], episodes=[], summaries=hits),
+        explain=True,
+    )
+    assert payload["empty"] is False and payload["summary"]["weekly_summaries"] == len(hits) >= 1
+    assert payload["weekly_summaries"][0]["content"].startswith("Week of ")
+
+
+def test_the_chat_panel_draws_a_row_for_each_weekly_summary():
+    """The browser half: chat.js paints the payload's weekly summaries (a
+    row each, after the history) and counts them in the panel's line."""
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js").read_text(
+        encoding="utf-8")
+    panel = js.split("function applyMemoryExplain(data)", 1)[1].split("\n  function ", 1)[0]
+    assert "(data.weekly_summaries || []).forEach(function(h) { row('weekly', h); });" in panel
+    assert panel.index("row('episode', h)") < panel.index("row('weekly', h)")
+    assert "sum.weekly_summaries" in panel and "is-weekly" in panel
+
+
 def test_a_database_from_before_summaries_recalls_none(tmp_path):
     db = sqlite3.connect(str(tmp_path / "old.db"))
     db.row_factory = sqlite3.Row
