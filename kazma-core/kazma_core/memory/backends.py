@@ -986,7 +986,7 @@ class PgvectorBackend:
 
 
 class HybridVectorBackend:
-    """Search remote first (if available), always dual-write to local + remote."""
+    """Search both and merge; always dual-write to local + remote."""
 
     name = "hybrid"
     write_ready = True
@@ -1011,15 +1011,23 @@ class HybridVectorBackend:
         limit: int = 10,
         kind: str | None = None,
     ) -> list[tuple[str, float]]:
-        if getattr(self._remote, "available", False):
-            hits = self._remote.search(
-                query_vec, tenant_id=tenant_id, tier=tier, limit=limit, kind=kind
-            )
-            if hits:
-                return hits
-        return self._local.search(
+        """The remote index's nearest and the local store's, merged by id.
+
+        It returned the remote's hits alone whenever there were any, so a
+        memory not yet in the remote index -- written while it was down, or
+        before it was set up -- could not be found by meaning at all (plan
+        R8). The local store is the source of truth: its score wins.
+        """
+        local = self._local.search(
             query_vec, tenant_id=tenant_id, tier=tier, limit=limit, kind=kind
         )
+        if not getattr(self._remote, "available", False):
+            return local
+        merged = dict(self._remote.search(
+            query_vec, tenant_id=tenant_id, tier=tier, limit=limit, kind=kind
+        ))
+        merged.update(local)
+        return sorted(merged.items(), key=lambda hit: hit[1], reverse=True)[:limit]
 
     def similarities(
         self,

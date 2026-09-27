@@ -166,7 +166,12 @@ last won.
   too.
 - "Remember this" (or تذكر، لا تنسى، احفظ، سجل عندك ...) puts the turn straight
   in the recall tier, in English or Arabic. Small talk -- a greeting or thanks
-  with a short reply -- is kept but never shown as history.  
+  with a short reply -- is kept but never shown as history, and a greeting
+  looks nothing up.
+- The graph walk that connects facts ("works at Acme" + "Acme is in Lisbon")
+  reads the facts around the question's entities, however many other facts
+  there are; hybrid vector search merges the remote index with the local
+  store, so a memory not yet copied to the remote index is still found.  
 - Heuristic (+ optional LLM queue) belief extraction → `mutate_belief`, stated at the turn's time. A `user_explicit` functional belief **cannot** be superseded by `llm_inferred` / `system_tool` (commitment source-trust gate in `_mutate_functional`; independent of `authorize_effect`), nor cut short by an earlier lower-trust statement.  
 - Hygiene rejects stack/version subjects (e.g. `kazma_v2_4_0` mistaken for product version)  
 - Dual-write: optional Postgres state mirror + Neo4j edge upsert  

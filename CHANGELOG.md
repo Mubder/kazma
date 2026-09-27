@@ -16,6 +16,11 @@ nothing new.
   ("تذكرة", a ticket, does not count.)
 - Saying hello again no longer brings back an earlier "hello" as a memory.
   Greetings and thanks are still kept, just not shown as history.
+- Kazma can connect facts it rarely uses -- "I work at Acme" and "Acme is in
+  Lisbon" -- however many other things it knows. It used to connect only its
+  800 most important facts.
+- With a remote memory search index, a memory not copied to it yet is still
+  found.
 
 - The "Rebuild embeddings" action for memory used to delete the Knowledge
   Library's search data as a leftover of an older design. It no longer
