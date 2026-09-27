@@ -788,6 +788,7 @@ def readme_values(m: dict) -> dict[str, str]:
         "test_functions": f"{t['test_functions_total']:,}",
         "test_files": f"{t['files']:,}",
         "commits": f"{g['commits']:,}",
+        "packages": str(len(m["packages"])),
     }
 
 
@@ -815,6 +816,9 @@ def sync_readme(m: dict, text: str) -> str:
          lambda mm: f"**{v['test_functions']} test functions** ({v['test_files']} test files)"),
         (r"\*\*[\d,]+\+ commits\*\* across",
          lambda mm: f"**{v['commits']}+ commits** across"),
+        # Typed by hand until 2026-09-28, and it said 7 for a year after
+        # kazma-memory was retired.
+        (r"across \d+ packages", lambda mm: f"across {v['packages']} packages"),
     ]
     for pattern, repl in subs:
         text = re.sub(pattern, repl, text)
@@ -884,6 +888,18 @@ def check_readme(m: dict, text: str) -> list[str]:
         problems.append(
             f"claims ~{stated_loc.group(1)}K LOC, repository has ~{loc_k_now}K "
             f"(slack is {README_LOC_K_SLACK}K) — regenerate"
+        )
+
+    # The package count moves only when a package is added or retired, so it
+    # must be exact (README said 7 packages of a six-package repository).
+    stated_packages = re.search(r"across (\d+) packages", text)
+    packages_now = len(m["packages"])
+    if not stated_packages:
+        problems.append("could not find the 'across N packages' claim")
+    elif int(stated_packages.group(1)) != packages_now:
+        problems.append(
+            f"claims {stated_packages.group(1)} packages, the repository has "
+            f"{packages_now} — regenerate"
         )
 
     # Self-consistency is free and no lag excuses it: the badge and the table

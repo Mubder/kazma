@@ -371,6 +371,22 @@ def test_out_dir_leaves_the_repository_alone(tmp_path, monkeypatch):
     assert json.loads((out / "metrics.json").read_text(encoding="utf-8"))["commit"]["short"] == "92b0b15a"
 
 
+def test_the_readme_package_count_is_written_and_checked():
+    """README said "across 7 packages" of a six-package repository: typed by
+    hand, so nothing updated it when kazma-memory was retired."""
+    m = _sample()  # six packages
+    readme = (
+        "| **~511K LOC** (405K Python code + 40K JS) | **9,421 test functions** "
+        "(794 test files) | **4,035+ commits** across {n} packages |"
+    )
+    assert "across 6 packages" in gm.sync_readme(m, readme.format(n=7))
+    assert gm.check_readme(m, readme.format(n=6)) == []
+    # Negative control: the stale count is caught.
+    assert gm.check_readme(m, readme.format(n=7)) == [
+        "claims 7 packages, the repository has 6 — regenerate"
+    ]
+
+
 def test_the_readme_gate_runs_no_pytest(monkeypatch):
     """--check-readme compares static counts; it skips the collection."""
     asked: list[bool] = []

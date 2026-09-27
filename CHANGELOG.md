@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Who Kazma is for, said plainly (2026-09-28)
+
+**One operator per install.** Kazma is software you run for yourself.
+Whoever runs an install has full control of it, can switch any safeguard off,
+and answers for what its agent does. Anyone they let in, through a web login
+or an allowlisted chat account, acts with their authority. The safeguards
+protect the operator from the agent and from the untrusted content it reads;
+they do not protect an install from its operator, and they do not keep apart
+people who share one. This was implied across several documents and never
+said in one place. It is now the first section of `docs/THREAT_MODEL.md`, and
+the README, the docs home, `SECURITY.md` and the feature list point to it.
+
+**The README's package count is written by the metrics generator.** It was
+typed by hand and still said 7 packages a year after one was retired (there
+are 6). CI now checks it.
+
 ## An old "skip approvals" flag no longer lasts forever (2026-09-28)
 
 **One chat of the live install had skipped approvals since July.** YOLO
