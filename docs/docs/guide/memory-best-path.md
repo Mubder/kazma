@@ -81,7 +81,7 @@ Includes isolation, KB toggles, backends, Neo4j Test/Sync, **and embedder** (no 
 | `memory.backends.*` | Vector / state / graph adapters + failover |
 | Graph provider `neo4j` | Dual-write triples; topology **paint** stays SQLite |
 | `tenant_mode` | shared / per_platform / per_user |
-| `KAZMA_MEMORY_ENFORCE_TENANT=1` | Scope `/memory` reads, mutations, undo, and graph-clear by request tenant (off = `default`) |
+| `KAZMA_MEMORY_ENFORCE_TENANT=1` | Scope every `/api/memory` route by the request tenant -- reads, counts, mutations, undo, hygiene, graph-clear (always on in production and multi-user; off = `default`) |
 
 ## Optional Neo4j
 

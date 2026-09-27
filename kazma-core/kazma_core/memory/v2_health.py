@@ -63,8 +63,30 @@ def _safe_count(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> int:
         return 0
 
 
-def build_v2_health() -> dict[str, Any]:
+#: The install's own state. Shown with ``install_details`` only: to the
+#: install's own tenant and to an admin, never to a principal of another
+#: tenant (engine errors and queue rows can carry any tenant's text).
+_INSTALL_ONLY = (
+    "queue",
+    "recent_audits",
+    "post_turn",
+    "last_error",
+    "last_reconsolidation",
+    "findability",
+    "vector_capability",
+)
+
+
+def build_v2_health(
+    tenant_id: str | None = None, *, install_details: bool = True
+) -> dict[str, Any]:
     """Build the V2 cognitive-engine health snapshot.
+
+    ``tenant_id`` narrows the belief, episode, entity and skill counts to one
+    tenant; ``None`` and the install's own tenant ("default") count the whole
+    install. ``install_details=False`` leaves out the install's own state
+    (``_INSTALL_ONLY``, the graph backend's address) and marks the answer
+    ``"scope": "tenant"``. Every URL password in the answer is masked.
 
     Returns::
 
@@ -82,6 +104,10 @@ def build_v2_health() -> dict[str, Any]:
 
     Never raises — a missing/broken DB returns status="OFF" with zeros.
     """
+    scoped = tenant_id not in (None, "", "default")
+    # A tenant predicate for every count below: (" AND tenant_id=?", (tid,)).
+    tsql = " AND tenant_id=?" if scoped else ""
+    tparams: tuple = (tenant_id,) if scoped else ()
     # Read the flag from ConfigStore
     try:
         from kazma_core.memory.config import memory_v2_enabled
@@ -188,57 +214,51 @@ def build_v2_health() -> dict[str, Any]:
         # Beliefs
         out["beliefs"]["active"] = _safe_count(
             primary_conn,
-            "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL",
+            "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NULL AND invalidated_at IS NULL"
+            + tsql,
+            tparams,
         )
         out["beliefs"]["superseded"] = _safe_count(
             primary_conn,
-            "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NOT NULL",
+            "SELECT COUNT(*) FROM beliefs WHERE valid_until IS NOT NULL" + tsql,
+            tparams,
         )
-        out["beliefs"]["archived"] = _safe_count(primary_conn, "SELECT COUNT(*) FROM beliefs_archive")
+        out["beliefs"]["archived"] = _safe_count(
+            primary_conn, "SELECT COUNT(*) FROM beliefs_archive WHERE 1=1" + tsql, tparams
+        )
 
         # Episodes per tier
         for tier in ("working", "episodic", "recall", "archived"):
             out["episodes"][tier] = _safe_count(
-                primary_conn, "SELECT COUNT(*) FROM episodes WHERE tier=?", (tier,)
+                primary_conn,
+                "SELECT COUNT(*) FROM episodes WHERE tier=?" + tsql,
+                (tier, *tparams),
             )
 
-        # Findability (docs/plans/MEMORY_NOTHING_LOST_PLAN.md, item G): what
-        # meaning search can compare, what waits for the 15-minute repair, and
-        # the memories the pre-2026-09-26 archive rule erased.
-        from kazma_core.config_store import get_config_store
-        from kazma_core.db.pg_helpers import store_errors
-        from kazma_core.memory.legacy_tables import legacy_archive_counts
-        from kazma_core.memory.reembed import vector_repair_counts
-        from kazma_core.memory.rehydrate import STATE_KEY, erased_counts
-        from kazma_core.memory.turn_reconcile import STATE_KEY as RECONCILE_KEY
-
-        try:
-            findability: dict[str, Any] = {
-                "vectors": vector_repair_counts(primary_conn),
-                "erased": erased_counts(primary_conn),
-                "legacy_archive": legacy_archive_counts(primary_conn),
-            }
-            state = get_config_store().get(STATE_KEY)
-            if isinstance(state, dict) and isinstance(state.get("last"), dict):
-                findability["last_recovery"] = state["last"]
-            reconcile = get_config_store().get(RECONCILE_KEY)
-            if isinstance(reconcile, dict) and isinstance(reconcile.get("last"), dict):
-                findability["turn_reconcile"] = reconcile["last"]
-            out["findability"] = findability
-        except store_errors():
-            logger.debug("[v2_health] findability counts failed", exc_info=True)
+        # Findability (docs/plans/MEMORY_NOTHING_LOST_PLAN.md, item G): the
+        # install's repair and recovery state.
+        if install_details:
+            findability = _findability(primary_conn)
+            if findability is not None:
+                out["findability"] = findability
 
         # Entities + procedural DAGs
-        out["entities"] = _safe_count(primary_conn, "SELECT COUNT(*) FROM entities")
+        out["entities"] = _safe_count(
+            primary_conn, "SELECT COUNT(*) FROM entities WHERE 1=1" + tsql, tparams
+        )
         out["procedural_dags"]["active"] = _safe_count(
-            primary_conn, "SELECT COUNT(*) FROM procedural_dags WHERE status='active'"
+            primary_conn,
+            "SELECT COUNT(*) FROM procedural_dags WHERE status='active'" + tsql,
+            tparams,
         )
         out["procedural_dags"]["quarantine"] = _safe_count(
-            primary_conn, "SELECT COUNT(*) FROM procedural_dags WHERE status='quarantine'"
+            primary_conn,
+            "SELECT COUNT(*) FROM procedural_dags WHERE status='quarantine'" + tsql,
+            tparams,
         )
 
-        # Ops DB: queue + audits
-        if os.path.exists(memory_ops_db()):
+        # Ops DB: queue + audits (the install's)
+        if install_details and os.path.exists(memory_ops_db()):
             ops_conn = sqlite3.connect(memory_ops_db(), check_same_thread=False)
             ensure_ops_schema(ops_conn)
             for st in ("pending", "processing", "failed"):
@@ -275,4 +295,43 @@ def build_v2_health() -> dict[str, Any]:
                     conn.close()
                 except Exception:
                     pass
-    return out
+    if not install_details:
+        for key in _INSTALL_ONLY:
+            out.pop(key, None)
+        graph = out.get("graph")
+        if isinstance(graph, dict):
+            graph.pop("url", None)
+            graph.pop("detail", None)
+        out["scope"] = "tenant"
+    from kazma_core.security.url_credentials import mask_url_credentials_deep
+
+    return mask_url_credentials_deep(out)
+
+
+def _findability(primary_conn: sqlite3.Connection) -> dict[str, Any] | None:
+    """What meaning search can compare, what waits for the 15-minute repair,
+    and the memories the pre-2026-09-26 archive rule erased. ``None`` when the
+    stores cannot be read."""
+    from kazma_core.config_store import get_config_store
+    from kazma_core.db.pg_helpers import store_errors
+    from kazma_core.memory.legacy_tables import legacy_archive_counts
+    from kazma_core.memory.reembed import vector_repair_counts
+    from kazma_core.memory.rehydrate import STATE_KEY, erased_counts
+    from kazma_core.memory.turn_reconcile import STATE_KEY as RECONCILE_KEY
+
+    try:
+        findability: dict[str, Any] = {
+            "vectors": vector_repair_counts(primary_conn),
+            "erased": erased_counts(primary_conn),
+            "legacy_archive": legacy_archive_counts(primary_conn),
+        }
+        state = get_config_store().get(STATE_KEY)
+        if isinstance(state, dict) and isinstance(state.get("last"), dict):
+            findability["last_recovery"] = state["last"]
+        reconcile = get_config_store().get(RECONCILE_KEY)
+        if isinstance(reconcile, dict) and isinstance(reconcile.get("last"), dict):
+            findability["turn_reconcile"] = reconcile["last"]
+        return findability
+    except store_errors():
+        logger.debug("[v2_health] findability counts failed", exc_info=True)
+        return None

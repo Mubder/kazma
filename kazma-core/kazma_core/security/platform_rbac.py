@@ -60,6 +60,13 @@ _ADMIN_PREFIXES = (
     # the viewer list (audit 2026-09-22).
     "/api/sessions",
     "/settings",
+    # The memory engine's own maintenance: the durable task queue (list,
+    # retry, clear), reconsolidation of every tenant's facts, and the golden
+    # benchmark. The rest of /api/memory is per tenant, and any role reaches
+    # it (tests/test_memory_routes_tenant_scope.py, 2026-09-27).
+    "/api/memory/v2/queue",
+    "/api/memory/v2/reconsolidate",
+    "/api/memory/v2/eval",
 )
 
 # Paths viewer may access (read-ish); everything else needs operator+

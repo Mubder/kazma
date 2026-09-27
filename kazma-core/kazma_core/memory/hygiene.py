@@ -172,8 +172,15 @@ def invalidate_belief(
     conn: sqlite3.Connection | None = None,
     now: float | None = None,
     remove_graph: bool = True,
+    tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """Soft-invalidate one belief and best-effort remove its Neo4j edge.
+
+    ``tenant_id`` is the caller's tenant: another tenant's belief reads as not
+    found. ``None`` and the install's own tenant (``"default"``) do not narrow
+    -- the rule of ``kazma_ui.routes_direct._shared._tenant_clause``. Every
+    route and tool that takes a belief id from its caller passes it
+    (``tests/test_memory_routes_tenant_scope.py``).
 
     Returns ``{"ok": bool, "updated": int, "graph_removed": bool, ...}``.
     """
@@ -193,12 +200,15 @@ def invalidate_belief(
             ensure_primary_schema(conn)
         assert conn is not None
 
+        scoped = tenant_id not in (None, "", "default")
         row = conn.execute(
             """
             SELECT id, subject, predicate, object, tenant_id, valid_until, invalidated_at
-            FROM beliefs WHERE id=? LIMIT 1
-            """,
-            (bid,),
+            FROM beliefs WHERE id=?
+            """
+            + (" AND tenant_id=?" if scoped else "")
+            + " LIMIT 1",
+            (bid, tenant_id) if scoped else (bid,),
         ).fetchone()
         if not row:
             if own_conn:

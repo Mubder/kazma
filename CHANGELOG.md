@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Each tenant's memory stays its own (2026-09-27)
+
+On an install with more than one tenant, the memory pages and APIs could
+reach another tenant's memory. A user could invalidate another tenant's
+facts, decide its entity merges, rename its entities or regroup its graph,
+if they had the ids. The episode list, the memory health counts, the quality
+score and the cleanup preview counted every tenant, and the cleanup action
+changed every tenant's rows. Every memory page now shows and changes only
+the signed-in tenant's memory. Another tenant's id reads as not found.
+
+- The memory engine's own maintenance -- the task queue, reconsolidation and
+  the golden benchmark -- is for admins. Other roles see "admins only".
+- The fact list on the Memory page failed with a database error for a user
+  bound to a tenant. It works now.
+- A single-user install, and a user bound to no tenant, see the whole install
+  as before.
+
 ## Kazma sees what it told you, not only what you asked (2026-09-27)
 
 When Kazma remembered a past conversation, it saw only your question from
