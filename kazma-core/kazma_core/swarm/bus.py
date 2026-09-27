@@ -28,6 +28,7 @@ __all__ = [
     "SwarmMessageBus",
     "SwarmReport",
     "get_message_bus",
+    "peek_message_bus",
     "set_message_bus",
 ]
 
@@ -429,6 +430,12 @@ def get_message_bus() -> SwarmMessageBus:
     global _bus
     if _bus is None:
         _bus = SwarmMessageBus()
+    return _bus
+
+
+def peek_message_bus() -> SwarmMessageBus | None:
+    """The shared bus if this process made one; never makes one. Shutdown only
+    closes what exists (tests/test_shutdown_builds_nothing.py)."""
     return _bus
 
 

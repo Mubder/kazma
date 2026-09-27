@@ -2485,11 +2485,13 @@ class KazmaAppBuilder:
             else:
                 logger.warning("[app] Error closing checkpointer: %s", e)
 
-        # 5) Close all cached ModelRegistry clients
+        # 5) Close all cached ModelRegistry clients -- of the registry this
+        # process made, if it made one: shutdown closes what exists and
+        # builds nothing (tests/test_shutdown_builds_nothing.py).
         try:
-            from kazma_core.model_registry import get_model_registry
+            from kazma_core.model_registry import peek_model_registry
 
-            registry = get_model_registry()
+            registry = peek_model_registry()
             if registry is not None:
                 await registry.close()
         except Exception as e:
@@ -2555,13 +2557,17 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.debug("[app] alert watchdog stop: %s", e)
 
-        # 6) Best-effort vector memory close & SessionManager close
+        # 6) SessionManager close -- the one this process made, if any, off
+        # the loop. get_session_manager() BUILT one here: every chat session
+        # loaded from Postgres, on the event loop. A server nobody had opened
+        # the web UI on spent the guard's whole 60 s grace doing that, was
+        # killed, and paged the owner (live 2026-09-27).
         try:
-            from kazma_ui.session_manager import get_session_manager
+            from kazma_ui.session_manager import peek_session_manager
 
-            sm = get_session_manager()
+            sm = peek_session_manager()
             if sm is not None and hasattr(sm, "close"):
-                sm.close()
+                await asyncio.to_thread(sm.close)
                 logger.info("[app] SessionManager closed cleanly")
         except Exception as e:
             logger.debug("[app] SessionManager close: %s", e)
@@ -2580,10 +2586,11 @@ class KazmaAppBuilder:
         # gateway.start()/stop() (lifecycle-notifier requirement) — close
         # them explicitly, or each restart leaks one pool per platform.
         try:
-            from kazma_core.swarm.bus import get_message_bus
+            from kazma_core.swarm.bus import peek_message_bus
 
-            _bus_adapter = get_message_bus().adapter
-            for _child in getattr(_bus_adapter, "adapters", [_bus_adapter]):
+            _bus = peek_message_bus()
+            _bus_adapter = _bus.adapter if _bus is not None else None
+            for _child in getattr(_bus_adapter, "adapters", [_bus_adapter]) if _bus_adapter is not None else []:
                 _close = getattr(_child, "close", None)
                 if _close is not None:
                     await _close()

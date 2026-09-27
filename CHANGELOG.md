@@ -20,6 +20,13 @@ Kazma holds open to one of the safe patterns. Two old methods that deleted
 chat history directly under the chat engine's feet, and had no callers, are
 gone.
 
+**A restart no longer runs out of time shutting down.** To close the chat
+list, shutdown asked for it -- and on a server nobody had opened the web
+page on since it started, that request built it first, loading every chat
+from the database. The 60 seconds a restart allows ran out, the server was
+stopped by force, and the owner got an alert. Shutdown now closes only what
+is there.
+
 ## The reminder store no longer holds its database locked (2026-09-27)
 
 **Reminders' database is no longer locked while the server idles.** The
