@@ -56,6 +56,17 @@ def _one_line(text: object, limit: int = _DESCRIPTION_LIMIT) -> str:
     return s if len(s) <= limit else s[: limit - 1].rstrip() + "…"
 
 
+#: What a markdown table cell must escape. The docs site reads these pages as
+#: MDX, where "<" opens a JSX tag and "{" a JavaScript expression: one tool
+#: description with "proposal_id=<that item's id>" stopped the whole site
+#: from building (2026-09-25 to 2026-09-27; tests/test_docs_mdx_safe.py).
+_CELL_ESCAPES = {"|": "\\|", "<": "&lt;", ">": "&gt;", "{": "&#123;", "}": "&#125;"}
+
+
+def _cell(text: object) -> str:
+    return "".join(_CELL_ESCAPES.get(ch, ch) for ch in str(text or ""))
+
+
 def _live_registry():
     """The registry a running Kazma builds: built-ins plus native skills."""
     from kazma_core.agent.tool_builtins import register_builtin_tools
@@ -163,7 +174,7 @@ def render(builtin: list[dict], modules: list[str], native: list[dict]) -> str:
         "|------|----------|------------------|-------------|",
     ]
     for t in builtin:
-        desc = (t.get("description") or "").replace("|", "\\|")
+        desc = _cell(t.get("description"))
         lines.append(
             f"| `{t['name']}` | {t.get('category') or '—'} | {danger_label(t['name'])} | {desc} |"
         )
@@ -186,7 +197,7 @@ def render(builtin: list[dict], modules: list[str], native: list[dict]) -> str:
         "|------|-------|----------|------------------|-------------|",
     ]
     for t in native:
-        desc = (t.get("description") or "").replace("|", "\\|")
+        desc = _cell(t.get("description"))
         lines.append(
             f"| `{t['name']}` | {t.get('skill') or '—'} | {t.get('category') or '—'} | "
             f"{danger_label(t['name'])} | {desc} |"
