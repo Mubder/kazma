@@ -47,7 +47,8 @@ TARGETS = [f"{ssm.SITE_DATA_DIR}/{name}" for name in ssm.FILES]
 
 
 def _digest(*parts: object) -> str:
-    return hashlib.sha1(repr(parts).encode()).hexdigest()
+    """A stable fake git id (40 hex digits, like a real one)."""
+    return hashlib.sha256(repr(parts).encode()).hexdigest()[:40]
 
 
 class FakeGitHub:
