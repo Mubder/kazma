@@ -83,6 +83,48 @@ def test_without_the_guard_the_write_reaches_the_next_test():
     assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
 
 
+# ── the workspace binding ──────────────────────────────────────────────────
+# A test that built an agent left the MCP rebind subscribed with its executor,
+# and a pin one test set named its root in the next; on CI a workspace-context
+# test got the previous test's root (2026-09-26, 09-27).
+
+_PROBE_PIN = REPO / "order-independence-probe-root"
+_PROBE_EXECUTOR = object()
+
+
+def _probe_subscriber(root, reason):
+    return None
+
+
+def test_a_workspace_binding_is_left_here():
+    """First of a pair: the shape an agent-building test left behind."""
+    from kazma_core.workspace import binding, mcp_rebind
+
+    mcp_rebind.install_mcp_workspace_rebind(_PROBE_EXECUTOR)
+    binding.subscribe_root_changed(_probe_subscriber)
+    binding.configure_workspace(str(_PROBE_PIN))
+    assert binding.get_process_pin() == _PROBE_PIN.resolve()
+
+
+def test_and_the_binding_does_not_reach_the_next_test():
+    from kazma_core.workspace import binding, mcp_rebind
+
+    assert binding.get_process_pin() != _PROBE_PIN.resolve()
+    assert _probe_subscriber not in binding._subscribers
+    assert mcp_rebind._executor_ref is not _PROBE_EXECUTOR
+
+
+def test_without_the_guard_the_binding_reaches_the_next_test():
+    """Negative control: the same pair with test isolation off."""
+    proc = _child_pytest(
+        f"{HERE}::test_a_workspace_binding_is_left_here",
+        f"{HERE}::test_and_the_binding_does_not_reach_the_next_test",
+        KAZMA_TEST_ISOLATION="0",
+    )
+    assert proc.returncode == 1, proc.stdout[-2000:]
+    assert "1 failed, 1 passed" in proc.stdout, proc.stdout[-2000:]
+
+
 # ── import timing ──────────────────────────────────────────────────────────
 
 

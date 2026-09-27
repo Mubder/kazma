@@ -440,8 +440,43 @@ def _isolate_process_singletons(tmp_path):
     except Exception:
         _prev_dashboard = None
 
+    # The workspace binding is module globals: the process pin, the binding
+    # bus's subscribers, the bound MCP root, and the MCP rebind's executor
+    # and asyncio lock. A test that built an agent left its rebind subscribed
+    # with that test's executor, so a later test switching workspace inside
+    # its event loop scheduled a rebind on it -- with a dead executor, and a
+    # lock bound to a closed loop -- beside its own lookups; a pin one test
+    # set named its root in the next. On CI, twice (2026-09-26 and 09-27),
+    # test_env_context_async_workspace_id_passthrough got the previous test's
+    # root. Each test starts from, and leaves, the state it found.
+    try:
+        from kazma_core.workspace import binding as _binding
+        from kazma_core.workspace import mcp_rebind as _mcp_rebind
+
+        _prev_binding = (
+            _binding._WORKSPACE_ROOT, _binding._ALLOW_ABSOLUTE,
+            list(_binding._subscribers), _binding._bound_mcp_root,
+        )
+        _prev_rebind = (
+            _mcp_rebind._executor_ref, _mcp_rebind._installed,
+            _mcp_rebind._rebind_lock, _mcp_rebind._last_rebind_at,
+        )
+    except Exception:
+        _prev_binding = _prev_rebind = None
+
     # ---- teardown: restore + park (never close/GC — see _PARKED) ---------
     yield
+
+    if _prev_binding is not None:
+        try:
+            with _binding._sub_lock:
+                _binding._subscribers[:] = _prev_binding[2]
+            (_binding._WORKSPACE_ROOT, _binding._ALLOW_ABSOLUTE,
+             _, _binding._bound_mcp_root) = _prev_binding
+            (_mcp_rebind._executor_ref, _mcp_rebind._installed,
+             _mcp_rebind._rebind_lock, _mcp_rebind._last_rebind_at) = _prev_rebind
+        except Exception:
+            pass
 
     if _prev_dashboard is not None:
         try:
