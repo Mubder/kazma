@@ -24,6 +24,13 @@ commit.
 The install's own tenant ("default": single-user, or a principal bound to no
 tenant) sees the whole install. That is ``_tenant_clause``'s rule, and
 ``test_the_installs_own_view_is_unchanged`` pins it.
+
+The same walk -- and one call per agent memory tool -- checks that no SQLite
+statement runs while an event loop runs on its thread (``_trace_sql_on_loop``):
+that loop serves every chat stream (AGENTS §35). Until 2026-09-27, 17 memory
+routes opened their connection in a thread and then ran every statement on
+the loop, the graph search and the reconsolidate enqueue ran there outright,
+and 9 of the 10 memory tools did (``memory_search`` embedded the query there).
 """
 
 from __future__ import annotations
@@ -209,6 +216,16 @@ ADMIN_ONLY = {
     ("POST", "/api/memory/v2/eval/golden"): "a CPU-heavy benchmark of the engine on a private database",
 }
 
+#: One request per install-wide route, made as an admin: they answer the
+#: install, but they still may not run SQL on the event loop.
+ADMIN_REQUESTS: dict[tuple[str, str], tuple[str, Any]] = {
+    ("GET", "/api/memory/v2/queue"): ("/api/memory/v2/queue", None),
+    ("POST", "/api/memory/v2/queue/{task_id}/retry"): ("/api/memory/v2/queue/beta9_t1/retry", None),
+    ("POST", "/api/memory/v2/queue/clear-failed"): ("/api/memory/v2/queue/clear-failed", None),
+    ("POST", "/api/memory/v2/reconsolidate"): ("/api/memory/v2/reconsolidate", None),
+    ("POST", "/api/memory/v2/eval/golden"): ("/api/memory/v2/eval/golden", {"include_optional": False}),
+}
+
 #: No tenant data at all.
 NO_DATA = {
     ("GET", "/api/memory/graph"): "retired: answers 410",
@@ -370,6 +387,8 @@ def memory_client(tmp_path, monkeypatch):
     monkeypatch.setattr("kazma_ui.auth.admin_decision", lambda request: "forbidden")
     who = {"tenant": "alpha"}
 
+    on_loop = _trace_sql_on_loop(monkeypatch)
+
     app = FastAPI()
 
     @app.middleware("http")
@@ -389,7 +408,39 @@ def memory_client(tmp_path, monkeypatch):
     mount_memory_api(app)
     register_memory_page(app, SimpleNamespace(), None)
     client = TestClient(app, raise_server_exceptions=False)
-    return SimpleNamespace(client=client, app=app, who=who, tmp=tmp_path, monkeypatch=monkeypatch)
+    return SimpleNamespace(
+        client=client, app=app, who=who, tmp=tmp_path, monkeypatch=monkeypatch, on_loop=on_loop
+    )
+
+
+def _on_loop() -> bool:
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
+
+
+def _trace_sql_on_loop(monkeypatch) -> list[str]:
+    """Every SQLite statement run while an event loop runs on its thread.
+
+    That loop serves every chat stream (AGENTS §35). A trace callback sees the
+    statement where it executes, so a connection opened in a thread and then
+    used on the loop -- the memory admin API's shape until 2026-09-27 -- is
+    caught too.
+    """
+    on_loop: list[str] = []
+    real_connect = sqlite3.connect
+
+    def _traced_connect(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        conn.set_trace_callback(lambda sql: on_loop.append(" ".join(sql.split())[:80]) if _on_loop() else None)
+        return conn
+
+    monkeypatch.setattr(sqlite3, "connect", _traced_connect)
+    return on_loop
 
 
 def _fresh(ctx, name: str) -> Path:
@@ -408,9 +459,12 @@ def _problems(ctx, route: tuple[str, str]) -> list[str]:
         if "{beta_undo}" in path:
             path = path.replace("{beta_undo}", _register_beta_undo(root))
         before = _beta_rows(root)
+        ctx.on_loop.clear()
         resp = ctx.client.request(method, path, json=body)
         after = _beta_rows(root)
         label = f"{method} {path}"
+        if ctx.on_loop:
+            problems.append(f"{label}: ran SQL on the event loop: {ctx.on_loop[:3]}")
         if resp.status_code in (404, 405, 422):
             # The request never reached the handler: the gate would pass for
             # a route it did not exercise.
@@ -462,6 +516,7 @@ def test_every_memory_route_is_declared(memory_client):
     assert routes - declared == set(), "a memory route with no tenant rule: add requests to REQUESTS"
     assert declared - routes == set(), "a declared route no longer exists"
     assert not (set(REQUESTS) & set(ADMIN_ONLY)) and not (set(REQUESTS) & set(NO_DATA))
+    assert set(ADMIN_REQUESTS) == set(ADMIN_ONLY)
 
 
 @pytest.mark.parametrize("route", sorted(REQUESTS), ids=lambda r: f"{r[0]} {r[1]}")
@@ -478,6 +533,37 @@ def test_an_install_wide_memory_route_is_for_admins(route):
     assert role_allows("admin", path, method)
     assert not role_allows("operator", path, method)
     assert not role_allows("viewer", path, method)
+
+
+@pytest.mark.parametrize("route", sorted(ADMIN_REQUESTS), ids=lambda r: f"{r[0]} {r[1]}")
+def test_an_install_wide_memory_route_runs_off_the_loop(memory_client, route):
+    _fresh(memory_client, uuid.uuid4().hex[:10])
+    path, body = ADMIN_REQUESTS[route]
+    memory_client.on_loop.clear()
+    resp = memory_client.client.request(route[0], path, json=body)
+    assert resp.status_code < 500, resp.text[:300]
+    assert memory_client.on_loop == [], f"{route[0]} {path} ran SQL on the event loop"
+
+
+def test_the_gate_sees_sql_on_the_loop(memory_client):
+    """Negative control: a route that opens its connection in a thread and
+    then runs its statement on the loop (memory_api's shape until 2026-09-27)."""
+    import asyncio
+
+    from kazma_ui.memory_api import _conn
+
+    @memory_client.app.get("/api/memory/zz-negative-control")
+    async def _on_the_loop():
+        conn = await asyncio.to_thread(_conn)
+        try:
+            return {"n": conn.execute("SELECT COUNT(*) FROM beliefs").fetchone()[0]}
+        finally:
+            conn.close()
+
+    _fresh(memory_client, "control")
+    memory_client.on_loop.clear()
+    assert memory_client.client.get("/api/memory/zz-negative-control").status_code == 200
+    assert any("SELECT COUNT(*) FROM beliefs" in s for s in memory_client.on_loop)
 
 
 def test_the_gate_sees_a_route_that_ignores_the_tenant(memory_client, monkeypatch):
@@ -554,6 +640,64 @@ def test_the_agent_invalidate_tool_reaches_the_row_it_may_change(seeded):
     answer = _as_tenant("default", _memory_tools()["memory_invalidate"], "beta9_lives")
     assert '"ok": true' in answer
     assert _beta_rows(seeded)["beliefs"] != before["beliefs"]
+
+
+#: Calls per memory tool. The registry runs an async tool ON the loop and
+#: threads only sync ones, so every one of these must hand its work to a
+#: thread: memory_search embedded the query and searched SQLite on the loop
+#: until 2026-09-27.
+TOOL_CALLS: dict[str, list[dict]] = {
+    "memory_search": [{"query": "where does Alice live"}],
+    "memory_admin": [
+        {"action": "list_beliefs", "q": "Paris"},
+        {"action": "list_entities", "q": "Alice"},
+        {"action": "invalidate", "id": "alpha_b1"},
+        {"action": "delete_entity", "id": "alice_pet"},
+        {"action": "purge_empty_entities"},
+        {"action": "merge", "id": "alice_pet", "target": "alice"},
+        {"action": "link", "subject": "alice", "object": "Carol"},
+    ],
+    "memory_merge_entities": [{"source_id": "alice_pet", "target_id": "alice"}],
+    "memory_link_entities": [{"subject": "alice", "object": "Carol"}],
+    "memory_list_beliefs": [{"q": "Paris"}],
+    "memory_invalidate": [{"belief_id": "alpha_b1"}],
+    "memory_list_entities": [{"q": "Alice"}],
+    "memory_delete_entity": [{"entity_id": "alice_pet"}],
+    "memory_purge_empty_entities": [{"confirm": False}],
+    "memory_store": [{"text": "Alice likes tea"}],
+}
+
+
+def test_every_memory_tool_has_calls():
+    assert set(TOOL_CALLS) == set(_memory_tools())
+
+
+def test_the_tool_check_sees_sql_on_the_loop(seeded, monkeypatch):
+    """Negative control: the pre-fix tool shape, a sync store call made
+    straight from the async tool."""
+    on_loop = _trace_sql_on_loop(monkeypatch)
+
+    async def inline_tool() -> str:
+        conn = sqlite3.connect(seeded / "memory_state.db")
+        try:
+            return str(conn.execute("SELECT COUNT(*) FROM beliefs").fetchone()[0])
+        finally:
+            conn.close()
+
+    _as_tenant("alpha", inline_tool)
+    assert any("SELECT COUNT(*) FROM beliefs" in s for s in on_loop)
+
+
+@pytest.mark.parametrize("name", sorted(TOOL_CALLS))
+def test_an_agent_memory_tool_runs_off_the_loop(seeded, monkeypatch, name):
+    monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: None)
+    on_loop = _trace_sql_on_loop(monkeypatch)
+    tool = _memory_tools()[name]
+    for kwargs in TOOL_CALLS[name]:
+        on_loop.clear()
+        answer = _as_tenant("alpha", lambda kw=kwargs: tool(**kw))
+        assert isinstance(answer, str)
+        assert on_loop == [], f"{name}({kwargs}) ran SQL on the event loop: {on_loop[:3]}"
 
 
 # ── Counts ─────────────────────────────────────────────────────────────────

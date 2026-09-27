@@ -772,7 +772,9 @@ async def tool_worker_node(
             try:
                 from kazma_core.safety.hitl import get_hitl_config as _live_hitl
 
-                _live = _live_hitl({})
+                # A settings-store read (Postgres on a shared store): in a
+                # thread, once per tool call, never on the loop.
+                _live = await asyncio.to_thread(_live_hitl, {})
                 if isinstance(_live, dict) and _live:
                     # Merge, never replace: the live store owns the POLICY
                     # keys (enabled / require_approval_for / timeouts — a

@@ -581,6 +581,12 @@ def register_memory_tools(registry: Any) -> None:
         category="memory",
     )
     async def memory_search(query: str, limit: int = 5) -> str:
+        # Recall reads SQLite and embeds the query: in a thread, never on the
+        # loop that serves every chat stream (AGENTS §35). An async tool runs
+        # on the loop; the registry threads only sync ones.
+        return await asyncio.to_thread(_memory_search_sync, query, limit)
+
+    def _memory_search_sync(query: str, limit: int) -> str:
         # V2 cognitive recall — the single memory read path (V1 removed).
         # Returns its results even when empty: an empty result is a real
         # "no memories match", not a signal to consult a legacy store.
@@ -678,21 +684,22 @@ def register_memory_tools(registry: Any) -> None:
                 ensure_ascii=False,
                 indent=2,
             )
+        # Every action is SQLite: in a thread, like memory_store.
         if act in ("list_beliefs", "beliefs"):
-            return _mem_list_beliefs(q=q, limit=limit)
+            return await asyncio.to_thread(_mem_list_beliefs, q=q, limit=limit)
         if act in ("list_entities", "entities"):
-            return _mem_list_entities(q=q, limit=limit)
+            return await asyncio.to_thread(_mem_list_entities, q=q, limit=limit)
         if act in ("invalidate", "invalidate_belief"):
-            return _mem_invalidate(id)
+            return await asyncio.to_thread(_mem_invalidate, id)
         if act in ("delete_entity", "delete"):
-            return _mem_delete_entity(id)
+            return await asyncio.to_thread(_mem_delete_entity, id)
         if act in ("purge_empty_entities", "purge_empty", "purge"):
-            return _mem_purge_empty_entities(confirm=bool(confirm))
+            return await asyncio.to_thread(_mem_purge_empty_entities, confirm=bool(confirm))
         if act in ("merge", "merge_entities"):
-            return _mem_merge_entities(id or subject, target or object)
+            return await asyncio.to_thread(_mem_merge_entities, id or subject, target or object)
         if act in ("link", "link_entities", "edge"):
-            return _mem_link_entities(
-                subject or id, predicate, object or target
+            return await asyncio.to_thread(
+                _mem_link_entities, subject or id, predicate, object or target
             )
         return (
             f"Error: unknown action {action!r}. "
@@ -707,7 +714,7 @@ def register_memory_tools(registry: Any) -> None:
         category="memory",
     )
     async def memory_merge_entities(source_id: str, target_id: str) -> str:
-        return _mem_merge_entities(source_id, target_id)
+        return await asyncio.to_thread(_mem_merge_entities, source_id, target_id)
     @registry.register(
         description=(
             "WRITE: Link two entities with a belief edge subject--predicate-->object. "
@@ -723,8 +730,8 @@ def register_memory_tools(registry: Any) -> None:
         predicate: str = "related_to",
         predicate_type: str = "set",
     ) -> str:
-        return _mem_link_entities(
-            subject, predicate, object, predicate_type=predicate_type
+        return await asyncio.to_thread(
+            _mem_link_entities, subject, predicate, object, predicate_type=predicate_type
         )
     @registry.register(
         description=(
@@ -734,7 +741,7 @@ def register_memory_tools(registry: Any) -> None:
         category="memory",
     )
     async def memory_list_beliefs(q: str = "", limit: int = 30) -> str:
-        return _mem_list_beliefs(q=q, limit=limit)
+        return await asyncio.to_thread(_mem_list_beliefs, q=q, limit=limit)
     @registry.register(
         description=(
             "WRITE: Soft-invalidate one belief by id (from memory_list_beliefs). "
@@ -743,7 +750,7 @@ def register_memory_tools(registry: Any) -> None:
         category="memory",
     )
     async def memory_invalidate(belief_id: str) -> str:
-        return _mem_invalidate(belief_id)
+        return await asyncio.to_thread(_mem_invalidate, belief_id)
     @registry.register(
         description=(
             "List memory entities with belief counts. "
@@ -753,7 +760,7 @@ def register_memory_tools(registry: Any) -> None:
         category="memory",
     )
     async def memory_list_entities(q: str = "", limit: int = 40) -> str:
-        return _mem_list_entities(q=q, limit=limit)
+        return await asyncio.to_thread(_mem_list_entities, q=q, limit=limit)
     @registry.register(
         description=(
             "WRITE: Delete one memory entity by id (e.g. empty shell). "
@@ -762,7 +769,7 @@ def register_memory_tools(registry: Any) -> None:
         category="memory",
     )
     async def memory_delete_entity(entity_id: str) -> str:
-        return _mem_delete_entity(entity_id)
+        return await asyncio.to_thread(_mem_delete_entity, entity_id)
     @registry.register(
         description=(
             "WRITE: Purge entity shells with zero active beliefs (safe clutter cleanup). "
@@ -772,7 +779,7 @@ def register_memory_tools(registry: Any) -> None:
         category="memory",
     )
     async def memory_purge_empty_entities(confirm: bool = False) -> str:
-        return _mem_purge_empty_entities(confirm=bool(confirm))
+        return await asyncio.to_thread(_mem_purge_empty_entities, confirm=bool(confirm))
     @registry.register(
         description=(
             "Store a fact, preference, or conversation fragment in long-term memory. "

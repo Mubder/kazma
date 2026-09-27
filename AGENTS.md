@@ -727,7 +727,17 @@ four injected were noise.
   `search_transcripts`, `promote_working_memory` and `run_golden_eval` are
   in `_LOOP_STALL_HELPERS` (`tests/test_static_gates.py`); the supervisor's
   knowledge search, the probe and federated-search routes and the packages
-  page's health card call them through `asyncio.to_thread`.
+  page's health card call them through `asyncio.to_thread`. The
+  `memory_search` tool did not until 2026-09-27: it imported `recall as
+  v2_recall`, and the gate matched names (it resolves `import ... as` now,
+  which also caught the tool worker's per-call `get_hitl_config`). Every
+  `/api/memory` route and every agent memory tool is now checked by
+  behaviour: `tests/test_memory_routes_tenant_scope.py` traces each SQLite
+  statement (`set_trace_callback`) and fails one executed while an event
+  loop runs on its thread -- which also catches a connection opened in a
+  thread and then used on the loop, the memory admin API's shape in 17
+  routes (each is now an async shell reading the body and a `_..._sync`
+  body run with `to_thread`).
 - **A busy extraction pool defers a turn, never drops it (W2):** the
   post-turn body is `consolidator._run_turn_memory`; with all four threads
   busy (or no thread) the turn's question and answer go to the durable queue
@@ -2296,7 +2306,12 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
 - **No blocking I/O inline in `async def`.** A route handler that never
   awaits is a plain `def` (FastAPI threadpools it, context included); one that
   does awaits `to_thread` around its store calls. An `async def` façade over a
-  sync body (`KnowledgeIndex.search`) runs the body in `to_thread`. DNS is I/O:
+  sync body (`KnowledgeIndex.search`) runs the body in `to_thread`. So does
+  an async agent TOOL: the registry runs async tools on the loop and threads
+  only sync ones. The debt ratchet counts both shapes that slipped past the
+  name-based gates -- `async_inline_db_calls` (a DB-API `execute`/`commit`
+  made in async code, e.g. on a connection opened in a thread) and
+  `async_tools_never_await` -- and they only go down. DNS is I/O:
   `await asyncio.to_thread(validate_url, …)` — keep the name so test patches
   still apply (`test_no_blocking_dns_in_async_functions`). Route walks with
   loop-detecting fakes: `tests/test_kb_api_routes.py`. An
