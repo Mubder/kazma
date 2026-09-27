@@ -671,6 +671,17 @@ four injected were noise.
   read). Gate: `tests/test_memory_episode_text.py::test_every_episode_text_comes_from_one_place`
   (no "summary first" choice outside that module; ids and dedupe keys take
   the question first and are exempt).
+- **"Remember this" in either language (W4).** `memory/remember_request.py`
+  is the one detector: English phrases as before, Arabic (MSA and Gulf:
+  تذكر، لا تنسى، احفظ، سجل عندك، خلك فاكر، حط في بالك ...) compared folded
+  and as whole words with an optional و/ف prefix -- "تذكرة" (a ticket) is
+  not "تذكر". It promotes the turn to the recall tier (`episode_row`) and is
+  a durable cue (`is_filler_turn`: "تذكر هذا" is eight characters).
+- **Small talk is kept, never recalled (W5).** `episode_text.is_small_talk`:
+  a greeting, thanks or acknowledgement (the words, never a length -- "Pixel's
+  age?" is short and a question) with a reply under 200 characters. Every
+  episode candidate path of recall (local, Postgres-primary, mirror top-up)
+  leaves it out; the row stays. "ok" followed by a report is history.
 - **Measured, not asserted (R7):** `kazma_core/memory/benchmark.py` seeds a
   private database the product's way -- turns via `episode_row`, facts via
   `mutate_belief(private=True)`, which keeps every write in that database (no

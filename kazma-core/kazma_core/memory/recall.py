@@ -35,7 +35,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from kazma_core.memory.episode_text import display_text, match_text
+from kazma_core.memory.episode_text import display_text, is_small_talk, match_text
 from kazma_core.memory.vector_engine import BELIEF_ACTIVE_SQL, RECALLABLE_TIERS
 
 logger = logging.getLogger(__name__)
@@ -47,6 +47,7 @@ __all__ = [
     "search",
     "format_recall_block",
     "build_memory_explain_payload",
+    "shown_text",
 ]
 
 #: Tier IN (...) for every episode search, built from the one tier list:
@@ -431,7 +432,7 @@ def _pg_primary_episodes(
     candidates: list[_Candidate] = []
     for eid in dict.fromkeys([*(str(e) for e, _s in dense_pairs), *rows]):
         row = rows.get(eid)
-        if row is None:
+        if row is None or is_small_talk(row.get("user_text"), row.get("assistant_text")):
             continue
         text = " ".join(
             str(row.get(k)) for k in ("user_text", "assistant_text", "summary_text") if row.get(k)
@@ -660,6 +661,8 @@ def _merge_remote_state_hits(
             text, shown = _state_episode_texts(row)
             if not eid or eid in seen_ep or eid in held or not text:
                 continue
+            if is_small_talk(row.get("user_text"), row.get("assistant_text")):
+                continue
             full = " ".join(
                 str(row.get(k)) for k in ("user_text", "assistant_text", "summary_text")
                 if row.get(k)
@@ -750,8 +753,8 @@ def search(
             source_layer = f"v2:{h.kind}:{h.source}" if h.source else f"v2:{h.kind}"
             out.append({
                 "id": h.id,
-                "content": _shown(h),
-                "text": _shown(h),  # alias for retrieve_memories fallback
+                "content": shown_text(h),
+                "text": shown_text(h),  # alias for retrieve_memories fallback
                 "score": h.score,
                 "source_layer": source_layer,
                 "metadata": dict(h.metadata),
@@ -1244,7 +1247,7 @@ def _rank_episodes_by_evidence(
             by_meaning=eid in by_meaning,
         )
         for eid in ids
-        if (row := rows.get(eid)) is not None
+        if (row := rows.get(eid)) is not None and not is_small_talk(row[1], row[2])
     ]
     return _rank_by_evidence(query, candidates, _question_background(h.score for h in dense))
 
@@ -1846,7 +1849,7 @@ def _apply_session_bias(
         return hits
 
 
-def _shown(hit: RecallHit) -> str:
+def shown_text(hit: RecallHit) -> str:
     """What the model or the operator reads of a hit: an episode's both sides
     when recall has them, else what it was compared by."""
     return str((hit.metadata or {}).get("display") or hit.content or "")
@@ -1931,7 +1934,7 @@ def format_recall_block(
             do_explain = False
 
     def _line(h: RecallHit) -> str:
-        shown = _shown(h)
+        shown = shown_text(h)
         base = f"- {shown}"
         if (h.metadata or {}).get("strength") == "weak":
             # Found on thin evidence (memory/recall.py _EVIDENCE_STRONG): the
@@ -2037,7 +2040,7 @@ def build_memory_explain_payload(
         return {
             "id": h.id,
             "kind": h.kind,
-            "content": _shown(h)[:content_n],
+            "content": shown_text(h)[:content_n],
             "score": round(float(h.score or 0), 4),
             "sources": list(srcs)[:6] if detail == "full" else list(srcs)[:2],
         }

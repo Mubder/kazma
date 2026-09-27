@@ -24,12 +24,41 @@ index read all three fields.
 
 from __future__ import annotations
 
-__all__ = ["display_text", "embed_text", "match_text"]
+import re
+
+__all__ = ["display_text", "embed_text", "is_small_talk", "match_text"]
 
 #: Characters of each side recall shows the model (five turns fit its budget).
 _SHOW_QUESTION = 200
 _SHOW_ANSWER = 300
 _SHOW_ONE = 500
+
+
+#: A greeting, thanks or acknowledgement -- the whole message (plan W5). The
+#: words themselves, not a length: "Pixel's age?" is short and a question.
+#: Arabic is matched folded (documents.arabic.fold_for_search).
+_SMALL_TALK_RE = re.compile(
+    r"^\W*(?:(?:hi|hello|hey|hiya|yo|thanks|thank you|thx|ok|okay|got it|noted|sure|yes|yep|no|nope"
+    r"|cool|nice|great|perfect|lol|haha|bye|good (?:morning|afternoon|evening|night)"
+    r"|مرحبا|اهلا|هلا|هلا والله|السلام عليكم|وعليكم السلام|شكرا|مشكور|يعطيك العافيه|تمام"
+    r"|طيب|اوك|اوكي|ممتاز|حلو|زين)(?:\W+(?:kazma|there|you|a lot|so much|very much|جزيلا))*)\W*$",
+    re.IGNORECASE,
+)
+#: A reply longer than this says something, whatever the user said.
+_SMALL_TALK_REPLY = 200
+
+
+def is_small_talk(user_text: str | None, assistant_text: str | None) -> bool:
+    """A turn with nothing to recall: small talk and a short reply.
+
+    Kept in memory (plan W5 -- nothing is deleted); recall leaves it out of
+    the history it shows. "ok" followed by a long report is not small talk.
+    """
+    from kazma_core.documents.arabic import fold_for_search
+
+    if len(_flat(assistant_text)) >= _SMALL_TALK_REPLY:
+        return False
+    return bool(_SMALL_TALK_RE.match(fold_for_search(user_text or "")))
 
 
 def _flat(text: str | None) -> str:

@@ -137,7 +137,12 @@ def is_filler_turn(user_text: str) -> bool:
     text = (user_text or "").strip()
     if not text:
         return True
-    # Durable cue → never filler
+    # Durable cue → never filler; a request to remember is one in any
+    # language (W4: "تذكر هذا" is eight characters, and short turns are filler).
+    from kazma_core.memory.remember_request import is_remember_request
+
+    if is_remember_request(text):
+        return False
     for pat in _DURABLE_CUES:
         if pat.search(text):
             return False
