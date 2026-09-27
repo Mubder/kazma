@@ -838,7 +838,13 @@ queued by the maintenance sweep with at most two weeks in flight.
   similarity clears the tenant's own bar (the 90th percentile of pairs of
   its memories: 0.525 on live, the same from 200 to 1,676 memories; a
   week's own percentile split weeks of few topics). A question with fewer
-  than two content words follows the previous turn of its chat.
+  than two content words follows the previous turn of its chat. A V1
+  migration copy of a turn memory also holds (`legacy-*`, "User: ...
+  Assistant: ...": 206 of 269 on live) is left out -- the first run wrote
+  three July topics twice.
+- **Versioned:** a week done by an older `_VERSION` of these rules is
+  summarized again, its summaries retired first; a forgotten summary stays a
+  tombstone and still keeps its topic unwritten.
 - **Derived, never a source:** `memory_summary_sources` names the turns.
   `forget.forget_episode` calls `on_turns_forgotten` before it commits: the
   summary is emptied at once (`rebuild`) and written again without the turn

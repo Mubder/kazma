@@ -385,8 +385,14 @@ from whichever five turns ranked first.
   and 0.91-1.0 on weeks of repeated test prompts) split weeks of few topics.
 - A question with fewer than two content words follows its chat's previous
   turn; small talk and copies of a turn are left out.
-- Result on live history: about 110 topics over eleven weeks (35 in the
-  busiest), then about 10 a week. deepseek-flash: a turn of 27K tokens cost
+- Found on the first live run (week 30: 12 summaries, three topics twice):
+  the V1 migration's single-turn copies ("User: ... Assistant: ..." in
+  `legacy-*` sessions) repeat turns turn reconcile later wrote from the chat
+  store -- 206 of 269. A copy of a turn memory holds is left out (week 30:
+  121 turns became 82, 12 topics 9), and runs carry a version: a week an
+  older version did is summarized again, its summaries retired first.
+- Result on live history: 104 topics over ten weeks (24 at most a week),
+  then about 10 a week. deepseek-flash: a turn of 27K tokens cost
   $0.004, so the backlog costs cents.
 
 **What holds.** Each summary lists its turns; forgetting one empties the

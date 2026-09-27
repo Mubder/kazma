@@ -27,8 +27,14 @@ Grouping, measured on the live install's eleven weeks:
   average-linkage clusters exactly. A question with fewer than two content
   words ("yes", "try again") carries no topic of its own: that turn follows
   the previous turn of its chat.
-- Small talk and repeated copies of one turn are left out; a chat's two
-  keys are one chat (``chat_history.chat_ids``).
+- Small talk and repeated copies of one turn are left out -- a V1
+  migration copy too ("User: ... Assistant: ..." in a ``legacy-*`` session)
+  when memory holds the turn it copied: on live 206 of 269 did, and the first
+  run wrote three July topics twice. A chat's two keys are one chat
+  (``chat_history.chat_ids``).
+- A week done by an older version of these rules (:data:`_VERSION`) is
+  summarized again: its summaries are retired first, and a summary the user
+  forgot stays a tombstone that still keeps its topic from being written.
 
 A summary is never the source of anything:
 
@@ -80,6 +86,11 @@ __all__ = [
 #: turns left; ``forgotten`` the user took back.
 SUMMARY_STATUSES = ("active", "rebuild", "retired", "forgotten")
 
+#: The version of how a week is summarized. A week done by an older version is
+#: summarized again: its summaries are retired first -- a forgotten one stays a
+#: tombstone and still keeps its topic from being written. 2: V1 migration
+#: copies of turns memory holds are left out (version 1 wrote July twice).
+_VERSION = 2
 #: A week is summarized this long after it ends: turn reconcile and the
 #: post-turn writers have settled well within it.
 _WEEK_GRACE_S = 86400.0
@@ -111,6 +122,12 @@ _LONG_TOPIC = 20
 #: The agent's saved notes: memories, not a conversation.
 _NOTES_CHAT = "memory_store"
 _NOTE_SOURCE = "memory_store_tool"
+#: The V1 migration's sessions (``backfill_v2``) and its form of a turn.
+_LEGACY_CHAT = "legacy-"
+_LEGACY_TURN = re.compile(r"User:\s*(.*?)\s*\nAssistant:\s*(.*)\Z", re.DOTALL)
+#: A migration copy is its turn when the first this-many characters of the
+#: question match.
+_LEGACY_MATCH_CHARS = 200
 #: A topic whose turns are at least this share of another summary's is that one.
 _COVERED_SHARE = 0.5
 #: Summary vectors re-encoded per pass after an embedding-model switch.
@@ -215,8 +232,9 @@ def _load_turns(
 ) -> list[_Turn]:
     """The recallable turns of *tenant_id* between *start* and *end* -- or the
     turns *ids* -- in chat order. Small talk, forgotten turns and repeated
-    copies of one turn are left out; a vector another model made, or of
-    another size than most, counts as none."""
+    copies of one turn are left out -- a V1 migration copy too, when the turn
+    it copied is in memory itself (:func:`_legacy_copies`); a vector another
+    model made, or of another size than most, counts as none."""
     from kazma_core.memory.embedder import get_embedding_model_name
     from kazma_core.memory.episode_text import is_small_talk
     from kazma_core.memory.vector_engine import RECALLABLE_TIERS
@@ -242,9 +260,16 @@ def _load_turns(
     turns: list[_Turn] = []
     seen: set[str] = set()
     sizes: dict[int, int] = {}
-    for row in conn.execute(sql, params).fetchall():
+    rows = conn.execute(sql, params).fetchall()
+    copies = _legacy_copies(conn, tenant_id, rows)
+    for row in rows:
+        if row["id"] in copies:
+            continue
         question = (row["user_text"] or row["summary_text"] or "").strip()
         answer = (row["assistant_text"] or "").strip()
+        legacy = _LEGACY_TURN.match(question) if str(row["session_id"] or "").startswith(_LEGACY_CHAT) else None
+        if legacy and not answer:
+            question, answer = legacy.group(1).strip(), legacy.group(2).strip()
         if not (question or answer) or is_small_talk(question, answer):
             continue
         key = hashlib.sha256(f"{question.lower()}\x00{answer.lower()[:2000]}".encode()).hexdigest()
@@ -267,6 +292,36 @@ def _load_turns(
         if turn.vector is not None and len(turn.vector) != size:
             turn.vector = None
     return turns
+
+
+def _legacy_copies(conn: sqlite3.Connection, tenant_id: str, rows: list[sqlite3.Row]) -> set[str]:
+    """The V1 migration copies among *rows* whose turn memory also holds.
+
+    The V1-to-V2 migration (``backfill_v2``) wrote each old memory as a
+    single-turn episode of a ``legacy-*`` session, a conversation turn as
+    "User: ... Assistant: ...". Turn reconcile later wrote the same turns from
+    the chat store: on live 206 of the 269 migration copies repeat a turn
+    memory holds, and summarizing both wrote each July topic twice -- once
+    from the chat, once from the copies grouped by meaning.
+    """
+    from kazma_core.memory.vector_engine import RECALLABLE_TIERS
+
+    copies: set[str] = set()
+    tiers = ",".join("?" for _ in RECALLABLE_TIERS)
+    for row in rows:
+        if not str(row["session_id"] or "").startswith(_LEGACY_CHAT):
+            continue
+        legacy = _LEGACY_TURN.match((row["user_text"] or "").strip())
+        if not legacy:
+            continue
+        question = legacy.group(1).strip()[:_LEGACY_MATCH_CHARS].lower()
+        if question and conn.execute(
+            "SELECT 1 FROM episodes WHERE tenant_id = ? AND session_id NOT LIKE ? "
+            f"AND tier IN ({tiers}) AND lower(substr(trim(user_text), 1, ?)) = ? LIMIT 1",
+            (tenant_id or "default", _LEGACY_CHAT + "%", *RECALLABLE_TIERS, _LEGACY_MATCH_CHARS, question),
+        ).fetchone():
+            copies.add(row["id"])
+    return copies
 
 
 def _meaning_bar(conn: sqlite3.Connection, tenant_id: str, size: int) -> float | None:
@@ -505,15 +560,51 @@ def _summary_id(tenant_id: str, period_key: str, ids: Iterable[str]) -> str:
 
 
 def _covered(conn: sqlite3.Connection, tenant_id: str, period_key: str, ids: list[str]) -> bool:
-    """True when a summary of the week (in any state) already stands for most
-    of these turns: a retried task, or a summary the user forgot."""
+    """True when a summary of the week already stands for most of these turns:
+    a retried task wrote it, or the user forgot it. A retired summary stands
+    for nothing."""
     row = conn.execute(
         "SELECT COUNT(DISTINCT src.episode_id) FROM memory_summary_sources src "
         "JOIN memory_summaries s ON s.id = src.summary_id "
-        f"WHERE s.tenant_id = ? AND s.period_key = ? AND src.episode_id IN ({','.join('?' for _ in ids)})",
+        "WHERE s.tenant_id = ? AND s.period_key = ? AND s.status != 'retired' "
+        f"AND src.episode_id IN ({','.join('?' for _ in ids)})",
         (tenant_id, period_key, *ids),
     ).fetchone()
     return int(row[0] or 0) >= _COVERED_SHARE * len(ids)
+
+
+def _version_of(raw: Any) -> int:
+    """The version a summary or a week's run recorded; 1 before versions."""
+    try:
+        data = json.loads(raw or "{}")
+    except ValueError:
+        return 1
+    try:
+        return int(data.get("version") or 1) if isinstance(data, dict) else 1
+    except (TypeError, ValueError):
+        return 1
+
+
+def _retire_older(conn: sqlite3.Connection, tenant_id: str, period_key: str) -> int:
+    """Retire the week's summaries an older version wrote, before it is
+    summarized again. Forgotten ones stay tombstones."""
+    old = [
+        str(r["id"]) for r in conn.execute(
+            "SELECT id, metadata_json FROM memory_summaries WHERE tenant_id = ? AND period_key = ? "
+            "AND status IN ('active', 'rebuild')",
+            (tenant_id, period_key),
+        ).fetchall()
+        if _version_of(r["metadata_json"]) < _VERSION
+    ]
+    now = time.time()
+    conn.executemany(
+        "UPDATE memory_summaries SET status = 'retired', title = '', summary_text = '', "
+        "embedding = NULL, embedding_model_version = NULL, queued_at = NULL, updated_at = ? "
+        "WHERE id = ?",
+        [(now, sid) for sid in old],
+    )
+    conn.commit()
+    return len(old)
 
 
 def _store(
@@ -528,22 +619,33 @@ def _store(
     fields = (
         title, summary, len(turns), len({t.chat for t in turns}), min(t.at for t in turns),
         max(t.at for t in turns), model, now, blob, get_embedding_model_name() if blob else None,
+        json.dumps({"version": _VERSION}),
     )
     if summary_id:
         conn.execute(
             "UPDATE memory_summaries SET title = ?, summary_text = ?, turn_count = ?, chat_count = ?, "
             "first_turn_at = ?, last_turn_at = ?, model = ?, updated_at = ?, embedding = ?, "
-            "embedding_model_version = ?, status = 'active', queued_at = NULL WHERE id = ?",
+            "embedding_model_version = ?, metadata_json = ?, status = 'active', queued_at = NULL "
+            "WHERE id = ?",
             (*fields, summary_id),
         )
         conn.commit()
         return summary_id
     sid = _summary_id(tenant_id, period_key, [t.id for t in turns])
+    # The same turns as a summary an older version wrote (now retired): that
+    # row is written again. Any other existing row is left as it is.
     conn.execute(
-        "INSERT OR IGNORE INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, "
+        "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, "
         "title, summary_text, turn_count, chat_count, first_turn_at, last_turn_at, model, updated_at, "
-        "embedding, embedding_model_version, created_at, status) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')",
+        "embedding, embedding_model_version, metadata_json, created_at, status) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active') "
+        "ON CONFLICT(id) DO UPDATE SET title = excluded.title, summary_text = excluded.summary_text, "
+        "turn_count = excluded.turn_count, chat_count = excluded.chat_count, "
+        "first_turn_at = excluded.first_turn_at, last_turn_at = excluded.last_turn_at, "
+        "model = excluded.model, updated_at = excluded.updated_at, embedding = excluded.embedding, "
+        "embedding_model_version = excluded.embedding_model_version, "
+        "metadata_json = excluded.metadata_json, status = 'active', queued_at = NULL "
+        "WHERE memory_summaries.status = 'retired'",
         (sid, tenant_id, period_key, start, end, *fields, now),
     )
     conn.executemany(
@@ -555,13 +657,16 @@ def _store(
 
 
 def _finish_period(
-    conn: sqlite3.Connection, tenant_id: str, period_key: str, *, turns: int, written: int,
-    detail: dict[str, Any],
+    conn: sqlite3.Connection, tenant_id: str, period_key: str, *, turns: int, detail: dict[str, Any],
 ) -> None:
+    """Mark the week done by this version, with the summaries it now has."""
     conn.execute(
         "UPDATE memory_summary_periods SET status = 'done', finished_at = ?, turns = ?, "
-        "summaries = summaries + ?, detail_json = ? WHERE tenant_id = ? AND period_key = ?",
-        (time.time(), turns, written, json.dumps(detail, ensure_ascii=False), tenant_id, period_key),
+        "summaries = (SELECT COUNT(*) FROM memory_summaries s WHERE s.tenant_id = ? "
+        "AND s.period_key = ? AND s.status = 'active'), detail_json = ? "
+        "WHERE tenant_id = ? AND period_key = ?",
+        (time.time(), turns, tenant_id, period_key,
+         json.dumps({**detail, "version": _VERSION}, ensure_ascii=False), tenant_id, period_key),
     )
     conn.commit()
 
@@ -599,6 +704,7 @@ async def summarize_period(
         conn = _open()
         if conn is None:
             return None, [], _Grouping()
+        _retire_older(conn, tenant_id, period_key)
         turns = _load_turns(conn, tenant_id, start=start, end=end)
         size = next((len(t.vector) for t in turns if t.vector), 0)
         grouping = _topic_groups(
@@ -638,10 +744,7 @@ async def summarize_period(
                 counts["written"] += 1
         detail = {"chats": grouping.chats, "by_meaning": grouping.by_meaning, "bar": grouping.bar,
                   "topics": len(grouping.groups), **counts}
-        await asyncio.to_thread(
-            _finish_period, conn, tenant_id, period_key,
-            turns=len(turns), written=counts["written"], detail=detail,
-        )
+        await asyncio.to_thread(_finish_period, conn, tenant_id, period_key, turns=len(turns), detail=detail)
         logger.info(
             "[summaries] %s (%s): %d turns, %d topics, %d written, %d skipped, %d unusable",
             period_key, tenant_id, len(turns), len(grouping.groups), counts["written"],
@@ -734,8 +837,10 @@ def queue_due_work(*, now: float | None = None) -> dict[str, int]:
             conn.execute(
                 "INSERT INTO memory_summary_periods (tenant_id, period_key, period_start, period_end, "
                 "status, queued_at, attempts) VALUES (?, ?, ?, ?, 'queued', ?, 1) "
-                "ON CONFLICT(tenant_id, period_key) DO UPDATE SET status = 'queued', "
-                "queued_at = excluded.queued_at, attempts = attempts + 1",
+                "ON CONFLICT(tenant_id, period_key) DO UPDATE SET "
+                # A week an older version did starts its attempts afresh.
+                "attempts = CASE WHEN status = 'done' THEN 1 ELSE attempts + 1 END, "
+                "status = 'queued', queued_at = excluded.queued_at",
                 (tenant, key, start, end, now),
             )
             conn.commit()
@@ -759,8 +864,9 @@ def queue_due_work(*, now: float | None = None) -> dict[str, int]:
 
 def _due_periods(conn: sqlite3.Connection, now: float, min_turns: int) -> list[tuple[str, float, float, str]]:
     """``(tenant, start, end, key)`` of every ended week with enough turns that
-    is not done, oldest first. A queued week comes back after a day, until its
-    attempts run out."""
+    this version has not done, oldest first. A queued week comes back after a
+    day, until its attempts run out; a week an older version did comes back
+    at once."""
     from kazma_core.memory.vector_engine import RECALLABLE_TIERS
 
     weeks: dict[tuple[str, str], list[Any]] = {}
@@ -774,15 +880,19 @@ def _due_periods(conn: sqlite3.Connection, now: float, min_turns: int) -> list[t
     state = {
         (r["tenant_id"], r["period_key"]): r
         for r in conn.execute(
-            "SELECT tenant_id, period_key, status, queued_at, attempts FROM memory_summary_periods"
+            "SELECT tenant_id, period_key, status, queued_at, attempts, detail_json "
+            "FROM memory_summary_periods"
         ).fetchall()
     }
     due = []
     for (tenant, key), (start, end, n) in sorted(weeks.items(), key=lambda kv: kv[1][0]):
         seen = state.get((tenant, key))
-        if n < min_turns or (seen is not None and seen["status"] in ("done", "failed")):
+        if n < min_turns or (seen is not None and seen["status"] == "failed"):
             continue
-        if seen is not None:
+        if seen is not None and seen["status"] == "done":
+            if _version_of(seen["detail_json"]) >= _VERSION:
+                continue
+        elif seen is not None:
             if (seen["queued_at"] or 0) > now - _REQUEUE_AFTER_S:
                 continue
             if int(seen["attempts"] or 0) >= _MAX_PERIOD_ATTEMPTS:
