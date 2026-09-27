@@ -21,12 +21,13 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import sqlite3
 import struct
 import time
 from datetime import UTC, datetime
 from typing import Any, Callable
+
+from kazma_core.memory.episode_text import embed_text
 
 logger = logging.getLogger(__name__)
 
@@ -199,7 +200,7 @@ def rebuild_embeddings(
     Safe to re-run: rows already stamped with the current model are skipped.
     """
     from kazma_core.memory.embedder import get_embedder, get_embedding_model_name
-    from kazma_core.paths import data_dir, primary_memory_db
+    from kazma_core.paths import primary_memory_db
 
     target_model = model_name or get_embedding_model_name()
     db_path = primary_memory_db()
@@ -245,7 +246,7 @@ def rebuild_embeddings(
         ).fetchall()
         total = len(rows)
         for i, row in enumerate(rows, 1):
-            text = (row["summary_text"] or row["user_text"] or row["assistant_text"] or "").strip()
+            text = embed_text(row["user_text"], row["assistant_text"], row["summary_text"])
             if text:
                 blob = _encode_text(emb, text)
                 if blob:
@@ -300,14 +301,12 @@ def rebuild_embeddings(
         if progress:
             progress(total, total)
 
-        # ── Chroma derived store (L3/L4 legacy index) ───────────────────
-        vec_dir = os.path.join(data_dir(), "vector_memory")
-        if os.path.isdir(vec_dir):
-            try:
-                shutil.rmtree(vec_dir)
-                logger.info("[reembed] removed Chroma store %s", vec_dir)
-            except Exception:
-                logger.warning("[reembed] could not remove Chroma store", exc_info=True)
+        # The Chroma folder (data_dir/vector_memory) is NOT touched: it held
+        # the retired V1 chat index when this deleted it after every rebuild,
+        # and since 2026-09-26 it is the Knowledge Library's live store --
+        # a rebuild would have removed it under the running server. The
+        # Knowledge Library re-embeds another model's vectors itself
+        # (KnowledgeIndex.backfill_vectors).
     finally:
         conn.close()
 
@@ -319,9 +318,9 @@ def rebuild_embeddings(
 
 # ── Continuous repair (the 15-minute maintenance cadence) ──────────────────
 
-#: The text each writer embeds -- ``dual_write`` for episodes (the summary, else
-#: the question, else the answer) and ``belief_mutation`` for beliefs. A repair
-#: must use the same text, or its vector would sit apart from a fresh one.
+#: Whether an episode has any text to embed. The text itself is
+#: ``episode_text.embed_text``, computed in Python -- the function every writer
+#: uses; a repair with another text would put its vector apart from a fresh one.
 _EPISODE_TEXT_SQL = (
     "COALESCE(NULLIF(TRIM(summary_text), ''), NULLIF(TRIM(user_text), ''), "
     "NULLIF(TRIM(assistant_text), ''))"
@@ -441,8 +440,9 @@ def repair_unsearchable_vectors(
     done = {"episodes": 0, "beliefs": 0}
     skipped: set[str] = set()  # text that would not encode, this pass only
     for kind in ("episodes", "beliefs"):
-        text_sql = _EPISODE_TEXT_SQL if kind == "episodes" else _BELIEF_TEXT_SQL
-        extra = ", tier, session_id" if kind == "episodes" else ", '', ''"
+        source = _unsearchable_sql(kind, model)
+        columns = ("id, user_text, assistant_text, summary_text, tier, session_id"
+                   if kind == "episodes" else f"id, {_BELIEF_TEXT_SQL}, '', '', '', ''")
         order = "created_at" if kind == "episodes" else "ingested_at"
         for tenant in tenants:
             while time.monotonic() < deadline:
@@ -452,13 +452,13 @@ def repair_unsearchable_vectors(
                     exclude = f" AND id NOT IN ({','.join('?' for _ in skipped)})"
                     params.extend(sorted(skipped))
                 rows = conn.execute(
-                    f"SELECT id, {text_sql}{extra} FROM {_unsearchable_sql(kind, model)}"
-                    f"{exclude} ORDER BY {order} DESC LIMIT ?",
+                    f"SELECT {columns} FROM {source}{exclude} ORDER BY {order} DESC LIMIT ?",
                     [*params, int(batch)],
                 ).fetchall()
                 if not rows:
                     break
-                for rid, text, tier, session_id in rows:
+                for rid, first, answer, summary, tier, session_id in rows:
+                    text = embed_text(first, answer, summary) if kind == "episodes" else first
                     vec = _embed(emb, text)
                     if not vec or len(vec) != dim:
                         skipped.add(str(rid))

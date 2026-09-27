@@ -157,7 +157,13 @@ never replaces the current fact. Before, whichever statement was written
 last won.
 
 - Mirror working/recall episode (the question and ITS answer; the episode's
-  turn number is the conversation's turn index)  
+  turn number is the conversation's turn index). Recall shows the model
+  both sides ("User: ... / Assistant: ...", `memory/episode_text.py`,
+  2026-09-27) -- it used to show the question alone, so a recalled "what did
+  you suggest?" came back without the suggestion. The meaning vector is made
+  from the question (the answer was tried and measured: it cost precision
+  and found nothing more); keyword search and word coverage read the answer
+  too.  
 - Heuristic (+ optional LLM queue) belief extraction → `mutate_belief`, stated at the turn's time. A `user_explicit` functional belief **cannot** be superseded by `llm_inferred` / `system_tool` (commitment source-trust gate in `_mutate_functional`; independent of `authorize_effect`), nor cut short by an earlier lower-trust statement.  
 - Hygiene rejects stack/version subjects (e.g. `kazma_v2_4_0` mistaken for product version)  
 - Dual-write: optional Postgres state mirror + Neo4j edge upsert  

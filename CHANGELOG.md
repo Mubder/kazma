@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Kazma sees what it told you, not only what you asked (2026-09-27)
+
+When Kazma remembered a past conversation, it saw only your question from
+it, never its own answer. Asked "which restaurant did you recommend?", it
+could find the right conversation and still not see the restaurant. Now it
+sees both what you asked and what it answered.
+
+Searching by the answer as well was built and measured on the memory test
+set, and left out: it brought in more unrelated conversations and found
+nothing new.
+
+- The "Rebuild embeddings" action for memory used to delete the Knowledge
+  Library's search data as a leftover of an older design. It no longer
+  does. After a change of embedding model, the Knowledge Library now
+  re-embeds itself.
+
 ## Kazma keeps what you told it in the order you said it (2026-09-27)
 
 When something you said long ago reached memory late -- a message recovered

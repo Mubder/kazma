@@ -115,8 +115,9 @@ def _insert_episode(
     # Best-effort: a missing embedder leaves embedding NULL (FTS5 still works).
     try:
         from kazma_core.memory.embedder import encode_text_to_blob
+        from kazma_core.memory.episode_text import embed_text
 
-        ep_text = (summary_text or user_text or "").strip()
+        ep_text = embed_text(user_text, None, summary_text)
         if ep_text:
             emb_blob = encode_text_to_blob(ep_text)
             if emb_blob is not None:

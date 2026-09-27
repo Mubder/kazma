@@ -35,6 +35,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
+from kazma_core.memory.episode_text import display_text, match_text
 from kazma_core.memory.vector_engine import BELIEF_ACTIVE_SQL, RECALLABLE_TIERS
 
 logger = logging.getLogger(__name__)
@@ -371,11 +372,10 @@ def _backend_search(
         return []
 
 
-def _state_episode_display(row: dict[str, Any]) -> str:
-    """What recall shows of a mirrored episode (as :func:`_episode_text` locally)."""
-    return str(
-        row.get("summary_text") or row.get("user_text") or row.get("assistant_text") or ""
-    )[:400]
+def _state_episode_texts(row: dict[str, Any]) -> tuple[str, str]:
+    """(match text, display text) of a mirrored episode, as :func:`_episode_texts` locally."""
+    sides = (row.get("user_text"), row.get("assistant_text"), row.get("summary_text"))
+    return match_text(*sides), display_text(*sides)
 
 
 def _pg_primary_episodes(
@@ -445,7 +445,10 @@ def _pg_primary_episodes(
                 created_at=float(row.get("created_at") or 0.0),
                 similarity=sims.get(eid),
                 by_meaning=eid in by_meaning,
-                content=_state_episode_display(row),
+                content=match_text(row.get("user_text"), row.get("assistant_text"),
+                                   row.get("summary_text")),
+                display=display_text(row.get("user_text"), row.get("assistant_text"),
+                                     row.get("summary_text")),
             )
         )
     ranked = _rank_by_evidence(
@@ -654,7 +657,7 @@ def _merge_remote_state_hits(
         held = _held_locally("episodes", [str(r.get("id") or "") for r in remote])
         for i, row in enumerate(remote):
             eid = str(row.get("id") or "")
-            text = _state_episode_display(row)
+            text, shown = _state_episode_texts(row)
             if not eid or eid in seen_ep or eid in held or not text:
                 continue
             full = " ".join(
@@ -667,6 +670,7 @@ def _merge_remote_state_hits(
                 "tier": row.get("tier"),
                 "remote_state": True,
                 "strength": "weak",
+                "display": shown,
             }
             if explain:
                 meta["sources"] = ["postgres_state"]
@@ -746,8 +750,8 @@ def search(
             source_layer = f"v2:{h.kind}:{h.source}" if h.source else f"v2:{h.kind}"
             out.append({
                 "id": h.id,
-                "content": h.content,
-                "text": h.content,  # alias for retrieve_memories fallback
+                "content": _shown(h),
+                "text": _shown(h),  # alias for retrieve_memories fallback
                 "score": h.score,
                 "source_layer": source_layer,
                 "metadata": dict(h.metadata),
@@ -1017,9 +1021,10 @@ def _recall_episodes(
     # question asked in five sessions took all five slots.
     out: list[RecallHit] = []
     for hit in fused:
-        text = _episode_text(conn, hit.id)
+        text, shown = _episode_texts(conn, hit.id)
         if text:
             meta = dict(hit.metadata or {})
+            meta["display"] = shown
             if explain:
                 meta["sources"] = list(dict.fromkeys(sources.get(hit.id) or [hit.source or ""]))
             out.append(
@@ -1086,8 +1091,9 @@ class _Candidate:
     created_at: float
     similarity: float | None  # cosine with the question; None: no comparable vector
     by_meaning: bool  # found by the meaning search (else by its words only)
-    content: str = ""  # what recall shows, when the caller already has it
+    content: str = ""  # what recall compares it by, when the caller already has it
     standing: float = 0.0  # a belief's importance x confidence x trust
+    display: str = ""  # what the model is shown, when it differs (an episode's both sides)
 
 
 def _question_background(dense_scores: Iterable[float]) -> float:
@@ -1178,6 +1184,7 @@ def _rank_by_evidence(
                 "coverage": round(cov, 3),
                 "evidence": round(ev, 4),
                 "strength": "strong" if ev >= strong else "weak",
+                **({"display": cand.display} if cand.display else {}),
             },
         )
         for cand, ev, lift, cov in kept
@@ -1331,7 +1338,7 @@ def _episode_fts(
     try:
         rows = conn.execute(
             f"""
-            SELECT e.id, e.tier, e.user_text, e.assistant_text,
+            SELECT e.id, e.tier, e.user_text, e.assistant_text, e.summary_text,
                    bm25(episodes_fts) AS rank
             FROM episodes_fts
             JOIN episodes e ON e.rowid = episodes_fts.rowid
@@ -1358,7 +1365,9 @@ def _episode_fts(
                 content=text,
                 score=score if score > 0 else 0.01,
                 source="fts5",
-                metadata={"tier": r["tier"], "bm25": bm},
+                metadata={"tier": r["tier"], "bm25": bm,
+                          "display": display_text(r["user_text"], r["assistant_text"],
+                                                  r["summary_text"])},
             )
         )
     return hits
@@ -1409,7 +1418,9 @@ def _episode_word_fallback(
                 content=(r["user_text"] or r["assistant_text"] or "")[:300],
                 score=1.0 / (len(hits) + 1),
                 source="fts_like",
-                metadata={"tier": r["tier"]},
+                metadata={"tier": r["tier"],
+                          "display": display_text(r["user_text"], r["assistant_text"],
+                                                  r["summary_text"])},
             )
         )
         if len(hits) >= limit:
@@ -1835,6 +1846,12 @@ def _apply_session_bias(
         return hits
 
 
+def _shown(hit: RecallHit) -> str:
+    """What the model or the operator reads of a hit: an episode's both sides
+    when recall has them, else what it was compared by."""
+    return str((hit.metadata or {}).get("display") or hit.content or "")
+
+
 # ── Deterministic dedup gate ──────────────────────────────────────────────
 
 
@@ -1853,18 +1870,23 @@ def _dedup_gate(hits: list[RecallHit]) -> list[RecallHit]:
     return list(seen.values())
 
 
-def _episode_text(conn: sqlite3.Connection, episode_id: str) -> str:
-    """Hydrate the display text for an episode."""
+def _episode_texts(conn: sqlite3.Connection, episode_id: str) -> tuple[str, str]:
+    """An episode's (match text, display text); empty when it is gone.
+
+    Recall compares and de-duplicates by the first and shows the second
+    (``memory/episode_text.py``).
+    """
     try:
         row = conn.execute(
             "SELECT user_text, assistant_text, summary_text FROM episodes WHERE id = ?",
             (episode_id,),
         ).fetchone()
     except Exception:
-        return ""
+        return "", ""
     if not row:
-        return ""
-    return (row["summary_text"] or row["user_text"] or row["assistant_text"] or "")[:400]
+        return "", ""
+    sides = (row["user_text"], row["assistant_text"], row["summary_text"])
+    return match_text(*sides), display_text(*sides)
 
 
 # ── Formatting ────────────────────────────────────────────────────────────
@@ -1909,11 +1931,12 @@ def format_recall_block(
             do_explain = False
 
     def _line(h: RecallHit) -> str:
-        base = f"- {h.content}"
+        shown = _shown(h)
+        base = f"- {shown}"
         if (h.metadata or {}).get("strength") == "weak":
             # Found on thin evidence (memory/recall.py _EVIDENCE_STRONG): the
             # model should weigh it as possibly related, not as the answer.
-            base = f"- (possibly related) {h.content}"
+            base = f"- (possibly related) {shown}"
         if not do_explain:
             return base
         srcs = (h.metadata or {}).get("sources") or ([h.source] if h.source else [])
@@ -2014,7 +2037,7 @@ def build_memory_explain_payload(
         return {
             "id": h.id,
             "kind": h.kind,
-            "content": (h.content or "")[:content_n],
+            "content": _shown(h)[:content_n],
             "score": round(float(h.score or 0), 4),
             "sources": list(srcs)[:6] if detail == "full" else list(srcs)[:2],
         }

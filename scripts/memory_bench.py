@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 from pathlib import Path
@@ -576,10 +577,25 @@ def _patched(embedder: Any, model: str):
     )
 
 
+def _limit_cpu_threads() -> None:
+    """Leave most of the CPU to whatever else runs on this machine.
+
+    The live install shares it with the dev checkout: on 2026-09-27 two
+    embedding runs at torch's default (every core) starved the live server
+    until its guard restarted it twice. Set before the model loads.
+    """
+    try:
+        import torch
+    except ImportError:
+        return
+    torch.set_num_threads(max(1, min(4, (os.cpu_count() or 2) // 4)))
+
+
 def _cmd_vectors() -> int:
     from kazma_core.memory.benchmark import RecordingEmbedder, run_benchmark
     from kazma_core.memory.embedder import get_embedder, get_embedding_model_name
 
+    _limit_cpu_threads()
     real = get_embedder()
     if real is None:
         print("no embedder is configured: install the rag extra (bge-m3)", file=sys.stderr)
@@ -600,6 +616,7 @@ def _cmd_run(real: bool, as_json: bool, details: bool) -> int:
     from kazma_core.memory.benchmark import ReplayEmbedder, run_benchmark
 
     if real:
+        _limit_cpu_threads()
         report = run_benchmark(keep_results=details)
     else:
         replay = ReplayEmbedder(VECTORS)
