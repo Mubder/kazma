@@ -50,7 +50,8 @@ every change is inside the existing V2 engine.
 | R6 | A reranker (bge-reranker-v2-m3) is a ~2 GB model download: needs the owner's go-ahead before anything is fetched | ☐ owner |
 | U1 | The user decides what is kept: forget a memory (a tombstone plus the forget ledger every writer asks -- turn reconcile, recovery, the legacy restore and the past-chats search never bring it back), "don't remember this chat" (web menu, `/memory off`), export | ☑ `tests/test_memory_forget.py` |
 | W6 | One fact, one predicate name. Measured on live first: 281 extra current facts shared a subject and value with another under a different name; by meaning (bge-m3) true pairs and different facts overlap ("grok_next_reset" / "grok_personal_next_reset", two accounts, at 0.94), so the rule is the same WORDS -- 15 pairs on live, all true. New facts take the subject's existing name (`mutate_belief`), reconsolidation retires the 13 stored twice among equal sources (the user's word against an inference stays for the user), and the deep pass reuses the names in use and skips one run's status and internal ids. The LLM-judged ADD/UPDATE/DELETE step was not built: what the measurement found is either this rule's or the prompt's | ☑ `tests/test_memory_predicate_names.py` |
-| S2+ | Remaining Stage 2 item: C2 | ☐ |
+| C2 | Weekly topic summaries (§5.7): once a week has ended, one summary per topic -- a chat of 4+ turns, or short chats and notes grouped by meaning (average linkage against the tenant's own bar, identical to scipy's) -- written by the model on the durable queue, two weeks in flight; forgetting a turn empties every summary made from it and rewrites it without; a forgotten summary never returns; fenced and credential-masked; Memory page panel, export, health | ☑ `tests/test_memory_topic_summaries.py` |
+| C2b | Recall reads the summaries: thresholds set from summaries the live model wrote (§5.7) | ☐ |
 
 ---
 
@@ -354,6 +355,50 @@ transient state (a research run's `pipeline_state: pending`, a config
 mismatch since fixed), internal ids (channel ids). The update decision step
 W6 plans is where the first class goes; the second and third are the
 extraction prompt's to skip, measured on the same turns.
+
+### 5.7 C2 detail -- weekly topic summaries (2026-09-27)
+
+**The gap, measured on live.** Recall injects at most five turns and five
+facts. Topics ran far past that: ShipX 264 turns in 95 chats (107 and 115 in
+its two busiest weeks), the fitness app's naming 108 turns in one week, the X
+posts 89, email 214 over ten weeks. "Where are we with ShipX?" was answered
+from whichever five turns ranked first.
+
+**Grouping, measured before it was chosen (eleven live weeks).**
+- Average linkage (UPGMA) over the stored question-first vectors; my numpy
+  version reproduces scipy's clusters exactly on every week (26 ms for 498
+  turns).
+- By meaning alone the result mixed topics: follow-ups dominate the owner's
+  chats ("recheck it again I have made some changes", "schedule them", "try
+  again"), and their vectors say how the user talks, not what about -- an
+  audit chat, a reminders chat and an X-posts chat merged into one group (40
+  turns at the 0.525 bar, 32 at 0.55). Chat segments merged by centroid did
+  worse (one 64-turn group).
+- Chats are task-sized (the week's largest ran 33-117 turns), so a chat with
+  4+ turns that week is one topic (a multi-subject chat gets a sentence per
+  subject). The rest -- short chats, the 269 legacy single-turn sessions from
+  the V1 migration, the agent's 162 notes -- is grouped by meaning; on W31
+  that gave ShipX builds (36), ShipX phases (33), repo status (17), memory
+  health (14), resets (8).
+- The bar is the tenant's: the 90th percentile of pairs of its memories,
+  0.524-0.527 from 200 to 1,676 memories. A week's own percentile (0.52-0.61,
+  and 0.91-1.0 on weeks of repeated test prompts) split weeks of few topics.
+- A question with fewer than two content words follows its chat's previous
+  turn; small talk and copies of a turn are left out.
+- Result on live history: about 110 topics over eleven weeks (35 in the
+  busiest), then about 10 a week. deepseek-flash: a turn of 27K tokens cost
+  $0.004, so the backlog costs cents.
+
+**What holds.** Each summary lists its turns; forgetting one empties the
+summary at once and rewrites it without (retired below four turns); a
+forgotten summary is never written again, even when a late turn joins its
+topic; the model's text passes the prompt fence and a credential mask. Local
+database only (not mirrored; rebuilt from turns).
+
+**C2b, next.** Recall reads summaries only once their ranking is measured on
+the summaries the live model writes: aggregate questions from the live
+history ("what phases are remains?", "list me all the resets", "what do you
+know about me") against specific and unrelated ones, like §15G's thresholds.
 
 ---
 

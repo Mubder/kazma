@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Kazma writes a summary of each week's topics (2026-09-27)
+
+A topic you work on for weeks can fill a hundred conversation turns a week --
+on the author's install, one project ran to 107 and 115 -- and a question
+about it brought back only the five turns that matched best. Now, once a week
+is over, Kazma writes a short summary of each topic from that week: what it
+was about, what was decided or done, what was left open. A chat with at least
+4 turns that week is a topic; turns from short chats and the notes Kazma saved
+are grouped by what they are about.
+
+The summaries are on the Memory page under "Weekly summaries". Forget one and
+it is never written again; forget a conversation turn and every summary made
+from it is rewritten without it. They are in the memory export too. The first
+run works through your past weeks two at a time.
+
+Kazma does not use them to answer questions yet: that follows once they have
+been measured on real summaries.
+
 ## Kazma keeps one version of a fact (2026-09-27)
 
 Kazma could hold the same fact twice under two names -- "timezone" and

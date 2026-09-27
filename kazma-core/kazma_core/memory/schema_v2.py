@@ -215,6 +215,60 @@ CREATE TABLE IF NOT EXISTS memory_forgotten (
   PRIMARY KEY (tenant_id, session_key, turn_number, question_sha)
 );
 
+-- Weekly topic summaries (plan C2, topic_summaries.py): what one week of
+-- conversations said about one topic, written by the model from those turns.
+-- Derived memory: memory_summary_sources names the turns, and forgetting one
+-- empties the summary (status 'rebuild') until it is written without it.
+-- status: active | rebuild | retired | forgotten (a tombstone, never rewritten).
+CREATE TABLE IF NOT EXISTS memory_summaries (
+  id                      TEXT PRIMARY KEY,
+  tenant_id               TEXT NOT NULL DEFAULT 'default',
+  period_key              TEXT NOT NULL,
+  period_start            REAL NOT NULL,
+  period_end              REAL NOT NULL,
+  title                   TEXT NOT NULL DEFAULT '',
+  summary_text            TEXT NOT NULL DEFAULT '',
+  status                  TEXT NOT NULL DEFAULT 'active',
+  turn_count              INTEGER NOT NULL DEFAULT 0,
+  chat_count              INTEGER NOT NULL DEFAULT 0,
+  first_turn_at           REAL,
+  last_turn_at            REAL,
+  model                   TEXT,
+  created_at              REAL NOT NULL,
+  updated_at              REAL NOT NULL,
+  queued_at               REAL,
+  embedding               BLOB,
+  embedding_model_version TEXT,
+  metadata_json           TEXT DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_memory_summaries_tenant
+  ON memory_summaries(tenant_id, status, period_start);
+
+CREATE TABLE IF NOT EXISTS memory_summary_sources (
+  summary_id  TEXT NOT NULL,
+  episode_id  TEXT NOT NULL,
+  PRIMARY KEY (summary_id, episode_id)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_summary_sources_episode
+  ON memory_summary_sources(episode_id);
+
+-- One row per tenant and week the summaries were queued for.
+-- status: queued | done | failed (queued too many times without finishing).
+CREATE TABLE IF NOT EXISTS memory_summary_periods (
+  tenant_id     TEXT NOT NULL DEFAULT 'default',
+  period_key    TEXT NOT NULL,
+  period_start  REAL NOT NULL,
+  period_end    REAL NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'queued',
+  queued_at     REAL,
+  finished_at   REAL,
+  attempts      INTEGER NOT NULL DEFAULT 0,
+  turns         INTEGER NOT NULL DEFAULT 0,
+  summaries     INTEGER NOT NULL DEFAULT 0,
+  detail_json   TEXT DEFAULT '{}',
+  PRIMARY KEY (tenant_id, period_key)
+);
+
 -- Graph groupings — operator-defined VIEW-ONLY associations for the /memory
 -- canvas. Lets the operator cluster nodes (e.g. "kazma_app belongs under
 -- kazma") and tier them (main/major/sub/leaf) for tree layout + per-tier
