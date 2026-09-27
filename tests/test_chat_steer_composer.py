@@ -1269,10 +1269,14 @@ def test_setplan_and_memory_explain_never_create_panels() -> None:
         "setPlan builds DOM again; on hydration that is a phantom "
         "'Working…' panel over finished history (2026-09-03)"
     )
-    mem = code.split("function applyMemoryExplain(data)", 1)[1].split(
+    # The memory frame's painter (applyMemoryExplain until 2026-09-27) builds
+    # no DOM either: it hands the turn's memory row to logProgress, the path
+    # every activity row takes (tests/js/test_memory_row.js draws it).
+    mem = code.split("function _paintMemory(data)", 1)[1].split(
         "\n  function ", 1
     )[0]
-    assert "ensureProgressPanel" not in mem
+    assert "ensureProgressPanel" not in mem and "createElement" not in mem
+    assert "logProgress(row)" in mem
     # Plan progress used to ride the Live Task Card's header meta. With the
     # bar gone the header derives its meta from the document instead, so
     # what matters is that neither of these functions mints a panel.

@@ -169,7 +169,7 @@ detail in `CHANGELOG.md` and `AGENTS.md` §21–§23. Audit:
 | Proxy Provider | Residential proxy for scrape/crawl/Playwright/SERP | Settings → System |
 | Knowledge Library | Smart re-index, gone-URL prune, hybrid inject; **document_index** bridge | `/knowledge`, Settings → Memory, Documents → Index |
 | Memory admin | Graph dedupe, rename, list↔graph, belief edit, hub brand, Group/Ungroup, truncation honesty | `/memory` |
-| Memory explain | Channel chips on chat turns + Dashboard probe | Settings → Memory → Explain recall |
+| Memory explain | The turn's Memory used row (with channels) + Dashboard probe | Settings → Memory → Explain recall |
 | Golden eval | Offline recall regression | Dashboard → Run golden eval |
 | Topic-shift focus | **Explicit** pivot disarms recall; inferred drift only re-ranks. Interrogative check-ins never count as drift | Settings → `agent.topic_drift.*`; AGENTS.md §29 |
 | Non-Stop & Self-Healing | Supervisor watchdog, model failover chain, call ledger, orphan recovery, HITL timeout | Settings → Agent → Non-Stop Execution |
@@ -391,7 +391,7 @@ Chat turn
 | Inject Knowledge into chat | `memory.v2.merge_knowledge_into_chat` | Per-turn KB inject |
 | Promote top KB hits | `memory.v2.promote_kb_to_episodes` | Soft mirror to episodes |
 | **Smart Knowledge search** | `knowledge.smart_search` | On technical Qs, inject from all active libs with chunks |
-| **Explain recall** | `memory.v2.explain_recall` | Tag hits + chat panel (below) |
+| **Explain recall** | `memory.v2.explain_recall` | Channels on the turn's Memory used row (below) |
 
 Kill switch: `KAZMA_KB_AUTO_INJECT=0`.
 
@@ -401,18 +401,17 @@ Kill switch: `KAZMA_KB_AUTO_INJECT=0`.
 
 ## 4. Memory explain + golden eval
 
-### Chat-turn Memory context panel
+### The turn's "Memory used" row
 
-**Industry default:** `explain_recall` is **on** in config defaults (and Settings
-UI default). When inject happens with explain off, the panel still shows a
-**summary** (counts + short previews) plus a hint to enable full chips.
+A turn that used memory shows a **Memory used** row in its activity (inside
+the turn's thoughts fold): how many facts, memories of past conversations,
+weekly summaries and library passages the model was shown, and one line per
+item, in the order the model saw them. The row is stored with the turn, so a
+reload shows it again, and every tab watching the chat shows it (SSE and
+WebSocket). With **Explain recall** on (Settings → Memory, the default), each
+line also names the retrieval channels that found it:
 
-1. Keep **Explain recall** on (Settings → Memory) for full channel chips.  
-2. Chat as usual (seed a fact, then ask).  
-3. Open the turn **workbench** (progress card).  
-4. **Memory context** lists beliefs / episodes / KB rows with **channel chips**:
-
-| Chip | Meaning |
+| Channel | Meaning |
 |------|---------|
 | `fts5` / `belief_fts` | Lexical |
 | `dense` | Embedding similarity |
@@ -420,9 +419,9 @@ UI default). When inject happens with explain off, the panel still shows a
 | `session_boost` | Same-thread episodes |
 | `kb_rrf` | Knowledge hybrid RRF |
 
-Empty turn → “No memory/KB hits this turn”.
-
-Works on **SSE and WebSocket** chat.
+With Explain recall on and nothing found, the row says "nothing matched". (The
+earlier "Memory context" panel stopped drawing on 2026-09-20; this row
+replaced it on 2026-09-27.)
 
 ### Dashboard
 
@@ -545,7 +544,7 @@ Industry-grade web scraping resilience and model output truncation recovery.
 
 1. **Explain recall** on.  
 2. Ask a personal-fact question after “Remember …”.  
-3. Inspect **Memory context** chips and/or Dashboard probe.
+3. Open the turn's **Memory used** row (its channels) and/or the Dashboard probe.
 
 ### E. Harden scraping
 

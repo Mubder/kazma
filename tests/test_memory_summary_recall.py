@@ -200,17 +200,26 @@ def test_the_turns_memory_panel_names_a_weekly_summary(mem):
     assert payload["weekly_summaries"][0]["content"].startswith("Week of ")
 
 
-def test_the_chat_panel_draws_a_row_for_each_weekly_summary():
-    """The browser half: chat.js paints the payload's weekly summaries (a
-    row each, after the history) and counts them in the panel's line."""
-    from pathlib import Path
+def test_the_turns_memory_row_lists_weekly_summaries_after_the_history(mem):
+    """The browser half: the turn's memory part (what the chat's memory row
+    draws, stored with the turn) counts the weekly summaries and lists them
+    after the conversation turns, as the model is shown them. The same
+    function in JavaScript is held to it by the shared fixture
+    (tests/fixtures/unified_turn/messages/memory_used.json)."""
+    from kazma_ui.turn_document import memory_part
 
-    js = (Path(__file__).resolve().parents[1] / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js").read_text(
-        encoding="utf-8")
-    panel = js.split("function applyMemoryExplain(data)", 1)[1].split("\n  function ", 1)[0]
-    assert "(data.weekly_summaries || []).forEach(function(h) { row('weekly', h); });" in panel
-    assert panel.index("row('episode', h)") < panel.index("row('weekly', h)")
-    assert "sum.weekly_summaries" in panel and "is-weekly" in panel
+    hits = R._recall_summaries(mem.db, "Where are we with the ShipX platform phases?", "default")
+    turn = R.RecallHit(id="e1", content="x", score=1.0, kind="episode",
+                       metadata={"display": "User: ShipX? / Assistant: Phase 9."})
+    payload = R.build_memory_explain_payload(
+        query="Where are we with ShipX?", result=R.RecallResult(beliefs=[], episodes=[turn], summaries=hits),
+        explain=True,
+    )
+    part = memory_part(payload)
+    assert part["counts"]["weekly"] == len(hits) >= 1 and part["counts"]["turn"] == 1
+    kinds = [h["kind"] for h in part["hits"]]
+    assert kinds.index("turn") < kinds.index("weekly")
+    assert next(h for h in part["hits"] if h["kind"] == "weekly")["text"].startswith("Week of ")
 
 
 def test_a_database_from_before_summaries_recalls_none(tmp_path):

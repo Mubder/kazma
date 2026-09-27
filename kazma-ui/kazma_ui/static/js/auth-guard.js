@@ -123,3 +123,35 @@
         return body;
     };
 })();
+
+/**
+ * window.kazmaGetJson(url, init) -> Promise<object|null> — the read side, for
+ * pollers.
+ *
+ * The parsed body of a 2xx JSON response; otherwise null: an error status, a
+ * proxy's HTML page (Cloudflare answers 502 HTML while the server restarts),
+ * or no network. It never throws and never logs: a poller treats null as
+ * "nothing new; the next tick tries again". Pollers that parsed the error
+ * page as JSON wrote "Unexpected token '<'" into the console on every restart
+ * (the Memory and Swarm pages, 2026-09-27). Gates:
+ * tests/js/test_kazma_get_json.js and, in a browser, every page under a 502,
+ * tests/e2e/test_pages_load_clean.py.
+ */
+(function () {
+    "use strict";
+    if (typeof window.kazmaGetJson === "function") return;
+
+    window.kazmaGetJson = async function (url, init) {
+        try {
+            var res = await window.fetch(url, Object.assign({ credentials: "same-origin" }, init || {}));
+            if (!res || !res.ok) return null;
+            var type = (res.headers && typeof res.headers.get === "function"
+                ? res.headers.get("content-type") : "") || "";
+            if (type && type.toLowerCase().indexOf("json") < 0) return null;
+            return await res.json();
+        } catch (e) {
+            // No network, or a body that is not JSON after all: nothing to show.
+            return null;
+        }
+    };
+})();

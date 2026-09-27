@@ -183,6 +183,91 @@ def test_negative_control_the_instrument_sees_both_kinds() -> None:
     assert "rust" in bundled_modes() and "lua" in bundled_modes()
 
 
+#: What Cloudflare serves for every request while the server restarts.
+BAD_GATEWAY = "<!DOCTYPE html><html><head><title>502</title></head><body>Bad gateway</body></html>"
+
+
+def _json_noise(text: str) -> bool:
+    """A console line that is a page parsing an error page as JSON."""
+    return "not valid JSON" in text or "Unexpected token '<'" in text
+
+
+def restart_problems(pg, path: str, base: str) -> list[str]:
+    """Load *path*, then answer every API GET with the 502 page and run the
+    page's timers for 65 s (the clock, not the wall): what the page threw or
+    logged as a JSON parse of the error page."""
+    found: list[str] = []
+    pg.on("pageerror", lambda exc: found.append(f"{path}: uncaught {str(exc).splitlines()[0][:160]}"))
+    pg.on("console", lambda msg: found.append(f"{path}: {msg.text[:160]}")
+          if msg.type == "error" and _json_noise(msg.text) else None)
+    pg.clock.install()
+    pg.goto(f"{base}{path}", wait_until="domcontentloaded", timeout=30000)
+    pg.clock.run_for(3000)
+    pg.wait_for_timeout(800)
+    pg.route("**/api/**", lambda route: route.fulfill(status=502, content_type="text/html", body=BAD_GATEWAY)
+             if route.request.method == "GET" else route.continue_())
+    pg.clock.run_for(65000)  # every poller on the page fires at least once
+    pg.wait_for_timeout(1200)  # real time for the fetch promises to settle
+    return found
+
+
+def test_every_page_survives_a_restart(harness: Harness) -> None:
+    """While the server restarts, the pages stay quiet (2026-09-27).
+
+    The Memory and Swarm pages' pollers parsed Cloudflare's 502 HTML page as
+    JSON and logged "Unexpected token '<'" into the console on every restart;
+    pollers read through ``window.kazmaGetJson`` now, which answers null for an
+    error page. Every nav page and Settings tab, in its own tab: no uncaught
+    error and no JSON parse of the error page. (Chrome's own "Failed to load
+    resource" lines are the browser's, not the page's, and are not counted.)"""
+    from playwright.sync_api import sync_playwright
+
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1280, "height": 900})
+        try:
+            first = context.new_page()
+            first.goto(f"{harness.base}/chat", wait_until="domcontentloaded", timeout=30000)
+            first.wait_for_function("() => !!window.KazmaChat", timeout=30000)
+            pages = first.evaluate(_NAV_JS)
+            first.close()
+            tabs_page = context.new_page()
+            tabs_page.goto(f"{harness.base}/settings", wait_until="domcontentloaded", timeout=30000)
+            _settle(tabs_page)
+            tabs = tabs_page.evaluate(_SETTINGS_TABS_JS)
+            tabs_page.close()
+            assert len(pages) >= 10 and len(tabs) >= 10, (pages, tabs)
+            for path in pages + [f"/settings?tab={t}" for t in tabs]:
+                pg = context.new_page()
+                problems += restart_problems(pg, path, harness.base)
+                pg.close()
+        finally:
+            context.close()
+            browser.close()
+    assert not problems, "pages that break while the server restarts:\n  " + "\n  ".join(sorted(set(problems)))
+
+
+def test_negative_control_a_poller_reading_the_error_page_is_caught(harness: Harness) -> None:
+    """The poller shape that shipped, on a page of its own: the instrument
+    reports it."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            pg = browser.new_page()
+            pg.route("**/probe-page", lambda route: route.fulfill(status=200, content_type="text/html", body=(
+                "<html><body><script>setInterval(function () {"
+                " fetch('/api/system/status').then(function (r) { return r.json(); })"
+                ".catch(function (e) { console.error('Failed to poll:', e); }); }, 5000);"
+                "</script></body></html>")))
+            found = restart_problems(pg, "/probe-page", harness.base)
+        finally:
+            browser.close()
+    assert found and all("not valid JSON" in f or "Unexpected token" in f for f in found), found
+
+
 def test_the_alert_banner_shows_what_the_store_holds(harness: Harness) -> None:
     """The system-alerts banner reads the header's notifications store; it
     polled /api/alerts/recent on a second poller of its own until 2026-09-26.

@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Each turn shows the memory it used; quiet pages during a restart (2026-09-27)
+
+**Memory used.** A turn that used memory shows a **Memory used** row in its
+activity: how many facts, memories of past conversations, weekly summaries and
+library passages the model was shown, and one line for each, in the order the
+model saw them -- with the retrieval channels when Settings → Memory →
+Explain recall is on. It is stored with the turn, so a reload shows it again,
+and every tab watching the chat shows it. The "Memory context" panel this
+replaces had shown nothing since 2026-09-20.
+
+**Restarts.** While the server restarts, the proxy answers every request with
+an error page. The Memory and Swarm pages read it as data and filled the
+browser console with errors each time; every page now waits quietly for the
+next check. Every nav page and Settings tab is tested that way.
+
+**Arabic.** Fifteen chat labels -- "Reconnecting", "Thoughts", "Waiting for
+the server", "Planning" among them -- showed in English in every language.
+They are translated, and a check fails the build if a new one is missed.
+
 ## "About me", and a choice when deleting a chat (2026-09-27)
 
 **Settings → Memory → About me** is a short text you write about yourself:

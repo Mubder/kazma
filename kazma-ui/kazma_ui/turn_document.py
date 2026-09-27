@@ -365,6 +365,55 @@ def _stale_running_twin(parts: list[dict[str, Any]], i: int) -> bool:
     return False
 
 
+#: What a turn's memory part keeps of the ``memory_explain`` payload: the
+#: count of each kind and at most this many hits, each cut at this many
+#: characters (code points, as JavaScript's ``Array.from`` counts them). The
+#: part is stored with the turn, so it stays small.
+_MEMORY_HITS = 12
+_MEMORY_HIT_CHARS = 160
+#: The payload's lists, in the order the model is shown them, and the kind
+#: each hit is recorded as.
+_MEMORY_KINDS = (
+    ("beliefs", "fact"),
+    ("episodes", "turn"),
+    ("weekly_summaries", "weekly"),
+    ("knowledge", "knowledge"),
+)
+
+
+def memory_part(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The turn part recording what memory the model was shown this turn,
+    built from the supervisor's ``memory_explain`` payload
+    (``recall.build_memory_explain_payload``). One per turn (key
+    ``memory``); a later one replaces it. Mirrors
+    ``turn_document.js:memoryPartOf``.
+    """
+    if not isinstance(payload, dict):
+        return None
+    counts: dict[str, int] = {}
+    hits: list[dict[str, Any]] = []
+    for key, kind in _MEMORY_KINDS:
+        rows = [h for h in (payload.get(key) or []) if isinstance(h, dict)]
+        counts[kind] = len(rows)
+        for h in rows:
+            if len(hits) >= _MEMORY_HITS:
+                break
+            hit: dict[str, Any] = {"kind": kind, "text": str(h.get("content") or "")[:_MEMORY_HIT_CHARS]}
+            sources = [str(s) for s in (h.get("sources") or []) if s][:3]
+            if sources:
+                hit["sources"] = sources
+            hits.append(hit)
+    return {"type": "memory", "counts": counts, "hits": hits}
+
+
+def _memory_fields(part: dict[str, Any]) -> dict[str, Any]:
+    counts = part.get("counts") if isinstance(part.get("counts"), dict) else {}
+    return {
+        "counts": {kind: int(counts.get(kind) or 0) for _, kind in _MEMORY_KINDS},
+        "hits": [dict(h) for h in (part.get("hits") or []) if isinstance(h, dict)],
+    }
+
+
 def activity_of(parts: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """Workbench rows the restored CoT accordion already knows how to render.
 
@@ -429,6 +478,16 @@ def activity_of(parts: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
                 "state": "info",
                 **({"ts": p["ts"]} if p.get("ts") else {}),
             })
+        elif kind == "memory":
+            # What memory the model was shown this turn: never running, and
+            # the renderer builds its words from the counts and hits.
+            rows.append({
+                "id": part_key_str(p),
+                "kind": "memory",
+                "title": "Memory used",
+                "state": "info",
+                **_memory_fields(p),
+            })
     return rows
 
 
@@ -481,6 +540,9 @@ def _part_key(part: dict[str, Any]) -> tuple[Any, ...]:
         )
     if kind == "status":
         return ("status", str(part.get("title") or ""))
+    if kind == "memory":
+        # One per turn: the memory the turn was shown.
+        return ("memory",)
     if kind == "hitl":
         # One slot PER GATE, keyed by interrupt id — NOT one slot per turn.
         #
@@ -540,6 +602,8 @@ def _activity_to_parts(activity: list[dict[str, Any]] | None) -> list[dict[str, 
             detail = str(row.get("detail") or "")
             if detail.strip():
                 out.append({"type": "reasoning", "text": detail})
+        elif kind == "memory":
+            out.append({"type": "memory", **_memory_fields(row)})
         elif kind in ("status", "info"):
             # A row whose id names another part is that part's RENDERING,
             # not a part of its own. Reviving it mints a duplicate with a
@@ -624,6 +688,12 @@ def merge_parts(
                 for i, x in enumerate(out):
                     if _part_key(x) == key:
                         out[i] = merge_tool_part(x, part)
+                        return
+            if replace and part.get("type") == "memory":
+                # The latest record of the turn's memory wins.
+                for i, x in enumerate(out):
+                    if _part_key(x) == key:
+                        out[i] = dict(part)
                         return
             return
         seen.add(key)

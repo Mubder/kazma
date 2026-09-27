@@ -405,11 +405,6 @@ html[data-theme="light"] { color-scheme: only light; }
   color: var(--secondary);
 }
 
-/* Memory explain panel (chat) — was violet-tinted */
-.agent-memory-explain {
-  background: color-mix(in srgb, var(--accent-light) 7%, transparent);
-}
-
 /* v4 gave active sessions a 3px accent bar — v5 uses a uniform pill ring */
 .session-item.active {
   border-left-width: 1px;

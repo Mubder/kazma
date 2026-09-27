@@ -108,6 +108,46 @@
    * while the row's content changes (UNIFIED_TURN_BLOCK.md §3), and deriving
    * it here means the row id and the part key cannot drift apart.
    */
+  // What a turn's memory part keeps of the memory_explain payload: the count
+  // of each kind and at most MEMORY_HITS hits, each cut at MEMORY_HIT_CHARS
+  // code points (Array.from counts as Python does). Mirrors
+  // turn_document.py:memory_part.
+  var MEMORY_HITS = 12;
+  var MEMORY_HIT_CHARS = 160;
+  var MEMORY_KINDS = [
+    ['beliefs', 'fact'], ['episodes', 'turn'], ['weekly_summaries', 'weekly'], ['knowledge', 'knowledge'],
+  ];
+
+  function memoryPartOf(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+    var counts = {};
+    var hits = [];
+    MEMORY_KINDS.forEach(function (pair) {
+      var rows = (Array.isArray(payload[pair[0]]) ? payload[pair[0]] : []).filter(function (h) {
+        return h && typeof h === 'object' && !Array.isArray(h);
+      });
+      counts[pair[1]] = rows.length;
+      rows.forEach(function (h) {
+        if (hits.length >= MEMORY_HITS) return;
+        var hit = { kind: pair[1], text: Array.from(String(h.content || '')).slice(0, MEMORY_HIT_CHARS).join('') };
+        var sources = (Array.isArray(h.sources) ? h.sources : []).filter(Boolean).map(String).slice(0, 3);
+        if (sources.length) hit.sources = sources;
+        hits.push(hit);
+      });
+    });
+    return { type: 'memory', counts: counts, hits: hits };
+  }
+
+  function memoryFields(part) {
+    var counts = (part && part.counts && typeof part.counts === 'object') ? part.counts : {};
+    var out = {};
+    MEMORY_KINDS.forEach(function (pair) { out[pair[1]] = parseInt(counts[pair[1]], 10) || 0; });
+    var hits = (part && Array.isArray(part.hits) ? part.hits : []).filter(function (h) {
+      return h && typeof h === 'object';
+    }).map(function (h) { return Object.assign({}, h); });
+    return { counts: out, hits: hits };
+  }
+
   function activityOf(parts, gateState) {
     var rows = [];
     if (!Array.isArray(parts)) return rows;
@@ -169,6 +209,12 @@
         };
         if (p.ts) row.ts = p.ts;
         rows.push(row);
+      } else if (kind === 'memory') {
+        // What memory the model was shown this turn: never running, and the
+        // renderer builds its words from the counts and hits.
+        var mem = memoryFields(p);
+        rows.push({ id: partKey(p), kind: 'memory', title: 'Memory used', state: 'info',
+          counts: mem.counts, hits: mem.hits });
       }
     }
     return rows;
@@ -215,6 +261,8 @@
         String(part.result || part.detail || '').slice(0, 80);
     }
     if (kind === 'status') return 'status:' + String(part.title || '');
+    // One per turn: the memory the turn was shown.
+    if (kind === 'memory') return 'memory';
     // One slot PER GATE, keyed by interrupt id — NOT one slot per turn.
     // A turn can pause more than once (sequential "Allow this tool" clicks).
     // Collapsing every gate into a single 'hitl' slot meant the second gate
@@ -475,6 +523,9 @@
       } else if (kind === 'thought') {
         var detail = String(row.detail || '');
         if (detail.trim()) out.push({ type: 'reasoning', text: detail });
+      } else if (kind === 'memory') {
+        var memRow = memoryFields(row);
+        out.push({ type: 'memory', counts: memRow.counts, hits: memRow.hits });
       } else if (kind === 'status' || kind === 'info') {
         // A row whose id names another part is that part's RENDERING,
         // not a part of its own. Reviving it mints a duplicate with a
@@ -519,6 +570,12 @@
           // freeze every tool row at "running".
           for (var rt = 0; rt < out.length; rt++) {
             if (partKey(out[rt]) === key) { out[rt] = mergeToolPart(out[rt], part); return; }
+          }
+        }
+        if (replace && part.type === 'memory') {
+          // The latest record of the turn's memory wins.
+          for (var rm = 0; rm < out.length; rm++) {
+            if (partKey(out[rm]) === key) { out[rm] = Object.assign({}, part); return; }
           }
         }
         return;
@@ -1040,6 +1097,7 @@
   root.KazmaTurnDocument = {
     textOf: textOf,
     activityOf: activityOf,
+    memoryPartOf: memoryPartOf,
     activityForMessage: activityForMessage,
     mergeParts: mergeParts,
     mergeHitlPart: mergeHitlPart,

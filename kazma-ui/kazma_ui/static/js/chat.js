@@ -593,6 +593,9 @@
       case 'turn_heartbeat':
         _paintHeartbeat(data, 'ws');
         return true;
+      case 'memory_explain':
+        _paintMemory(data);
+        return true;
       case 'hitl': {
         var st = String(data.state || 'pending');
         if (st === 'pending' && data.replay) return true;
@@ -3089,7 +3092,7 @@
       onMemoryExplain: function(data) {
         if (!_mine()) return;
         noteTurnActivity();
-        try { applyMemoryExplain(data || {}); } catch (e) { /* ignore */ }
+        applyJournalFrame('memory_explain', data || {});
       },
 
       // SSE CoT parity with WS agentStore — routing / synthesizing / heartbeats
@@ -3438,7 +3441,6 @@
   var _planParsedFromText = false;
   var _progressStartedAt = 0;
   var _progressTimerId = null;
-  var _lastMemoryExplain = null;
   var TOOL_DETAIL_MAX = 900;
   // Detail length over which tool results render clamped with a "show more"
   // toggle instead of a 14em scroll box (B).
@@ -3532,93 +3534,60 @@
     }
   }
 
-  function _srcChipHtml(srcs) {
-    var arr = Array.isArray(srcs) ? srcs : (srcs ? [srcs] : []);
-    if (!arr.length) return '';
-    return arr.map(function(s) {
-      var key = String(s || '').toLowerCase();
-      var color = '#94a3b8';
-      if (key.indexOf('ppr') >= 0) color = '#93c5fd';
-      else if (key.indexOf('dense') >= 0) color = '#38bdf8';
-      else if (key.indexOf('fts') >= 0 || key.indexOf('belief') >= 0) color = '#34d399';
-      else if (key.indexOf('session') >= 0) color = '#fbbf24';
-      else if (key.indexOf('kb') >= 0) color = '#f472b6';
-      return '<span class="mem-src-chip" style="color:' + color + ';">' + escapeHtml(String(s)) + '</span>';
-    }).join('');
+  // The memory the model was shown this turn (the memory_explain frame),
+  // as the turn's `memory` part -- the part the server stores with the turn
+  // (turn_document.js:memoryPartOf / turn_document.py:memory_part), so a
+  // reload draws the same row. It enters through logProgress like every
+  // activity row and is drawn by _activityRowsHtml; it never builds DOM of
+  // its own. (The panel it replaces drew nothing from 2026-09-20, when
+  // Phase 5 deleted its markup, to 2026-09-27.)
+  function _paintMemory(data) {
+    var TD = window.KazmaTurnDocument;
+    if (!TD || typeof TD.memoryPartOf !== 'function') return;
+    var part = TD.memoryPartOf(data || {});
+    var row = part ? TD.activityOf([part])[0] : null;
+    if (row) logProgress(row);
   }
 
-  function applyMemoryExplain(data) {
-    _lastMemoryExplain = data || null;
-    // Attach-only (2026-09-03): memory explain updates an existing live
-    // workbench; it must not mint a phantom in-bubble panel on hydration.
-    var panel = messagesEl
-      ? messagesEl.querySelector('.agent-progress.is-active')
-      : null;
-    if (!panel || !data) return;
-    var wrap = panel.querySelector('.agent-memory-explain');
-    var body = panel.querySelector('.agent-memory-explain-body');
-    var meta = panel.querySelector('.agent-memory-explain-meta');
-    if (!wrap || !body) return;
-    var sum = data.summary || {};
-    var nB = sum.beliefs || (data.beliefs || []).length || 0;
-    var nE = sum.episodes || (data.episodes || []).length || 0;
-    var nK = sum.knowledge || (data.knowledge || []).length || 0;
-    // Weekly topic summaries (plan C2b): shown only when recall used one.
-    var nW = sum.weekly_summaries || (data.weekly_summaries || []).length || 0;
-    if (meta) {
-      meta.textContent = nB + ' beliefs · ' + (nW ? nW + ' weekly · ' : '') + nE + ' episodes · ' + nK + ' KB';
-    }
-    if (data.hint && data.detail === 'summary') {
-      // Light inject summary when full explain is off
-    }
-    if (data.empty) {
-      body.innerHTML = '<div class="agent-memory-explain-empty">' +
-        escapeHtml(ti('memory_empty', 'No memory/KB hits this turn')) +
-        (data.query ? ' <span class="muted">«' + escapeHtml(String(data.query).slice(0, 80)) + '»</span>' : '') +
-        '</div>';
-      wrap.hidden = false;
-      return;
-    }
-    var lines = [];
-    function row(kind, h) {
-      var isAr = (document.documentElement.getAttribute('dir') || '') === 'rtl' || (window.KAZMA_LANG === 'ar');
-      var label = kind === 'belief'
-        ? (isAr ? 'معتقد' : 'BELIEF')
-        : kind === 'weekly'
-          ? (isAr ? 'ملخص أسبوعي' : 'WEEKLY')
-          : (kind === 'episode' ? (isAr ? 'حلقة' : 'EPISODE') : (isAr ? 'معرفة' : 'KB'));
-      var cls = kind === 'belief' ? 'is-belief'
-        : (kind === 'weekly' ? 'is-weekly' : (kind === 'episode' ? 'is-episode' : 'is-kb'));
-      var score = (h.score != null && h.score !== '') ? Number(h.score).toFixed(3) : '';
-      lines.push(
-        '<div class="agent-memory-hit ' + cls + '">' +
-          '<span class="agent-memory-kind">' + label + '</span> ' +
-          '<span class="agent-memory-text">' + escapeHtml((h.content || '').slice(0, 180)) + '</span>' +
-          '<div class="agent-memory-chips">' + _srcChipHtml(h.sources) +
-          (score ? ' <span class="muted">score ' + score + '</span>' : '') +
-          '</div></div>'
-      );
-    }
-    (data.beliefs || []).forEach(function(h) { row('belief', h); });
-    (data.episodes || []).forEach(function(h) { row('episode', h); });
-    // After the history, as the model is shown them (memory/recall.py).
-    (data.weekly_summaries || []).forEach(function(h) { row('weekly', h); });
-    (data.knowledge || []).forEach(function(h) { row('knowledge', h); });
-    var hintHtml = (data.hint && data.detail === 'summary')
-      ? '<div class="agent-memory-explain-empty" style="margin-bottom:6px;">' + escapeHtml(String(data.hint)) + '</div>'
-      : '';
-    body.innerHTML = hintHtml + (lines.join('') ||
-      '<div class="agent-memory-explain-empty">' + escapeHtml(ti('memory_empty', 'No memory/KB hits this turn')) + '</div>');
-    wrap.hidden = false;
-    var isArMem = (document.documentElement.getAttribute('dir') || '') === 'rtl' || (window.KAZMA_LANG === 'ar');
-    var memUnits = isArMem
-      ? (nB + ' ' + ti('beliefs', 'معتقدات') + ' / ' + nE + ' ' + ti('episodes', 'حلقات') + ' / ' + nK + ' KB')
-      : (nB + 'B / ' + nE + 'E / ' + nK + 'KB');
-    logProgress({
-      kind: 'status',
-      title: ti('memory_context', 'Memory context') + ' · ' + memUnits,
-      state: 'info',
+  // Every label a literal ti()/tiCount() key, so the i18n bridge gate sees
+  // it (tests/test_chat_i18n_bridge.py).
+  function _memoryCountLabel(kind, n) {
+    if (kind === 'fact') return tiCount('count_facts', n, '{n} fact', '{n} facts');
+    if (kind === 'turn') return tiCount('count_memories', n, '{n} memory', '{n} memories');
+    if (kind === 'weekly') return tiCount('count_weekly', n, '{n} weekly summary', '{n} weekly summaries');
+    return tiCount('count_passages', n, '{n} library passage', '{n} library passages');
+  }
+
+  function _memoryKindLabel(kind) {
+    if (kind === 'fact') return ti('memory_kind_fact', 'Fact');
+    if (kind === 'turn') return ti('memory_kind_turn', 'Memory');
+    if (kind === 'weekly') return ti('memory_kind_weekly', 'Weekly summary');
+    return ti('memory_kind_knowledge', 'Library');
+  }
+
+  function _memoryRowHtml(row) {
+    var counts = row.counts || {};
+    var said = [];
+    ['fact', 'turn', 'weekly', 'knowledge'].forEach(function(kind) {
+      var n = Number(counts[kind]) || 0;
+      if (n) said.push(_memoryCountLabel(kind, n));
     });
+    var title = ti('memory_used', 'Memory used') + ': ' +
+      (said.length ? said.join(' · ') : ti('memory_nothing', 'nothing matched'));
+    var lines = (row.hits || []).map(function(h) {
+      var src = (h.sources && h.sources.length) ? ' [' + h.sources.join(', ') + ']' : '';
+      return _memoryKindLabel(h.kind) + ' · ' + String(h.text || '') + src;
+    });
+    return '<li class="agent-progress-step step-memory state-info" data-kind="memory">' +
+      _stepRowHtml({
+        kind: 'status',
+        state: 'info',
+        title: title,
+        rawTitle: 'Memory used',
+        detail: lines.join('\n'),
+        tsIso: null,
+      }) +
+      '</li>';
   }
 
   function _formatElapsed(ms) {
@@ -4328,6 +4297,7 @@
     var lastKey = '';
     activity.forEach(function(row) {
       if (!row) return;
+      if (row.kind === 'memory') { html += _memoryRowHtml(row); lastKey = ''; return; }
       var kind = row.kind === 'tool' ? 'tool'
         : (row.kind === 'thought' ? 'thought'
           : (row.kind === 'error' ? 'error' : 'status'));
@@ -8528,7 +8498,6 @@
     logProgress: logProgress,
     finalizeProgress: finalizeProgress,
     noteTurnActivity: noteTurnActivity,
-    applyMemoryExplain: applyMemoryExplain,
     resync: function(reason) { _resyncDelivery(reason || 'api'); },
     /**
      * After HITL approve/YOLO: clear token accum so the resumed final answer

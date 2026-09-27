@@ -28,6 +28,74 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الذاكرة…",
         "en": "Memory…",
     },
+    # The turn's memory row (restored 2026-09-27): what memory the model was
+    # shown, counted by kind, one line per hit.
+    "chat.memory_used": {
+        "ar": "الذاكرة المستخدمة",
+        "en": "Memory used",
+    },
+    "chat.memory_nothing": {
+        "ar": "لا شيء مطابق",
+        "en": "nothing matched",
+    },
+    "chat.memory_kind_fact": {
+        "ar": "حقيقة",
+        "en": "Fact",
+    },
+    "chat.memory_kind_turn": {
+        "ar": "ذكرى",
+        "en": "Memory",
+    },
+    "chat.memory_kind_weekly": {
+        "ar": "ملخص أسبوعي",
+        "en": "Weekly summary",
+    },
+    "chat.memory_kind_knowledge": {
+        "ar": "المكتبة",
+        "en": "Library",
+    },
+    # Keys chat.js used with no catalog entry, so they showed in English in
+    # every language (found 2026-09-27 by tests/test_chat_i18n_bridge.py).
+    "chat.copy_id": {
+        "ar": "نسخ المعرّف",
+        "en": "Copy ID",
+    },
+    "chat.no_response": {
+        "ar": "لا يوجد رد",
+        "en": "No response",
+    },
+    "chat.no_signal_for": {
+        "ar": "لا إشارة منذ {t}",
+        "en": "No signal for {t}",
+    },
+    "chat.planning": {
+        "ar": "يخطط…",
+        "en": "Planning…",
+    },
+    "chat.reconnecting": {
+        "ar": "يعيد الاتصال…",
+        "en": "Reconnecting…",
+    },
+    "chat.sending_decision": {
+        "ar": "يرسل القرار…",
+        "en": "Sending decision…",
+    },
+    "chat.still_working_bg": {
+        "ar": "ما زال يعمل في الخلفية…",
+        "en": "Still working in background…",
+    },
+    "chat.synthesizing": {
+        "ar": "يكتب الرد…",
+        "en": "Composing response…",
+    },
+    "chat.thoughts": {
+        "ar": "الأفكار",
+        "en": "Thoughts",
+    },
+    "chat.waiting_server": {
+        "ar": "بانتظار الخادم…",
+        "en": "Waiting for the server…",
+    },
     "chat.delete_chat_title": {
         "ar": "حذف المحادثة",
         "en": "Delete chat",
@@ -440,6 +508,31 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "chat.count_requests.few": {"ar": "{n} طلبات", "en": "{n} requests"},
     "chat.count_requests.many": {"ar": "{n} طلبًا", "en": "{n} requests"},
     "chat.count_requests.other": {"ar": "{n} طلب", "en": "{n} requests"},
+    # The turn's memory row: what the model was shown, by kind.
+    "chat.count_facts.zero": {"ar": "لا حقائق", "en": "{n} facts"},
+    "chat.count_facts.one": {"ar": "حقيقة واحدة", "en": "{n} fact"},
+    "chat.count_facts.two": {"ar": "حقيقتان", "en": "{n} facts"},
+    "chat.count_facts.few": {"ar": "{n} حقائق", "en": "{n} facts"},
+    "chat.count_facts.many": {"ar": "{n} حقيقةً", "en": "{n} facts"},
+    "chat.count_facts.other": {"ar": "{n} حقيقة", "en": "{n} facts"},
+    "chat.count_memories.zero": {"ar": "لا ذكريات", "en": "{n} memories"},
+    "chat.count_memories.one": {"ar": "ذكرى واحدة", "en": "{n} memory"},
+    "chat.count_memories.two": {"ar": "ذكريان", "en": "{n} memories"},
+    "chat.count_memories.few": {"ar": "{n} ذكريات", "en": "{n} memories"},
+    "chat.count_memories.many": {"ar": "{n} ذكرى", "en": "{n} memories"},
+    "chat.count_memories.other": {"ar": "{n} ذكرى", "en": "{n} memories"},
+    "chat.count_weekly.zero": {"ar": "لا ملخصات أسبوعية", "en": "{n} weekly summaries"},
+    "chat.count_weekly.one": {"ar": "ملخص أسبوعي واحد", "en": "{n} weekly summary"},
+    "chat.count_weekly.two": {"ar": "ملخصان أسبوعيان", "en": "{n} weekly summaries"},
+    "chat.count_weekly.few": {"ar": "{n} ملخصات أسبوعية", "en": "{n} weekly summaries"},
+    "chat.count_weekly.many": {"ar": "{n} ملخصًا أسبوعيًا", "en": "{n} weekly summaries"},
+    "chat.count_weekly.other": {"ar": "{n} ملخص أسبوعي", "en": "{n} weekly summaries"},
+    "chat.count_passages.zero": {"ar": "لا مقاطع من المكتبة", "en": "{n} library passages"},
+    "chat.count_passages.one": {"ar": "مقطع واحد من المكتبة", "en": "{n} library passage"},
+    "chat.count_passages.two": {"ar": "مقطعان من المكتبة", "en": "{n} library passages"},
+    "chat.count_passages.few": {"ar": "{n} مقاطع من المكتبة", "en": "{n} library passages"},
+    "chat.count_passages.many": {"ar": "{n} مقطعًا من المكتبة", "en": "{n} library passages"},
+    "chat.count_passages.other": {"ar": "{n} مقطع من المكتبة", "en": "{n} library passages"},
     "chat.awaiting_decisions": {
         "ar": "{n} بانتظار قرارك",
         "en": "{n} awaiting your decision",

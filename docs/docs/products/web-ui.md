@@ -83,12 +83,15 @@ Multi-tenant isolation: memory is scoped by the request tenant with `KAZMA_MEMOR
 
 Research / scrape runs through **chat tools** and the **Research panel** start form + live SSE sessions (see [Web research](../guide/web-research)). Tour of the latest stack: [Recent features](../guide/recent-features).
 
-### Memory context (chat workbench)
+### Memory used (in each turn)
 
-With **Settings → Memory → Explain recall** on, each turn’s workbench can show a
-**Memory context** panel (beliefs / episodes / KB hits with channel chips:
-`fts5`, `dense`, `belief_ppr`, `kb_rrf`, …). Dashboard probe uses the same
-explain tags; **Run golden eval** exercises the golden recall set.
+A turn that used memory shows a **Memory used** row in its activity: the
+facts, memories of past conversations, weekly summaries and library passages
+the model was shown, counted and listed. It is stored with the turn (a reload
+shows it) and appears in every tab watching the chat. With **Settings →
+Memory → Explain recall** on (the default), each line names the channels that
+found it (`fts5`, `dense`, `belief_ppr`, `kb_rrf`, …). The Dashboard probe
+uses the same tags; **Run golden eval** exercises the golden recall set.
 
 ## Email (Settings → Email)
 
