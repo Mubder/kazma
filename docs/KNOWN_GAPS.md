@@ -437,7 +437,9 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
   needs `CREATEDB`, which the live install's role has (checked read-only
   2026-09-25 and 2026-09-27; 889 GB free on the database volume); without it
   the drill reports UNVERIFIED with the grant. `python -m
-  kazma_core.backup.restore_drill --deep` runs it on demand.
+  kazma_core.backup.restore_drill --deep` runs it on demand. (The live
+  install had already turned it on, `KAZMA_PG_RESTORE_REHEARSAL=1`, on
+  2026-09-25; its first weekly deep drill since is due on 2026-09-28.)
 - **Accepted: the `python_exec` denylist sees literals only.** A path or
   command built at run time goes to the approval card, which is the control
   for it; static analysis cannot see a value the code computes.
@@ -1120,6 +1122,17 @@ delivery path that reorders or skips a boundary will misfile frames again.
 The fix is to stamp `current_turn_id()` on every journaled frame, which
 changes what both transports send and how the projector adopts a turn id
 mid-turn, and wants the whole unified-turn browser suite behind it.
+
+**Watching: two event-loop stalls right after a boot (2026-09-27 00:50, 15
+and 27 s).** The watchdog's dumps show start-up contention -- the first
+maintenance pass importing modules in a worker, the first requests building
+FastAPI's route table, backups starting -- and the loop thread at a different
+innocent frame in each sample, not one blocking call. The server was
+answering again within the half minute; neither of the two reloads later
+that day stalled, and the 2026-09-25 database hang (eleven dumps, AGENTS.md §35) has not come
+back. The weekly resilience report counts stalls, so a recurrence is seen;
+the next dump that names a frame above the storage layer is the next gate
+entry (AGENTS.md §35).
 
 **A Postgres install leaves a dead `settings` TABLE behind in
 `kazma-data/settings.db` — and live data in the same file.** Switching backends

@@ -11,9 +11,9 @@ It is the one backup check that writes to the database server, so:
 * **On by default on Postgres (since 2026-09-27; it was opt-in).**
   ``backups.pg.restore_rehearsal`` (ConfigStore) set to false, or
   ``KAZMA_PG_RESTORE_REHEARSAL=0``, turns it off; ``=1`` turns it on whatever
-  the setting says. Until it ran by default, "the dump restores" was inferred
-  from "the dump reads" on every install that never opted in -- the live one
-  included. Postgres installs only.
+  the setting says. Until it ran by default, "the dump restores" was only
+  inferred from "the dump reads" on every install that did not opt in.
+  Postgres installs only.
 * **Scratch only.** It creates ``kazma_restore_rehearsal_<epoch>`` on the same
   server, restores into that, and drops it. Every CREATE and DROP re-checks the
   name against a strict pattern and refuses one equal to the live database.

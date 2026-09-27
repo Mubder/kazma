@@ -17,6 +17,7 @@
   </p>
 
   <a href="#quick-start">Quick start</a> ·
+  <a href="docs/FEATURES.md">What it does</a> ·
   <a href="docs/docs/guide/architecture.md">Architecture</a> ·
   <a href="docs/INJECTION.md">Safety measurements</a> ·
   <a href="docs/KNOWN_GAPS.md">Known gaps</a> ·
@@ -159,7 +160,7 @@ scripts/agentdojo_bench.py --report slack,banking      # pooled figures + p-valu
 |---|---|
 | [**Prompt injection: the numbers**](docs/INJECTION.md) | The full measurement, the payloads that still land, and a free offline reproduction |
 | [**Threat model**](docs/THREAT_MODEL.md) | What each boundary stops and, stated plainly, what it does not. Approval is consent, not containment |
-| [**Known gaps**](docs/KNOWN_GAPS.md) | Open weaknesses, dated, with the evidence for each |
+| [**Known gaps**](docs/KNOWN_GAPS.md) | Where things stand: no open defects known, the owner decisions, and every accepted limit with its reason — dated, with the evidence |
 
 ---
 
@@ -234,15 +235,23 @@ Deep dives: [System architecture](docs/docs/guide/architecture.md) ·
 ### Memory
 - **Bi-temporal beliefs** with assertion and validity time, so knowledge can
   change without rewriting history.
-- **Associative recall** through a personalized-PageRank ego graph, and hybrid
-  episode retrieval (FTS5 plus dense vectors via `sqlite-vec`, or pgvector on
-  Postgres).
-- **Rule-based lifecycle.** Memories you still recall are never archived, and
-  an archived one keeps a summary. See [Memory](docs/docs/guide/memory-and-rag.md).
+- **Recall by evidence.** A memory reaches the model only when its meaning
+  and words clear a threshold measured on a benchmark — nothing is injected
+  when nothing matches. Meaning search is exact over every memory
+  (`sqlite-vec`, or pgvector when the Postgres server has it), with keywords
+  and a personalized-PageRank walk of the fact graph beside it.
+- **Memory you can see and steer.** Each answer shows the memory it used;
+  **About me** is text you write that every reply reads; any memory or whole
+  chat can be forgotten, a chat kept out of memory, and everything exported.
+  Weekly topic summaries keep the gist of long threads.
+- **Nothing lost by accident.** Archiving moves a memory to cold storage and
+  never erases its text. See [Memory](docs/docs/guide/memory-and-rag.md).
 - **Backups you can restore.** WAL-safe SQLite copies, a filtered `pg_dump`,
   and graph exports, snapshotted into encrypted, deduplicated
   [restic](https://restic.net) repositories (local and offsite), with a
-  daily restore drill. See [Disaster recovery](docs/docs/ops/disaster-recovery.md).
+  daily restore drill and, with Postgres, a weekly rehearsal that restores the
+  newest dump into a scratch database. See
+  [Disaster recovery](docs/docs/ops/disaster-recovery.md).
 
 ### Swarm orchestration
 - **Six dispatch patterns:** dispatch, broadcast, pipeline (with checkpoint

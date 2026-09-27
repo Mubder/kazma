@@ -14,7 +14,7 @@ description: Postgres & SaaS Cutover — production ops
 | Config / settings / platform users | `kazma_settings` | `config_store.py` |
 | Chat sessions | `kazma_chat_sessions` | `session_manager.py` |
 | Swarm tasks + metrics | `kazma_swarm_tasks`, `kazma_swarm_worker_metrics` | `task_store.py` |
-| LangGraph checkpoints | LangGraph internal schema | `AsyncPostgresSaver` via `create_checkpointer` / `agent_runner` |
+| LangGraph checkpoints | LangGraph internal schema | `AsyncPostgresSaver`, opened by `kazma_core/checkpoints_pg.py` (agent and gateway). Pruned since 2026-09-27: each chat keeps its newest 200 checkpoints, one idle for `checkpoints.retention_days` (Settings → System → Chat step history, default 30; 0 keeps all) its newest 10 |
 | Web sessions | still ConfigStore keys (also Postgres via settings) | `web_sessions.py` |
 
 SQLite remains the default when no database URL is set (tests, local single-node).
@@ -26,6 +26,10 @@ to **pgvector** in the same database (table `kazma_memory` — the
 `memory.backends.vector.collection` setting — cosine, HNSW index), **if that
 Postgres can hold vectors**. The cognitive store (`memory_state.db`) stays
 SQLite until you set `KAZMA_MEMORY_STATE_ROLE=primary`.
+
+Neither pgvector nor Qdrant is needed: without them memory's meaning search
+is exact over every memory, locally (sqlite-vec or NumPy, about 1 ms per
+1,000 memories).
 
 The server must ship the extension. `postgres:16-alpine` — the image in
 `docker-compose.postgres.yml` and `docker-compose.ha.yml` — does **not**; use
@@ -120,12 +124,14 @@ Kazma backs up its own Postgres tables automatically (added after the
 2026-08-14 incident in which another app dropped Kazma's tables from a
 shared database):
 
-- **Nightly, automatic:** the 24h backup/export loop dumps exactly the
+- **Every 6 hours, automatic:** the backup/export loop dumps exactly the
   tables in `kazma_core.db.pg_backup.KAZMA_PG_TABLES` to
   `{kazma-data}/backups/pg/pg_shared_<epoch>.dump` (custom `-Fc` format,
-  atomic write, magic-validated, retention default 7 →
-  `backups.pg.retention` / `KAZMA_PG_BACKUP_RETENTION`). First dump ~2 min
-  after boot.
+  atomic write, magic-validated; 3 local dumps kept, restic keeps the
+  history → `backups.pg.retention` / `KAZMA_PG_BACKUP_RETENTION`). First dump
+  ~2 min after boot. The weekly deep drill restores the newest one into a
+  scratch database, checks it and drops it (on by default since 2026-09-27;
+  [Disaster recovery](disaster-recovery)).
 - **Manual dump now:** `python scripts/pg_backup.py backup`
 - **Restore:** `python scripts/pg_backup.py restore --latest`
   (`--file <name>`, `--dry-run`, `list`). Restores only Kazma's own tables —

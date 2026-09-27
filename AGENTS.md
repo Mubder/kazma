@@ -2745,7 +2745,8 @@ Read the named test before changing the code it guards.
 - **Restore rehearsal: on by default with Postgres, scratch-only**
   (`backup/restore_rehearsal.py`; `backups.pg.restore_rehearsal=false` or
   `KAZMA_PG_RESTORE_REHEARSAL=0` turns it off -- it was opt-in until
-  2026-09-27, so nothing had ever proven a dump restores): the weekly
+  2026-09-27, so an install that did not opt in never proved a dump
+  restores): the weekly
   pass restores the newest dump into `kazma_restore_rehearsal_<epoch>`,
   checks it, drops it; every CREATE/DROP re-checks that exact pattern and
   refuses the live database. Gate: `tests/test_restore_rehearsal.py`.
@@ -3084,6 +3085,7 @@ new *guard* (its own code, or other OS-level variables) still needs the
 ## Key References
 
 - `docs/docs/intro.md` — Documentation map (single SoT under `docs/docs/`)
+- `docs/FEATURES.md` — What Kazma does, a plain list checked against the code (the website's source; re-check a line against the code before changing it)
 - `docs/docs/guide/architecture.md` — Full system architecture with data flow diagram
 - `docs/docs/guide/memory-and-rag.md` — Chat memory SoT (V2 cognitive engine is the single stack; the V1 4-layer RRF was removed in the V1→V2 cutover)
 - `docs/docs/guide/document-intelligence.md` — Document Intelligence product guide

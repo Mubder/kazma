@@ -70,7 +70,7 @@ Use this before exposing Kazma beyond loopback. Aligns with
 - [ ] `documents.enabled` intentional (default compatibility: enabled, not default-authoritative)
 - [ ] Do **not** run multi-replica against a shared document store until metadata is Postgres — check `GET /api/documents/ops/readiness`
 - [ ] `documents.capacity.storage_free_floor_bytes` set conservatively (default 512 MiB)
-- [ ] Nightly document backup path known (`kazma-data/backups/document-store-*` or equivalent)
+- [ ] Document backup path known (the 6-hourly native backup: `kazma-data/backups/document-store-*` or equivalent)
 - [ ] Migration plan includes `documents.db` + content tree ([Migration](./migration))
 - [ ] Optional engines understood (fitz / WeasyPrint / LibreOffice may be CONDITIONAL)
 - [ ] PDF Arabic / electronic text: `pip install -e ".[document-platform]"` (PyMuPDF + pypdfium2); parser readiness should be **ready**, not text-only degraded
@@ -130,6 +130,8 @@ Also run document rows in the [Smoke matrix](./smoke-matrix).
 ## Backup & ops alerting
 
 - [ ] Universal + `native_pg_backup` cadence is **6h** (not 24h); local PG staging retention default **3** (restic keeps history)
+- [ ] With Postgres, the weekly deep drill's **restore rehearsal** is on (default since 2026-09-27) and the database role has `CREATEDB`; the drill log names `postgres:restore`
+- [ ] **Chat step history** retention is what you want (Settings → System; default 30 days, 0 keeps every checkpoint). An install upgrading with years of history: set it before the upgrade if you want to keep them
 - [ ] Universal backup **checks** PG dump freshness — a missing/stale dump is not `"ok": true`
 - [ ] `ops_alerts` reach Telegram (and FanOut if Discord/Slack configured); kill-switch `KAZMA_OPS_ALERTS=0` only during a noisy incident
 - [ ] Guard Telegram is separate (child-down). 503 cause-quality (`database: …` vs `Service Unavailable`) is **deferred**: [`GUARD_OPS_ALERTING_CAUSE_QUALITY.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md)

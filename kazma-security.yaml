@@ -1,7 +1,13 @@
 # Kazma Security Configuration
-# Declares scanning, disclosure workflow, bounty posture, and hardening checks.
-# This file is policy posture — confirm runtime enforcement against the
-# hardening runner and SECURITY.md before relying on every check in production.
+# Declares the security program for people: disclosure workflow, bounty
+# posture, what scanning and hardening cover.
+#
+# NO KAZMA CODE READS THIS FILE (checked 2026-09-27). Nothing below is
+# scheduled or enforced because of it: the hardening report and the
+# dependency scan run on demand (GET /api/security/hardening,
+# GET /api/security/deps); Dependabot (.github/dependabot.yml) and bandit in CI
+# run on GitHub's schedule. Run-time enforcement lives in the code -- the
+# approval gates, the commitment layer, the vault -- with its gates in tests/.
 
 scanning:
   enabled: true

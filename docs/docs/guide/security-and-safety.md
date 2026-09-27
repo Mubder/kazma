@@ -277,11 +277,11 @@ This is inter-agent delegation — unrelated to MCP or skills.
 
 ## 8. Security config files
 
-`kazma-security.yaml` declares posture across `scanning`, `disclosure`, `bug_bounty` (**disabled** — no paid program), and `hardening` (8 checks: `secrets_in_logs`, `input_validation`, `rbac_enforcement`, `tls_required`, `dependency_audit`, `least_privilege`, `audit_trail`, `config_integrity`). See [Configuration → security config](configuration#7-security-config-files) and root [`SECURITY.md`](https://github.com/Mubder/kazma/blob/main/SECURITY.md). `kazma-permissions.yaml` defines division-based MCP allow/deny lists (the ALMuhalab divisions) with cross-division rules (`require_explicit_approval`, `max_approval_duration_hours: 24`, `audit_all_access`).
+`kazma-security.yaml` declares posture across `scanning`, `disclosure`, `bug_bounty` (**disabled** — no paid program), and `hardening`. **No Kazma code reads that file** (checked 2026-09-27): it records the security program for people, and nothing below runs because of it. Its `hardening` section lists 8 checks ( `secrets_in_logs`, `input_validation`, `rbac_enforcement`, `tls_required`, `dependency_audit`, `least_privilege`, `audit_trail`, `config_integrity`). See [Configuration → security config](configuration#7-security-config-files) and root [`SECURITY.md`](https://github.com/Mubder/kazma/blob/main/SECURITY.md). `kazma-permissions.yaml` defines division-based MCP allow/deny lists (the ALMuhalab divisions) with cross-division rules (`require_explicit_approval`, `max_approval_duration_hours: 24`, `audit_all_access`).
 
-### 8.1 Hardening runner (`security/hardening.py`)
+### 8.1 Hardening report (`security/hardening.py`)
 
-`SecurityHardeningRunner` runs the checks at startup; keys are `run_on_startup: true`, `fail_on_critical: true`, `auto_fix: false`. Each yaml check label maps to an implemented method:
+`SecurityHardeningRunner` is an **on-demand operator report**, not a gate: `GET /api/security/hardening` runs it over the install's source tree and returns the findings. It does not run at startup, and no page calls it yet. The file's `run_on_startup` / `fail_on_critical` keys are not read. Each check it implements:
 
 | Check (yaml label) | Implemented method | Severity |
 |---|---|---|
@@ -306,7 +306,7 @@ This is inter-agent delegation — unrelated to MCP or skills.
 
 Both parse `requirements.txt` and `pyproject.toml`. `DependabotStyleScanner` additionally runs `scan_skill_manifests()` (flags suspicious MCP configs: `eval`/`exec`/`system` in command, env `TOKEN`/`SECRET`/`KEY`, `--privileged`, `network: host`; escalation patterns like `sudo`/`chmod 777`/`setuid`), `create_github_issue()` via the `gh` CLI, `generate_advisory()`, and `check_for_updates()`.
 
-`kazma-security.yaml`: `scanning` interval 24 h, `severity_threshold: medium`, `auto_create_issues: true`.
+Neither scanner is scheduled: `GET /api/security/deps` runs one on demand. The `scanning` section of `kazma-security.yaml` (interval 24 h, `auto_create_issues`) is not read. What does run on a schedule is GitHub's: Dependabot's weekly pip update PRs (`.github/dependabot.yml`), and bandit's HIGH gate on every CI run.
 
 ### 8.3 Disclosure workflow (`security/disclosure.py`)
 
@@ -314,7 +314,7 @@ SQLite `kazma-data/disclosure.db` enforces the transition chain `submitted → a
 
 `kazma-security.yaml`: response window 48 h, assessment 7 d, `security_txt_url` (RFC 9116 contact file — **not** a PGP key), channels email + GitHub private reporting. **`bug_bounty.enabled: false`** (no paid bounty). Canonical policy: root `SECURITY.md` and [Vulnerability reporting](../security/vulnerability-reporting).
 
-> **Verify runtime enforcement** of `kazma-security.yaml` checks against the hardening runner before relying on them. The file declares policy; confirm the runner enforces each check at startup (`hardening.run_on_startup: true`, `fail_on_critical: true`).
+> **What enforces security at run time is in the code, not in `kazma-security.yaml`:** the approval gates (§7 of AGENTS.md), the commitment layer, the vault, SSRF/CSRF checks and the fence — each with its gate in `tests/`. The YAML is a declaration.
 
 ---
 

@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## The docs say what the code does (2026-09-27)
+
+A pass over the documentation against the code. **`docs/FEATURES.md`** is new:
+what Kazma does, in plain words, each line checked against the source and
+marked shipped, opt-in, partial or not built -- the list the website is
+written from. Corrected where the docs claimed more than the code: no code
+reads `kazma-security.yaml` (the security guide said a hardening runner ran
+its checks at startup; the report runs only on demand, and a test now keeps
+the docs honest about it); OpenTelemetry GenAI spans exist (two pages said
+they were removed); `kazma mcp` makes Kazma an MCP server (two pages said it
+is not); memory recall ranks by evidence, not rank fusion (three pages); the
+memory backups and the Postgres dump run every 6 hours, not nightly, and 3
+local dumps are kept, not 7; the worker autoscaler is wired; there is no
+signed delegation code; and the Majlis protocol is a greeting fast path. The
+roadmap was re-checked row by row, and the recent-features tour, the README's
+capability list and the Postgres, production and web UI pages cover this
+week's changes.
+
 ## Every "still open" known gap closed or accepted, and what closing them found (2026-09-27)
 
 **Chat step history is bounded on Postgres too.** Kazma keeps each chat's

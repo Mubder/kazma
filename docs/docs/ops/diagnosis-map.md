@@ -336,8 +336,9 @@ not expose partial desync via `COUNT(*)` on the virtual table. The 6h sweep
 compares `*_docsize` vs base and rebuilds (`fts_health.fts_drift_check`).
 
 **Postgres mirror would resurrect dead facts on `role=primary`:** invalidate /
-supersede / archive / graph-clear now tombstone the mirror. Nightly export logs
-drift; reconcile with `python scripts/reconcile_memory_mirror.py`.
+supersede / archive / graph-clear now tombstone the mirror, and the 15-minute
+mirror sync pushes what differs (memory health: `mirror`). A one-off full
+reconcile: `python scripts/reconcile_memory_mirror.py`.
 
 **“Could not deliver your message after several retries” (Web, V2 cursor):**
 not a memory bug — a function-local `get_active_turn` import shadowed the
