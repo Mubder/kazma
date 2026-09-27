@@ -111,6 +111,13 @@
         memoryPromoteKb: true,
         memorySmartSearch: false,
         memoryExplainRecall: true,
+        // "About me" (plan C1): the user's own words, shown to the model on
+        // every call. Saved = what the server holds, so the page can tell.
+        aboutMe: '',
+        aboutMeSaved: '',
+        aboutMeMax: 2000,
+        aboutMeSaving: false,
+        aboutMeError: '',
         memoryNeo4jStatus: '',
         memoryNeo4jOk: false,
         memoryStateSyncStatus: '',
@@ -755,7 +762,7 @@
                 case 'models': break; // Loaded on init
                 case 'agent': break;
                 case 'memory':
-                    await Promise.all([this.loadEmbedder(), this.loadTimeTravel(), this.loadCronTimezone()]);
+                    await Promise.all([this.loadAboutMe(), this.loadEmbedder(), this.loadTimeTravel(), this.loadCronTimezone()]);
                     if (scrollEmbedder || (window.location.hash || '').includes('embedder')) {
                         setTimeout(function() {
                             var el = document.getElementById('memory-embedder-section');

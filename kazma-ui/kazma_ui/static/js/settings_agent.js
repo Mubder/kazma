@@ -140,6 +140,35 @@
             this.saving = false;
         },
 
+        async loadAboutMe() {
+            try {
+                const r = await window.kazmaSave('/api/memory/v2/profile');
+                this.aboutMe = this.aboutMeSaved = (r && r.about) || '';
+                if (r && r.max_chars) this.aboutMeMax = r.max_chars;
+                this.aboutMeError = '';
+            } catch (e) {
+                this.aboutMeError = (e && e.message) || 'Could not load About me';
+            }
+        },
+
+        async saveAboutMe() {
+            this.aboutMeSaving = true;
+            this.aboutMeError = '';
+            try {
+                const r = await window.kazmaSave('/api/memory/v2/profile', {
+                    method: 'PUT',
+                    body: { about: this.aboutMe || '' },
+                });
+                if (!r || !r.ok) throw new Error((r && r.error) || 'Save failed');
+                this.aboutMe = this.aboutMeSaved = r.about || '';
+                showToast(this.t ? this.t('settings.about_me_saved') : 'Saved', 'success');
+            } catch (e) {
+                this.aboutMeError = (e && e.message) || 'Save failed';
+            } finally {
+                this.aboutMeSaving = false;
+            }
+        },
+
         async saveMemoryKbMerge() {
             try {
                 await window.kazmaSave('/api/settings/memory/merge-kb', {

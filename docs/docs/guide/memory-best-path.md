@@ -34,7 +34,7 @@ Chat turn
 1. **Personal memory** — defaults; chat “Remember my favorite color is teal.” then “What color?”  
 2. **Docs** — ingest Knowledge Library; keep **Inject Knowledge into chat** on (Settings → **Memory**).  
 3. **Federated search** — Dashboard → Search all knowledge → **Federated** (`MEM` / `KB` chips).  
-4. **Explain recall** (optional) — Settings → Memory → **Explain recall**; chat workbench shows **Memory context** with channel chips.  
+4. **Explain recall** (on by default) — Settings → Memory → **Explain recall**; each turn's **Memory used** row names the channels that found each memory.  
 5. **Smart Knowledge search** (optional) — expand inject to all active libs on technical questions.  
 6. **Memory admin (`/memory`)** — graph + entities/beliefs (below).  
 7. **Smoke** — `pwsh -File scripts/memory_smoke.ps1` · [Smoke matrix](../ops/smoke-matrix) · [Recent features](./recent-features)  

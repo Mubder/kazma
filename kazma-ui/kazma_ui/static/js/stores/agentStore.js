@@ -877,11 +877,12 @@ function registerAgentStore() {
         }
 
         case 'memory_explain': {
-          try {
-            if (window.KazmaChat && typeof window.KazmaChat.applyMemoryExplain === 'function') {
-              window.KazmaChat.applyMemoryExplain(data || frame || {});
-            }
-          } catch (e) { /* ignore */ }
+          // The memory the turn was shown: the same painter as the stream
+          // (chat.applyJournalFrame -> the turn's `memory` row).
+          const chat = this._chat();
+          if (chat && typeof chat.applyJournalFrame === 'function') {
+            try { chat.applyJournalFrame('memory_explain', data || frame || {}); } catch (e) { /* never break the socket */ }
+          }
           break;
         }
 

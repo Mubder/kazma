@@ -58,6 +58,7 @@ _TENANT_TABLES = (
     "episodes",
     "graph_associations",
     "memory_forgotten",
+    "memory_profile",
     "memory_summaries",
     "memory_summary_periods",
     "procedural_dags",
@@ -203,6 +204,11 @@ REQUESTS: dict[tuple[str, str], list[tuple[str, Any]]] = {
     ("POST", "/api/memory/v2/summaries/{summary_id}/forget"): [
         ("/api/memory/v2/summaries/beta9_sum/forget", None),
     ],
+    # Plan C1: "About me" -- the caller's own text, never another tenant's.
+    ("GET", "/api/memory/v2/profile"): [("/api/memory/v2/profile", None)],
+    ("PUT", "/api/memory/v2/profile"): [
+        ("/api/memory/v2/profile", {"about": "Alice's own words, rewritten"}),
+    ],
 }
 
 #: What alpha must see of its own rows. A route that answers a tenant-bound
@@ -229,6 +235,7 @@ SHOWS_OWN: dict[str, str] = {
     "/api/memory/v2/chats/alpha_s1/memory": '"memories":1',
     "/api/memory/v2/export": '"alpha_e1"',
     "/api/memory/v2/summaries": '"alpha_sum1"',
+    "/api/memory/v2/profile": "Alice's own words",
 }
 
 #: Install-wide: the platform role check lets an admin through and no one else.
@@ -355,6 +362,11 @@ def _seed(root: Path) -> None:
         "status, turns, summaries, detail_json) VALUES (?, '2026-W30', ?, ?, 'done', 3, 1, ?)",
         [("alpha", now - 9 * 86400, now - 2 * 86400, "{}"),
          ("beta", now - 9 * 86400, now - 2 * 86400, '{"note": "BETA9"}')],
+    )
+    # an "About me" each (plan C1)
+    c.executemany(
+        "INSERT INTO memory_profile (tenant_id, about, updated_at) VALUES (?, ?, ?)",
+        [("alpha", "Alice's own words", now), ("beta", "BETA9 Bob's own words", now)],
     )
     c.commit()
     c.close()

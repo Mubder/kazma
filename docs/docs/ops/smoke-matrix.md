@@ -69,7 +69,7 @@ eval, and docs presence. **Live network / LLM rows below still need a human.**
 | # | Action | Expect | Pass |
 |---|--------|--------|------|
 | M1 | Chat: “Remember my favorite color is teal.” then “What color do I like?” | Recalls teal | ☐ |
-| M2 | Settings → Memory → **Explain recall** ON | Next chat turn workbench shows **Memory context** panel | ☐ |
+| M2 | Settings → Memory → **Explain recall** ON | Next chat turn that uses memory shows a **Memory used** row, with channels, and a reload still shows it | ☐ |
 | M3 | Panel chips | Beliefs/episodes show `fts5` / `dense` / `belief_ppr` / `session_boost` as applicable | ☐ |
 | M4 | With KB inject: technical doc question | Panel also lists **KB** rows with `kb_rrf` | ☐ |
 | M5 | Dashboard probe | Same channel chips; **Run golden eval** returns pass rate | ☐ |

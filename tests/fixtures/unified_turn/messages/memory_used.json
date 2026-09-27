@@ -1,0 +1,203 @@
+{
+  "name": "memory_used",
+  "why": "The memory the model was shown this turn, recorded as one `memory` part (restored 2026-09-27: the chat's memory panel had drawn nothing since the unified turn block's Phase 5 deleted its markup). The part is built from the supervisor's memory_explain payload by memory_part / memoryPartOf -- the same function in both languages, fed the same payload, including Arabic and a 170-emoji string the 160-code-point cut must count alike.",
+  "memory_payload": {
+    "query": "where do I live and what did we decide about ShipX?",
+    "empty": false,
+    "detail": "full",
+    "beliefs": [
+      {
+        "id": "b1",
+        "kind": "belief",
+        "content": "user lives_in kuwait",
+        "score": 0.6112,
+        "sources": [
+          "fts5",
+          "dense",
+          "ppr",
+          "session"
+        ]
+      },
+      {
+        "id": "b2",
+        "kind": "belief",
+        "content": "المستخدم يفضّل الإجابات المختصرة",
+        "score": 0.52,
+        "sources": []
+      }
+    ],
+    "episodes": [
+      {
+        "id": "e1",
+        "kind": "episode",
+        "content": "User: what phase is ShipX on? / Assistant: Phase 9 is built.",
+        "score": 0.44,
+        "sources": [
+          "dense"
+        ]
+      }
+    ],
+    "weekly_summaries": [
+      {
+        "id": "s1",
+        "kind": "summary",
+        "content": "Week of 2026-09-14: ShipX delivery platform phases 🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓",
+        "score": 0.31,
+        "sources": [
+          "dense"
+        ]
+      }
+    ],
+    "knowledge": [],
+    "summary": {
+      "beliefs": 2,
+      "episodes": 1,
+      "weekly_summaries": 1,
+      "knowledge": 0
+    }
+  },
+  "message": {
+    "role": "assistant",
+    "turn_id": "utb-fixture-memory-1",
+    "content": "You live in Kuwait, and ShipX is on phase 9.",
+    "parts": [
+      {
+        "type": "memory",
+        "counts": {
+          "fact": 2,
+          "turn": 1,
+          "weekly": 1,
+          "knowledge": 0
+        },
+        "hits": [
+          {
+            "kind": "fact",
+            "text": "user lives_in kuwait",
+            "sources": [
+              "fts5",
+              "dense",
+              "ppr"
+            ]
+          },
+          {
+            "kind": "fact",
+            "text": "المستخدم يفضّل الإجابات المختصرة"
+          },
+          {
+            "kind": "turn",
+            "text": "User: what phase is ShipX on? / Assistant: Phase 9 is built.",
+            "sources": [
+              "dense"
+            ]
+          },
+          {
+            "kind": "weekly",
+            "text": "Week of 2026-09-14: ShipX delivery platform phases 🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓",
+            "sources": [
+              "dense"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "text": "You live in Kuwait, and ShipX is on phase 9."
+      }
+    ]
+  },
+  "expect": {
+    "turn_id": "utb-fixture-memory-1",
+    "text": "You live in Kuwait, and ShipX is on phase 9.",
+    "part_keys": [
+      "memory",
+      "text"
+    ],
+    "gates": [],
+    "activity": [
+      {
+        "id": "memory",
+        "kind": "memory",
+        "title": "Memory used",
+        "state": "info",
+        "counts": {
+          "fact": 2,
+          "turn": 1,
+          "weekly": 1,
+          "knowledge": 0
+        },
+        "hits": [
+          {
+            "kind": "fact",
+            "text": "user lives_in kuwait",
+            "sources": [
+              "fts5",
+              "dense",
+              "ppr"
+            ]
+          },
+          {
+            "kind": "fact",
+            "text": "المستخدم يفضّل الإجابات المختصرة"
+          },
+          {
+            "kind": "turn",
+            "text": "User: what phase is ShipX on? / Assistant: Phase 9 is built.",
+            "sources": [
+              "dense"
+            ]
+          },
+          {
+            "kind": "weekly",
+            "text": "Week of 2026-09-14: ShipX delivery platform phases 🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓",
+            "sources": [
+              "dense"
+            ]
+          }
+        ]
+      }
+    ],
+    "memory_part": {
+      "type": "memory",
+      "counts": {
+        "fact": 2,
+        "turn": 1,
+        "weekly": 1,
+        "knowledge": 0
+      },
+      "hits": [
+        {
+          "kind": "fact",
+          "text": "user lives_in kuwait",
+          "sources": [
+            "fts5",
+            "dense",
+            "ppr"
+          ]
+        },
+        {
+          "kind": "fact",
+          "text": "المستخدم يفضّل الإجابات المختصرة"
+        },
+        {
+          "kind": "turn",
+          "text": "User: what phase is ShipX on? / Assistant: Phase 9 is built.",
+          "sources": [
+            "dense"
+          ]
+        },
+        {
+          "kind": "weekly",
+          "text": "Week of 2026-09-14: ShipX delivery platform phases 🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓🗓",
+          "sources": [
+            "dense"
+          ]
+        }
+      ]
+    }
+  },
+  "notes": [
+    "One memory part per turn (key `memory`); a later memory_explain frame replaces it.",
+    "The row is never running (state info): it records what happened, it does not spin.",
+    "Scores are not kept; at most three sources per hit are."
+  ]
+}

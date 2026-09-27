@@ -84,7 +84,13 @@ function loadAll() {
   const out = {};
   for (const file of fixtureFiles()) {
     const fx = JSON.parse(fs.readFileSync(file, "utf8"));
-    out[fx.name] = { fixture: fx, projection: project(fx.message) };
+    const projection = project(fx.message);
+    // A fixture with a memory_explain payload also checks the part built
+    // from it (memoryPartOf; memory_part on the Python side).
+    if (Object.prototype.hasOwnProperty.call(fx, "memory_payload")) {
+      projection.memory_part = TD.memoryPartOf(fx.memory_payload);
+    }
+    out[fx.name] = { fixture: fx, projection: projection };
   }
   return out;
 }

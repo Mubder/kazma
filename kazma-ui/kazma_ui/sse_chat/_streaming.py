@@ -362,6 +362,20 @@ class DurablePresentation:
             return False
 
 
+async def _note_memory(durable: DurablePresentation, payload: Any, text: str) -> None:
+    """Record the memory the turn was shown as its ``memory`` part and commit
+    it before the ``memory_explain`` frame goes out (persist, then publish --
+    the tool rows' rule). The chat's memory panel drew nothing from the
+    unified turn block's Phase 5 (2026-09-20) until 2026-09-27: its markup was
+    gone and the frame was never stored, so a reload lost it too."""
+    from kazma_ui.turn_document import memory_part
+
+    part = memory_part(payload if isinstance(payload, dict) else None)
+    if part is not None:
+        durable.note(part)
+        await durable.commit(text)
+
+
 def stamp_hitl_part_state(
     session_id: str,
     reply_turn_id: str,
@@ -1112,6 +1126,9 @@ async def _stream_langgraph_events(
                         ):
                             output = data.get("output", {})
                             if isinstance(output, dict) and output.get("memory_explain"):
+                                # Persist, then publish: the turn keeps what
+                                # memory it was shown, and a reload redraws it.
+                                await _note_memory(_durable, output["memory_explain"], content_acc)
                                 yield await emit_j(
                                     "memory_explain", output["memory_explain"]
                                 )
@@ -1152,6 +1169,7 @@ async def _stream_langgraph_events(
                                     yield await emit_j("context_compacted", _cc)
                                 # Late explain if only present on terminal state
                                 if output.get("memory_explain"):
+                                    await _note_memory(_durable, output["memory_explain"], content_acc)
                                     yield await emit_j(
                                         "memory_explain", output["memory_explain"]
                                     )

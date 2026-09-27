@@ -79,6 +79,18 @@ def _project(message: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _project_fixture(fixture: dict[str, Any]) -> dict[str, Any]:
+    """:func:`_project` of the fixture's row, plus -- for a fixture that
+    carries a ``memory_payload`` -- the ``memory`` part built from it
+    (``memory_part``; ``memoryPartOf`` on the JavaScript side)."""
+    out = _project(fixture["message"])
+    if "memory_payload" in fixture:
+        from kazma_ui.turn_document import memory_part
+
+        out["memory_part"] = memory_part(fixture["memory_payload"])
+    return out
+
+
 def _dense(obj: Any) -> Any:
     """Drop null values so the comparison is about content, not about how
     each language spells "absent"."""
@@ -114,7 +126,7 @@ def _js_projections() -> dict[str, Any]:
 @pytest.mark.parametrize("fixture", _fixtures(), ids=lambda f: f["name"])
 def test_python_projection_matches_fixture(fixture: dict[str, Any]) -> None:
     """The Python normalizer produces what the shared fixture declares."""
-    got = _dense(_project(fixture["message"]))
+    got = _dense(_project_fixture(fixture))
     diverged = {d["field"] for d in fixture.get("known_divergences", [])}
     for field, want in fixture["expect"].items():
         if field in diverged:
@@ -152,7 +164,7 @@ def test_python_and_javascript_agree(fixture: dict[str, Any]) -> None:
     js_all = _js_projections()
     name = fixture["name"]
     assert name in js_all, f"JavaScript driver did not project {name}"
-    py = _dense(_project(fixture["message"]))
+    py = _dense(_project_fixture(fixture))
     js = _dense(js_all[name])
     diverged = {d["field"] for d in fixture.get("known_divergences", [])}
     for field in sorted(set(py) | set(js)):
@@ -204,7 +216,7 @@ def test_recorded_divergence_still_diverges(
 ) -> None:
     """Assert the aligned behavior the recorded divergence currently denies."""
     fixture = next(f for f in _fixtures() if f["name"] == name)
-    py = _project(fixture["message"])
+    py = _project_fixture(fixture)
     js = _js_projections()[name]
     field = divergence["field"]
     assert py.get(field) == js.get(field), (

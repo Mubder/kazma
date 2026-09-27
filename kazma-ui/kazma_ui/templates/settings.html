@@ -1172,6 +1172,26 @@
          TAB: MEMORY (isolation, KB merge, backends, Neo4j)
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'memory'" x-transition x-cloak>
+        <!-- About me (plan C1): the user's own words, read on every reply -->
+        <div class="settings-group" id="memory-about-me-section">
+            <h3>{{ t('settings.about_me_title') }}</h3>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:10px;">
+                {{ t('settings.about_me_hint') }}
+            </p>
+            <div class="form-group">
+                <textarea class="form-textarea" id="about-me-text" rows="6" dir="auto"
+                          x-model="aboutMe" :maxlength="aboutMeMax"
+                          placeholder="{{ t('settings.about_me_placeholder') }}"></textarea>
+                <p style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;"
+                   x-text="(aboutMe || '').length + ' / ' + aboutMeMax"></p>
+                <p class="form-error" x-show="aboutMeError" x-cloak x-text="aboutMeError"></p>
+            </div>
+            <button class="btn btn-primary" @click="saveAboutMe()"
+                    :disabled="aboutMeSaving || (aboutMe || '') === (aboutMeSaved || '')">
+                {{ t('settings.about_me_save') }}
+            </button>
+        </div>
+
         <!-- Memory Tenant Mode -->
         <div class="settings-group">
             <h3>{{ t('settings.memory_isolation_title') }}</h3>

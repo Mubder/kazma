@@ -8,6 +8,26 @@ One slice of the translation catalog, extracted from the former
 from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
+    "settings.about_me_title": {
+        "ar": "عني",
+        "en": "About me",
+    },
+    "settings.about_me_hint": {
+        "ar": "ما تكتبه هنا يقرؤه Kazma في بداية كل رد: اسمك، عملك، مكانك، وكيف تحب أن يجيبك. يكتبه أنت فقط، ولا يستنتجه Kazma؛ وما تقوله في المحادثة لاحقًا يتقدم عليه.",
+        "en": "Kazma reads this at the start of every reply: your name, your work, where you are, how you like to be answered. Only you write it; Kazma never infers it, and what you say later in a chat wins over it.",
+    },
+    "settings.about_me_placeholder": {
+        "ar": "مثال: اسمي سارة، مديرة منتجات في دبي. أفضّل الإجابات المختصرة، وبالعربية إذا كتبت بالعربية.",
+        "en": "e.g. I'm Sara, a product manager in Dubai. I prefer short answers, and Arabic when I write in Arabic.",
+    },
+    "settings.about_me_save": {
+        "ar": "حفظ",
+        "en": "Save About me",
+    },
+    "settings.about_me_saved": {
+        "ar": "تم حفظ «عني»",
+        "en": "About me saved",
+    },
     "settings.accent_color": {
         "ar": "لون التمييز",
         "en": "Accent Color",

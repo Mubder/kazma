@@ -44,6 +44,23 @@ guard = _load("kazma_guard")
 installer = _load("install_service")
 
 
+def _foreign_pid(first: int = 4242) -> int:
+    """A pid that is neither this process nor its parent.
+
+    The guard never reaps or reports its own pid (``reap_orphan`` and
+    ``_guard_alive`` skip ``os.getpid()``), so a fixed number fails the day
+    the test process is given it: CI on 2026-09-27 ran a chunk as pid 4242
+    and three of these tests failed for that alone.
+    """
+    pid = first
+    while pid in (os.getpid(), os.getppid()):
+        pid += 1
+    return pid
+
+
+FOREIGN_PID = _foreign_pid()
+
+
 class _Clock:
     """A fake clock whose sleeps return a hair early, like Windows timers can."""
 
@@ -86,7 +103,7 @@ class _Log:
 
 
 class _Child:
-    def __init__(self, pid: int = 4242) -> None:
+    def __init__(self, pid: int = FOREIGN_PID) -> None:
         self.pid = pid
         self.returncode = None
 
@@ -239,7 +256,7 @@ def test_a_new_request_is_carried_out_by_the_guard_itself(monkeypatch):
     monkeypatch.setattr(guard, "probe", lambda *a: pytest.fail("the request comes first"))
 
     assert g._supervise() == guard.RELOAD_REASON
-    assert stops == [(4242, guard.GRACEFUL_STOP_S)]
+    assert stops == [(FOREIGN_PID, guard.GRACEFUL_STOP_S)]
     state = guard._read_state()
     assert state["reload_ack"] == requested_at and state["reload_action"] == "restarting"
     assert not guard.reload_requested()
@@ -308,7 +325,7 @@ def test_a_deliberate_stop_asks_the_server_to_shut_down_first(monkeypatch):
     log = _Log()
     assert guard.stop_child(child, log, grace_s=30.0) is True
     expected = signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM
-    assert sent == [(4242, expected)], "asked, never killed"
+    assert sent == [(FOREIGN_PID, expected)], "asked, never killed"
     assert "child.stopped_gracefully" in log.names()
 
 
@@ -319,10 +336,10 @@ def test_a_server_that_does_not_shut_down_is_killed_after_the_grace(monkeypatch)
     assert guard.stop_child(child, log, grace_s=3.0) is False
     assert "child.graceful_timeout" in log.names()
     if os.name == "nt":
-        assert sent[0] == (4242, signal.CTRL_BREAK_EVENT)
-        assert sent[1][:3] == ("taskkill", "/PID", "4242")
+        assert sent[0] == (FOREIGN_PID, signal.CTRL_BREAK_EVENT)
+        assert sent[1][:3] == ("taskkill", "/PID", str(FOREIGN_PID))
     else:
-        assert sent == [(4242, signal.SIGTERM), (4242, signal.SIGKILL)]
+        assert sent == [(FOREIGN_PID, signal.SIGTERM), (FOREIGN_PID, signal.SIGKILL)]
 
 
 def test_the_stop_request_is_never_broadcast_to_the_whole_console(monkeypatch):
@@ -442,7 +459,7 @@ def test_a_fresh_heartbeat_means_a_guard_and_a_stale_one_does_not(monkeypatch):
 
 
 def test_a_state_file_from_before_the_heartbeat_falls_back_to_the_pid(monkeypatch):
-    guard._write_json_atomic(guard._state_path(), {"guard_pid": 4242, "child_pid": 1})
+    guard._write_json_atomic(guard._state_path(), {"guard_pid": FOREIGN_PID, "child_pid": 1})
     monkeypatch.setattr(guard, "_pid_alive", lambda pid: True)
     monkeypatch.setattr(guard, "_windows_image_name", lambda pid: "python.exe")
     assert guard._guard_alive() is True
@@ -454,8 +471,23 @@ def test_a_state_file_from_before_the_heartbeat_falls_back_to_the_pid(monkeypatc
     assert guard._guard_alive() is False
 
 
+def test_the_fabricated_pid_is_never_the_test_process(monkeypatch):
+    """The pid these tests plant must not be the one running them.
+
+    Negative control: planted as the test process's own pid, the same state
+    file reads as no guard at all -- the CI failure of 2026-09-27.
+    """
+    assert FOREIGN_PID not in (os.getpid(), os.getppid())
+    monkeypatch.setattr(guard.os, "getpid", lambda: 4242)
+    assert _foreign_pid() != 4242
+    guard._write_json_atomic(guard._state_path(), {"guard_pid": 4242})
+    monkeypatch.setattr(guard, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(guard, "_windows_image_name", lambda pid: "python.exe")
+    assert guard._guard_alive() is False
+
+
 def test_status_says_when_no_guard_is_running(monkeypatch, capsys):
-    guard._update_state(guard_pid=4242, child_pid=77, heartbeat=time.time() - 3600)
+    guard._update_state(guard_pid=FOREIGN_PID, child_pid=77, heartbeat=time.time() - 3600)
     monkeypatch.setattr(guard, "probe", lambda *a: (True, "ready"))
     monkeypatch.setattr(guard, "_port_holder_pid", lambda port: 77)
     guard._cmd_status()
@@ -486,7 +518,7 @@ def _kill_recorder(monkeypatch) -> list:
 
 
 def test_a_recorded_pid_now_owned_by_another_process_is_not_reaped(monkeypatch):
-    guard._write_json_atomic(guard._state_path(), {"child_pid": 4242, "child_created": 1000.0})
+    guard._write_json_atomic(guard._state_path(), {"child_pid": FOREIGN_PID, "child_created": 1000.0})
     monkeypatch.setattr(guard, "_pid_alive", lambda pid: True)
     monkeypatch.setattr(guard, "_process_started_at", lambda pid: 5000.0)
     kills = _kill_recorder(monkeypatch)
@@ -514,7 +546,7 @@ def test_a_recorded_pid_now_owned_by_another_process_is_not_reaped(monkeypatch):
 
 
 def test_a_legacy_record_is_reaped_only_if_it_is_a_python_process(monkeypatch):
-    guard._write_json_atomic(guard._state_path(), {"child_pid": 4242})
+    guard._write_json_atomic(guard._state_path(), {"child_pid": FOREIGN_PID})
     monkeypatch.setattr(guard, "_pid_alive", lambda pid: True)
     monkeypatch.setattr(guard, "_process_started_at", lambda pid: None)
     monkeypatch.setattr(guard, "_windows_image_name", lambda pid: "sqlservr.exe")
@@ -599,7 +631,7 @@ def test_negative_control_an_applied_fallback_keeps_the_request(monkeypatch):
 
 def test_the_fallback_never_stops_a_server_spawned_after_the_request(monkeypatch):
     requested_at = time.time()
-    guard._update_state(child_pid=4242, child_spawned=requested_at + 3)
+    guard._update_state(child_pid=FOREIGN_PID, child_spawned=requested_at + 3)
     ran: list = []
     monkeypatch.setattr(guard.subprocess, "run", lambda *a, **k: ran.append(a))
     monkeypatch.setattr(guard, "_pid_alive", lambda pid: True)
@@ -610,7 +642,7 @@ def test_the_fallback_never_stops_a_server_spawned_after_the_request(monkeypatch
 def test_a_failed_stop_is_reported_as_failed(monkeypatch):
     """taskkill's "Access is denied" was logged as reload.child_stopped."""
     _use_clock(monkeypatch, _Clock(early=0.0))
-    guard._update_state(child_pid=4242)
+    guard._update_state(child_pid=FOREIGN_PID)
     monkeypatch.setattr(guard, "_pid_alive", lambda pid: True)
     monkeypatch.setattr(
         guard.subprocess, "run",
@@ -675,9 +707,9 @@ def test_pause_stop_without_a_guard_says_when_it_could_not_stop(monkeypatch, cap
 
 def test_negative_control_a_stop_that_worked_is_reported(monkeypatch, capsys):
     monkeypatch.setattr(guard, "_guard_alive", lambda: False)
-    monkeypatch.setattr(guard, "_stop_recorded_child", lambda log, **kw: 4242)
+    monkeypatch.setattr(guard, "_stop_recorded_child", lambda log, **kw: FOREIGN_PID)
     assert guard._cmd_pause("maintenance", 600, stop_now=True) == 0
-    assert "server stopped (pid 4242)." in capsys.readouterr().out
+    assert f"server stopped (pid {FOREIGN_PID})." in capsys.readouterr().out
 
 
 def test_a_pause_wakes_the_guard_at_once(monkeypatch):

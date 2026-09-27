@@ -325,9 +325,11 @@
   }
 
   function refreshStatus() {
-    fetch('/api/swarm/status')
-      .then(function(r) { return r.json(); })
+    // null while the server restarts (a proxy's HTML error page): keep what
+    // is shown and let the next tick try again.
+    window.kazmaGetJson('/api/swarm/status')
       .then(function(data) {
+        if (!data) return;
         workers = data.workers || [];
         updateSwarmControls(data.started, data.count);
         updateMetrics(data);

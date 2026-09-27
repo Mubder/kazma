@@ -312,13 +312,27 @@ You decide what Kazma keeps:
   and forgets what it already remembered from it. In Telegram, Discord or
   Slack, send `/memory off` (and `/memory on` to start again). `/memory`
   says whether the chat is remembered.
+- **Deleting a chat keeps what Kazma learned from it**, unless you tick
+  **Also forget what Kazma learned from this chat** in the delete dialog:
+  then the chat's memories and facts are forgotten before it is deleted.
+- **Notes Kazma saves with its memory tools belong to the chat** they were
+  saved in: forgetting that chat (or that turn) forgets them too, and in a
+  chat you keep out of memory Kazma saves nothing.
 - **Take it with you.** **Export** on the Memory page downloads everything
-  Kazma remembers as JSON: facts (current and past, with the chat they came
-  from), memories of conversations, entities, and when things were forgotten
-  (never what).
+  Kazma remembers as JSON: your About me, facts (current and past, with the
+  chat they came from), memories of conversations, weekly summaries,
+  entities, and when things were forgotten (never what).
 
 A forgotten memory stays forgotten: nothing that rebuilds memory from your
 chat history brings it back.
+
+## About me
+
+**Settings → Memory → About me** is a short text (up to 2,000 characters)
+that you write: your name, your work, where you are, how you like to be
+answered. Kazma reads it at the start of every reply, in every chat. It is
+never filled in by Kazma, and what you say later in a conversation wins over
+it. Clear the text to remove it.
 
 ## One fact, one name
 

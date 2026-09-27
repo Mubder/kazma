@@ -833,6 +833,20 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   second record of the chat under the session "compaction" and the tenant
   "default", out of reach of both controls above; every turn already
   reaches memory (F) and the weekly summaries hold the gist (J).
+- **"About me" (C1, `memory/profile.py`)** is the user's own text (Settings
+  → Memory, `GET/PUT /api/memory/v2/profile`, 2,000 characters, refused --
+  never cut -- past that), one row per tenant in `memory_profile`, in the
+  export. The supervisor reads it on every call (`get_about`, off the loop)
+  and `graph_helpers._ensure_about_user` places it right after the system
+  prompt and personality, replacing an earlier copy. Never inferred: a
+  profile built from facts would have shown 4 past reset dates every turn.
+  `tests/test_memory_about_me.py`.
+- **Deleting a chat keeps its memories (S3, the owner's rule)** unless the
+  dialog's "Also forget what Kazma learned from this chat" is ticked: then
+  the page asks `PUT .../chats/{id}/memory {remember: false, forget_past:
+  true}` FIRST (the forget finds the chat's other key through the chat
+  store, which the delete empties) and deletes only if that succeeded.
+  `tests/e2e/test_chat_delete_forget.py` (unticked makes no forget request).
 - **Export** (`GET /api/memory/v2/export`): the caller's tenant's facts
   (with provenance), memories, weekly summaries, entities and what was
   forgotten (when, never what). The Memory page's "Memories of
@@ -2266,6 +2280,16 @@ Load-bearing rules:
   `applyTurnStats` updated only the badges, so a watching tab never showed
   the line). A reply shows `closed_at` — its delivery time, set once by
   `_write_lifecycle` on the closing write.
+- **The memory a turn was shown is a stored row** (2026-09-27). The
+  supervisor's `memory_explain` payload becomes the turn's `memory` part
+  (`turn_document.memory_part` / `memoryPartOf`, shared fixture
+  `memory_used.json`), committed before the frame is published
+  (`_streaming._note_memory`, persist-then-publish like tool rows) and drawn
+  by `_activityRowsHtml` through `_memoryRowHtml` (never running) from both
+  mouths (`applyJournalFrame('memory_explain')`). The "Memory context" panel
+  it replaces had drawn nothing since Phase 5 deleted its markup (2026-09-20);
+  its frame was never stored either. Gates: `tests/test_turn_memory_row.py`,
+  `tests/js/test_memory_row.js`.
 - **A step spins only when it says `running`.** Gate rows carry `info`;
   `_activityRowsHtml` drew every status row without running/failed/done as
   running, so decided gates spun forever (`test_sequential_allow_tool_in_one_bubble`
@@ -2866,7 +2890,8 @@ types plus `KAZMA_MSGPACK_TYPES`, anything else back as raw data.
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser
-  dialogs. `window.kazmaConfirm(opts)` (→ `Promise<boolean>`),
+  dialogs. `window.kazmaConfirm(opts)` (→ `Promise<boolean>`; with a
+  `checkbox` label it shows that box unticked and answers `{ok, checked}`),
   `window.kazmaAlert(opts)` (→ `Promise<void>`), `window.kazmaPrompt(opts)`
   (→ `Promise<string|null>`). All backed by `$store.modal`
   (`static/js/modules/stores.js`) + `components/modal.html`. Each has a
@@ -2918,6 +2943,19 @@ types plus `KAZMA_MSGPACK_TYPES`, anything else back as raw data.
   template compiles in node; `<template x-for>` scope; no second `init()`),
   `tests/js/test_settings_mixins.js`, `tests/test_vendor_codemirror.py` —
   each with a negative control.
+- **A poller reads through `window.kazmaGetJson`** (`auth-guard.js`): the
+  parsed body of a 2xx JSON response, else null (an error status, a proxy's
+  HTML page, no network); it never throws or logs. While the server restarts
+  Cloudflare answers 502 HTML, and the Memory and Swarm pollers parsed it as
+  JSON, logging "Unexpected token '<'" on every restart (2026-09-27). Gate:
+  `test_every_page_survives_a_restart` (every nav page and Settings tab, every
+  API GET answered 502 HTML, the page's clock run 65 s; negative control).
+- **Every translation key the chat page's scripts use is bridged.** chat.js
+  and agentStore.js read `window.CHAT_I18N`, which `chat.html` fills line by
+  line; 15 keys had no line and showed English in every language. Gate:
+  `tests/test_chat_i18n_bridge.py` (each `ti`/`tiFmt`/`tiCount` key has a
+  line, each line's catalog key exists in English and Arabic, all six plural
+  forms for a count).
 - **A polled route never calls a rate-limited API per poll.**
   `/api/github/status` spent ~2,000 GitHub calls an hour per open Workspace
   tab (10 s poll, fetched twice per tick, three calls each). It now keeps one

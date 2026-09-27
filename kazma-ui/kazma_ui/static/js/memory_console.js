@@ -357,8 +357,10 @@
 
   async function pollMemoryStatus() {
     try {
-      const resp = await fetch('/api/system/status');
-      const data = await resp.json();
+      // null while the server restarts (a proxy's HTML error page): keep what
+      // is shown and let the next tick try again.
+      const data = await window.kazmaGetJson('/api/system/status');
+      if (!data) return;
       const status = data.status || 'ACTIVE';
 
       if (status === 'ACTIVE') {
