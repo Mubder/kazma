@@ -184,6 +184,18 @@ def test_prune_reports_what_it_deleted(store):
     assert store.get_task(old_paused.id) is not None, "only finished tasks are pruned"
 
 
+def test_a_task_is_deleted_by_id_and_only_that_task(store):
+    """The research panel's Delete, on the store's own SQL for each backend."""
+    worker = f"w-{_uid()}"
+    doomed = _put(store, worker=worker)
+    kept = _put(store, worker=worker)
+
+    assert store.delete_task(doomed.id) is True
+    assert store.get_task(doomed.id) is None
+    assert store.get_task(kept.id) is not None
+    assert store.delete_task(doomed.id) is False, "an id already gone deletes nothing"
+
+
 def test_orphaned_running_tasks_are_requeued_then_failed(store):
     """A task left 'running' by a crash is requeued a bounded number of times."""
     orphan = _put(store, worker=f"orphan-{_uid()}", status=TaskStatus.RUNNING)

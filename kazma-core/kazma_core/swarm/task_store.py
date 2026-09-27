@@ -532,6 +532,25 @@ class TaskStore:
                 logger.info("[TaskStore] pruned %d terminal tasks older than %d days", deleted, retention_days)
             return deleted
 
+    def delete_task(self, task_id: str) -> bool:
+        """Delete one task by id, on either backend. True when a row went.
+
+        The research panel's Delete ran its own SQL against both tables
+        (Postgres by the pool, SQLite through ``_get_conn``); the store is the
+        one place that knows its tables.
+        """
+        with self._lock:
+            if self._pg:
+                from kazma_core.db.pg_helpers import get_pool
+
+                return bool(get_pool().execute(
+                    "DELETE FROM kazma_swarm_tasks WHERE id = %s RETURNING id", (task_id,)
+                ))
+            conn = self._get_conn()
+            cur = conn.execute("DELETE FROM swarm_tasks WHERE id = ?", (task_id,))
+            conn.commit()
+            return (cur.rowcount or 0) > 0
+
     def get_paused_tasks(self) -> list[SwarmTask]:
         """Return all tasks with status='paused' (for HITL restore on restart)."""
         with self._lock:

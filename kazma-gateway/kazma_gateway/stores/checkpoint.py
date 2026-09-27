@@ -535,33 +535,10 @@ async def create_checkpoint_manager(
         from kazma_core.db.backend import get_database_url, is_postgres
 
         if is_postgres():
-            dsn = get_database_url() or ""
-            if dsn.startswith("postgres://"):
-                dsn = "postgresql://" + dsn[len("postgres://") :]
             try:
-                from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore
-                from psycopg.rows import dict_row  # type: ignore
-                from psycopg_pool import AsyncConnectionPool  # type: ignore
+                from kazma_core.checkpoints_pg import open_postgres_checkpointer
 
-                # LangGraph setup() may run CREATE INDEX CONCURRENTLY, which
-                # requires autocommit (not a transaction block). Official
-                # from_conn_string() uses autocommit=True; the pool must match.
-                pool = AsyncConnectionPool(
-                    conninfo=dsn,
-                    min_size=1,
-                    max_size=10,
-                    kwargs={
-                        "autocommit": True,
-                        "prepare_threshold": 0,
-                        "row_factory": dict_row,
-                    },
-                    open=False,
-                )
-                await pool.open()
-                saver = AsyncPostgresSaver(conn=pool, serde=kazma_checkpoint_serde())  # type: ignore[arg-type]
-
-                if hasattr(saver, "setup"):
-                    await saver.setup()
+                saver = await open_postgres_checkpointer(get_database_url() or "", max_size=10)
                 manager = CheckpointManager(saver)  # type: ignore[arg-type]
                 logger.info(
                     "[Checkpoint] CheckpointManager using AsyncPostgresSaver (multi-replica)"

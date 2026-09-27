@@ -8,9 +8,12 @@ one, into a database of its own.
 
 It is the one backup check that writes to the database server, so:
 
-* **Opt-in, default OFF.** ``backups.pg.restore_rehearsal`` (ConfigStore) or
-  ``KAZMA_PG_RESTORE_REHEARSAL=1``; ``KAZMA_PG_RESTORE_REHEARSAL=0`` vetoes the
-  setting. Postgres installs only.
+* **On by default on Postgres (since 2026-09-27; it was opt-in).**
+  ``backups.pg.restore_rehearsal`` (ConfigStore) set to false, or
+  ``KAZMA_PG_RESTORE_REHEARSAL=0``, turns it off; ``=1`` turns it on whatever
+  the setting says. Until it ran by default, "the dump restores" was inferred
+  from "the dump reads" on every install that never opted in -- the live one
+  included. Postgres installs only.
 * **Scratch only.** It creates ``kazma_restore_rehearsal_<epoch>`` on the same
   server, restores into that, and drops it. Every CREATE and DROP re-checks the
   name against a strict pattern and refuses one equal to the live database.
@@ -19,7 +22,7 @@ It is the one backup check that writes to the database server, so:
 * **Honest about permissions.** A user without CREATEDB is reported as
   UNVERIFIED with the grant to add, not as a failed backup.
 
-Runs inside the weekly deep drill when enabled (``restore_drill.run_deep_drill``).
+Runs inside the weekly deep drill (``restore_drill.run_deep_drill``).
 """
 
 from __future__ import annotations
@@ -59,7 +62,11 @@ class _RehearsalRefused(RuntimeError):
 
 
 def rehearsal_enabled() -> bool:
-    """Opt-in. The env var decides when set; otherwise the setting; default off."""
+    """The env var decides when set; otherwise the setting; default ON (Postgres).
+
+    A setting that cannot be read is treated as the default: the rehearsal's
+    own guard rails, not a read error, are what keep it off a live database.
+    """
     from kazma_core.db.backend import is_postgres
 
     if not is_postgres():
@@ -72,10 +79,15 @@ def rehearsal_enabled() -> bool:
     try:
         from kazma_core.config_store import get_config_store
 
-        return bool(get_config_store().get(_CONFIG_KEY, False))
+        value = get_config_store().get(_CONFIG_KEY, None)
     except (RuntimeError, OSError, ValueError, TypeError):
-        logger.debug("[restore-rehearsal] setting unreadable -- treated as off", exc_info=True)
-        return False
+        logger.debug("[restore-rehearsal] setting unreadable -- the default applies", exc_info=True)
+        return True
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() not in ("0", "false", "off", "no")
+    return bool(value)
 
 
 def _scratch_name(now: float) -> str:

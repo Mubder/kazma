@@ -192,34 +192,82 @@ def _json_noise(text: str) -> bool:
     return "not valid JSON" in text or "Unexpected token '<'" in text
 
 
+#: What a route answers when a store behind it fails (``safe_error``).
+ERROR_JSON = '{"detail": "Internal Server Error", "error": "internal_error"}'
+
+
+def _watch(pg, path: str, found: list[str]) -> None:
+    """Record what the page threw, a JSON parse of an error page, and every
+    Alpine expression error. Alpine reports an expression that throws as a
+    console WARNING and rethrows it from a ``setTimeout(0)``; under a fake
+    clock the rethrow may never reach the page, the warning always does
+    (X Studio, 2026-09-27: CI saw the rethrow, a local run only the warning)."""
+    pg.on("pageerror", lambda exc: found.append(f"{path}: uncaught {str(exc).splitlines()[0][:160]}"))
+    pg.on("console", lambda msg: found.append(f"{path}: {msg.text[:160]}")
+          if (msg.type == "error" and _json_noise(msg.text)) or "Alpine Expression Error" in msg.text
+          else None)
+
+
+def _answer_api_gets(pg, *, status: int, content_type: str, body: str) -> None:
+    pg.route("**/api/**", lambda route: route.fulfill(status=status, content_type=content_type, body=body)
+             if route.request.method == "GET" else route.continue_())
+
+
+def _run(pg, ms: int, path: str, found: list[str]) -> None:
+    """Advance the page's clock *ms*, then let real time settle the fetches it
+    started. A timer that throws surfaces from ``run_for`` -- Alpine rethrows
+    an expression error from a ``setTimeout(0)`` -- so it is recorded, not
+    raised: every page is still visited and every problem listed."""
+    from playwright.sync_api import Error as PlaywrightError
+
+    try:
+        pg.clock.run_for(ms)
+    except PlaywrightError as exc:  # a timer the page set threw: a finding
+        found.append(f"{path}: timer threw {str(exc).splitlines()[0][:160]}")
+    pg.wait_for_timeout(1200)
+
+
+def _settle_and_flush(pg, path: str, found: list[str]) -> None:
+    # Real time for the page's first fetches to answer, then the clock for
+    # every poller (65 s: each fires at least once) and for the rethrows the
+    # answers caused. Run before the fetches answered, the clock missed an
+    # error thrown from their results (X Studio, local run, 2026-09-27).
+    pg.wait_for_timeout(1500)
+    _run(pg, 65000, path, found)
+    _run(pg, 1000, path, found)
+
+
 def restart_problems(pg, path: str, base: str) -> list[str]:
     """Load *path*, then answer every API GET with the 502 page and run the
     page's timers for 65 s (the clock, not the wall): what the page threw or
     logged as a JSON parse of the error page."""
     found: list[str] = []
-    pg.on("pageerror", lambda exc: found.append(f"{path}: uncaught {str(exc).splitlines()[0][:160]}"))
-    pg.on("console", lambda msg: found.append(f"{path}: {msg.text[:160]}")
-          if msg.type == "error" and _json_noise(msg.text) else None)
+    _watch(pg, path, found)
     pg.clock.install()
     pg.goto(f"{base}{path}", wait_until="domcontentloaded", timeout=30000)
-    pg.clock.run_for(3000)
-    pg.wait_for_timeout(800)
-    pg.route("**/api/**", lambda route: route.fulfill(status=502, content_type="text/html", body=BAD_GATEWAY)
-             if route.request.method == "GET" else route.continue_())
-    pg.clock.run_for(65000)  # every poller on the page fires at least once
-    pg.wait_for_timeout(1200)  # real time for the fetch promises to settle
+    pg.wait_for_timeout(1500)
+    _run(pg, 3000, path, found)
+    _answer_api_gets(pg, status=502, content_type="text/html", body=BAD_GATEWAY)
+    _settle_and_flush(pg, path, found)
     return found
 
 
-def test_every_page_survives_a_restart(harness: Harness) -> None:
-    """While the server restarts, the pages stay quiet (2026-09-27).
+def failing_api_problems(pg, path: str, base: str) -> list[str]:
+    """Load *path* while every API GET answers 500 with an error body -- a
+    store behind the routes failing -- and run its timers for 65 s: what the
+    page threw. X Studio kept such a body as its status and threw on every
+    render (CI, 2026-09-27: its store could not open there)."""
+    found: list[str] = []
+    _watch(pg, path, found)
+    pg.clock.install()
+    _answer_api_gets(pg, status=500, content_type="application/json", body=ERROR_JSON)
+    pg.goto(f"{base}{path}", wait_until="domcontentloaded", timeout=30000)
+    _settle_and_flush(pg, path, found)
+    return found
 
-    The Memory and Swarm pages' pollers parsed Cloudflare's 502 HTML page as
-    JSON and logged "Unexpected token '<'" into the console on every restart;
-    pollers read through ``window.kazmaGetJson`` now, which answers null for an
-    error page. Every nav page and Settings tab, in its own tab: no uncaught
-    error and no JSON parse of the error page. (Chrome's own "Failed to load
-    resource" lines are the browser's, not the page's, and are not counted.)"""
+
+def _every_page(harness: Harness, visit) -> list[str]:
+    """*visit* on every nav page and Settings tab, each in its own tab."""
     from playwright.sync_api import sync_playwright
 
     problems: list[str] = []
@@ -240,12 +288,72 @@ def test_every_page_survives_a_restart(harness: Harness) -> None:
             assert len(pages) >= 10 and len(tabs) >= 10, (pages, tabs)
             for path in pages + [f"/settings?tab={t}" for t in tabs]:
                 pg = context.new_page()
-                problems += restart_problems(pg, path, harness.base)
+                problems += visit(pg, path, harness.base)
                 pg.close()
         finally:
             context.close()
             browser.close()
-    assert not problems, "pages that break while the server restarts:\n  " + "\n  ".join(sorted(set(problems)))
+    return sorted(set(problems))
+
+
+def test_every_page_survives_a_restart(harness: Harness) -> None:
+    """While the server restarts, the pages stay quiet (2026-09-27).
+
+    The Memory and Swarm pages' pollers parsed Cloudflare's 502 HTML page as
+    JSON and logged "Unexpected token '<'" into the console on every restart;
+    pollers read through ``window.kazmaGetJson`` now, which answers null for an
+    error page. Every nav page and Settings tab, in its own tab: no uncaught
+    error and no JSON parse of the error page. (Chrome's own "Failed to load
+    resource" lines are the browser's, not the page's, and are not counted.)"""
+    problems = _every_page(harness, restart_problems)
+    assert not problems, "pages that break while the server restarts:\n  " + "\n  ".join(problems)
+
+
+def test_every_page_survives_its_apis_failing(harness: Harness) -> None:
+    """With every API answering 500 and an error body -- a store behind the
+    routes failing -- every page still renders without throwing
+    (2026-09-27). X Studio kept the error body as its status and threw on
+    every render; CI found it where the X store could not open."""
+    problems = _every_page(harness, failing_api_problems)
+    assert not problems, "pages that break when their APIs fail:\n  " + "\n  ".join(problems)
+
+
+def test_negative_control_a_page_keeping_an_error_body_is_caught(harness: Harness) -> None:
+    """X Studio's shape as it shipped, on a page of its own with the real
+    Alpine: the error body becomes the state and a nested read throws. The
+    instrument reports it; the same page reading through kazmaGetJson and
+    keeping its shape does not."""
+    from playwright.sync_api import sync_playwright
+
+    def page(loader: str) -> str:
+        return (
+            "<html><body><div x-data=\"{status: {caps: {}}, async init() {" + loader + "}}\">"
+            "<span x-text=\"status.caps.posts_today || 0\"></span></div>"
+            "<script src=\"/static/js/auth-guard.js\"></script>"
+            "<script defer src=\"/static/js/alpine.min.js\"></script></body></html>"
+        )
+
+    shipped = page("const r = await fetch('/api/x/status'); const d = await r.json(); if (d) this.status = d;")
+    fixed = page("const d = await window.kazmaGetJson('/api/x/status');"
+                 " if (d && d.caps) this.status = Object.assign({caps: {}}, d);")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            found = {}
+
+            def serve(html: str):
+                # Playwright passes (route, request) to a two-argument handler.
+                return lambda route: route.fulfill(status=200, content_type="text/html", body=html)
+
+            for name, body in (("shipped", shipped), ("fixed", fixed)):
+                pg = browser.new_page()
+                pg.route("**/probe-page", serve(body))
+                found[name] = failing_api_problems(pg, "/probe-page", harness.base)
+                pg.close()
+        finally:
+            browser.close()
+    assert any("posts_today" in f for f in found["shipped"]), found
+    assert found["fixed"] == [], found
 
 
 def test_negative_control_a_poller_reading_the_error_page_is_caught(harness: Harness) -> None:

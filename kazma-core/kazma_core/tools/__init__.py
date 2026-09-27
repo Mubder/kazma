@@ -5,56 +5,53 @@ async functions registered with @registry.register(description=..., category=...
 
 Each tool returns a string or dict — the registry normalizes results into
 {"content": ..., "is_error": ...} for the LangGraph tool_worker node.
+
+A name in this package is its submodule wherever one exists:
+``kazma_core.tools.read_url`` is the module, and the tool is
+``kazma_core.tools.read_url.read_url``. Until 2026-09-27 this file rebound
+nine such names (``read_url``, ``file_read``, ``file_write``, ...) to the
+functions, so ``from kazma_core.tools import file_write as fw`` gave the
+function and a test's ``monkeypatch.setattr(fw, "check_path_access", ...)``
+patched an attribute of the function -- nothing at all -- and passed.
+``tests/test_package_namespaces.py`` keeps every package that way.
 """
 
-# NAME CLASH: each import below rebinds a submodule's name (read_url,
-# file_read, web_search, ...) to the function of the same name, so
-# `import kazma_core.tools.read_url as m` gives the FUNCTION, and pytest's
-# monkeypatch.setattr("kazma_core.tools.read_url.X", ...) raises AttributeError
-# on it (mock.patch, which imports, does reach the module). For the module use
-# importlib.import_module("kazma_core.tools.read_url") or monkeypatch.setattr(module, "X", ...).
+from kazma_core.tools import (  # noqa: F401 -- the submodules, bound as modules
+    computer_use,
+    context_cmd,
+    export_session,
+    file_apply_patch,
+    file_read,
+    file_write,
+    read_url,
+    send_message,
+    web_search,
+)
 from kazma_core.tools.code_exec import python_exec
-from kazma_core.tools.context_cmd import context_cmd
-from kazma_core.tools.export_session import export_session
-from kazma_core.tools.file_read import file_read
-from kazma_core.tools.file_apply_patch import file_apply_patch
-from kazma_core.tools.file_write import file_write
 from kazma_core.tools.image_gen import generate_image
 from kazma_core.tools.personality_cmd import handle_personality_command, is_personality_command
 from kazma_core.tools.read_url import (
     digest_research_file,
     list_research_chunks,
     read_research_chunk,
-    read_url,
     read_url_to_file,
     summarize_research_file,
 )
-from kazma_core.tools.send_message import register_message_backend, send_message
-from kazma_core.tools.computer_use import computer_use
+from kazma_core.tools.send_message import register_message_backend
 from kazma_core.tools.vision_analyze import analyze_image
 from kazma_core.tools.web_research import crawl_site
-from kazma_core.tools.web_search import web_search
 
 __all__ = [
-    "send_message",
     "register_message_backend",
-    "web_search",
-    "read_url",
     "read_url_to_file",
     "list_research_chunks",
     "read_research_chunk",
     "summarize_research_file",
     "digest_research_file",
     "crawl_site",
-    "export_session",
-    "file_read",
-    "file_write",
-    "file_apply_patch",
     "generate_image",
     "analyze_image",
-    "computer_use",
     "python_exec",
-    "context_cmd",
     "is_personality_command",
     "handle_personality_command",
 ]

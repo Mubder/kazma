@@ -864,15 +864,9 @@ class KazmaAppBuilder:
             except Exception as e:
                 logger.error("[Swarm] Maintenance loop start failed: %s", e, exc_info=True)
 
-        # Checkpoint retention sweep (audit M-G1): checkpoints.db grows a
-        # full-state row per superstep with no deleter — bound it daily.
-        try:
-            from kazma_core.checkpoint_retention import start_checkpoint_retention_loop
-
-            start_checkpoint_retention_loop()
-            logger.info("[app] Checkpoint retention loop started")
-        except Exception as e:
-            logger.error("[app] Checkpoint retention loop failed to start: %s", e, exc_info=True)
+        # Checkpoint retention (audit M-G1) runs on the 15-minute maintenance
+        # cadence ("checkpoint retention", memory.worker_bootstrap), on SQLite
+        # and Postgres alike; it used to be a daily loop started here.
 
         # Liveness heartbeat (audit M-P6): `kazma migrate import` refuses to
         # swap live DBs when this key is fresh. Without it the interlock that
@@ -929,13 +923,6 @@ class KazmaAppBuilder:
                 self.swarm_manager.engine.stop_maintenance_loop()
         except Exception:
             logger.debug("[Swarm] maintenance loop stop failed", exc_info=True)
-
-        try:
-            from kazma_core.checkpoint_retention import stop_checkpoint_retention_loop
-
-            stop_checkpoint_retention_loop()
-        except Exception:
-            logger.debug("[app] checkpoint retention stop failed", exc_info=True)
 
         task = getattr(KazmaAppBuilder, "_heartbeat_task", None)
         if task is not None:
@@ -2323,8 +2310,8 @@ class KazmaAppBuilder:
         # Cancel our own never-ending loops BEFORE draining. They are
         # `while True` and never complete, so draining them first spends the
         # full 10s timeout on every shutdown (audit 2026-09-16 F-1 follow-up).
-        # The later teardown block still calls stop_maintenance_loop() /
-        # stop_checkpoint_retention_loop() — both are idempotent.
+        # The later teardown block still calls stop_maintenance_loop(), which
+        # is idempotent.
         try:
             self._stop_background_loops()
         except Exception as e:  # noqa: BLE001 — teardown must not fail here
@@ -2455,14 +2442,6 @@ class KazmaAppBuilder:
             if engine is not None:
                 try:
                     engine.stop_maintenance_loop()
-                except Exception:
-                    pass
-                try:
-                    from kazma_core.checkpoint_retention import (
-                        stop_checkpoint_retention_loop,
-                    )
-
-                    stop_checkpoint_retention_loop()
                 except Exception:
                     pass
                 handles = getattr(engine, "_task_handles", None) or {}

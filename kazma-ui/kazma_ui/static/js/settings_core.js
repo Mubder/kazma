@@ -125,6 +125,8 @@
         logging: { level: 'INFO', format: 'text', retention_days: 7 },
         swarmRetention: { days: 30, default: 30, max: 3650 },
         swarmRetentionSaving: false,
+        checkpointRetention: { days: 30, source: 'default', default: 30, max: 3650, keep_per_chat: 200, idle_keep: 10 },
+        checkpointRetentionSaving: false,
         proxy: { provider: 'none', host: 'portal.anyip.io', port: '1080', username: '', password: '', network: 'mixed', country: '', session_sticky: false },
         proxyTestResult: null,
         proxyTesting: false,
@@ -776,7 +778,7 @@
                 case 'shortcuts': this.shortcutConflicts = this.detectConflicts(); break;
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
-                case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadSwarmRetention(); await this.loadProxy(); break;
+                case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadSwarmRetention(); await this.loadCheckpointRetention(); await this.loadProxy(); break;
                 case 'backup': await Promise.all([this.loadBackupList(), this.loadOffsiteConfig(), this.syncBackupState()]); break;
                 case 'packages': await this.loadPackages(); break;
                 case 'import': break;

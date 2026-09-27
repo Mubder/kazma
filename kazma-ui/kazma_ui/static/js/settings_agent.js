@@ -406,6 +406,25 @@
             this.swarmRetentionSaving = false;
         },
 
+        async saveCheckpointRetention() {
+            this.checkpointRetentionSaving = true;
+            try {
+                await window.kazmaSave('/api/settings/single', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        key: 'checkpoints.retention_days',
+                        value: this.checkpointRetention.days,
+                        category: 'system',
+                    }),
+                });
+                showToast((window.t && window.t('settings.checkpoint_retention_saved')) || 'Step history retention saved', 'success');
+            } catch (e) {
+                showToast(e.message || 'Save failed', 'error');
+            }
+            this.checkpointRetentionSaving = false;
+        },
+
         async loadProxy() {
             try {
                 const data = await this._fetch('/api/settings/proxy');

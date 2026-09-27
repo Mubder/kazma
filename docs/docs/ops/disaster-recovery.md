@@ -163,14 +163,16 @@ consequence:
 | Check | What it would catch |
 |---|---|
 | the Postgres dump streamed through `pg_restore --file=-` | a dump whose *data* sections are damaged behind an intact TOC. Every block is read — but nothing is loaded, so this proves the archive reads, not that it restores |
-| **opt-in:** the dump restored into a scratch database, checked, dropped | a dump that reads back but does not restore: a schema that will not recreate, rows that will not load, Kazma's tables missing, an empty `kazma_settings`. Off by default — see below |
+| the dump restored into a scratch database, checked, dropped | a dump that reads back but does not restore: a schema that will not recreate, rows that will not load, Kazma's tables missing, an empty `kazma_settings`. On by default with Postgres — see below |
 | `restic check --read-data-subset=5%` | bit rot inside the repository's packs |
 | a `HEAD` read-back of the offsite object, comparing stored size to uploaded size | a truncated upload. A short object and a complete one look identical from the sending side, which returns 200 for both |
 
 **The restore rehearsal** (`kazma_core.backup.restore_rehearsal`) is the only
-backup check that writes to the database server, so it is **off unless you
-turn it on**: set `backups.pg.restore_rehearsal` to `true`, or
-`KAZMA_PG_RESTORE_REHEARSAL=1` (`=0` vetoes the setting). When on, the weekly
+backup check that writes to the database server. It is **on by default**
+with Postgres (since 2026-09-27; it was opt-in, so "the dump restores" had
+only ever been inferred from "the dump reads"). Set
+`backups.pg.restore_rehearsal` to `false`, or `KAZMA_PG_RESTORE_REHEARSAL=0`,
+to turn it off (`=1` turns it on over the setting). The weekly
 pass creates `kazma_restore_rehearsal_<epoch>` on the same server, restores the
 newest dump into it with `pg_restore`, checks that Kazma's tables came back and
 `kazma_settings` is not empty, and drops it. Every `CREATE`/`DROP` re-checks the

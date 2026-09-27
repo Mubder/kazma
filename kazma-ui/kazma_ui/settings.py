@@ -19,6 +19,15 @@ from fastapi.responses import HTMLResponse, Response
 from kazma_ui.rate_limit import rate_limit
 from fastapi.templating import Jinja2Templates
 
+from kazma_core.checkpoint_retention import (
+    DEFAULT_RETENTION_DAYS as DEFAULT_CHECKPOINT_RETENTION_DAYS,
+    INACTIVE_KEEP as CHECKPOINT_INACTIVE_KEEP,
+    KEEP_PER_THREAD as CHECKPOINT_KEEP_PER_CHAT,
+    MAX_RETENTION_DAYS as MAX_CHECKPOINT_RETENTION_DAYS,
+    RETENTION_KEY as CHECKPOINT_RETENTION_KEY,
+    parse_retention_days as parse_checkpoint_retention_days,
+    retention_setting as checkpoint_retention_setting,
+)
 from kazma_core.errors import safe_error, validation_error
 from kazma_core.swarm.task_store import (
     DEFAULT_TASK_RETENTION_DAYS,
@@ -456,6 +465,20 @@ class SettingsRouterBuilder:
                     )
                 setting.value = days
                 setting.category = "swarm"
+            # Checkpoint retention decides what the 15-minute sweep deletes
+            # from every chat's step history: the same rule.
+            if setting.key == CHECKPOINT_RETENTION_KEY:
+                days = parse_checkpoint_retention_days(setting.value)
+                if days is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Step history retention must be a whole number of days "
+                            f"from 0 (keep every step) to {MAX_CHECKPOINT_RETENTION_DAYS}."
+                        ),
+                    )
+                setting.value = days
+                setting.category = "system"
             config_store.set(setting.key, setting.value, category=setting.category)
             return {"status": "ok"}
 
@@ -466,6 +489,21 @@ class SettingsRouterBuilder:
                 "days": task_retention_days(config_store),
                 "default": DEFAULT_TASK_RETENTION_DAYS,
                 "max": MAX_TASK_RETENTION_DAYS,
+            }
+
+        @router.get("/api/settings/checkpoints/retention")
+        def api_get_checkpoint_retention() -> dict[str, Any]:
+            """Days a chat's step history is kept in full once it goes idle (0 =
+            every step), where that comes from (``env`` overrides the setting),
+            and the fixed parts of the policy."""
+            current = checkpoint_retention_setting(config_store)
+            return {
+                "days": current["days"],
+                "source": current["source"],
+                "default": DEFAULT_CHECKPOINT_RETENTION_DAYS,
+                "max": MAX_CHECKPOINT_RETENTION_DAYS,
+                "keep_per_chat": CHECKPOINT_KEEP_PER_CHAT,
+                "idle_keep": CHECKPOINT_INACTIVE_KEEP,
             }
 
         @router.get("/api/settings/cron-timezone")

@@ -211,12 +211,14 @@ function xStudioPage() {
       } catch (_e) { /* keep last preview */ }
     },
 
+    // The status the page renders always has its shape: an error answer (a
+    // store behind the route failing) kept the last one -- it used to become
+    // the status, and the quota pill threw on every render (2026-09-27).
     async loadStatus() {
-      try {
-        const resp = await fetch('/api/x/status', { credentials: 'same-origin' });
-        const data = await resp.json();
-        if (data) this.status = data;
-      } catch (_e) { this.status = { can_post: false, handle: '', caps: {} }; }
+      const data = await window.kazmaGetJson('/api/x/status');
+      if (!data || typeof data !== 'object' || data.ok === false) return;
+      const caps = (data.caps && typeof data.caps === 'object') ? data.caps : {};
+      this.status = Object.assign({ can_post: false, handle: '' }, data, { caps: caps });
     },
 
     async loadQueue() {

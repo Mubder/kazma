@@ -1,5 +1,56 @@
 # CHANGELOG
 
+## Every "still open" known gap closed or accepted, and what closing them found (2026-09-27)
+
+**Chat step history is bounded on Postgres too.** Kazma keeps each chat's
+step history (the checkpoints undo and resume use). On Postgres nothing ever
+pruned it: on the author's install it held 2.9 GB of a 3.0 GB database. Every
+chat now keeps its newest 200 steps and a chat idle for 30 days its newest
+10, on SQLite and Postgres alike, checked every 15 minutes. The number of
+days is a setting (Settings → System → Chat step history; 0 keeps
+everything), and `KAZMA_CHECKPOINT_RETENTION_DAYS` now means that number of
+days. Messages and memory are not affected. On SQLite the pruning had left
+each removed step's pending writes behind, and its 30-day rule never applied;
+both are fixed. An existing install that wants to keep its history sets 0
+before upgrading.
+
+**A model switch no longer leaks a database connection.** On Postgres, the
+agent's checkpointer never closed its connection pool when the graph was
+rebuilt (a model switch rebuilds it). There is now one way to open and close
+that checkpointer, tested on a real Postgres.
+
+**Backups prove they restore, by default.** With Postgres, the weekly backup
+check now restores the newest dump into a scratch database, checks it and
+drops it. It was opt-in, so it had never run on an install that did not ask.
+`KAZMA_PG_RESTORE_REHEARSAL=0` or the setting `backups.pg.restore_rehearsal`
+turns it off.
+
+**X Studio no longer breaks when its API fails.** It kept an error answer as
+its status and threw on every render. Every page is now tested with its APIs
+answering errors, as well as during a restart.
+
+**Multi-region memory:** the conflict policies `origin_wins` and
+`fail_closed` behaved the same. Now `origin_wins` keeps the other region's
+row quietly, and `fail_closed` reports each conflict (a warning and an
+operator alert).
+
+**Smaller fixes:** the research panel's Delete goes through the task store
+(it ran its own SQL); a package's name for one of its modules is that module
+(`kazma_core.tools.file_write` was a function, which let a test patch
+nothing and pass); `web_acquire/search.py` is `serp.py`.
+
+**Gates:** every product module that opens Postgres has a test that runs on
+a real Postgres (`tests/test_postgres_coverage.py`); no package shadows its
+own submodule (`tests/test_package_namespaces.py`); every page survives its
+APIs failing (`tests/e2e/test_pages_load_clean.py`); the guard tests never
+plant their own process id; and a test run no longer hangs at exit on a
+thread a test left running -- it fails and names the test (one such leak,
+an aiosqlite connection opened on a store another test left behind, hung a
+7-way run to its timeout). `docs/KNOWN_GAPS.md` now opens with where things
+stand: no open defects known, two owner decisions (branch protection, and the
+first prune of the author's own step history), and the accepted limits, each
+with its reason.
+
 ## Each turn shows the memory it used; quiet pages during a restart (2026-09-27)
 
 **Memory used.** A turn that used memory shows a **Memory used** row in its

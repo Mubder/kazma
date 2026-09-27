@@ -839,17 +839,8 @@ def create_research_router() -> APIRouter:
         if store is None:
             return JSONResponse({"error": "store unavailable"}, status_code=503)
         try:
-            # TaskStore doesn't have a delete method — use direct SQL.
-            # Check Postgres FIRST (calling _get_conn() on a PG backend raises).
-            if getattr(store, "_pg", False):
-                from kazma_core.db.pg_helpers import get_pool
-                get_pool().execute("DELETE FROM kazma_swarm_tasks WHERE id = %s", (task_id,))
-            elif hasattr(store, "_get_conn"):
-                conn = store._get_conn()
-                conn.execute("DELETE FROM swarm_tasks WHERE id = ?", (task_id,))
-                conn.commit()
-            else:
-                return JSONResponse({"error": "cannot access store"}, status_code=500)
+            # Idempotent: an id already gone is the state the caller wanted.
+            store.delete_task(task_id)
             return JSONResponse({"ok": True, "deleted": task_id})
         except Exception as exc:
             logger.exception("[research] delete failed")

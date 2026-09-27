@@ -11,7 +11,7 @@ from kazma_core.web_acquire import (
 )
 from kazma_core.web_acquire.fetch import FetchResult, fetch_text
 from kazma_core.web_acquire.profiles import profile_to_crawl_kwargs
-from kazma_core.web_acquire.search import SearchResult, search
+from kazma_core.web_acquire.serp import SearchResult, search
 
 
 def test_crawl_profiles_known():

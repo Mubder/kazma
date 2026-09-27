@@ -1,4 +1,4 @@
-"""The restore rehearsal: off by default, scratch-only, self-cleaning, honest.
+"""The restore rehearsal: on by default, scratch-only, self-cleaning, honest.
 
 Reading every block of a dump is not restoring it. ``restore_rehearsal``
 restores the newest dump into ``kazma_restore_rehearsal_<epoch>`` on the same
@@ -20,7 +20,7 @@ from kazma_core.backup.restore_drill import DrillResult
 NOW = 1_790_000_000.0
 
 
-# ── opt-in ────────────────────────────────────────────────────────────────
+# ── on by default (2026-09-27; it was opt-in) ─────────────────────────────
 
 
 class _Store:
@@ -37,19 +37,24 @@ def on_postgres(monkeypatch):
     monkeypatch.delenv("KAZMA_PG_RESTORE_REHEARSAL", raising=False)
 
 
-def test_off_by_default(on_postgres, monkeypatch):
-    monkeypatch.setattr("kazma_core.config_store.get_config_store", lambda: _Store(None))
+def test_on_by_default(on_postgres, monkeypatch):
+    """Opt-in, it had never run on an install that did not ask -- the live
+    one among them."""
+    for unset in (None, "", "  "):
+        monkeypatch.setattr("kazma_core.config_store.get_config_store", lambda v=unset: _Store(v))
+        assert rr.rehearsal_enabled() is True
+
+
+@pytest.mark.parametrize("off", [False, "false", "0", "off", "no"])
+def test_the_setting_turns_it_off(on_postgres, monkeypatch, off):
+    monkeypatch.setattr("kazma_core.config_store.get_config_store", lambda: _Store(off))
     assert rr.rehearsal_enabled() is False
 
 
-def test_the_setting_opts_in_and_the_env_can_veto_it(on_postgres, monkeypatch):
+def test_the_env_decides_over_the_setting(on_postgres, monkeypatch):
     monkeypatch.setattr("kazma_core.config_store.get_config_store", lambda: _Store(True))
-    assert rr.rehearsal_enabled() is True
     monkeypatch.setenv("KAZMA_PG_RESTORE_REHEARSAL", "0")
     assert rr.rehearsal_enabled() is False
-
-
-def test_the_env_alone_opts_in(on_postgres, monkeypatch):
     monkeypatch.setattr("kazma_core.config_store.get_config_store", lambda: _Store(False))
     monkeypatch.setenv("KAZMA_PG_RESTORE_REHEARSAL", "1")
     assert rr.rehearsal_enabled() is True

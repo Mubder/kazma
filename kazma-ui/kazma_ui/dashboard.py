@@ -91,6 +91,22 @@ def set_dashboard_context(
         _session_store = session_store
 
 
+def get_dashboard_context() -> dict[str, Any]:
+    """What :func:`set_dashboard_context` last set, as its keyword arguments.
+
+    The test suite restores it after every test: an app built by one test
+    left its gateway session store here, and the next test that deleted a
+    session opened that store's aiosqlite connection -- whose thread kept the
+    process from ever exiting (2026-09-27).
+    """
+    return {
+        "tracer": _tracer,
+        "cost_breaker": _cost_breaker,
+        "checkpoint_manager": _checkpoint_manager,
+        "session_store": _session_store,
+    }
+
+
 def _get_trace_data() -> list[dict[str, Any]]:
     """Get recent traces from the in-memory store, formatted for the template."""
     from kazma_core.tracing import get_trace_store

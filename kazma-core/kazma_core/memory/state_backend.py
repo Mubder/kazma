@@ -119,6 +119,9 @@ class _NullStateBackend:
     def belief_digest(self) -> dict[str, tuple[bool, str]]:
         return {}
 
+    def row_regions(self, table: str) -> dict[str, str]:
+        return {}
+
     def search_episodes(
         self, query: str, *, tenant_id: str = "default", limit: int = 10
     ) -> list[dict[str, Any]]:
@@ -263,7 +266,9 @@ class PostgresStateBackend:
             existing, region=state_region(), policy=state_conflict_policy()
         )
         if not ok:
-            logger.info("[state_backend] skip %s %s: %s", table, row_id, reason)
+            # The mirror sync counts these and, under fail_closed, reports
+            # them once a pass; one line per refused write would be noise.
+            logger.debug("[state_backend] skip %s %s: %s", table, row_id, reason)
         return ok
 
     def mirror_episode(self, row: dict[str, Any]) -> bool:
@@ -444,6 +449,29 @@ class PostgresStateBackend:
                 "md5(COALESCE(object, '')) FROM kazma_beliefs"
             ).items()
         }
+
+    def row_regions(self, table: str) -> dict[str, str]:
+        """id -> the region that wrote it, for every row of *table* whose
+        metadata names one (:func:`sync_state_mirror` under ``origin_wins`` /
+        ``fail_closed``). Read with a pattern, not a JSON cast: one row of
+        malformed metadata would fail the whole query. Raises like
+        :meth:`episode_digest`."""
+        if table not in ("kazma_episodes", "kazma_beliefs") or not self._dsn:
+            return {}
+        conn = self._connect()
+        try:
+            self._ensure(conn)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, substring(metadata_json from "
+                "'\"region\"[[:space:]]*:[[:space:]]*\"([^\"]*)\"') "
+                f"FROM {table} WHERE metadata_json LIKE '%\"region\"%'"
+            )
+            out = {str(r[0]): str(r[1]) for r in cur.fetchall() if r[1]}
+            cur.close()
+            return out
+        finally:
+            conn.close()
 
     def search_episodes(
         self, query: str, *, tenant_id: str = "default", limit: int = 10
@@ -690,9 +718,14 @@ def should_apply_remote_write(
 ) -> tuple[bool, str]:
     """Decide whether a dual-write may overwrite an existing mirrored row.
 
-    * ``last_write_wins`` — always apply (default).
-    * ``origin_wins`` — first writer / same region keeps the row.
-    * ``fail_closed`` — refuse when another region already owns the id.
+    * ``last_write_wins`` -- always apply (default).
+    * ``origin_wins`` -- the region that wrote a row keeps it; another
+      region's change is not mirrored, quietly (memory health counts it,
+      ``kept_by_origin``).
+    * ``fail_closed`` -- the same refusal, reported: memory health counts it
+      (``region_conflicts``), the mirror sync logs a WARNING each pass and
+      pages the operator (``memory.region_conflict``). Until 2026-09-27 the
+      two behaved the same.
     """
     pol = (policy or "last_write_wins").strip().lower()
     if pol not in ("last_write_wins", "origin_wins", "fail_closed"):
@@ -974,7 +1007,23 @@ def sync_state_mirror(conn: sqlite3.Connection, *, limit: int = _SYNC_LIMIT) -> 
     if is_state_primary():
         return {"skipped": "postgres is the primary store"}
 
+    # Under origin_wins / fail_closed a row another region wrote is not this
+    # install's to overwrite: it is counted, never pushed -- and never spent
+    # from the push budget, or 500 of them would stop every other push.
+    policy = state_conflict_policy()
+    here = state_region()
+    guarded = policy != "last_write_wins"
+    conflicts: list[str] = []
+
+    def _theirs(owners: dict[str, str], row_id: str) -> bool:
+        owner = owners.get(row_id)
+        if not owner:
+            return False
+        ok, _reason = should_apply_remote_write({"region": owner}, region=here, policy=policy)
+        return not ok
+
     remote_ep = backend.episode_digest()
+    owners_ep = backend.row_regions("kazma_episodes") if guarded else {}
     local_ep: dict[str, float] = {}
     behind_ep: list[tuple[float, str]] = []
     for eid, tier, user, assistant, summary, created in conn.execute(
@@ -982,9 +1031,13 @@ def sync_state_mirror(conn: sqlite3.Connection, *, limit: int = _SYNC_LIMIT) -> 
     ):
         local_ep[eid] = float(created or 0)
         if remote_ep.get(eid) != _episode_digest(tier, user, assistant, summary):
-            behind_ep.append((float(created or 0), eid))
+            if _theirs(owners_ep, eid):
+                conflicts.append(eid)
+            else:
+                behind_ep.append((float(created or 0), eid))
 
     remote_bel = backend.belief_digest()
+    owners_bel = backend.row_regions("kazma_beliefs") if guarded else {}
     local_bel: set[str] = set()
     behind_bel: list[tuple[float, str]] = []
     for bid, obj, until, invalidated, ingested in conn.execute(
@@ -994,7 +1047,10 @@ def sync_state_mirror(conn: sqlite3.Connection, *, limit: int = _SYNC_LIMIT) -> 
         mine = (until is None and invalidated is None,
                 hashlib.md5(str(_pg_text(obj) or "").encode("utf-8"), usedforsecurity=False).hexdigest())
         if remote_bel.get(bid) != mine:
-            behind_bel.append((float(ingested or 0), bid))
+            if _theirs(owners_bel, bid):
+                conflicts.append(bid)
+            else:
+                behind_bel.append((float(ingested or 0), bid))
 
     budget = max(0, int(limit))
     pushed_ep = failed = pushed_bel = 0
@@ -1019,8 +1075,14 @@ def sync_state_mirror(conn: sqlite3.Connection, *, limit: int = _SYNC_LIMIT) -> 
         "mirror_only_beliefs": len(set(remote_bel) - local_bel),
         "at": time.time(),
     }
+    if policy == "origin_wins":
+        stats["kept_by_origin"] = len(conflicts)
+    elif policy == "fail_closed":
+        stats["region_conflicts"] = len(conflicts)
     _last_sync.clear()
     _last_sync.update(stats)
+    if policy == "fail_closed" and conflicts:
+        _report_region_conflicts(conflicts, here)
     if pushed_ep or pushed_bel:
         logger.info(
             "[memory] mirror sync: pushed %d memories and %d facts the Postgres mirror "
@@ -1030,6 +1092,31 @@ def sync_state_mirror(conn: sqlite3.Connection, *, limit: int = _SYNC_LIMIT) -> 
     if failed:
         logger.warning("[memory] mirror sync: %d pushes failed; the next pass retries them", failed)
     return stats
+
+
+def _report_region_conflicts(ids: list[str], here: str) -> None:
+    """``fail_closed``: a local change another region's row refuses is the
+    operator's to settle -- said once per pass here, and paged (6-hour
+    cooldown). ``origin_wins`` is the same refusal made quietly, by choice."""
+    logger.warning(
+        "[memory] mirror sync: %d local change(s) not mirrored -- another region wrote "
+        "those rows and the conflict policy is fail_closed (this region %r; first id %s)",
+        len(ids), here, ids[0],
+    )
+    try:
+        from kazma_core.observability.ops_alerts import alert
+
+        alert(
+            "memory.region_conflict",
+            "Memory mirror: changes another region owns were refused",
+            f"{len(ids)} local memory change(s) were not mirrored: another region wrote "
+            f"those rows, and memory.backends.state.conflict_policy is fail_closed. "
+            f"This region: {here or '(unset)'}.",
+            severity="warn",
+            cooldown_s=6 * 3600,
+        )
+    except ImportError:
+        logger.debug("[memory] ops alerts unavailable", exc_info=True)
 
 
 def last_mirror_sync() -> dict[str, Any]:

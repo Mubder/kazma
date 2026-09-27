@@ -1808,6 +1808,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "حفظ إعدادات الأمان",
         "en": "Save Safety Settings",
     },
+    "settings.save_checkpoint_retention": {
+        "ar": "حفظ مدة الاحتفاظ",
+        "en": "Save Retention",
+    },
     "settings.save_swarm_retention": {
         "ar": "حفظ مدة الاحتفاظ",
         "en": "Save Retention",
@@ -1903,6 +1907,26 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.summarize_old": {
         "ar": "تلخيص الرسائل القديمة",
         "en": "Summarize Old Messages",
+    },
+    "settings.checkpoint_retention_days": {
+        "ar": "الاحتفاظ بكامل السجل بعد آخر رسالة (أيام)",
+        "en": "Keep the full history after a chat's last message for (days)",
+    },
+    "settings.checkpoint_retention_env": {
+        "ar": "هذه القيمة مضبوطة بالمتغير KAZMA_CHECKPOINT_RETENTION_DAYS في بيئة الخادم؛ غيّرها هناك.",
+        "en": "Set by KAZMA_CHECKPOINT_RETENTION_DAYS in the server's environment; change it there.",
+    },
+    "settings.checkpoint_retention_hint": {
+        "ar": "كل محادثة تحتفظ بآخر 200 خطوة من سجل خطواتها (ما يستخدمه التراجع والاستئناف)، والمحادثة الخاملة طوال هذه المدة تحتفظ بآخر 10 فقط. الرسائل نفسها والذاكرة لا تتأثر. تتم المراجعة كل 15 دقيقة. القيمة 0 تحتفظ بكل الخطوات.",
+        "en": "Every chat keeps the newest 200 steps of its step history (what undo and resume use); a chat idle this long keeps its newest 10. The messages themselves and memory are not affected. The check runs every 15 minutes. 0 keeps every step.",
+    },
+    "settings.checkpoint_retention_saved": {
+        "ar": "تم حفظ مدة الاحتفاظ بسجل الخطوات",
+        "en": "Step history retention saved",
+    },
+    "settings.checkpoint_retention_title": {
+        "ar": "سجل خطوات المحادثات",
+        "en": "Chat step history",
     },
     "settings.swarm_retention_days": {
         "ar": "الاحتفاظ بالمهام المنتهية (أيام)",

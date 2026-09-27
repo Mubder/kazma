@@ -863,6 +863,17 @@ def _prune_swarm_tasks() -> None:
     prune_finished_tasks()
 
 
+def _prune_checkpoints() -> None:
+    # LangGraph step history, per Settings `checkpoints.retention_days`
+    # (default 30, 0 keeps everything): every chat keeps its newest 200
+    # checkpoints, an idle one its newest 10 -- SQLite and, since 2026-09-27,
+    # Postgres. It used to be a daily loop of its own that logged failures at
+    # DEBUG. Logs what it removes.
+    from kazma_core.checkpoint_retention import run_checkpoint_retention
+
+    run_checkpoint_retention()
+
+
 def _repair_memory_vectors() -> None:
     # Memories meaning search cannot compare -- no vector, another size,
     # another embedding model -- re-encoded in place, newest first, ~20 s a
@@ -972,6 +983,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("gate TTL sweep", _expire_gates),
     ("task queue purge", _purge_task_queue),
     ("swarm task retention", _prune_swarm_tasks),
+    ("checkpoint retention", _prune_checkpoints),
     ("supervisor watch", _watch_supervisor),
     ("memory vector repair", _repair_memory_vectors),
     ("memory recovery", _recover_erased_memories),

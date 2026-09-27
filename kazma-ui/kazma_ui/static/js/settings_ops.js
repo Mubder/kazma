@@ -526,6 +526,22 @@
             } catch (e) { /* keep defaults */ }
         },
 
+        async loadCheckpointRetention() {
+            try {
+                const data = await this._fetch('/api/settings/checkpoints/retention');
+                if (data && typeof data.days === 'number') {
+                    this.checkpointRetention = {
+                        days: data.days,
+                        source: data.source || 'default',
+                        default: typeof data.default === 'number' ? data.default : 30,
+                        max: typeof data.max === 'number' ? data.max : 3650,
+                        keep_per_chat: typeof data.keep_per_chat === 'number' ? data.keep_per_chat : 200,
+                        idle_keep: typeof data.idle_keep === 'number' ? data.idle_keep : 10,
+                    };
+                }
+            } catch (e) { /* keep defaults */ }
+        },
+
         async loadPackages() {
             this.pkgLoading = true;
             try {
