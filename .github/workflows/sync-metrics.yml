@@ -1,143 +1,93 @@
-# Auto-sync repository metrics to the kazma.ai website.
+# Put the framework's metrics on the kazma.ai website, once a day.
 #
-# When the framework changes (push to main), regenerate the metrics and open (or
-# update) a PR against the PRIVATE website repo (Mubder/KazmaAI) so the public
-# metrics card on kazma.ai stays fresh. Merging that auto-PR triggers Cloudflare
-# Pages' production deploy.
+# Generates METRICS.md and metrics.json at the head of main, then
+# scripts/sync_site_metrics.py makes ONE open pull request on the private
+# website repo (Mubder/KazmaAI) carry them, and fails unless it does. Merging
+# that pull request deploys the site (Cloudflare Pages); nothing here merges,
+# and nothing here writes to this repository (contents: read -- main is
+# protected, and GitHub will not let the Actions app bypass a ruleset on a
+# personal-account repository; docs/docs/ops/branch-protection.md section 3).
 #
-# It no longer commits METRICS.md back to the framework's main (2026-09-27):
-# main is protected by a ruleset that requires the CI checks, a bot commit
-# skips CI, and GitHub does not let the GitHub Actions app bypass a ruleset on a
-# personal-account repository ("Actor GitHub Actions integration must be part
-# of the ruleset source or owner organization"). The framework copy is
-# refreshed with `python scripts/generate_metrics.py --write` before a push
-# (docs/docs/ops/branch-protection.md section 3); the README's numbers are
-# CI-gated either way (`--check-readme`). So this workflow only READS the
-# framework repo.
+# Daily, not per push: every update of the website branch builds a Cloudflare
+# Pages preview, and 529 framework pushes in September 2026 meant 529 preview
+# builds -- more than the Pages free plan's 500 a month -- for numbers the site
+# only needs daily. For an immediate refresh: Actions > Sync Metrics > Run
+# workflow.
 #
-# Requires the `WEBSITE_TOKEN` repository secret: a fine-grained PAT scoped to
-# Mubder/KazmaAI with Contents + Pull requests (read & write). Without it the
-# website-sync step is skipped gracefully.
+# Until 2026-09-27 this ran on every push and was green while the site got
+# nothing: it looked the pull request up with `gh pr view <branch>`, which
+# returns a MERGED one, and "updated" PR #3 (merged 2026-07-30) for two
+# months. It also installed nothing, so pytest could not collect and every
+# copy said "Collected at runtime: n/a". The job now installs what CI's Tests
+# job installs (tests/test_site_metrics_sync.py holds the two lines equal),
+# --require-collected fails a run without the count, and the sync script
+# reads the pull request back.
 #
-# Manual fallback: scripts/refresh-and-deploy-metrics.sh (one command, locally).
+# Requires the WEBSITE_TOKEN secret: a fine-grained PAT for Mubder/KazmaAI with
+# Contents and Pull requests read & write. Without it the run fails.
+# Details and the metrics.json layout: docs/docs/ops/website-metrics.md.
 
 name: Sync Metrics
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch: # manual trigger from the Actions tab
+  schedule:
+    - cron: "23 4 * * *" # daily, 04:23 UTC
+  workflow_dispatch: # Actions > Sync Metrics > Run workflow
 
-# Read-only on the framework repo: the website PR uses WEBSITE_TOKEN.
 permissions:
   contents: read
-  pull-requests: read
 
-# Serialize Sync Metrics runs. Queue (don't cancel): cancelling in-flight runs
-# lost important refreshes — when the runner queue was slow and another push
-# landed, cancel-in-progress killed a run that was carrying a real metrics fix,
-# so it never reached the website PR. Queuing guarantees every push eventually
-# refreshes; the latest run wins because each overwrites the same PR branch.
+# One sync at a time; a queued run waits rather than cancelling one mid-push.
 concurrency:
   group: sync-metrics
   cancel-in-progress: false
 
-env:
-  PYTHON_VERSION: "3.11"
-  WEBSITE_REPO: "Mubder/KazmaAI"
-  PR_BRANCH: "chore/auto-refresh-metrics"
-  PR_TITLE: "chore(metrics): auto-refresh METRICS.md from framework"
-  TARGET_PATH: "src/data/METRICS.md"
-
 jobs:
   sync:
     name: Regenerate & open site PR
+    if: github.repository == 'Mubder/kazma'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout framework repo
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # full history — generate_metrics.py needs git ls-files + rev-parse
+          fetch-depth: 0 # the commit count needs the whole history
 
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: "3.11"
 
-      - name: Regenerate METRICS.md
-        id: regen
-        run: |
-          python scripts/generate_metrics.py --write
-          if git diff --quiet METRICS.md; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "METRICS.md unchanged — nothing to commit or sync."
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            git --no-pager diff --stat METRICS.md
-          fi
+      - name: Install deps
+        # The same set as CI's Tests job, so `pytest --collect-only` counts
+        # the tests CI runs.
+        run: pip install -e ".[test]" pillow pymupdf sqlite-vec pypdfium2 numpy prometheus-client
 
-      - name: Nothing to do
-        if: steps.regen.outputs.changed != 'true'
-        run: echo "Metrics current — exiting."
-
-      # Sync the regenerated file to the private website repo via PR. (It is
-      # not committed back to the framework's main: see the header.)
-      - name: Detect WEBSITE_TOKEN presence
-        id: token
+      - name: Generate the metrics
         env:
-          WEBSITE_TOKEN_REF: ${{ secrets.WEBSITE_TOKEN }}
-        run: |
-          if [ -n "$WEBSITE_TOKEN_REF" ]; then echo "present=true" >> "$GITHUB_OUTPUT"; \
-          else echo "present=false" >> "$GITHUB_OUTPUT"; echo "WEBSITE_TOKEN not set — skipping site sync (see workflow header)."; fi
+          GH_TOKEN: ${{ github.token }} # the contributors API, rate limit only
+        run: python scripts/generate_metrics.py --out-dir "$RUNNER_TEMP/site-metrics" --require-collected
 
-      - name: Sync refreshed METRICS.md to website repo
-        if: steps.regen.outputs.changed == 'true' && steps.token.outputs.present == 'true'
+      - name: Keep the generated files
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-metrics
+          path: ${{ runner.temp }}/site-metrics
+          retention-days: 14
+
+      - name: Open or refresh the website pull request
         env:
           GH_TOKEN: ${{ secrets.WEBSITE_TOKEN }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: |
-          set -euo pipefail
-          echo "→ Cloning website repo ($WEBSITE_REPO) with the sync token…"
-          gh repo clone "$WEBSITE_REPO" site -- --depth 1
-
-          cd site
-          # Authenticate raw git operations (push/fetch) for this clone with the
-          # WEBSITE_TOKEN. gh repo clone authenticates the clone itself, but the
-          # credential helper it installs does not cover subsequent `git push` —
-          # without this, push fails with "could not read Username for github.com".
-          gh auth setup-git
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B "$PR_BRANCH" origin/main
-
-          cp "../METRICS.md" "$TARGET_PATH"
-          if git diff --quiet; then echo "Website copy already in sync — no PR needed."; exit 0; fi
-
-          git add "$TARGET_PATH"
-          SHORT_HEAD=$(git -C .. rev-parse --short HEAD)
-          FW_MSG=$(git -C .. log -1 --pretty=%s)
-          git commit -m "chore(metrics): auto-refresh from framework @ ${SHORT_HEAD}
-
-          ${FW_MSG}
-
-          Auto-generated by the Sync Metrics workflow in Mubder/kazma."
-          # The PR branch is auto-managed (it exists solely to carry this one
-          # file refresh), so overwriting it is intentional. Plain --force is
-          # used instead of --force-with-lease because the shallow clone above
-          # (--depth 1) doesn't reliably carry a current ref for the existing
-          # remote branch, which made force-with-lease fail with "stale info"
-          # when a prior run already created the branch.
-          git push --force origin "$PR_BRANCH"
-
-          PR_BODY="Auto-refreshed METRICS.md from the framework repo (\`Mubder/kazma\`) at commit \`${SHORT_HEAD}\`.
-
-          Source commit: ${FW_MSG}
-
-          Merging triggers the Cloudflare Pages production deploy to kazma.ai.
-          _This PR was opened automatically by the **Sync Metrics** workflow._"
-
-          if gh pr view "$PR_BRANCH" --json url >/dev/null 2>&1; then
-            echo "Updated existing PR: $(gh pr view "$PR_BRANCH" --json url --jq .url)"
-          else
-            gh pr create --base main --head "$PR_BRANCH" --title "$PR_TITLE" --body "$PR_BODY"
-            echo "Opened new PR against $WEBSITE_REPO."
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::WEBSITE_TOKEN is not set, so the website cannot get its metrics (see this workflow's header)."
+            exit 1
           fi
+          # git push/fetch authenticate through gh with the same token.
+          gh auth setup-git
+          python scripts/sync_site_metrics.py --source "$RUNNER_TEMP/site-metrics"

@@ -2,20 +2,20 @@
 id: branch-protection
 title: Branch protection
 sidebar_label: Branch protection
-description: How to protect main without breaking the owner's direct pushes or the metrics bot
+description: How main is protected, which checks it requires, and why no bot writes to it
 ---
 
 # Protecting `main`
 
-**State on 2026-09-26** (read with `gh api`): `main` has no branch protection
-and no ruleset; the repository does not allow auto-merge. Every CI job named
-below has been green on every push of the day, so requiring them costs nothing
-a normal push is not already paying.
+**State since 2026-09-27:** `main` is protected by the ruleset
+`KazmaLatestRule` (section 2): the eleven CI checks below must pass, force
+pushes and deletion are blocked, and the repository admin may bypass. Only the
+owner (and the agent working with the owner's credentials) pushes to `main`;
+no workflow writes to it (section 3). Before that day `main` had no protection
+at all.
 
 Protection is a repository setting, and only the owner changes it. This page
-is the checklist for doing it without breaking the two things that push to
-`main` directly today: the owner (and the agent working with the owner's
-credentials), and the **Sync Metrics** bot.
+records what was set, and what has to stay in step with it.
 
 ## 1. The checks to require
 
@@ -72,35 +72,39 @@ Verify afterwards: `gh api repos/Mubder/kazma/rulesets` lists the ruleset,
 and a push from an account without the bypass is rejected with
 "required status checks".
 
-## 3. The metrics bot — decide before enabling
+## 3. The metrics bot writes to the website, never to `main` (decided 2026-09-27)
 
-`.github/workflows/sync-metrics.yml` regenerates `METRICS.md` after each push
-and commits it straight to `main` with `GITHUB_TOKEN`
+Before protection, `.github/workflows/sync-metrics.yml` committed a fresh
+`METRICS.md` straight to `main` after every push
 (`chore(metrics): auto-regenerate METRICS.md [skip ci]`). Under the ruleset
-that push is rejected: its commit skips CI, so the required checks never run
-on it. Pick one:
+that push is rejected: the commit skips CI, so the required checks never run
+on it. The options were:
 
 1. **Let the bot bypass.** Not available here: on a personal-account
    repository GitHub refuses the *GitHub Actions* app as a bypass actor
    ("Actor GitHub Actions integration must be part of the ruleset source or
-   owner organization", HTTP 422, 2026-09-27). It works for a repository
-   owned by an organization.
-2. **Stop committing `METRICS.md` to `main`.** **Chosen (2026-09-27).** The
-   workflow keeps its website-sync half (it opens a PR on the site repo with
-   its own token), dropped the framework commit, and now only reads the
-   framework repo (`contents: read`). `python scripts/generate_metrics.py
-   --write` before a push keeps the framework copy current, and
-   `--check-readme` gates the README's numbers in CI.
-3. **Not recommended:** make the bot open a PR. A PR created with
-   `GITHUB_TOKEN` does not trigger workflows, so its required checks would
-   never run and it could never merge without a separate token.
+   owner organization", HTTP 422, 2026-09-27). A deploy key or a GitHub App of
+   our own could bypass, but then `main` would take commits that never ran
+   CI, and every push raced the bot's commit (a fetch before each push).
+2. **Stop committing `METRICS.md` to `main`.** **Chosen.** The workflow only
+   reads this repository (`contents: read`). The website gets its metrics from
+   the pull request the workflow keeps open on the website repository, once a
+   day ([Website metrics](website-metrics.md)). This repository's copy is
+   refreshed with `python scripts/generate_metrics.py --write` before a push,
+   and `--check-readme` gates README's numbers in CI.
+3. **A second branch here for the bot** (`metrics`, unprotected) was not
+   needed: the only reader is the website, which takes the files by pull
+   request, so a branch here would only be a second copy to keep fresh.
 
-Whichever is chosen, run the next push through it once and confirm both a
-green CI run and (for option 1) the bot's metrics commit landing.
+A pull request created with `GITHUB_TOKEN` would not trigger workflows, so a
+bot pull request against `main` could never pass its required checks; the
+website pull request uses its own token (`WEBSITE_TOKEN`), and the website
+repository runs its own build on it.
 
-## 4. After enabling
+## 4. Kept in step with the ruleset
 
-- Update AGENTS.md §31 ("`main` has no branch protection at all") and the
-  KNOWN_GAPS entry "Branch protection is the owner's call".
-- The `Unified turn lifecycle (GATE)` job becomes the required check AGENTS.md
-  §31 says it is not yet — reword that paragraph too.
+- The check table above is held equal to CI's job names by
+  `tests/test_branch_protection_runbook.py`. A job added to CI must be added
+  to the ruleset too, or protection does not require it.
+- AGENTS.md §31 and `docs/KNOWN_GAPS.md` record the protection (updated
+  2026-09-27).

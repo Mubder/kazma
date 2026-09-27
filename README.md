@@ -12,7 +12,7 @@
     <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Mubder/kazma/ci.yml?branch=main&style=flat-square&label=CI&logo=githubactions&logoColor=white" alt="CI status"></a>
     <a href="https://github.com/Mubder/kazma/actions"><img src="https://img.shields.io/badge/Tests-9%2C421-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
     <a href="docs/INJECTION.md"><img src="https://img.shields.io/badge/Prompt_injection-measured-EF4444.svg?style=flat-square" alt="Prompt injection benchmark"></a>
-    <a href="https://github.com/Mubder/kazma/commits/main"><img src="https://img.shields.io/badge/Commits-4%2C035%2B-6366F1.svg?style=flat-square&logo=git&logoColor=white" alt="Commits"></a>
+    <a href="https://github.com/Mubder/kazma/commits/main"><img src="https://img.shields.io/badge/Commits-4%2C036%2B-6366F1.svg?style=flat-square&logo=git&logoColor=white" alt="Commits"></a>
     <a href="https://kazma.ai"><img src="https://img.shields.io/badge/Website-kazma.ai-06B6D4.svg?style=flat-square" alt="Website"></a>
   </p>
 
@@ -39,7 +39,7 @@ producing a plausible reply.
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase Volume | Test Suite | Engineering Depth | Platforms Supported |
 |---|---|---|---|
-| **~511K LOC** (405K Python code + 40K JS) | **9,421 test functions** (794 test files) | **4,035+ commits** across 7 packages | **Web, TUI, CLI, Telegram, Discord, Slack** |
+| **~511K LOC** (405K Python code + 40K JS) | **9,421 test functions** (794 test files) | **4,036+ commits** across 7 packages | **Web, TUI, CLI, Telegram, Discord, Slack** |
 
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="Kazma observability dashboard" width="100%">

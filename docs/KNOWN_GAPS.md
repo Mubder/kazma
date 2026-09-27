@@ -17,26 +17,27 @@ three things: **closed** (struck through, with the evidence and the gate that
 holds it), **accepted** (a limit kept on purpose, with the reason), or an
 **owner decision** (it changes the owner's accounts or data).
 
-**Owner decisions:**
+**Owner decisions** (all settled on 2026-09-27):
 
-- **Branch protection on `main`: done 2026-09-27.** Ruleset
-  `KazmaLatestRule` requires the eleven CI checks, blocks deletions and
-  force pushes, and lets the repository admin bypass
-  (`docs/docs/ops/branch-protection.md`). The metrics bot no longer commits
-  to `main`.
-- **The first prune of the live install's chat step history.** Checkpoint
-  retention covers Postgres since 2026-09-27 (§41 of AGENTS.md). The live
-  install's checkpoint tables are 2.9 GB; at 30 days the prune would remove
-  17,554 of its 22,808 checkpoints (measured read-only that day), and
-  deleting them is the owner's call. It is set to keep everything there
-  (`checkpoints.retention_days` = 0) until the owner sets a number of days in
-  Settings -> System -> Chat step history. New installs prune from day one
-  (30 days).
-- **Removing the test data found on the live install**
-  (`scripts/cleanup_live_leftovers.py --apply`, run from the install folder):
-  it deletes, so the owner runs it; its dry run matched the inventory.
-- **pgvector** was decided 2026-09-27: it stays out. Meaning search is exact
-  and local (sqlite-vec / NumPy); see "Exact meaning search is linear" below.
+- **Branch protection on `main`: done.** Ruleset `KazmaLatestRule` requires
+  the eleven CI checks, blocks deletions and force pushes, and lets the
+  repository admin bypass (`docs/docs/ops/branch-protection.md`). The metrics
+  bot no longer commits to `main`; it keeps a pull request open on the
+  website repository instead (`docs/docs/ops/website-metrics.md`).
+- **The first prune of the live install's chat step history: done.** The
+  owner set 30 days (Settings -> System -> Chat step history), and the next
+  maintenance pass removed 301,753 rows of step history across 137 chats
+  (5,147 checkpoints of 214 chats remain, read-only count that day).
+  Postgres keeps the freed space for new step history, so the tables still
+  take 3.0 GB on disk; only `VACUUM FULL` would shrink the files, and it
+  locks the tables while it runs -- not needed with 889 GB free on the
+  volume. New installs prune from day one (30 days).
+- **Removing the test data found on the live install: done.** The owner ran
+  `scripts/cleanup_live_leftovers.py --apply`. The first run stopped at a
+  locked cron store (fixed that day: the cron store commits every write),
+  the second finished, keeping a backup of everything it changed.
+- **pgvector: stays out.** Meaning search is exact and local (sqlite-vec /
+  NumPy); see "Exact meaning search is linear" below.
 
 **Watching:** two event-loop stalls right after one boot (2026-09-27 00:50),
 start-up contention with no single cause; see "Operational tripwires".
@@ -438,6 +439,17 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
   a personal-account repository), so `sync-metrics.yml` stopped committing
   `METRICS.md` to `main` and only reads the framework repo now
   (`docs/docs/ops/branch-protection.md` section 3).
+- **Closed 2026-09-27: the website's metrics.** From 2026-07-30 the Sync
+  Metrics workflow was green on every push while the site got nothing: it
+  looked its pull request up with `gh pr view <branch>`, which returns
+  merged ones, and "updated" PR #3 (merged 2026-07-30) for two months. It
+  also installed nothing, so every copy said "Collected at runtime: n/a", and
+  each push rebuilt a site preview (529 Cloudflare builds in September).
+  Now: daily and by hand, the same install as CI's Tests job,
+  `--require-collected`, `metrics.json` with a frozen layout for the site,
+  and `scripts/sync_site_metrics.py` reads the open pull request back or
+  fails (`tests/test_site_metrics_sync.py`, `tests/test_generate_metrics.py`,
+  `docs/docs/ops/website-metrics.md`).
 - **Accepted: the shared-store peer registry is advisory.** It names
   installs; it does not stop one from writing -- replicas share the store
   legitimately, and a fence would need an identity they cannot forge. An acknowledged id silences only that id.

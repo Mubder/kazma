@@ -77,6 +77,7 @@ const sidebars = {
         'ops/multi-replica-and-saas',
         'ops/disaster-recovery',
         'ops/branch-protection',
+        'ops/website-metrics',
         'ops/multi-region',
         'ops/oidc-setup',
         'ops/wsl-fixed-access',
