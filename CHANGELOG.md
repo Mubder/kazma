@@ -11,6 +11,12 @@ Searching by the answer as well was built and measured on the memory test
 set, and left out: it brought in more unrelated conversations and found
 nothing new.
 
+- "تذكر"، "لا تنسى"، "احفظ" and other ways of saying "remember this" in Arabic
+  now work like "remember this" in English: Kazma keeps that message close.
+  ("تذكرة", a ticket, does not count.)
+- Saying hello again no longer brings back an earlier "hello" as a memory.
+  Greetings and thanks are still kept, just not shown as history.
+
 - The "Rebuild embeddings" action for memory used to delete the Knowledge
   Library's search data as a leftover of an older design. It no longer
   does. After a change of embedding model, the Knowledge Library now

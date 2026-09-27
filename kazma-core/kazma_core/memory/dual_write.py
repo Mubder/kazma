@@ -37,6 +37,7 @@ import time
 from typing import Any
 
 from kazma_core.memory.episode_text import embed_text
+from kazma_core.memory.remember_request import is_remember_request
 
 logger = logging.getLogger(__name__)
 
@@ -116,14 +117,6 @@ def _episode_id(session_id: str, turn: int, content: str) -> str:
 
 
 #: Phrases that mark a turn the user explicitly asked Kazma to keep.
-_REMEMBER_PHRASES = (
-    "remember that",
-    "remember my",
-    "remember this",
-    "don't forget",
-    "do not forget",
-    "note that",
-)
 #: Sources whose turns are written after the fact, so they are not the live
 #: session's short-term buffer and stay episodic.
 _AFTER_THE_FACT_SOURCES = frozenset(
@@ -155,8 +148,7 @@ def episode_row(
     meta: dict[str, Any] = {"source": source}
     effective_tier = tier
     effective_importance = int(importance)
-    ut_low = (user_text or "").strip().lower()
-    if any(phrase in ut_low for phrase in _REMEMBER_PHRASES):
+    if is_remember_request(user_text):  # English or Arabic (W4)
         # Explicit "remember" turns go straight to the recall tier so meaning
         # search finds them immediately (Phase A).
         effective_tier = "recall"

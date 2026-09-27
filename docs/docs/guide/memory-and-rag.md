@@ -163,7 +163,10 @@ last won.
   you suggest?" came back without the suggestion. The meaning vector is made
   from the question (the answer was tried and measured: it cost precision
   and found nothing more); keyword search and word coverage read the answer
-  too.  
+  too.
+- "Remember this" (or تذكر، لا تنسى، احفظ، سجل عندك ...) puts the turn straight
+  in the recall tier, in English or Arabic. Small talk -- a greeting or thanks
+  with a short reply -- is kept but never shown as history.  
 - Heuristic (+ optional LLM queue) belief extraction → `mutate_belief`, stated at the turn's time. A `user_explicit` functional belief **cannot** be superseded by `llm_inferred` / `system_tool` (commitment source-trust gate in `_mutate_functional`; independent of `authorize_effect`), nor cut short by an earlier lower-trust statement.  
 - Hygiene rejects stack/version subjects (e.g. `kazma_v2_4_0` mistaken for product version)  
 - Dual-write: optional Postgres state mirror + Neo4j edge upsert  

@@ -42,7 +42,9 @@ every change is inside the existing V2 engine.
 | W1 | Facts follow the order they were said in: an older statement is history, never a replacement; every late writer (queue, deep pass, reconcile) passes the turn's time; reconciled turns get their facts (heuristic + queued deep pass, 60 a pass) | ☑ `tests/test_memory_event_time.py` |
 | R3 | Recall shows the model the question AND the answer (`memory/episode_text.py`); it still compares by the question. Embedding the answer was built and measured, and not adopted: precision fell in four categories, answer-only questions gained nothing | ☑ `tests/test_memory_episode_text.py` |
 | X3 | Found building R3: the memory Rebuild deleted `data_dir/vector_memory` -- now the Knowledge Library's live store. Removed; the Knowledge Library re-embeds another model's vectors and rebuilds a collection of another size itself | ☑ `tests/test_knowledge_meaning_search.py` |
-| S2+ | Remaining Stage 2 items, in the approved order: R5, R8, W4, W5, then C1, U1, W6, R6, C2 | ☐ |
+| W4 | "Remember this" heard in Arabic too (folded, whole words: a ticket, تذكرة, is not تذكر); promotes the turn and is a durable cue | ☑ `tests/test_memory_remember_and_small_talk.py` |
+| W5 | Small talk (the words and a short reply) is kept but never recalled, on every episode path; benchmark unchanged | ☑ same file |
+| S2+ | Remaining Stage 2 items, in the approved order: R5, R8, then C1, U1, W6, R6, C2 | ☐ |
 
 ---
 

@@ -385,7 +385,7 @@ def register_memory_routes(self: Any) -> None:
         if not query:
             return {"ok": False, "error": "query required", "beliefs": [], "episodes": []}
         try:
-            from kazma_core.memory.recall import recall
+            from kazma_core.memory.recall import recall, shown_text
             from kazma_core.tenant_isolation import require_tenant_id
 
             tenant_id = require_tenant_id()
@@ -419,7 +419,8 @@ def register_memory_routes(self: Any) -> None:
                 "episodes": [
                     {
                         "id": h.id,
-                        "content": h.content,
+                        # What the model is shown: both sides of the turn.
+                        "content": shown_text(h),
                         "score": h.score,
                         "source": h.source,
                         "sources": (h.metadata or {}).get("sources"),
