@@ -3145,6 +3145,7 @@ new *guard* (its own code, or other OS-level variables) still needs the
 
 - `docs/docs/intro.md` — Documentation map (single SoT under `docs/docs/`)
 - `docs/FEATURES.md` — What Kazma does, a plain list checked against the code (the website's source; re-check a line against the code before changing it)
+- `docs/docs/ops/website-sync.md` — How kazma.ai is kept in step with this repository: the standing procedure, `docs/website-pages.json` (every doc page's place on the site) and `scripts/website_sync_plan.py` (what the site must add, update, remove, translate)
 - `docs/docs/guide/architecture.md` — Full system architecture with data flow diagram
 - `docs/docs/guide/memory-and-rag.md` — Chat memory SoT (V2 cognitive engine is the single stack; the V1 4-layer RRF was removed in the V1→V2 cutover)
 - `docs/docs/guide/document-intelligence.md` — Document Intelligence product guide
@@ -3166,4 +3167,4 @@ new *guard* (its own code, or other OS-level variables) still needs the
 - `docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md` — Deferred Guard/ops alerting sprint
 - `docs/plans/done/DOCS_CONSOLIDATION_PLAN.md` — Docs consolidation plan (completed)
 - `CHANGELOG.md` — Sprint history
-- Live docs only under `docs/docs/` (Docusaurus). Do not resurrect retired `docs-v2` / loose handover trees.
+- Live docs only under `docs/docs/` (Docusaurus). Do not resurrect retired `docs-v2` / loose handover trees. A page added, moved or deleted there (or directly in `docs/`) changes `docs/website-pages.json` and `docs/sidebars.js` in the same commit (`tests/test_website_pages.py`, `tests/test_docs_sidebar.py`).

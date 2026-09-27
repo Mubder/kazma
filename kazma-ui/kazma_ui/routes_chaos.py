@@ -25,6 +25,11 @@ def _chaos_enabled() -> bool:
     )
 
 
+#: What a custom injection may set through ``params``; the other
+#: FailureInjection fields are this route's own or the injector's bookkeeping.
+_CUSTOM_PARAMS = frozenset({"latency_ms", "error_code", "error_message", "severity", "metadata"})
+
+
 def register_chaos_routes(app: FastAPI) -> None:
     """Mount ``/api/chaos/*`` when chaos is explicitly enabled."""
     if not _chaos_enabled():
@@ -128,6 +133,22 @@ def register_chaos_routes(app: FastAPI) -> None:
             probability = float(body["probability"])
             duration_seconds = int(body["duration_seconds"])
             params = body.get("params") or {}
+            # ``params`` becomes keyword arguments of FailureInjection: an
+            # unknown key was a TypeError there, answered as a 500.
+            if not isinstance(params, dict):
+                raise HTTPException(status_code=400, detail="params must be an object")
+            unknown = sorted(set(params) - _CUSTOM_PARAMS)
+            if unknown:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Unknown params: {', '.join(unknown)} "
+                        f"(allowed: {', '.join(sorted(_CUSTOM_PARAMS))})"
+                    ),
+                )
+            for key in ("latency_ms", "error_code"):
+                if key in params:
+                    params[key] = int(params[key])
             if not 0 <= probability <= 1:
                 raise HTTPException(
                     status_code=400, detail="probability must be between 0 and 1"
@@ -138,7 +159,7 @@ def register_chaos_routes(app: FastAPI) -> None:
                 )
         except HTTPException:
             raise
-        except ValueError as e:
+        except (ValueError, TypeError) as e:
             raise HTTPException(status_code=400, detail=f"Invalid value: {e}") from e
 
         injection = FailureInjection(

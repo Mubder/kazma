@@ -85,7 +85,7 @@ not there.
 | GitHub: branches, commits, pull requests, through a GitHub App or a token | Shipped | `git_github_manager` skill |
 | Code search across the repository (ripgrep plus symbols) | Shipped | `kazma_core/code_index/` |
 | Steer a running task (`/steer`), abort it, plan first (`/plan`), long missions (`/long`) | Shipped | chat commands |
-| Rewind or branch a conversation from any earlier step | Shipped | `/replay`, `/fork` |
+| Rewind or branch a conversation from any earlier step | Shipped | `/replay`, `/fork`, [Time travel](docs/guide/time-travel-and-replay.md) |
 
 ## Many agents at once
 
@@ -117,7 +117,8 @@ not there.
 | Old chat step history pruned on a schedule you set | Shipped | Settings → System |
 | Postgres for settings, chats, tasks and checkpoints; SQLite with no setup | Shipped | [Postgres](docs/ops/postgres-and-saas.md) |
 | Prometheus metrics; OpenTelemetry and Langfuse traces | Shipped / Opt-in | `/metrics`, [OpenTelemetry](docs/ops/opentelemetry.md) |
-| Updates in one command | Shipped | `kazma update` |
+| Updates in one command | Shipped | [`kazma update`](docs/ops/kazma-update.md) |
+| Fault injection to test retries and failover: slow or failing model calls, tool calls and reply saves (other targets have no injection point yet); off unless enabled | Opt-in | `KAZMA_CHAOS_ENABLED`, [Chaos testing](docs/ops/chaos-testing.md) |
 
 ## Not built
 

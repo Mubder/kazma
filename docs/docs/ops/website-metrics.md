@@ -8,7 +8,9 @@ description: How kazma.ai gets its numbers from this repository, and the metrics
 # Website metrics
 
 kazma.ai shows figures measured from this repository: lines of code, the test
-count, commits, contributors. They reach the site one way:
+count, commits, contributors. (Its pages and claims follow
+[Website sync](website-sync.md); the numbers arrive by themselves.) They reach
+the site one way:
 
 1. **Daily** (04:23 UTC), or by hand (Actions → **Sync Metrics** → **Run
    workflow**), `.github/workflows/sync-metrics.yml` installs the project the

@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## A standing procedure keeps kazma.ai in step with the code (2026-09-28)
+
+**Anyone updating the website now starts from one page and one command.**
+`docs/docs/ops/website-sync.md` is the procedure. It covers where the truth
+lives, where each thing sits on the site, and how to port, translate, check
+the claims and record the sync. `docs/website-pages.json` gives every
+documentation page its place on kazma.ai, or says why it is not published.
+`scripts/website_sync_plan.py` compares both repositories and lists exactly
+what to add, update, remove and translate, with the diff for each page. It
+also checks the website itself for broken links, sidebar entries and Arabic
+pages that don't match their English ones. A new page here must be given its
+place on the site in the same change, so the website can no longer miss one.
+
+Its first run on the website found:
+- 28 pages behind their source;
+- two pages never published (the `kazma update` upgrade guide and the smoke
+  matrix);
+- three pages with no source, all wrong or stale;
+- 27 Arabic pages that are shortened versions rather than full translations.
+
+**Docs written from the code:** time travel (rewinding and branching a
+conversation) and chaos testing had no page here. Both now do. Chaos testing
+states that only model calls, tool calls and reply saves can actually be made
+to fail. The IDE page listed the order in which the working folder is chosen
+wrongly, and the website had copied it; it now matches the code. Three pages
+were missing from the docs navigation.
+
+**Chaos testing:** a custom fault injection with a misspelled setting failed
+with a server error (500) instead of saying what was wrong. It now gets a
+clear 400.
+
 ## The website gets its numbers again (2026-09-27)
 
 **For two months the website's metrics never updated, and nothing said so.**
