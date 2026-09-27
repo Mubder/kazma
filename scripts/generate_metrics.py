@@ -6,12 +6,16 @@ history from **git-tracked** files only (so the numbers are stable and
 reproducible regardless of local clutter like ``.pytest_tmp_*`` dirs).
 
 Outputs a Markdown table to stdout that can be pasted into ``METRICS.md``, or
-written directly with ``--write``.
+written directly with ``--write``. ``--out-dir`` writes the pair the website
+reads (``METRICS.md`` for people, ``metrics.json`` for its build) somewhere
+else, without touching the repository; the Sync Metrics workflow uses it.
 
 Usage:
     python scripts/generate_metrics.py            # print to stdout
-    python scripts/generate_metrics.py --check    # exit 1 if METRICS.md is stale
-    python scripts/generate_metrics.py --write    # update METRICS.md in place
+    python scripts/generate_metrics.py --check    # exit 1 if METRICS.md differs from a fresh run
+    python scripts/generate_metrics.py --write    # update METRICS.md (and README's numbers)
+    python scripts/generate_metrics.py --out-dir DIR --require-collected
+                                                  # METRICS.md + metrics.json for the website
 
 From the project root:
     .venv/Scripts/python.exe scripts/generate_metrics.py
@@ -31,18 +35,34 @@ from pathlib import Path
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
+#: The product packages, each a top-level folder. ``kazma-memory`` was retired
+#: (V2 memory lives in ``kazma_core.memory``); it stayed on this list with 0
+#: files and made the metrics say "Source (7 packages)" of a six-package repo.
+#: tests/test_generate_metrics.py fails when an entry names no folder.
 PACKAGES = [
     "kazma-core",
     "kazma-gateway",
     "kazma-ui",
     "kazma-tui",
-    "kazma-memory",
     "kazma-skills",
     "kazma-cli",
 ]
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 METRICS_FILE = REPO_ROOT / "METRICS.md"
+METRICS_JSON_NAME = "metrics.json"
+
+#: Layout version of ``metrics.json``, the file the website's build reads.
+#: Adding a key is compatible; renaming, removing or changing what a key
+#: means is not -- bump this, and the website refuses the file until it is
+#: taught the new layout (docs/docs/ops/website-metrics.md). The layout is
+#: frozen in tests/test_generate_metrics.py.
+SCHEMA_VERSION = 1
+
+#: Ceiling for ``pytest --collect-only``: it takes seconds (6 s locally; the
+#: whole generator ran in 8 s in CI on 2026-09-27); the ceiling only stops a
+#: hung import.
+COLLECT_TIMEOUT_S = 600
 
 # Regex patterns counted per-file
 RE_DEF = re.compile(r"^\s*def\s+\w+", re.M)
@@ -269,16 +289,18 @@ def count_patterns(paths: list[str], *patterns: re.Pattern) -> list[int]:
     return counts
 
 
-def count_collected_tests() -> int:
-    """Return the number of tests pytest collects at runtime (the real count,
-    including ``@pytest.mark.parametrize`` expansion). The static ``def test_*``
-    count under-reports for exactly that reason — one parametrized function can
+def count_collected_tests() -> tuple[int, str]:
+    """Return ``(count, problem)``: how many tests pytest collects at runtime
+    (the real count, including ``@pytest.mark.parametrize`` expansion), or 0
+    and the reason it could not tell. The static ``def test_*`` count
+    under-reports for exactly that reason — one parametrized function can
     produce dozens of collected cases.
 
     Runs ``pytest --collect-only -q`` and parses the trailing
-    ``"N tests collected"`` summary. Returns ``0`` when pytest isn't available,
-    collection errors out, or the summary line is absent — callers fall back to
-    the static def count in that case.
+    ``"N tests collected"`` summary. The reason matters: the Sync Metrics
+    workflow ran this for two months in a job that had not installed the
+    project, got 0 every time, and published "Collected at runtime: n/a" with
+    nothing saying why (``--require-collected`` now fails such a run with it).
 
     Prefers the repo's own ``.venv`` interpreter (where the project's pytest is
     installed) so the result reflects the project's real test suite rather than
@@ -288,23 +310,26 @@ def count_collected_tests() -> int:
     py = venv_python if (REPO_ROOT / ".venv" / "Scripts" / "python.exe").exists() else "python"
     try:
         out = subprocess.run(
-            [py, "-m", "pytest", "--collect-only", "-q"],
+            [py, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider"],
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,
             errors="replace",
-            timeout=180,
+            timeout=COLLECT_TIMEOUT_S,
         )
-    except (OSError, subprocess.SubprocessError):
-        return 0
+    except subprocess.TimeoutExpired:
+        return 0, f"pytest --collect-only did not finish in {COLLECT_TIMEOUT_S}s"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 0, f"pytest --collect-only could not start: {exc}"
     # pytest prints the summary to stderr; check both streams. The line can read
     # "4354 tests collected" or "4354 tests collected, 1 error in 2.5s" — match
     # the "<n> tests collected" prefix and ignore any trailing status.
     for stream in (out.stderr, out.stdout):
         m = re.search(r"(\d+)\s+tests?\s+collected", stream)
         if m:
-            return int(m.group(1))
-    return 0
+            return int(m.group(1)), ""
+    tail = "\n".join((out.stdout + out.stderr).strip().splitlines()[-15:])
+    return 0, f"pytest --collect-only exited {out.returncode} with no count:\n{tail}"
 
 
 def bucket(files: list[str], prefixes: list[str]) -> list[str]:
@@ -314,7 +339,9 @@ def bucket(files: list[str], prefixes: list[str]) -> list[str]:
 # ── Metric collection ────────────────────────────────────────────────────────
 
 
-def collect() -> dict:
+def collect(runtime_tests: bool = True) -> dict:
+    """Measure the repository. ``runtime_tests=False`` skips the pytest
+    collection (the README gate compares static counts only)."""
     py = git_files("*.py")
     src = bucket(py, PACKAGES)
     # Tests live both in the root suite AND in per-package _tests directories
@@ -368,15 +395,21 @@ def collect() -> dict:
     # Runtime-collected count (the real number pytest would run, including
     # @pytest.mark.parametrize expansion). The static def count above is a
     # source-level count and under-reports; this is the figure that should face
-    # users. Returns 0 when pytest isn't installed or collection fails, so the
-    # static count remains available as a fallback (test_functions_total).
+    # users. 0 when pytest isn't installed or collection fails (the reason is
+    # kept), so the static count remains available as a fallback
+    # (test_functions_total).
+    if runtime_tests:
+        collected, collect_problem = count_collected_tests()
+    else:
+        collected, collect_problem = 0, "runtime collection not requested"
     m["tests"] = {
         "files": len(test_files),
         "test_def": tdefs[0],
         "test_async_def": tdefs[1],
         "test_class": tdefs[2],
         "test_functions_total": tdefs[0] + tdefs[1],
-        "collected": count_collected_tests(),
+        "collected": collected,
+        "collect_problem": collect_problem,
     }
 
     # ── Source structure ──
@@ -440,7 +473,11 @@ def collect() -> dict:
     # ── Versions (for the drift note) ──
     m["versions"] = read_versions()
 
-    m["head"] = git("log", "-1", "--format=%h %s (%ad)", "--date=short")
+    sha, short, subject, day = git(
+        "log", "-1", "--format=%H%x00%h%x00%s%x00%ad", "--date=short"
+    ).split("\0")
+    m["commit"] = {"sha": sha, "short": short, "subject": subject, "date": day}
+    m["head"] = f"{short} {subject} ({day})"
     m["generated"] = date.today().isoformat()
     return m
 
@@ -520,7 +557,7 @@ def render(m: dict) -> str:
     for name in ["source", "tests", "examples", "archive", "scripts", "root"]:
         a = m["areas"][name]
         label = {
-            "source": "Source (7 packages)",
+            "source": f"Source ({len(m['packages'])} packages)",
             "tests": "tests/ + loadtests/",
             "root": "root *.py",
         }.get(name, name + "/")
@@ -533,9 +570,8 @@ def render(m: dict) -> str:
         "| Package | Files | Total LOC | Code LOC |",
         "|---|---:|---:|---:|",
     ]
-    for pkg in PACKAGES:
-        p = m["packages"][pkg]
-        lines.append(f"| `{pkg}` | {p['files']} | {p['total']:,} | {p['code']:,} |")
+    for pkg, p in m["packages"].items():
+        lines.append(f"| `{pkg}` | {p['files']:,} | {p['total']:,} | {p['code']:,} |")
 
     src = m["areas"]["source"]
     tests = m["areas"]["tests"]
@@ -547,11 +583,11 @@ def render(m: dict) -> str:
         "",
         "| Metric | Count |",
         "|---|---:|",
-        f"| Test files | **{t['files']}** |",
+        f"| Test files | **{t['files']:,}** |",
         f"| Collected at runtime | **{t['collected']:,}** |" if t["collected"] else "| Collected at runtime | n/a |",
         f"| `def test_*` functions | {t['test_def']:,} |",
         f"| `async def test_*` functions | {t['test_async_def']:,} |",
-        f"| `Test*` classes | {t['test_class']} |",
+        f"| `Test*` classes | {t['test_class']:,} |",
         f"| Total test functions | {t['test_functions_total']:,} |",
         f"| Test LOC | {tests['total']:,} |",
         f"| Test-to-source LOC ratio | ~{ratio:.2f}:1 |",
@@ -567,7 +603,7 @@ def render(m: dict) -> str:
         "|---|---:|",
         f"| `def` functions | {m['source_structure']['def']:,} |",
         f"| `async def` functions | {m['source_structure']['async_def']:,} |",
-        f"| Classes | {m['source_structure']['class']} |",
+        f"| Classes | {m['source_structure']['class']:,} |",
         "",
         "## Non-Python assets",
         "",
@@ -586,7 +622,7 @@ def render(m: dict) -> str:
         ("SVG", a["svg"], False),
     ]
     for label, count, _ in asset_rows:
-        lines.append(f"| {label} | {count} |")
+        lines.append(f"| {label} | {count:,} |")
     lines += [
         "",
         f"| JS LOC (UI static) | **{a['js_loc']:,}** |",
@@ -596,9 +632,9 @@ def render(m: dict) -> str:
         "| Metric | Count |",
         "|---|---:|",
         f"| Commits | **{m['git']['commits']:,}** |",
-        f"| Contributors | {m['git']['contributors']} |",
-        f"| Branches | {m['git']['branches']} |",
-        f"| Tags | {m['git']['tags']} |",
+        f"| Contributors | {m['git']['contributors']:,} |",
+        f"| Branches | {m['git']['branches']:,} |",
+        f"| Tags | {m['git']['tags']:,} |",
         "",
         "## Largest Python files (top 15)",
         "",
@@ -636,15 +672,100 @@ def render(m: dict) -> str:
         "# from the repo root, using the project venv:",
         ".venv/Scripts/python.exe scripts/generate_metrics.py          # print to stdout",
         ".venv/Scripts/python.exe scripts/generate_metrics.py --write   # update METRICS.md in place",
-        ".venv/Scripts/python.exe scripts/generate_metrics.py --check   # CI: exit 1 if stale",
+        ".venv/Scripts/python.exe scripts/generate_metrics.py --check   # exit 1 if it differs from a fresh run",
         "```",
         "",
         "The generator counts **git-tracked** files only via `git ls-files`, so deleting or "
         "adding source is reflected immediately after a commit. Regenerate after any structural "
         "change (new package, large refactor, test additions).",
         "",
+        "The website reads `metrics.json`, which the Sync Metrics workflow writes beside a copy "
+        "of this file every day (docs/docs/ops/website-metrics.md).",
+        "",
     ]
     return "\n".join(lines)
+
+
+def _known(value: str) -> str | None:
+    """A version string, or None where the generator could not read one."""
+    return None if value in ("?", "n/a", "") else value
+
+
+def to_json(m: dict) -> dict:
+    """The website's copy of the metrics: the same figures as :func:`render`,
+    as numbers under stable keys (layout ``SCHEMA_VERSION``).
+
+    The site parsed METRICS.md's tables by their row labels, so a label edit
+    here (a package count in "Source (7 packages)", a bold marker, a thousands
+    separator) was a silent change to the site. Keys here only change with a
+    new ``SCHEMA_VERSION``. ``tests.collected`` is None when pytest could not
+    collect; every other count is an integer.
+    """
+    py, t, a, g, s = m["python"], m["tests"], m["assets"], m["git"], m["source_structure"]
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_on": m["generated"],
+        "repository": _GITHUB_REPO,
+        "commit": dict(m["commit"]),
+        "python": {
+            "files": py["files"],
+            "lines": py["total"],
+            "code_lines": py["pure_code"],
+            "blank_lines": py["blank"],
+            "comment_lines": py["comment"],
+        },
+        "areas": {
+            name: {"files": area["files"], "lines": area["total"], "code_lines": area["code"]}
+            for name, area in m["areas"].items()
+        },
+        "packages": [
+            {"name": name, "files": p["files"], "lines": p["total"], "code_lines": p["code"]}
+            for name, p in m["packages"].items()
+        ],
+        "tests": {
+            "files": t["files"],
+            "collected": t["collected"] or None,
+            "static_functions": t["test_functions_total"],
+            "def_functions": t["test_def"],
+            "async_def_functions": t["test_async_def"],
+            "classes": t["test_class"],
+            "lines": m["areas"]["tests"]["total"],
+        },
+        "source_structure": {
+            "functions": s["def"],
+            "async_functions": s["async_def"],
+            "classes": s["class"],
+        },
+        "assets": {
+            "javascript_files": a["js"],
+            "javascript_lines": a["js_loc"],
+            "html_files": a["html"],
+            "yaml_files": a["yaml"],
+            "markdown_files": a["md"],
+            "tsx_files": a["tsx"],
+            "css_files": a["css"],
+            "json_files": a["json"],
+            "svg_files": a["svg"],
+        },
+        "git": {
+            "commits": g["commits"],
+            "contributors": g["contributors"],
+            "branches": g["branches"],
+            "tags": g["tags"],
+        },
+        "largest_python_files": [
+            {"path": rel, "lines": n} for rel, n in m["largest_files"]
+        ],
+        "versions": {
+            "pyproject": _known(m["versions"]["pyproject"]),
+            "kazma_yaml": _known(m["versions"]["kazma_yaml"]),
+            "cli": _known(m["versions"]["cli"]),
+        },
+    }
+
+
+def render_json(m: dict) -> str:
+    return json.dumps(to_json(m), indent=2, ensure_ascii=False) + "\n"
 
 
 def pct(part: int, whole: int) -> str:
@@ -730,7 +851,6 @@ def check_readme(m: dict, text: str) -> list[str]:
     * commits is stated as ``N+`` -> a LOWER BOUND. It may lag, but it may
       never overstate, and it may not rot indefinitely.
     """
-    v = readme_values(m)
     problems: list[str] = []
 
     # Counts drift by a handful on any commit that adds a test, and the
@@ -815,7 +935,7 @@ def check_readme(m: dict, text: str) -> list[str]:
     return problems
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate Kazma repository metrics.")
     parser.add_argument(
         "--write",
@@ -832,17 +952,44 @@ def main() -> int:
         action="store_true",
         help=(
             "exit 1 if README.md's headline numbers disagree with the repo. "
-            "Unlike --check this is race-free (it does not depend on the "
-            "metrics bot having committed yet), so CI can GATE on it."
+            "Unlike --check this can pass on any commit (README states bounds "
+            "with a tolerance; METRICS.md names its own HEAD), so CI GATES on it."
         ),
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        help=(
+            "write METRICS.md and metrics.json into this directory (created if "
+            "missing) for the website; the repository's files are not touched"
+        ),
+    )
+    parser.add_argument(
+        "--require-collected",
+        action="store_true",
+        help=(
+            "exit 1, with pytest's reason, when the runtime test count cannot "
+            "be collected, instead of writing 'n/a'"
+        ),
+    )
+    args = parser.parse_args(argv)
 
     if not (REPO_ROOT / ".git").exists():
         print("error: not a git repository (or not run from repo root)", file=sys.stderr)
         return 2
 
-    metrics = collect()
+    # The README gate compares static counts; it has no use for a pytest run.
+    metrics = collect(runtime_tests=not args.check_readme)
+    if not args.check_readme and not metrics["tests"]["collected"]:
+        problem = metrics["tests"]["collect_problem"]
+        if args.require_collected:
+            print(
+                "error: the runtime test count could not be collected, and "
+                "--require-collected refuses to publish 'n/a':\n" + problem,
+                file=sys.stderr,
+            )
+            return 1
+        print(f"warning: 'Collected at runtime' will read n/a:\n{problem}", file=sys.stderr)
     rendered = render(metrics)
 
     if args.check_readme:
@@ -863,6 +1010,15 @@ def main() -> int:
             )
             return 1
         print("README.md metrics agree with the repository.")
+        return 0
+
+    if args.out_dir is not None:
+        args.out_dir.mkdir(parents=True, exist_ok=True)
+        (args.out_dir / METRICS_FILE.name).write_text(rendered, encoding="utf-8", newline="\n")
+        (args.out_dir / METRICS_JSON_NAME).write_text(
+            render_json(metrics), encoding="utf-8", newline="\n"
+        )
+        print(f"wrote {METRICS_FILE.name} and {METRICS_JSON_NAME} to {args.out_dir}")
         return 0
 
     if args.check:

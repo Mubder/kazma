@@ -155,20 +155,16 @@ jobs:
         run: python scripts/fast_test.py --chunks 4 --chunk-timeout 1500
         env:
           KAZMA_DB_BACKEND: sqlite
-      - name: Metrics check (advisory)
-        # NOT a gate, and deliberately so: METRICS.md records the HEAD it was
-        # generated from, so a commit can never carry its own current copy
-        # (it is refreshed with `generate_metrics.py --write` before a push;
-        # the metrics bot stopped committing it once main was protected,
-        # 2026-09-27). Gating here would fail every commit. The race-free
-        # half of this check is the README gate below.
-        run: python scripts/generate_metrics.py --check || true
       - name: README metrics gate
         # README carries "Metrics auto-verified from METRICS.md" above a
         # table nothing verified — on 2026-09-16 it advertised 7,346 tests /
         # ~409K LOC against a real 7,659 / 430K (audit F-7). This compares
-        # README against the repository itself, so it does not depend on the
-        # bot having committed, and it GATES.
+        # README against the repository itself, and it GATES.
+        # There is no METRICS.md gate: the file names the HEAD it was made
+        # from, so no commit can carry its own current copy (`--check` could
+        # never pass here; it ran as `|| true` until 2026-09-27). It is
+        # refreshed with `generate_metrics.py --write` before a push, and the
+        # website gets a fresh copy daily from sync-metrics.yml.
         run: python scripts/generate_metrics.py --check-readme
 
   postgres:

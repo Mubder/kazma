@@ -2255,7 +2255,11 @@ agent's with the owner's credentials, still land. So a red required check
 on `main` is not a blocked push: it is a failing build, fixed at once. The
 metrics bot no longer commits to `main` (GitHub will not let the Actions
 app bypass on a personal-account repository); refresh `METRICS.md` with
-`scripts/generate_metrics.py --write` before a push.
+`scripts/generate_metrics.py --write` before a push. The website gets its
+numbers from `metrics.json`, through the ONE open pull request
+`scripts/sync_site_metrics.py` keeps on `Mubder/KazmaAI`, daily
+(`docs/docs/ops/website-metrics.md`). It is read back, never assumed: the
+old workflow "updated" a merged pull request for two months, all green.
 
 Load-bearing rules:
 

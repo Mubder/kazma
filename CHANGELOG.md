@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## The website gets its numbers again (2026-09-27)
+
+**For two months the website's metrics never updated, and nothing said so.**
+The workflow that sends kazma.ai its numbers ran after every push and
+reported success each time, but it looked for its pull request in a way that
+also finds merged ones. It kept "updating" one merged on 2026-07-30, so no
+pull request was ever open and the site kept old figures until they were
+copied in by hand. It also never installed the project, so its copy could not
+count the tests pytest actually runs ("Collected at runtime: n/a").
+
+Now the numbers are measured once a day (or on demand from the Actions tab)
+with the same setup as CI's test job. They reach the website through a single
+open pull request that the run reads back, and the run fails if it isn't
+there. A run that cannot count the tests fails instead of sending "n/a".
+Running daily instead of on every push also stops the website from building a
+preview for each of the ~500 pushes a month. The website now gets
+`metrics.json`, a machine-readable file with a fixed layout, beside
+`METRICS.md`, so it no longer has to read numbers out of Markdown tables.
+
+**The metrics now count six packages, not seven.** `kazma-memory` was retired
+long ago but still counted, so the metrics said "7 packages".
+
 ## `main` is protected (2026-09-27)
 
 **Every change to `main` must pass the eleven CI checks.** The owner enabled
