@@ -82,13 +82,14 @@ class AuditLogger:
     async def _get_db(self) -> aiosqlite.Connection:
         if self._db is None:
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-            self._db = await aiosqlite.connect(self.db_path)
+            # Autocommit: each entry is one statement, and one that raises
+            # cannot leave the write lock held (tests/test_sqlite_kept_connections.py).
+            self._db = await aiosqlite.connect(self.db_path, isolation_level=None)
             from kazma_core.config_store import apply_sqlite_pragmas_async
 
             await apply_sqlite_pragmas_async(self._db)
             self._db.row_factory = aiosqlite.Row
             await self._db.executescript(_SCHEMA)
-            await self._db.commit()
         return self._db
 
     async def close(self) -> None:
@@ -154,7 +155,6 @@ class AuditLogger:
                 entry.metadata_json,
             ),
         )
-        await db.commit()
         logger.info("Audit: %s %s/%s %s -> %s", user_id, division, resource, action, result)
         return entry
 
@@ -215,7 +215,6 @@ class AuditLogger:
                 entry.approver_id,
             ),
         )
-        await db.commit()
         logger.info("Audit: decision %s by %s -> %s", request_id, approver_id, decision)
         return entry
 
@@ -284,7 +283,6 @@ class AuditLogger:
         """Clear all audit entries. Returns count of deleted rows."""
         db = await self._get_db()
         cursor = await db.execute("DELETE FROM audit_entries")
-        await db.commit()
         count = cursor.rowcount
         logger.warning("Audit log cleared: %d entries deleted", count)
         return count

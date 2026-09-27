@@ -6,6 +6,7 @@ access controls for the ALMuhalab Global ecosystem.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -144,34 +145,44 @@ class RBACEngine:
         self.db_path = db_path or _default_db()
         self.divisions = divisions or DIVISIONS
         self._db: aiosqlite.Connection | None = None
+        self._init_lock = asyncio.Lock()
 
     async def _get_db(self) -> aiosqlite.Connection:
         if self._db is None:
-            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-            self._db = await aiosqlite.connect(self.db_path)
-            from kazma_core.config_store import apply_sqlite_pragmas_async
+            async with self._init_lock:
+                if self._db is None:
+                    Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+                    # Autocommit: a write that raises cannot leave the write
+                    # lock held (tests/test_sqlite_kept_connections.py); the
+                    # seed below is one explicit transaction.
+                    db = await aiosqlite.connect(self.db_path, isolation_level=None)
+                    from kazma_core.config_store import apply_sqlite_pragmas_async
 
-            await apply_sqlite_pragmas_async(self._db)
-            self._db.row_factory = aiosqlite.Row
-            await self._db.executescript(_SCHEMA)
-            await self._db.commit()
-            await self._load_default_permissions()
+                    await apply_sqlite_pragmas_async(db)
+                    db.row_factory = aiosqlite.Row
+                    await db.executescript(_SCHEMA)
+                    await self._load_default_permissions(db)
+                    # Handed out only once seeded: a caller holding it earlier
+                    # could have written into the seed's transaction.
+                    self._db = db
         return self._db
 
-    async def _load_default_permissions(self) -> None:
-        """Seed division_permissions with defaults if empty."""
-        db = await self._get_db()
-        cursor = await db.execute("SELECT COUNT(*) as cnt FROM division_permissions")
-        row = await cursor.fetchone()
-        if row["cnt"] == 0:
-            for div, roles in _DEFAULT_PERMISSIONS.items():
-                for role, resources in roles.items():
-                    for pattern, actions in resources.items():
-                        await db.execute(
-                            "INSERT OR IGNORE INTO division_permissions (division, role, resource_pattern, actions) VALUES (?, ?, ?, ?)",
-                            (div, role, pattern, json.dumps(actions)),
-                        )
-            await db.commit()
+    async def _load_default_permissions(self, db: aiosqlite.Connection) -> None:
+        """Seed division_permissions with defaults if empty -- all of them or
+        none: a seed cut short would leave a table no later start reseeds."""
+        from kazma_core.db.sqlite_session import write_transaction
+
+        async with write_transaction(db):
+            cursor = await db.execute("SELECT COUNT(*) as cnt FROM division_permissions")
+            row = await cursor.fetchone()
+            if row["cnt"] == 0:
+                for div, roles in _DEFAULT_PERMISSIONS.items():
+                    for role, resources in roles.items():
+                        for pattern, actions in resources.items():
+                            await db.execute(
+                                "INSERT OR IGNORE INTO division_permissions (division, role, resource_pattern, actions) VALUES (?, ?, ?, ?)",
+                                (div, role, pattern, json.dumps(actions)),
+                            )
 
     async def close(self) -> None:
         """Close the database connection."""
@@ -210,7 +221,6 @@ class RBACEngine:
                VALUES (?, ?, ?, ?, ?)""",
             (user_id, division, role, now, granted_by),
         )
-        await db.commit()
         logger.info("Assigned role '%s' to user '%s' in division '%s'", role, user_id, division)
         return True
 
@@ -230,7 +240,6 @@ class RBACEngine:
             "DELETE FROM user_roles WHERE user_id = ? AND division = ? AND role = ?",
             (user_id, division, role),
         )
-        await db.commit()
         deleted = cursor.rowcount > 0
         if deleted:
             logger.info("Revoked role '%s' from user '%s' in division '%s'", role, user_id, division)
@@ -425,7 +434,6 @@ class RBACEngine:
         """Clear all user roles. Returns count of deleted rows."""
         db = await self._get_db()
         cursor = await db.execute("DELETE FROM user_roles")
-        await db.commit()
         count = cursor.rowcount
         logger.warning("RBAC cleared: %d user roles deleted", count)
         return count

@@ -857,52 +857,52 @@ class DependabotStyleScanner:
     def _store_scan_report(self, report: ScanReport) -> int:
         """Store a scan report in SQLite. Returns the scan_id."""
         conn = self._get_conn()
-        cur = conn.execute(
-            """
-            INSERT INTO scan_history (scan_time, total_packages, vulnerable_packages, sources_checked, results_json)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                report.scan_time,
-                report.total_packages,
-                report.vulnerable_packages,
-                json.dumps(report.sources_checked),
-                json.dumps(
-                    [
-                        {
-                            "package": r.package,
-                            "current_version": r.current_version,
-                            "vuln_id": r.vulnerability.vuln_id,
-                            "severity": r.vulnerability.severity,
-                            "description": r.vulnerability.description,
-                            "fix_available": r.fix_available,
-                            "fix_version": r.fix_version,
-                            "source": r.source,
-                        }
-                        for r in report.results
-                    ]
-                ),
-            ),
-        )
-        scan_id: int = cur.lastrowid or 0  # type: ignore[assignment]
-        for r in report.results:
-            conn.execute(
+        with conn:  # the report and its findings commit together, or not at all
+            cur = conn.execute(
                 """
-                INSERT INTO scan_results
-                    (scan_id, package, current_version, vuln_id, severity, description, fix_available, fix_version, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO scan_history (scan_time, total_packages, vulnerable_packages, sources_checked, results_json)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
-                    scan_id,
-                    r.package,
-                    r.current_version,
-                    r.vulnerability.vuln_id,
-                    r.vulnerability.severity,
-                    r.vulnerability.description,
-                    1 if r.fix_available else 0,
-                    r.fix_version,
-                    r.source,
+                    report.scan_time,
+                    report.total_packages,
+                    report.vulnerable_packages,
+                    json.dumps(report.sources_checked),
+                    json.dumps(
+                        [
+                            {
+                                "package": r.package,
+                                "current_version": r.current_version,
+                                "vuln_id": r.vulnerability.vuln_id,
+                                "severity": r.vulnerability.severity,
+                                "description": r.vulnerability.description,
+                                "fix_available": r.fix_available,
+                                "fix_version": r.fix_version,
+                                "source": r.source,
+                            }
+                            for r in report.results
+                        ]
+                    ),
                 ),
             )
-        conn.commit()
+            scan_id: int = cur.lastrowid or 0  # type: ignore[assignment]
+            for r in report.results:
+                conn.execute(
+                    """
+                    INSERT INTO scan_results
+                        (scan_id, package, current_version, vuln_id, severity, description, fix_available, fix_version, source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        scan_id,
+                        r.package,
+                        r.current_version,
+                        r.vulnerability.vuln_id,
+                        r.vulnerability.severity,
+                        r.vulnerability.description,
+                        1 if r.fix_available else 0,
+                        r.fix_version,
+                        r.source,
+                    ),
+                )
         return scan_id

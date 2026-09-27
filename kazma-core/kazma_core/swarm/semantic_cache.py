@@ -47,7 +47,12 @@ class SemanticCache:
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
-            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            # Autocommit: each write stands alone. In the default mode an
+            # INSERT that raised (a lock timeout, a full disk) left a
+            # transaction open -- store() only logs the error -- and the
+            # cache's write lock with it, until the next successful store
+            # (tests/test_sqlite_kept_connections.py).
+            self._conn = sqlite3.connect(self.db_path, check_same_thread=False, isolation_level=None)
             self._conn.row_factory = sqlite3.Row
             apply_sqlite_pragmas(self._conn)
         return self._conn
@@ -74,7 +79,6 @@ class SemanticCache:
             except sqlite3.OperationalError:
                 pass  # Column already exists.
             conn.execute("CREATE INDEX IF NOT EXISTS idx_scope ON semantic_cache(scope)")
-            conn.commit()
 
     def _compute_hash(self, prompt: str, tools: list[dict[str, Any]] | None, scope: str = "_global_") -> str:
         """Compute SHA256 of scope + prompt + tools_json for exact hash fallback.
@@ -203,7 +207,6 @@ class SemanticCache:
                     """,
                     (prompt_hash, prompt, tools_json, response_json, embedding_json, scope),
                 )
-                conn.commit()
                 logger.debug("[SemanticCache] Successfully cached response")
                 self._evict_if_needed(conn)
             except Exception as exc:
@@ -263,7 +266,3 @@ class SemanticCache:
                     )
             except Exception as exc:
                 logger.debug("[SemanticCache] max-row eviction failed: %s", exc)
-        try:
-            conn.commit()
-        except Exception:
-            pass

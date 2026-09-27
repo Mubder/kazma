@@ -115,7 +115,10 @@ class KazmaHub:
 
     async def _get_conn(self) -> aiosqlite.Connection:
         if self._conn is None:
-            self._conn = await aiosqlite.connect(str(self.db_path))
+            # Autocommit: a write that raises cannot leave the write lock held
+            # (tests/test_sqlite_kept_connections.py); register() groups its
+            # writes in one explicit transaction.
+            self._conn = await aiosqlite.connect(str(self.db_path), isolation_level=None)
             from kazma_core.config_store import apply_sqlite_pragmas_async
 
             await apply_sqlite_pragmas_async(self._conn)
@@ -123,14 +126,12 @@ class KazmaHub:
             await self._conn.execute("PRAGMA foreign_keys = ON")
         if not self._initialized:
             await self._conn.executescript(_CREATE_SKILLS + _CREATE_DEPS + _CREATE_AGENTS)
-            await self._conn.commit()
             self._initialized = True
         return self._conn
 
     async def _init_db(self) -> None:
         conn = await self._get_conn()
         await conn.executescript(_CREATE_SKILLS + _CREATE_DEPS)
-        await conn.commit()
 
     async def close(self) -> None:
         if self._conn is not None:
@@ -150,55 +151,57 @@ class KazmaHub:
         sid = _make_skill_id(author, name, version)
         checksum = _manifest_checksum(data)
 
+        from kazma_core.db.sqlite_session import write_transaction
+
         conn = await self._get_conn()
-        await conn.execute(
-            """\
-            INSERT INTO skills
-                (name, author, version, description, license,
-                 capabilities, tags, manifest_json, checksum)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(name, author, version) DO UPDATE SET
-                description = excluded.description,
-                license      = excluded.license,
-                capabilities = excluded.capabilities,
-                tags         = excluded.tags,
-                manifest_json = excluded.manifest_json,
-                checksum      = excluded.checksum
-            """,
-            (
-                name,
-                author,
-                version,
-                data.get("description"),
-                data.get("license"),
-                json.dumps(data.get("capabilities")),
-                json.dumps(data.get("tags")),
-                json.dumps(data, ensure_ascii=False),
-                checksum,
-            ),
-        )
-        await conn.commit()
-
-        # Insert dependencies (replace existing)
-        cursor = await conn.execute(
-            "SELECT id FROM skills WHERE name=? AND author=? AND version=?",
-            (name, author, version),
-        )
-        skill_row = await cursor.fetchone()
-        if skill_row is None:
-            raise RuntimeError(f"Failed to insert skill {name}")
-        skill_id_int = skill_row["id"]
-
-        await conn.execute("DELETE FROM skill_dependencies WHERE skill_id=?", (skill_id_int,))
-        for dep in data.get("dependencies", []):
-            dep_name = dep.get("name", "") if isinstance(dep, dict) else str(dep)
-            dep_version = dep.get("version") if isinstance(dep, dict) else None
-            is_optional = dep.get("optional", False) if isinstance(dep, dict) else False
+        # The skill and its dependency list land together, or not at all.
+        async with write_transaction(conn):
             await conn.execute(
-                "INSERT INTO skill_dependencies (skill_id, dep_name, dep_version, is_optional) VALUES (?, ?, ?, ?)",
-                (skill_id_int, dep_name, dep_version, is_optional),
+                """\
+                INSERT INTO skills
+                    (name, author, version, description, license,
+                     capabilities, tags, manifest_json, checksum)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(name, author, version) DO UPDATE SET
+                    description = excluded.description,
+                    license      = excluded.license,
+                    capabilities = excluded.capabilities,
+                    tags         = excluded.tags,
+                    manifest_json = excluded.manifest_json,
+                    checksum      = excluded.checksum
+                """,
+                (
+                    name,
+                    author,
+                    version,
+                    data.get("description"),
+                    data.get("license"),
+                    json.dumps(data.get("capabilities")),
+                    json.dumps(data.get("tags")),
+                    json.dumps(data, ensure_ascii=False),
+                    checksum,
+                ),
             )
-        await conn.commit()
+
+            # Insert dependencies (replace existing)
+            async with conn.execute(
+                "SELECT id FROM skills WHERE name=? AND author=? AND version=?",
+                (name, author, version),
+            ) as cursor:
+                skill_row = await cursor.fetchone()
+            if skill_row is None:
+                raise RuntimeError(f"Failed to insert skill {name}")
+            skill_id_int = skill_row["id"]
+
+            await conn.execute("DELETE FROM skill_dependencies WHERE skill_id=?", (skill_id_int,))
+            for dep in data.get("dependencies", []):
+                dep_name = dep.get("name", "") if isinstance(dep, dict) else str(dep)
+                dep_version = dep.get("version") if isinstance(dep, dict) else None
+                is_optional = dep.get("optional", False) if isinstance(dep, dict) else False
+                await conn.execute(
+                    "INSERT INTO skill_dependencies (skill_id, dep_name, dep_version, is_optional) VALUES (?, ?, ?, ?)",
+                    (skill_id_int, dep_name, dep_version, is_optional),
+                )
         return sid
 
     async def unregister(self, skill_id: str) -> bool:
@@ -209,7 +212,6 @@ class KazmaHub:
             "DELETE FROM skills WHERE name=? AND author=? AND version=?",
             (name, author, version),
         )
-        await conn.commit()
         return cursor.rowcount > 0
 
     # ------------------------------------------------------------------
@@ -291,7 +293,6 @@ class KazmaHub:
             "UPDATE skills SET installed_path=? WHERE name=? AND author=? AND version=?",
             (str(install_path), name, author, version),
         )
-        await conn.commit()
         return install_path
 
     async def update(self, skill_id: str) -> SkillManifest | None:
@@ -317,13 +318,11 @@ class KazmaHub:
                 json.dumps(agent.metadata),
             ),
         )
-        await conn.commit()
 
     async def unregister_agent(self, agent_id: str) -> bool:
         """Remove an agent from the registry."""
         conn = await self._get_conn()
         cursor = await conn.execute("DELETE FROM agents WHERE agent_id = ?", (agent_id,))
-        await conn.commit()
         return cursor.rowcount > 0
 
     async def find_agents_by_capabilities(self, required: list[str]) -> list[AgentInfo]:
@@ -382,4 +381,3 @@ class KazmaHub:
             "UPDATE agents SET reputation = ? WHERE agent_id = ?",
             (score, agent_id),
         )
-        await conn.commit()

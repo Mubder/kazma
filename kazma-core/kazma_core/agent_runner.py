@@ -803,44 +803,6 @@ class KazmaAgent:
             logger.debug("Failed to read checkpoint summary: %s", e)
             return {"sessions": [], "count": 0}
 
-    async def delete_checkpoint_thread(self, thread_id: str) -> bool:
-        """Delete all checkpoints for a specific thread.
-
-        Returns True if deletion succeeded, False otherwise.
-        """
-        if self._checkpoint_conn is None:
-            return False
-        try:
-            await self._checkpoint_conn.execute(
-                "DELETE FROM checkpoints WHERE thread_id = ?",
-                (thread_id,),
-            )
-            await self._checkpoint_conn.commit()
-            return True
-        except Exception as e:
-            logger.debug("Failed to delete checkpoint thread %s: %s", thread_id, e)
-            return False
-
-    async def clear_all_checkpoints(self) -> int:
-        """Delete ALL checkpointed sessions.
-
-        Returns the number of deleted rows, or -1 on error.
-        """
-        if self._checkpoint_conn is None:
-            return -1
-        try:
-            cursor = await self._checkpoint_conn.execute(
-                "SELECT COUNT(*) FROM checkpoints"
-            )
-            row = await cursor.fetchone()
-            count: int = row[0] if row else 0
-            await self._checkpoint_conn.execute("DELETE FROM checkpoints")
-            await self._checkpoint_conn.commit()
-            return count
-        except Exception as e:
-            logger.debug("Failed to clear checkpoints: %s", e)
-            return -1
-
     # ── Streaming graph (VAL-ARCH-002) ─────────────────────────────
 
     def get_streaming_graph(self) -> Any:

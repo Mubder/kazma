@@ -186,33 +186,33 @@ class VulnerabilityDisclosure:
 
         with self._lock:
             conn = self._get_conn()
-            conn.execute(
-                """
-                INSERT INTO reports
-                    (id, title, description, severity, steps_to_reproduce,
-                     impact, reporter_email, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'submitted', ?)
-                """,
-                (
-                    report_id,
-                    report.get("title", ""),
-                    report.get("description", ""),
-                    report.get("severity", "unknown"),
-                    report.get("steps_to_reproduce", ""),
-                    report.get("impact", ""),
-                    report.get("reporter_email", ""),
-                    now,
-                ),
-            )
-            # Record the initial status
-            conn.execute(
-                """
-                INSERT INTO status_history (report_id, old_status, new_status, changed_at, notes)
-                VALUES (?, '', 'submitted', ?, 'Report created')
-                """,
-                (report_id, now),
-            )
-            conn.commit()
+            with conn:  # the report and its first history row land together
+                conn.execute(
+                    """
+                    INSERT INTO reports
+                        (id, title, description, severity, steps_to_reproduce,
+                         impact, reporter_email, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'submitted', ?)
+                    """,
+                    (
+                        report_id,
+                        report.get("title", ""),
+                        report.get("description", ""),
+                        report.get("severity", "unknown"),
+                        report.get("steps_to_reproduce", ""),
+                        report.get("impact", ""),
+                        report.get("reporter_email", ""),
+                        now,
+                    ),
+                )
+                # Record the initial status
+                conn.execute(
+                    """
+                    INSERT INTO status_history (report_id, old_status, new_status, changed_at, notes)
+                    VALUES (?, '', 'submitted', ?, 'Report created')
+                    """,
+                    (report_id, now),
+                )
 
         return report_id
 
@@ -243,18 +243,18 @@ class VulnerabilityDisclosure:
             if old_status != "submitted":
                 raise ValueError(f"Cannot acknowledge report in status '{old_status}'; must be 'submitted'")
 
-            conn.execute(
-                "UPDATE reports SET status = 'acknowledged', acknowledged_at = ? WHERE id = ?",
-                (now, report_id),
-            )
-            conn.execute(
-                """
-                INSERT INTO status_history (report_id, old_status, new_status, changed_at, notes)
-                VALUES (?, 'submitted', 'acknowledged', ?, 'Receipt acknowledged')
-                """,
-                (report_id, now),
-            )
-            conn.commit()
+            with conn:  # the status and its history row land together
+                conn.execute(
+                    "UPDATE reports SET status = 'acknowledged', acknowledged_at = ? WHERE id = ?",
+                    (now, report_id),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO status_history (report_id, old_status, new_status, changed_at, notes)
+                    VALUES (?, 'submitted', 'acknowledged', ?, 'Receipt acknowledged')
+                    """,
+                    (report_id, now),
+                )
 
         return {
             "report_id": report_id,
@@ -294,18 +294,18 @@ class VulnerabilityDisclosure:
                 patch_fields["patched_at"] = now
 
             set_clause = ", ".join(f"{k} = ?" for k in patch_fields)
-            conn.execute(
-                f"UPDATE reports SET {set_clause} WHERE id = ?",
-                (*patch_fields.values(), report_id),
-            )
-            conn.execute(
-                """
-                INSERT INTO status_history (report_id, old_status, new_status, changed_at, notes)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (report_id, old_status, status, now, notes),
-            )
-            conn.commit()
+            with conn:  # the status and its history row land together
+                conn.execute(
+                    f"UPDATE reports SET {set_clause} WHERE id = ?",
+                    (*patch_fields.values(), report_id),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO status_history (report_id, old_status, new_status, changed_at, notes)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (report_id, old_status, status, now, notes),
+                )
 
     async def get_report(self, report_id: str) -> dict:
         """Get full report details with status history.
@@ -419,14 +419,14 @@ class VulnerabilityDisclosure:
 
         with self._lock:
             conn = self._get_conn()
-            conn.execute(
-                """
-                INSERT INTO advisories (report_id, cve_id, content, published_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (report_id, advisory_id, advisory_content, now),
-            )
-            conn.commit()
+            with conn:  # commits, or rolls back when the write raises
+                conn.execute(
+                    """
+                    INSERT INTO advisories (report_id, cve_id, content, published_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (report_id, advisory_id, advisory_content, now),
+                )
 
         return {
             "report_id": report_id,

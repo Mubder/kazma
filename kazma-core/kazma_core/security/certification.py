@@ -90,7 +90,10 @@ class KazmaCertification:
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
-            self._conn = sqlite3.connect(str(self._db_path))
+            # Autocommit: each write is one statement, and one that raises
+            # cannot leave the write lock held
+            # (tests/test_sqlite_kept_connections.py).
+            self._conn = sqlite3.connect(str(self._db_path), isolation_level=None)
             from kazma_core.config_store import apply_sqlite_pragmas
 
             apply_sqlite_pragmas(self._conn)
@@ -114,7 +117,6 @@ class KazmaCertification:
                 )
                 """
             )
-            conn.commit()
 
     # ------------------------------------------------------------------
     # Public API
@@ -163,7 +165,6 @@ class KazmaCertification:
                     """,
                     (skill_id, level, level_cfg["badge"], now.isoformat(), valid_until),
                 )
-                conn.commit()
 
         return CertificationResult(
             certified=certified,
@@ -228,7 +229,6 @@ class KazmaCertification:
                 "UPDATE certifications SET revoked = 1, revoke_reason = ? WHERE skill_id = ? AND revoked = 0",
                 (reason, skill_id),
             )
-            conn.commit()
             return cursor.rowcount > 0
 
     # ------------------------------------------------------------------

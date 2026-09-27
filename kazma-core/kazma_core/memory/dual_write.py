@@ -268,7 +268,10 @@ class DualWriteMirror:
         bid = _belief_id(tenant_id, sub, pred, now)
         meta = {"source": "dual_write_mirror", "fact_text": (fact_text or "")[:500]}
         try:
-            with self._lock:
+            # `with self._primary:` commits, or rolls back when the write
+            # raises -- the writer is shared, and an open transaction on it
+            # would hold memory_state.db's write lock until the next write.
+            with self._lock, self._primary:
                 self._primary.execute(
                     """
                     INSERT OR IGNORE INTO beliefs (
@@ -297,7 +300,6 @@ class DualWriteMirror:
                         _embedding_model_version(),
                     ),
                 )
-                self._primary.commit()
             return bid
         except Exception:
             logger.debug("[dual_write] belief mirror failed", exc_info=True)
@@ -366,7 +368,7 @@ class DualWriteMirror:
             # upsert, and state mirror below can each block up to ~60s;
             # holding self._lock across them serialized ALL V2 mirror writes
             # process-wide behind one slow embed call (audit finding).
-            with self._lock:
+            with self._lock, self._primary:
                 self._primary.execute(
                     """
                     INSERT OR IGNORE INTO episodes (
@@ -391,7 +393,6 @@ class DualWriteMirror:
                         row["embedding_model_version"],
                     ),
                 )
-                self._primary.commit()
 
             # Compute + store the episode embedding so dense vector recall can
             # find it. Also dual-write to VectorBackend (Qdrant/pgvector) when
@@ -406,13 +407,12 @@ class DualWriteMirror:
                 if ep_text:
                     emb_blob = encode_text_to_blob(ep_text)
                     if emb_blob is not None:
-                        with self._lock:
+                        with self._lock, self._primary:
                             self._primary.execute(
                                 "UPDATE episodes SET embedding=? WHERE id=? AND embedding IS NULL "
                                 "AND tier != 'forgotten'",
                                 (emb_blob, eid),
                             )
-                            self._primary.commit()
                     # Remote / hybrid vector upsert (best-effort)
                     try:
                         from kazma_core.memory.backends import get_vector_backend

@@ -2532,15 +2532,25 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
 - **Every product module is reached** (`tests/test_orphan_modules.py`); a
   module only its own tests import fails, unless allowlisted with a reason.
 - **A SQLite connection kept across calls cannot sit on the write lock**
-  (`tests/test_sqlite_kept_connections.py`, 2026-09-27). Every
+  (`tests/test_sqlite_kept_connections.py`, 2026-09-27). In Python's default
+  mode every INSERT/UPDATE/DELETE opens a transaction -- also one that changes
+  nothing (the cron store, §16 C) and one that raises (fourteen more stores:
+  the memory writer, the LLM ledger, the semantic cache...). Every
   `sqlite3.connect`/`aiosqlite.connect` product code keeps on an attribute or
-  a global is found from the source. It opens in autocommit mode
-  (`isolation_level=None`), or it is declared in `DEFAULT_MODE_KEPT` with its
-  reason and every write made on it is committed on every normal path (a
-  commit after it in the same or an enclosing block, or `with conn:` around
-  it). The declared list only shrinks. The cron store (§16 C) was the
-  instance: in the default mode a write that changes nothing still opens a
-  transaction.
+  a global is found from the source (also one opened into a local and
+  stored later), and it is one of: autocommit
+  (`isolation_level=None`; a group of writes is an explicit `BEGIN
+  IMMEDIATE` -- `db.sqlite_session.write_transaction` on aiosqlite, which
+  runs the groups on one connection one at a time: a second `BEGIN` on an
+  open group fails); a
+  `sqlite3` connection every write on which runs inside `with conn:` (commit,
+  or rollback when the block raises); or LangGraph's saver connection, on
+  which Kazma writes nothing of its own. An aiosqlite connection kept in the
+  default mode is refused: `async with` closes it, it is no transaction.
+  Every explicit `BEGIN` in product code rolls back on its error path (same
+  file). Behaviour: `tests/test_kept_connection_error_paths.py` makes each
+  store's write fail inside the statement and takes the lock from another
+  connection.
 - **Debt ratchet:** `tests/test_debt_ratchet.py` holds the blind/silent
   exception-handler counts; they may only go down, and lowering them means
   updating the baseline in the same change. It counts untracked files too:
