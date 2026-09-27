@@ -37,7 +37,7 @@ from kazma_core.providers import PROVIDER_PRESETS
 from kazma_core.runtime.live_llm import coerce_api_key
 from kazma_core.http_tls import shared_ssl_context
 
-__all__ = ["ModelRegistry", "get_model_registry", "initialize_model_registry", "lookup_context_window", "reset_model_registry"]
+__all__ = ["ModelRegistry", "get_model_registry", "initialize_model_registry", "lookup_context_window", "peek_model_registry", "reset_model_registry"]
 
 if TYPE_CHECKING:
     from kazma_core.config_store import ConfigStore
@@ -135,6 +135,12 @@ def get_model_registry() -> ModelRegistry:
             raise RuntimeError(
                 "ModelRegistry not initialized. Call initialize_model_registry() first."
             ) from exc
+    return _registry
+
+
+def peek_model_registry() -> ModelRegistry | None:
+    """The registry if this process made one; never makes one. Shutdown only
+    closes what exists (tests/test_shutdown_builds_nothing.py)."""
     return _registry
 
 

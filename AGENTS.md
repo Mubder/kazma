@@ -2908,7 +2908,16 @@ code) and Kazma ran with nobody supervising it.
   (`kazma_gateway/adapters/ws_shutdown.closes_on_shutdown`); they used to sit
   in `recv()` until the platform next spoke, costing 5 s each, in sequence, on
   every reload (`tests/test_gateway_prompt_shutdown.py`, real websockets).
-  A new socket-reading adapter uses the same helper.
+  A new socket-reading adapter uses the same helper. **And the shutdown hook
+  builds nothing it only came to close** (2026-09-27): it called
+  `get_session_manager()`, which on a server nobody had opened the web UI on
+  BUILT the manager -- every chat session loaded from Postgres, on the loop --
+  so the guard's 60 s ran out, the server was killed and the owner paged.
+  `_on_shutdown` uses the `peek_*` accessors (session manager, model
+  registry, message bus: what exists, or None) and closes off the loop.
+  Gate: `tests/test_shutdown_builds_nothing.py` (every accessor the hook
+  calls, resolved through its imports; one that assigns a module global
+  fails).
 - **The OS brings a dead guard back:** `install_service.py` registers a
   5-minute repeating trigger with `MultipleInstances IgnoreNew`. An existing
   task gets it only when re-registered from an elevated shell (owner action).
