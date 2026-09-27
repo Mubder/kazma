@@ -3563,8 +3563,10 @@
     var nB = sum.beliefs || (data.beliefs || []).length || 0;
     var nE = sum.episodes || (data.episodes || []).length || 0;
     var nK = sum.knowledge || (data.knowledge || []).length || 0;
+    // Weekly topic summaries (plan C2b): shown only when recall used one.
+    var nW = sum.weekly_summaries || (data.weekly_summaries || []).length || 0;
     if (meta) {
-      meta.textContent = nB + ' beliefs · ' + nE + ' episodes · ' + nK + ' KB';
+      meta.textContent = nB + ' beliefs · ' + (nW ? nW + ' weekly · ' : '') + nE + ' episodes · ' + nK + ' KB';
     }
     if (data.hint && data.detail === 'summary') {
       // Light inject summary when full explain is off
@@ -3582,8 +3584,11 @@
       var isAr = (document.documentElement.getAttribute('dir') || '') === 'rtl' || (window.KAZMA_LANG === 'ar');
       var label = kind === 'belief'
         ? (isAr ? 'معتقد' : 'BELIEF')
-        : (kind === 'episode' ? (isAr ? 'حلقة' : 'EPISODE') : (isAr ? 'معرفة' : 'KB'));
-      var cls = kind === 'belief' ? 'is-belief' : (kind === 'episode' ? 'is-episode' : 'is-kb');
+        : kind === 'weekly'
+          ? (isAr ? 'ملخص أسبوعي' : 'WEEKLY')
+          : (kind === 'episode' ? (isAr ? 'حلقة' : 'EPISODE') : (isAr ? 'معرفة' : 'KB'));
+      var cls = kind === 'belief' ? 'is-belief'
+        : (kind === 'weekly' ? 'is-weekly' : (kind === 'episode' ? 'is-episode' : 'is-kb'));
       var score = (h.score != null && h.score !== '') ? Number(h.score).toFixed(3) : '';
       lines.push(
         '<div class="agent-memory-hit ' + cls + '">' +
@@ -3596,6 +3601,8 @@
     }
     (data.beliefs || []).forEach(function(h) { row('belief', h); });
     (data.episodes || []).forEach(function(h) { row('episode', h); });
+    // After the history, as the model is shown them (memory/recall.py).
+    (data.weekly_summaries || []).forEach(function(h) { row('weekly', h); });
     (data.knowledge || []).forEach(function(h) { row('knowledge', h); });
     var hintHtml = (data.hint && data.detail === 'summary')
       ? '<div class="agent-memory-explain-empty" style="margin-bottom:6px;">' + escapeHtml(String(data.hint)) + '</div>'

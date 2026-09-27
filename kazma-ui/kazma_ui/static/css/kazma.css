@@ -2556,6 +2556,9 @@ details.kazma-working > summary {
 .agent-memory-hit.is-kb {
   border-left: 2px solid #f472b6;
 }
+.agent-memory-hit.is-weekly {
+  border-left: 2px solid #a78bfa;
+}
 .agent-memory-kind {
   font-size: 0.62rem;
   font-weight: 700;
