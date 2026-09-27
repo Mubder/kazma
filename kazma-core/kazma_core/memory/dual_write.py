@@ -36,6 +36,8 @@ import threading
 import time
 from typing import Any
 
+from kazma_core.memory.episode_text import embed_text
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -178,7 +180,7 @@ def episode_row(
         "created_at": time.time() if created_at is None else float(created_at),
         "meta": meta,
         "embedding_model_version": _embedding_model_version(),
-        "embed_text": (summary_text or user_text or assistant_text or "").strip(),
+        "embed_text": embed_text(user_text, assistant_text, summary_text),
     }
 
 

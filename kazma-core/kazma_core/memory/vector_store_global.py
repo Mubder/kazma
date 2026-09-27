@@ -150,6 +150,7 @@ class VectorStore:
         self._model: Any | None = None
         self._failed_at: float | None = None
         self._space: str = _SPACE
+        self._dim: int | None = None  # the size this collection's vectors are
 
     # ── Initialisation ─────────────────────────────────────────────────
 
@@ -231,6 +232,7 @@ class VectorStore:
         if not embedding:
             logger.warning("[VectorStore] Index skipped — empty embedding for %s", doc_id)
             return False
+        self._fit(len(embedding))
         try:
             # ChromaDB rejects empty metadata dicts — always pass at least one key.
             meta = dict(metadata or {})
@@ -313,16 +315,26 @@ class VectorStore:
         A failing collection raises: the caller decides what an incomplete
         answer means (the backfill must not take "none" for "all missing").
         """
+        return set(self.models())
+
+    def models(self) -> dict[str, str | None]:
+        """Every document id with the model its vector records (None: none).
+
+        Read in pages, filtered here: Chroma's ``$ne`` also matches a vector
+        without the key, and every vector written before 2026-09-27 has none.
+        """
         if not self._ensure_client():
-            return set()
-        found: set[str] = set()
+            return {}
+        found: dict[str, str | None] = {}
         offset = 0
         while True:
-            page = self._collection.get(include=[], limit=_ID_PAGE, offset=offset).get("ids") or []
-            found.update(str(i) for i in page)
-            if len(page) < _ID_PAGE:
+            page = self._collection.get(include=["metadatas"], limit=_ID_PAGE, offset=offset)
+            ids = page.get("ids") or []
+            for doc_id, meta in zip(ids, page.get("metadatas") or [None] * len(ids)):
+                found[str(doc_id)] = (meta or {}).get("model")
+            if len(ids) < _ID_PAGE:
                 return found
-            offset += len(page)
+            offset += len(ids)
 
     def delete_many(self, doc_ids: list[str]) -> int:
         """Remove *doc_ids* from the collection; returns how many were asked for.
@@ -335,6 +347,30 @@ class VectorStore:
         for start in range(0, len(doc_ids), 500):
             self._collection.delete(ids=doc_ids[start:start + 500])
         return len(doc_ids)
+
+    def _fit(self, dim: int) -> None:
+        """Make the collection hold vectors of size *dim* before writing one.
+
+        A collection keeps the size of its first vector, and Chroma refuses
+        any other: after a switch to a model of another size every write
+        would fail. The vectors it holds were made by the old model, so they
+        are dropped with the collection and the maintenance pass embeds the
+        library again. Only a size the collection actually holds decides it.
+        """
+        if self._dim == dim:
+            return
+        held = self._collection.get(limit=1, include=["embeddings"]).get("embeddings")
+        stored = len(held[0]) if held is not None and len(held) else None
+        if stored is not None and stored != dim:
+            logger.warning(
+                "[VectorStore] %s holds %d-dimension vectors and the model now makes %d: "
+                "rebuilding it", self._collection_name, stored, dim,
+            )
+            self._client.delete_collection(self._collection_name)
+            self._ready = False
+            if not self._ensure_client():
+                raise RuntimeError(f"could not recreate {self._collection_name}")
+        self._dim = dim
 
     def drop(self) -> bool:
         """Delete the whole collection (its Knowledge Library is being deleted).
@@ -365,6 +401,7 @@ class VectorStore:
         keep = [(d, u) for d, u in ((d, _unit(v)) for d, v in zip(docs, vectors)) if u]
         if not keep:
             return 0
+        self._fit(len(keep[0][1]))
         self._collection.upsert(
             ids=[d[0] for d, _v in keep],
             embeddings=[v for _d, v in keep],

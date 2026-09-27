@@ -40,7 +40,9 @@ every change is inside the existing V2 engine.
 | S2 | Memory calls off the event loop (supervisor knowledge search, probe, federated search, health card) | ☑ `tests/test_static_gates.py` |
 | W2 | A turn the extraction pool cannot take goes to the durable queue (episode and facts), never dropped | ☑ `tests/test_memory_every_turn.py` |
 | W1 | Facts follow the order they were said in: an older statement is history, never a replacement; every late writer (queue, deep pass, reconcile) passes the turn's time; reconciled turns get their facts (heuristic + queued deep pass, 60 a pass) | ☑ `tests/test_memory_event_time.py` |
-| S2+ | Remaining Stage 2 items, in the approved order: R3, R5, R8, W4, W5, then C1, U1, W6, R6, C2 | ☐ |
+| R3 | Recall shows the model the question AND the answer (`memory/episode_text.py`); it still compares by the question. Embedding the answer was built and measured, and not adopted: precision fell in four categories, answer-only questions gained nothing | ☑ `tests/test_memory_episode_text.py` |
+| X3 | Found building R3: the memory Rebuild deleted `data_dir/vector_memory` -- now the Knowledge Library's live store. Removed; the Knowledge Library re-embeds another model's vectors and rebuilds a collection of another size itself | ☑ `tests/test_knowledge_meaning_search.py` |
+| S2+ | Remaining Stage 2 items, in the approved order: R5, R8, W4, W5, then C1, U1, W6, R6, C2 | ☐ |
 
 ---
 

@@ -63,6 +63,13 @@ logger = logging.getLogger(__name__)
 _RRF_K = 60
 
 
+def _embedding_model() -> str:
+    """The embedding model the Knowledge Library's vectors are made with."""
+    from kazma_core.memory.embedder import get_embedding_model_name
+
+    return get_embedding_model_name()
+
+
 def _vector_dir_for(store: KnowledgeStore) -> str:
     """Where a library's meaning vectors live.
 
@@ -269,14 +276,7 @@ class KnowledgeIndex:
                     vs.index(
                         doc_id=chunk["id"],
                         text=chunk["content"],
-                        metadata={
-                            "library_id": library_id,
-                            "source_url": chunk.get("source_url", ""),
-                            "section_header": chunk.get("section_header", ""),
-                            "document_title": chunk.get("document_title", ""),
-                            "chunk_index": int(chunk.get("chunk_index", 0)),
-                            "content_hash": chunk.get("content_hash", ""),
-                        },
+                        metadata=self._chunk_vector_metadata(library_id, chunk),
                     )
                 except Exception as exc:
                     logger.warning(
@@ -332,20 +332,13 @@ class KnowledgeIndex:
             if result["published"]:
                 for chunk in chunks:
                     try:
-                        metadata = chunk.get("metadata") or {}
                         vector.index(
                             doc_id=chunk["id"],
                             text=chunk["content"],
-                            metadata={
-                                "library_id": library_id,
-                                "source_url": chunk["source_url"],
-                                "document_id": document_id,
-                                "version_id": version_id,
-                                "page_start": int(metadata.get("page_start", 0)),
-                                "page_end": int(metadata.get("page_end", 0)),
-                                "citation_label": str(metadata.get("citation_label", "")),
-                                "content_hash": chunk["content_hash"],
-                            },
+                            metadata=self._chunk_vector_metadata(
+                                library_id,
+                                {**chunk, "document_id": document_id, "version_id": version_id},
+                            ),
                         )
                     except Exception as exc:
                         logger.warning(
@@ -744,6 +737,7 @@ class KnowledgeIndex:
                                   "unavailable": False, "complete": True}
         stores: dict[str, VectorStore] = {}
         todo: list[tuple[int, str, str]] = []  # (characters, library, chunk id)
+        model = _embedding_model()
         for library_id in self._store.all_library_ids():
             if time.monotonic() >= deadline:
                 report["complete"] = False
@@ -756,10 +750,15 @@ class KnowledgeIndex:
             report["libraries"] += 1
             # Vectors first: a chunk ingested between the two reads is then
             # embedded twice (harmless), never taken for a retired one.
-            have = vs.ids()
+            tags = vs.models()
+            have = set(tags)
+            # Made by another model. A vector records its model since
+            # 2026-09-27; one without the tag was made by the model of the day.
+            stale = {cid for cid, made_by in tags.items() if made_by and made_by != model}
             sizes = self._store.active_chunk_sizes(library_id)
             report["removed"] += vs.delete_many(sorted(have - set(sizes)))
-            todo += [(sizes[cid], library_id, cid) for cid in set(sizes) - have]
+            todo += [(sizes[cid], library_id, cid)
+                     for cid in (set(sizes) - have) | (stale & set(sizes))]
             stores[library_id] = vs
         todo.sort()
         report["missing"] = len(todo)
@@ -789,8 +788,14 @@ class KnowledgeIndex:
 
     @staticmethod
     def _chunk_vector_metadata(library_id: str, chunk: dict[str, Any]) -> dict[str, Any]:
-        """What the vector store keeps beside a chunk; Chroma refuses None values."""
+        """What the vector store keeps beside a chunk; Chroma refuses None values.
+
+        Every write goes through here -- ingest, document publish, the repair
+        -- so search can filter any vector by library and document, and the
+        repair can tell which model made it.
+        """
         meta = {
+            "model": _embedding_model(),
             "library_id": library_id,
             "source_url": chunk.get("source_url"),
             "section_header": chunk.get("section_header"),

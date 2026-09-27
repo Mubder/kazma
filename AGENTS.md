@@ -654,6 +654,23 @@ four injected were noise.
   and the graph walk's head. The access-count "rotation" penalty is gone: a
   fact asked about often is not demoted for it (R4). Display de-slugs the
   subject ("platform team owns ...").
+- **The model sees the question AND the answer (R3, 2026-09-27).**
+  `memory/episode_text.py` is the one home of an episode's texts:
+  `display_text` ("User: ... / Assistant: ..." when both sides exist; one
+  side is shown as it is -- a swarm result must not read as something the
+  user said) is what the injected block and the tool/probe outputs show
+  (`metadata["display"]`, read through `recall._shown`); `match_text`
+  (summary, else question, else answer) stays what recall compares,
+  de-duplicates and seeds the graph walk by -- used for those, the display
+  changed which memories were kept and precision fell; `embed_text` keeps
+  the vector question-first. Embedding the answer too was built and
+  measured, and not adopted: with every threshold re-swept, precision fell
+  in four benchmark categories (fact 0.71 -> 0.65, multi 0.89 -> 0.78, noise
+  0.61 -> 0.57, paraphrase 0.66 -> 0.65) and answer-only questions gained
+  nothing (their words are in the answer, which keyword search and coverage
+  read). Gate: `tests/test_memory_episode_text.py::test_every_episode_text_comes_from_one_place`
+  (no "summary first" choice outside that module; ids and dedupe keys take
+  the question first and are exempt).
 - **Measured, not asserted (R7):** `kazma_core/memory/benchmark.py` seeds a
   private database the product's way -- turns via `episode_row`, facts via
   `mutate_belief(private=True)`, which keeps every write in that database (no
@@ -1476,6 +1493,18 @@ module was deleted and the import's `except` said "chromadb not installed".
   lasted two months. A library's `chunk_count` is COUNTED by every library
   SELECT (`_CHUNK_COUNT_SQL`): the column is a cache several writers keep,
   one missed, and the page listed 365 chunks for a library holding 366.
+- **An embedding-model switch** (2026-09-27): a vector records the model
+  that made it (`model` in its metadata; every write builds it in
+  `_chunk_vector_metadata`) and the repair re-embeds another model's. Tags
+  are read in Python (`VectorStore.models`): Chroma's `$ne` also matches a
+  vector WITHOUT the key, and every vector written before the tag has none
+  (it was made by the model of the day). A collection holding vectors of
+  another size is rebuilt before the first write (`VectorStore._fit`, from
+  the size it actually holds): Chroma keeps its first size and refuses any
+  other. The memory Rebuild (`reembed.rebuild_embeddings`) used to finish
+  with `shutil.rmtree(data_dir/vector_memory)` -- the V1 chat index once,
+  the Knowledge Library's live store since 2026-09-26; it no longer touches
+  it.
 - Gate: `tests/test_knowledge_meaning_search.py` (a fake chromadb in CI, the
   real one where the `rag` extra is installed).
 

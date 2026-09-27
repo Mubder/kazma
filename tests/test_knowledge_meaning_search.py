@@ -60,13 +60,23 @@ class _Collection:
             for key, value in meta.items():
                 if value is None:  # what Chroma does with a None value
                     raise ValueError(f"Expected metadata value for {key!r}, got None")
+        held = {len(v) for v, _d, _m in self.rows.values()}
+        for e in embeddings:
+            if held and len(e) not in held:  # Chroma keeps its first size
+                raise ValueError(f"Collection expecting embedding with dimension of "
+                                 f"{held.pop()}, got {len(e)}")
         for i, e, d, m in zip(ids, embeddings, documents, metadatas):
             self.rows[i] = (list(e), d, dict(m))
 
     def get(self, ids=None, include=None, limit=None, offset=None):
         keys = list(self.rows) if ids is None else [i for i in ids if i in self.rows]
         keys = keys[offset or 0:][:limit] if limit is not None else keys[offset or 0:]
-        return {"ids": keys, "documents": [self.rows[k][1] for k in keys]}
+        out = {"ids": keys, "documents": [self.rows[k][1] for k in keys]}
+        if include and "metadatas" in include:
+            out["metadatas"] = [dict(self.rows[k][2]) for k in keys]
+        if include and "embeddings" in include:
+            out["embeddings"] = [list(self.rows[k][0]) for k in keys]
+        return out
 
     def count(self):
         return len(self.rows)
@@ -368,8 +378,11 @@ def test_a_library_counts_its_chunks_when_it_is_read(kb):
 
 def test_the_backfill_stops_at_its_budget_and_the_next_pass_continues(kb, monkeypatch):
     _seed(kb, "api", [f"Endpoint number {i} returns a list" for i in range(10)])
+    from kazma_core.stores import knowledge_index
+
+    # This module's clock only: the model-name lookup reads the global one.
     clock = iter([0.0, 0.0, 0.0, 99.0] + [199.0] * 50)
-    monkeypatch.setattr("kazma_core.stores.knowledge_index.time.monotonic", lambda: next(clock))
+    monkeypatch.setattr(knowledge_index, "time", types.SimpleNamespace(monotonic=lambda: next(clock)))
     part = kb.index.backfill_vectors(time_budget_s=30, batch=4)
     assert part["complete"] is False and 0 < part["embedded"] < 10
 
@@ -495,3 +508,80 @@ def test_with_the_real_chromadb(tmp_path, monkeypatch):
         assert Path(tmp_path / "vector_memory").is_dir()
     finally:
         store.close()
+
+
+# ── an embedding-model switch ─────────────────────────────────────────────
+
+
+def test_a_vector_records_its_model_and_another_models_are_embedded_again(kb, monkeypatch):
+    from kazma_core.stores import knowledge_index
+
+    _seed(kb, "api", ["Webhooks retry delivery five times", "Install the command line tool"])
+    monkeypatch.setattr(knowledge_index, "_embedding_model", lambda: "model-one")
+    assert kb.index.backfill_vectors(time_budget_s=30)["embedded"] == 2
+    rows = kb.index._vector_store_for("api")._collection.rows
+    assert {meta["model"] for _v, _d, meta in rows.values()} == {"model-one"}
+
+    monkeypatch.setattr(knowledge_index, "_embedding_model", lambda: "model-two")
+    assert kb.index.backfill_vectors(time_budget_s=30)["embedded"] == 2
+    assert {meta["model"] for _v, _d, meta in rows.values()} == {"model-two"}
+    assert kb.index.backfill_vectors(time_budget_s=30)["embedded"] == 0
+
+    # A vector written before vectors recorded their model is the model of
+    # the day's: it is not embedded again (Chroma's $ne would have said so).
+    for _v, _d, meta in rows.values():
+        meta.pop("model")
+    assert kb.index.backfill_vectors(time_budget_s=30)["embedded"] == 0
+
+
+def test_a_collection_of_another_size_is_rebuilt(kb, monkeypatch):
+    """Chroma keeps a collection's first vector size and refuses any other."""
+
+    class Narrow(_Embedder):
+        dim = 16
+
+        def encode(self, text):
+            return super().encode(text)[:16]
+
+        def encode_batch(self, texts):
+            return [self.encode(t) for t in texts]
+
+    _seed(kb, "api", ["Webhooks retry delivery five times", "Install the command line tool"])
+    assert kb.index.backfill_vectors(time_budget_s=30)["embedded"] == 2
+    vs = kb.index._vector_store_for("api")
+    before = vs._collection
+    assert {len(v) for v, _d, _m in before.rows.values()} == {DIM}
+
+    # Negative control: the same size writes into the same collection.
+    vs.index_many([("api-9", "Tokens expire after an hour", {"library_id": "api"})])
+    assert vs._collection is before
+
+    monkeypatch.setattr(vsg, "get_encoder", lambda model_name=None: Narrow())
+    fresh = kb.index.__class__(kb.store)  # a new process: nothing cached
+    monkeypatch.setattr("kazma_core.stores.knowledge_index._embedding_model", lambda: "narrow")
+    assert fresh.backfill_vectors(time_budget_s=30)["embedded"] == 2
+    rebuilt = fresh._vector_store_for("api")._collection
+    assert rebuilt is not before and {len(v) for v, _d, _m in rebuilt.rows.values()} == {16}
+
+
+def test_a_rebuild_of_memory_vectors_leaves_the_knowledge_library_alone(tmp_path, monkeypatch):
+    """The Embedder page's Rebuild deleted data_dir/vector_memory: the V1 chat
+    index once, the Knowledge Library's live store since 2026-09-26."""
+    import sqlite3
+
+    from kazma_core.memory import reembed
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
+
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("KAZMA_MEMORY_STATE_DB", str(tmp_path / "memory_state.db"))
+    conn = sqlite3.connect(str(tmp_path / "memory_state.db"))
+    ensure_primary_schema(conn)
+    conn.close()
+    chroma = tmp_path / "vector_memory" / "chroma.sqlite3"
+    chroma.parent.mkdir()
+    chroma.write_bytes(b"the knowledge library's vectors")
+    monkeypatch.setattr("kazma_core.memory.embedder.get_embedder", lambda: _Embedder())
+
+    summary = reembed.rebuild_embeddings(model_name="m")
+    assert summary["episodes"] == 0
+    assert chroma.read_bytes() == b"the knowledge library's vectors"
