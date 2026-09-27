@@ -678,10 +678,12 @@ four injected were noise.
   not "تذكر". It promotes the turn to the recall tier (`episode_row`) and is
   a durable cue (`is_filler_turn`: "تذكر هذا" is eight characters).
 - **Small talk is kept, never recalled (W5).** `episode_text.is_small_talk`:
-  a greeting, thanks or acknowledgement (the words, never a length -- "Pixel's
-  age?" is short and a question) with a reply under 200 characters. Every
-  episode candidate path of recall (local, Postgres-primary, mirror top-up)
-  leaves it out; the row stays. "ok" followed by a report is history.
+  the whole message is small talk by its words, never by length ("Pixel's
+  age?" is short and a question). A greeting, thanks or goodbye with a reply
+  under 1,000 characters (live greeting replies ran to 531, median 141); an
+  acknowledgement ("ok", "yes", "تمام") only with a reply under 200 -- it is
+  often the go-ahead for a report. Every episode candidate path of recall
+  (local, Postgres-primary, mirror top-up) leaves it out; the row stays.
 - **Measured, not asserted (R7):** `kazma_core/memory/benchmark.py` seeds a
   private database the product's way -- turns via `episode_row`, facts via
   `mutate_belief(private=True)`, which keeps every write in that database (no
