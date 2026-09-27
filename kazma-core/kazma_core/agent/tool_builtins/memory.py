@@ -601,6 +601,13 @@ def register_memory_tools(registry: Any) -> None:
                     "id": h.id, "content": h.content, "score": h.score,
                     "kind": "belief", "source": h.source, "metadata": h.metadata,
                 })
+            for h in result.summaries:
+                # A week's topic summary (plan C2): its week, title and text.
+                out.append({
+                    "id": h.id, "content": (h.metadata or {}).get("display") or h.content,
+                    "score": h.score, "kind": "weekly_summary", "source": h.source,
+                    "metadata": h.metadata,
+                })
             for h in result.episodes:
                 out.append({
                     "id": h.id, "content": h.content, "score": h.score,

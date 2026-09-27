@@ -1,5 +1,5 @@
 {
- "version": 2,
+ "version": 3,
  "seed": 20260926,
  "sessions": [
   {
@@ -7691,6 +7691,1896 @@
    "importance": 3
   }
  ],
+ "summaries": [
+  {
+   "id": "sw1",
+   "day": 0,
+   "title": "Getting to know Sami: home, work, family, running",
+   "text": "Sami introduced himself: he lives in Porto and works as a structural engineer at Aurelia Bridges. He has a lazy four-year-old greyhound called Pixel, is allergic to shellfish, and his partner Noor teaches chemistry at a secondary school. Kazma drew up a 12-week plan for the Lisbon half marathon on March 22 (three easy runs a week, a Sunday long run growing from 8 to 18 km, a two-week taper) and suggested Cantinho do Avillez for Noor's birthday dinner: seafood for her, a meat menu for him. Left open: booking the dinner.",
+   "sources": [
+    "p01#1",
+    "p01#2",
+    "p02#1",
+    "p02#2",
+    "p03#1",
+    "p04#1"
+   ]
+  },
+  {
+   "id": "sw2",
+   "day": 7,
+   "title": "Passport renewal, the Tagus retrofit, Maya's new school",
+   "text": "Sami's passport expires on 14 March 2031; Kazma will remind him in September 2030 to renew it. At work he now leads the Tagus footbridge retrofit, due at the end of June, under his manager Ines Carvalho, who likes detailed status reports; Kazma offered a milestone plan. His daughter Maya, seven, started at Escola Azul: school begins at 8:40, so they leave home by 8:10 and a 7:30 alarm leaves time for breakfast.",
+   "sources": [
+    "p05#1",
+    "p06#1",
+    "p06#2",
+    "p07#1",
+    "p08#1"
+   ]
+  },
+  {
+   "id": "sw4",
+   "day": 70,
+   "title": "Lisbon trip bookings and a laptop battery fix",
+   "text": "For the Lisbon half marathon trip the hotel is booked (reference ZX4-91Q) and the flight is TP1352 on March 20 at 07:15; Kazma advised being at the airport by 05:45. Separately, Sami's ThinkPad X1 Carbon battery was draining fast: Kazma suggested an 80 percent charge threshold in Lenovo Vantage and the Better Battery power mode.",
+   "sources": [
+    "p21#1",
+    "p22#1",
+    "p23#1"
+   ]
+  },
+  {
+   "id": "sw5",
+   "day": 105,
+   "title": "Keep the Octavia or buy an electric car",
+   "text": "Sami considered selling the 2019 Skoda Octavia estate and buying an electric car, probably a Kia EV6; Kazma noted its good range and said to check home charging first. A few days later he decided to keep the Octavia for another year.",
+   "sources": [
+    "p29#1",
+    "p30#1"
+   ]
+  },
+  {
+   "id": "sw6",
+   "day": 21,
+   "title": "رحلة إسطنبول في ديسمبر",
+   "text": "رحلة العائلة إلى إسطنبول في ديسمبر، وحجزوا فندق قريب من ساحة تقسيم. نصح كاظمة بأخذ جاكيتات لأن الجو في ديسمبر بارد شوي.",
+   "sources": [
+    "a04#1"
+   ]
+  },
+  {
+   "id": "dw00code",
+   "day": 0,
+   "title": "Programming questions",
+   "text": "The user asked: Explain big O notation briefly (It describes how running time grows with input size, ignoring constants); How do I squash the last three git commits (Run git rebase -i HEAD~3 and mark two of them as squash); How do I read a CSV file with pandas (pandas.read_csv('file.csv') returns a DataFrame); What's the difference between a process and a thread (Processes have separate memory; threads share memory within one process); What is dependency injection (Passing a component its collaborators instead of letting it build them); Why does my React component render twice (In development StrictMode renders twice on purpose to surface side effects).",
+   "sources": [
+    "d069#2",
+    "d069#3",
+    "d078#2",
+    "d078#5",
+    "d079#2",
+    "d128#3",
+    "d133#3",
+    "d151#1",
+    "d167#2",
+    "d167#3",
+    "d168#1",
+    "d182#1",
+    "d182#3",
+    "d182#5",
+    "d211#1",
+    "d224#3",
+    "d224#4",
+    "d235#2",
+    "d257#2"
+   ]
+  },
+  {
+   "id": "dw00food",
+   "day": 0,
+   "title": "Cooking questions",
+   "text": "The user asked: What spices go into garam masala (Cumin, coriander, cardamom, cloves, cinnamon and black pepper); What's a quick vegetarian dinner idea (Chickpea curry with spinach over rice, ready in twenty minutes); How do I make sourdough starter (Mix flour and water, feed daily, and wait about a week for it to bubble); How long should I boil an egg for a runny yolk (About six minutes from boiling water); How do I keep avocados from browning (Lemon juice and tight wrap slow the oxidation); How do I make a French omelette (Low heat, constant stirring, roll it before it browns).",
+   "sources": [
+    "d002#2",
+    "d016#4",
+    "d128#1",
+    "d128#2",
+    "d133#2",
+    "d182#2",
+    "d250#2"
+   ]
+  },
+  {
+   "id": "dw00general",
+   "day": 0,
+   "title": "General knowledge questions",
+   "text": "The user asked: Why do cats purr (Contentment mostly, but also to soothe themselves when stressed); Summarise the plot of Hamlet in two lines (A prince avenges his father's murder and nearly everyone dies); How do vaccines work (They train the immune system to recognise a pathogen without the disease); How does compound interest work (Interest earns interest, so growth accelerates over time); What is the capital of Australia (Canberra); Who painted the Girl with a Pearl Earring (Johannes Vermeer, around 1665).",
+   "sources": [
+    "d005#2",
+    "d016#3",
+    "d069#1",
+    "d078#3",
+    "d118#3",
+    "d118#4",
+    "d256#3",
+    "d277#1",
+    "d277#3",
+    "d277#4"
+   ]
+  },
+  {
+   "id": "dw00tools",
+   "day": 0,
+   "title": "Tool runs: tests, disk, files, servers",
+   "text": "The user asked: list the files in the downloads folder (12 files, the newest is invoice_0917.pdf); run the unit tests (Done. 42 passed, 0 failed); ping the staging server (staging responded in 23 ms); show the git status (On branch main, working tree clean).",
+   "sources": [
+    "d005#5",
+    "d118#1",
+    "d168#4",
+    "d224#2"
+   ]
+  },
+  {
+   "id": "dw00traps",
+   "day": 0,
+   "title": "Miscellaneous questions",
+   "text": "The user asked: Is it possible to cook rice without a lid (Here is what I can tell you: Passing a component its collaborators instead of letting it build them); What does it mean when they say it runs out of steam (Here is what I can tell you: Air scatters short blue wavelengths more than red ones); Is it the case that it is what it is (Here is what I can tell you: Contentment mostly, but also to soothe themselves when stressed); Tell me about the layout of a typical Roman villa (Here is what I can tell you: Toast arborio rice, add stock ladle by ladle, finish with parmesan and butter); What travel adapters work in the United Kingdom (Here is what I can tell you: You're welcome!); What is the best way to do it and how is it done in the end (Here is what I can tell you: Two operations on shared state whose result depends on timing).",
+   "sources": [
+    "d005#4",
+    "d016#1",
+    "d018#2",
+    "d018#5",
+    "d079#1",
+    "d118#2",
+    "d133#1",
+    "d151#2",
+    "d167#1",
+    "d211#3",
+    "d235#1"
+   ]
+  },
+  {
+   "id": "dw00travel",
+   "day": 0,
+   "title": "Travel questions",
+   "text": "The user asked: How do I get from Rome airport to the city centre (The Leonardo Express train reaches Termini in 32 minutes); What should I pack for a ski trip (Base layers, a waterproof jacket, gloves, goggles and sunscreen); My colleague is visiting Tokyo, what should she see (Asakusa, the Meiji shrine, Shibuya crossing and a day trip to Nikko); What's the best time of year to visit Iceland (June to August for hiking, winter for the northern lights).",
+   "sources": [
+    "d005#1",
+    "d016#2",
+    "d016#5",
+    "d078#4",
+    "d118#5",
+    "d256#4",
+    "d277#2"
+   ]
+  },
+  {
+   "id": "dw00writing",
+   "day": 0,
+   "title": "Writing help",
+   "text": "The user asked: Proofread: their going to the park tomorow (They're going to the park tomorrow); Write a haiku about rain (Soft rain on tin roofs, / the street forgets its footsteps, / puddles hold the sky); Give me a title for a blog post about remote work (Home Is Where the Standup Is); Suggest a slogan for a bakery (Rise and shine, fresh every morning).",
+   "sources": [
+    "d018#1",
+    "d069#4",
+    "d078#1",
+    "d211#2",
+    "d224#1",
+    "d250#1",
+    "d256#2"
+   ]
+  },
+  {
+   "id": "dw01arabic",
+   "day": 7,
+   "title": "أسئلة متفرقة",
+   "text": "سأل المستخدم: شلون أسوي كيكة بالشوكولاتة؟ (اخلط الطحين والكاكاو والبيض والسكر واخبزها على ١٨٠ درجة.)؛ وش أحسن طريقة لحفظ القرآن؟ (التكرار اليومي والمراجعة المنتظمة.)؛ كيف أحسن نومي؟ (نام بوقت ثابت وخفف الشاشات قبل النوم.)؛ وش أفضل وقت لزيارة الأندلس؟ (الربيع أحلى وقت، الجو معتدل.)",
+   "sources": [
+    "d156#2",
+    "d194#5",
+    "d237#2",
+    "d290#2"
+   ]
+  },
+  {
+   "id": "dw01code",
+   "day": 7,
+   "title": "Programming questions",
+   "text": "The user asked: How do I squash the last three git commits (Run git rebase -i HEAD~3 and mark two of them as squash); What's the difference between a process and a thread (Processes have separate memory; threads share memory within one process); Explain big O notation briefly (It describes how running time grows with input size, ignoring constants); How do I read a CSV file with pandas (pandas.read_csv('file.csv') returns a DataFrame); How do I write a SQL join between orders and customers (SELECT * FROM orders JOIN customers ON orders.customer_id = customers.id); How do I reverse a list in Python (Use my_list[::-1] for a copy or my_list.reverse() in place).",
+   "sources": [
+    "d009#3",
+    "d026#2",
+    "d026#5",
+    "d029#2",
+    "d033#1",
+    "d075#2",
+    "d080#1",
+    "d083#2",
+    "d086#1",
+    "d136#1",
+    "d136#4",
+    "d156#3",
+    "d208#2",
+    "d264#4",
+    "d267#2"
+   ]
+  },
+  {
+   "id": "dw01food",
+   "day": 7,
+   "title": "Cooking questions",
+   "text": "The user asked: How long should I boil an egg for a runny yolk (About six minutes from boiling water); What's a quick vegetarian dinner idea (Chickpea curry with spinach over rice, ready in twenty minutes); How do I make a French omelette (Low heat, constant stirring, roll it before it browns); How do I make sourdough starter (Mix flour and water, feed daily, and wait about a week for it to bubble).",
+   "sources": [
+    "d009#1",
+    "d063#2",
+    "d080#4",
+    "d086#2",
+    "d156#1",
+    "d205#2",
+    "d267#1"
+   ]
+  },
+  {
+   "id": "dw01general",
+   "day": 7,
+   "title": "General knowledge questions",
+   "text": "The user asked: How far is the Moon from Earth (About 384,400 kilometres on average); Why is the sky blue (Air scatters short blue wavelengths more than red ones); Summarise the plot of Hamlet in two lines (A prince avenges his father's murder and nearly everyone dies); How do vaccines work (They train the immune system to recognise a pathogen without the disease); What is the capital of Australia (Canberra); Who painted the Girl with a Pearl Earring (Johannes Vermeer, around 1665).",
+   "sources": [
+    "d009#2",
+    "d026#1",
+    "d029#1",
+    "d083#3",
+    "d094#1",
+    "d094#2",
+    "d136#2",
+    "d205#3",
+    "d208#1",
+    "d237#1"
+   ]
+  },
+  {
+   "id": "dw01tools",
+   "day": 7,
+   "title": "Tool runs: tests, disk, files, servers",
+   "text": "The user asked: run the unit tests (Done. 42 passed, 0 failed); check the disk space (C: has 118 GB free of 476 GB); list the files in the downloads folder (12 files, the newest is invoice_0917.pdf); ping the staging server (staging responded in 23 ms).",
+   "sources": [
+    "d063#4",
+    "d130#2",
+    "d226#2",
+    "d264#1"
+   ]
+  },
+  {
+   "id": "dw01traps",
+   "day": 7,
+   "title": "Miscellaneous questions",
+   "text": "The user asked: Why do fans shout during football matches (Here is what I can tell you: Canberra); What does it mean when they say it runs out of steam (Here is what I can tell you: About six minutes from boiling water); Write about something you find fascinating about octopuses (Here is what I can tell you: Mix flour and water, feed daily, and wait about a week for it to bubble); Is it the case that it is what it is (Here is what I can tell you: Two operations on shared state whose result depends on timing); What travel adapters work in the United Kingdom (Here is what I can tell you: A prince avenges his father's murder and nearly everyone dies); Is it possible to cook rice without a lid (Here is what I can tell you: Done. 42 passed, 0 failed).",
+   "sources": [
+    "d001#1",
+    "d058#1",
+    "d058#3",
+    "d063#1",
+    "d080#3",
+    "d084#1",
+    "d136#5",
+    "d194#1",
+    "d194#2",
+    "d226#1",
+    "d264#2",
+    "d264#3"
+   ]
+  },
+  {
+   "id": "dw01travel",
+   "day": 7,
+   "title": "Travel questions",
+   "text": "The user asked: What should I pack for a ski trip (Base layers, a waterproof jacket, gloves, goggles and sunscreen); Recommend a weekend itinerary for Seville (Alcazar, the cathedral, Triana and a flamenco show at night); What's the best time of year to visit Iceland (June to August for hiking, winter for the northern lights); Is Prague expensive for tourists (Cheaper than western Europe, especially outside the old town); My colleague is visiting Tokyo, what should she see (Asakusa, the Meiji shrine, Shibuya crossing and a day trip to Nikko).",
+   "sources": [
+    "d063#3",
+    "d083#1",
+    "d130#1",
+    "d136#3",
+    "d194#3",
+    "d205#4",
+    "d264#5",
+    "d290#1"
+   ]
+  },
+  {
+   "id": "dw01writing",
+   "day": 7,
+   "title": "Writing help",
+   "text": "The user asked: Suggest a slogan for a bakery (Rise and shine, fresh every morning); Proofread: their going to the park tomorow (They're going to the park tomorrow); Make this email more polite: send me the report now (Could you please send me the report when you have a moment?); Give me a title for a blog post about remote work (Home Is Where the Standup Is); Write a haiku about rain (Soft rain on tin roofs, / the street forgets its footsteps, / puddles hold the sky).",
+   "sources": [
+    "d001#2",
+    "d026#3",
+    "d026#4",
+    "d080#5",
+    "d130#4",
+    "d156#4",
+    "d205#1",
+    "d208#3",
+    "d226#3"
+   ]
+  },
+  {
+   "id": "dw02code",
+   "day": 14,
+   "title": "Programming questions",
+   "text": "The user asked: How do I write a SQL join between orders and customers (SELECT * FROM orders JOIN customers ON orders.customer_id = customers.id); What is a race condition (Two operations on shared state whose result depends on timing); What does HTTP status 429 mean (Too Many Requests: you are being rate limited); Explain async and await in JavaScript (async marks a function that returns a promise; await pauses until the promise settles); How can I center a div with CSS (Use display:flex with justify-content:center and align-items:center on the parent); Explain big O notation briefly (It describes how running time grows with input size, ignoring constants).",
+   "sources": [
+    "d003#5",
+    "d019#2",
+    "d046#2",
+    "d159#1",
+    "d196#3",
+    "d204#1",
+    "d248#2",
+    "d294#2",
+    "d294#5"
+   ]
+  },
+  {
+   "id": "dw02food",
+   "day": 14,
+   "title": "Cooking questions",
+   "text": "The user asked: Give me a recipe for mushroom risotto (Toast arborio rice, add stock ladle by ladle, finish with parmesan and butter); What's a quick vegetarian dinner idea (Chickpea curry with spinach over rice, ready in twenty minutes); What spices go into garam masala (Cumin, coriander, cardamom, cloves, cinnamon and black pepper); Best way to reheat pizza (In a hot pan with a lid for a few minutes); How do I make sourdough starter (Mix flour and water, feed daily, and wait about a week for it to bubble); How do I keep avocados from browning (Lemon juice and tight wrap slow the oxidation).",
+   "sources": [
+    "d003#3",
+    "d047#1",
+    "d047#2",
+    "d098#1",
+    "d116#2",
+    "d150#3",
+    "d159#2",
+    "d159#3",
+    "d204#2",
+    "d232#2",
+    "d268#1",
+    "d278#1",
+    "d294#1",
+    "d294#4"
+   ]
+  },
+  {
+   "id": "dw02general",
+   "day": 14,
+   "title": "General knowledge questions",
+   "text": "The user asked: What is photosynthesis (Plants turn light, water and CO2 into sugar and oxygen); How do vaccines work (They train the immune system to recognise a pathogen without the disease); Why is the sky blue (Air scatters short blue wavelengths more than red ones); Why do cats purr (Contentment mostly, but also to soothe themselves when stressed); Who painted the Girl with a Pearl Earring (Johannes Vermeer, around 1665).",
+   "sources": [
+    "d003#2",
+    "d047#3",
+    "d204#4",
+    "d232#4",
+    "d247#1",
+    "d247#2",
+    "d268#2",
+    "d268#3"
+   ]
+  },
+  {
+   "id": "dw02tools",
+   "day": 14,
+   "title": "Tool runs: tests, disk, files, servers",
+   "text": "The user asked: check the disk space (C: has 118 GB free of 476 GB); list the files in the downloads folder (12 files, the newest is invoice_0917.pdf); run the unit tests (Done. 42 passed, 0 failed).",
+   "sources": [
+    "d046#1",
+    "d098#2",
+    "d116#1",
+    "d150#2",
+    "d268#5"
+   ]
+  },
+  {
+   "id": "dw02traps",
+   "day": 14,
+   "title": "Miscellaneous questions",
+   "text": "The user asked: What is the best way to do it and how is it done in the end (Here is what I can tell you: Chickpea curry with spinach over rice, ready in twenty minutes); Write about something you find fascinating about octopuses (Here is what I can tell you: SELECT * FROM orders JOIN customers ON orders.customer_id = customers.id); What travel adapters work in the United Kingdom (Here is what I can tell you: pandas.read_csv('file.csv') returns a DataFrame).",
+   "sources": [
+    "d019#1",
+    "d150#1",
+    "d196#2",
+    "d204#3",
+    "d294#3"
+   ]
+  },
+  {
+   "id": "dw02travel",
+   "day": 14,
+   "title": "Travel questions",
+   "text": "The user asked: What should I pack for a ski trip (Base layers, a waterproof jacket, gloves, goggles and sunscreen); Recommend a weekend itinerary for Seville (Alcazar, the cathedral, Triana and a flamenco show at night); How do I get from Rome airport to the city centre (The Leonardo Express train reaches Termini in 32 minutes); My colleague is visiting Tokyo, what should she see (Asakusa, the Meiji shrine, Shibuya crossing and a day trip to Nikko); What's the best time of year to visit Iceland (June to August for hiking, winter for the northern lights).",
+   "sources": [
+    "d098#4",
+    "d116#3",
+    "d196#1",
+    "d232#1",
+    "d247#3",
+    "d248#3",
+    "d268#4",
+    "d278#2"
+   ]
+  },
+  {
+   "id": "dw02writing",
+   "day": 14,
+   "title": "Writing help",
+   "text": "The user asked: Suggest a slogan for a bakery (Rise and shine, fresh every morning); Give me a title for a blog post about remote work (Home Is Where the Standup Is); Make this email more polite: send me the report now (Could you please send me the report when you have a moment?).",
+   "sources": [
+    "d098#3",
+    "d232#3",
+    "d248#1",
+    "d278#3"
+   ]
+  },
+  {
+   "id": "dw03code",
+   "day": 21,
+   "title": "Programming questions",
+   "text": "The user asked: Why does my React component render twice (In development StrictMode renders twice on purpose to surface side effects); Explain big O notation briefly (It describes how running time grows with input size, ignoring constants); How do I squash the last three git commits (Run git rebase -i HEAD~3 and mark two of them as squash); What does HTTP status 429 mean (Too Many Requests: you are being rate limited); How do I reverse a list in Python (Use my_list[::-1] for a copy or my_list.reverse() in place); What is a race condition (Two operations on shared state whose result depends on timing).",
+   "sources": [
+    "d027#1",
+    "d095#1",
+    "d162#4",
+    "d192#1",
+    "d192#2",
+    "d192#3",
+    "d192#4",
+    "d244#4",
+    "d282#4"
+   ]
+  },
+  {
+   "id": "dw03food",
+   "day": 21,
+   "title": "Cooking questions",
+   "text": "The user asked: What's a quick vegetarian dinner idea (Chickpea curry with spinach over rice, ready in twenty minutes); How long should I boil an egg for a runny yolk (About six minutes from boiling water); What spices go into garam masala (Cumin, coriander, cardamom, cloves, cinnamon and black pepper); Give me a recipe for mushroom risotto (Toast arborio rice, add stock ladle by ladle, finish with parmesan and butter); How do I make a French omelette (Low heat, constant stirring, roll it before it browns).",
+   "sources": [
+    "d031#1",
+    "d031#2",
+    "d050#4",
+    "d095#3",
+    "d123#3",
+    "d209#2"
+   ]
+  },
+  {
+   "id": "dw03general",
+   "day": 21,
+   "title": "General knowledge questions",
+   "text": "The user asked: Why do cats purr (Contentment mostly, but also to soothe themselves when stressed); Summarise the plot of Hamlet in two lines (A prince avenges his father's murder and nearly everyone dies); What is photosynthesis (Plants turn light, water and CO2 into sugar and oxygen); What is the capital of Australia (Canberra); Why is the sky blue (Air scatters short blue wavelengths more than red ones); What causes the seasons (The tilt of Earth's axis, not its distance from the Sun).",
+   "sources": [
+    "d015#4",
+    "d050#1",
+    "d050#2",
+    "d066#1",
+    "d066#2",
+    "d112#1",
+    "d123#2",
+    "d123#4",
+    "d162#3",
+    "d282#1",
+    "d282#2",
+    "d282#5"
+   ]
+  },
+  {
+   "id": "dw03tools",
+   "day": 21,
+   "title": "Tool runs: tests, disk, files, servers",
+   "text": "The user asked: check the disk space (C: has 118 GB free of 476 GB); list the files in the downloads folder (12 files, the newest is invoice_0917.pdf); ping the staging server (staging responded in 23 ms).",
+   "sources": [
+    "d015#1",
+    "d162#2",
+    "d212#3",
+    "d222#1",
+    "d222#5"
+   ]
+  },
+  {
+   "id": "dw03traps",
+   "day": 21,
+   "title": "Miscellaneous questions",
+   "text": "The user asked: What is the best way to do it and how is it done in the end (Here is what I can tell you: The tilt of Earth's axis, not its distance from the Sun); I have my doubts about this marketing plan (Here is what I can tell you: async marks a function that returns a promise; await pauses until the promise settles); What does it mean when they say it runs out of steam (Here is what I can tell you: Canberra); How do you make it so that it does not do that again (Here is what I can tell you: Glad it helped); Tell me about the layout of a typical Roman villa (Here is what I can tell you: They're going to the park tomorrow).",
+   "sources": [
+    "d027#3",
+    "d095#2",
+    "d112#2",
+    "d222#4",
+    "d244#1",
+    "d244#3",
+    "d263#1"
+   ]
+  },
+  {
+   "id": "dw03travel",
+   "day": 21,
+   "title": "Travel questions",
+   "text": "The user asked: How do I get from Rome airport to the city centre (The Leonardo Express train reaches Termini in 32 minutes); What's the best time of year to visit Iceland (June to August for hiking, winter for the northern lights); Is Prague expensive for tourists (Cheaper than western Europe, especially outside the old town); What should I pack for a ski trip (Base layers, a waterproof jacket, gloves, goggles and sunscreen); Recommend a weekend itinerary for Seville (Alcazar, the cathedral, Triana and a flamenco show at night).",
+   "sources": [
+    "d004#1",
+    "d004#2",
+    "d015#2",
+    "d050#3",
+    "d212#2",
+    "d222#2",
+    "d222#3",
+    "d244#2",
+    "d244#5",
+    "d263#2",
+    "d282#3"
+   ]
+  },
+  {
+   "id": "dw03writing",
+   "day": 21,
+   "title": "Writing help",
+   "text": "The user asked: Write a haiku about rain (Soft rain on tin roofs, / the street forgets its footsteps, / puddles hold the sky); Suggest a slogan for a bakery (Rise and shine, fresh every morning); Make this email more polite: send me the report now (Could you please send me the report when you have a moment?); Give me a title for a blog post about remote work (Home Is Where the Standup Is).",
+   "sources": [
+    "d027#2",
+    "d095#4",
+    "d162#1",
+    "d162#5",
+    "d209#3"
+   ]
+  },
+  {
+   "id": "dw04arabic",
+   "day": 28,
+   "title": "أسئلة متفرقة",
+   "text": "سأل المستخدم: كم المسافة بين الكويت والرياض؟ (تقريبا ستمية كيلو بالسيارة.)؛ وش أحسن طريقة لحفظ القرآن؟ (التكرار اليومي والمراجعة المنتظمة.)؛ وش أفضل وقت لزيارة الأندلس؟ (الربيع أحلى وقت، الجو معتدل.)؛ كيف أحسن نومي؟ (نام بوقت ثابت وخفف الشاشات قبل النوم.)؛ شلون أتعلم البرمجة؟ (ابدأ ببايثون وسو مشاريع صغيرة كل أسبوع.)",
+   "sources": [
+    "d013#1",
+    "d115#1",
+    "d121#3",
+    "d173#1",
+    "d173#4",
+    "d187#4",
+    "d228#3",
+    "d228#4",
+    "d253#3"
+   ]
+  },
+  {
+   "id": "dw04code",
+   "day": 28,
+   "title": "Programming questions",
+   "text": "The user asked: Explain async and await in JavaScript (async marks a function that returns a promise; await pauses until the promise settles); How can I center a div with CSS (Use display:flex with justify-content:center and align-items:center on the parent); What does HTTP status 429 mean (Too Many Requests: you are being rate limited); What is dependency injection (Passing a component its collaborators instead of letting it build them); Why does my React component render twice (In development StrictMode renders twice on purpose to surface side effects); How do I write a SQL join between orders and customers (SELECT * FROM orders JOIN customers ON orders.customer_id = customers.id).",
+   "sources": [
+    "d008#1",
+    "d008#2",
+    "d013#3",
+    "d060#1",
+    "d154#2",
+    "d171#1",
+    "d171#3",
+    "d173#2",
+    "d173#3",
+    "d173#5",
+    "d175#2",
+    "d187#2",
+    "d225#1",
+    "d225#3",
+    "d252#2",
+    "d270#1"
+   ]
+  },
+  {
+   "id": "dw04food",
+   "day": 28,
+   "title": "Cooking questions",
+   "text": "The user asked: What's a quick vegetarian dinner idea (Chickpea curry with spinach over rice, ready in twenty minutes); How do I make a French omelette (Low heat, constant stirring, roll it before it browns); How do I make sourdough starter (Mix flour and water, feed daily, and wait about a week for it to bubble); How do I keep avocados from browning (Lemon juice and tight wrap slow the oxidation).",
+   "sources": [
+    "d013#4",
+    "d013#5",
+    "d154#3",
+    "d187#1",
+    "d287#1"
+   ]
+  },
+  {
+   "id": "dw04general",
+   "day": 28,
+   "title": "General knowledge questions",
+   "text": "The user asked: What causes the seasons (The tilt of Earth's axis, not its distance from the Sun); Why is the sky blue (Air scatters short blue wavelengths more than red ones); Summarise the plot of Hamlet in two lines (A prince avenges his father's murder and nearly everyone dies); What is photosynthesis (Plants turn light, water and CO2 into sugar and oxygen); How far is the Moon from Earth (About 384,400 kilometres on average); How do vaccines work (They train the immune system to recognise a pathogen without the disease).",
+   "sources": [
+    "d115#2",
+    "d115#4",
+    "d121#1",
+    "d154#4",
+    "d154#5",
+    "d171#4",
+    "d171#5",
+    "d225#2",
+    "d228#1",
+    "d270#4",
+    "d287#3",
+    "d287#4"
+   ]
+  },
+  {
+   "id": "dw04traps",
+   "day": 28,
+   "title": "Miscellaneous questions",
+   "text": "The user asked: How do you make it so that it does not do that again (Here is what I can tell you: Home Is Where the Standup Is); Write about something you find fascinating about octopuses (Here is what I can tell you: Asakusa, the Meiji shrine, Shibuya crossing and a day trip to Nikko); What is the best way to do it and how is it done in the end (Here is what I can tell you: They're going to the park tomorrow); What does it mean when they say it runs out of steam (Here is what I can tell you: Glad it helped); Can you run the numbers on this and see if it works out (Here is what I can tell you: Plants turn light, water and CO2 into sugar and oxygen).",
+   "sources": [
+    "d008#4",
+    "d121#2",
+    "d154#1",
+    "d228#5",
+    "d253#1",
+    "d253#2",
+    "d270#2",
+    "d287#2"
+   ]
+  },
+  {
+   "id": "dw04travel",
+   "day": 28,
+   "title": "Travel questions",
+   "text": "The user asked: What's the best time of year to visit Iceland (June to August for hiking, winter for the northern lights); How do I get from Rome airport to the city centre (The Leonardo Express train reaches Termini in 32 minutes); Is Prague expensive for tourists (Cheaper than western Europe, especially outside the old town); Recommend a weekend itinerary for Seville (Alcazar, the cathedral, Triana and a flamenco show at night).",
+   "sources": [
+    "d060#2",
+    "d175#1",
+    "d228#2",
+    "d252#1"
+   ]
+  },
+  {
+   "id": "dw04writing",
+   "day": 28,
+   "title": "Writing help",
+   "text": "The user asked: Write a haiku about rain (Soft rain on tin roofs, / the street forgets its footsteps, / puddles hold the sky); Suggest a slogan for a bakery (Rise and shine, fresh every morning); Proofread: their going to the park tomorow (They're going to the park tomorrow).",
+   "sources": [
+    "d013#2",
+    "d187#3",
+    "d253#4",
+    "d292#1"
+   ]
+  },
+  {
+   "id": "dw05code",
+   "day": 35,
+   "title": "Programming questions",
+   "text": "The user asked: How do I read a CSV file with pandas (pandas.read_csv('file.csv') returns a DataFrame); How can I center a div with CSS (Use display:flex with justify-content:center and align-items:center on the parent); What does HTTP status 429 mean (Too Many Requests: you are being rate limited); Why does my React component render twice (In development StrictMode renders twice on purpose to surface side effects); What's the difference between a process and a thread (Processes have separate memory; threads share memory within one process).",
+   "sources": [
+    "d088#1",
+    "d088#2",
+    "d102#3",
+    "d148#3",
+    "d216#1",
+    "d216#2",
+    "d231#2",
+    "d240#2"
+   ]
+  },
+  {
+   "id": "dw05food",
+   "day": 35,
+   "title": "Cooking questions",
+   "text": "The user asked: How do I make sourdough starter (Mix flour and water, feed daily, and wait about a week for it to bubble); What's a quick vegetarian dinner idea (Chickpea curry with spinach over rice, ready in twenty minutes); What spices go into garam masala (Cumin, coriander, cardamom, cloves, cinnamon and black pepper); How do I make a French omelette (Low heat, constant stirring, roll it before it browns); How do I keep avocados from browning (Lemon juice and tight wrap slow the oxidation).",
+   "sources": [
+    "d068#1",
+    "d100#3",
+    "d102#2",
+    "d146#1",
+    "d148#2",
+    "d240#1",
+    "d296#2",
+    "d296#4"
+   ]
+  },
+  {
+   "id": "dw05tools",
+   "day": 35,
+   "title": "Tool runs: tests, disk, files, servers",
+   "text": "The user asked: check the disk space (C: has 118 GB free of 476 GB); ping the staging server (staging responded in 23 ms); list the files in the downloads folder (12 files, the newest is invoice_0917.pdf).",
+   "sources": [
+    "d074#3",
+    "d088#3",
+    "d088#5",
+    "d102#1",
+    "d108#1",
+    "d108#2",
+    "d132#2",
+    "d148#1"
+   ]
+  },
+  {
+   "id": "dw05traps",
+   "day": 35,
+   "title": "Miscellaneous questions",
+   "text": "The user asked: Tell me about the layout of a typical Roman villa (Here is what I can tell you: pandas.read_csv('file.csv') returns a DataFrame); How do you make it so that it does not do that again (Here is what I can tell you: Glad it helped); What is the best way to do it and how is it done in the end (Here is what I can tell you: Chickpea curry with spinach over rice, ready in twenty minutes); What travel adapters work in the United Kingdom (Here is what I can tell you: Lemon juice and tight wrap slow the oxidation).",
+   "sources": [
+    "d074#1",
+    "d129#1",
+    "d221#1",
+    "d239#1",
+    "d239#2",
+    "d239#5",
+    "d240#3"
+   ]
+  },
+  {
+   "id": "dw05travel",
+   "day": 35,
+   "title": "Travel questions",
+   "text": "The user asked: My colleague is visiting Tokyo, what should she see (Asakusa, the Meiji shrine, Shibuya crossing and a day trip to Nikko); What's the best time of year to visit Iceland (June to August for hiking, winter for the northern lights); Recommend a weekend itinerary for Seville (Alcazar, the cathedral, Triana and a flamenco show at night); What should I pack for a ski trip (Base layers, a waterproof jacket, gloves, goggles and sunscreen).",
+   "sources": [
+    "d068#2",
+    "d074#4",
+    "d088#4",
+    "d100#4",
+    "d216#5"
+   ]
+  },
+  {
+   "id": "dw05writing",
+   "day": 35,
+   "title": "Writing help",
+   "text": "The user asked: Proofread: their going to the park tomorow (They're going to the park tomorrow); Give me a title for a blog post about remote work (Home Is Where the Standup Is); Write a haiku about rain (Soft rain on tin roofs, / the street forgets its footsteps, / puddles hold the sky); Make this email more polite: send me the report now (Could you please send me the report when you have a moment?).",
+   "sources": [
+    "d068#3",
+    "d100#1",
+    "d129#2",
+    "d129#3",
+    "d129#4",
+    "d132#1",
+    "d148#4",
+    "d148#5",
+    "d221#2",
+    "d296#3"
+   ]
+  },
+  {
+   "id": "dw06code",
+   "day": 42,
+   "title": "Programming questions",
+   "text": "The user asked: What is a race condition (Two operations on shared state whose result depends on timing); Explain big O notation briefly (It describes how running time grows with input size, ignoring constants); What is dependency injection (Passing a component its collaborators instead of letting it build them); What does HTTP status 429 mean (Too Many Requests: you are being rate limited); Why does my React component render twice (In development StrictMode renders twice on purpose to surface side effects).",
+   "sources": [
+    "d067#2",
+    "d091#4",
+    "d144#1",
+    "d144#4",
+    "d152#2",
+    "d172#2",
+    "d288#1"
+   ]
+  },
+  {
+   "id": "dw06food",
+   "day": 42,
+   "title": "Cooking questions",
+   "text": "The user asked: How do I make a French omelette (Low heat, constant stirring, roll it before it browns); How long should I boil an egg for a runny yolk (About six minutes from boiling water); Best way to reheat pizza (In a hot pan with a lid for a few minutes).",
+   "sources": [
+    "d030#4",
+    "d091#1",
+    "d223#1",
+    "d293#1"
+   ]
+  },
+  {
+   "id": "dw06general",
+   "day": 42,
+   "title": "General knowledge questions",
+   "text": "The user asked: Why do cats purr (Contentment mostly, but also to soothe themselves when stressed); Why is the sky blue (Air scatters short blue wavelengths more than red ones); Summarise the plot of Hamlet in two lines (A prince avenges his father's murder and nearly everyone dies); What is photosynthesis (Plants turn light, water and CO2 into sugar and oxygen); How do vaccines work (They train the immune system to recognise a pathogen without the disease); How far is the Moon from Earth (About 384,400 kilometres on average).",
+   "sources": [
+    "d030#5",
+    "d067#3",
+    "d067#4",
+    "d082#1",
+    "d082#2",
+    "d091#3",
+    "d152#1",
+    "d223#2"
+   ]
+  },
+  {
+   "id": "dw06tools",
+   "day": 42,
+   "title": "Tool runs: tests, disk, files, servers",
+   "text": "The user asked: list the files in the downloads folder (12 files, the newest is invoice_0917.pdf); show the git status (On branch main, working tree clean); check the disk space (C: has 118 GB free of 476 GB).",
+   "sources": [
+    "d030#1",
+    "d030#2",
+    "d172#1",
+    "d198#1"
+   ]
+  },
+  {
+   "id": "dw06travel",
+   "day": 42,
+   "title": "Travel questions",
+   "text": "The user asked: What should I pack for a ski trip (Base layers, a waterproof jacket, gloves, goggles and sunscreen); Is Prague expensive for tourists (Cheaper than western Europe, especially outside the old town); Recommend a weekend itinerary for Seville (Alcazar, the cathedral, Triana and a flamenco show at night); What's the best time of year to visit Iceland (June to August for hiking, winter for the northern lights).",
+   "sources": [
+    "d067#1",
+    "d091#2",
+    "d109#2",
+    "d144#3",
+    "d186#1",
+    "d198#3"
+   ]
+  },
+  {
+   "id": "dw07arabic",
+   "day": 49,
+   "title": "أسئلة متفرقة",
+   "text": "سأل المستخدم: كم المسافة بين الكويت والرياض؟ (تقريبا ستمية كيلو بالسيارة.)؛ شلون أسوي كيكة بالشوكولاتة؟ (اخلط الطحين والكاكاو والبيض والسكر واخبزها على ١٨٠ درجة.)؛ عطني فكرة مشروع صغير. (مشروع توصيل وجبات صحية في الحي.)؛ اشرح لي الذكاء الاصطناعي باختصار. (هو أنظمة تتعلم من البيانات وتسوي مهام تحتاج ذكاء.)",
+   "sources": [
+    "d064#1",
+    "d064#4",
+    "d087#1",
+    "d117#3",
+    "d193#1",
+    "d255#4"
+   ]
+  },
+  {
+   "id": "dw07code",
+   "day": 49,
+   "title": "Programming questions",
+   "text": "The user asked: How do I reverse a list in Python (Use my_list[::-1] for a copy or my_list.reverse() in place); How do I read a CSV file with pandas (pandas.read_csv('file.csv') returns a DataFrame); What is dependency injection (Passing a component its collaborators instead of letting it build them); Explain big O notation briefly (It describes how running time grows with input size, ignoring constants); How can I center a div with CSS (Use display:flex with justify-content:center and align-items:center on the parent); How do I squash the last three git commits (Run git rebase -i HEAD~3 and mark two of them as squash).",
+   "sources": [
+    "d020#2",
+    "d022#3",
+    "d081#2",
+    "d087#2",
+    "d124#3",
+    "d193#2",
+    "d206#2",
+    "d213#1",
+    "d213#3",
+    "d214#4",
+    "d246#2",
+    "d259#5",
+    "d265#3",
+    "d274#1",
+    "d274#2"
+   ]
+  },
+  {
+   "id": "dw07food",
+   "day": 49,
+   "title": "Cooking questions",
+   "text": "The user asked: Best way to reheat pizza (In a hot pan with a lid for a few minutes); What's a quick vegetarian dinner idea (Chickpea curry with spinach over rice, ready in twenty minutes); Give me a recipe for mushroom risotto (Toast arborio rice, add stock ladle by ladle, finish with parmesan and butter); What spices go into garam masala (Cumin, coriander, cardamom, cloves, cinnamon and black pepper); How do I keep avocados from browning (Lemon juice and tight wrap slow the oxidation).",
+   "sources": [
+    "d064#3",
+    "d087#5",
+    "d105#3",
+    "d117#4",
+    "d189#2",
+    "d214#1",
+    "d233#1",
+    "d246#1",
+    "d259#2"
+   ]
+  },
+  {
+   "id": "dw07general",
+   "day": 49,
+   "title": "General knowledge questions",
+   "text": "The user asked: How far is the Moon from Earth (About 384,400 kilometres on average); Why is the sky blue (Air scatters short blue wavelengths more than red ones); Summarise the plot of Hamlet in two lines (A prince avenges his father's murder and nearly everyone dies); How do vaccines work (They train the immune system to recognise a pathogen without the disease); What causes the seasons (The tilt of Earth's axis, not its distance from the Sun); What is the capital of Australia (Canberra).",
+   "sources": [
+    "d061#1",
+    "d081#1",
+    "d105#2",
+    "d117#1",
+    "d124#1",
+    "d137#1",
+    "d206#1",
+    "d214#3",
+    "d233#3",
+    "d246#4",
+    "d255#1",
+    "d262#1",
+    "d262#2",
+    "d265#4",
+    "d274#3"
+   ]
+  },
+  {
+   "id": "dw07tools",
+   "day": 49,
+   "title": "Tool runs: tests, disk, files, servers",
+   "text": "The user asked: run the unit tests (Done. 42 passed, 0 failed); ping the staging server (staging responded in 23 ms); list the files in the downloads folder (12 files, the newest is invoice_0917.pdf); show the git status (On branch main, working tree clean).",
+   "sources": [
+    "d022#1",
+    "d064#2",
+    "d105#1",
+    "d189#1",
+    "d189#3",
+    "d206#4",
+    "d259#1",
+    "d265#1",
+    "d265#5"
+   ]
+  },
+  {
+   "id": "dw07traps",
+   "day": 49,
+   "title": "Miscellaneous questions",
+   "text": "The user asked: Why do fans shout during football matches (Here is what I can tell you: Soft rain on tin roofs, / the street forgets its footsteps, / puddles hold the sky); How do you make it so that it does not do that again (Here is what I can tell you: Use my_list[::-1] for a copy or my_list.reverse() in place); Is it the case that it is what it is (Here is what I can tell you: Soft rain on tin roofs, / the street forgets its footsteps, / puddles hold the sky); I have my doubts about this marketing plan (Here is what I can tell you: You're welcome!); What happened throughout the Renaissance in Florence (Here is what I can tell you: Could you please send me the report when you have a moment?); What travel adapters work in the United Kingdom (Here is what I can tell you: About 384,400 kilometres on average).",
+   "sources": [
+    "d020#1",
+    "d020#3",
+    "d022#5",
+    "d087#3",
+    "d124#2",
+    "d137#2",
+    "d233#2",
+    "d233#4",
+    "d265#2",
+    "d274#5"
+   ]
+  },
+  {
+   "id": "dw07writing",
+   "day": 49,
+   "title": "Writing help",
+   "text": "The user asked: Make this email more polite: send me the report now (Could you please send me the report when you have a moment?); Write a haiku about rain (Soft rain on tin roofs, / the street forgets its footsteps, / puddles hold the sky); Suggest a slogan for a bakery (Rise and shine, fresh every morning); Give me a title for a blog post about remote work (Home Is Where the Standup Is); Proofread: their going to the park tomorow (They're going to the park tomorrow).",
+   "sources": [
+    "d022#2",
+    "d061#2",
+    "d117#2",
+    "d193#3",
+    "d206#3",
+    "d214#2",
+    "d233#5",
+    "d274#4"
+   ]
+  },
+  {
+   "id": "dw08arabic",
+   "day": 56,
+   "title": "أسئلة متفرقة",
+   "text": "سأل المستخدم: اشرح لي الذكاء الاصطناعي باختصار. (هو أنظمة تتعلم من البيانات وتسوي مهام تحتاج ذكاء.)؛ شلون أسوي كيكة بالشوكولاتة؟ (اخلط الطحين والكاكاو والبيض والسكر واخبزها على ١٨٠ درجة.)؛ اكتب لي رسالة شكر لمديري. (شكرا على دعمك المستمر وثقتك.)؛ وش أحسن طريقة لحفظ القرآن؟ (التكرار اليومي والمراجعة المنتظمة.)؛ وش معنى كلمة شغف؟ (الشغف هو الحب الشديد للشي والتعلق فيه.)",
+   "sources": [
+    "d006#3",
+    "d120#1",
+    "d164#3",
+    "d174#1",
+    "d276#1",
+    "d276#2"
+   ]
+  },
+  {
+   "id": "dw08code",
+   "day": 56,
+   "title": "Programming questions",
+   "text": "The user asked: How do I read a CSV file with pandas (pandas.read_csv('file.csv') returns a DataFrame); How do I write a SQL join between orders and customers (SELECT * FROM orders JOIN customers ON orders.customer_id = customers.id); What's the difference between a process and a thread (Processes have separate memory; threads share memory within one process); Explain big O notation briefly (It describes how running time grows with input size, ignoring constants); What is dependency injection (Passing a component its collaborators instead of letting it build them); What is a race condition (Two operations on shared state whose result depends on timing).",
+   "sources": [
+    "d006#1",
+    "d062#2",
+    "d085#1",
+    "d126#3",
+    "d164#1",
+    "d166#3",
+    "d200#2",
+    "d285#2"
+   ]
+  },
+  {
+   "id": "dw08food",
+   "day": 56,
+   "title": "Cooking questions",
+   "text": "The user asked: What spices go into garam masala (Cumin, coriander, cardamom, cloves, cinnamon and black pepper); How do I make sourdough starter (Mix flour and water, feed daily, and wait about a week for it to bubble); Give me a recipe for mushroom risotto (Toast arborio rice, add stock ladle by ladle, finish with parmesan and butter); What's a quick vegetarian dinner idea (Chickpea curry with spinach over rice, ready in twenty minutes); How do I keep avocados from browning (Lemon juice and tight wrap slow the oxidation); Best way to reheat pizza (In a hot pan with a lid for a few minutes).",
+   "sources": [
+    "d035#1",
+    "d035#2",
+    "d062#3",
+    "d113#1",
+    "d120#2",
+    "d120#4",
+    "d153#3",
+    "d153#5",
+    "d217#1",
+    "d217#3",
+    "d217#4",
+    "d283#2",
+    "d291#4"
+   ]
+  },
+  {
+   "id": "dw08general",
+   "day": 56,
+   "title": "General knowledge questions",
+   "text": "The user asked: Why do cats purr (Contentment mostly, but also to soothe themselves when stressed); How does compound interest work (Interest earns interest, so growth accelerates over time); What causes the seasons (The tilt of Earth's axis, not its distance from the Sun).",
+   "sources": [
+    "d043#1",
+    "d113#2",
+    "d166#2",
+    "d166#4",
+    "d275#2",
+    "d283#1"
+   ]
+  },
+  {
+   "id": "dw08tools",
+   "day": 56,
+   "title": "Tool runs: tests, disk, files, servers",
+   "text": "The user asked: check the disk space (C: has 118 GB free of 476 GB); list the files in the downloads folder (12 files, the newest is invoice_0917.pdf); ping the staging server (staging responded in 23 ms); show the git status (On branch main, working tree clean).",
+   "sources": [
+    "d035#3",
+    "d085#2",
+    "d126#2",
+    "d153#1",
+    "d200#1",
+    "d275#1",
+    "d291#3"
+   ]
+  },
+  {
+   "id": "dw08traps",
+   "day": 56,
+   "title": "Miscellaneous questions",
+   "text": "The user asked: Is there a document template for meeting minutes (Here is what I can tell you: Too Many Requests: you are being rate limited); Is it possible to cook rice without a lid (Here is what I can tell you: staging responded in 23 ms); Can you run the numbers on this and see if it works out (Here is what I can tell you: Alcazar, the cathedral, Triana and a flamenco show at night); Write about something you find fascinating about octopuses (Here is what I can tell you: Interest earns interest, so growth accelerates over time); What is the best way to do it and how is it done in the end (Here is what I can tell you: Great); How do you make it so that it does not do that again (Here is what I can tell you: async marks a function that returns a promise; await pauses until the promise settles).",
+   "sources": [
+    "d043#2",
+    "d062#5",
+    "d085#4",
+    "d085#5",
+    "d153#2",
+    "d164#4",
+    "d166#1",
+    "d174#2",
+    "d215#3",
+    "d217#2",
+    "d275#3",
+    "d275#4",
+    "d291#1"
+   ]
+  },
+  {
+   "id": "dw08travel",
+   "day": 56,
+   "title": "Travel questions",
+   "text": "The user asked: Recommend a weekend itinerary for Seville (Alcazar, the cathedral, Triana and a flamenco show at night); My colleague is visiting Tokyo, what should she see (Asakusa, the Meiji shrine, Shibuya crossing and a day trip to Nikko); What's the best time of year to visit Iceland (June to August for hiking, winter for the northern lights); How do I get from Rome airport to the city centre (The Leonardo Express train reaches Termini in 32 minutes); Is Prague expensive for tourists (Cheaper than western Europe, especially outside the old town).",
+   "sources": [
+    "d006#2",
+    "d200#4",
+    "d215#1",
+    "d215#2",
+    "d276#3",
+    "d291#2"
+   ]
+  },
+  {
+   "id": "dw08writing",
+   "day": 56,
+   "title": "Writing help",
+   "text": "The user asked: Suggest a slogan for a bakery (Rise and shine, fresh every morning); Write a haiku about rain (Soft rain on tin roofs, / the street forgets its footsteps, / puddles hold the sky); Make this email more polite: send me the report now (Could you please send me the report when you have a moment?); Give me a title for a blog post about remote work (Home Is Where the Standup Is); Proofread: their going to the park tomorow (They're going to the park tomorrow).",
+   "sources": [
+    "d062#1",
+    "d126#4",
+    "d153#4",
+    "d164#2",
+    "d200#3",
+    "d283#3",
+    "d285#1"
+   ]
+  },
+  {
+   "id": "dw09arabic",
+   "day": 63,
+   "title": "أسئلة متفرقة",
+   "text": "سأل المستخدم: اشرح لي الذكاء الاصطناعي باختصار. (هو أنظمة تتعلم من البيانات وتسوي مهام تحتاج ذكاء.)؛ وش أحسن طريقة لحفظ القرآن؟ (التكرار اليومي والمراجعة المنتظمة.)؛ شلون أتعلم البرمجة؟ (ابدأ ببايثون وسو مشاريع صغيرة كل أسبوع.)؛ شلون أسوي كيكة بالشوكولاتة؟ (اخلط الطحين والكاكاو والبيض والسكر واخبزها على ١٨٠ درجة.)",
+   "sources": [
+    "d195#3",
+    "d229#5",
+    "d243#3",
+    "d243#4",
+    "d249#2"
+   ]
+  },
+  {
+   "id": "dw09code",
+   "day": 63,
+   "title": "Programming questions",
+   "text": "The user asked: What is dependency injection (Passing a component its collaborators instead of letting it build them); How do I read a CSV file with pandas (pandas.read_csv('file.csv') returns a DataFrame); How do I squash the last three git commits (Run git rebase -i HEAD~3 and mark two of them as squash); Explain big O notation briefly (It describes how running time grows with input size, ignoring constants); What's the difference between a process and a thread (Processes have separate memory; threads share memory within one process); Why does my React component render twice (In development StrictMode renders twice on purpose to surface side effects).",
+   "sources": [
+    "d014#1",
+    "d104#2",
+    "d104#3",
+    "d161#2",
+    "d161#3",
+    "d177#3",
+    "d181#1",
+    "d210#3",
+    "d229#1",
+    "d229#4",
+    "d238#1",
+    "d254#1",
+    "d280#4"
+   ]
+  },
+  {
+   "id": "dw09food",
+   "day": 63,
+   "title": "Cooking questions",
+   "text": "The user asked: How do I make a French omelette (Low heat, constant stirring, roll it before it browns); Best way to reheat pizza (In a hot pan with a lid for a few minutes); How do I keep avocados from browning (Lemon juice and tight wrap slow the oxidation); Give me a recipe for mushroom risotto (Toast arborio rice, add stock ladle by ladle, finish with parmesan and butter); What's a quick vegetarian dinner idea (Chickpea curry with spinach over rice, ready in twenty minutes); How long should I boil an egg for a runny yolk (About six minutes from boiling water).",
+   "sources": [
+    "d014#2",
+    "d014#4",
+    "d141#3",
+    "d141#4",
+    "d161#5",
+    "d163#1",
+    "d207#3",
+    "d229#2",
+    "d229#3",
+    "d243#1",
+    "d284#2",
+    "d284#3",
+    "d286#2",
+    "d286#3",
+    "d300#2"
+   ]
+  },
+  {
+   "id": "dw09general",
+   "day": 63,
+   "title": "General knowledge questions",
+   "text": "The user asked: How does compound interest work (Interest earns interest, so growth accelerates over time); Why is the sky blue (Air scatters short blue wavelengths more than red ones); How far is the Moon from Earth (About 384,400 kilometres on average); How do vaccines work (They train the immune system to recognise a pathogen without the disease); What causes the seasons (The tilt of Earth's axis, not its distance from the Sun); Why do cats purr (Contentment mostly, but also to soothe themselves when stressed).",
+   "sources": [
+    "d141#2",
+    "d142#2",
+    "d163#2",
+    "d163#4",
+    "d177#1",
+    "d210#1",
+    "d210#5",
+    "d238#3",
+    "d254#2",
+    "d284#4"
+   ]
+  },
+  {
+   "id": "dw09tools",
+   "day": 63,
+   "title": "Tool runs: tests, disk, files, servers",
+   "text": "The user asked: run the unit tests (Done. 42 passed, 0 failed); list the files in the downloads folder (12 files, the newest is invoice_0917.pdf); ping the staging server (staging responded in 23 ms); check the disk space (C: has 118 GB free of 476 GB); show the git status (On branch main, working tree clean).",
+   "sources": [
+    "d014#5",
+    "d103#1",
+    "d103#2",
+    "d142#1",
+    "d161#4",
+    "d163#3",
+    "d177#2",
+    "d177#4",
+    "d207#1"
+   ]
+  },
+  {
+   "id": "dw09traps",
+   "day": 63,
+   "title": "Miscellaneous questions",
+   "text": "The user asked: Is there a document template for meeting minutes (Here is what I can tell you: pandas.read_csv('file.csv') returns a DataFrame); Can you run the numbers on this and see if it works out (Here is what I can tell you: Plants turn light, water and CO2 into sugar and oxygen); Is it the case that it is what it is (Here is what I can tell you: Low heat, constant stirring, roll it before it browns); Tell me about the layout of a typical Roman villa (Here is what I can tell you: Great); Why do fans shout during football matches (Here is what I can tell you: Asakusa, the Meiji shrine, Shibuya crossing and a day trip to Nikko).",
+   "sources": [
+    "d014#3",
+    "d161#1",
+    "d177#5",
+    "d180#1",
+    "d180#2",
+    "d207#2",
+    "d238#2"
+   ]
+  },
+  {
+   "id": "dw09travel",
+   "day": 63,
+   "title": "Travel questions",
+   "text": "The user asked: My colleague is visiting Tokyo, what should she see (Asakusa, the Meiji shrine, Shibuya crossing and a day trip to Nikko); What should I pack for a ski trip (Base layers, a waterproof jacket, gloves, goggles and sunscreen); Is Prague expensive for tourists (Cheaper than western Europe, especially outside the old town); How do I get from Rome airport to the city centre (The Leonardo Express train reaches Termini in 32 minutes); What's the best time of year to visit Iceland (June to August for hiking, winter for the northern lights).",
+   "sources": [
+    "d104#1",
+    "d104#4",
+    "d180#4",
+    "d195#2",
+    "d195#4",
+    "d207#4",
+    "d207#5",
+    "d210#2",
+    "d286#1"
+   ]
+  },
+  {
+   "id": "dw09writing",
+   "day": 63,
+   "title": "Writing help",
+   "text": "The user asked: Proofread: their going to the park tomorow (They're going to the park tomorrow); Give me a title for a blog post about remote work (Home Is Where the Standup Is); Write a haiku about rain (Soft rain on tin roofs, / the street forgets its footsteps, / puddles hold the sky); Suggest a slogan for a bakery (Rise and shine, fresh every morning).",
+   "sources": [
+    "d141#1",
+    "d180#3",
+    "d181#2",
+    "d195#1",
+    "d243#2",
+    "d249#1",
+    "d280#2",
+    "d280#3"
+   ]
+  },
+  {
+   "id": "dw10code",
+   "day": 70,
+   "title": "Programming questions",
+   "text": "The user asked: How do I squash the last three git commits (Run git rebase -i HEAD~3 and mark two of them as squash); How do I reverse a list in Python (Use my_list[::-1] for a copy or my_list.reverse() in place); What is dependency injection (Passing a component its collaborators instead of letting it build them); What's the difference between a process and a thread (Processes have separate memory; threads share memory within one process); How do I read a CSV file with pandas (pandas.read_csv('file.csv') returns a DataFrame); Explain async and await in JavaScript (async marks a function that returns a promise; await pauses until the promise settles).",
+   "sources": [
+    "d073#3",
+    "d097#4",
+    "d134#1",
+    "d157#2",
+    "d201#1",
+    "d201#3"
+   ]
+  },
+  {
+   "id": "dw10food",
+   "day": 70,
+   "title": "Cooking questions",
+   "text": "The user asked: Give me a recipe for mushroom risotto (Toast arborio rice, add stock ladle by ladle, finish with parmesan and butter); What spices go into garam masala (Cumin, coriander, cardamom, cloves, cinnamon and black pepper); How do I make sourdough starter (Mix flour and water, feed daily, and wait about a week for it to bubble); What's a quick vegetarian dinner idea (Chickpea curry with spinach over rice, ready in twenty minutes).",
+   "sources": [
+    "d096#4",
+    "d176#2",
+    "d176#3",
+    "d271#1"
+   ]
+  },
+  {
+   "id": "dw10general",
+   "day": 70,
+   "title": "General knowledge questions",
+   "text": "The user asked: How far is the Moon from Earth (About 384,400 kilometres on average); Summarise the plot of Hamlet in two lines (A prince avenges his father's murder and nearly everyone dies); Who painted the Girl with a Pearl Earring (Johannes Vermeer, around 1665); What is photosynthesis (Plants turn light, water and CO2 into sugar and oxygen); What causes the seasons (The tilt of Earth's axis, not its distance from the Sun).",
+   "sources": [
+    "d096#2",
+    "d096#3",
+    "d097#3",
+    "d114#2",
+    "d190#2",
+    "d271#2"
+   ]
+  },
+  {
+   "id": "dw10tools",
+   "day": 70,
+   "title": "Tool runs: tests, disk, files, servers",
+   "text": "The user asked: list the files in the downloads folder (12 files, the newest is invoice_0917.pdf); ping the staging server (staging responded in 23 ms); check the disk space (C: has 118 GB free of 476 GB); run the unit tests (Done. 42 passed, 0 failed); show the git status (On branch main, working tree clean).",
+   "sources": [
+    "d096#1",
+    "d097#2",
+    "d119#2",
+    "d158#3",
+    "d169#4"
+   ]
+  },
+  {
+   "id": "dw10traps",
+   "day": 70,
+   "title": "Miscellaneous questions",
+   "text": "The user asked: What is the best way to do it and how is it done in the end (Here is what I can tell you: Use display:flex with justify-content:center and align-items:center on the parent); Is it possible to cook rice without a lid (Here is what I can tell you: Two operations on shared state whose result depends on timing); Write about something you find fascinating about octopuses (Here is what I can tell you: Too Many Requests: you are being rate limited); Can you run the numbers on this and see if it works out (Here is what I can tell you: Plants turn light, water and CO2 into sugar and oxygen); What happened throughout the Renaissance in Florence (Here is what I can tell you: In a hot pan with a lid for a few minutes).",
+   "sources": [
+    "d073#1",
+    "d073#2",
+    "d096#5",
+    "d134#2",
+    "d169#2",
+    "d190#1"
+   ]
+  },
+  {
+   "id": "dw11arabic",
+   "day": 77,
+   "title": "أسئلة متفرقة",
+   "text": "سأل المستخدم: كيف أحسن نومي؟ (نام بوقت ثابت وخفف الشاشات قبل النوم.)؛ اشرح لي الذكاء الاصطناعي باختصار. (هو أنظمة تتعلم من البيانات وتسوي مهام تحتاج ذكاء.)؛ شلون أسوي كيكة بالشوكولاتة؟ (اخلط الطحين والكاكاو والبيض والسكر واخبزها على ١٨٠ درجة.)؛ وش أحسن طريقة لحفظ القرآن؟ (التكرار اليومي والمراجعة المنتظمة.)",
+   "sources": [
+    "d045#3",
+    "d055#1",
+    "d092#3",
+    "d101#3",
+    "d179#4",
+    "d234#3"
+   ]
+  },
+  {
+   "id": "dw11code",
+   "day": 77,
+   "title": "Programming questions",
+   "text": "The user asked: Explain big O notation briefly (It describes how running time grows with input size, ignoring constants); How can I center a div with CSS (Use display:flex with justify-content:center and align-items:center on the parent); How do I write a SQL join between orders and customers (SELECT * FROM orders JOIN customers ON orders.customer_id = customers.id); What is dependency injection (Passing a component its collaborators instead of letting it build them); Explain async and await in JavaScript (async marks a function that returns a promise; await pauses until the promise settles).",
+   "sources": [
+    "d076#2",
+    "d107#1",
+    "d131#2",
+    "d143#2",
+    "d188#1",
+    "d188#3",
+    "d203#3",
+    "d234#1"
+   ]
+  },
+  {
+   "id": "dw11food",
+   "day": 77,
+   "title": "Cooking questions",
+   "text": "The user asked: Give me a recipe for mushroom risotto (Toast arborio rice, add stock ladle by ladle, finish with parmesan and butter); What's a quick vegetarian dinner idea (Chickpea curry with spinach over rice, ready in twenty minutes); How long should I boil an egg for a runny yolk (About six minutes from boiling water); What spices go into garam masala (Cumin, coriander, cardamom, cloves, cinnamon and black pepper); How do I keep avocados from browning (Lemon juice and tight wrap slow the oxidation); How do I make sourdough starter (Mix flour and water, feed daily, and wait about a week for it to bubble).",
+   "sources": [
+    "d025#3",
+    "d092#5",
+    "d101#1",
+    "d101#2",
+    "d131#4",
+    "d135#1",
+    "d188#4",
+    "d203#4",
+    "d289#1",
+    "d289#2"
+   ]
+  },
+  {
+   "id": "dw11general",
+   "day": 77,
+   "title": "General knowledge questions",
+   "text": "The user asked: What is the capital of Australia (Canberra); How does compound interest work (Interest earns interest, so growth accelerates over time); How do vaccines work (They train the immune system to recognise a pathogen without the disease); Summarise the plot of Hamlet in two lines (A prince avenges his father's murder and nearly everyone dies); How far is the Moon from Earth (About 384,400 kilometres on average); Who painted the Girl with a Pearl Earring (Johannes Vermeer, around 1665).",
+   "sources": [
+    "d039#2",
+    "d045#1",
+    "d076#4",
+    "d076#5",
+    "d092#4",
+    "d106#1",
+    "d106#2",
+    "d131#1",
+    "d135#3",
+    "d179#2",
+    "d203#2"
+   ]
+  },
+  {
+   "id": "dw11traps",
+   "day": 77,
+   "title": "Miscellaneous questions",
+   "text": "The user asked: I have my doubts about this marketing plan (Here is what I can tell you: C: has 118 GB free of 476 GB); Why do fans shout during football matches (Here is what I can tell you: About six minutes from boiling water); Write about something you find fascinating about octopuses (Here is what I can tell you: On branch main, working tree clean); Can you run the numbers on this and see if it works out (Here is what I can tell you: About 384,400 kilometres on average); Is there a document template for meeting minutes (Here is what I can tell you: Soft rain on tin roofs, / the street forgets its footsteps, / puddles hold the sky); Is it possible to cook rice without a lid (Here is what I can tell you: The tilt of Earth's axis, not its distance from the Sun).",
+   "sources": [
+    "d025#2",
+    "d055#2",
+    "d076#1",
+    "d092#1",
+    "d143#1",
+    "d203#1",
+    "d203#5",
+    "d234#4",
+    "d234#5"
+   ]
+  },
+  {
+   "id": "dw11travel",
+   "day": 77,
+   "title": "Travel questions",
+   "text": "The user asked: My colleague is visiting Tokyo, what should she see (Asakusa, the Meiji shrine, Shibuya crossing and a day trip to Nikko); What should I pack for a ski trip (Base layers, a waterproof jacket, gloves, goggles and sunscreen); Is Prague expensive for tourists (Cheaper than western Europe, especially outside the old town); Recommend a weekend itinerary for Seville (Alcazar, the cathedral, Triana and a flamenco show at night); What's the best time of year to visit Iceland (June to August for hiking, winter for the northern lights).",
+   "sources": [
+    "d025#1",
+    "d092#2",
+    "d106#4",
+    "d107#2",
+    "d135#2",
+    "d143#3"
+   ]
+  },
+  {
+   "id": "dw11writing",
+   "day": 77,
+   "title": "Writing help",
+   "text": "The user asked: Proofread: their going to the park tomorow (They're going to the park tomorrow); Suggest a slogan for a bakery (Rise and shine, fresh every morning); Give me a title for a blog post about remote work (Home Is Where the Standup Is).",
+   "sources": [
+    "d039#1",
+    "d039#3",
+    "d045#2",
+    "d131#5",
+    "d179#1",
+    "d179#3",
+    "d188#2"
+   ]
+  },
+  {
+   "id": "dw12arabic",
+   "day": 84,
+   "title": "أسئلة متفرقة",
+   "text": "سأل المستخدم: عطني فكرة مشروع صغير. (مشروع توصيل وجبات صحية في الحي.)؛ وش أفضل وقت لزيارة الأندلس؟ (الربيع أحلى وقت، الجو معتدل.)؛ شلون أسوي كيكة بالشوكولاتة؟ (اخلط الطحين والكاكاو والبيض والسكر واخبزها على ١٨٠ درجة.)؛ اشرح لي الذكاء الاصطناعي باختصار. (هو أنظمة تتعلم من البيانات وتسوي مهام تحتاج ذكاء.)",
+   "sources": [
+    "d070#5",
+    "d245#2",
+    "d245#4",
+    "d261#2"
+   ]
+  },
+  {
+   "id": "dw12code",
+   "day": 84,
+   "title": "Programming questions",
+   "text": "The user asked: Why does my React component render twice (In development StrictMode renders twice on purpose to surface side effects); How do I reverse a list in Python (Use my_list[::-1] for a copy or my_list.reverse() in place); How do I read a CSV file with pandas (pandas.read_csv('file.csv') returns a DataFrame); How do I squash the last three git commits (Run git rebase -i HEAD~3 and mark two of them as squash); How can I center a div with CSS (Use display:flex with justify-content:center and align-items:center on the parent); What is dependency injection (Passing a component its collaborators instead of letting it build them).",
+   "sources": [
+    "d036#2",
+    "d042#2",
+    "d053#2",
+    "d065#3",
+    "d090#1",
+    "d090#2",
+    "d099#1",
+    "d183#2",
+    "d183#4",
+    "d219#3",
+    "d245#3",
+    "d258#3",
+    "d269#4"
+   ]
+  },
+  {
+   "id": "dw12food",
+   "day": 84,
+   "title": "Cooking questions",
+   "text": "The user asked: Give me a recipe for mushroom risotto (Toast arborio rice, add stock ladle by ladle, finish with parmesan and butter); How do I keep avocados from browning (Lemon juice and tight wrap slow the oxidation); What spices go into garam masala (Cumin, coriander, cardamom, cloves, cinnamon and black pepper); What's a quick vegetarian dinner idea (Chickpea curry with spinach over rice, ready in twenty minutes); How long should I boil an egg for a runny yolk (About six minutes from boiling water); How do I make a French omelette (Low heat, constant stirring, roll it before it browns).",
+   "sources": [
+    "d042#1",
+    "d053#4",
+    "d054#1",
+    "d065#4",
+    "d139#1",
+    "d183#1",
+    "d219#1",
+    "d219#2",
+    "d236#4",
+    "d258#2",
+    "d261#1",
+    "d269#2",
+    "d299#2"
+   ]
+  },
+  {
+   "id": "dw12general",
+   "day": 84,
+   "title": "General knowledge questions",
+   "text": "The user asked: Summarise the plot of Hamlet in two lines (A prince avenges his father's murder and nearly everyone dies); How do vaccines work (They train the immune system to recognise a pathogen without the disease); Who painted the Girl with a Pearl Earring (Johannes Vermeer, around 1665); What is photosynthesis (Plants turn light, water and CO2 into sugar and oxygen); Why is the sky blue (Air scatters short blue wavelengths more than red ones); How far is the Moon from Earth (About 384,400 kilometres on average).",
+   "sources": [
+    "d048#2",
+    "d052#2",
+    "d052#3",
+    "d053#5",
+    "d065#1",
+    "d070#1",
+    "d070#3",
+    "d070#4",
+    "d090#3",
+    "d099#3",
+    "d139#2",
+    "d236#2",
+    "d236#3",
+    "d269#1",
+    "d299#1",
+    "d299#4"
+   ]
+  },
+  {
+   "id": "dw12tools",
+   "day": 84,
+   "title": "Tool runs: tests, disk, files, servers",
+   "text": "The user asked: run the unit tests (Done. 42 passed, 0 failed); check the disk space (C: has 118 GB free of 476 GB); show the git status (On branch main, working tree clean); list the files in the downloads folder (12 files, the newest is invoice_0917.pdf).",
+   "sources": [
+    "d042#3",
+    "d048#4",
+    "d052#1",
+    "d053#1",
+    "d065#2",
+    "d245#1",
+    "d258#1",
+    "d258#4"
+   ]
+  },
+  {
+   "id": "dw12traps",
+   "day": 84,
+   "title": "Miscellaneous questions",
+   "text": "The user asked: Can you run the numbers on this and see if it works out (Here is what I can tell you: Alcazar, the cathedral, Triana and a flamenco show at night); Is it possible to cook rice without a lid (Here is what I can tell you: In a hot pan with a lid for a few minutes); What is the best way to do it and how is it done in the end (Here is what I can tell you: Rise and shine, fresh every morning).",
+   "sources": [
+    "d048#1",
+    "d054#2",
+    "d261#3",
+    "d269#3"
+   ]
+  },
+  {
+   "id": "dw12travel",
+   "day": 84,
+   "title": "Travel questions",
+   "text": "The user asked: Recommend a weekend itinerary for Seville (Alcazar, the cathedral, Triana and a flamenco show at night); How do I get from Rome airport to the city centre (The Leonardo Express train reaches Termini in 32 minutes); Is Prague expensive for tourists (Cheaper than western Europe, especially outside the old town).",
+   "sources": [
+    "d036#1",
+    "d070#2",
+    "d099#2",
+    "d183#5",
+    "d299#3",
+    "d299#5"
+   ]
+  },
+  {
+   "id": "dw13arabic",
+   "day": 91,
+   "title": "أسئلة متفرقة",
+   "text": "سأل المستخدم: عطني فكرة مشروع صغير. (مشروع توصيل وجبات صحية في الحي.)؛ شلون أتعلم البرمجة؟ (ابدأ ببايثون وسو مشاريع صغيرة كل أسبوع.)؛ وش معنى كلمة شغف؟ (الشغف هو الحب الشديد للشي والتعلق فيه.)؛ وش أحسن طريقة لحفظ القرآن؟ (التكرار اليومي والمراجعة المنتظمة.)؛ وش أفضل وقت لزيارة الأندلس؟ (الربيع أحلى وقت، الجو معتدل.)؛ اشرح لي الذكاء الاصطناعي باختصار. (هو أنظمة تتعلم من البيانات وتسوي مهام تحتاج ذكاء.)",
+   "sources": [
+    "d010#2",
+    "d032#2",
+    "d071#5",
+    "d072#2",
+    "d127#1",
+    "d127#2",
+    "d147#1",
+    "d178#1",
+    "d260#4",
+    "d266#2"
+   ]
+  },
+  {
+   "id": "dw13code",
+   "day": 91,
+   "title": "Programming questions",
+   "text": "The user asked: What is a race condition (Two operations on shared state whose result depends on timing); Explain big O notation briefly (It describes how running time grows with input size, ignoring constants); How do I squash the last three git commits (Run git rebase -i HEAD~3 and mark two of them as squash); How can I center a div with CSS (Use display:flex with justify-content:center and align-items:center on the parent); Explain async and await in JavaScript (async marks a function that returns a promise; await pauses until the promise settles); How do I read a CSV file with pandas (pandas.read_csv('file.csv') returns a DataFrame).",
+   "sources": [
+    "d028#2",
+    "d071#2",
+    "d093#2",
+    "d127#4",
+    "d147#3",
+    "d178#3",
+    "d260#1",
+    "d260#2",
+    "d266#4",
+    "d266#5"
+   ]
+  },
+  {
+   "id": "dw13food",
+   "day": 91,
+   "title": "Cooking questions",
+   "text": "The user asked: What spices go into garam masala (Cumin, coriander, cardamom, cloves, cinnamon and black pepper); How long should I boil an egg for a runny yolk (About six minutes from boiling water); Best way to reheat pizza (In a hot pan with a lid for a few minutes); How do I make a French omelette (Low heat, constant stirring, roll it before it browns); What's a quick vegetarian dinner idea (Chickpea curry with spinach over rice, ready in twenty minutes); How do I make sourdough starter (Mix flour and water, feed daily, and wait about a week for it to bubble).",
+   "sources": [
+    "d007#3",
+    "d032#1",
+    "d032#3",
+    "d077#1",
+    "d077#3",
+    "d147#4",
+    "d260#5",
+    "d266#3",
+    "d279#1",
+    "d279#2"
+   ]
+  },
+  {
+   "id": "dw13general",
+   "day": 91,
+   "title": "General knowledge questions",
+   "text": "The user asked: What causes the seasons (The tilt of Earth's axis, not its distance from the Sun); Why do cats purr (Contentment mostly, but also to soothe themselves when stressed).",
+   "sources": [
+    "d071#3",
+    "d071#4",
+    "d147#2",
+    "d178#2"
+   ]
+  },
+  {
+   "id": "dw13traps",
+   "day": 91,
+   "title": "Miscellaneous questions",
+   "text": "The user asked: Write about something you find fascinating about octopuses (Here is what I can tell you: Great); Tell me about the layout of a typical Roman villa (Here is what I can tell you: About 384,400 kilometres on average); What travel adapters work in the United Kingdom (Here is what I can tell you: Two operations on shared state whose result depends on timing); Why do fans shout during football matches (Here is what I can tell you: Johannes Vermeer, around 1665); Is there a document template for meeting minutes (Here is what I can tell you: Done. 42 passed, 0 failed).",
+   "sources": [
+    "d007#1",
+    "d007#2",
+    "d111#1",
+    "d111#4",
+    "d111#5",
+    "d127#5",
+    "d147#5",
+    "d178#5"
+   ]
+  },
+  {
+   "id": "dw13writing",
+   "day": 91,
+   "title": "Writing help",
+   "text": "The user asked: Give me a title for a blog post about remote work (Home Is Where the Standup Is); Write a haiku about rain (Soft rain on tin roofs, / the street forgets its footsteps, / puddles hold the sky); Suggest a slogan for a bakery (Rise and shine, fresh every morning); Proofread: their going to the park tomorow (They're going to the park tomorrow).",
+   "sources": [
+    "d077#2",
+    "d093#1",
+    "d093#3",
+    "d178#4",
+    "d279#3"
+   ]
+  },
+  {
+   "id": "dw14arabic",
+   "day": 98,
+   "title": "أسئلة متفرقة",
+   "text": "سأل المستخدم: كيف أحسن نومي؟ (نام بوقت ثابت وخفف الشاشات قبل النوم.)؛ اشرح لي الذكاء الاصطناعي باختصار. (هو أنظمة تتعلم من البيانات وتسوي مهام تحتاج ذكاء.)؛ وش أحسن طريقة لحفظ القرآن؟ (التكرار اليومي والمراجعة المنتظمة.)؛ شلون أسوي كيكة بالشوكولاتة؟ (اخلط الطحين والكاكاو والبيض والسكر واخبزها على ١٨٠ درجة.)",
+   "sources": [
+    "d037#2",
+    "d040#5",
+    "d044#2",
+    "d140#1",
+    "d140#4",
+    "d241#5",
+    "d251#3"
+   ]
+  },
+  {
+   "id": "dw14code",
+   "day": 98,
+   "title": "Programming questions",
+   "text": "The user asked: Explain big O notation briefly (It describes how running time grows with input size, ignoring constants); What's the difference between a process and a thread (Processes have separate memory; threads share memory within one process); What is a race condition (Two operations on shared state whose result depends on timing); What is dependency injection (Passing a component its collaborators instead of letting it build them); How can I center a div with CSS (Use display:flex with justify-content:center and align-items:center on the parent); What does HTTP status 429 mean (Too Many Requests: you are being rate limited).",
+   "sources": [
+    "d017#3",
+    "d044#1",
+    "d057#3",
+    "d138#3",
+    "d155#2",
+    "d199#2",
+    "d202#3",
+    "d218#2",
+    "d218#3",
+    "d241#2",
+    "d251#5",
+    "d281#1",
+    "d281#4",
+    "d295#1"
+   ]
+  },
+  {
+   "id": "dw14food",
+   "day": 98,
+   "title": "Cooking questions",
+   "text": "The user asked: How do I make a French omelette (Low heat, constant stirring, roll it before it browns); What's a quick vegetarian dinner idea (Chickpea curry with spinach over rice, ready in twenty minutes); How do I keep avocados from browning (Lemon juice and tight wrap slow the oxidation); How long should I boil an egg for a runny yolk (About six minutes from boiling water); What spices go into garam masala (Cumin, coriander, cardamom, cloves, cinnamon and black pepper); Give me a recipe for mushroom risotto (Toast arborio rice, add stock ladle by ladle, finish with parmesan and butter).",
+   "sources": [
+    "d017#2",
+    "d040#3",
+    "d122#1",
+    "d122#3",
+    "d140#3",
+    "d140#5",
+    "d149#2",
+    "d149#3",
+    "d149#4",
+    "d191#1",
+    "d191#4",
+    "d197#1",
+    "d199#3",
+    "d241#3",
+    "d241#4",
+    "d251#1"
+   ]
+  },
+  {
+   "id": "dw14general",
+   "day": 98,
+   "title": "General knowledge questions",
+   "text": "The user asked: What is photosynthesis (Plants turn light, water and CO2 into sugar and oxygen); How do vaccines work (They train the immune system to recognise a pathogen without the disease); Why do cats purr (Contentment mostly, but also to soothe themselves when stressed); Why is the sky blue (Air scatters short blue wavelengths more than red ones); Summarise the plot of Hamlet in two lines (A prince avenges his father's murder and nearly everyone dies); How far is the Moon from Earth (About 384,400 kilometres on average).",
+   "sources": [
+    "d011#1",
+    "d011#3",
+    "d011#4",
+    "d017#4",
+    "d021#1",
+    "d037#1",
+    "d057#2",
+    "d149#1",
+    "d218#4",
+    "d230#1",
+    "d241#1",
+    "d272#1",
+    "d272#3",
+    "d295#2"
+   ]
+  },
+  {
+   "id": "dw14tools",
+   "day": 98,
+   "title": "Tool runs: tests, disk, files, servers",
+   "text": "The user asked: ping the staging server (staging responded in 23 ms); run the unit tests (Done. 42 passed, 0 failed); list the files in the downloads folder (12 files, the newest is invoice_0917.pdf); show the git status (On branch main, working tree clean); check the disk space (C: has 118 GB free of 476 GB).",
+   "sources": [
+    "d034#2",
+    "d040#2",
+    "d122#2",
+    "d138#5",
+    "d149#5",
+    "d155#1",
+    "d191#2",
+    "d197#4",
+    "d202#1",
+    "d202#2",
+    "d251#2"
+   ]
+  },
+  {
+   "id": "dw14traps",
+   "day": 98,
+   "title": "Miscellaneous questions",
+   "text": "The user asked: Is it the case that it is what it is (Here is what I can tell you: You're welcome!); Is there a document template for meeting minutes (Here is what I can tell you: Alcazar, the cathedral, Triana and a flamenco show at night); Tell me about the layout of a typical Roman villa (Here is what I can tell you: Rise and shine, fresh every morning); Can you run the numbers on this and see if it works out (Here is what I can tell you: Toast arborio rice, add stock ladle by ladle, finish with parmesan and butter); What travel adapters work in the United Kingdom (Here is what I can tell you: Lemon juice and tight wrap slow the oxidation); Is it possible to cook rice without a lid (Here is what I can tell you: Johannes Vermeer, around 1665).",
+   "sources": [
+    "d017#1",
+    "d021#2",
+    "d021#4",
+    "d034#1",
+    "d034#3",
+    "d034#4",
+    "d037#4",
+    "d057#1",
+    "d138#2",
+    "d191#3",
+    "d230#3",
+    "d251#4",
+    "d272#4"
+   ]
+  },
+  {
+   "id": "dw14travel",
+   "day": 98,
+   "title": "Travel questions",
+   "text": "The user asked: Is Prague expensive for tourists (Cheaper than western Europe, especially outside the old town); My colleague is visiting Tokyo, what should she see (Asakusa, the Meiji shrine, Shibuya crossing and a day trip to Nikko); How do I get from Rome airport to the city centre (The Leonardo Express train reaches Termini in 32 minutes); What's the best time of year to visit Iceland (June to August for hiking, winter for the northern lights).",
+   "sources": [
+    "d140#2",
+    "d197#5",
+    "d199#1",
+    "d218#1",
+    "d218#5",
+    "d272#2"
+   ]
+  },
+  {
+   "id": "dw14writing",
+   "day": 98,
+   "title": "Writing help",
+   "text": "The user asked: Proofread: their going to the park tomorow (They're going to the park tomorrow); Make this email more polite: send me the report now (Could you please send me the report when you have a moment?); Suggest a slogan for a bakery (Rise and shine, fresh every morning); Give me a title for a blog post about remote work (Home Is Where the Standup Is); Write a haiku about rain (Soft rain on tin roofs, / the street forgets its footsteps, / puddles hold the sky).",
+   "sources": [
+    "d011#2",
+    "d021#3",
+    "d034#5",
+    "d037#3",
+    "d037#5",
+    "d040#1",
+    "d040#4",
+    "d138#4",
+    "d197#2",
+    "d197#3",
+    "d281#2"
+   ]
+  },
+  {
+   "id": "dw15code",
+   "day": 105,
+   "title": "Programming questions",
+   "text": "The user asked: How do I reverse a list in Python (Use my_list[::-1] for a copy or my_list.reverse() in place); How do I read a CSV file with pandas (pandas.read_csv('file.csv') returns a DataFrame); Why does my React component render twice (In development StrictMode renders twice on purpose to surface side effects); Explain big O notation briefly (It describes how running time grows with input size, ignoring constants); What's the difference between a process and a thread (Processes have separate memory; threads share memory within one process); How do I squash the last three git commits (Run git rebase -i HEAD~3 and mark two of them as squash).",
+   "sources": [
+    "d041#2",
+    "d056#2",
+    "d089#1",
+    "d145#2",
+    "d184#5",
+    "d220#1",
+    "d220#2",
+    "d227#1",
+    "d227#3",
+    "d227#4"
+   ]
+  },
+  {
+   "id": "dw15food",
+   "day": 105,
+   "title": "Cooking questions",
+   "text": "The user asked: How do I make a French omelette (Low heat, constant stirring, roll it before it browns); How long should I boil an egg for a runny yolk (About six minutes from boiling water); Give me a recipe for mushroom risotto (Toast arborio rice, add stock ladle by ladle, finish with parmesan and butter); What's a quick vegetarian dinner idea (Chickpea curry with spinach over rice, ready in twenty minutes); What spices go into garam masala (Cumin, coriander, cardamom, cloves, cinnamon and black pepper); How do I make sourdough starter (Mix flour and water, feed daily, and wait about a week for it to bubble).",
+   "sources": [
+    "d012#3",
+    "d041#4",
+    "d056#4",
+    "d089#2",
+    "d110#2",
+    "d165#1",
+    "d184#2",
+    "d184#4",
+    "d242#2",
+    "d242#3"
+   ]
+  },
+  {
+   "id": "dw15general",
+   "day": 105,
+   "title": "General knowledge questions",
+   "text": "The user asked: Who painted the Girl with a Pearl Earring (Johannes Vermeer, around 1665); How does compound interest work (Interest earns interest, so growth accelerates over time); What is photosynthesis (Plants turn light, water and CO2 into sugar and oxygen); What causes the seasons (The tilt of Earth's axis, not its distance from the Sun).",
+   "sources": [
+    "d051#3",
+    "d110#1",
+    "d160#1",
+    "d184#1"
+   ]
+  },
+  {
+   "id": "dw15tools",
+   "day": 105,
+   "title": "Tool runs: tests, disk, files, servers",
+   "text": "The user asked: ping the staging server (staging responded in 23 ms); show the git status (On branch main, working tree clean); list the files in the downloads folder (12 files, the newest is invoice_0917.pdf).",
+   "sources": [
+    "d041#1",
+    "d056#1",
+    "d056#5",
+    "d184#3",
+    "d242#1"
+   ]
+  },
+  {
+   "id": "dw15traps",
+   "day": 105,
+   "title": "Miscellaneous questions",
+   "text": "The user asked: Tell me about the layout of a typical Roman villa (Here is what I can tell you: Glad it helped); Write about something you find fascinating about octopuses (Here is what I can tell you: Plants turn light, water and CO2 into sugar and oxygen); I have my doubts about this marketing plan (Here is what I can tell you: Plants turn light, water and CO2 into sugar and oxygen); What happened throughout the Renaissance in Florence (Here is what I can tell you: Rise and shine, fresh every morning).",
+   "sources": [
+    "d024#2",
+    "d056#3",
+    "d160#2",
+    "d165#3",
+    "d185#1",
+    "d220#3"
+   ]
+  },
+  {
+   "id": "dw15travel",
+   "day": 105,
+   "title": "Travel questions",
+   "text": "The user asked: Is Prague expensive for tourists (Cheaper than western Europe, especially outside the old town); My colleague is visiting Tokyo, what should she see (Asakusa, the Meiji shrine, Shibuya crossing and a day trip to Nikko); What's the best time of year to visit Iceland (June to August for hiking, winter for the northern lights).",
+   "sources": [
+    "d023#1",
+    "d041#3",
+    "d145#3",
+    "d165#2",
+    "d185#3",
+    "d227#2",
+    "d298#1",
+    "d298#2"
+   ]
+  },
+  {
+   "id": "dw15writing",
+   "day": 105,
+   "title": "Writing help",
+   "text": "The user asked: Make this email more polite: send me the report now (Could you please send me the report when you have a moment?); Proofread: their going to the park tomorow (They're going to the park tomorrow); Suggest a slogan for a bakery (Rise and shine, fresh every morning).",
+   "sources": [
+    "d012#2",
+    "d024#1",
+    "d051#2",
+    "d185#2"
+   ]
+  },
+  {
+   "id": "dw16code",
+   "day": 112,
+   "title": "Programming questions",
+   "text": "The user asked: Explain big O notation briefly (It describes how running time grows with input size, ignoring constants); How do I reverse a list in Python (Use my_list[::-1] for a copy or my_list.reverse() in place); How do I write a SQL join between orders and customers (SELECT * FROM orders JOIN customers ON orders.customer_id = customers.id); Why does my React component render twice (In development StrictMode renders twice on purpose to surface side effects); What's the difference between a process and a thread (Processes have separate memory; threads share memory within one process).",
+   "sources": [
+    "d125#1",
+    "d125#3",
+    "d170#3",
+    "d170#5",
+    "d273#1",
+    "d273#3",
+    "d273#5"
+   ]
+  },
+  {
+   "id": "dw16general",
+   "day": 112,
+   "title": "General knowledge questions",
+   "text": "The user asked: Summarise the plot of Hamlet in two lines (A prince avenges his father's murder and nearly everyone dies); What is the capital of Australia (Canberra); How far is the Moon from Earth (About 384,400 kilometres on average); How does compound interest work (Interest earns interest, so growth accelerates over time).",
+   "sources": [
+    "d049#1",
+    "d059#1",
+    "d170#1",
+    "d170#2",
+    "d297#2"
+   ]
+  }
+ ],
  "questions": [
   {
    "id": "q001",
@@ -8353,6 +10243,27 @@
    "below": []
   },
   {
+   "id": "q816",
+   "text": "Catch me up on the kitchen renovation.",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "q817",
+   "text": "What did we decide about the solar panels?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
+   "id": "q818",
+   "text": "Where are we with the garden redesign?",
+   "category": "abstain",
+   "gold": [],
+   "below": []
+  },
+  {
    "id": "q901",
    "text": "Who has our spare house key?",
    "category": "fact",
@@ -8385,6 +10296,67 @@
    "category": "fact",
    "gold": [
     "n04"
+   ],
+   "below": []
+  },
+  {
+   "id": "q951",
+   "text": "What's booked for our Lisbon trip?",
+   "category": "overview",
+   "gold": [
+    "sw4|p22#1|f32",
+    "sw4|p23#1|f26"
+   ],
+   "below": []
+  },
+  {
+   "id": "q952",
+   "text": "Catch me up on the Tagus retrofit project.",
+   "category": "overview",
+   "gold": [
+    "sw2|p06#1|f11",
+    "p27#1|f12b"
+   ],
+   "below": []
+  },
+  {
+   "id": "q953",
+   "text": "What did we decide about the car in the end?",
+   "category": "overview",
+   "gold": [
+    "sw5|p30#1|f35"
+   ],
+   "below": [
+    "p29#1",
+    "f36"
+   ]
+  },
+  {
+   "id": "q954",
+   "text": "Remind me what you know about Maya's school.",
+   "category": "overview",
+   "gold": [
+    "sw2|p07#1|f14",
+    "sw2|p08#1|f16"
+   ],
+   "below": []
+  },
+  {
+   "id": "q955",
+   "text": "What did I tell you about myself when we first talked?",
+   "category": "overview",
+   "gold": [
+    "sw1|p01#1|f01",
+    "sw1|p01#2|f05"
+   ],
+   "below": []
+  },
+  {
+   "id": "q956",
+   "text": "شنو خطتنا لرحلة إسطنبول؟",
+   "category": "overview",
+   "gold": [
+    "sw6|a04#1|g05"
    ],
    "below": []
   }

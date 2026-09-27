@@ -1,9 +1,10 @@
 # Memory: nothing lost, everything found
 
 **Owner-approved:** 2026-09-26 ("move on ... never stop until we have everything in place").
-**Status:** Stage 1 in progress. This file is the checklist: every item is ticked here in the
-same commit that lands it, with the test that holds it. A new session resumes from the first
-unticked item.
+**Status:** Stage 1 shipped 2026-09-26. Stage 2 shipped 2026-09-27 through C2b; what is left
+(C1, R6, S1, S3) waits on the owner's decision -- each row says what. This file is the
+checklist: every item is ticked here in the same commit that lands it, with the test that holds
+it. A new session resumes from the first unticked item.
 
 Related: [`MEMORY_REMAINING.md`](MEMORY_REMAINING.md) (what shipped before),
 [`docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md`](../audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md),
@@ -51,7 +52,7 @@ every change is inside the existing V2 engine.
 | U1 | The user decides what is kept: forget a memory (a tombstone plus the forget ledger every writer asks -- turn reconcile, recovery, the legacy restore and the past-chats search never bring it back), "don't remember this chat" (web menu, `/memory off`), export | ☑ `tests/test_memory_forget.py` |
 | W6 | One fact, one predicate name. Measured on live first: 281 extra current facts shared a subject and value with another under a different name; by meaning (bge-m3) true pairs and different facts overlap ("grok_next_reset" / "grok_personal_next_reset", two accounts, at 0.94), so the rule is the same WORDS -- 15 pairs on live, all true. New facts take the subject's existing name (`mutate_belief`), reconsolidation retires the 13 stored twice among equal sources (the user's word against an inference stays for the user), and the deep pass reuses the names in use and skips one run's status and internal ids. The LLM-judged ADD/UPDATE/DELETE step was not built: what the measurement found is either this rule's or the prompt's | ☑ `tests/test_memory_predicate_names.py` |
 | C2 | Weekly topic summaries (§5.7): once a week has ended, one summary per topic -- a chat of 4+ turns, or short chats and notes grouped by meaning (average linkage against the tenant's own bar, identical to scipy's) -- written by the model on the durable queue, two weeks in flight; forgetting a turn empties every summary made from it and rewrites it without; a forgotten summary never returns; fenced and credential-masked; Memory page panel, export, health | ☑ `tests/test_memory_topic_summaries.py` |
-| C2b | Recall reads the summaries: thresholds set from summaries the live model wrote (§5.7) | ☐ |
+| C2b | Recall reads the summaries (§5.7): every active summary ranked on evidence against the question's background among the summaries, floor 0.16 -- measured on 67 live summaries (every "catch me up" question 0.160-0.372, every unrelated one at most 0.132) and on benchmark v3 (117 summaries, "overview" questions, all no-answer questions clean); shown after the history (above it they cost MRR); only active rows | ☑ `tests/test_memory_summary_recall.py`, `tests/test_memory_benchmark.py` (v3) |
 
 ---
 
@@ -401,10 +402,24 @@ forgotten summary is never written again, even when a late turn joins its
 topic; the model's text passes the prompt fence and a credential mask. Local
 database only (not mirrored; rebuilt from turns).
 
-**C2b, next.** Recall reads summaries only once their ranking is measured on
-the summaries the live model writes: aggregate questions from the live
-history ("what phases are remains?", "list me all the resets", "what do you
-know about me") against specific and unrelated ones, like §15G's thresholds.
+**C2b: recall reads them.** Measured before the thresholds were set:
+- On live (67 summaries, bge-m3, 23 real questions): against the question's
+  background among the SUMMARIES, the answering summary of every aggregate
+  question scored 0.160-0.372 and the best summary for every unrelated
+  question at most 0.132 ("what's my dog's name" met the fitness app's
+  naming through the word "name", 0.132). The episodes' background does not
+  work: bge-m3 puts a paragraph 0.14-0.19 below a turn for the same
+  question, which sank true summaries below zero.
+- On the benchmark, dataset v3: the persona's five topics summarized by hand
+  in the live model's style, every week's unrelated chat summarized by topic
+  (112, so the pool is a real install's size -- with ten summaries a
+  question's background sat far lower than live), six "overview" questions
+  and three no-answer questions phrased as overviews. At floor 0.16 all 18
+  no-answer questions stay clean (0.15 let one in, 0.12 three).
+- Shown ABOVE the history, summaries pushed answering turns down (MRR 0.875
+  -> 0.868); below it MRR is unchanged and precision rose 0.673 -> 0.681. The
+  benchmark's topics are one or two turns, which recall already finds, so it
+  gains little there; the gain is on live, where a topic ran to 100+ turns.
 
 ---
 

@@ -296,6 +296,47 @@ FACTS: list[tuple[str, str, str, str, str, str, str, int]] = [
     ("z12", "@73", "user", "related_to", "aurelia_bridges", "set", "system_tool", 1),
 ]
 
+# ── Weekly topic summaries (dataset v3, plan C2b) ───────────────────────────
+# (summary id, day the week starts, title, text, the turns it was written
+# from). Written the way the live model writes them (2026-09-27): what was
+# said, decided and left open, nothing else. They answer the "overview"
+# questions. The unrelated chat is summarized too, week by week and topic by
+# topic (``_distractor_summaries``): about a hundred summaries, the pool a
+# real install holds over these four months -- a question's background
+# among ten summaries sat far below the live one among 67.
+SUMMARIES: list[tuple[str, int, str, str, list[str]]] = [
+    ("sw1", 0, "Getting to know Sami: home, work, family, running",
+     "Sami introduced himself: he lives in Porto and works as a structural engineer at Aurelia "
+     "Bridges. He has a lazy four-year-old greyhound called Pixel, is allergic to shellfish, and "
+     "his partner Noor teaches chemistry at a secondary school. Kazma drew up a 12-week plan for "
+     "the Lisbon half marathon on March 22 (three easy runs a week, a Sunday long run growing from "
+     "8 to 18 km, a two-week taper) and suggested Cantinho do Avillez for Noor's birthday dinner: "
+     "seafood for her, a meat menu for him. Left open: booking the dinner.",
+     ["p01#1", "p01#2", "p02#1", "p02#2", "p03#1", "p04#1"]),
+    ("sw2", 7, "Passport renewal, the Tagus retrofit, Maya's new school",
+     "Sami's passport expires on 14 March 2031; Kazma will remind him in September 2030 to renew "
+     "it. At work he now leads the Tagus footbridge retrofit, due at the end of June, under his "
+     "manager Ines Carvalho, who likes detailed status reports; Kazma offered a milestone plan. "
+     "His daughter Maya, seven, started at Escola Azul: school begins at 8:40, so they leave home "
+     "by 8:10 and a 7:30 alarm leaves time for breakfast.",
+     ["p05#1", "p06#1", "p06#2", "p07#1", "p08#1"]),
+    ("sw4", 70, "Lisbon trip bookings and a laptop battery fix",
+     "For the Lisbon half marathon trip the hotel is booked (reference ZX4-91Q) and the flight is "
+     "TP1352 on March 20 at 07:15; Kazma advised being at the airport by 05:45. Separately, "
+     "Sami's ThinkPad X1 Carbon battery was draining fast: Kazma suggested an 80 percent charge "
+     "threshold in Lenovo Vantage and the Better Battery power mode.",
+     ["p21#1", "p22#1", "p23#1"]),
+    ("sw5", 105, "Keep the Octavia or buy an electric car",
+     "Sami considered selling the 2019 Skoda Octavia estate and buying an electric car, probably "
+     "a Kia EV6; Kazma noted its good range and said to check home charging first. A few days "
+     "later he decided to keep the Octavia for another year.",
+     ["p29#1", "p30#1"]),
+    ("sw6", 21, "رحلة إسطنبول في ديسمبر",
+     "رحلة العائلة إلى إسطنبول في ديسمبر، وحجزوا فندق قريب من ساحة تقسيم. نصح كاظمة بأخذ "
+     "جاكيتات لأن الجو في ديسمبر بارد شوي.",
+     ["a04#1"]),
+]
+
 # ── Unrelated chat, including the traps ─────────────────────────────────────
 _TRAPS = [
     "Tell me about the layout of a typical Roman villa.",
@@ -415,6 +456,50 @@ def _distractor_sessions(rng: random.Random) -> list[tuple[str, int, list[tuple[
     return out
 
 
+_SUMMARY_TITLES = {
+    "code": "Programming questions",
+    "food": "Cooking questions",
+    "travel": "Travel questions",
+    "general": "General knowledge questions",
+    "writing": "Writing help",
+    "tools": "Tool runs: tests, disk, files, servers",
+    "traps": "Miscellaneous questions",
+    "arabic": "أسئلة متفرقة",
+}
+
+
+def _distractor_summaries(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A weekly summary per topic of the unrelated chat: the week's turns on
+    it (four or more, the product's minimum), up to six questions with their
+    answers, as the model lists a week of assorted questions."""
+    topic_of = {q: name for name, pairs in _TOPICS.items() for q, _ in pairs}
+    topic_of.update({q: "traps" for q in _TRAPS})
+    topic_of.update({q: "arabic" for q, _ in _AR_DISTRACTORS})
+    weeks: dict[tuple[int, str], list[tuple[str, str, str]]] = {}
+    for s in sessions:
+        if s["kind"] != "distractor":
+            continue
+        for i, t in enumerate(s["turns"], 1):
+            topic = topic_of.get(t["user"], "")
+            if topic in _SUMMARY_TITLES:
+                weeks.setdefault((s["day"] // 7, topic), []).append((t["user"], t["assistant"], f"{s['id']}#{i}"))
+    out: list[dict[str, Any]] = []
+    for (week, topic), turns in sorted(weeks.items()):
+        if len(turns) < 4:
+            continue
+        shown: dict[str, str] = {}
+        for q, a, _ref in turns:
+            shown.setdefault(q, a)
+        pairs = list(shown.items())[:6]
+        if topic == "arabic":
+            text = "سأل المستخدم: " + "؛ ".join(f"{q} ({a})" for q, a in pairs)
+        else:
+            text = "The user asked: " + "; ".join(f"{q.rstrip('?.')} ({a.rstrip('.')})" for q, a in pairs) + "."
+        out.append({"id": f"dw{week:02d}{topic}", "day": week * 7, "title": _SUMMARY_TITLES[topic],
+                    "text": text, "sources": [ref for _q, _a, ref in turns]})
+    return out
+
+
 # ── Questions: (id, text, category, gold, refs that must rank below the answer) ──
 # A ref is a turn, "<session>#<turn index>" (1-based), or a fact id. Each gold
 # entry is one piece of the answer; "a|b" means either memory gives it -- the
@@ -503,11 +588,25 @@ QUESTIONS: list[tuple[str, str, str, list[str], list[str]]] = [
     ("q813", "What is my father's job?", "abstain", [], []),
     ("q814", "شنو اسم أختي؟", "abstain", [], []),
     ("q815", "وين درست الجامعة؟", "abstain", [], []),
+    # asked for an overview of something never discussed (v3: summaries must stay out)
+    ("q816", "Catch me up on the kitchen renovation.", "abstain", [], []),
+    ("q817", "What did we decide about the solar panels?", "abstain", [], []),
+    ("q818", "Where are we with the garden redesign?", "abstain", [], []),
     # only a note the user asked to keep holds the answer: no turn does
     ("q901", "Who has our spare house key?", "fact", ["n01"], []),
     ("q902", "Who is Maya's paediatrician?", "fact", ["n02"], []),
     ("q903", "When does the car insurance renew?", "fact", ["n03"], []),
     ("q904", "كم رقم عداد الكهرباء في البيت؟", "fact", ["n04"], []),
+    # an overview of a topic: a weekly summary gives it in one memory, the
+    # turns and facts in several (v3). "sw4|p22#1|f32": the summary, the turn
+    # or the fact holds that piece.
+    ("q951", "What's booked for our Lisbon trip?", "overview", ["sw4|p22#1|f32", "sw4|p23#1|f26"], []),
+    ("q952", "Catch me up on the Tagus retrofit project.", "overview", ["sw2|p06#1|f11", "p27#1|f12b"], []),
+    ("q953", "What did we decide about the car in the end?", "overview", ["sw5|p30#1|f35"], ["p29#1", "f36"]),
+    ("q954", "Remind me what you know about Maya's school.", "overview", ["sw2|p07#1|f14", "sw2|p08#1|f16"], []),
+    ("q955", "What did I tell you about myself when we first talked?", "overview",
+     ["sw1|p01#1|f01", "sw1|p01#2|f05"], []),
+    ("q956", "شنو خطتنا لرحلة إسطنبول؟", "overview", ["sw6|a04#1|g05"], []),
 ]
 
 
@@ -541,14 +640,24 @@ def build() -> dict[str, Any]:
     fact_ids = {f["id"] for f in facts}
     if len(fact_ids) != len(facts):
         raise ValueError("duplicate fact id")
+    summaries = []
+    for sid, day, title, text, sources in SUMMARIES:
+        for ref in sources:
+            if ref not in refs:
+                raise ValueError(f"{sid}: unknown source turn {ref}")
+        summaries.append({"id": sid, "day": day, "title": title, "text": text, "sources": sources})
+    summaries.extend(_distractor_summaries(sessions))
+    summary_ids = {s["id"] for s in summaries}
+    if len(summary_ids) != len(summaries) or summary_ids & (fact_ids | refs):
+        raise ValueError("duplicate summary id")
     questions = []
     for qid, text, cat, gold, below in QUESTIONS:
         for ref in [a for piece in gold for a in piece.split("|")] + below:
-            if ref not in refs and ref not in fact_ids:
+            if ref not in refs and ref not in fact_ids and ref not in summary_ids:
                 raise ValueError(f"{qid}: unknown memory {ref}")
         questions.append({"id": qid, "text": text, "category": cat, "gold": gold, "below": below})
-    return {"version": 2, "seed": SEED, "sessions": sessions, "facts": facts,
-            "questions": questions}
+    return {"version": 3, "seed": SEED, "sessions": sessions, "facts": facts,
+            "summaries": summaries, "questions": questions}
 
 
 def _cmd_build() -> int:

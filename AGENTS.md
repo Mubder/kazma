@@ -719,8 +719,9 @@ four injected were noise.
 - **Measured, not asserted (R7):** `kazma_core/memory/benchmark.py` seeds a
   private database the product's way -- turns via `episode_row`, facts via
   `mutate_belief(private=True)`, which keeps every write in that database (no
-  state mirror, graph, unified index or remote vector index) -- and asks the
-  real `recall()`. CI replays bge-m3's recorded vectors
+  state mirror, graph, unified index or remote vector index), and (v3) weekly
+  summaries as `topic_summaries` stores them, a summary answering when it
+  stands for an answering turn -- and asks the real `recall()`. CI replays bge-m3's recorded vectors
   (`tests/fixtures/memory_bench/vectors.npz`); `thresholds.json` is a
   ratchet stamped with the dataset version: `python scripts/memory_bench.py
   lock` raises it and refuses to lower it, `lock --rebaseline` is for a new
@@ -857,9 +858,20 @@ queued by the maintenance sweep with at most two weeks in flight.
   graph, and are not mirrored to the Postgres state backend; they are
   rebuilt from turns. The Memory page's "Weekly summaries" panel lists and
   forgets them; memory health counts them.
-- **Recall does not read them yet (C2b):** how a summary ranks against a
-  question is set from summaries the live model wrote, measured the way
-  §15G's thresholds were -- not guessed before any exist.
+- **Recall reads them (C2b)** on every path (the Postgres-primary one from
+  the local database): every active summary of the tenant, ranked on
+  evidence with the summary thresholds (`recall._SUMMARY_*`), at most two,
+  shown AFTER the history ("## Weekly Summaries", week and title first, cut
+  at 900 characters). The background is the question's among the summaries:
+  bge-m3 puts a paragraph 0.14-0.19 below a turn, so the episodes'
+  background sank true summaries below zero. Floor 0.16, measured on 67
+  summaries the live model wrote (every "catch me up" question 0.160-0.372,
+  every unrelated one at or under 0.132) and on benchmark v3's 117 (all 18
+  no-answer questions clean; 0.15 let one in). Shown above the history they
+  pushed answering turns down (MRR 0.875 -> 0.868); below it the benchmark's
+  MRR is unchanged and precision rose 0.673 -> 0.681. Only `active` is ever
+  recalled -- forgotten, `rebuild` (a forgotten turn's) and retired rows
+  never are (`tests/test_memory_summary_recall.py`).
 - Gate: `tests/test_memory_topic_summaries.py` (grouping identical to
   scipy's average linkage; each rule with a negative control).
 
