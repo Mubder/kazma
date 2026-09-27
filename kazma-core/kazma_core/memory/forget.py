@@ -49,6 +49,7 @@ __all__ = [
     "forgotten_turns",
     "question_sha",
     "refuses_write",
+    "retire_copy",
     "set_chat_remembered",
 ]
 
@@ -275,7 +276,9 @@ def forget_episode(
             ).fetchall()
             if question_sha(r["user_text"]) == sha
         ]
-        ids = list(dict.fromkeys([eid, *copies]))
+        # And what the agent noted with its memory tools during that turn.
+        notes = _chat_notes(conn, tenant_id=owner, keys=keys, turn=turn)
+        ids = list(dict.fromkeys([eid, *copies, *notes]))
 
         conn.executemany(
             "INSERT OR IGNORE INTO memory_forgotten "
@@ -313,7 +316,56 @@ def forget_episode(
             conn.close()
 
 
-def _tombstone(conn: sqlite3.Connection, eid: str, *, now: float, by: str) -> None:
+def retire_copy(
+    copy_id: str, *, original_id: str, conn: sqlite3.Connection | None = None
+) -> dict[str, Any]:
+    """Retire a memory that another one holds in full: a V1 migration copy of
+    a turn memory holds (``legacy_tables.legacy_copies``, 181 on the live
+    install on 2026-09-27; recall could show one turn twice, the copy's
+    answer cut at 300 characters).
+
+    The copy is emptied like a forgotten memory -- text and vector gone, tier
+    ``forgotten`` so no recall, repair or recovery pass reads it, the id kept
+    so the legacy restore never puts it back -- but it is not a forget: the
+    turn stays remembered through the original, so no ledger entry, and the
+    facts stay. Refused unless the original is present and remembered.
+    Idempotent.
+    """
+    own = conn is None
+    conn = conn or _open()
+    try:
+        copy = conn.execute(
+            "SELECT id, tenant_id, tier FROM episodes WHERE id = ?", (copy_id,)
+        ).fetchone()
+        original = conn.execute(
+            "SELECT tier, user_text FROM episodes WHERE id = ?", (original_id,)
+        ).fetchone()
+        if copy is None:
+            return {"ok": False, "error": "not_found"}
+        if copy["tier"] == FORGOTTEN_TIER:
+            return {"ok": True, "episode_id": copy_id, "already": True}
+        if original is None or original["tier"] == FORGOTTEN_TIER or not (original["user_text"] or "").strip():
+            return {"ok": False, "error": "original_not_held"}
+        now = time.time()
+        _tombstone(conn, copy_id, now=now, by="duplicate", note={"duplicate_of": original_id})
+        from kazma_core.memory.topic_summaries import on_turns_forgotten
+
+        summaries = on_turns_forgotten(conn, [copy_id])
+        conn.commit()
+        from kazma_core.memory.state_backend import remirror_episode_by_id
+
+        remirror_episode_by_id(conn, copy_id)
+        remote = _delete_remote_vector(conn, copy_id, str(copy["tenant_id"] or "default"))
+        return {"ok": True, "episode_id": copy_id, "duplicate_of": original_id,
+                "summaries_emptied": len(summaries), "remote_vector_deleted": remote}
+    finally:
+        if own:
+            conn.close()
+
+
+def _tombstone(
+    conn: sqlite3.Connection, eid: str, *, now: float, by: str, note: dict[str, Any] | None = None
+) -> None:
     """Empty one episode's texts and vector; keep its id, chat, turn and time."""
     row = conn.execute("SELECT metadata_json FROM episodes WHERE id = ?", (eid,)).fetchone()
     try:
@@ -323,7 +375,7 @@ def _tombstone(conn: sqlite3.Connection, eid: str, *, now: float, by: str) -> No
     # Keep only what says where the memory came from; nothing it said.
     stamp = {
         "source": meta.get("source") if isinstance(meta, dict) else None,
-        "forgotten": {"at": now, "by": by},
+        "forgotten": {"at": now, "by": by, **(note or {})},
     }
     conn.execute(
         "UPDATE episodes SET user_text = '', assistant_text = '', summary_text = '', "
@@ -340,16 +392,42 @@ def _forget_turn_facts(
     Returns the ids it changed."""
     if not keys or turn <= 0:
         return []
-    from kazma_core.memory.hygiene import invalidate_belief
-
     marks = ",".join("?" for _ in keys)
     rows = conn.execute(
-        f"SELECT id, invalidated_at, valid_until, metadata_json FROM beliefs "
+        f"SELECT id, tenant_id, invalidated_at, valid_until, metadata_json FROM beliefs "
         f"WHERE tenant_id = ? AND source_turn = ? AND source_session IN ({marks})",
         (tenant_id, turn, *keys),
     ).fetchall()
+    return _forget_fact_rows(conn, rows, now=now)
+
+
+def _forget_chat_facts(
+    conn: sqlite3.Connection, *, tenant_id: str | None, keys: list[str], now: float
+) -> list[str]:
+    """Every fact naming the chat *keys* as its source, whatever its turn --
+    one a memory tool stored in a turn that left no memory of its own.
+    *tenant_id* None: any tenant."""
+    if not keys:
+        return []
+    marks = ",".join("?" for _ in keys)
+    sql = (
+        f"SELECT id, tenant_id, invalidated_at, valid_until, metadata_json FROM beliefs "
+        f"WHERE source_session IN ({marks})"
+    )
+    params: list[Any] = [*keys]
+    if tenant_id is not None:
+        sql += " AND tenant_id = ?"
+        params.append(tenant_id)
+    return _forget_fact_rows(conn, conn.execute(sql, params).fetchall(), now=now)
+
+
+def _forget_fact_rows(conn: sqlite3.Connection, rows: list[Any], *, now: float) -> list[str]:
+    """No longer current, and without their value. Skips those done already."""
+    from kazma_core.memory.hygiene import invalidate_belief
+
     changed: list[str] = []
     for r in rows:
+        tenant_id = str(r["tenant_id"] or "default")
         try:
             meta = json.loads(r["metadata_json"] or "{}")
         except (TypeError, ValueError):
@@ -412,7 +490,61 @@ def forget_chat(key: str, *, tenant_id: str, conn: sqlite3.Connection | None = N
         facts = 0
         for eid in ids:
             facts += int(forget_episode(eid, tenant_id=caller, conn=conn).get("facts_forgotten") or 0)
-        return {"ok": True, "forgotten": len(ids), "facts_forgotten": facts, "chat_keys": keys}
+        # What the agent noted during the chat in turns that left no memory of
+        # their own, and every fact naming the chat whatever its turn.
+        owner = None if caller == "default" else caller
+        notes = _chat_notes(conn, tenant_id=owner, keys=keys)
+        note_tenants = {
+            str(r[0]): str(r[1] or "default")
+            for r in conn.execute(
+                f"SELECT id, tenant_id FROM episodes WHERE id IN ({','.join('?' for _ in notes)})", notes
+            )
+        } if notes else {}
+        now = time.time()
+        for note in notes:
+            _tombstone(conn, note, now=now, by="user")
+        chat_facts = _forget_chat_facts(conn, tenant_id=owner, keys=keys, now=now)
+        if notes:
+            from kazma_core.memory.topic_summaries import on_turns_forgotten
+
+            on_turns_forgotten(conn, notes)
+        conn.commit()
+        if notes:
+            from kazma_core.memory.state_backend import remirror_episodes
+
+            remirror_episodes(conn, notes)
+            for note in notes:
+                _delete_remote_vector(conn, note, note_tenants.get(note, caller))
+        _remirror_facts(conn, chat_facts)
+        return {"ok": True, "forgotten": len(ids) + len(notes),
+                "facts_forgotten": facts + len(chat_facts), "chat_keys": keys}
     finally:
         if own:
             conn.close()
+
+
+#: The session the agent's saved notes live in (the memory_store tool).
+_NOTES_SESSION = "memory_store"
+
+
+def _chat_notes(
+    conn: sqlite3.Connection, *, tenant_id: str | None, keys: list[str], turn: int | None = None
+) -> list[str]:
+    """The agent's notes the memory tools wrote during the chat *keys* (in its
+    *turn*, when given): each names the chat (``metadata.chat`` /
+    ``chat_turn``, 2026-09-27). *tenant_id* None: any tenant."""
+    if not keys:
+        return []
+    marks = ",".join("?" for _ in keys)
+    sql = (
+        "SELECT id FROM episodes WHERE session_id = ? AND tier != ? AND json_valid(metadata_json) "
+        f"AND json_extract(metadata_json, '$.chat') IN ({marks})"
+    )
+    params: list[Any] = [_NOTES_SESSION, FORGOTTEN_TIER, *keys]
+    if turn is not None:
+        sql += " AND json_extract(metadata_json, '$.chat_turn') = ?"
+        params.append(int(turn))
+    if tenant_id is not None:
+        sql += " AND tenant_id = ?"
+        params.append(tenant_id)
+    return [str(r[0]) for r in conn.execute(sql, params).fetchall()]

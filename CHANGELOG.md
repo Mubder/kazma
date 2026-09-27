@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## Test data out of the live install, and the gaps that let it in (2026-09-27)
+
+A read-only inventory of the author's live install found data that tests and
+live checks had left there, and traced each to how it got in:
+
+- **A test run inside an install wrote into its stores.** An install is a
+  checkout of the repository, and Kazma's agent runs the tests of its
+  workspace -- the install folder. Test approval rows, a test chat store and
+  test swarm tasks landed in the live data folder. Every test run now uses
+  its own temporary data and home folders, set before anything else loads.
+- **Removed memories could come back through the Postgres mirror.** The
+  mirror held 53 rows the install no longer had -- test data written before
+  the database shield, among them "User prefers dark mode" -- and recall's
+  top-up could put them into an answer. Recall now takes from the mirror only
+  memories another install wrote.
+- **The mirror had drifted.** 116 memories were still "working" there after
+  moving on locally, and 17 facts had never arrived. Every change now reaches
+  it, and a sync pass every 15 minutes pushes whatever it is missing or holds
+  stale. It never deletes anything from the mirror.
+- **"Forget this chat" missed what the agent stored with its tools.** A note
+  or fact the agent saved during a chat now records the chat and turn, and
+  forgetting either forgets it too. In a chat kept out of memory the memory
+  tools store nothing.
+- **Compaction kept a copy of the conversation** in memory, outside both
+  controls. It no longer stores anything; the turns are remembered already.
+
+The one-off cleanup is `scripts/cleanup_live_leftovers.py`. It is a dry run
+unless given `--apply`, backs up both memory databases and every row it
+removes first, and names what it removes rather than matching patterns. It
+also retires 181 July copies of conversation turns memory holds in full
+(the question and the start of the same answer), keeping the originals and
+their facts.
+
 ## Kazma answers "where are we with ..." from its weekly summaries (2026-09-27)
 
 Ask Kazma where a long-running topic stands and it now brings back that

@@ -29,7 +29,8 @@ Grouping, measured on the live install's eleven weeks:
   the previous turn of its chat.
 - Small talk and repeated copies of one turn are left out -- a V1
   migration copy too ("User: ... Assistant: ..." in a ``legacy-*`` session)
-  when memory holds the turn it copied: on live 206 of 269 did, and the first
+  when memory holds the turn it copied, question and answer
+  (``legacy_tables.legacy_copies``): on live 181 of 269 did, and the first
   run wrote three July topics twice. A chat's two keys are one chat
   (``chat_history.chat_ids``).
 - A week done by an older version of these rules (:data:`_VERSION`) is
@@ -67,6 +68,8 @@ import time
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
+
+from kazma_core.memory.legacy_tables import LEGACY_SESSION_PREFIX, LEGACY_TURN
 
 logger = logging.getLogger(__name__)
 
@@ -122,12 +125,10 @@ _LONG_TOPIC = 20
 #: The agent's saved notes: memories, not a conversation.
 _NOTES_CHAT = "memory_store"
 _NOTE_SOURCE = "memory_store_tool"
-#: The V1 migration's sessions (``backfill_v2``) and its form of a turn.
-_LEGACY_CHAT = "legacy-"
-_LEGACY_TURN = re.compile(r"User:\s*(.*?)\s*\nAssistant:\s*(.*)\Z", re.DOTALL)
-#: A migration copy is its turn when the first this-many characters of the
-#: question match.
-_LEGACY_MATCH_CHARS = 200
+#: The V1 migration's sessions (``backfill_v2``) and its form of a turn: one
+#: definition, in ``legacy_tables``.
+_LEGACY_CHAT = LEGACY_SESSION_PREFIX
+_LEGACY_TURN = LEGACY_TURN
 #: A topic whose turns are at least this share of another summary's is that one.
 _COVERED_SHARE = 0.5
 #: Summary vectors re-encoded per pass after an embedding-model switch.
@@ -300,28 +301,14 @@ def _legacy_copies(conn: sqlite3.Connection, tenant_id: str, rows: list[sqlite3.
     The V1-to-V2 migration (``backfill_v2``) wrote each old memory as a
     single-turn episode of a ``legacy-*`` session, a conversation turn as
     "User: ... Assistant: ...". Turn reconcile later wrote the same turns from
-    the chat store: on live 206 of the 269 migration copies repeat a turn
-    memory holds, and summarizing both wrote each July topic twice -- once
-    from the chat, once from the copies grouped by meaning.
+    the chat store: summarizing both wrote each July topic twice -- once from
+    the chat, once from the copies grouped by meaning. One rule decides what a
+    copy is, here and in the live cleanup (``legacy_tables.legacy_copies``:
+    the question and the answer).
     """
-    from kazma_core.memory.vector_engine import RECALLABLE_TIERS
+    from kazma_core.memory.legacy_tables import legacy_copies
 
-    copies: set[str] = set()
-    tiers = ",".join("?" for _ in RECALLABLE_TIERS)
-    for row in rows:
-        if not str(row["session_id"] or "").startswith(_LEGACY_CHAT):
-            continue
-        legacy = _LEGACY_TURN.match((row["user_text"] or "").strip())
-        if not legacy:
-            continue
-        question = legacy.group(1).strip()[:_LEGACY_MATCH_CHARS].lower()
-        if question and conn.execute(
-            "SELECT 1 FROM episodes WHERE tenant_id = ? AND session_id NOT LIKE ? "
-            f"AND tier IN ({tiers}) AND lower(substr(trim(user_text), 1, ?)) = ? LIMIT 1",
-            (tenant_id or "default", _LEGACY_CHAT + "%", *RECALLABLE_TIERS, _LEGACY_MATCH_CHARS, question),
-        ).fetchone():
-            copies.add(row["id"])
-    return copies
+    return set(legacy_copies(conn, tenant_id, rows))
 
 
 def _meaning_bar(conn: sqlite3.Connection, tenant_id: str, size: int) -> float | None:

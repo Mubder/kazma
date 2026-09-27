@@ -237,6 +237,10 @@ install had 341 such shells; all were restored from backups.
 
 Export writes `kazma_beliefs_latest.jsonl`, GraphML, plus episodes, `beliefs_archive`, `entity_merges` (+ archive), and `memory_audit_log` (per-tenant filenames when not `default`). Native `.db` backups remain the restore SoT.
 
+The Postgres mirror is kept whole by a sync pass on the 15-minute maintenance cadence: every memory and fact it is missing, or holds in an older state (a tier move, a forgotten memory, an ended fact), is pushed again, newest first. A row only the mirror holds is counted in memory health and left alone. Recall tops up a thin answer only with memories another install wrote; a memory this install removed never comes back through the mirror.
+
+What the agent stores with its memory tools (`memory_store`, linking two entities) records the chat and turn it was said in: forgetting that turn or chat forgets those notes and facts too, and in a chat kept out of memory the tools store nothing. Compacting a long conversation no longer stores its summary as a memory; the turns themselves are remembered.
+
 Postgres mirror drift (dead facts still live in `kazma_beliefs`): the backup handler logs a warning. Reconcile with:
 
 ```bash

@@ -629,15 +629,18 @@ def _merge_remote_state_hits(
     writes. A row this install also holds was already judged by local recall
     -- re-adding it undid the relevance floor, which makes a short result
     normal, and the mirror search returned the newest rows containing "is" or
-    "my" -- so it is skipped. A remote-only row joins only when it holds at
-    least half of the question's content words, labelled weak, after every
-    local hit.
+    "my" -- so it is skipped. So is a row this install wrote and no longer
+    holds: it was removed here, and only another install's rows are what the
+    top-up is for (``state_backend.written_elsewhere``). A remote-only row
+    joins only when it holds at least half of the question's content words,
+    labelled weak, after every local hit.
     """
     from kazma_core.memory.query_terms import content_terms, coverage
     from kazma_core.memory.state_backend import (
         get_state_backend,
         search_state_beliefs,
         search_state_episodes,
+        written_elsewhere,
     )
 
     be = get_state_backend()
@@ -674,7 +677,7 @@ def _merge_remote_state_hits(
         for i, row in enumerate(remote):
             eid = str(row.get("id") or "")
             text, shown = _state_episode_texts(row)
-            if not eid or eid in seen_ep or eid in held or not text:
+            if not eid or eid in seen_ep or eid in held or not text or not written_elsewhere(row):
                 continue
             if is_small_talk(row.get("user_text"), row.get("assistant_text")):
                 continue
@@ -712,7 +715,7 @@ def _merge_remote_state_hits(
         held_b = _held_locally("beliefs", [str(r.get("id") or "") for r in remote_b])
         for i, row in enumerate(remote_b):
             bid = str(row.get("id") or "")
-            if not bid or bid in seen_b or bid in held_b:
+            if not bid or bid in seen_b or bid in held_b or not written_elsewhere(row):
                 continue
             hit = _state_belief_hit(row, bel_floor * 0.5 / (i + 1), explain=explain, weak=True)
             if hit is None or coverage(terms, hit.content) < 0.5:

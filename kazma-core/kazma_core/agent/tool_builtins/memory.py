@@ -27,6 +27,40 @@ def _qnorm(q: str) -> str:
     return _re.sub(r"[_\-\s]+", " ", str(q or "").strip().lower()).strip()
 
 
+#: What a memory tool answers in a chat the user keeps out of memory.
+_KEPT_OUT = (
+    "Not stored: the user keeps this chat out of memory, so nothing from it is "
+    "saved. They can let it back in from the chat's Memory menu, or with /memory on."
+)
+
+
+def _chat_of_call() -> tuple[str, int]:
+    """The chat and turn a memory tool is called in: the thread id and the
+    turn index its memory records (``consolidator.user_turn_index`` over the
+    turn's messages), or ``("", 0)`` outside a chat.
+
+    Every note and fact a memory tool writes names them (2026-09-27): without
+    that, "forget this chat" and "don't remember this chat" missed what the
+    agent stored with its tools -- live, a test chat's "pebble-live" token
+    outlived the chat as a current fact.
+    """
+    from kazma_core.memory.consolidator import user_turn_index
+    from kazma_core.safety.hitl import get_current_thread_id
+    from kazma_core.tools.export_session import get_current_session_messages
+
+    thread = str(get_current_thread_id() or "")
+    if not thread:
+        return "", 0
+    return thread, user_turn_index(get_current_session_messages() or [])
+
+
+def _chat_kept_out(thread: str, tenant_id: str) -> bool:
+    """True when the user keeps the chat *thread* out of memory (plan U1)."""
+    if not thread:
+        return False
+    from kazma_core.memory.forget import chat_remembered
+
+    return not chat_remembered(thread, tenant_id=tenant_id)
 
 
 def register_memory_tools(registry: Any) -> None:
@@ -284,6 +318,9 @@ def register_memory_tools(registry: Any) -> None:
         object_ = (obj or "").strip()
         if not sub or not object_:
             return "Error: subject and object required"
+        thread, turn = _chat_of_call()
+        if _chat_kept_out(thread, get_current_tenant_id()):
+            return _KEPT_OUT
         try:
             primary = sqlite3.connect(
                 primary_memory_db(), check_same_thread=False
@@ -320,6 +357,8 @@ def register_memory_tools(registry: Any) -> None:
                 importance=4,
                 extraction_method="user_explicit",
                 tenant_id=tenant,
+                source_session=thread or None,
+                source_turn=turn or None,
             )
             ops.close()
             primary.close()
@@ -513,6 +552,11 @@ def register_memory_tools(registry: Any) -> None:
             from kazma_core.safety.hitl import get_current_tenant_id
 
             _tenant = get_current_tenant_id()
+            # The chat this is stored from: named on the note and every fact,
+            # so forgetting the chat (or turn) forgets them too.
+            thread, turn = _chat_of_call()
+            if _chat_kept_out(thread, _tenant):
+                return _KEPT_OUT
             # Episode (raw text snapshot) — always keep diary trail
             eid = mirror_episode(
                 session_id=str(meta.get("session_id", "memory_store")),
@@ -520,6 +564,7 @@ def register_memory_tools(registry: Any) -> None:
                 user_text=text,
                 source="memory_store_tool",
                 tenant_id=_tenant,
+                metadata={"chat": thread, "chat_turn": turn} if thread else None,
             )
             current = parse_current_facts(text, meta)
             actions: list[dict] = []
@@ -537,6 +582,8 @@ def register_memory_tools(registry: Any) -> None:
                             importance=int(fact.get("importance") or 5),
                             extraction_method="user_explicit",
                             tenant_id=_tenant,
+                            source_session=thread or None,
+                            source_turn=turn or None,
                             cfg=None,
                         )
                     )
@@ -554,6 +601,8 @@ def register_memory_tools(registry: Any) -> None:
                         importance=5,
                         extraction_method="user_explicit",
                         tenant_id=_tenant,
+                        source_session=thread or None,
+                        source_turn=turn or None,
                         cfg=None,
                     )
                 )

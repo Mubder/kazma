@@ -74,6 +74,7 @@ _INSTALL_ONLY = (
     "last_reconsolidation",
     "findability",
     "vector_capability",
+    "mirror",
 )
 
 
@@ -249,6 +250,12 @@ def build_v2_health(
             out["summaries"] = summary_health(primary_conn, tenant_id=tenant_id or "default")
         except sqlite3.Error:
             logger.warning("[v2_health] weekly summary counts unreadable", exc_info=True)
+
+        # The Postgres mirror as the last sync pass found it (empty: no mirror,
+        # or no pass since boot).
+        from kazma_core.memory.state_backend import last_mirror_sync
+
+        out["mirror"] = last_mirror_sync()
 
         # Entities + procedural DAGs
         out["entities"] = _safe_count(

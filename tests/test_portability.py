@@ -15,6 +15,18 @@ import pytest
 from kazma_core import audit_logger, rbac
 from kazma_core.paths import audit_db, get_project_root, rbac_db
 
+
+@pytest.fixture
+def default_install(tmp_path, monkeypatch):
+    """A default install rooted in a temp folder: no KAZMA_DATA_DIR. The suite
+    pins its own data folder (root conftest), and a test may not resolve the
+    checkout's, which on a live install is the live one."""
+    from kazma_core import paths
+
+    monkeypatch.delenv("KAZMA_DATA_DIR", raising=False)
+    monkeypatch.setattr(paths, "_project_root", tmp_path)
+    return tmp_path
+
 # Repository root (tests/ is one level below)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -100,7 +112,7 @@ class TestRbacPathIsProjectRoot:
         source = inspect.getsource(rbac)
         assert "__file__" not in source, "rbac.py still uses __file__ for paths"
 
-    def test_default_db_uses_paths_module(self) -> None:
+    def test_default_db_uses_paths_module(self, default_install) -> None:
         """Default DB resolves via rbac_db() under the project root."""
         default_db = rbac._default_db()
         assert default_db == rbac_db()
@@ -127,7 +139,7 @@ class TestAuditLoggerPathIsProjectRoot:
             "audit_logger.py still uses __file__ for paths"
         )
 
-    def test_default_db_uses_paths_module(self) -> None:
+    def test_default_db_uses_paths_module(self, default_install) -> None:
         """Default DB resolves via audit_db() under the project root."""
         default_db = audit_logger._default_db()
         assert default_db == audit_db()

@@ -15,11 +15,13 @@ Dense search then uses pgvector (not ILIKE-only).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sqlite3
 import threading
 import time
+from collections.abc import Iterable
 
 # Liveness-probe cache TTL for the shared-state backend's `available`.
 _READY_PROBE_TTL = 60.0
@@ -44,6 +46,10 @@ __all__ = [
     "unmirror_belief_to_state",
     "remirror_belief_by_id",
     "remirror_episode_by_id",
+    "remirror_episodes",
+    "sync_state_mirror",
+    "last_mirror_sync",
+    "written_elsewhere",
     "reconcile_state_beliefs",
     "mirror_drift_summary",
 ]
@@ -78,7 +84,7 @@ class StateBackend(Protocol):
     ) -> list[dict[str, Any]]: ...
 
 
-class NullStateBackend:
+class _NullStateBackend:
     """No-op remote state (local SQLite is the only store)."""
 
     name = "null"
@@ -105,6 +111,12 @@ class NullStateBackend:
         return False
 
     def mirror_belief_snapshot(self) -> dict[str, bool]:
+        return {}
+
+    def episode_digest(self) -> dict[str, tuple[str, str]]:
+        return {}
+
+    def belief_digest(self) -> dict[str, tuple[bool, str]]:
         return {}
 
     def search_episodes(
@@ -284,9 +296,9 @@ class PostgresStateBackend:
                         row.get("tenant_id") or "default",
                         row.get("session_id"),
                         int(row.get("turn_number") or 0),
-                        row.get("user_text"),
-                        row.get("assistant_text"),
-                        row.get("summary_text"),
+                        _pg_text(row.get("user_text")),
+                        _pg_text(row.get("assistant_text")),
+                        _pg_text(row.get("summary_text")),
                         row.get("tier") or "episodic",
                         int(row.get("structural_importance") or 1),
                         float(row.get("created_at") or time.time()),
@@ -329,10 +341,10 @@ class PostgresStateBackend:
                     (
                         row.get("id"),
                         row.get("tenant_id") or "default",
-                        row.get("subject"),
-                        row.get("predicate"),
+                        _pg_text(row.get("subject")),
+                        _pg_text(row.get("predicate")),
                         row.get("predicate_type") or "functional",
-                        row.get("object"),
+                        _pg_text(row.get("object")),
                         float(row.get("confidence") or 0.5),
                         int(row.get("structural_importance") or 1),
                         float(row.get("source_trust_weight") or 1.0),
@@ -398,6 +410,41 @@ class PostgresStateBackend:
             logger.debug("[state_backend] snapshot failed", exc_info=True)
             return {}
 
+    def _digest(self, sql: str) -> dict[str, tuple[Any, str]]:
+        if not self._dsn:
+            return {}
+        conn = self._connect()
+        try:
+            self._ensure(conn)
+            cur = conn.cursor()
+            cur.execute(sql)
+            out = {str(r[0]): (r[1], str(r[2])) for r in cur.fetchall()}
+            cur.close()
+            return out
+        finally:
+            conn.close()
+
+    def episode_digest(self) -> dict[str, tuple[str, str]]:
+        """id -> (tier, digest of the texts) of every mirrored episode, for
+        :func:`sync_state_mirror`. Raises when Postgres does: a sync that could
+        not read the mirror must not conclude it is empty."""
+        return self._digest(
+            "SELECT id, COALESCE(tier, ''), md5(COALESCE(user_text, '') || chr(31) || "
+            "COALESCE(assistant_text, '') || chr(31) || COALESCE(summary_text, '')) "
+            "FROM kazma_episodes"
+        )
+
+    def belief_digest(self) -> dict[str, tuple[bool, str]]:
+        """id -> (alive, digest of the value) of every mirrored fact. Raises
+        like :meth:`episode_digest`."""
+        return {
+            k: (bool(alive), h)
+            for k, (alive, h) in self._digest(
+                "SELECT id, invalidated_at IS NULL AND valid_until IS NULL, "
+                "md5(COALESCE(object, '')) FROM kazma_beliefs"
+            ).items()
+        }
+
     def search_episodes(
         self, query: str, *, tenant_id: str = "default", limit: int = 10
     ) -> list[dict[str, Any]]:
@@ -434,7 +481,7 @@ class PostgresStateBackend:
                 cur.execute(
                     f"""
                     SELECT id, session_id, user_text, assistant_text, summary_text,
-                           tier, structural_importance, created_at
+                           tier, structural_importance, created_at, metadata_json
                     FROM kazma_episodes
                     WHERE tenant_id = %s AND ({clauses})
                     ORDER BY created_at DESC
@@ -490,7 +537,7 @@ class PostgresStateBackend:
                     f"""
                     SELECT id, subject, predicate, object, predicate_type,
                            confidence, structural_importance, source_trust_weight,
-                           valid_from
+                           valid_from, metadata_json
                     FROM kazma_beliefs
                     WHERE tenant_id = %s
                       AND valid_until IS NULL AND invalidated_at IS NULL
@@ -678,9 +725,44 @@ def _stamp_region_meta(row: dict[str, Any]) -> str:
     region = state_region()
     if region:
         meta["region"] = region
+    install = _this_install_id()
+    if install:
+        meta["install"] = install
     meta["updated_at"] = time.time()
     meta["conflict_policy"] = state_conflict_policy()
     return json.dumps(meta, ensure_ascii=False)
+
+
+def _pg_text(value: Any) -> Any:
+    """Text as Postgres stores it: a NUL byte is refused there (the chat store
+    refused every save of one chat over a single NUL, AGENTS.md §36), and a
+    refused mirror write would be retried by every sync pass."""
+    return value.replace("\x00", "") if isinstance(value, str) else value
+
+
+def _this_install_id() -> str | None:
+    """This install's id (``<data dir>/install_id``, written at boot), read
+    and never minted: a script or a test that never booted a server has none,
+    and its mirror writes carry no tag rather than a made-up one."""
+    from kazma_core.db.shared_store_peers import install_id
+
+    return install_id(create=False)
+
+
+def written_elsewhere(row: dict[str, Any]) -> bool:
+    """True when another install sharing the mirror wrote this mirror row.
+
+    The mirror holds this install's memories and other replicas' writes. A
+    row this install wrote and no longer holds was removed here -- forgotten,
+    retired as a copy, deleted by a cleanup since removed -- and recall's
+    top-up must not bring it back: live on 2026-09-27 the mirror held 53 such
+    rows, test data among them ("User prefers dark mode"). Rows mirrored
+    before writers were tagged (that day) carry no tag and count as this
+    install's own.
+    """
+    meta = _parse_meta(row.get("metadata_json") or row.get("metadata"))
+    writer = str(meta.get("install") or "")
+    return bool(writer) and writer != (_this_install_id() or "")
 
 
 def state_capability(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -771,7 +853,7 @@ def get_state_backend() -> Any:
                 _state_backend_cache[key] = be
             return be
         logger.info("[state_backend] postgres unavailable — null sink")
-    return NullStateBackend()
+    return _NullStateBackend()
 
 
 def mirror_episode_to_state(row: dict[str, Any]) -> bool:
@@ -809,13 +891,22 @@ def remirror_episode_by_id(conn: Any, episode_id: str) -> bool:
     """Push an episode's CURRENT local row to the mirror (a tier move, restored
     text). A row that no longer exists is left alone. Never raises."""
     try:
-        row = conn.execute(
-            f"SELECT {_EPISODE_MIRROR_COLUMNS} FROM episodes WHERE id = ?", (episode_id,)
-        ).fetchone()
+        row = _row_dict(conn, f"SELECT {_EPISODE_MIRROR_COLUMNS} FROM episodes WHERE id = ?", episode_id)
     except sqlite3.Error:
         logger.debug("[state_backend] remirror failed for %s", episode_id, exc_info=True)
         return False
-    return mirror_episode_to_state(dict(row)) if row is not None else False
+    return mirror_episode_to_state(row) if row is not None else False
+
+
+def _row_dict(conn: Any, sql: str, key: str) -> dict[str, Any] | None:
+    """One row as a dict, whatever the connection's row factory: the
+    working-turn promotion's connection returns tuples, and ``dict(row)`` of a
+    tuple raised out of a function that promises never to."""
+    cur = conn.execute(sql, (key,))
+    row = cur.fetchone()
+    if row is None:
+        return None
+    return dict(zip([d[0] for d in cur.description], tuple(row)))
 
 
 def remirror_belief_by_id(conn: Any, belief_id: str) -> bool:
@@ -827,18 +918,123 @@ def remirror_belief_by_id(conn: Any, belief_id: str) -> bool:
     a delete. Never raises.
     """
     try:
-        row = conn.execute(
-            "SELECT * FROM beliefs WHERE id = ?", (belief_id,)
-        ).fetchone()
+        row = _row_dict(conn, "SELECT * FROM beliefs WHERE id = ?", belief_id)
         if row is None:
             return unmirror_belief_to_state(belief_id)
-        d = dict(row)
-        if isinstance(d.get("metadata_json"), str) and "metadata" not in d:
-            d["metadata_json"] = d["metadata_json"]
-        return mirror_belief_to_state(d)
+        return mirror_belief_to_state(row)
     except Exception:
         logger.debug("[state_backend] remirror failed for %s", belief_id, exc_info=True)
         return False
+
+
+def remirror_episodes(conn: Any, episode_ids: Iterable[str]) -> int:
+    """Push these episodes' current local rows to the mirror after a change
+    (a tier move, restored text). No-op without a mirror. Returns how many
+    reached it; a miss is caught by :func:`sync_state_mirror`."""
+    ids = list(dict.fromkeys(str(i) for i in episode_ids if i))
+    if not ids or isinstance(get_state_backend(), _NullStateBackend):
+        return 0
+    return sum(1 for eid in ids if remirror_episode_by_id(conn, eid))
+
+
+#: At most this many rows pushed per sync pass (each is one Postgres write).
+_SYNC_LIMIT = 500
+_last_sync: dict[str, Any] = {}
+
+
+def _episode_digest(tier: Any, user: Any, assistant: Any, summary: Any) -> tuple[str, str]:
+    """The (tier, texts digest) :meth:`PostgresStateBackend.episode_digest`
+    computes, from a local row: the texts as the mirror stores them."""
+    texts = "\x1f".join(str(_pg_text(t) or "") for t in (user, assistant, summary))
+    # A comparison digest, not a secret -- the mirror computes the same md5.
+    return str(tier or "episodic"), hashlib.md5(texts.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
+def sync_state_mirror(conn: sqlite3.Connection, *, limit: int = _SYNC_LIMIT) -> dict[str, Any]:
+    """Anti-entropy for the Postgres mirror: every local memory reaches it as
+    it is now.
+
+    Mirror writes are best effort. One made while Postgres was down, or by a
+    path that did not mirror (the working-turn promotion, until 2026-09-27),
+    left the copy behind for good: live that day 116 turns were still
+    "working" in the mirror and 17 facts had never reached it. A pass compares
+    the whole mirror with the local store -- id, tier and a digest of the
+    texts; for a fact, whether it is current and its value -- and pushes what
+    differs, newest first, at most *limit* rows. A row only the mirror holds
+    is counted and left alone, never deleted and never copied back: another
+    install may have written it, and recall's top-up already leaves this
+    install's own out (:func:`written_elsewhere`).
+
+    Skipped without a mirror and when Postgres is the primary store. Raises
+    when the mirror cannot be read (the maintenance runner logs it).
+    """
+    backend = get_state_backend()
+    if isinstance(backend, _NullStateBackend) or not getattr(backend, "available", False):
+        return {"skipped": "no mirror"}
+    if is_state_primary():
+        return {"skipped": "postgres is the primary store"}
+
+    remote_ep = backend.episode_digest()
+    local_ep: dict[str, float] = {}
+    behind_ep: list[tuple[float, str]] = []
+    for eid, tier, user, assistant, summary, created in conn.execute(
+        "SELECT id, tier, user_text, assistant_text, summary_text, created_at FROM episodes"
+    ):
+        local_ep[eid] = float(created or 0)
+        if remote_ep.get(eid) != _episode_digest(tier, user, assistant, summary):
+            behind_ep.append((float(created or 0), eid))
+
+    remote_bel = backend.belief_digest()
+    local_bel: set[str] = set()
+    behind_bel: list[tuple[float, str]] = []
+    for bid, obj, until, invalidated, ingested in conn.execute(
+        "SELECT id, object, valid_until, invalidated_at, ingested_at FROM beliefs"
+    ):
+        local_bel.add(bid)
+        mine = (until is None and invalidated is None,
+                hashlib.md5(str(_pg_text(obj) or "").encode("utf-8"), usedforsecurity=False).hexdigest())
+        if remote_bel.get(bid) != mine:
+            behind_bel.append((float(ingested or 0), bid))
+
+    budget = max(0, int(limit))
+    pushed_ep = failed = pushed_bel = 0
+    for _, eid in sorted(behind_ep, reverse=True)[:budget]:
+        if remirror_episode_by_id(conn, eid):
+            pushed_ep += 1
+        else:
+            failed += 1
+    for _, bid in sorted(behind_bel, reverse=True)[: max(0, budget - pushed_ep - failed)]:
+        if remirror_belief_by_id(conn, bid):
+            pushed_bel += 1
+        else:
+            failed += 1
+
+    stats = {
+        "episodes_pushed": pushed_ep,
+        "beliefs_pushed": pushed_bel,
+        "failed": failed,
+        "episodes_behind": len(behind_ep) - pushed_ep,
+        "beliefs_behind": len(behind_bel) - pushed_bel,
+        "mirror_only_episodes": len(set(remote_ep) - set(local_ep)),
+        "mirror_only_beliefs": len(set(remote_bel) - local_bel),
+        "at": time.time(),
+    }
+    _last_sync.clear()
+    _last_sync.update(stats)
+    if pushed_ep or pushed_bel:
+        logger.info(
+            "[memory] mirror sync: pushed %d memories and %d facts the Postgres mirror "
+            "was missing or held stale; %d memories and %d facts only in the mirror (left alone)",
+            pushed_ep, pushed_bel, stats["mirror_only_episodes"], stats["mirror_only_beliefs"],
+        )
+    if failed:
+        logger.warning("[memory] mirror sync: %d pushes failed; the next pass retries them", failed)
+    return stats
+
+
+def last_mirror_sync() -> dict[str, Any]:
+    """What the last :func:`sync_state_mirror` pass found (memory health)."""
+    return dict(_last_sync)
 
 
 def reconcile_state_beliefs(conn: Any, *, dry_run: bool = False) -> dict[str, int]:
@@ -956,7 +1152,7 @@ def backfill_state_mirror(*, tenant_id: str = "default") -> dict[str, Any]:
     UPDATE``). SQLite stays the source of truth; this only writes copies.
     """
     be = get_state_backend()
-    if type(be).__name__ == "NullStateBackend" or not getattr(be, "available", False):
+    if type(be).__name__ == "_NullStateBackend" or not getattr(be, "available", False):
         return {
             "ok": False,
             "synced": 0,

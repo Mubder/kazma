@@ -483,18 +483,27 @@ def promote_working_memory(session_id: str | None, *, tenant_id: str | None = No
     from kazma_core.memory.schema_v2 import ensure_primary_schema
     from kazma_core.paths import primary_memory_db
 
+    from kazma_core.memory.state_backend import remirror_episodes
+
     conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
     apply_sqlite_pragmas(conn)
     try:
         ensure_primary_schema(conn)
-        sql = "UPDATE episodes SET tier = 'episodic' WHERE session_id = ? AND tier = 'working'"
+        where = "session_id = ? AND tier = 'working'"
         params: list[Any] = [session_id]
         if tenant_id is not None:
-            sql += " AND tenant_id = ?"
+            where += " AND tenant_id = ?"
             params.append(tenant_id)
-        cur = conn.execute(sql, params)
+        ids = [str(r[0]) for r in conn.execute(f"SELECT id FROM episodes WHERE {where}", params)]
+        if not ids:
+            return 0
+        marks = ",".join("?" for _ in ids)
+        conn.execute(f"UPDATE episodes SET tier = 'episodic' WHERE id IN ({marks}) AND tier = 'working'", ids)
         conn.commit()
-        return int(cur.rowcount or 0)
+        # The mirror learns the move too: until 2026-09-27 it did not, and 116
+        # promoted turns stayed "working" in the live Postgres mirror.
+        remirror_episodes(conn, ids)
+        return len(ids)
     finally:
         conn.close()
 

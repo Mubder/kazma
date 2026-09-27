@@ -31,7 +31,14 @@ import sqlite3
 import time
 from typing import Any
 
-__all__ = ["LEGACY_EPISODE_TABLE", "legacy_archive_counts", "restore_legacy_episode_archive"]
+__all__ = [
+    "LEGACY_EPISODE_TABLE",
+    "LEGACY_SESSION_PREFIX",
+    "LEGACY_TURN",
+    "legacy_archive_counts",
+    "legacy_copies",
+    "restore_legacy_episode_archive",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -212,3 +219,68 @@ def restore_legacy_episode_archive(conn: sqlite3.Connection) -> dict[str, int]:
             report["duplicate"],
         )
     return report
+
+
+#: A V1 migration copy's session: one per memory the migration carried over.
+LEGACY_SESSION_PREFIX = "legacy-"
+# "User: <question>" then "Assistant: <answer>" on the next line.
+LEGACY_TURN = re.compile(r"User:\s*(.*?)\s*\nAssistant:\s*(.*)\Z", re.DOTALL)
+#: Characters of the question the database compares before Python does.
+_PREFILTER = 40
+
+
+def _plain(text: Any) -> str:
+    """Compared form: whitespace folded, case folded, the migration's "…"
+    truncation mark (and a final full stop) dropped."""
+    folded = re.sub(r"\s+", " ", str(text or "")).strip().casefold()
+    return folded.rstrip("…").rstrip(".").strip()
+
+
+def legacy_copies(
+    conn: sqlite3.Connection, tenant_id: str, rows: Any = None
+) -> dict[str, str]:
+    """The V1 migration copies among *rows* that repeat a turn memory holds:
+    ``{copy id: original id}``.
+
+    The V1-to-V2 migration (``backfill_v2``) wrote each old memory as a
+    one-turn episode of a ``legacy-*`` session, a conversation turn as
+    "User: ... Assistant: ..." with the answer cut at about 300 characters
+    and marked "…". Turn reconcile later wrote the same turns from the chat
+    store, in full. A copy is one whose question AND answer the original
+    starts with -- on live 2026-09-27, 181 of 269. The same question with
+    another answer is another occasion, not a copy (20 of them), and a
+    migrated note is never one. *rows* are episode rows (``id``,
+    ``session_id``, ``user_text``); ``None`` reads the tenant's legacy
+    sessions in the tiers recall searches.
+    """
+    from kazma_core.memory.vector_engine import RECALLABLE_TIERS
+
+    tenant = tenant_id or "default"
+    tiers = ",".join("?" for _ in RECALLABLE_TIERS)
+    if rows is None:
+        rows = conn.execute(
+            f"SELECT id, session_id, user_text FROM episodes WHERE tenant_id = ? "
+            f"AND session_id LIKE ? AND tier IN ({tiers})",
+            (tenant, LEGACY_SESSION_PREFIX + "%", *RECALLABLE_TIERS),
+        ).fetchall()
+    found: dict[str, str] = {}
+    for row in rows:
+        if not str(row["session_id"] or "").startswith(LEGACY_SESSION_PREFIX):
+            continue
+        turn = LEGACY_TURN.match(str(row["user_text"] or "").strip())
+        if not turn:
+            continue
+        question, answer = _plain(turn.group(1)), _plain(turn.group(2))
+        if not question:
+            continue
+        for cand in conn.execute(
+            "SELECT id, user_text, assistant_text FROM episodes WHERE tenant_id = ? "
+            f"AND session_id NOT LIKE ? AND tier IN ({tiers}) "
+            "AND lower(substr(trim(user_text), 1, ?)) = lower(?)",
+            (tenant, LEGACY_SESSION_PREFIX + "%", *RECALLABLE_TIERS, _PREFILTER,
+             turn.group(1).strip()[:_PREFILTER]),
+        ):
+            if _plain(cand[1]).startswith(question) and _plain(cand[2]).startswith(answer):
+                found[str(row["id"])] = str(cand[0])
+                break
+    return found

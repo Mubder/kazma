@@ -5,7 +5,7 @@ compaction after the V1→V2 memory cutover.
 Covers:
   - swarm_bridge.store_swarm_result  → episode (source="swarm_result") only
   - swarm_bridge.log_evolution_v2    → episode (source="soul_evolution")
-  - swarm_bridge.store_compaction_summary → episode (source="compaction_summary")
+  - compaction stores no memory of its own
   - recall.search dict-shape compat shim (the linchpin read contract)
 
 All tests use tmp_path + KAZMA_DATA_DIR override + dual_write._reset_mirror().
@@ -134,36 +134,33 @@ def test_log_evolution_v2_writes_episode(isolated_data):
         conn.close()
 
 
-# ── store_compaction_summary ──────────────────────────────────────────────
+# ── compaction leaves no memory of its own ────────────────────────────────
 
 
-def test_store_compaction_summary_writes_episode(isolated_data):
-    from kazma_core.memory.swarm_bridge import store_compaction_summary
+def test_compaction_stores_nothing_in_memory(isolated_data):
+    """Compaction used to store its summary as an episode of the session
+    "compaction" under the tenant "default" -- a second record of the chat that
+    "forget this chat" could not reach. The turns themselves reach memory."""
+    import asyncio
 
-    eid = store_compaction_summary(
-        "Conversation about refactoring the memory subsystem.",
-        metadata={"type": "compaction_summary"},
-    )
-    assert eid is not None
+    from kazma_core.compaction import CompactionEngine
+    from kazma_core.memory.schema_v2 import ensure_primary_schema
 
     conn = _primary_conn()
+    ensure_primary_schema(conn)
+    conn.close()
+    state = {"messages": [{"role": "user", "content": "We agreed to ship on Friday."},
+                          {"role": "assistant", "content": "Noted: shipping Friday."}],
+             "context_tokens": 90_000}
+    asyncio.run(CompactionEngine().compact(state))
+    conn = _primary_conn()
     try:
-        ep = conn.execute(
-            "SELECT summary_text, metadata_json FROM episodes WHERE id=?", (eid,)
-        ).fetchone()
-        assert ep is not None
-        assert "refactoring the memory" in (ep["summary_text"] or "")
-        meta = json.loads(ep["metadata_json"])
-        assert meta["source"] == "compaction_summary"
+        assert conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0] == 0
     finally:
         conn.close()
+    import kazma_core.memory.swarm_bridge as bridge
 
-
-def test_store_compaction_summary_skips_empty(isolated_data):
-    from kazma_core.memory.swarm_bridge import store_compaction_summary
-
-    assert store_compaction_summary("   ", None) is None
-    assert store_compaction_summary("", None) is None
+    assert not hasattr(bridge, "store_compaction_summary")
 
 
 # ── recall.search compat shim ─────────────────────────────────────────────
