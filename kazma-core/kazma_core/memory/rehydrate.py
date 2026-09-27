@@ -95,9 +95,11 @@ _KB_SUMMARY_CAP = 500
 #: text as ``''``, so a NULL pair there is always the rule's work, in any tier
 #: (an erased row that was recalled has since been revived out of archived).
 #: ``swarm_bridge`` rows are born with NULL text, so only archived ones count.
+#: A memory the user forgot is emptied on purpose (``memory/forget.py``: its
+#: text is ``''`` and its tier ``forgotten``) and is never refilled.
 ERASED_SQL = (
     "user_text IS NULL AND assistant_text IS NULL "
-    "AND (tier = 'archived' OR substr(id, 1, 2) = 'e_')"
+    "AND (tier = 'archived' OR substr(id, 1, 2) = 'e_') AND tier != 'forgotten'"
 )
 
 

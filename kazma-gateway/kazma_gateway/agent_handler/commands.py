@@ -2168,6 +2168,7 @@ async def _build_slash_ctx(
         tenant = resolve_tenant_id(
             msg.platform or "unknown", sender_id=str(msg.sender_id or ""), prefer_context=True
         )
+        ctx["memory_tenant"] = tenant  # /memory off|on writes the ledger under it
         count = await asyncio.to_thread(count_current_facts, tenant)
         if count is not None:
             ctx["memory_count"] = count

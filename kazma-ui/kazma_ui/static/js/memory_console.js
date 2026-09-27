@@ -1211,6 +1211,50 @@
     } catch (e) { if (scoreEl) scoreEl.textContent = '–'; }
   }
   document.getElementById('v2-procedural-refresh')?.addEventListener('click', loadV2Procedural);
+
+  // What Kazma remembers of conversations, each with Forget (plan U1). A
+  // forgotten memory keeps nothing it said, and nothing brings it back.
+  async function loadV2Memories() {
+    const el = document.getElementById('v2-memories-list');
+    if (!el) return;
+    try {
+      const resp = await fetch('/api/memory/v2/episodes?limit=30');
+      const data = await resp.json();
+      const eps = data.episodes || [];
+      if (!eps.length) { el.textContent = 'No memories of conversations yet.'; return; }
+      el.innerHTML = eps.map(function(ep) {
+        const when = ep.created_at ? new Date(ep.created_at * 1000).toLocaleString() : '';
+        const chat = ep.session_id ? ' · chat ' + _esc(String(ep.session_id).slice(0, 12)) : '';
+        return '<div style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+          '<span style="min-width:0;overflow-wrap:anywhere;"><span style="color:var(--text-primary);">' + _esc(ep.preview || ep.id) + '</span>' +
+          '<span style="display:block;color:var(--text-muted);font-size:0.65rem;">' + _esc(when) + chat + '</span></span>' +
+          '<button type="button" class="btn btn-sm v2-memory-forget" data-id="' + _esc(ep.id).replace(/"/g, '&quot;') + '" style="font-size:0.65rem;padding:1px 6px;flex-shrink:0;">Forget</button></div>';
+      }).join('');
+      el.querySelectorAll('.v2-memory-forget').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          const ok = await window.kazmaConfirm({
+            title: 'Forget this memory?',
+            message: 'Kazma stops remembering this part of the conversation and the facts it learned from it. The chat itself stays as it is.',
+            confirmText: 'Forget',
+            danger: true,
+          });
+          if (!ok) return;
+          try {
+            const r = await window.kazmaSave('/api/memory/v2/episodes/' + encodeURIComponent(btn.getAttribute('data-id')) + '/forget', { method: 'POST' });
+            if (window.showToast) {
+              window.showToast(r && r.ok ? 'Forgotten' + (r.facts_forgotten ? ' (and ' + r.facts_forgotten + ' fact' + (r.facts_forgotten === 1 ? '' : 's') + ')' : '') : ((r && r.error) || 'Forget failed'), r && r.ok ? 'success' : 'error');
+            }
+          } catch (e) {
+            window.kazmaAlert({ title: 'Forget failed', message: e.message, variant: 'btn-danger' });
+          }
+          loadV2Memories();
+          pollV2Health();
+        });
+      });
+    } catch (e) { el.textContent = 'Memories load failed'; }
+  }
+  document.getElementById('v2-memories-refresh')?.addEventListener('click', loadV2Memories);
+  loadV2Memories();
   loadV2Queue();
   loadV2Merges();
   loadV2Procedural();

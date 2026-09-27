@@ -200,6 +200,21 @@ CREATE TABLE IF NOT EXISTS entity_merges_archive (
 CREATE INDEX IF NOT EXISTS idx_entity_merges_archive_tenant
   ON entity_merges_archive(tenant_id, archived_at);
 
+-- The forget ledger (memory/forget.py, plan U1): turns the user took back
+-- and chats kept out of memory. The chat store still holds those
+-- conversations, so every writer that rebuilds memory from it reads this.
+-- turn_number 0 with an empty question_sha is the whole chat. A chat has two
+-- keys (its session id and its thread id), and a row is written for each.
+CREATE TABLE IF NOT EXISTS memory_forgotten (
+  tenant_id     TEXT NOT NULL DEFAULT 'default',
+  session_key   TEXT NOT NULL,
+  turn_number   INTEGER NOT NULL DEFAULT 0,
+  question_sha  TEXT NOT NULL DEFAULT '',
+  episode_id    TEXT,
+  forgotten_at  REAL NOT NULL,
+  PRIMARY KEY (tenant_id, session_key, turn_number, question_sha)
+);
+
 -- Graph groupings — operator-defined VIEW-ONLY associations for the /memory
 -- canvas. Lets the operator cluster nodes (e.g. "kazma_app belongs under
 -- kazma") and tier them (main/major/sub/leaf) for tree layout + per-tier

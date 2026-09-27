@@ -768,6 +768,40 @@ four injected were noise.
   embedder remembers short texts (<= 256 characters, 4,096 of them): each
   extraction with a fact re-embedded every entity name of the tenant.
 
+**I. The user decides what is kept (U1, 2026-09-27, `memory/forget.py`).**
+"Nothing lost" (F) guards against accidents; a user who takes a memory back
+has decided otherwise, and every path that rebuilds memory must respect it.
+- **Forgetting is a tombstone, never a delete.** The chat store still holds
+  the conversation: a deleted episode would be re-created by turn reconcile,
+  and one with its text gone looks erased to recovery. `forget_episode`
+  empties question, answer and summary (`''`, never NULL -- NULL is what
+  `rehydrate.ERASED_SQL` treats as erased, and it excludes tier `forgotten`
+  too), drops the vector, sets tier `forgotten` (not in `RECALLABLE_TIERS`,
+  no tier rule moves it), and does it to EVERY copy of the turn (the live
+  write and reconcile use different keys of the chat).
+- **The forget ledger** (`memory_forgotten`: tenant, chat key, turn number,
+  question hash; turn 0 with no hash = the whole chat) is written under
+  every key of the chat (`chat_keys`: session id and thread id, from the chat
+  store). `dual_write.mirror_episode` asks it FIRST (`refuses_write`) -- it
+  embeds, upserts the remote index and mirrors to Postgres even when its
+  insert is ignored -- and so do the swarm bridge and the legacy restore.
+  Every product site that inserts an episode is declared in
+  `tests/test_memory_forget.py`, and the live writers must ask the ledger.
+- The facts a forgotten turn produced (`source_session`/`source_turn`) are
+  invalidated and lose their value (`object = ''`, `metadata.forgotten`);
+  a forget cut short (`invalidate_belief` commits as it goes) is finished by
+  asking again. The Postgres mirror gets the tombstones; the remote vector
+  index loses the vectors.
+- **"Don't remember this chat"** is the whole-chat ledger row: the writer
+  refuses its turns, the post-turn worker (`_run_turn_memory`) extracts no
+  facts, the past-chats search skips the chat -- and reads other chats
+  without their forgotten turns. Web: the chat's menu (Memory...); chat
+  apps: `/memory off` / `/memory on`. Turning it off also forgets what the
+  chat left (`forget_past`).
+- **Export** (`GET /api/memory/v2/export`): the caller's tenant's facts
+  (with provenance), memories, entities and what was forgotten (when, never
+  what). The Memory page's "Memories of conversations" panel forgets one.
+
 ### 16. Cron Scheduler & Reminder Delivery (`kazma-core/kazma_core/cron/`)
 
 The user-facing reminder cron (`schedule_task` native skill → `CronScheduler`

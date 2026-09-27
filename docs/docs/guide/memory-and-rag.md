@@ -294,6 +294,28 @@ If unset, default graph provider stays **sqlite**. Server down → topology fall
 
 ---
 
+## Forgetting, and chats kept out of memory
+
+You decide what Kazma keeps:
+
+- **Forget one memory.** The Memory page lists what Kazma remembers of your
+  conversations ("Memories of conversations"); **Forget** removes one. Kazma
+  keeps nothing it said -- the question, the answer, the search vector -- and
+  the facts it learned from that part of the conversation stop being used.
+  The chat itself stays as it is.
+- **Don't remember a chat.** In the chat list, a chat's menu has
+  **Memory...**: turn it off and Kazma remembers nothing new from that chat
+  and forgets what it already remembered from it. In Telegram, Discord or
+  Slack, send `/memory off` (and `/memory on` to start again). `/memory`
+  says whether the chat is remembered.
+- **Take it with you.** **Export** on the Memory page downloads everything
+  Kazma remembers as JSON: facts (current and past, with the chat they came
+  from), memories of conversations, entities, and when things were forgotten
+  (never what).
+
+A forgotten memory stays forgotten: nothing that rebuilds memory from your
+chat history brings it back.
+
 ## Memory admin UI (`/memory`)
 
 Single operator surface for **topology + entities + beliefs + hygiene**

@@ -281,6 +281,18 @@
             <div id="v2-quality-detail" style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;">–</div>
           </div>
         </div>
+        <!-- What Kazma remembers of conversations: forget one, or take it all
+             away (plan U1, kazma_core/memory/forget.py). -->
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);margin-bottom:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap;">
+            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Memories of conversations</span>
+            <span style="display:inline-flex;gap:4px;">
+              <a id="v2-memory-export" class="btn btn-sm" href="/api/memory/v2/export" download style="font-size:0.65rem;padding:2px 8px;" title="Download everything Kazma remembers, as JSON">Export</a>
+              <button id="v2-memories-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+            </span>
+          </div>
+          <div id="v2-memories-list" style="font-size:0.72rem;max-height:220px;overflow-y:auto;color:var(--text-muted);">–</div>
+        </div>
       </div>
 
       <style>

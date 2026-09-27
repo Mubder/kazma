@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## You decide what Kazma remembers (2026-09-27)
+
+- **Forget a memory.** The Memory page now lists what Kazma remembers of your
+  conversations, each with **Forget**. A forgotten memory keeps nothing it
+  said, the facts Kazma learned from it stop being used, and nothing brings
+  it back -- not the recovery of old chats, not the search of past chats.
+  The chat itself is not changed.
+- **Don't remember a chat.** A chat's menu has **Memory...**: turned off,
+  Kazma remembers nothing new from that chat and forgets what it had. In
+  Telegram, Discord or Slack: `/memory off` and `/memory on`.
+- **Export** on the Memory page downloads everything Kazma remembers, as
+  JSON.
+
 ## Memory work no longer holds up other chats (2026-09-27)
 
 When Kazma searched its memory during a chat, or you used an action on the

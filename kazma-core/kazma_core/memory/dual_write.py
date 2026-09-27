@@ -341,6 +341,23 @@ class DualWriteMirror:
         effective_tier = row["tier"]
         effective_importance = row["importance"]
         try:
+            # A turn the user took back, or a chat they keep out of memory
+            # (plan U1, memory/forget.py): nothing is written -- not the row,
+            # and not the embedding, remote vector or mirror below, which run
+            # even when the insert is ignored. Every episode write reaches this.
+            from kazma_core.memory.forget import refuses_write
+
+            with self._lock:
+                refused = refuses_write(
+                    self._primary,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    turn_number=row["turn_number"],
+                    user_text=row["user_text"],
+                )
+            if refused:
+                logger.debug("[dual_write] turn kept out of memory by the user: %s", eid)
+                return None
             # Lock only the local SQLite writes. The remote embed, vector
             # upsert, and state mirror below can each block up to ~60s;
             # holding self._lock across them serialized ALL V2 mirror writes
@@ -387,7 +404,8 @@ class DualWriteMirror:
                     if emb_blob is not None:
                         with self._lock:
                             self._primary.execute(
-                                "UPDATE episodes SET embedding=? WHERE id=? AND embedding IS NULL",
+                                "UPDATE episodes SET embedding=? WHERE id=? AND embedding IS NULL "
+                                "AND tier != 'forgotten'",
                                 (emb_blob, eid),
                             )
                             self._primary.commit()

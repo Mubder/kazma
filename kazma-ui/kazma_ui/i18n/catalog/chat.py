@@ -24,6 +24,42 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تمت الموافقة ✓",
         "en": "Approved ✓",
     },
+    "chat.chat_memory": {
+        "ar": "الذاكرة…",
+        "en": "Memory…",
+    },
+    "chat.memory_off_title": {
+        "ar": "ألا يتذكر Kazma هذه المحادثة؟",
+        "en": "Don't remember this chat?",
+    },
+    "chat.memory_off_body": {
+        "ar": "يتوقف Kazma عن تذكر الرسائل الجديدة في هذه المحادثة، وينسى ما يتذكره منها الآن. المحادثة نفسها تبقى كما هي.",
+        "en": "Kazma stops remembering new messages in this chat, and forgets what it already remembers from it. The chat itself stays as it is.",
+    },
+    "chat.memory_off_confirm": {
+        "ar": "لا تتذكر",
+        "en": "Don't remember",
+    },
+    "chat.memory_off_done": {
+        "ar": "لن يتذكر Kazma هذه المحادثة",
+        "en": "Kazma won't remember this chat",
+    },
+    "chat.memory_on_title": {
+        "ar": "يتذكر Kazma هذه المحادثة من جديد؟",
+        "en": "Remember this chat again?",
+    },
+    "chat.memory_on_body": {
+        "ar": "يتذكر Kazma الرسائل الجديدة في هذه المحادثة من جديد. ما نسيه يبقى منسيًا.",
+        "en": "Kazma remembers new messages in this chat again. What it forgot stays forgotten.",
+    },
+    "chat.memory_on_confirm": {
+        "ar": "تذكر",
+        "en": "Remember",
+    },
+    "chat.memory_on_done": {
+        "ar": "يتذكر Kazma هذه المحادثة من جديد",
+        "en": "Kazma remembers this chat again",
+    },
     "chat.archive": {
         "ar": "أرشفة",
         "en": "Archive",

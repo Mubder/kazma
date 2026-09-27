@@ -84,12 +84,27 @@ def _row_value(row: Any, cols: list[str], name: str) -> Any:
     return row[cols.index(name)] if name in cols else None
 
 
+def _forgotten(conn: sqlite3.Connection, row: Any, cols: list[str]) -> bool:
+    """The user forgot this turn, or keeps its chat out of memory (plan U1):
+    a stranded copy of it stays stranded."""
+    from kazma_core.memory.forget import refuses_write
+
+    return refuses_write(
+        conn,
+        tenant_id=str(_row_value(row, cols, "tenant_id") or "default"),
+        session_id=str(_row_value(row, cols, "session_id") or ""),
+        turn_number=int(_row_value(row, cols, "turn_number") or 0),
+        user_text=_row_value(row, cols, "user_text"),
+    )
+
+
 def legacy_archive_counts(conn: sqlite3.Connection) -> dict[str, int]:
     """``total`` stranded rows, how many are back (``restored``), how many
-    the tenant already held under another id (``duplicate``), and
-    ``pending``. All zero on a database without the legacy table."""
+    the tenant already held under another id (``duplicate``), how many the
+    user forgot (``forgotten``), and ``pending``. All zero on a database
+    without the legacy table."""
     cols = _legacy_columns(conn)
-    out = {"total": 0, "restored": 0, "duplicate": 0, "pending": 0}
+    out = {"total": 0, "restored": 0, "duplicate": 0, "forgotten": 0, "pending": 0}
     if not cols:
         return out
     present = {
@@ -112,6 +127,8 @@ def legacy_archive_counts(conn: sqlite3.Connection) -> dict[str, int]:
         tenant = str(_row_value(row, cols, "tenant_id") or "default")
         if key and key in held.get(tenant, set()):
             out["duplicate"] += 1
+        elif _forgotten(conn, row, cols):
+            out["forgotten"] += 1
         else:
             out["pending"] += 1
     return out
@@ -123,7 +140,7 @@ def restore_legacy_episode_archive(conn: sqlite3.Connection) -> dict[str, int]:
     Idempotent, and it never changes a row ``episodes`` already holds.
     """
     cols = _legacy_columns(conn)
-    report = {"restored": 0, "present": 0, "duplicate": 0, "empty": 0}
+    report = {"restored": 0, "present": 0, "duplicate": 0, "empty": 0, "forgotten": 0}
     if not cols:
         return report
     live_cols = set(_columns(conn, "episodes"))
@@ -155,6 +172,9 @@ def restore_legacy_episode_archive(conn: sqlite3.Connection) -> dict[str, int]:
         tenant = str(_row_value(row, cols, "tenant_id") or "default")
         if key in held.get(tenant, set()):
             report["duplicate"] += 1
+            continue
+        if _forgotten(conn, row, cols):
+            report["forgotten"] += 1
             continue
         try:
             meta = json.loads(_row_value(row, cols, "metadata_json") or "{}")

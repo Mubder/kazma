@@ -6,7 +6,7 @@ Registered commands:
   /reset        — clear conversation history
   /status       — return gateway health overview
   /model        — show active model
-  /memory       — report memory stats
+  /memory       — report memory stats; /memory off|on — keep this chat out of memory
   /cost         — show token spend for this session
   /replay       — time travel: list snapshots, replay, or compare
   /personality  — show, list, or switch agent personality (core tool)
@@ -255,7 +255,7 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
     if cmd in ("/model", "/models"):
         return None  # Handled by agent_handler directly (interactive selector)
     if cmd == "/memory":
-        return _cmd_memory(ctx)
+        return _cmd_memory(text, ctx)
     if cmd == "/cost":
         return _cmd_cost(ctx)
     if cmd == "/replay":
@@ -335,7 +335,7 @@ def _cmd_help() -> str:
         "• `/help` — Show this list\n"
         "• `/status` — Gateway health overview\n"
         "• `/model` — Show active model\n"
-        "• `/memory` — Report memory usage\n"
+        "• `/memory` — Report memory usage; `/memory off` / `/memory on` — keep this chat out of memory, or let it back in\n"
         "• `/cost` — Token spend this session\n\n"
         "For anything else, just ask the agent directly!"
     )
@@ -376,9 +376,37 @@ def _cmd_model(ctx: dict[str, Any]) -> str:
     return f"🧠 Active model: **{model}**"
 
 
-def _cmd_memory(ctx: dict[str, Any]) -> str:
+def _cmd_memory(text: str, ctx: dict[str, Any]) -> str:
+    """``/memory``: the facts held and whether Kazma remembers this chat.
+    ``/memory off`` keeps the chat out of memory and forgets what it left;
+    ``/memory on`` lets new messages back in (plan U1,
+    ``kazma_core/memory/forget.py``). The resolver runs in a thread, so the
+    ledger is read and written here directly."""
+    from kazma_core.memory.forget import chat_remembered, forget_chat, set_chat_remembered
+
+    parts = (text or "").strip().split()
+    sub = parts[1].lower() if len(parts) > 1 else ""
+    thread = str(ctx.get("thread_id") or "")
+    tenant = str(ctx.get("memory_tenant") or "default")
+    if sub in ("off", "on"):
+        if not thread:
+            return "💾 There is no chat here to set memory for."
+        if sub == "off":
+            set_chat_remembered(thread, False, tenant_id=tenant)
+            n = int(forget_chat(thread, tenant_id=tenant).get("forgotten") or 0)
+            forgot = f" Forgot {n} memor{'y' if n == 1 else 'ies'} from it." if n else ""
+            return f"🔕 Kazma won't remember this chat.{forgot} `/memory on` lets new messages back in."
+        set_chat_remembered(thread, True, tenant_id=tenant)
+        return "💾 Kazma remembers this chat again. What it forgot stays forgotten."
     count = ctx.get("memory_count", "?")
-    return f"💾 Memory: `{count}` stored facts."
+    here = ""
+    if thread:
+        here = (
+            " This chat is remembered (`/memory off` to stop)."
+            if chat_remembered(thread, tenant_id=tenant)
+            else " This chat is not remembered (`/memory on` to start again)."
+        )
+    return f"💾 Memory: `{count}` stored facts.{here}"
 
 
 def _cmd_cost(ctx: dict[str, Any]) -> str:

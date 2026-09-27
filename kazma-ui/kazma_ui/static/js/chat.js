@@ -6320,6 +6320,8 @@
             escapeHtml(ti('rename', 'Rename')) + '</button>' +
           '<button class="session-menu-item" data-menu-action="copyid" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
             escapeHtml(ti('copy_id', 'Copy ID')) + '</button>' +
+          '<button class="session-menu-item" data-menu-action="memory" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
+            escapeHtml(ti('chat_memory', 'Memory\u2026')) + '</button>' +
           '<button class="session-menu-item" data-menu-action="archive" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
             escapeHtml(ti('archive', 'Archive')) + '</button>' +
           '<button class="session-menu-item danger" data-menu-action="delete" data-menu-sid="' + escapeHtml(s.session_id) + '">' +
@@ -6430,10 +6432,42 @@
         else if (action === 'unpin') pinSession(sid, false);
         else if (action === 'rename') renameSession(sid);
         else if (action === 'copyid') copySessionId(sid);
+        else if (action === 'memory') chatMemory(sid);
         else if (action === 'archive') archiveSession(sid);
         else if (action === 'delete') deleteSession(sid);
       });
     });
+  }
+
+  // Whether Kazma remembers this chat (plan U1). Turning it off also
+  // forgets what the chat has left in memory: that is what "don't remember
+  // this chat" means. The chat itself is never touched.
+  async function chatMemory(sessionId) {
+    var url = '/api/memory/v2/chats/' + encodeURIComponent(sessionId) + '/memory';
+    try {
+      var state = await window.kazmaSave(url);
+      var remembered = !(state && state.remembered === false);
+      var ok = await window.kazmaConfirm(remembered ? {
+        title: ti('memory_off_title', "Don't remember this chat?"),
+        message: ti('memory_off_body', 'Kazma stops remembering new messages in this chat, and forgets what it already remembers from it. The chat itself stays as it is.'),
+        confirmText: ti('memory_off_confirm', "Don't remember"),
+        danger: true,
+      } : {
+        title: ti('memory_on_title', 'Remember this chat again?'),
+        message: ti('memory_on_body', 'Kazma remembers new messages in this chat again. What it forgot stays forgotten.'),
+        confirmText: ti('memory_on_confirm', 'Remember'),
+      });
+      if (!ok) return;
+      var r = await window.kazmaSave(url, {
+        method: 'PUT',
+        body: remembered ? { remember: false, forget_past: true } : { remember: true },
+      });
+      if (!r || !r.ok) throw new Error((r && r.error) || 'failed');
+      KS.toast(remembered ? ti('memory_off_done', "Kazma won't remember this chat")
+                          : ti('memory_on_done', 'Kazma remembers this chat again'), 'success', 2500);
+    } catch (e) {
+      KS.toast((e && e.message) || 'Memory setting failed', 'error', 3000);
+    }
   }
 
   function pinSession(sessionId, pinned) {

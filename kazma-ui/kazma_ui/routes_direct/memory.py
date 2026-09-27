@@ -648,21 +648,26 @@ def register_memory_routes(self: Any) -> None:
             src_session = row["source_session"]
             src_turn = row["source_turn"]
             if src_session:
-                # Find the originating episode (same session; prefer the turn).
+                # Find the originating episode (same session; prefer the turn),
+                # in the caller's tenant like the belief itself.
+                osql, oparams = _tenant_clause(tid)
                 ep_row = conn.execute(
                     "SELECT id, tier, user_text, assistant_text, created_at "
                     "FROM episodes WHERE session_id=? "
                     + ("AND turn_number=?" if src_turn is not None else "")
+                    + osql
                     + " ORDER BY created_at DESC LIMIT 1",
-                    (src_session, src_turn) if src_turn is not None else (src_session,),
+                    (src_session, *((src_turn,) if src_turn is not None else ()), *oparams),
                 ).fetchone()
                 if ep_row:
                     ut = (ep_row["user_text"] or "")[:160]
                     at = (ep_row["assistant_text"] or "")[:120]
+                    # A forgotten memory says so; it has nothing else to show.
+                    forgotten = ep_row["tier"] == "forgotten"
                     origin_episode = {
                         "id": ep_row["id"],
                         "tier": ep_row["tier"],
-                        "preview": ut or at or ep_row["id"],
+                        "preview": "(forgotten)" if forgotten else (ut or at or ep_row["id"]),
                         "created_at": ep_row["created_at"],
                         "turn": src_turn,
                     }

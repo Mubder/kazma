@@ -57,6 +57,7 @@ _TENANT_TABLES = (
     "entity_merges",
     "episodes",
     "graph_associations",
+    "memory_forgotten",
     "procedural_dags",
 )
 #: Derived caches any write may mark stale (-1) for the read path to recompute.
@@ -182,6 +183,19 @@ REQUESTS: dict[tuple[str, str], list[tuple[str, Any]]] = {
             {"purge_empty_entities": True, "invalidate_near_dup_noted": True, "archive_invalidated": True},
         ),
     ],
+    # Plan U1: what the user decides to keep.
+    ("POST", "/api/memory/v2/episodes/{episode_id}/forget"): [
+        ("/api/memory/v2/episodes/beta9_e0/forget", None),
+    ],
+    ("GET", "/api/memory/v2/chats/{chat_id}/memory"): [
+        ("/api/memory/v2/chats/beta9_s1/memory", None),
+        ("/api/memory/v2/chats/alpha_s1/memory", None),
+    ],
+    ("PUT", "/api/memory/v2/chats/{chat_id}/memory"): [
+        ("/api/memory/v2/chats/beta9_s1/memory", {"remember": False, "forget_past": True}),
+        ("/api/memory/v2/chats/beta9_s1/memory", {"remember": True}),
+    ],
+    ("GET", "/api/memory/v2/export"): [("/api/memory/v2/export", None)],
 }
 
 #: What alpha must see of its own rows. A route that answers a tenant-bound
@@ -205,6 +219,8 @@ SHOWS_OWN: dict[str, str] = {
     "/api/memory/v2/admin/summary": '"beliefs_live":2',
     "/api/memory/v2/entities": '"alice"',
     "/api/memory/v2/entities?q=Alice": '"alice"',
+    "/api/memory/v2/chats/alpha_s1/memory": '"memories":1',
+    "/api/memory/v2/export": '"alpha_e1"',
 }
 
 #: Install-wide: the platform role check lets an admin through and no one else.
@@ -304,6 +320,12 @@ def _seed(root: Path) -> None:
         "VALUES ('beta9_p1', 'beta', 'BETA9 routine', 'BETA9 how Bob ships', 'h', '[]', '[]', '[]', ?)",
         (now,),
     )
+    # beta took one turn back (plan U1): its ledger row is beta's too
+    c.execute(
+        "INSERT INTO memory_forgotten (tenant_id, session_key, turn_number, question_sha, "
+        "episode_id, forgotten_at) VALUES ('beta', 'beta9_s1', 9, 'beta9sha', NULL, ?)",
+        (now,),
+    )
     c.commit()
     c.close()
     o = sqlite3.connect(root / "memory_ops.db")
@@ -325,7 +347,7 @@ def _beta_rows(root: Path) -> dict[str, list[dict]]:
     try:
         for table in _TENANT_TABLES:
             rows = c.execute(
-                f"SELECT * FROM {table} WHERE tenant_id = 'beta' ORDER BY id"  # table: a fixed name above
+                f"SELECT * FROM {table} WHERE tenant_id = 'beta' ORDER BY rowid"  # table: a fixed name above
             ).fetchall()
             out[table] = [{k: r[k] for k in r.keys() if k not in _CACHE_COLUMNS} for r in rows]
     finally:
