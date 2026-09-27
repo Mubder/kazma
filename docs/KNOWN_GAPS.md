@@ -451,6 +451,17 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
   and `scripts/sync_site_metrics.py` reads the open pull request back or
   fails (`tests/test_site_metrics_sync.py`, `tests/test_generate_metrics.py`,
   `docs/docs/ops/website-metrics.md`).
+- **Closed 2026-09-28: a pre-TTL YOLO flag bypassed approvals for good.**
+  When YOLO windows got an end time (2026-07-21), a bare `true` from before
+  was still honoured as active, with no end. One was on the live install
+  (`general` category, set 2026-07-19): that chat's danger tools would have
+  been auto-approved (`graph_tool_worker`, except always-HITL tools and git
+  writes) whenever it was reopened. `yolo_status` now removes such a flag
+  instead, and `purge_expired_yolo` (15-minute maintenance) removes every
+  ended window in both categories writers used -- 90 had piled up since July,
+  because an ended window went only when its own chat asked again
+  (`tests/test_yolo_ttl.py`, `tests/test_yolo_sweep.py`; the legacy test used
+  to assert the flag was active).
 - **Closed 2026-09-28: the website's pages drifted from their sources, with
   no way to tell which.** The site's docs were copied by a one-off script on
   2026-09-24 and nothing recorded what it had copied. 28 pages had changed

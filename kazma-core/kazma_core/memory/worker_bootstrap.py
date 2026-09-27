@@ -874,6 +874,17 @@ def _prune_checkpoints() -> None:
     run_checkpoint_retention()
 
 
+def _purge_ended_yolo() -> None:
+    # YOLO windows (a chat's approval bypass) that have ended. yolo_status
+    # removed one only when its own chat asked again, so the ended windows of
+    # chats nobody reopened stayed in the settings for good -- 90 on the live
+    # install on 2026-09-28, one of them a pre-TTL flag that still counted as
+    # active. Logs what it removes.
+    from kazma_core.safety.yolo import purge_expired_yolo
+
+    purge_expired_yolo()
+
+
 def _repair_memory_vectors() -> None:
     # Memories meaning search cannot compare -- no vector, another size,
     # another embedding model -- re-encoded in place, newest first, ~20 s a
@@ -981,6 +992,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("commitment GC cycle", _gc_commitments),
     ("artifact GC", _gc_artifacts),
     ("gate TTL sweep", _expire_gates),
+    ("ended YOLO windows", _purge_ended_yolo),
     ("task queue purge", _purge_task_queue),
     ("swarm task retention", _prune_swarm_tasks),
     ("checkpoint retention", _prune_checkpoints),

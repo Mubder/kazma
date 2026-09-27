@@ -460,7 +460,7 @@ Auth scope: **Open** = always open; **Secret** = KAZMA_SECRET / session / token 
 | `KAZMA_PRODUCTION` | unset | **Yes** (`1`) | Force Docker code_exec, YOLO off, vault required, workspace root |
 | `KAZMA_VAULT_KEY` | auto-dev only | **Yes** | Encrypt secrets at rest |
 | `KAZMA_ALLOW_YOLO` | unset | No (off) | Opt-in YOLO under production |
-| `KAZMA_YOLO_TTL_SECONDS` | 4h | No | YOLO expiry |
+| `KAZMA_YOLO_TTL_SECONDS` | 1h | No | YOLO expiry |
 | `KAZMA_CODE_EXEC_DOCKER` | auto | `force` | code_exec jail policy |
 | `KAZMA_CODE_EXEC_IMAGE` | python:3.12-slim | No | Jail image |
 | `KAZMA_WORKSPACE` | data/workspace | No | Default workspace pin |

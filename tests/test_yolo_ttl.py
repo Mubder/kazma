@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kazma_core.safety.yolo import disable_yolo, enable_yolo, is_yolo_active, yolo_status
+from kazma_core.safety.yolo import disable_yolo, enable_yolo, is_yolo_active
 
 
 @pytest.fixture()
@@ -41,11 +41,16 @@ def test_enable_disable(mem_store):
         assert is_yolo_active("t1") is False
 
 
-def test_legacy_true_still_active(mem_store):
+def test_a_legacy_flag_without_an_end_time_is_over(mem_store):
+    """A pre-TTL bare ``True`` was honoured as active for good: on 2026-09-28
+    one live chat still skipped approvals under a flag from 2026-07-19. It is
+    removed, never honoured. (Until then this test asserted it was active.)"""
     store, data = mem_store
-    data["yolo.t2"] = True
-    with patch("kazma_core.config_store.get_config_store", return_value=store):
-        assert is_yolo_active("t2") is True
+    for value in (True, 1, "true"):
+        data["yolo.t2"] = value
+        with patch("kazma_core.config_store.get_config_store", return_value=store):
+            assert is_yolo_active("t2") is False
+            assert "yolo.t2" not in data
 
 
 def test_expiry_auto_disables(mem_store, monkeypatch):
