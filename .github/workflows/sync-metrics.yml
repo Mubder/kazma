@@ -1,19 +1,23 @@
 # Auto-sync repository metrics to the kazma.ai website.
 #
-# When the framework changes (push to main), regenerate METRICS.md, commit it
-# back to the framework's main branch (keeps the source of truth honest), then
-# open (or update) a PR against the PRIVATE website repo (Mubder/KazmaAI) so the
-# public metrics card on kazma.ai stays fresh. Merging that auto-PR triggers
-# Cloudflare Pages' production deploy.
+# When the framework changes (push to main), regenerate the metrics and open (or
+# update) a PR against the PRIVATE website repo (Mubder/KazmaAI) so the public
+# metrics card on kazma.ai stays fresh. Merging that auto-PR triggers Cloudflare
+# Pages' production deploy.
 #
-# The workflow triggers itself recursively: the bot's METRICS.md commit to main
-# re-runs the workflow, but that second run finds nothing changed and exits — so
-# it converges (no infinite loop).
+# It no longer commits METRICS.md back to the framework's main (2026-09-27):
+# main is protected by a ruleset that requires the CI checks, a bot commit
+# skips CI, and GitHub does not let the GitHub Actions app bypass a ruleset on a
+# personal-account repository ("Actor GitHub Actions integration must be part
+# of the ruleset source or owner organization"). The framework copy is
+# refreshed with `python scripts/generate_metrics.py --write` before a push
+# (docs/docs/ops/branch-protection.md section 3); the README's numbers are
+# CI-gated either way (`--check-readme`). So this workflow only READS the
+# framework repo.
 #
 # Requires the `WEBSITE_TOKEN` repository secret: a fine-grained PAT scoped to
 # Mubder/KazmaAI with Contents + Pull requests (read & write). Without it the
-# website-sync step is skipped gracefully (the framework commit still happens
-# via GITHUB_TOKEN). See workflow header for setup.
+# website-sync step is skipped gracefully.
 #
 # Manual fallback: scripts/refresh-and-deploy-metrics.sh (one command, locally).
 
@@ -22,13 +26,11 @@ name: Sync Metrics
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'METRICS.md' # the bot's own metrics commit shouldn't loop us
   workflow_dispatch: # manual trigger from the Actions tab
 
-# The framework commit step needs write access to contents.
+# Read-only on the framework repo: the website PR uses WEBSITE_TOKEN.
 permissions:
-  contents: write
+  contents: read
   pull-requests: read
 
 # Serialize Sync Metrics runs. Queue (don't cancel): cancelling in-flight runs
@@ -49,16 +51,13 @@ env:
 
 jobs:
   sync:
-    name: Regenerate, commit & open site PR
+    name: Regenerate & open site PR
     runs-on: ubuntu-latest
-    # Skip the workflow's own bot commits (belt-and-suspenders with paths-ignore).
-    if: github.actor != 'github-actions[bot]'
     steps:
       - name: Checkout framework repo
         uses: actions/checkout@v7
         with:
           fetch-depth: 0 # full history — generate_metrics.py needs git ls-files + rev-parse
-          token: ${{ secrets.GITHUB_TOKEN }} # write back to framework main
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -81,19 +80,8 @@ jobs:
         if: steps.regen.outputs.changed != 'true'
         run: echo "Metrics current — exiting."
 
-      # 1) Keep the framework's own METRICS.md honest: commit directly to main.
-      #    This is a generated artifact, so a direct bot commit is appropriate
-      #    (no PR review needed). Uses GITHUB_TOKEN, available with no secret.
-      - name: Commit refreshed METRICS.md to framework main
-        if: steps.regen.outputs.changed == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add METRICS.md
-          git commit -m "chore(metrics): auto-regenerate METRICS.md [skip ci]"
-          git push
-
-      # 2) Sync the same file to the private website repo via PR.
+      # Sync the regenerated file to the private website repo via PR. (It is
+      # not committed back to the framework's main: see the header.)
       - name: Detect WEBSITE_TOKEN presence
         id: token
         env:

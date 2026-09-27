@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## `main` is protected (2026-09-27)
+
+**Every change to `main` must pass the eleven CI checks.** The owner enabled
+a GitHub ruleset on `main`: the full test suite, the Postgres tests, the
+browser tests, the Windows event-loop subset, the compile, import, JS,
+lint, security and packaging checks are all required, each accepted only
+from GitHub's own CI, and branch deletion and force pushes are blocked. The
+owner's account (and the agent working with it) can still push directly;
+anything else must pass the checks first.
+
+**The metrics bot no longer writes to the repository.** It used to commit a
+refreshed `METRICS.md` after every push; GitHub will not let its bot bypass
+the ruleset on a personal account, so it now only regenerates the numbers
+and updates the website, with read-only access to the code. `METRICS.md` is
+refreshed by hand before a push, and the README's numbers stay checked by
+CI.
+
 ## A failed database write no longer leaves its database locked (2026-09-27)
 
 Following the reminder store below, every database connection Kazma keeps

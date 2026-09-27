@@ -45,10 +45,28 @@ checks for `.github/workflows/ci.yml`:
   the way this repository works (AGENTS.md, and the agent pushes with the
   owner's credentials) — while everyone else must pass the checks.
 - **Rules:** Restrict deletions; Block force pushes; Require status checks
-  to pass, with the eleven checks above (`tests/test_branch_protection_runbook.py`
-  keeps that table equal to the CI jobs). Leave "require branches to be up to
-  date" off: with direct pushes it would force a rebase-and-wait on every
-  push for no extra safety (the checks run on the pushed commit itself).
+  to pass, with the eleven check NAMES in the table above, each added with
+  the GitHub Actions source. Leave "require branches to be up to date" off:
+  with direct pushes it would force a rebase-and-wait on every push for no
+  extra safety (the checks run on the pushed commit itself).
+
+The table is kept equal to CI's job names by a test
+(`tests/test_branch_protection_runbook.py`). That file is not a check: a
+required check must be a job name GitHub reports, or it never passes. On
+2026-09-27 the ruleset was first saved with that file name as its only
+required check, and targeting no branch.
+
+**As enabled (2026-09-27):** ruleset `KazmaLatestRule`, Active, targets
+`~DEFAULT_BRANCH` and `refs/heads/main`, bypass Repository admin (always),
+rules: restrict deletions, block force pushes, the eleven checks. The same
+settings as JSON, applied with
+`gh api -X PUT repos/Mubder/kazma/rulesets/<id> --input ruleset.json`:
+`name`, `target: branch`, `enforcement: active`, `conditions.ref_name.include`,
+`bypass_actors: [{actor_id: 5, actor_type: RepositoryRole, bypass_mode:
+always}]`, and `rules`: `deletion`, `non_fast_forward`,
+`required_status_checks` with each check as
+`{context: <name>, integration_id: 15368}` (15368 is the GitHub Actions app,
+so only a real CI run can satisfy a check).
 
 Verify afterwards: `gh api repos/Mubder/kazma/rulesets` lists the ruleset,
 and a push from an account without the bypass is rejected with
@@ -62,14 +80,17 @@ and commits it straight to `main` with `GITHUB_TOKEN`
 that push is rejected: its commit skips CI, so the required checks never run
 on it. Pick one:
 
-1. **Let the bot bypass.** If the ruleset's bypass picker offers the
-   *GitHub Actions* app, add it. Smallest change; the bot keeps working as
-   today.
-2. **Stop committing `METRICS.md` to `main`.** Keep the workflow's
-   website-sync half (it opens a PR on the site repo with its own token) and
-   drop the framework commit. `python scripts/generate_metrics.py --write`
-   before a push keeps the framework copy current, and `--check-readme`
-   already runs before every push.
+1. **Let the bot bypass.** Not available here: on a personal-account
+   repository GitHub refuses the *GitHub Actions* app as a bypass actor
+   ("Actor GitHub Actions integration must be part of the ruleset source or
+   owner organization", HTTP 422, 2026-09-27). It works for a repository
+   owned by an organization.
+2. **Stop committing `METRICS.md` to `main`.** **Chosen (2026-09-27).** The
+   workflow keeps its website-sync half (it opens a PR on the site repo with
+   its own token), dropped the framework commit, and now only reads the
+   framework repo (`contents: read`). `python scripts/generate_metrics.py
+   --write` before a push keeps the framework copy current, and
+   `--check-readme` gates the README's numbers in CI.
 3. **Not recommended:** make the bot open a PR. A PR created with
    `GITHUB_TOKEN` does not trigger workflows, so its required checks would
    never run and it could never merge without a separate token.

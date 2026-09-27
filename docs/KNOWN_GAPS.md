@@ -19,8 +19,11 @@ holds it), **accepted** (a limit kept on purpose, with the reason), or an
 
 **Owner decisions:**
 
-- **Branch protection on `main`.** It changes GitHub settings; the checklist
-  is `docs/docs/ops/branch-protection.md`.
+- **Branch protection on `main`: done 2026-09-27.** Ruleset
+  `KazmaLatestRule` requires the eleven CI checks, blocks deletions and
+  force pushes, and lets the repository admin bypass
+  (`docs/docs/ops/branch-protection.md`). The metrics bot no longer commits
+  to `main`.
 - **The first prune of the live install's chat step history.** Checkpoint
   retention covers Postgres since 2026-09-27 (§41 of AGENTS.md). The live
   install's checkpoint tables are 2.9 GB; at 30 days the prune would remove
@@ -427,14 +430,14 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
 
 **What that pass left open, and where it stands:**
 
-- **Owner decision: branch protection.** `main` has none and no ruleset
-  (checked 2026-09-25). A ruleset requiring the Tests job with the repository
-  admin as a bypass actor would block unreviewed red pushes from anyone else
-  while keeping the owner's direct pushes — the objection recorded in AGENTS
-  §31. It changes GitHub settings, so it is not done here. The checklist is
-  ready: `docs/docs/ops/branch-protection.md` (the eleven required checks by
-  name, the ruleset, and the metrics bot's direct push, which the ruleset
-  would reject -- decide that first).
+- **Closed 2026-09-27: branch protection.** The owner enabled the ruleset
+  `KazmaLatestRule` on `main`: the eleven CI checks required (each only from
+  the GitHub Actions app), deletions and force pushes blocked, the
+  repository admin as bypass so the owner's direct pushes still land. The
+  metrics bot could not be given a bypass (GitHub refuses the Actions app on
+  a personal-account repository), so `sync-metrics.yml` stopped committing
+  `METRICS.md` to `main` and only reads the framework repo now
+  (`docs/docs/ops/branch-protection.md` section 3).
 - **Accepted: the shared-store peer registry is advisory.** It names
   installs; it does not stop one from writing -- replicas share the store
   legitimately, and a fence would need an identity they cannot forge. An acknowledged id silences only that id.
