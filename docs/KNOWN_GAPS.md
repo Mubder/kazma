@@ -39,8 +39,9 @@ holds it), **accepted** (a limit kept on purpose, with the reason), or an
 - **pgvector: stays out.** Meaning search is exact and local (sqlite-vec /
   NumPy); see "Exact meaning search is linear" below.
 
-**Watching:** two event-loop stalls right after one boot (2026-09-27 00:50),
-start-up contention with no single cause; see "Operational tripwires".
+**Watching: nothing.** The two event-loop stalls right after one boot
+(2026-09-27 00:50) did not come back in the 31 boots of the following day;
+see "Operational tripwires" (accepted there, with how a recurrence is seen).
 
 **Accepted limits** (each is explained where it is recorded below):
 the Postgres CI job runs the marked tests, and every module that opens
@@ -465,8 +466,10 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
   page for time travel or chaos testing, three pages missing from the docs
   sidebar (`tests/test_docs_sidebar.py`), and a 500 from a custom chaos
   injection with an unknown parameter (`tests/test_chaos_routes.py`).
-  **Open, on the website:** the sync itself. The plan lists it; the website
-  agent does it (the owner's repository).
+  The first full sync was done 2026-09-28 by the owner's website agent
+  following the procedure (KazmaAI `e3f6165`, 87 sources recorded at
+  `93eecd1d`; the plan's `--check` exits 0), and checked on the live site:
+  the new pages, the 301s, Arabic headings equal to English.
 - **Accepted: the shared-store peer registry is advisory.** It names
   installs; it does not stop one from writing -- replicas share the store
   legitimately, and a fence would need an identity they cannot forge. An acknowledged id silences only that id.
@@ -1170,16 +1173,19 @@ The fix is to stamp `current_turn_id()` on every journaled frame, which
 changes what both transports send and how the projector adopts a turn id
 mid-turn, and wants the whole unified-turn browser suite behind it.
 
-**Watching: two event-loop stalls right after a boot (2026-09-27 00:50, 15
-and 27 s).** The watchdog's dumps show start-up contention -- the first
-maintenance pass importing modules in a worker, the first requests building
-FastAPI's route table, backups starting -- and the loop thread at a different
-innocent frame in each sample, not one blocking call. The server was
-answering again within the half minute; neither of the two reloads later
-that day stalled, and the 2026-09-25 database hang (eleven dumps, AGENTS.md §35) has not come
-back. The weekly resilience report counts stalls, so a recurrence is seen;
-the next dump that names a frame above the storage layer is the next gate
-entry (AGENTS.md §35).
+**Accepted (2026-09-28): two event-loop stalls right after a boot
+(2026-09-27 00:50, 15 and 27 s).** The watchdog's dumps show start-up
+contention -- the first maintenance pass importing modules in a worker, the
+first requests building FastAPI's route table, backups starting -- and the
+loop thread at a different innocent frame in each sample, not one blocking
+call. The server was answering again within the half minute. It did not
+recur: 31 boots followed on 2026-09-27 and 28 (guard.log `child.spawned`), and
+the only later dumps (21:29 local that day) were the shutdown hook loading
+every chat session on the loop, fixed in f5079dfb
+(`tests/test_shutdown_builds_nothing.py`). The 2026-09-25 database hang
+(eleven dumps, AGENTS.md §35) has not come back either. The weekly resilience
+report counts stalls, so a recurrence is seen; the next dump that names a
+frame above the storage layer is the next gate entry (AGENTS.md §35).
 
 **A Postgres install leaves a dead `settings` TABLE behind in
 `kazma-data/settings.db` — and live data in the same file.** Switching backends
