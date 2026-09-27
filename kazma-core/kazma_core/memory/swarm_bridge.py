@@ -82,6 +82,18 @@ def _insert_episode(
         eid = bridge_episode_id(
             source, session_id, turn_number, (user_text or summary_text or "").strip()
         )
+    # A memory the user took back, or a chat kept out of memory (plan U1):
+    # nothing is written, and the embedding below never reaches a tombstone.
+    from kazma_core.memory.forget import FORGOTTEN_TIER, refuses_write
+
+    if refuses_write(
+        conn,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        turn_number=turn_number,
+        user_text=user_text,
+    ):
+        return ""  # not written: callers treat a falsy id as nothing stored
     # The `source` param is the authoritative V2 categorization — it must
     # win over any caller-supplied metadata["source"] (e.g. the legacy
     # "swarm_worker" source) so V2 read filters by source stay reliable.
@@ -122,8 +134,8 @@ def _insert_episode(
             emb_blob = encode_text_to_blob(ep_text)
             if emb_blob is not None:
                 conn.execute(
-                    "UPDATE episodes SET embedding=? WHERE id=? AND embedding IS NULL",
-                    (emb_blob, eid),
+                    "UPDATE episodes SET embedding=? WHERE id=? AND embedding IS NULL AND tier != ?",
+                    (emb_blob, eid, FORGOTTEN_TIER),
                 )
     except Exception:
         logger.debug("[swarm_bridge] episode embedding failed for %s", eid, exc_info=True)

@@ -48,7 +48,8 @@ every change is inside the existing V2 engine.
 | R8 | Hybrid vector search merges the remote index with the local store (local score wins) | ☑ same file |
 | C1 | Measured before building (2026-09-27): the live install holds 6 current, user-stated, single-valued facts about the user -- all subscription reset dates, 4 of them past. A profile "from user_explicit facts" would put stale dates in front of the model every turn. Not built: it needs the owner to say what the profile holds (for example an editable "About me" in Settings) | ☐ owner |
 | R6 | A reranker (bge-reranker-v2-m3) is a ~2 GB model download: needs the owner's go-ahead before anything is fetched | ☐ owner |
-| S2+ | Remaining Stage 2 items, in the approved order: U1, W6, C2 | ☐ |
+| U1 | The user decides what is kept: forget a memory (a tombstone plus the forget ledger every writer asks -- turn reconcile, recovery, the legacy restore and the past-chats search never bring it back), "don't remember this chat" (web menu, `/memory off`), export | ☑ `tests/test_memory_forget.py` |
+| S2+ | Remaining Stage 2 items, in the approved order: W6, C2 | ☐ |
 
 ---
 
@@ -301,6 +302,57 @@ Severity: **H** = memory is wrong, missing or unsafe; **M** = quality or cost; *
 4. **R2 stopwords + Arabic folding**, **R3 answer-aware vectors**, **R4/R5 caps**, **R8**, **W4**, **W5**.
 5. **C1 core profile**, **U1 user control**, **W6 update decisions**, **R6 reranker**, **C2 consolidation**.
 6. **S1 cleanup** and **S3 chat-deletion rule** -- owner decisions (they delete data or set policy).
+
+### 5.6 U1 detail -- the user decides what Kazma remembers (2026-09-27)
+
+What exists: the Memory page edits and invalidates facts and entities. A
+memory of a conversation (an episode) can be listed but not forgotten, nothing
+keeps a chat out of memory, and there is no export to take away.
+
+1. **Forgetting is a tombstone, never a row delete** (`memory/forget.py`, the
+   one home). The chat store still holds the conversation: a deleted episode
+   would be re-created by turn reconcile within 15 minutes, and a row with its
+   text gone looks erased to the recovery pass, which refills it. Forgetting
+   an episode:
+   - empties its question, answer and summary (`''`, never NULL: NULL text is
+     what recovery treats as erased) and drops its vector; tier `forgotten`
+     (not in `RECALLABLE_TIERS`: never recalled, archived or promoted);
+     `metadata.forgotten` stamped;
+   - records the turn in the forget ledger (`memory_forgotten`: tenant, chat
+     key, turn number, question hash) under EVERY key of its chat -- a chat
+     has a session id and a thread id, and writers use either;
+   - invalidates the facts extracted from that turn (`source_session` /
+     `source_turn`);
+   - reaches the Postgres mirror (the tombstone) and the remote vector index
+     (the vector is deleted).
+2. **"Don't remember this chat"** is a ledger row for the whole chat.
+   `dual_write.mirror_episode` -- the one episode writer -- refuses a ledgered
+   turn or chat before it writes anything (it embeds, upserts the remote
+   index and mirrors to Postgres even when its local insert is ignored), so
+   the live path, turn reconcile and the swarm bridge are covered at one
+   point; the post-turn worker extracts no facts from such a chat; the
+   past-chats search skips the chat and reads a chat without its forgotten
+   turns. Web: a toggle on the chat; chat apps: `/memory off` / `/memory on`.
+3. **Export** (`GET /api/memory/v2/export`): a JSON download of the caller's
+   tenant -- facts (current and past, with provenance), episodes, entities,
+   and what was forgotten (when; never the text).
+4. **Provenance shown**: an episode names its chat; a fact names the chat
+   and turn it came from.
+5. The Memory page gets a Memories panel: the newest memories, each with
+   Forget, and Export.
+
+Gates: after a forget, recall, turn reconcile, recovery and the past-chats
+search neither return nor rebuild it (a behavioural test each, with a negative
+control); every product site that inserts an episode is declared (like the
+delete gate); the tenant gate walks the new routes.
+
+**For W6, measured on live the same day:** turn reconcile's fact pass added
+1,366 facts in its first three hours (1,225 from the LLM deep pass). Among
+them: one fact under two predicate names (`slack_id` / `slack_user_id`),
+transient state (a research run's `pipeline_state: pending`, a config
+mismatch since fixed), internal ids (channel ids). The update decision step
+W6 plans is where the first class goes; the second and third are the
+extraction prompt's to skip, measured on the same turns.
 
 ---
 

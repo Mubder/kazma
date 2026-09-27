@@ -162,7 +162,7 @@ def test_nothing_is_overwritten_doubled_or_mixed_across_tenants(conn):
     assert _row(conn, "e_legacy_copy") is None
     assert (_row(conn, "e_twin_a") is None) != (_row(conn, "e_twin_b") is None)
     assert _row(conn, "e_default_budget")["tenant_id"] == "default"
-    assert report == {"restored": 2, "present": 1, "duplicate": 2, "empty": 0}
+    assert report == {"restored": 2, "present": 1, "duplicate": 2, "empty": 0, "forgotten": 0}
 
 
 def test_it_runs_once_and_leaves_the_legacy_table_alone(conn):
@@ -171,7 +171,7 @@ def test_it_runs_once_and_leaves_the_legacy_table_alone(conn):
     first = legacy_tables.restore_legacy_episode_archive(conn)
     second = legacy_tables.restore_legacy_episode_archive(conn)
     assert first["restored"] == 3
-    assert second == {"restored": 0, "present": 3, "duplicate": 0, "empty": 0}
+    assert second == {"restored": 0, "present": 3, "duplicate": 0, "empty": 0, "forgotten": 0}
     assert conn.execute("SELECT count(*) FROM episodes_archive").fetchone()[0] == 3
 
 
@@ -179,7 +179,7 @@ def test_a_database_without_the_table_is_untouched(tmp_path):
     db = sqlite3.connect(str(tmp_path / "m.db"))
     ensure_primary_schema(db)
     assert legacy_tables.restore_legacy_episode_archive(db) == {
-        "restored": 0, "present": 0, "duplicate": 0, "empty": 0
+        "restored": 0, "present": 0, "duplicate": 0, "empty": 0, "forgotten": 0
     }
     assert legacy_tables.legacy_archive_counts(db)["total"] == 0
 
@@ -192,13 +192,13 @@ def test_health_warns_while_memories_are_stranded(conn):
     _live(conn, "e_c_live", "third")
     _stranded(conn, "e_c", "third")
     before = legacy_tables.legacy_archive_counts(conn)
-    assert before == {"total": 3, "restored": 0, "duplicate": 1, "pending": 2}
+    assert before == {"total": 3, "restored": 0, "duplicate": 1, "forgotten": 0, "pending": 2}
     row = _findability_component({"legacy_archive": before})
     assert row["status"] == "warn" and "legacy archive" in row["detail"]
 
     legacy_tables.restore_legacy_episode_archive(conn)
     after = legacy_tables.legacy_archive_counts(conn)
-    assert after == {"total": 3, "restored": 2, "duplicate": 1, "pending": 0}
+    assert after == {"total": 3, "restored": 2, "duplicate": 1, "forgotten": 0, "pending": 0}
     assert _findability_component({"legacy_archive": after})["status"] == "ok"
 
 

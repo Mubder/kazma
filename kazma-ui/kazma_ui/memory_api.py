@@ -2226,6 +2226,143 @@ async def hygiene_run(request: Request) -> dict[str, Any]:
     return out
 
 
+# ── What the user decides to keep (plan U1, memory/forget.py) ────────────
+#
+# A chat id here only picks among the CALLER's tenant's memories: the ledger
+# rows are written under that tenant, and forgetting touches that tenant's
+# episodes. Users of one tenant share its memory, as they share every other
+# memory route; another tenant's chat id changes nothing of theirs.
+
+
+@router.post("/api/memory/v2/episodes/{episode_id}/forget")
+def forget_memory(episode_id: str) -> dict[str, Any]:
+    """Forget one memory and every copy of its turn; the facts it produced
+    stop being current. Another tenant's memory reads as not found.
+
+    A plain ``def``: FastAPI runs it in its threadpool (every step is I/O).
+    """
+    from kazma_core.memory.forget import forget_episode
+
+    try:
+        return forget_episode(episode_id, tenant_id=_memory_tenant_id())
+    except sqlite3.Error as exc:
+        logger.exception("[memory_api] forget failed")
+        return {"ok": False, "error": safe_error(exc)}
+
+
+@router.get("/api/memory/v2/chats/{chat_id}/memory")
+def chat_memory(chat_id: str) -> dict[str, Any]:
+    """Whether Kazma remembers this chat, and how many memories it has left."""
+    from kazma_core.memory.forget import FORGOTTEN_TIER, chat_keys, forgotten_turns
+
+    tid = _memory_tenant_id()
+    keys = chat_keys(chat_id)
+    if not keys:
+        return {"ok": False, "error": "chat required"}
+    conn = _conn()
+    try:
+        marks = ",".join("?" for _ in keys)
+        scope = "" if tid == "default" else " AND tenant_id = ?"
+        count = conn.execute(
+            f"SELECT COUNT(*) FROM episodes WHERE session_id IN ({marks}) AND tier != ?{scope}",
+            (*keys, FORGOTTEN_TIER, *(() if tid == "default" else (tid,))),
+        ).fetchone()[0]
+        kept_out, _turns = forgotten_turns(conn, tenant_id=tid, keys=keys)
+        return {"ok": True, "remembered": not kept_out, "memories": int(count)}
+    finally:
+        conn.close()
+
+
+@router.put("/api/memory/v2/chats/{chat_id}/memory")
+async def set_chat_memory(chat_id: str, request: Request) -> dict[str, Any]:
+    """Keep this chat out of memory, or let it back in. Body::
+
+        {"remember": false, "forget_past": true}
+
+    ``forget_past`` also forgets what the chat has left in memory already.
+    """
+    return await asyncio.to_thread(_set_chat_memory_sync, chat_id, await _read_json(request))
+
+
+def _set_chat_memory_sync(chat_id: str, payload: Any) -> dict[str, Any]:
+    """Blocking half of :func:`set_chat_memory` -- runs off the event loop."""
+    from kazma_core.memory.forget import forget_chat, set_chat_remembered
+
+    if payload is _INVALID_JSON or not isinstance(payload, dict) or "remember" not in payload:
+        return {"ok": False, "error": "body must be {\"remember\": true|false}"}
+    tid = _memory_tenant_id()
+    out = set_chat_remembered(chat_id, bool(payload.get("remember")), tenant_id=tid)
+    if out.get("ok") and payload.get("forget_past"):
+        out["forgot"] = forget_chat(chat_id, tenant_id=tid)
+    return out
+
+
+@router.get("/api/memory/v2/export")
+def export_memory() -> Any:
+    """Everything the caller's tenant's memory holds, as a JSON download:
+    facts (current and past, with the chat and turn they came from),
+    memories of conversations, entities, and what was forgotten (when --
+    never what)."""
+    from datetime import UTC, datetime
+
+    from fastapi.responses import Response
+    from kazma_core.memory.forget import FORGOTTEN_TIER
+
+    tid = _memory_tenant_id()
+    scope, params = ("", ()) if tid == "default" else (" WHERE tenant_id = ?", (tid,))
+    conn = _conn()
+    try:
+        def rows(sql: str, extra: tuple = ()) -> list[dict[str, Any]]:
+            return [dict(r) for r in conn.execute(sql, (*params, *extra)).fetchall()]
+
+        facts = rows(
+            "SELECT tenant_id, subject, predicate, predicate_type, object, confidence, "
+            "valid_from, valid_until, invalidated_at, ingested_at, extraction_method, "
+            "source_session, source_turn, metadata_json FROM beliefs" + scope
+            + " ORDER BY ingested_at"
+        )
+        for f in facts:
+            try:
+                meta = json.loads(f.pop("metadata_json") or "{}")
+            except (TypeError, ValueError):
+                meta = {}
+            f["forgotten"] = isinstance(meta, dict) and "forgotten" in meta
+        episodes = rows(
+            "SELECT tenant_id, id, session_id, turn_number, user_text, assistant_text, "
+            "summary_text, tier, created_at FROM episodes"
+            + (scope + " AND" if scope else " WHERE") + " tier != ? ORDER BY created_at",
+            (FORGOTTEN_TIER,),
+        )
+        entities = rows("SELECT tenant_id, id, type, name, aliases_json FROM entities" + scope)
+        forgotten = rows(
+            "SELECT tenant_id, session_key, turn_number, forgotten_at FROM memory_forgotten"
+            + scope + " ORDER BY forgotten_at"
+        )
+    finally:
+        conn.close()
+    now = datetime.now(UTC)
+    body = json.dumps(
+        {
+            "exported_at": now.isoformat(),
+            "tenant": tid,
+            "facts": facts,
+            "memories": episodes,
+            "entities": entities,
+            "forgotten": forgotten,
+        },
+        ensure_ascii=False,
+        indent=1,
+        default=str,
+    )
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="kazma-memory-{now:%Y%m%d-%H%M}.json"'
+        },
+    )
+
+
 def mount_memory_api(app: Any) -> None:
     """Include API router on the FastAPI app."""
     app.include_router(router)

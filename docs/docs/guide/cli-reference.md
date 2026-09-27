@@ -392,7 +392,8 @@ These are typed inside a connected chat (Telegram/Discord/Slack/Web). Defined in
 | `/reset` | Clear conversation (handled in `graph.py:196`). |
 | `/status` | Gateway health overview. |
 | `/model` or `/models` | Interactive model selector (Telegram inline keyboard). |
-| `/memory` | Memory subsystem stats. |
+| `/memory` | Facts held, and whether this chat is remembered. |
+| `/memory off` \| `/memory on` | Keep this chat out of memory (and forget what it left), or let new messages back in. |
 | `/cost` | Token spend for the session. |
 | `/replay list \| &lt;iter> \| compare &lt;a> &lt;b> \| clear` | Time-travel: list snapshots, restore (rewind), compare diff, clear. |
 | `/fork &lt;iter>` | Branch from a snapshot into a new thread (original stays intact). |

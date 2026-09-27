@@ -144,10 +144,21 @@ def search_transcripts(
             limit=max(1, limit) * _PREFILTER_FACTOR,
             sqlite_path=Path(db_path) if db_path is not None else None,
         )
+        from kazma_core.memory.forget import forgotten_in_chat
+
         hits: list[dict[str, Any]] = []
         for r in rows:
             title = str(r.get("title") or "")
             messages = str(r.get("messages") or "")
+            # What the user took back stays out (plan U1): a chat they keep
+            # out of memory is skipped, a forgotten turn is not read.
+            whole, forgotten = forgotten_in_chat(
+                tenant_id, (str(r.get("session_id") or ""), str(r.get("thread_id") or ""))
+            )
+            if whole:
+                continue
+            if forgotten:
+                messages = _without_turns(messages, forgotten)
             matched = _present(terms, f"{title}\n{messages}")
             if len(matched) * 2 <= len(terms):
                 continue  # half the question or less: not about it
@@ -168,6 +179,41 @@ def search_transcripts(
     except Exception:
         logger.debug("[transcript-recall] search failed — returning no hits", exc_info=True)
         return []
+
+
+def _without_turns(messages: str, forgotten: set[tuple[int, str]]) -> str:
+    """The chat's stored messages without the turns the user forgot.
+
+    A turn is left out when its number OR its question matches the ledger:
+    a chat edited since may number its turns differently, and hiding one turn
+    too many is the side to err on. Messages that cannot be read are all left
+    out -- which of them were forgotten cannot be told.
+    """
+    import json
+
+    from kazma_core.memory.chat_history import normalize_message
+    from kazma_core.memory.consolidator import message_text
+    from kazma_core.memory.forget import question_sha
+
+    try:
+        items = json.loads(messages)
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(items, list):
+        return ""
+    numbers = {turn for turn, _sha in forgotten}
+    shas = {sha for _turn, sha in forgotten}
+    kept: list[Any] = []
+    turn = 0
+    skipping = False
+    for item in items:
+        msg = normalize_message(item)
+        if msg.get("role") == "user":
+            turn += 1
+            skipping = turn in numbers or question_sha(message_text(msg.get("content"))) in shas
+        if not skipping:
+            kept.append(item)
+    return json.dumps(kept, ensure_ascii=False)
 
 
 def format_transcript_block(hits: list[dict[str, Any]]) -> str:

@@ -401,6 +401,14 @@ def _run_turn_memory(
     """
     ok = True
     at = time.time() if at is None else float(at)
+    # ── A chat the user keeps out of memory (plan U1) ─────────────
+    # No episode (the writer would refuse it anyway) and no facts: the
+    # heuristic pass below would otherwise still read the turn.
+    if session_id:
+        from kazma_core.memory.forget import chat_remembered
+
+        if not chat_remembered(session_id, tenant_id=tenant_id):
+            return True
     # ── Phase C: promote prior working → episodic for this session ─
     try:
         promote_working_memory(session_id, tenant_id=tenant_id)
