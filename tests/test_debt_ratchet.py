@@ -51,6 +51,21 @@ riskier than the debt — but which nothing stopped from growing:
   ``python_exec``), and a fixed name can be someone else's file
   (``test_path_anchoring`` unlinked ``%TEMP%/test.txt``, whoever made it).
   Use ``tmp_path``, ``mkdtemp``/``mkstemp``, or a uuid in the name.
+* ``async_inline_db_calls`` (2026-09-27) -- an ``async def`` that makes a
+  DB-API call (``execute``, ``executemany``, ``executescript``, ``commit``)
+  itself, not awaited: the statement runs on the loop that serves every SSE
+  and WebSocket stream, and a lock wait stalls them all. §26E's gate catches
+  a ``sqlite3.connect`` in async code; opening the connection in a thread
+  and then executing on the loop passed it -- the memory admin API did that
+  in 17 routes. Fix: the body in a ``_..._sync`` function run with
+  ``asyncio.to_thread`` (``memory_api.py`` shows the shape).
+* ``async_tools_never_await`` (2026-09-27) -- a registered agent tool that is
+  ``async def`` but never awaits. The registry runs an async tool ON the
+  loop and threads only sync ones, so all of its work blocks every stream:
+  ``memory_search`` embedded the query and searched SQLite there. Fix:
+  ``await asyncio.to_thread(...)`` around the work (``memory_store`` shows
+  it); a plain ``def`` only when nothing in it needs the loop
+  (``spawn_background``, ``create_task``, loop-bound state).
 """
 
 from __future__ import annotations
@@ -65,19 +80,21 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 #: Lower these whenever the counts drop. Never raise them casually.
 BASELINE = {
     # except Exception / except BaseException / bare except, any body
-    "blind_except": 3779,
+    "blind_except": 3770,
     # ...whose body is only `pass` (or a docstring): the error vanishes
     "silent_except": 556,
 }
 
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
 STRUCTURAL_BASELINE = {
-    "async_route_never_awaits": 187,
+    "async_route_never_awaits": 184,
     "module_local_public_symbols": 600,
     "patched_value_imports": 82,
     "sleep_then_assert": 52,
     "bare_module_attr_assignments": 0,
     "shared_temp_names": 0,
+    "async_inline_db_calls": 18,
+    "async_tools_never_await": 10,
 }
 
 
@@ -416,6 +433,85 @@ def shared_temp_names(tests: dict[str, str]) -> list[str]:
     return sorted(found, key=lambda e: (e.rsplit(":", 1)[0], int(e.rsplit(":", 1)[1])))
 
 
+#: Calls that run a statement on a sync DB-API connection or cursor.
+_DB_API_CALLS = frozenset({"execute", "executemany", "executescript", "commit"})
+#: Functions whose arguments are coroutines: ``wait_for(executor.execute(...))``
+#: is an async tool executor, not a database.
+_COROUTINE_CONSUMERS = frozenset({
+    "wait_for", "gather", "shield", "create_task", "ensure_future",
+    "spawn_background", "run_coroutine_threadsafe",
+})
+
+
+def _own_nodes(fn: ast.AST):
+    """Nodes of *fn*'s own body: not a nested def, lambda or class."""
+    stack = list(ast.iter_child_nodes(fn))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue
+        yield node
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _runs_db_call_inline(fn: ast.AsyncFunctionDef) -> bool:
+    awaited: set[int] = set()
+    for node in _own_nodes(fn):
+        if isinstance(node, ast.Await) and isinstance(node.value, ast.Call):
+            awaited.add(id(node.value))  # an async driver's call
+        if isinstance(node, ast.AsyncWith):
+            awaited.update(id(i.context_expr) for i in node.items)  # `async with db.execute(...)`
+        if isinstance(node, ast.Call):
+            callee = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+            if callee in _COROUTINE_CONSUMERS:
+                awaited.update(id(a) for a in node.args if isinstance(a, ast.Call))
+    return any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _DB_API_CALLS
+        and id(node) not in awaited
+        for node in _own_nodes(fn)
+    )
+
+
+def async_inline_db_calls(product: dict[str, str]) -> list[str]:
+    found: list[str] = []
+    for rel, text in product.items():
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        found += [
+            f"{rel} {fn.name}"
+            for fn in ast.walk(tree)
+            if isinstance(fn, ast.AsyncFunctionDef) and _runs_db_call_inline(fn)
+        ]
+    return sorted(found)
+
+
+def _is_tool_registration(decorator: ast.expr) -> bool:
+    target = decorator.func if isinstance(decorator, ast.Call) else decorator
+    name = target.attr if isinstance(target, ast.Attribute) else getattr(target, "id", "")
+    return name in ("register", "register_tool")
+
+
+def async_tools_never_await(product: dict[str, str]) -> list[str]:
+    found: list[str] = []
+    for rel, text in product.items():
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        for fn in ast.walk(tree):
+            if (
+                isinstance(fn, ast.AsyncFunctionDef)
+                and any(_is_tool_registration(d) for d in fn.decorator_list)
+                and not any(isinstance(n, (ast.Await, ast.AsyncFor, ast.AsyncWith)) for n in _own_nodes(fn))
+            ):
+                found.append(f"{rel} {fn.name}")
+    return sorted(found)
+
+
 def _tracked(patterns: list[str]) -> dict[str, str]:
     files = subprocess.run(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard", *patterns],
@@ -450,6 +546,8 @@ def structural_debt() -> dict[str, list[str]]:
         "sleep_then_assert": sleep_then_assert(tests),
         "bare_module_attr_assignments": bare_module_attr_assignments(tests),
         "shared_temp_names": shared_temp_names(tests),
+        "async_inline_db_calls": async_inline_db_calls(product),
+        "async_tools_never_await": async_tools_never_await(product),
     }
 
 
@@ -482,6 +580,32 @@ def test_structural_scanners_count_what_they_say():
         )
     }
     assert [e.split()[-1] for e in async_routes_never_awaiting(routes)] == ["a", "d"]
+
+    db = {
+        "r.py": (
+            "async def a():\n    conn = await asyncio.to_thread(_conn)\n    conn.execute('x')\n"
+            "async def b():\n    await db.execute('x')\n    await db.commit()\n"
+            "async def c():\n    return await asyncio.to_thread(_c_sync)\n"
+            "async def d():\n    async with db.execute('x') as cur:\n        pass\n"
+            "async def e():\n    def inner():\n        conn.commit()\n    return await asyncio.to_thread(inner)\n"
+            "async def f():\n    rows = (await db.execute('x')).fetchall()\n    conn.commit()\n"
+            "async def g():\n    return await asyncio.wait_for(executor.execute(name, args), 5)\n"
+            "async def h():\n    await asyncio.to_thread(process, conn.execute('x'))\n"
+        )
+    }
+    # g hands a coroutine to wait_for (the tool executor); h runs the
+    # statement on the loop to build to_thread's argument.
+    assert [e.split()[-1] for e in async_inline_db_calls(db)] == ["a", "f", "h"]
+
+    tools = {
+        "t.py": (
+            "@registry.register(description='x')\nasync def a(q):\n    return search(q)\n"
+            "@registry.register(description='x')\nasync def b(q):\n    return await asyncio.to_thread(search, q)\n"
+            "@registry.register(description='x')\ndef c(q):\n    return search(q)\n"
+            "async def d(q):\n    return search(q)\n"
+        )
+    }
+    assert [e.split()[-1] for e in async_tools_never_await(tools)] == ["a"]
 
     product = {
         "kazma-core/kazma_core/m.py": "def used():\n    pass\ndef lonely():\n    pass\n"

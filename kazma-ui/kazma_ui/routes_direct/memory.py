@@ -58,12 +58,14 @@ def register_memory_routes(self: Any) -> None:
             },
         )
     @self.app.get("/api/memory/graph/search")
-    async def _memory_graph_search(q: str = "", limit: int = 20):
+    def _memory_graph_search(q: str = "", limit: int = 20):
         """Search the V2 cognitive memory (repoints the legacy graph FTS search).
 
         Backed by ``recall.search`` — hybrid FTS5 + dense vector + PPR over V2
         beliefs and episodes. Returns the same ``{query, results[]}`` envelope
-        the legacy handler emitted so existing callers keep working.
+        the legacy handler emitted so existing callers keep working. A plain
+        ``def``: the search is SQLite plus an embedding of the query, and it
+        ran on the event loop (AGENTS §35).
         """
         if not (q or "").strip():
             return {"results": [], "query": ""}
@@ -919,8 +921,11 @@ def register_memory_routes(self: Any) -> None:
             except Exception:
                 pass  # already closed / never opened
     @self.app.post("/api/memory/v2/reconsolidate", dependencies=[Depends(rate_limit("admin_ops", 10))])
-    async def _memory_v2_reconsolidate():
-        """Enqueue a global_reconsolidation task (Dashboard / Settings trigger)."""
+    def _memory_v2_reconsolidate():
+        """Enqueue a global_reconsolidation task (Dashboard / Settings trigger).
+
+        A plain ``def``: the enqueue is a SQLite write (AGENTS §35).
+        """
         try:
             from kazma_core.memory.task_queue import enqueue_task
 

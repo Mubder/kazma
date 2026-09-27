@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Memory work no longer holds up other chats (2026-09-27)
+
+When Kazma searched its memory during a chat, or you used an action on the
+Memory page (rename, link, delete, merge, groupings, the fact list), that work
+ran on the part of the server that delivers every open chat's replies. While
+it ran, other chats stopped streaming -- briefly, or for as long as the
+database made it wait. It now runs beside them.
+
+- The same was true of a check Kazma makes before every tool it runs, and of
+  deleting a research task. Both run beside the chats now too.
+
 ## Each tenant's memory stays its own (2026-09-27)
 
 On an install with more than one tenant, the memory pages and APIs could

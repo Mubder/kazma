@@ -30,7 +30,7 @@ DECLARED = {
         "superseded beliefs past the archive age: copied into beliefs_archive first",
     ("kazma-ui/kazma_ui/memory_api.py", "_archive_invalidated_sync"):
         "operator's archive_invalidated action: copied into beliefs_archive first",
-    ("kazma-ui/kazma_ui/memory_api.py", "delete_entity"):
+    ("kazma-ui/kazma_ui/memory_api.py", "_delete_entity_sync"):
         "operator deletes one graph node by id; its facts stay, the merge ledger is "
         "preserved, and the route offers a restore",
     ("kazma-core/kazma_core/agent/tool_builtins/memory.py", "_mem_delete_entity"):

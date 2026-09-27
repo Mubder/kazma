@@ -935,6 +935,16 @@ _LOOP_STALL_HELPERS = frozenset({
 
 def _loop_stall_helper_calls(tree: ast.AST) -> list[tuple[int, str]]:
     found: list[tuple[int, str]] = []
+    # `from ... import recall as v2_recall` calls the helper by another name:
+    # the memory_search tool ran recall on the loop that way until 2026-09-27,
+    # after the S2 pass had listed it as fixed.
+    aliases = {
+        a.asname: a.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for a in node.names
+        if a.asname and a.name in _LOOP_STALL_HELPERS
+    }
 
     def visit(node: ast.AST, in_async: bool) -> None:
         for child in ast.iter_child_nodes(node):
@@ -946,6 +956,7 @@ def _loop_stall_helper_calls(tree: ast.AST) -> list[tuple[int, str]]:
                 if in_async and isinstance(child, ast.Call):
                     fn = child.func
                     name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+                    name = aliases.get(name, name)
                     if name in _LOOP_STALL_HELPERS:
                         found.append((child.lineno, name))
                 visit(child, in_async)
@@ -986,6 +997,13 @@ def test_loop_stall_gate_catches_the_watchdog_shape():
     )
     assert _loop_stall_helper_calls(ast.parse(bad)) == [(2, "get_hitl_config"), (3, "record_watcher")]
     assert _loop_stall_helper_calls(ast.parse(good)) == []
+    # The memory_search shape: the helper under another name.
+    aliased = (
+        "async def memory_search(query):\n"
+        "    from kazma_core.memory.recall import recall as v2_recall\n"
+        "    return v2_recall(query)\n"
+    )
+    assert _loop_stall_helper_calls(ast.parse(aliased)) == [(3, "recall")]
 
 
 # ── 2f''''. httpx clients built on the loop share one TLS context (2026-09-23)

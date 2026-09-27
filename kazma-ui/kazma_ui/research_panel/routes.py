@@ -829,8 +829,12 @@ def create_research_router() -> APIRouter:
         return await _set_archived(task_id, archived=False)
 
     @router.delete("/api/research/tasks/{task_id}")
-    async def delete_research(task_id: str) -> JSONResponse:
-        """Delete a research task from the TaskStore."""
+    def delete_research(task_id: str) -> JSONResponse:
+        """Delete a research task from the TaskStore.
+
+        A plain ``def``: every line is a database call, and as ``async def``
+        they ran on the event loop (AGENTS §35).
+        """
         store = _get_store()
         if store is None:
             return JSONResponse({"error": "store unavailable"}, status_code=503)

@@ -174,6 +174,23 @@ def _conn() -> sqlite3.Connection:
     return c
 
 
+#: What :func:`_read_json` answers for a body that is not JSON; each route
+#: decides what that means, as it did when it parsed the body itself.
+_INVALID_JSON = object()
+
+
+async def _read_json(request: Request) -> Any:
+    """The request's JSON body, or ``_INVALID_JSON``.
+
+    The routes below read the body here, on the loop, and do every
+    database step in a thread (AGENTS §35).
+    """
+    try:
+        return await request.json()
+    except ValueError:
+        return _INVALID_JSON
+
+
 def _memory_tenant_id() -> str:
     """Active tenant id for memory reads/writes.
 
@@ -314,8 +331,13 @@ async def memory_vocab() -> dict[str, Any]:
     name). Predicates are ordered by frequency so the common ones surface
     first; entities by belief_count. Tenant-scoped like every other route.
     """
+    return await asyncio.to_thread(_memory_vocab_sync)
+
+
+def _memory_vocab_sync() -> dict[str, Any]:
+    """Blocking half of :func:`memory_vocab` -- runs off the event loop."""
     try:
-        conn = await asyncio.to_thread(_conn)
+        conn = _conn()
         tid = _memory_tenant_id()
         tfilter = " AND tenant_id = ?" if tid != "default" else ""
         tparam: tuple = (tid,) if tid != "default" else ()
@@ -362,8 +384,13 @@ async def memory_vocab() -> dict[str, Any]:
 
 @router.get("/api/memory/v2/admin/summary")
 async def memory_admin_summary() -> dict[str, Any]:
+    return await asyncio.to_thread(_memory_admin_summary_sync)
+
+
+def _memory_admin_summary_sync() -> dict[str, Any]:
+    """Blocking half of :func:`memory_admin_summary` -- runs off the event loop."""
     try:
-        conn = await asyncio.to_thread(_conn)
+        conn = _conn()
         # Phase 4: scope every count by the active tenant when enforcement is
         # on; unscoped (today's behavior) otherwise. The tenant filter uses
         # the tenant_id-leading indexes so it stays fast either way.
@@ -471,8 +498,13 @@ async def list_entities(
     empty_only: bool = False,
     isolated_only: bool = False,
 ) -> dict[str, Any]:
+    return await asyncio.to_thread(_list_entities_sync, q, limit, offset, empty_only, isolated_only)
+
+
+def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isolated_only: bool) -> dict[str, Any]:
+    """Blocking half of :func:`list_entities` -- runs off the event loop."""
     try:
-        conn = await asyncio.to_thread(_conn)
+        conn = _conn()
         lim = max(1, min(int(limit or 100), 300))
         off = max(0, int(offset or 0))
         # Phase 3: use the materialized belief_count / graph_degree columns
@@ -617,14 +649,18 @@ async def rename_entity(entity_id: str, request: Request) -> dict[str, Any]:
     Missing rows are upserted so graph virtual nodes (and the hardcoded
     ``user`` hub) can receive a durable label on first rename.
     """
+    return await asyncio.to_thread(_rename_entity_sync, entity_id, await _read_json(request))
+
+
+def _rename_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
+    """Blocking half of :func:`rename_entity` -- runs off the event loop."""
     eid = (entity_id or "").strip()
     if not eid:
         return {"ok": False, "error": "entity_id required"}
     if len(eid) > 200:
         return {"ok": False, "error": "entity_id too long"}
-    try:
-        body = await request.json()
-    except Exception:
+    body = payload
+    if body is _INVALID_JSON:
         return {"ok": False, "error": "invalid JSON"}
     new_name = str((body or {}).get("name") or "").strip()
     if not new_name:
@@ -640,7 +676,7 @@ async def rename_entity(entity_id: str, request: Request) -> dict[str, Any]:
             parse_aliases,
         )
 
-        conn = await asyncio.to_thread(_conn)
+        conn = _conn()
         row = conn.execute(
             "SELECT id, type, name, aliases_json FROM entities WHERE id=?",
             (eid,),
@@ -733,13 +769,15 @@ async def protect_entity(entity_id: str, request: Request) -> dict[str, Any]:
     hardcoded floor (user/assistant/kazma/mubder) is always protected and
     cannot be unprotected here. Body: ``{"protected": true|false}``.
     """
+    return await asyncio.to_thread(_protect_entity_sync, entity_id, await _read_json(request))
+
+
+def _protect_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
+    """Blocking half of :func:`protect_entity` -- runs off the event loop."""
     eid = (entity_id or "").strip()
     if not eid:
         return {"ok": False, "error": "entity_id required"}
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
+    body = {} if payload is _INVALID_JSON else payload
     want = bool(body.get("protected"))
     # The hardcoded floor is always protected — reject attempts to clear it
     # via this route so the operator can't accidentally unprotect the hub.
@@ -748,7 +786,7 @@ async def protect_entity(entity_id: str, request: Request) -> dict[str, Any]:
     if not want and str(eid).lower() in _PROTECTED_ENTITIES:
         return {"ok": False, "error": f"cannot unprotect core entity: {eid}"}
     try:
-        conn = await asyncio.to_thread(_conn)
+        conn = _conn()
         if not _entity_tenant_ok(conn, eid):
             conn.close()
             return {"ok": False, "error": "not_found"}
@@ -778,16 +816,18 @@ async def set_major_entity(entity_id: str, request: Request) -> dict[str, Any]:
     with a distinct color, and grouped sub-nodes attach to them visually.
     Body: ``{"major": true|false}``.
     """
+    return await asyncio.to_thread(_set_major_entity_sync, entity_id, await _read_json(request))
+
+
+def _set_major_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
+    """Blocking half of :func:`set_major_entity` -- runs off the event loop."""
     eid = (entity_id or "").strip()
     if not eid:
         return {"ok": False, "error": "entity_id required"}
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
+    body = {} if payload is _INVALID_JSON else payload
     want = bool(body.get("major"))
     try:
-        conn = await asyncio.to_thread(_conn)
+        conn = _conn()
         if not _entity_tenant_ok(conn, eid):
             conn.close()
             return {"ok": False, "error": "not_found"}
@@ -806,10 +846,15 @@ async def set_major_entity(entity_id: str, request: Request) -> dict[str, Any]:
 
 @router.delete("/api/memory/v2/entities/{entity_id}")
 async def delete_entity(entity_id: str) -> dict[str, Any]:
+    return await asyncio.to_thread(_delete_entity_sync, entity_id)
+
+
+def _delete_entity_sync(entity_id: str) -> dict[str, Any]:
+    """Blocking half of :func:`delete_entity` -- runs off the event loop."""
     eid = (entity_id or "").strip()
     if not eid:
         return {"ok": False, "error": "entity_id required"}
-    conn = await asyncio.to_thread(_conn)
+    conn = _conn()
     # F3: protection covers the hardcoded floor AND the per-row is_protected
     # flag. Resolved against a connection so the per-row flag is read.
     if not _entity_tenant_ok(conn, eid):
@@ -873,8 +918,8 @@ async def delete_entity(entity_id: str) -> dict[str, Any]:
         conn.commit()
         conn.close()
 
-        async def _restore_entity() -> dict[str, Any]:
-            c = await asyncio.to_thread(_conn)
+        def _restore_entity_sync() -> dict[str, Any]:
+            c = _conn()
             c.execute(
                 "INSERT OR IGNORE INTO entities "
                 "(id, tenant_id, type, name, aliases_json, metadata_json, is_high_stakes, is_protected) "
@@ -893,6 +938,9 @@ async def delete_entity(entity_id: str) -> dict[str, Any]:
             c.commit()
             c.close()
             return {"restored": snap["id"]}
+
+        async def _restore_entity() -> dict[str, Any]:
+            return await asyncio.to_thread(_restore_entity_sync)
 
         undo_token = register_undo(
             _restore_entity,
@@ -914,9 +962,13 @@ async def delete_entity(entity_id: str) -> dict[str, Any]:
 @router.post("/api/memory/v2/entities/merge")
 async def merge_entities(request: Request) -> dict[str, Any]:
     """Merge *source_id* into *target_id* (beliefs rewired, source retired)."""
-    try:
-        body = await request.json()
-    except Exception:
+    return await asyncio.to_thread(_merge_entities_sync, await _read_json(request))
+
+
+def _merge_entities_sync(payload: Any) -> dict[str, Any]:
+    """Blocking half of :func:`merge_entities` -- runs off the event loop."""
+    body = payload
+    if body is _INVALID_JSON:
         return {"ok": False, "error": "invalid JSON"}
     source_id = str((body or {}).get("source_id") or "").strip()
     target_id = str((body or {}).get("target_id") or "").strip()
@@ -924,7 +976,7 @@ async def merge_entities(request: Request) -> dict[str, Any]:
         return {"ok": False, "error": "source_id and target_id required"}
     if source_id == target_id:
         return {"ok": False, "error": "source and target must differ"}
-    conn = await asyncio.to_thread(_conn)
+    conn = _conn()
     # F3: protection covers the hardcoded floor AND the per-row is_protected flag.
     if _is_protected(conn, source_id):
         conn.close()
@@ -1208,9 +1260,13 @@ async def unlink_entities(request: Request) -> dict[str, Any]:
     Graph canvas edges always have endpoints; belief_id can be missing on
     older Neo4j exports — triple match is the fallback.
     """
-    try:
-        body = await request.json()
-    except Exception:
+    return await asyncio.to_thread(_unlink_entities_sync, await _read_json(request))
+
+
+def _unlink_entities_sync(payload: Any) -> dict[str, Any]:
+    """Blocking half of :func:`unlink_entities` -- runs off the event loop."""
+    body = payload
+    if body is _INVALID_JSON:
         return {"ok": False, "error": "invalid JSON"}
     body = body or {}
     belief_id = str(body.get("belief_id") or body.get("id") or "").strip()
@@ -1225,9 +1281,7 @@ async def unlink_entities(request: Request) -> dict[str, Any]:
     # 1) Direct id path. Another tenant's id reads as not found, and the
     # triple path below is scoped the same way.
     if belief_id:
-        r = await asyncio.to_thread(
-            invalidate_belief, belief_id, remove_graph=True, tenant_id=tid
-        )
+        r = invalidate_belief(belief_id, remove_graph=True, tenant_id=tid)
         if r.get("ok") or r.get("already"):
             return {
                 "ok": True,
@@ -1250,7 +1304,7 @@ async def unlink_entities(request: Request) -> dict[str, Any]:
 
     sub_id = _entity_slug(subject)
     try:
-        conn = await asyncio.to_thread(_conn)
+        conn = _conn()
         tsql = " AND tenant_id=?" if tid != "default" else ""
         tparams: list = [tid] if tid != "default" else []
         row = conn.execute(
@@ -1292,7 +1346,7 @@ async def unlink_entities(request: Request) -> dict[str, Any]:
                 "object": obj,
             }
         bid = str(row["id"] if isinstance(row, sqlite3.Row) else row[0])
-        r = await asyncio.to_thread(invalidate_belief, bid, remove_graph=True, tenant_id=tid)
+        r = invalidate_belief(bid, remove_graph=True, tenant_id=tid)
         if not r.get("ok"):
             # Idempotent: already soft-deleted counts as success
             if r.get("error") == "not found":
@@ -1322,12 +1376,16 @@ async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
     changes (recall will re-embed on next path that needs it). FTS sync is
     handled by the beliefs_fts UPDATE trigger.
     """
+    return await asyncio.to_thread(_edit_belief_sync, belief_id, await _read_json(request))
+
+
+def _edit_belief_sync(belief_id: str, payload: Any) -> dict[str, Any]:
+    """Blocking half of :func:`edit_belief` -- runs off the event loop."""
     bid = (belief_id or "").strip()
     if not bid:
         return {"ok": False, "error": "belief_id required"}
-    try:
-        body = await request.json()
-    except Exception:
+    body = payload
+    if body is _INVALID_JSON:
         return {"ok": False, "error": "invalid JSON"}
     body = body or {}
 
@@ -1350,7 +1408,7 @@ async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
         return {"ok": False, "error": "predicate_type must be functional|set|state"}
 
     try:
-        conn = await asyncio.to_thread(_conn)
+        conn = _conn()
         if not _belief_tenant_ok(conn, bid):
             conn.close()
             return {"ok": False, "error": "not_found"}
@@ -1462,8 +1520,8 @@ async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
         except Exception:
             pass
 
-        async def _restore_edit() -> dict[str, Any]:
-            c = await asyncio.to_thread(_conn)
+        def _restore_edit_sync() -> dict[str, Any]:
+            c = _conn()
             c.execute(
                 "UPDATE beliefs SET subject=?, predicate=?, object=?, predicate_type=? "
                 "WHERE id=?",
@@ -1478,6 +1536,9 @@ async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
             c.commit()
             c.close()
             return {"restored": bid}
+
+        async def _restore_edit() -> dict[str, Any]:
+            return await asyncio.to_thread(_restore_edit_sync)
 
         undo_token = register_undo(
             _restore_edit,
@@ -1556,14 +1617,21 @@ async def repoint_belief(belief_id: str, request: Request) -> dict[str, Any]:
         result["op"] = "repoint"
         # F3: surface orphan warning for the OLD subject if it lost its last edge.
         try:
-            conn = await asyncio.to_thread(_conn)
-            warn = _would_orphan(conn, [bid], tenant_id=_memory_tenant_id())
-            conn.close()
+            warn = await asyncio.to_thread(_repoint_orphan_warning, bid)
             if warn:
                 result["warn_orphaned"] = warn
         except Exception:
             logger.debug("[memory_api] repoint orphan warning failed", exc_info=True)
     return result
+
+
+def _repoint_orphan_warning(bid: str) -> list[str]:
+    """Blocking half of :func:`repoint_belief`'s warning -- runs off the event loop."""
+    conn = _conn()
+    try:
+        return _would_orphan(conn, [bid], tenant_id=_memory_tenant_id())
+    finally:
+        conn.close()
 
 
 @router.post("/api/memory/v2/beliefs/invalidate-batch")
@@ -1713,8 +1781,13 @@ def _group_descendants(conn: sqlite3.Connection, root: str, tenant_id: str) -> l
 @router.get("/api/memory/v2/graph/groups")
 async def graph_groups_list() -> dict[str, Any]:
     """List all graph groupings (view-only associations) for the active tenant."""
+    return await asyncio.to_thread(_graph_groups_list_sync)
+
+
+def _graph_groups_list_sync() -> dict[str, Any]:
+    """Blocking half of :func:`graph_groups_list` -- runs off the event loop."""
     try:
-        conn = await asyncio.to_thread(_conn)
+        conn = _conn()
         tid = _memory_tenant_id()
         rows = [
             dict(r) for r in conn.execute(
@@ -1736,9 +1809,13 @@ async def graph_groups_create(request: Request) -> dict[str, Any]:
     """Create a view-only grouping: member under group_root, tier defaults to
     parent_tier + 1. Never touches beliefs. Rejects cycles.
     """
-    try:
-        body = await request.json()
-    except Exception:
+    return await asyncio.to_thread(_graph_groups_create_sync, await _read_json(request))
+
+
+def _graph_groups_create_sync(payload: Any) -> dict[str, Any]:
+    """Blocking half of :func:`graph_groups_create` -- runs off the event loop."""
+    body = payload
+    if body is _INVALID_JSON:
         return {"ok": False, "error": "invalid JSON"}
     body = body or {}
     root = str(body.get("group_root") or "").strip()
@@ -1750,7 +1827,7 @@ async def graph_groups_create(request: Request) -> dict[str, Any]:
     label = str(body.get("label") or "").strip() or None
     tid = _memory_tenant_id()
     try:
-        conn = await asyncio.to_thread(_conn)
+        conn = _conn()
         if _group_creates_cycle(conn, member, root, tid):
             conn.close()
             return {"ok": False, "error": "cycle: member is an ancestor of group_root"}
@@ -1795,11 +1872,16 @@ async def graph_groups_create(request: Request) -> dict[str, Any]:
 async def graph_groups_delete(group_id: str) -> dict[str, Any]:
     """Remove a view-only grouping. The member's children (if any) become
     ungrouped. Never touches beliefs."""
+    return await asyncio.to_thread(_graph_groups_delete_sync, group_id)
+
+
+def _graph_groups_delete_sync(group_id: str) -> dict[str, Any]:
+    """Blocking half of :func:`graph_groups_delete` -- runs off the event loop."""
     gid = (group_id or "").strip()
     if not gid:
         return {"ok": False, "error": "group_id required"}
     try:
-        conn = await asyncio.to_thread(_conn)
+        conn = _conn()
         row = conn.execute(
             "SELECT member, tenant_id FROM graph_associations WHERE id=?", (gid,)
         ).fetchone()
@@ -1822,13 +1904,15 @@ async def graph_groups_delete(group_id: str) -> dict[str, Any]:
 async def graph_groups_move(member_id: str, request: Request) -> dict[str, Any]:
     """Move a member (and re-tier its subtree) to a new group root. Atomic.
     Never touches beliefs."""
+    return await asyncio.to_thread(_graph_groups_move_sync, member_id, await _read_json(request))
+
+
+def _graph_groups_move_sync(member_id: str, payload: Any) -> dict[str, Any]:
+    """Blocking half of :func:`graph_groups_move` -- runs off the event loop."""
     member = (member_id or "").strip()
     if not member:
         return {"ok": False, "error": "member_id required"}
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
+    body = {} if payload is _INVALID_JSON else payload
     new_root = str((body or {}).get("new_root") or "").strip()
     if not new_root:
         return {"ok": False, "error": "new_root required"}
@@ -1836,7 +1920,7 @@ async def graph_groups_move(member_id: str, request: Request) -> dict[str, Any]:
         return {"ok": False, "error": "new_root must differ from member"}
     tid = _memory_tenant_id()
     try:
-        conn = await asyncio.to_thread(_conn)
+        conn = _conn()
         if not _entity_tenant_ok(conn, member) or not _entity_tenant_ok(conn, new_root):
             conn.close()
             return {"ok": False, "error": "not_found"}
@@ -1902,13 +1986,15 @@ async def graph_groups_move(member_id: str, request: Request) -> dict[str, Any]:
 async def graph_groups_set_tier(node_id: str, request: Request) -> dict[str, Any]:
     """Manually override a node's tier (for when parent+1 is wrong). Never
     touches beliefs."""
+    return await asyncio.to_thread(_graph_groups_set_tier_sync, node_id, await _read_json(request))
+
+
+def _graph_groups_set_tier_sync(node_id: str, payload: Any) -> dict[str, Any]:
+    """Blocking half of :func:`graph_groups_set_tier` -- runs off the event loop."""
     node = (node_id or "").strip()
     if not node:
         return {"ok": False, "error": "node_id required"}
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
+    body = {} if payload is _INVALID_JSON else payload
     tier = body.get("tier")
     if tier is None:
         return {"ok": False, "error": "tier required"}
@@ -1917,7 +2003,7 @@ async def graph_groups_set_tier(node_id: str, request: Request) -> dict[str, Any
     except Exception:
         return {"ok": False, "error": "tier must be an integer 0-4"}
     try:
-        conn = await asyncio.to_thread(_conn)
+        conn = _conn()
         if not _entity_tenant_ok(conn, node):
             conn.close()
             return {"ok": False, "error": "not_found"}
