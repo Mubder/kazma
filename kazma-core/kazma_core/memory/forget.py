@@ -286,6 +286,11 @@ def forget_episode(
         for one in ids:
             _tombstone(conn, one, now=now, by=by)
         facts = _forget_turn_facts(conn, tenant_id=owner, keys=keys, turn=turn, now=now)
+        # A weekly summary written from the turn keeps nothing of it: emptied
+        # now, written again without it (plan C2).
+        from kazma_core.memory.topic_summaries import on_turns_forgotten
+
+        summaries = on_turns_forgotten(conn, ids)
         conn.commit()
 
         from kazma_core.memory.state_backend import remirror_episode_by_id
@@ -299,6 +304,7 @@ def forget_episode(
             "episode_id": eid,
             "copies": len(ids),
             "facts_forgotten": len(facts),
+            "summaries_emptied": len(summaries),
             "chat_keys": keys,
             "remote_vector_deleted": all(remote),
         }

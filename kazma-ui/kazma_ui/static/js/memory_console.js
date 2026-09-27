@@ -1255,6 +1255,67 @@
   }
   document.getElementById('v2-memories-refresh')?.addEventListener('click', loadV2Memories);
   loadV2Memories();
+
+  // Weekly topic summaries (plan C2): what each week's conversations said
+  // about each topic. Forget one and its week never writes it again; the
+  // conversations themselves stay.
+  async function loadV2Summaries() {
+    const el = document.getElementById('v2-summaries-list');
+    const stateEl = document.getElementById('v2-summaries-state');
+    if (!el) return;
+    try {
+      const resp = await fetch('/api/memory/v2/summaries?limit=40');
+      const data = await resp.json();
+      const st = data.state || {};
+      if (stateEl) {
+        const parts = [(st.weeks_done || 0) + ' week' + (st.weeks_done === 1 ? '' : 's') + ' summarized'];
+        if (st.weeks_queued) parts.push(st.weeks_queued + ' in progress');
+        if (st.weeks_failed) parts.push(st.weeks_failed + ' failed');
+        stateEl.textContent = parts.join(' · ');
+      }
+      const rows = data.summaries || [];
+      if (!rows.length) {
+        el.textContent = 'No weekly summaries yet. Kazma writes them a day after each week ends.';
+        return;
+      }
+      el.innerHTML = rows.map(function(s) {
+        const monday = s.period_start ? new Date(s.period_start * 1000).toLocaleDateString() : '';
+        const size = (s.turn_count || 0) + ' turn' + (s.turn_count === 1 ? '' : 's') +
+          ((s.chat_count || 0) > 1 ? ' in ' + s.chat_count + ' chats' : '');
+        const pending = s.status === 'rebuild';
+        const title = pending ? 'Being rewritten without a forgotten conversation' : (s.title || s.id);
+        return '<div style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+          '<span style="min-width:0;overflow-wrap:anywhere;">' +
+          '<span style="color:var(--text-primary);font-weight:600;">' + _esc(title) + '</span>' +
+          '<span style="display:block;color:var(--text-muted);font-size:0.65rem;">Week of ' + _esc(monday) + ' · ' + _esc(size) + '</span>' +
+          (pending ? '' : '<span style="display:block;margin-top:2px;white-space:pre-wrap;">' + _esc(s.summary_text || '') + '</span>') +
+          '</span>' +
+          '<button type="button" class="btn btn-sm v2-summary-forget" data-id="' + _esc(s.id).replace(/"/g, '&quot;') + '" style="font-size:0.65rem;padding:1px 6px;flex-shrink:0;">Forget</button></div>';
+      }).join('');
+      el.querySelectorAll('.v2-summary-forget').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          const ok = await window.kazmaConfirm({
+            title: 'Forget this summary?',
+            message: 'Kazma stops using this summary and never writes it again. The conversations it was written from stay as they are.',
+            confirmText: 'Forget',
+            danger: true,
+          });
+          if (!ok) return;
+          try {
+            const r = await window.kazmaSave('/api/memory/v2/summaries/' + encodeURIComponent(btn.getAttribute('data-id')) + '/forget', { method: 'POST' });
+            if (window.showToast) {
+              window.showToast(r && r.ok ? 'Summary forgotten' : ((r && r.error) || 'Forget failed'), r && r.ok ? 'success' : 'error');
+            }
+          } catch (e) {
+            window.kazmaAlert({ title: 'Forget failed', message: e.message, variant: 'btn-danger' });
+          }
+          loadV2Summaries();
+        });
+      });
+    } catch (e) { el.textContent = 'Weekly summaries load failed'; }
+  }
+  document.getElementById('v2-summaries-refresh')?.addEventListener('click', loadV2Summaries);
+  loadV2Summaries();
   loadV2Queue();
   loadV2Merges();
   loadV2Procedural();

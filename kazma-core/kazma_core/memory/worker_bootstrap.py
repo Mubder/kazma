@@ -122,6 +122,10 @@ def register_v2_handlers() -> None:
     register_handler("global_reconsolidation", _handle_global_reconsolidation)
     # A turn the post-turn pool could not take (Stage 2, W2).
     register_handler("post_turn_memory", _handle_post_turn_memory)
+    # Weekly topic summaries (C2): each awaits model calls, and runs its
+    # SQLite work in threads itself.
+    register_handler("topic_summaries", _handle_topic_summaries)
+    register_handler("topic_summary_rebuild", _handle_topic_summary_rebuild)
     _registered = True
     logger.info("[memory_worker] V2 task handlers registered")
 
@@ -903,6 +907,33 @@ def _reconcile_memory_turns() -> None:
     run_turn_reconcile_pass()
 
 
+def _queue_topic_summaries() -> None:
+    # Weekly topic summaries (plan C2): the weeks that ended over a day ago
+    # (two a pass, oldest first) and the summaries a forgotten turn emptied.
+    # Queues only; the model calls run on the durable queue.
+    from kazma_core.memory.topic_summaries import queue_due_work
+
+    queue_due_work()
+
+
+async def _handle_topic_summaries(payload: dict[str, Any]) -> bool:
+    """Write one week's topic summaries (plan C2). False -- retried -- when
+    the model could not be reached."""
+    from kazma_core.memory.topic_summaries import summarize_period
+
+    return await summarize_period(
+        str(payload.get("tenant_id") or "default"), str(payload.get("period_key") or ""),
+        float(payload.get("start") or 0), float(payload.get("end") or 0),
+    )
+
+
+async def _handle_topic_summary_rebuild(payload: dict[str, Any]) -> bool:
+    """Write a summary again without the turn the user forgot (plan C2)."""
+    from kazma_core.memory.topic_summaries import rebuild_summary
+
+    return await rebuild_summary(str(payload.get("summary_id") or ""))
+
+
 def _watch_supervisor() -> None:
     # Is the guard that started this server still alive? Its heartbeat is in
     # the state file named by KAZMA_GUARD_STATE_FILE. The guard died on
@@ -926,6 +957,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("memory vector repair", _repair_memory_vectors),
     ("memory recovery", _recover_erased_memories),
     ("memory turn reconcile", _reconcile_memory_turns),
+    ("memory topic summaries", _queue_topic_summaries),
     ("knowledge vector repair", _embed_knowledge_chunks),
 )
 

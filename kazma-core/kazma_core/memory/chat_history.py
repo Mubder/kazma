@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "STORE_ERRORS",
+    "chat_ids",
     "checkpoint_message_versions",
     "conversations_for",
     "normalize_message",
@@ -195,6 +197,61 @@ def conversations_for(
         if strict:
             raise
         logger.debug("[chat_history] conversation %s unreadable", key, exc_info=True)
+    return out
+
+
+def chat_ids(keys: Iterable[str], *, sqlite_path: Path | None = None) -> dict[str, str]:
+    """The conversation each key names: ``key -> its session id``.
+
+    A chat is stored under a session id and a thread id, and memory writers
+    use either (``forget.chat_keys``), so one conversation can reach memory
+    under two keys. A key the store does not hold -- a deleted chat, the
+    agent's notes, a probe -- maps to itself, and so does every key when the
+    store cannot be read: the worst case is one chat counted as two.
+    """
+    wanted = sorted({str(k) for k in keys if k})
+    out = {k: k for k in wanted}
+    if not wanted:
+        return out
+    sessions = _sessions_path(sqlite_path)
+    rows: list[dict[str, Any]] = []
+    try:
+        for s in _spooled(sessions):
+            rows.append({"session_id": s.get("session_id"), "thread_id": s.get("thread_id")})
+        for start in range(0, len(wanted), 400):
+            part = wanted[start: start + 400]
+            if sqlite_path is None and _postgres():
+                from kazma_core.db.pg_helpers import get_pool
+
+                rows.extend(get_pool().execute(
+                    "SELECT session_id, thread_id FROM kazma_chat_sessions "
+                    "WHERE session_id = ANY(%s) OR thread_id = ANY(%s)",
+                    [part, part],
+                ))
+                continue
+            conn = _ro(sessions)
+            if conn is None:
+                break
+            try:
+                marks = ",".join("?" for _ in part)
+                rows.extend(dict(r) for r in conn.execute(
+                    f"SELECT session_id, thread_id FROM sessions "
+                    f"WHERE session_id IN ({marks}) OR thread_id IN ({marks})",
+                    (*part, *part),
+                ).fetchall())
+            finally:
+                conn.close()
+    except STORE_ERRORS as exc:
+        if not _never_created(exc):
+            logger.debug("[chat_history] chat ids unreadable -- each key is its own chat", exc_info=True)
+        return out
+    for r in rows:
+        session, thread = str(r.get("session_id") or ""), str(r.get("thread_id") or "")
+        if not session:
+            continue
+        for k in (session, thread):
+            if k in out:
+                out[k] = session
     return out
 
 

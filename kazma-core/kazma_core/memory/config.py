@@ -111,6 +111,12 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
         # sync heuristic extractor already found ≥1 belief this turn.
         "extraction_every_n_turns": 1,
         "skip_llm_if_heuristic_extracted": False,
+        # Weekly topic summaries (plan C2, topic_summaries.py): once a week has
+        # ended, one model call per topic of at least summaries_min_turns
+        # turns, at most summaries_max_per_week topics a week (largest first).
+        "summaries_enabled": True,
+        "summaries_min_turns": 4,
+        "summaries_max_per_week": 24,
         # Entity resolution (§5.2 micro-consolidation)
         "entity_vector_merge_threshold": 0.12,
     },

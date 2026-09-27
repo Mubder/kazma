@@ -293,6 +293,19 @@
           </div>
           <div id="v2-memories-list" style="font-size:0.72rem;max-height:220px;overflow-y:auto;color:var(--text-muted);">–</div>
         </div>
+        <!-- What each week's conversations said about each topic, written by
+             Kazma a day after the week ends (plan C2,
+             kazma_core/memory/topic_summaries.py). -->
+        <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);margin-bottom:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap;">
+            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Weekly summaries</span>
+            <span style="display:inline-flex;gap:6px;align-items:center;">
+              <span id="v2-summaries-state" style="font-size:0.65rem;color:var(--text-muted);"></span>
+              <button id="v2-summaries-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
+            </span>
+          </div>
+          <div id="v2-summaries-list" style="font-size:0.72rem;max-height:320px;overflow-y:auto;color:var(--text-muted);">–</div>
+        </div>
       </div>
 
       <style>

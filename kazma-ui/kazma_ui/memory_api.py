@@ -2297,12 +2297,44 @@ def _set_chat_memory_sync(chat_id: str, payload: Any) -> dict[str, Any]:
     return out
 
 
+@router.get("/api/memory/v2/summaries")
+def weekly_summaries(limit: int = 30) -> dict[str, Any]:
+    """The caller's tenant's weekly topic summaries, newest week first (plan
+    C2), with the state of the summarizing: weeks done, queued, failed."""
+    from kazma_core.memory.topic_summaries import list_summaries, summary_health
+
+    tid = _memory_tenant_id()
+    conn = _conn()
+    try:
+        return {
+            "ok": True,
+            "summaries": list_summaries(conn, tenant_id=tid, limit=limit),
+            "state": summary_health(conn, tenant_id=tid),
+        }
+    finally:
+        conn.close()
+
+
+@router.post("/api/memory/v2/summaries/{summary_id}/forget")
+def forget_weekly_summary(summary_id: str) -> dict[str, Any]:
+    """Forget one weekly summary: its text goes and its week never writes it
+    again. The turns it was written from stay. Another tenant's summary reads
+    as not found."""
+    from kazma_core.memory.topic_summaries import forget_summary
+
+    try:
+        return forget_summary(summary_id, tenant_id=_memory_tenant_id())
+    except sqlite3.Error as exc:
+        logger.exception("[memory_api] summary forget failed")
+        return {"ok": False, "error": safe_error(exc)}
+
+
 @router.get("/api/memory/v2/export")
 def export_memory() -> Any:
     """Everything the caller's tenant's memory holds, as a JSON download:
     facts (current and past, with the chat and turn they came from),
-    memories of conversations, entities, and what was forgotten (when --
-    never what)."""
+    memories of conversations, weekly summaries (with the memories each was
+    written from), entities, and what was forgotten (when -- never what)."""
     from datetime import UTC, datetime
 
     from fastapi.responses import Response
@@ -2338,6 +2370,16 @@ def export_memory() -> Any:
             "SELECT tenant_id, session_key, turn_number, forgotten_at FROM memory_forgotten"
             + scope + " ORDER BY forgotten_at"
         )
+        summaries = rows(
+            "SELECT tenant_id, id, period_key, title, summary_text, status, turn_count, "
+            "chat_count, first_turn_at, last_turn_at, created_at, updated_at FROM memory_summaries"
+            + scope + " ORDER BY period_start"
+        )
+        for s in summaries:
+            s["memories"] = [r[0] for r in conn.execute(
+                "SELECT episode_id FROM memory_summary_sources WHERE summary_id = ? ORDER BY episode_id",
+                (s["id"],),
+            )]
     finally:
         conn.close()
     now = datetime.now(UTC)
@@ -2347,6 +2389,7 @@ def export_memory() -> Any:
             "tenant": tid,
             "facts": facts,
             "memories": episodes,
+            "weekly_summaries": summaries,
             "entities": entities,
             "forgotten": forgotten,
         },

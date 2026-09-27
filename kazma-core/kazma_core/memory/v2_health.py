@@ -242,6 +242,14 @@ def build_v2_health(
             if findability is not None:
                 out["findability"] = findability
 
+        # Weekly topic summaries (plan C2): written, being rewritten, weeks done.
+        try:
+            from kazma_core.memory.topic_summaries import summary_health
+
+            out["summaries"] = summary_health(primary_conn, tenant_id=tenant_id or "default")
+        except sqlite3.Error:
+            logger.warning("[v2_health] weekly summary counts unreadable", exc_info=True)
+
         # Entities + procedural DAGs
         out["entities"] = _safe_count(
             primary_conn, "SELECT COUNT(*) FROM entities WHERE 1=1" + tsql, tparams

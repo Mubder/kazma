@@ -58,6 +58,8 @@ _TENANT_TABLES = (
     "episodes",
     "graph_associations",
     "memory_forgotten",
+    "memory_summaries",
+    "memory_summary_periods",
     "procedural_dags",
 )
 #: Derived caches any write may mark stale (-1) for the read path to recompute.
@@ -196,6 +198,11 @@ REQUESTS: dict[tuple[str, str], list[tuple[str, Any]]] = {
         ("/api/memory/v2/chats/beta9_s1/memory", {"remember": True}),
     ],
     ("GET", "/api/memory/v2/export"): [("/api/memory/v2/export", None)],
+    # Plan C2: weekly topic summaries.
+    ("GET", "/api/memory/v2/summaries"): [("/api/memory/v2/summaries", None)],
+    ("POST", "/api/memory/v2/summaries/{summary_id}/forget"): [
+        ("/api/memory/v2/summaries/beta9_sum/forget", None),
+    ],
 }
 
 #: What alpha must see of its own rows. A route that answers a tenant-bound
@@ -221,6 +228,7 @@ SHOWS_OWN: dict[str, str] = {
     "/api/memory/v2/entities?q=Alice": '"alice"',
     "/api/memory/v2/chats/alpha_s1/memory": '"memories":1',
     "/api/memory/v2/export": '"alpha_e1"',
+    "/api/memory/v2/summaries": '"alpha_sum1"',
 }
 
 #: Install-wide: the platform role check lets an admin through and no one else.
@@ -325,6 +333,28 @@ def _seed(root: Path) -> None:
         "INSERT INTO memory_forgotten (tenant_id, session_key, turn_number, question_sha, "
         "episode_id, forgotten_at) VALUES ('beta', 'beta9_s1', 9, 'beta9sha', NULL, ?)",
         (now,),
+    )
+    # a weekly summary each (plan C2), written from their own turns
+    c.executemany(
+        "INSERT INTO memory_summaries (id, tenant_id, period_key, period_start, period_end, title, "
+        "summary_text, turn_count, chat_count, created_at, updated_at) "
+        "VALUES (?, ?, '2026-W30', ?, ?, ?, ?, 3, 1, ?, ?)",
+        [
+            ("alpha_sum1", "alpha", now - 9 * 86400, now - 2 * 86400, "Alice's week",
+             "Alice asked where she lives.", now, now),
+            ("beta9_sum", "beta", now - 9 * 86400, now - 2 * 86400, "BETA9 week",
+             "BETA9 Bob moved to Berlin.", now, now),
+        ],
+    )
+    c.executemany(
+        "INSERT INTO memory_summary_sources (summary_id, episode_id) VALUES (?, ?)",
+        [("alpha_sum1", "alpha_e1"), ("beta9_sum", "beta9_e0"), ("beta9_sum", "beta9_e1")],
+    )
+    c.executemany(
+        "INSERT INTO memory_summary_periods (tenant_id, period_key, period_start, period_end, "
+        "status, turns, summaries, detail_json) VALUES (?, '2026-W30', ?, ?, 'done', 3, 1, ?)",
+        [("alpha", now - 9 * 86400, now - 2 * 86400, "{}"),
+         ("beta", now - 9 * 86400, now - 2 * 86400, '{"note": "BETA9"}')],
     )
     c.commit()
     c.close()

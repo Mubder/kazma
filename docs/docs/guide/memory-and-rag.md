@@ -327,6 +327,28 @@ memory maintenance retires facts already stored twice (keeping the latest).
 Where your own words and something Kazma inferred disagree, both are kept for
 you to settle.
 
+## Weekly summaries
+
+A topic you work on for weeks can fill a hundred conversation turns a week,
+and a question about it brings back only the few turns that match best. So
+once a week is over (a day later), Kazma writes a short summary of each topic
+from that week: what it was about, what was decided or done, and what was
+left open.
+
+- **A topic** is a chat with at least 4 turns that week. Turns from short
+  chats, and the notes Kazma saved for you, are grouped by what they are
+  about.
+- **Where to see them:** the Memory page, "Weekly summaries". Forget one and
+  Kazma never writes it again; the conversations it was written from stay.
+- **Forgetting a conversation turn** also removes it from every summary: the
+  summary is emptied at once and written again without it.
+- **Settings** (`memory.v2`): `summaries_enabled` (on), `summaries_min_turns`
+  (4), `summaries_max_per_week` (24 topics, largest first). One model call per
+  topic.
+- Summaries are included in the memory export. They are kept in the memory
+  database on this install and rebuilt from the conversations; they are not
+  copied to the Postgres memory mirror.
+
 ## Memory admin UI (`/memory`)
 
 Single operator surface for **topology + entities + beliefs + hygiene**

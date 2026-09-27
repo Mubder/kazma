@@ -517,7 +517,8 @@ left backups/export inert). Current boot list:
   artifact GC, HITL-gate TTL, memory task-queue purge, swarm task retention —
   `swarm.task_retention_days`, default 30, 0 keeps all — the supervisor
   watch, §39, memory vector repair, knowledge vector repair (§24F), memory
-  recovery and memory turn reconcile, §15F), run by ONE isolated
+  recovery and memory turn reconcile, §15F, weekly topic summaries, §15J),
+  run by ONE isolated
   runner so a failing sweep never stops the rest -- and is logged at WARNING
   (it was DEBUG: a sweep failing every pass is a feature that is off). A new periodic cleanup is a
   new entry there, never a new loop (`tests/test_swarm_task_retention.py`).
@@ -816,8 +817,45 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   apps: `/memory off` / `/memory on`. Turning it off also forgets what the
   chat left (`forget_past`).
 - **Export** (`GET /api/memory/v2/export`): the caller's tenant's facts
-  (with provenance), memories, entities and what was forgotten (when, never
-  what). The Memory page's "Memories of conversations" panel forgets one.
+  (with provenance), memories, weekly summaries, entities and what was
+  forgotten (when, never what). The Memory page's "Memories of
+  conversations" panel forgets one.
+
+**J. Weekly topic summaries (C2, 2026-09-27, `memory/topic_summaries.py`).**
+Recall injects five turns and five facts; one topic on live ran to 100+
+turns a week (ShipX 107 and 115, the fitness app's naming 108). Once a week
+has ended (a day's grace), its turns are grouped by topic and the model
+writes one summary per topic, on the durable queue (`topic_summaries`),
+queued by the maintenance sweep with at most two weeks in flight.
+- **Grouping, measured on live:** a chat with at least
+  `memory.v2.summaries_min_turns` (4) turns in the week is one topic, under
+  either of its keys (`chat_history.chat_ids`). Grouping every turn by
+  meaning mixed chats: the question-first vectors of follow-ups ("recheck it
+  again", "schedule them") say how the user talks, not what about, and an
+  audit chat, a reminders chat and an X-posts chat became one group. The rest
+  -- short chats, legacy single turns, the agent's notes (`memory_store`) --
+  is grouped by meaning: average linkage, merging while the average
+  similarity clears the tenant's own bar (the 90th percentile of pairs of
+  its memories: 0.525 on live, the same from 200 to 1,676 memories; a
+  week's own percentile split weeks of few topics). A question with fewer
+  than two content words follows the previous turn of its chat.
+- **Derived, never a source:** `memory_summary_sources` names the turns.
+  `forget.forget_episode` calls `on_turns_forgotten` before it commits: the
+  summary is emptied at once (`rebuild`) and written again without the turn
+  (`topic_summary_rebuild`), or retired below the minimum. A summary the
+  user forgets is a tombstone its week never writes again (`_covered`: a
+  topic mostly made of another summary's turns is that summary, even after a
+  late turn joins it). The model's text passes `prompt_fence.filter_injection`
+  and a credential mask.
+- **Local only:** summaries live in the local memory database, like the
+  graph, and are not mirrored to the Postgres state backend; they are
+  rebuilt from turns. The Memory page's "Weekly summaries" panel lists and
+  forgets them; memory health counts them.
+- **Recall does not read them yet (C2b):** how a summary ranks against a
+  question is set from summaries the live model wrote, measured the way
+  §15G's thresholds were -- not guessed before any exist.
+- Gate: `tests/test_memory_topic_summaries.py` (grouping identical to
+  scipy's average linkage; each rule with a negative control).
 
 ### 16. Cron Scheduler & Reminder Delivery (`kazma-core/kazma_core/cron/`)
 
