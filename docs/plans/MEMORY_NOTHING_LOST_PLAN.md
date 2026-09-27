@@ -52,7 +52,7 @@ every change is inside the existing V2 engine.
 | U1 | The user decides what is kept: forget a memory (a tombstone plus the forget ledger every writer asks -- turn reconcile, recovery, the legacy restore and the past-chats search never bring it back), "don't remember this chat" (web menu, `/memory off`), export | ☑ `tests/test_memory_forget.py` |
 | W6 | One fact, one predicate name. Measured on live first: 281 extra current facts shared a subject and value with another under a different name; by meaning (bge-m3) true pairs and different facts overlap ("grok_next_reset" / "grok_personal_next_reset", two accounts, at 0.94), so the rule is the same WORDS -- 15 pairs on live, all true. New facts take the subject's existing name (`mutate_belief`), reconsolidation retires the 13 stored twice among equal sources (the user's word against an inference stays for the user), and the deep pass reuses the names in use and skips one run's status and internal ids. The LLM-judged ADD/UPDATE/DELETE step was not built: what the measurement found is either this rule's or the prompt's | ☑ `tests/test_memory_predicate_names.py` |
 | C2 | Weekly topic summaries (§5.7): once a week has ended, one summary per topic -- a chat of 4+ turns, or short chats and notes grouped by meaning (average linkage against the tenant's own bar, identical to scipy's) -- written by the model on the durable queue, two weeks in flight; forgetting a turn empties every summary made from it and rewrites it without; a forgotten summary never returns; fenced and credential-masked; Memory page panel, export, health | ☑ `tests/test_memory_topic_summaries.py` |
-| C2b | Recall reads the summaries (§5.7): every active summary ranked on evidence against the question's background among the summaries, floor 0.16 -- measured on 67 live summaries (every "catch me up" question 0.160-0.372, every unrelated one at most 0.132) and on benchmark v3 (117 summaries, "overview" questions, all no-answer questions clean); shown after the history (above it they cost MRR); only active rows | ☑ `tests/test_memory_summary_recall.py`, `tests/test_memory_benchmark.py` (v3) |
+| C2b | Recall reads the summaries (§5.7): every active summary ranked on evidence against the MEDIAN of the question's similarity with all summaries, floor 0.21 -- measured on 97 live summaries (every "catch me up" question 0.235-0.439, every unrelated one at most 0.170) and on benchmark v4 (125 summaries, a topic summarized every week, "overview" questions, all no-answer questions clean); shown after the history (above it they cost MRR); only active rows | ☑ `tests/test_memory_summary_recall.py`, `tests/test_memory_benchmark.py` (v4) |
 
 ---
 
@@ -420,6 +420,18 @@ database only (not mirrored; rebuilt from turns).
   -> 0.868); below it MRR is unchanged and precision rose 0.673 -> 0.681. The
   benchmark's topics are one or two turns, which recall already finds, so it
   gains little there; the gain is on live, where a topic ran to 100+ turns.
+- Corrected the same day, once all 97 live summaries existed: "list me all my
+  subscription resets" (a summary found at 67) found none. Ten weekly reset
+  summaries filled the ranks 4-15 window, so the topic was its own
+  background. The background is now the median of the question's similarity
+  with every summary (blended with 0.34, the measured level, below 20
+  summaries): every aggregate question 0.235-0.439, every unrelated one at
+  most 0.170, floor 0.21. Benchmark v4 adds eleven weekly training
+  check-ins with their summaries: with the ranks window the race result was
+  not found, with the median it is. On v4, against no summaries (hits 0.916,
+  precision 0.638, overview hits 0.8), both backgrounds lift overview hits
+  to 0.9; the median costs 0.008 precision against the ranks window (0.644
+  vs 0.652) and is the one that finds a weekly topic.
 
 ---
 

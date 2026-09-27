@@ -1,5 +1,5 @@
 {
- "version": 3,
+ "version": 4,
  "seed": 20260926,
  "sessions": [
   {
@@ -341,6 +341,127 @@
     {
      "user": "Decided: we're keeping the Octavia for another year.",
      "assistant": "Sensible, the Octavia still has plenty of life."
+    }
+   ]
+  },
+  {
+   "id": "r00",
+   "day": 7,
+   "kind": "persona",
+   "turns": [
+    {
+     "user": "First week of the plan: three easy 5 km runs, and the Sunday long run was 8 km.",
+     "assistant": "Right on plan. Keep the easy runs truly easy, conversation pace."
+    }
+   ]
+  },
+  {
+   "id": "r01",
+   "day": 14,
+   "kind": "persona",
+   "turns": [
+    {
+     "user": "Training check-in: this week's long run was 10 km, easy pace, knees felt fine.",
+     "assistant": "Good start. Keep the long runs conversational and add 1-2 km a week."
+    }
+   ]
+  },
+  {
+   "id": "r02",
+   "day": 21,
+   "kind": "persona",
+   "turns": [
+    {
+     "user": "Long run 12 km on Sunday, but my left calf was tight afterwards.",
+     "assistant": "Stretch and foam-roll the calf; if it is still tight by Wednesday, swap one easy run for cycling."
+    }
+   ]
+  },
+  {
+   "id": "r03",
+   "day": 28,
+   "kind": "persona",
+   "turns": [
+    {
+     "user": "Calf is fine now. Did 13 km at 5:40 per km.",
+     "assistant": "Nice, 5:40 is a good steady pace for your goal."
+    }
+   ]
+  },
+  {
+   "id": "r04",
+   "day": 35,
+   "kind": "persona",
+   "turns": [
+    {
+     "user": "Skipped the long run this week, work on the retrofit was crazy.",
+     "assistant": "One missed week is fine; don't try to make up the distance, just pick up the plan."
+    }
+   ]
+  },
+  {
+   "id": "r05",
+   "day": 42,
+   "kind": "persona",
+   "turns": [
+    {
+     "user": "Back on track: 14 km long run, and I added one interval session.",
+     "assistant": "Great. Keep the intervals to once a week so the long run stays fresh."
+    }
+   ]
+  },
+  {
+   "id": "r06",
+   "day": 49,
+   "kind": "persona",
+   "turns": [
+    {
+     "user": "16 km long run done, felt strong at the end.",
+     "assistant": "That's the sign the base is there. Two more build weeks, then the taper."
+    }
+   ]
+  },
+  {
+   "id": "r07",
+   "day": 56,
+   "kind": "persona",
+   "turns": [
+    {
+     "user": "Long run 18 km, my longest ever! Averaged 5:35 per km.",
+     "assistant": "Excellent, 18 km means race day is well within reach. Taper starts next week."
+    }
+   ]
+  },
+  {
+   "id": "r08",
+   "day": 63,
+   "kind": "persona",
+   "turns": [
+    {
+     "user": "Taper week: only 10 km on Sunday and legs feel fresh. Race goal is under 2 hours.",
+     "assistant": "A sub-2-hour half is realistic from your long runs. Rest well and trust the taper."
+    }
+   ]
+  },
+  {
+   "id": "r09",
+   "day": 70,
+   "kind": "persona",
+   "turns": [
+    {
+     "user": "Last long run before the race: 8 km easy, and I booked a sports massage for Thursday.",
+     "assistant": "Perfect taper, and a massage two days before the race is well timed."
+    }
+   ]
+  },
+  {
+   "id": "r10",
+   "day": 77,
+   "kind": "persona",
+   "turns": [
+    {
+     "user": "Race result: I finished the Lisbon half marathon in 1:56:40!",
+     "assistant": "Congratulations, a sub-2-hour half marathon on your first attempt!"
     }
    ]
   },
@@ -7741,6 +7862,105 @@
    ]
   },
   {
+   "id": "sr0",
+   "day": 7,
+   "title": "Half marathon training: week one",
+   "text": "Week one of the 12-week plan for the Lisbon half marathon: three easy 5 km runs and an 8 km Sunday long run. Kazma: keep the easy runs truly easy.",
+   "sources": [
+    "r00#1"
+   ]
+  },
+  {
+   "id": "sr1",
+   "day": 14,
+   "title": "Half marathon training: first check-in",
+   "text": "Sami's long run this week was 10 km at an easy pace, knees fine. Kazma advised keeping long runs conversational and adding 1-2 km a week toward the Lisbon half marathon.",
+   "sources": [
+    "r01#1"
+   ]
+  },
+  {
+   "id": "sr2",
+   "day": 21,
+   "title": "Half marathon training: 12 km and a tight calf",
+   "text": "Sami ran 12 km on Sunday for the Lisbon half marathon, and his left calf was tight afterwards. Kazma suggested stretching and foam-rolling, and cycling instead of one easy run if it stayed tight. Left open: whether the calf recovers.",
+   "sources": [
+    "r02#1"
+   ]
+  },
+  {
+   "id": "sr3",
+   "day": 28,
+   "title": "Half marathon training: 13 km, calf recovered",
+   "text": "The calf recovered. Sami ran 13 km at 5:40 per km, a good steady pace for his half marathon goal.",
+   "sources": [
+    "r03#1"
+   ]
+  },
+  {
+   "id": "sr4",
+   "day": 35,
+   "title": "Half marathon training: a missed long run",
+   "text": "Sami skipped this week's long run because of work on the Tagus retrofit. Kazma said one missed week is fine: pick the plan up again without making up the distance.",
+   "sources": [
+    "r04#1"
+   ]
+  },
+  {
+   "id": "sr5",
+   "day": 42,
+   "title": "Half marathon training: 14 km and intervals",
+   "text": "Back on track with a 14 km long run and one interval session added. Kazma: keep intervals to once a week so the long run stays fresh.",
+   "sources": [
+    "r05#1"
+   ]
+  },
+  {
+   "id": "sr6",
+   "day": 49,
+   "title": "Half marathon training: 16 km, felt strong",
+   "text": "Sami ran 16 km and felt strong at the end; two more build weeks, then the taper before the Lisbon half marathon.",
+   "sources": [
+    "r06#1"
+   ]
+  },
+  {
+   "id": "sr7",
+   "day": 56,
+   "title": "Half marathon training: longest run, 18 km",
+   "text": "Sami's longest run ever: 18 km at an average 5:35 per km. Kazma said race day is well within reach; the taper starts next week.",
+   "sources": [
+    "r07#1"
+   ]
+  },
+  {
+   "id": "sr8",
+   "day": 63,
+   "title": "Half marathon training: taper week",
+   "text": "Taper week: only 10 km on Sunday and fresh legs. Sami's goal for the Lisbon half marathon is under two hours, which Kazma judged realistic from his long runs.",
+   "sources": [
+    "r08#1"
+   ]
+  },
+  {
+   "id": "sr9",
+   "day": 70,
+   "title": "Half marathon training: last long run and a massage",
+   "text": "The last long run before the Lisbon half marathon: 8 km easy. Sami booked a sports massage for Thursday, which Kazma judged well timed.",
+   "sources": [
+    "r09#1"
+   ]
+  },
+  {
+   "id": "sr10",
+   "day": 77,
+   "title": "Lisbon half marathon: finished in 1:56:40",
+   "text": "Sami finished the Lisbon half marathon in 1:56:40, under his two-hour goal, on his first attempt.",
+   "sources": [
+    "r10#1"
+   ]
+  },
+  {
    "id": "sw6",
    "day": 21,
    "title": "رحلة إسطنبول في ديسمبر",
@@ -10357,6 +10577,42 @@
    "category": "overview",
    "gold": [
     "sw6|a04#1|g05"
+   ],
+   "below": []
+  },
+  {
+   "id": "q957",
+   "text": "How is my half marathon training going?",
+   "category": "overview",
+   "gold": [
+    "sr10|sr9|sr8|r10#1|r09#1|r08#1"
+   ],
+   "below": []
+  },
+  {
+   "id": "q960",
+   "text": "How did the half marathon race go in the end?",
+   "category": "overview",
+   "gold": [
+    "sr10|r10#1"
+   ],
+   "below": []
+  },
+  {
+   "id": "q958",
+   "text": "What long runs have I done for the half marathon so far?",
+   "category": "overview",
+   "gold": [
+    "sr7|r07#1|sr6|r06#1|sr5|r05#1"
+   ],
+   "below": []
+  },
+  {
+   "id": "q959",
+   "text": "What happened with my calf during training?",
+   "category": "overview",
+   "gold": [
+    "sr2|sr3|r02#1|r03#1"
    ],
    "below": []
   }

@@ -16,11 +16,11 @@ the Postgres-primary path reads them from the local database.
 
 from __future__ import annotations
 
-import hashlib
 import math
 import sqlite3
 import struct
 import time
+import zlib
 from types import SimpleNamespace
 
 import pytest
@@ -28,7 +28,7 @@ import pytest
 from kazma_core.memory import recall as R
 from kazma_core.memory.schema_v2 import ensure_primary_schema
 
-DIM = 64
+DIM = 1024  # buckets for the words: enough that different words rarely share one
 MODEL = "fake-bow"
 
 
@@ -37,7 +37,7 @@ def _vector(text: str) -> list[float]:
     similar vectors -- enough to exercise the ranking without a model."""
     vec = [0.0] * DIM
     for word in text.lower().replace(",", " ").replace(".", " ").replace("?", " ").split():
-        vec[int(hashlib.md5(word.encode()).hexdigest(), 16) % DIM] += 1.0
+        vec[zlib.crc32(word.encode()) % DIM] += 1.0  # a bucket, not a secret: a checksum does
     norm = math.sqrt(sum(x * x for x in vec)) or 1.0
     return [x / norm for x in vec]
 
@@ -96,6 +96,32 @@ def test_a_question_about_a_topic_brings_its_summary(mem):
     assert _ids(hits)[:1] == ["s0"]
     shown = hits[0].metadata["display"]
     assert shown.startswith("Week of ") and "ShipX delivery platform phases" in shown
+
+
+def _weekly_topic(mem, weeks=14):
+    """One topic summarized every week, as live held the subscription resets
+    -- in the same words each week (the fake embedder hashes words, so a week
+    number would make one week's vector differ by accident)."""
+    now = time.time()
+    for i in range(weeks):
+        _summary(mem.db, f"reset{i}", "Subscription reset reminders",
+                 "Grok and ZCode subscription reset times noted and reminders scheduled.",
+                 at=now - (i + 1) * 7 * 86400)
+
+
+def test_a_topic_summarized_every_week_stays_findable(mem):
+    """Live 2026-09-27: with ten reset summaries, "list me all my
+    subscription resets" found none -- they were their own background."""
+    _weekly_topic(mem)
+    hits = R._recall_summaries(mem.db, "List me all my subscription resets", "default")
+    assert hits and all(h.id.startswith("reset") for h in hits)
+
+
+def test_against_its_nearest_neighbours_the_topic_would_hide_itself(mem, monkeypatch):
+    """Negative control: the episodes' background (ranks 4-15) is the topic."""
+    _weekly_topic(mem)
+    monkeypatch.setattr(R, "_summary_background", R._question_background)
+    assert R._recall_summaries(mem.db, "List me all my subscription resets", "default") == []
 
 
 def test_an_unrelated_question_brings_none(mem):

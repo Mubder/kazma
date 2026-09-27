@@ -1098,19 +1098,26 @@ _BACKGROUND_MIN_SAMPLES = 5
 #: question's content words, and stay within one word in three of the best.
 _WORDS_ONLY_FLOOR = 0.5
 _WORDS_ONLY_GAP = 0.34
-#: Weekly topic summaries (plan C2b). The background is the question's among
-#: the summaries (ranks 4-15): a summary is a paragraph, and bge-m3 puts it
-#: 0.14-0.19 below a turn for the same question, so the episodes' background
-#: left most true summaries below zero. Measured 2026-09-27 on 67 summaries
-#: the live model wrote and 23 real questions -- every "catch me up" question
-#: at 0.160-0.372, every unrelated one at or under 0.132 -- and on the
-#: benchmark's 117 (all 18 no-answer questions clean at this floor; 0.15 let
-#: one in, 0.12 three).
+#: Weekly topic summaries (plan C2b). The background is the MEDIAN of the
+#: question's similarity with every summary (:func:`_summary_background`):
+#: a summary is a paragraph, and bge-m3 puts it 0.14-0.19 below a turn for
+#: the same question, so the episodes' background sank true summaries below
+#: zero; and a topic returned to every week fills the "near but unrelated"
+#: ranks 4-15 with itself -- measured 2026-09-27 on 97 summaries the live
+#: model wrote, "list me all my subscription resets" found nothing that way
+#: (ten reset summaries), where at 67 it had. Against the median, every
+#: "catch me up" question of 23 real ones scored 0.235-0.439 and every
+#: unrelated one at most 0.170; on the benchmark's 117 summaries all 18
+#: no-answer questions stay clean from 0.20 up (0.19 let three in).
 _SUMMARY_COVERAGE_WEIGHT = 0.12
-_SUMMARY_FLOOR = 0.16
-_SUMMARY_STRONG = 0.20
+_SUMMARY_FLOOR = 0.21
+_SUMMARY_STRONG = 0.28
 _SUMMARY_GAP = 0.10
 _SUMMARY_RECENCY_WEIGHT = 0.02
+#: Below this many summaries the median is blended with the level measured on
+#: live and on the benchmark (mean median 0.342 and 0.352, bge-m3).
+_SUMMARY_BACKGROUND_MIN = 20
+_SUMMARY_BACKGROUND_PRIOR = 0.34
 #: At most this many summaries are shown, each cut to this many characters
 #: (the Memory page has the whole text).
 _SUMMARY_LIMIT = 2
@@ -1316,6 +1323,21 @@ def _cosines(qvec: list[float], rows: list[Any], model: str) -> dict[str, float]
     return out
 
 
+def _summary_background(sims: Iterable[float]) -> float:
+    """What summaries unrelated to the question reach for it: the median of
+    its similarity with every summary, blended with
+    :data:`_SUMMARY_BACKGROUND_PRIOR` below :data:`_SUMMARY_BACKGROUND_MIN`
+    summaries. A median stays unrelated until one topic is half of them all."""
+    ordered = sorted(float(x) for x in sims)
+    n = len(ordered)
+    if not n:
+        return _SUMMARY_BACKGROUND_PRIOR
+    mid = n // 2
+    median = ordered[mid] if n % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+    missing = max(0, _SUMMARY_BACKGROUND_MIN - n)
+    return (median * n + _SUMMARY_BACKGROUND_PRIOR * missing) / (n + missing)
+
+
 def _summary_display(row: Any) -> str:
     """What the model is shown of a summary: its week, title and text, bounded."""
     from datetime import datetime
@@ -1363,7 +1385,7 @@ def _recall_summaries(conn: sqlite3.Connection, query: str, tenant_id: str) -> l
         )
         for row in rows
     ]
-    hits = _rank_by_evidence(query, candidates, _question_background(sims.values()), kind="summary")
+    hits = _rank_by_evidence(query, candidates, _summary_background(sims.values()), kind="summary")
     return hits[:_SUMMARY_LIMIT]
 
 
