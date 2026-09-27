@@ -9,6 +9,11 @@ not what is planned.
 **Partial**: works, with the limit stated. **Not built**: people ask; it is
 not there.
 
+**Who it is for.** One operator per install: Kazma is software you run for
+yourself, and whoever runs an install has full control of it and answers for
+what its agent does ([THREAT_MODEL.md](THREAT_MODEL.md#who-kazma-is-for-one-operator-per-install)).
+Every line below describes that setup.
+
 ---
 
 ## One assistant, everywhere you talk to it
@@ -125,4 +130,4 @@ not there.
 - A paid bug bounty (responsible disclosure only — [SECURITY.md](../SECURITY.md)).
 - Cryptographic trust tiers for skills beyond HMAC verification, and signed delegation between agents.
 - A hardening check that runs at startup: `kazma-security.yaml` is read by no code; the hardening report runs on demand.
-- A security audit of multi-tenant, internet-facing deployments. Kazma is built for one trusted operator; what that means is written down in [THREAT_MODEL.md](THREAT_MODEL.md).
+- A security audit of multi-tenant, internet-facing deployments. Kazma is built for one trusted operator; what that means is written down in [THREAT_MODEL.md](THREAT_MODEL.md#who-kazma-is-for-one-operator-per-install).

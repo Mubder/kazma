@@ -10,6 +10,32 @@ security reviewer is a boundary described as stronger than it is. Every limit
 below is a real one; several are load-bearing; none of them is a jail in the
 sense that word is usually used.
 
+## Who Kazma is for: one operator per install
+
+Kazma is software you run for yourself. Each install has **one operator**:
+the person who runs the server, holds its keys and edits its settings.
+Everything on this page protects the operator from the **agent** -- from its
+mistakes, and from the untrusted web pages, documents and messages it reads.
+Nothing on it protects an install from its own operator.
+
+- **The operator has full control.** Every safeguard below can be switched
+  off by whoever runs the install. Each has its own switch, off by default,
+  listed with what it stops protecting under
+  [Switches that weaken a security default](docs/reference/environment-variables.md#switches-that-weaken-a-security-default).
+  Turning one on is the operator's decision, and the operator's responsibility.
+- **Anyone the operator lets in acts with the operator's authority.** A web
+  login, or an allowlisted Telegram, Discord or Slack account, can ask the
+  agent for anything the operator could. There are no permissions that keep
+  people who do not trust each other apart (section 6).
+- **What the agent does, the operator does.** A post, an email, a message or
+  a command sent through an install is its operator's. By default Kazma asks
+  before a dangerous action and records what it did; it does not decide what
+  its operator may do.
+- **Not a hosted service.** Kazma is provided as is, under the MIT license
+  ([LICENSE](../LICENSE)). Running it for other people, or exposing it to
+  people you do not trust, is outside what these safeguards are built for;
+  section 7 says what a real boundary would take.
+
 **Reviewed 2026-09-12** against the code, not against the README.
 
 ---

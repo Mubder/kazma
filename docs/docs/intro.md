@@ -11,6 +11,11 @@ description: Map of all Kazma documentation — start here
 **Single source of truth** for the Kazma agent framework (v0.11+).  
 Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historical audits live in [`docs/audits/archive/`](https://github.com/Mubder/kazma/tree/main/docs/audits/archive).
 
+**One operator per install.** Kazma is software you run for yourself: whoever
+runs an install has full control of it and answers for what its agent does.
+The safeguards protect the operator from the agent, not an install from its
+operator. What that means: [Who Kazma is for](https://github.com/Mubder/kazma/blob/main/docs/THREAT_MODEL.md#who-kazma-is-for-one-operator-per-install).
+
 ## Start here
 
 | I want to… | Go to |
