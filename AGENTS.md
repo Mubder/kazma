@@ -698,6 +698,23 @@ four injected were noise.
   not yet in the remote index was invisible to meaning search. Both are
   searched and merged by id; the local store's score wins (it is the source
   of truth).
+- **One fact, one predicate name (W6, `memory/predicates.py`).** The
+  extractor names predicates freely; under two names a single-valued fact is
+  never superseded (live 2026-09-27: "daily_tweet_cap" 16 and
+  "tweet_daily_cap" 8 both current). Names that are the SAME WORDS (order,
+  filler words and a plural "s" aside) are one name: `mutate_belief` writes a
+  new fact under the name its subject already uses for those words and type
+  (`canonical_predicate`, inside the mutation lock, so the trust gate still
+  decides), and reconsolidation retires what is stored twice
+  (`merge_same_word_predicates`: latest statement among equal sources; where
+  the user's word and an inference disagree, both stay -- the extractor labels
+  the user's own later words "inferred", so either choice is wrong). Never by
+  meaning: bge-m3 puts "grok_next_reset" / "grok_personal_next_reset" (two
+  accounts) at 0.94, above most true pairs. Names a word apart are the
+  extractor's to avoid: the deep pass is given the names in use
+  (`predicate_vocabulary`) and told to reuse them, and to skip one run's
+  status and internal ids. Measured and gated in
+  `tests/test_memory_predicate_names.py`.
 - **Measured, not asserted (R7):** `kazma_core/memory/benchmark.py` seeds a
   private database the product's way -- turns via `episode_row`, facts via
   `mutate_belief(private=True)`, which keeps every write in that database (no

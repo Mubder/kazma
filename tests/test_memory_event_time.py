@@ -242,7 +242,7 @@ def test_the_deep_pass_states_facts_at_the_turn_time(mem, monkeypatch):
     mutate(later, "user", "lives_in", "London", now=turn_time + 60, extraction_method="llm_inferred")
     later.close()
 
-    async def llm(user_text, assistant_text="", *, use_llm=True, ignore_filler=False):
+    async def llm(user_text, assistant_text="", *, use_llm=True, ignore_filler=False, vocabulary=None):
         return ([{"subject": "user", "predicate": "lives_in", "predicate_type": "functional",
                   "object": "Paris", "confidence": 0.9, "importance": 4}],
                 {"skipped_filler": False, "source": "llm", "applied": 0, "rejected": 0,

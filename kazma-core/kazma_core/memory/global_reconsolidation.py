@@ -125,6 +125,19 @@ def run_global_reconsolidation(
     except Exception:
         stats["errors"] += 1
         logger.warning("[reconsolidation] duplicate merge failed", exc_info=True)
+    # W6: one fact stored under two names with the same words ("timezone" /
+    # "timezone_is", "daily_tweet_cap" / "tweet_daily_cap"). It reads every
+    # subject itself, so it runs once per sweep, with the first partition.
+    if p_index == 0:
+        from kazma_core.memory.predicates import merge_same_word_predicates
+
+        try:
+            renamed = len(merge_same_word_predicates(conn, tenant_id=tenant_id, max_merges=max_merges))
+            stats["same_fact_other_name_retired"] = renamed
+            stats["duplicate_beliefs_merged"] += renamed
+        except sqlite3.Error:
+            stats["errors"] += 1
+            logger.warning("[reconsolidation] same-word predicate merge failed", exc_info=True)
     try:
         ep, bel = _reembed_missing(
             conn,

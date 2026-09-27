@@ -316,6 +316,17 @@ You decide what Kazma keeps:
 A forgotten memory stays forgotten: nothing that rebuilds memory from your
 chat history brings it back.
 
+## One fact, one name
+
+When Kazma learns a fact it names it (`timezone`, `works_at` ...). The same
+fact could come back under another name -- `timezone` and `timezone_is`,
+`daily_tweet_cap` and `tweet_daily_cap` -- and then an old value and a new one
+were both current. A fact is now written under the name Kazma already uses for
+it when the words are the same, so a new value replaces the old one; the daily
+memory maintenance retires facts already stored twice (keeping the latest).
+Where your own words and something Kazma inferred disagree, both are kept for
+you to settle.
+
 ## Memory admin UI (`/memory`)
 
 Single operator surface for **topology + entities + beliefs + hygiene**
