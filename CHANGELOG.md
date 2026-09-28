@@ -1,5 +1,40 @@
 # CHANGELOG
 
+## The live install, second pass: what ran late, and switches that did nothing (2026-09-28)
+
+**The daily digest had not been sent once in a week.** It waited a full day
+from every start, and the live install restarts several times a day for
+updates. The backup sweep had the same fault in another form: when a backup
+was recent at startup, it waited six hours from the start rather than from
+that backup, and the newest backup was nine hours old. Both now count from
+their last run, which is remembered across restarts. So does the restore
+drill, which waited a whole day after finding the last drill not quite due.
+A new check starts every scheduler with its job due in half an hour and
+fails if the job has not run within forty minutes.
+
+**A swarm task sent to "auto" failed for most questions.** Workers are made
+from templates chosen by the words in the task, so "In one sentence: what is
+idempotency?" matched no template and failed with "No capable workers". The
+shipped "generalist" template now takes any task no other template matches,
+and a template form checkbox sets this for your own templates. Templates are
+found in the install's folder whatever directory the server starts in, and
+your edits are saved in the data folder instead of the shipped file (which
+an update would otherwise refuse to overwrite).
+
+**Switching a skill off on the Skills page now switches it off.** The switch
+was saved and never read: the skill's tools stayed available, and the page
+showed it on again after a reload. A switched-off skill's tools are no longer
+offered to the model or run. "Uninstall" on a built-in skill said "Skill
+uninstalled" while nothing changed; built-in skills now offer only the switch.
+
+**The Agents page showed "Stopped" over an agent answering chats**, with Start
+and Stop buttons that changed a flag nothing used. The page now shows the real
+state and says how a reply or the server is stopped.
+
+**The IDE's editor keeps its room** at common window sizes with the sidebar
+open: it used to be squeezed to a sliver between the file tree and the AI
+chat, which now moves below the editor when space is short.
+
 ## Found by using the live install like a person would (2026-09-28)
 
 **A file asked for in the web chat went to Telegram.** Asked in the web chat

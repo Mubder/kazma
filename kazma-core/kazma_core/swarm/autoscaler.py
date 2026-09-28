@@ -43,8 +43,22 @@ logger = logging.getLogger(__name__)
 # Resolved to an absolute path at import time — mirrors WorkerRegistry — so
 # the autoscaler still finds templates when the app is started from a
 # different working directory (deep-audit 2026-08-19, finding #14).
-_DEFAULT_TEMPLATES_PATH = Path("swarm_templates.json").resolve()
+_TEMPLATES_FILE = "swarm_templates.json"
 _DEFAULT_IDLE_TTL = 300  # 5 minutes
+
+
+def _default_templates_path() -> Path:
+    """The install's own ``swarm_templates.json``, whatever the working directory.
+
+    It was ``Path("swarm_templates.json").resolve()`` at import: absolute,
+    and still wherever the process happened to start -- a server started from
+    another folder found no templates and spawned nothing. The install that
+    contains this package decides; an installed wheel (no project above it)
+    falls back to the project-root walk.
+    """
+    from kazma_core.paths import get_project_root, installed_project_root
+
+    return (installed_project_root() or get_project_root()) / _TEMPLATES_FILE
 
 
 @dataclass
@@ -64,6 +78,11 @@ class WorkerTemplate:
     min_instances: int = 0
     max_instances: int = 5
     system_prompt: str = ""
+    #: Takes any task no other template matched. Matching is by the words in
+    #: the prompt, so "In one sentence: what is idempotency?" matched nothing
+    #: -- not even the shipped "generalist" -- and a swarm task sent to
+    #: ``auto`` failed with "No capable workers" (2026-09-28).
+    catch_all: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> WorkerTemplate:
@@ -95,6 +114,7 @@ class WorkerTemplate:
             min_instances=min_i,
             max_instances=max_i,
             system_prompt=str(data.get("system_prompt", ""))[:_MAX_PROMPT_CHARS],
+            catch_all=data.get("catch_all") is True,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -108,6 +128,7 @@ class WorkerTemplate:
             "min_instances": self.min_instances,
             "max_instances": self.max_instances,
             "system_prompt": self.system_prompt,
+            "catch_all": self.catch_all,
         }
 
     def matches_task(self, task_prompt: str, required_expertise: list[str] | None = None) -> bool:
@@ -179,11 +200,26 @@ class AutoScaler:
     def __init__(
         self,
         engine: Any,
-        templates_path: str | Path = _DEFAULT_TEMPLATES_PATH,
+        templates_path: str | Path | None = None,
         idle_ttl: float = _DEFAULT_IDLE_TTL,
     ) -> None:
         self._engine = engine
-        self._templates_path = Path(templates_path)
+        # Read from here; ``_saved_path`` is where the operator's edits go.
+        # The shipped file is tracked in the install's checkout, and writing
+        # an edit into it left a modified tree that the next update's pull
+        # refuses. Edits live in the data folder (backed up, migrated) and
+        # replace the shipped list once there are any. An explicit path is
+        # both (tests, embedders).
+        if templates_path:
+            self._templates_path = Path(templates_path)
+            self._saved_path = self._templates_path
+        else:
+            from kazma_core.paths import data_dir
+
+            self._saved_path = data_dir() / _TEMPLATES_FILE
+            self._templates_path = (
+                self._saved_path if self._saved_path.exists() else _default_templates_path()
+            )
         self._idle_ttl = idle_ttl
         self._templates: dict[str, WorkerTemplate] = {}
         # Track spawned instances: name -> (template_name, spawned_at, last_active)
@@ -216,9 +252,10 @@ class AutoScaler:
         return list(self._templates.values())
 
     def save_templates(self) -> None:
-        """Persist templates to JSON file atomically."""
+        """Persist templates to JSON file atomically (the operator's copy,
+        never the shipped file -- see __init__)."""
         data = [t.to_dict() for t in self._templates.values()]
-        p = Path(self._templates_path)
+        p = Path(self._saved_path)
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_name(f".{p.name}.tmp.{os.getpid()}.{time.time_ns()}")
         try:
@@ -226,6 +263,7 @@ class AutoScaler:
                 json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
             )
             os.replace(tmp, p)
+            self._templates_path = p  # a reload reads the edits from now on
         except Exception:
             try:
                 tmp.unlink(missing_ok=True)
@@ -266,10 +304,11 @@ class AutoScaler:
         # Hold the lock across the capacity-check + spawn so two concurrent
         # maybe_scale calls can't both pass the check and over-scale.
         with self._lock:
-            for template in self._templates.values():
-                if not template.matches_task(task_prompt):
-                    continue
-
+            # Templates whose words the prompt uses first (file order:
+            # specialist to general), then those that take any task.
+            matched = [t for t in self._templates.values() if t.matches_task(task_prompt)]
+            fallback = [t for t in self._templates.values() if t.catch_all and t not in matched]
+            for template in matched + fallback:
                 # Check capacity
                 active = self._count_active_instances(template.name)
                 if active >= template.max_instances:

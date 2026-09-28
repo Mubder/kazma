@@ -186,7 +186,10 @@ async def _shown_in_web_chat(filepath: Path) -> str:
     except (OSError, ValueError) as exc:
         logger.warning("[image_gen] could not show the image in the web chat: %s", exc)
         return ""
+    # Worded so the model does not also send the file: on live it called
+    # send_file after this line was offered, and the user had to approve a
+    # send of an image the answer could already show.
     return (
-        "\n  Shown in this chat only where your answer includes this line, "
-        f"exactly as it is: {shared.markdown()}"
+        "\n  Already in this chat -- no send_file needed. The user sees it where "
+        f"your answer includes this line, exactly as it is: {shared.markdown()}"
     )

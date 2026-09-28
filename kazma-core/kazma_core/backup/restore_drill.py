@@ -731,15 +731,20 @@ _DEEP_PG_TIMEOUT_S = 3600
 _DEEP_RESTIC_SUBSET = "5%"
 
 
-def deep_drill_is_due(now: float | None = None) -> bool:
-    """True when no DEEP drill has completed within its interval."""
-    stamp = time.time() if now is None else now
+def _last_deep_drill_run() -> float:
+    """Epoch seconds of the last completed deep drill, or 0.0."""
     try:
         from kazma_core.config_store import get_config_store
 
-        last = float(get_config_store().get(_DEEP_LAST_RUN_KEY, 0) or 0)
+        return float(get_config_store().get(_DEEP_LAST_RUN_KEY, 0) or 0)
     except Exception:  # noqa: BLE001
-        last = 0.0
+        return 0.0
+
+
+def deep_drill_is_due(now: float | None = None) -> bool:
+    """True when no DEEP drill has completed within its interval."""
+    stamp = time.time() if now is None else now
+    last = _last_deep_drill_run()
     if last <= 0:
         return True
     return (stamp - last) >= DEEP_DRILL_INTERVAL_HOURS * 3600
@@ -914,6 +919,19 @@ def _record_drill_run(when: float) -> None:
         logger.debug("[restore-drill] could not record run time", exc_info=True)
 
 
+def _seconds_until_a_drill_is_due(now: float | None = None) -> float:
+    """Time until the daily or the weekly deep drill falls due (at least a
+    minute; a minute when either has never run)."""
+    stamp = time.time() if now is None else now
+    waits = []
+    for last, hours in (
+        (_last_drill_run(), DRILL_INTERVAL_HOURS),
+        (_last_deep_drill_run(), DEEP_DRILL_INTERVAL_HOURS),
+    ):
+        waits.append(hours * 3600 - (stamp - last) if last > 0 else 0.0)
+    return max(60.0, min(waits))
+
+
 def drill_is_due(now: float | None = None) -> bool:
     """True when no drill has completed within the interval.
 
@@ -954,7 +972,10 @@ async def drill_scheduler() -> None:
                 await asyncio.sleep(_DRILL_FIRST_DELAY_SECONDS)
                 first = False
             else:
-                await asyncio.sleep(DRILL_INTERVAL_HOURS * 3600)
+                # Until the next drill (daily or deep) is due -- not a whole
+                # interval: after a boot that found the last drill 23 hours
+                # old, that was 24 more hours (2026-09-28).
+                await asyncio.sleep(await asyncio.to_thread(_seconds_until_a_drill_is_due))
             # The weekly deep tier first: if it is due, the daily checks it
             # supersedes run anyway below.
             if deep_drill_is_due():

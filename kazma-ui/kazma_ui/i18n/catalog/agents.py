@@ -132,10 +132,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الجلسات",
         "en": "Sessions",
     },
-    "agents.start": {
-        "ar": "تشغيل",
-        "en": "Start",
-    },
     "agents.state_hint": {
         "ar": "خامل / يفكر / ينفذ",
         "en": "idle / thinking / acting",
@@ -152,9 +148,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "خطوة",
         "en": "steps",
     },
-    "agents.stop": {
-        "ar": "إيقاف",
-        "en": "Stop",
+    "agents.serves_while_running": {
+        "ar": "يجيب ما دام الخادم يعمل. أوقف ردًا من المحادثة، وأوقف الخادم أو أعد تشغيله عبر المشرف.",
+        "en": "Answers whenever the server runs. Stop a reply from the chat; stop or restart the server with its supervisor.",
     },
     "agents.stopped": {
         "ar": "متوقف",

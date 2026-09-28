@@ -216,12 +216,13 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     return "\n".join(lines)
 
 
-def send_digest(hours: float = DIGEST_INTERVAL_HOURS) -> bool:
-    """Build and deliver the digest. Never raises."""
+def send_digest(hours: float = DIGEST_INTERVAL_HOURS, *, text: str | None = None) -> bool:
+    """Build (unless *text* is given) and deliver the digest. Never raises."""
     try:
         if not digest_enabled():
             return False
-        text = build_digest(hours)
+        if text is None:
+            text = build_digest(hours)
         # Reuse the alert delivery path: it already falls back to a direct
         # Telegram send when no platform bus exists in this process.
         from kazma_core.observability.ops_alerts import _dispatch
@@ -234,19 +235,42 @@ def send_digest(hours: float = DIGEST_INTERVAL_HOURS) -> bool:
         return False
 
 
-async def digest_scheduler() -> None:
-    """Fire the digest once per interval. Fire-and-forget, crash-isolated.
+#: When the digest was last delivered, so its day survives a restart.
+_LAST_SENT_KEY = "observability.daily_digest.last_sent"
+#: After boot, a due digest waits this long: never in the middle of startup,
+#: and never one per restart (the stamp says it was sent).
+_SETTLE_S = 600.0
+#: A digest that could not be delivered is tried again this much later.
+_RETRY_S = 3600.0
 
-    Sleeps first: a digest sent at every boot would fire on each restart,
-    which during an incident is precisely when the operator least needs
-    another message.
+
+async def digest_scheduler() -> None:
+    """Deliver the digest once per interval, counted from the last delivery.
+
+    It slept a full interval from boot before its first send, so a server
+    restarted more often than daily never sent one: not once in the week to
+    2026-09-28 on the live install, which reloads several times a day. The
+    last delivery is stamped (kazma_core.observability.cadence); a restart
+    neither re-sends a digest nor postpones a due one.
+
+    The log reading runs off the event loop; the delivery runs on it
+    (ops_alerts delivers through the loop's bus adapters).
     """
     import asyncio
 
+    from kazma_core.observability.cadence import seconds_until_due, stamp_run
+
+    interval = DIGEST_INTERVAL_HOURS * 3600
     while True:
         try:
-            await asyncio.sleep(DIGEST_INTERVAL_HOURS * 3600)
-            send_digest()
+            await asyncio.sleep(await asyncio.to_thread(
+                seconds_until_due, _LAST_SENT_KEY, interval, settle_s=_SETTLE_S,
+            ))
+            text = await asyncio.to_thread(build_digest, DIGEST_INTERVAL_HOURS)
+            if send_digest(text=text):
+                await asyncio.to_thread(stamp_run, _LAST_SENT_KEY)
+            else:
+                await asyncio.sleep(_RETRY_S)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — a failed digest must not

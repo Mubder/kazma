@@ -40,7 +40,11 @@
                                @change='toggleSkill({{ skill.id|tojson }}, $event.target.checked)'>
                         <span class="toggle-slider"></span>
                     </label>
+                    {% if skill.builtin %}
+                    <span class="text-muted" style="font-size:0.75rem;">{{ t('skills.builtin') }}</span>
+                    {% else %}
                     <button class="btn btn-sm btn-danger" @click='uninstallSkill({{ skill.id|tojson }})'>{{ t('skills.uninstall') }}</button>
+                    {% endif %}
                 </div>
             </div>
             {% endfor %}

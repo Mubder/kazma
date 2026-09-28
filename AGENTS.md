@@ -482,6 +482,14 @@ swarm works with zero pre-registered workers.
   the page refused to dispatch without a registered worker and said "Stopped"
   over a swarm that answered through the API in 3 s.
   `tests/test_swarm_auto_worker.py`.
+- **A template with `catch_all: true` takes any `auto` task no other template
+  matches** (the shipped `generalist`). Matching is by the prompt's words:
+  "In one sentence: what is idempotency?" matched nothing and failed with "No
+  capable workers" (2026-09-28). The shipped file is found from the install
+  containing the package (`_default_templates_path`), never the CWD; the
+  operator's edits are saved to `<data dir>/swarm_templates.json`, which then
+  replaces the shipped list -- writing them into the tracked file left a
+  modified checkout that `git pull` refuses.
 
 ### 15. V2 Memory Worker & Schedulers (`kazma-core/kazma_core/memory/worker_bootstrap.py`)
 
@@ -506,6 +514,17 @@ left backups/export inert). Current boot list:
 - `_start_daily_digest_scheduler()`
 - `_start_firing_ledger_scheduler()`
 - `_start_restore_drill_scheduler()`
+
+**B0. A job's wait is counted from its last run, never from boot.** The live
+install restarts several times a day; a scheduler that sleeps a whole
+interval from process start never runs there. The daily digest was not sent
+once in the week to 2026-09-28, and the backup sweep, skipping a fresh backup
+at boot, waited six hours from boot (a nine-hour gap). Long jobs stamp their
+last run (`observability/cadence.py`, the ledger and drill their own keys)
+and sleep only the rest of the interval. `tests/test_scheduler_cadence.py`
+boots every scheduler `start_memory_worker` starts on a virtual clock with
+its job due in 30 minutes and fails unless it runs within 40; a new
+scheduler needs a case there.
 
 **B. Distinct cadences (do not collapse them):**
 - **6h `macro_sleep`:** rule-based tier demotion/promotion (TTLs,
@@ -1586,6 +1605,18 @@ covers an install (the user is the gate for what enters the system).
 GitHub `topic:agent-skills` repository search (GITHUB_TOKEN-aware for rate
 limits). The `/skills` page has a Marketplace tab (debounced search + one-click
 install). Do not build a parallel registry — the GitHub topic IS the index.
+
+**G. The Skills page's switch is real** (`kazma_core/skills/switches.py`,
+2026-09-28). `skills.enabled.<id>` was written and never read: a built-in
+skill switched off kept its tools and was listed on again. A native skill's
+tools carry `LocalTool.skill_id` (`native:<folder>`, set by the native
+loader); a switched-off skill's tools are left out of
+`get_tool_definitions` and refused by `_execute_inner`. The switches are
+read once per settings store (weak reference, not `id()`) and updated by the
+page's toggle, so no model call reads settings. Built-in skills cannot be
+uninstalled (400; the page shows the switch only). Marketplace ("hub")
+skills install but register no tools with the agent -- not built.
+`tests/test_skill_switches.py`.
 
 ### 23. Windows asyncio.subprocess trap (`SelectorEventLoop`)
 
@@ -3105,6 +3136,16 @@ writes.
   over three good ones. `tests/js/test_namespace_members.js` loads every
   script that defines a namespace in a sandbox where no page is ready and
   checks every member reference in the static JS and the templates.
+- **A control changes something, or is not shown** (2026-09-28). The Agents
+  page's Start/Stop flipped `agent.is_running`, which nothing else read: the
+  page said "Stopped" over an agent answering chats. It now shows whether the
+  server is serving and says how a reply or the server is stopped;
+  `POST /api/agents/stop` answers 409 with that text. Built-in skills'
+  "Uninstall" and the skill switch were the same shape (§22G).
+- **A panel lays out by its own width** (`@container`), not the window's:
+  with the sidebar open a 918px window left the IDE editor ~40px and
+  clipped the providers panel. `tests/e2e/test_layout_widths.py` (each with
+  the container switched off as its control).
 - **A control is wired once** (2026-09-28): never an inline `on<event>` in a
   template and a script listener for the same element and event -- Start
   All and Stop All sent every click twice. A handler that only prevents the

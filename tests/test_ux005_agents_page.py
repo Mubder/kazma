@@ -164,10 +164,12 @@ class TestAgentsTemplateNotPlaceholder:
         """Must include a reasoning steps section."""
         assert "Reasoning" in agents_html
 
-    def test_has_start_stop_controls(self, agents_html: str):
-        """Must have start/stop controls (i18n keys, not literal strings)."""
-        assert "t('agents.start')" in agents_html
-        assert "t('agents.stop')" in agents_html
+    def test_offers_no_control_that_changes_nothing(self, agents_html: str):
+        """Start/Stop flipped a flag nothing read: the page said "Stopped" over
+        an agent answering chats (2026-09-28). It says what stops things."""
+        assert "control('start')" not in agents_html
+        assert "control('stop')" not in agents_html
+        assert "agents.serves_while_running" in agents_html
 
     def test_loads_agents_js(self, agents_html: str):
         """Must include the agents.js script."""
@@ -202,9 +204,10 @@ class TestAgentsJs:
     def test_calls_reasoning_endpoint(self, agents_js: str):
         assert "/api/agents/reasoning" in agents_js
 
-    def test_has_start_stop_actions(self, agents_js: str):
-        """Must call /api/agents/start and /api/agents/stop."""
-        assert "/api/agents/" in agents_js and "start" in agents_js and "stop" in agents_js
+    def test_calls_no_start_stop_endpoint(self, agents_js: str):
+        """The page no longer toggles anything (see the template test above)."""
+        assert "/api/agents/' + action" not in agents_js
+        assert "/api/agents/start" not in agents_js and "/api/agents/stop" not in agents_js
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -307,14 +310,15 @@ class TestAgentsEndpoints:
         assert mock_agent.is_running is True
 
     def test_agent_stop_control(self, client, mock_agent: Any):
-        """POST /api/agents/stop stops the agent."""
+        """POST /api/agents/stop says what stops things instead of flipping a
+        flag nothing read (the page said "Stopped" over a working agent)."""
         mock_agent.set_running(True)
         resp = client.post("/api/agents/stop")
-        assert resp.status_code == 200
+        assert resp.status_code == 409
         data = resp.json()
-        assert data["status"] == "ok"
-        assert data["running"] is False
-        assert mock_agent.is_running is False
+        assert data["status"] == "error"
+        assert data["running"] is True
+        assert mock_agent.is_running is True  # nothing was toggled
 
     def test_agent_invalid_action(self, client):
         """POST /api/agents/{invalid} returns 400."""
