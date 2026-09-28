@@ -25,19 +25,12 @@
           </div>
         </div>
       </div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-primary"
-                @click="control('start')"
-                :disabled="agent.running || loadingAction"
-                :title="t('agents.start')">
-          <span x-html="KazmaIcons.play()"></span> {{ t('agents.start') }}
-        </button>
-        <button class="btn btn-danger"
-                @click="control('stop')"
-                :disabled="!agent.running || loadingAction"
-                :title="t('agents.stop')">
-          <span x-html="KazmaIcons.square()"></span> {{ t('agents.stop') }}
-        </button>
+      <div style="display:flex;gap:8px;align-items:center;">
+        {# No Start/Stop here: they flipped a flag nothing read, so the page
+           said "Stopped" over an agent answering chats (2026-09-28). The
+           agent serves while the server runs; a turn is stopped from the
+           chat, the server through its supervisor. #}
+        <span style="font-size:0.75rem;color:var(--text-muted);max-width:360px;">{{ t('agents.serves_while_running') }}</span>
         <button class="btn btn-secondary" @click="refresh()" :disabled="loadingAction" :title="t('agents.refresh')">
           <span x-show="!loadingAction" x-cloak>↻</span>
           <span x-show="loadingAction" x-cloak>…</span>

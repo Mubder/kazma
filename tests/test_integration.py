@@ -62,11 +62,14 @@ class TestAgentRoutes:
         assert "tools" in data
 
     def test_agents_stop_action(self, client: TestClient) -> None:
+        """There is no agent to stop apart from the server (2026-09-28): the
+        old answer, 200 "stopped", was a flag nothing read."""
         resp = client.post("/api/agents/stop")
-        assert resp.status_code == 200
+        assert resp.status_code == 409
         data = resp.json()
-        assert data["status"] == "ok"
-        assert data["running"] is False
+        assert data["status"] == "error"
+        assert data["running"] is True
+        assert "supervisor" in data["message"]
 
     def test_agents_start_action(self, client: TestClient) -> None:
         resp = client.post("/api/agents/start")

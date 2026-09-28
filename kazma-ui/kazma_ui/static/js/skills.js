@@ -62,15 +62,21 @@ function skillsApp() {
                 danger: true,
             }))) return;
             try {
-                await window.kazmaSave('/api/skills/uninstall', {
+                const body = await window.kazmaSave('/api/skills/uninstall', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ skill_id: skillId })
                 });
+                // Only "ok" removed something: "not_found" used to toast
+                // "Skill uninstalled" over a skill that was still there.
+                if (!body || body.status !== 'ok') {
+                    showToast('Nothing was uninstalled: ' + ((body && (body.error || body.status)) || 'no answer'), 'error');
+                    return;
+                }
                 showToast('Skill uninstalled', 'success');
                 location.reload();
             } catch (e) {
-                showToast('Failed to uninstall', 'error');
+                showToast('Failed to uninstall' + (e && e.message ? ': ' + e.message : ''), 'error');
             }
         },
 

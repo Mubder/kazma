@@ -106,38 +106,6 @@ function agentsPage() {
       }
     },
 
-    async control(action) {
-      if (action !== 'start' && action !== 'stop') return;
-      this.loadingAction = true;
-      try {
-        const resp = await fetch('/api/agents/' + action, { method: 'POST' });
-        const data = await resp.json();
-        if (data.status === 'ok') {
-          this.agent.running = data.running;
-          if (window.KazmaStream) {
-            KazmaStream.toast(
-              action === 'start' ? 'Agent started' : 'Agent stopped',
-              'success',
-              3000,
-            );
-          }
-        } else {
-          const msg = data.message || 'Action failed';
-          if (window.KazmaStream) {
-            KazmaStream.toast(msg, 'error', 5000);
-          }
-        }
-      } catch (err) {
-        console.error('[AgentsPage] control failed:', err);
-        if (window.KazmaStream) {
-          KazmaStream.toast('Failed to ' + action + ' agent', 'error', 5000);
-        }
-      } finally {
-        this.loadingAction = false;
-        // Refresh state after the action
-        await this.fetchStatus();
-      }
-    },
 
     async switchPersonality(name) {
       this.agent.personality = name;

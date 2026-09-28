@@ -66,6 +66,8 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
         (file_read, shell_exec, etc.) are implementation details that
         belong to the agent's base toolset, not user-facing skills.
         """
+        from kazma_core.skills.switches import is_skill_enabled
+
         skills: list[dict[str, Any]] = []
         seen_names: set[str] = set()
 
@@ -99,13 +101,17 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
                         continue
                     seen_names.add(name)
                     raw_desc = manifest.get("description", "")
+                    skill_id = f"native:{skill_dir.name}"
                     skills.append({
-                        "id": f"native:{skill_dir.name}",
+                        "id": skill_id,
                         "name": name,
                         "version": manifest.get("version", "1.0.0"),
                         "description": _localize_skill_desc(name, raw_desc, lang),
                         "author": manifest.get("author", "kazma"),
-                        "enabled": True,
+                        # The saved switch (it read True whatever was saved).
+                        "enabled": is_skill_enabled(skill_id),
+                        # Ships with Kazma: switched off, never uninstalled.
+                        "builtin": True,
                         "security_score": manifest.get("security_score", 100),
                         "certification_level": manifest.get("certification_level", "native"),
                         "capabilities": manifest.get("capabilities", []),
@@ -360,6 +366,14 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
                 {"status": "error", "error": "Directory traversal not allowed in skill_id"},
                 status_code=400,
             )
+        if skill_id.startswith("native:"):
+            # A built-in skill ships with Kazma. This answered 200
+            # "not_found" and the page said "Skill uninstalled" over a skill
+            # that was still there (2026-09-28).
+            return JSONResponse(
+                {"status": "error", "error": "Built-in skills ship with Kazma and cannot be uninstalled; switch the skill off instead."},
+                status_code=400,
+            )
 
         try:
             if skill_id.startswith("agent-skill:"):
@@ -396,11 +410,12 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
                     category="skills",
                 )
             else:
-                store.set(
-                    f"skills.enabled.{skill_id}",
-                    req.enabled,
-                    category="skills",
-                )
+                # Saved AND applied to this process: the tools of a skill
+                # switched off here are no longer offered or run. The key was
+                # written and never read until 2026-09-28.
+                from kazma_core.skills.switches import set_skill_enabled
+
+                set_skill_enabled(skill_id, bool(req.enabled))
             return {"status": "ok", "enabled": str(req.enabled)}
         except Exception:
             return {"status": "error", "error": "Internal error"}

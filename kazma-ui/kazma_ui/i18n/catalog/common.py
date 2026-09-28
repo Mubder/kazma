@@ -732,6 +732,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "إزالة",
         "en": "Uninstall",
     },
+    "skills.builtin": {
+        "ar": "مدمج في Kazma — أوقفه بالمفتاح",
+        "en": "Built in — switch it off instead",
+    },
     "skills.validate_btn": {
         "ar": "تحقق",
         "en": "Validate",

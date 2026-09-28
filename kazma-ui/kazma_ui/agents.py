@@ -46,6 +46,13 @@ def _format_trace_entry(entry: Any) -> dict[str, Any]:
     }
 
 
+def _serving() -> bool:
+    """Whether the agent is answering: always, unless the server is stopping."""
+    from kazma_core.shutdown import is_shutting_down
+
+    return not is_shutting_down()
+
+
 def _derive_agent_state(running: bool, recent_traces: list[Any]) -> str:
     """Derive a high-level agent state from running flag + recent traces.
 
@@ -121,25 +128,33 @@ def create_agents_router(agent: Any, templates: Jinja2Templates) -> APIRouter:
 
     @router.post("/api/agents/{action}")
     async def agent_control(action: str) -> JSONResponse:
-        """Start or stop the agent."""
+        """The agent serves while the server runs; there is nothing to toggle.
+
+        "stop" used to flip a flag that nothing read and answer "stopped"
+        while the agent kept answering every chat (2026-09-28). It now says
+        what does stop things. "start" answers the truth: it is running.
+        """
         if action == "start":
             try:
                 agent.set_running(True)
-                logger.info("Agent started")
-                return JSONResponse({"status": "ok", "running": True})
             except Exception as e:
                 logger.debug("Agent start failed: %s", e)
                 return JSONResponse({"status": "error", "message": "Internal error"}, status_code=500)
-        elif action == "stop":
-            try:
-                agent.set_running(False)
-                logger.info("Agent stopped")
-                return JSONResponse({"status": "ok", "running": False})
-            except Exception as e:
-                logger.debug("Agent stop failed: %s", e)
-                return JSONResponse({"status": "error", "message": "Internal error"}, status_code=500)
-        else:
-            return JSONResponse({"status": "error", "message": f"Unknown action: {action}"}, status_code=400)
+            return JSONResponse({"status": "ok", "running": _serving()})
+        if action == "stop":
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "running": _serving(),
+                    "message": (
+                        "The agent answers whenever the server runs. Stop a reply "
+                        "from the chat (Stop generation, /abort); stop or restart "
+                        "the server with its supervisor (kazma_guard --reload)."
+                    ),
+                },
+                status_code=409,
+            )
+        return JSONResponse({"status": "error", "message": f"Unknown action: {action}"}, status_code=400)
 
     return router
 
@@ -182,9 +197,11 @@ def _get_agent_info(agent: Any) -> dict[str, Any]:
     except Exception:
         logger.debug("[agents] active profile overlay skipped", exc_info=True)
 
-    # Derive agent state from running flag + recent traces
+    # The agent answers whenever the server serves. The page used to read
+    # agent.is_running, a flag set only by its own Start/Stop buttons and
+    # read by nothing else, so it said "Stopped" over a working agent.
     recent_traces = store.recent(10)
-    running = agent.is_running if hasattr(agent, "is_running") else False
+    running = _serving()
     agent_state = _derive_agent_state(running, recent_traces)
 
     # Build a human-readable description of the last activity (if any)
@@ -193,7 +210,7 @@ def _get_agent_info(agent: Any) -> dict[str, Any]:
         latest = recent_traces[-1]
         last_activity = latest.label or latest.trace_type or "activity"
     elif not running:
-        last_activity = "Agent stopped"
+        last_activity = "Server shutting down"
 
     # Session count from trace stats (proxied by total traces)
     session_count = stats["total_traces"]

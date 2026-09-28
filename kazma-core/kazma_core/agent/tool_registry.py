@@ -346,6 +346,10 @@ class LocalTool:
     func: Callable[..., Any]
     input_schema: dict[str, Any]
     is_async: bool = True
+    #: The Skills page's id of the skill that provides this tool
+    #: (``native:<folder>``), or None for Kazma's own tools. A switched-off
+    #: skill's tools are neither offered nor run (kazma_core.skills.switches).
+    skill_id: str | None = None
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -439,8 +443,13 @@ class LocalToolRegistry:
         ``T | null``). Tools with free-form ``dict`` parameters stay
         unstrict so local / Anthropic / Gemini endpoints do not 400.
         """
+        from kazma_core.skills.switches import load_switches
+
+        switched_off = load_switches()
         definitions: list[dict[str, Any]] = []
         for tool in self._tools.values():
+            if tool.skill_id and tool.skill_id in switched_off:
+                continue  # switched off on the Skills page
             definitions.append(
                 {
                     "type": "function",
@@ -501,6 +510,16 @@ class LocalToolRegistry:
         if tool is None:
             return {
                 "content": f"Tool '{tool_name}' not found. Available: {list(self._tools.keys())}",
+                "is_error": True,
+            }
+        from kazma_core.skills.switches import is_skill_enabled
+
+        if not is_skill_enabled(tool.skill_id):
+            return {
+                "content": (
+                    f"Tool '{tool_name}' belongs to a skill that is switched off "
+                    f"({tool.skill_id}). The operator can switch it on in Skills."
+                ),
                 "is_error": True,
             }
 

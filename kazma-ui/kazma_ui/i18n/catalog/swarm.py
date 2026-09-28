@@ -1344,6 +1344,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تنسيق السرب",
         "en": "Swarm Orchestration",
     },
+    "swarm.tmpl_catch_all": {
+        "ar": "يقبل أي مهمة",
+        "en": "Takes any task",
+    },
+    "swarm.tmpl_catch_all_hint": {
+        "ar": "يُنشأ عامل من هذا القالب لمهمة «تلقائية» لا تطابق كلماتها أي قالب آخر.",
+        "en": "Spawns a worker for an Auto task whose words match no other template.",
+    },
     "swarm.tmpl_expertise": {
         "ar": "وسوم الخبرة",
         "en": "Expertise tags",

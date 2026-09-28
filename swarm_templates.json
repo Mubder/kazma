@@ -23,6 +23,7 @@
     "capabilities": {
       "expertise": ["task", "help", "general", "draft", "write", "answer", "explain", "assist"]
     },
+    "catch_all": true,
     "max_instances": 5,
     "system_prompt": "You are a capable generalist worker in the Kazma swarm. You handle a broad range of tasks — drafting, answering, explaining, and assisting — reliably and clearly. Ask for clarification when a request is ambiguous."
   }

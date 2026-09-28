@@ -45,9 +45,8 @@ async def test_m8_agent_runner_close_checkpointer():
 def test_m20_autoscaler_atomic_save_templates(tmp_path):
     from kazma_core.swarm.autoscaler import AutoScaler
 
-    scaler = AutoScaler(MagicMock())
     target_path = tmp_path / "templates.json"
-    scaler._templates_path = str(target_path)
+    scaler = AutoScaler(MagicMock(), templates_path=target_path)
     mock_template = MagicMock()
     mock_template.to_dict.return_value = {"system_prompt": "hello"}
     scaler._templates = {"test_worker": mock_template}

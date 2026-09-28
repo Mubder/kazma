@@ -669,6 +669,13 @@
             <label style="font-size:0.8rem;font-weight:600;">{{ t('swarm.tmpl_system_prompt') }}</label>
             <textarea id="tmpl-prompt" class="form-input" rows="3" placeholder="{{ t('swarm.tmpl_prompt_ph') }}"></textarea>
           </div>
+          <div class="form-group" style="margin-bottom:12px;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;cursor:pointer;">
+              <input id="tmpl-catch-all" type="checkbox" style="accent-color:var(--accent);">
+              <span>{{ t('swarm.tmpl_catch_all') }}</span>
+            </label>
+            <div style="font-size:0.72rem;color:var(--text-tertiary);margin-top:4px;">{{ t('swarm.tmpl_catch_all_hint') }}</div>
+          </div>
           <div style="display:flex;gap:8px;">
             <button class="btn btn-primary" onclick="KazmaSwarm.saveTemplate()">{{ t('swarm.save_template') }}</button>
             <button class="btn btn-secondary" onclick="KazmaSwarm.resetTemplateForm()">{{ t('swarm.reset') }}</button>

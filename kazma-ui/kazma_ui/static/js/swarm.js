@@ -2890,6 +2890,7 @@
                 '<span style="font-weight:600;">' + esc(tmpl.name) + '</span>' +
                 (tmpl.role ? '<span class="badge badge-accent" style="font-size:0.65rem;">' + esc(tmpl.role) + '</span>' : '') +
                 '<span class="badge badge-info" style="font-size:0.65rem;">' + active + '/' + max + ' ' + (window.t ? t('swarm.instances') : 'active') + '</span>' +
+                (tmpl.catch_all ? '<span class="badge badge-success" style="font-size:0.65rem;">' + esc(window.t ? t('swarm.tmpl_catch_all') : 'Takes any task') + '</span>' : '') +
               '</div>' +
               '<div style="font-size:0.8rem;color:var(--text-tertiary);">' + (window.t ? t('swarm.model') : 'Model') + ': <span style="color:var(--text-secondary);font-family:var(--font-mono);">' + esc(modelLabel) + '</span></div>' +
               (expertise.length ? '<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">' + expertise.map(function(tag){ return '<span class="badge badge-info" style="font-size:0.6rem;">' + esc(tag) + '</span>'; }).join('') + '</div>' : '') +
@@ -2912,6 +2913,7 @@
     var m = $('tmpl-model'); if (m) m.value = '';
     var mx = $('tmpl-max'); if (mx) mx.value = '3';
     var p = $('tmpl-prompt'); if (p) p.value = '';
+    var ca = $('tmpl-catch-all'); if (ca) ca.checked = false;
     var title = $('template-form-title'); if (title) title.textContent = (window.t ? t('swarm.add_template') : 'Add Template');
   }
 
@@ -2928,6 +2930,7 @@
         var m = $('tmpl-model'); if (m) m.value = tmpl.model || '';
         var mx = $('tmpl-max'); if (mx) mx.value = tmpl.max_instances || 3;
         var p = $('tmpl-prompt'); if (p) p.value = tmpl.system_prompt || '';
+        var ca = $('tmpl-catch-all'); if (ca) ca.checked = tmpl.catch_all === true;
         var title = $('template-form-title'); if (title) title.textContent = (window.t ? t('swarm.edit_template') : 'Edit Template');
       });
   }
@@ -2944,6 +2947,7 @@
       model: (($('tmpl-model') || {}).value || '').trim(),
       max_instances: parseInt(($('tmpl-max') || {}).value || '3', 10) || 3,
       system_prompt: (($('tmpl-prompt') || {}).value || '').trim(),
+      catch_all: !!(($('tmpl-catch-all') || {}).checked),
       worker_type: 'in_process',
     };
     // If editing (name changed), delete the old one first

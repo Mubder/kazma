@@ -490,7 +490,8 @@ jobs:
             tests/e2e/test_session_switch_resume.py \
             tests/e2e/test_new_chat_button.py \
             tests/e2e/test_chat_delete_forget.py \
-            tests/e2e/test_session_list_loading.py
+            tests/e2e/test_session_list_loading.py \
+            tests/e2e/test_layout_widths.py
         env:
           KAZMA_DB_BACKEND: sqlite
 

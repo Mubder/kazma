@@ -75,6 +75,9 @@ class NativeSkillLoader:
             # Bind Arabic and cultural metadata onto the registered tool object
             if hasattr(self.registry, "_tools") and tool_name in self.registry._tools:
                 local_tool = self.registry._tools[tool_name]
+                # The Skills page's id for this skill: its switch applies to
+                # every tool the skill registers (kazma_core.skills.switches).
+                local_tool.skill_id = f"native:{skill_dir.name}"
                 # Attach custom fields for UI rendering & localized system prompt building
                 local_tool.arabic_name = tool_info.get("arabic_name", tool_name)
                 local_tool.prompt_chain = tool_info.get("prompt_chain", [])

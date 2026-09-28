@@ -196,10 +196,15 @@ def test_format_skill_activation_survives_integrity_check_error(tmp_path, monkey
 # ── Patch 2 — finding #14: no CWD-relative default paths ────────────────
 
 
-def test_autoscaler_default_templates_path_is_absolute():
-    from kazma_core.swarm.autoscaler import _DEFAULT_TEMPLATES_PATH
+def test_autoscaler_default_templates_path_is_absolute(tmp_path, monkeypatch):
+    """Absolute AND the install's own file: ``.resolve()`` at import was
+    absolute but still relative to whatever folder the process started in."""
+    from kazma_core.swarm.autoscaler import _default_templates_path
 
-    assert _DEFAULT_TEMPLATES_PATH.is_absolute()
+    here = _default_templates_path()
+    assert here.is_absolute() and here.name == "swarm_templates.json"
+    monkeypatch.chdir(tmp_path)
+    assert _default_templates_path() == here
 
 
 def test_cron_store_default_db_path_is_absolute():

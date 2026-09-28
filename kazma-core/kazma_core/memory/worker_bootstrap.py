@@ -728,7 +728,7 @@ def _start_backup_export_scheduler() -> None:
                     )
             except (OSError, RuntimeError, ValueError):
                 logger.warning("[memory_worker] pg dump freshness check failed", exc_info=True)
-            await asyncio.sleep(_BACKUP_EXPORT_INTERVAL_HOURS * 3600)
+            await asyncio.sleep(await asyncio.to_thread(_seconds_until_backup_due))
         while True:
             try:
                 from kazma_core.memory.task_queue import enqueue_task
@@ -1128,8 +1128,9 @@ def _pg_dump_is_stale() -> bool:
     return (_time.time() - newest.stat().st_mtime) >= _FRESH_BACKUP_HOURS * 3600
 
 
-def _backup_ran_recently() -> bool:
-    """True when a universal backup completed within _FRESH_BACKUP_HOURS.
+def _newest_backup_age_s() -> float | None:
+    """Seconds since the newest universal backup finished, or None when there
+    is none -- or its age cannot be read (unknown age means "take one").
 
     Read from the newest generation directory on disk rather than tracked
     state, so it stays correct across restarts -- which is precisely the
@@ -1147,10 +1148,30 @@ def _backup_ran_recently() -> bool:
             if child.is_dir():
                 newest = max(newest, child.stat().st_mtime)
         if not newest:
-            return False
-        return (_time.time() - newest) < _FRESH_BACKUP_HOURS * 3600
+            return None
+        return max(0.0, _time.time() - newest)
     except Exception:
-        return False  # unknown age -> take the backup; never skip on doubt
+        return None  # unknown age -> take the backup; never skip on doubt
+
+
+def _backup_ran_recently() -> bool:
+    """True when a universal backup completed within _FRESH_BACKUP_HOURS."""
+    age = _newest_backup_age_s()
+    return age is not None and age < _FRESH_BACKUP_HOURS * 3600
+
+
+def _seconds_until_backup_due() -> float:
+    """After a skipped boot sweep: wait until the newest backup is one
+    interval old, not a whole interval from boot.
+
+    Waiting the whole interval from every boot meant a server reloaded more
+    often than every six hours kept postponing its backup: on the live
+    install the newest was over nine hours old on 2026-09-28.
+    """
+    age = _newest_backup_age_s()
+    if age is None:
+        return 60.0
+    return max(60.0, _BACKUP_EXPORT_INTERVAL_HOURS * 3600 - age)
 
 
 def register_backup_export_handlers() -> None:
