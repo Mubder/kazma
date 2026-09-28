@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Settings: connecting Outlook Calendar no longer opens Google (2026-09-28)
+
+The calendar card in Settings → Email was titled "Calendar (Google /
+Outlook)" but had one button, "Connect Calendar", which only ever started
+Google's sign-in, and one badge that said "Connected" when either calendar
+was. Asked to connect Outlook, the owner pressed it and landed on Google.
+The card now lists each calendar on its own row, with its own state and its
+own button: "Connect Google Calendar" and "Connect Outlook Calendar" (a
+Microsoft sign-in that also asks for calendar access; Microsoft mail stays
+connected).
+
 ## Round 8 on the live install: background jobs, documents, research, knowledge, voice (2026-09-28)
 
 Checked on the live install against its own records, not assumed: the daily
