@@ -186,17 +186,43 @@
    *   Call x_post with EXACTLY this text: "كاظمه…"
    * First-strong-char dir=auto stays LTR because the wrapper is English.
    */
+  // A quoted fragment is the text only when the wrapper hands it over (a
+  // colon before it, nothing after it) or when it is most of the message
+  // (60+ characters, or half of it); a blockquote only where it is handed
+  // over -- a mid-sentence ">" is an arrow. The same rule as
+  // kazma_core.text_display.extract_post_body: both are held to
+  // tests/fixtures/post_body_cases.json. A reminder saying 'Reply "done" to
+  // stop' showed on the Scheduled page as "done" (2026-09-28).
+  var MIN_BODY_CHARS = 60, MIN_BODY_SHARE = 0.5;
+  function cpLen(s) { return Array.from(String(s)).length; }  // code points, as Python counts
+  function handedOver(before) {
+    var b = before.replace(/\s+$/, '');
+    return b.charAt(b.length - 1) === ':';
+  }
+
   function extractPostBody(text) {
     var raw = String(text || '').replace(/\s+/g, ' ').trim();
     if (!raw) return '';
-    var candidates = [];
+    var found = [];  // [fragment, introduced]
     var re = /["“]([^"”]{4,})["”]/g;
     var m;
-    while ((m = re.exec(raw))) candidates.push(m[1].trim());
+    while ((m = re.exec(raw))) {
+      var after = raw.slice(m.index + m[0].length).trim();
+      found.push([m[1].trim(), handedOver(raw.slice(0, m.index)) && cpLen(after) <= 2]);
+    }
     m = raw.match(/:\s*["“]([^"”]{4,})\s*$/);
-    if (m) candidates.push(m[1].trim());
-    m = raw.match(/>\s*(.+)$/);
-    if (m) candidates.push(m[1].replace(/^["“]|["”]$/g, '').trim());
+    if (m) found.push([m[1].trim(), true]);
+    m = /[>]\s*(.+)$/.exec(raw);
+    if (m && (handedOver(raw.slice(0, m.index)) || !raw.slice(0, m.index).trim())) {
+      found.push([m[1].replace(/^[\s"“”]+|[\s"“”]+$/g, ''), true]);
+    }
+    var candidates = [];
+    for (var k = 0; k < found.length; k++) {
+      var c = found[k][0];
+      if (found[k][1] || cpLen(c) >= MIN_BODY_CHARS || cpLen(c) >= MIN_BODY_SHARE * cpLen(raw)) {
+        candidates.push(c);
+      }
+    }
     var arabic = [];
     for (var i = 0; i < candidates.length; i++) {
       if (hasArabic(candidates[i])) arabic.push(candidates[i]);
@@ -205,7 +231,7 @@
     if (!pool.length) return raw;
     var best = pool[0];
     for (var j = 1; j < pool.length; j++) {
-      if (pool[j].length > best.length) best = pool[j];
+      if (cpLen(pool[j]) > cpLen(best)) best = pool[j];
     }
     return best;
   }
