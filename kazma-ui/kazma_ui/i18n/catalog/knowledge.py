@@ -196,4 +196,144 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "استعادة",
         "en": "Restore",
     },
+    "knowledge.auto_inject_on": {
+        "ar": "الحقن التلقائي مفعّل: تُدمج أفضل المقاطع في كل موجّه.",
+        "en": "Auto-inject ON: top chunks are folded into every prompt.",
+    },
+    "knowledge.auto_inject_off": {
+        "ar": "الحقن التلقائي معطّل: على الوكيل استدعاء knowledge_search صراحةً.",
+        "en": "Auto-inject OFF: the agent must call knowledge_search explicitly.",
+    },
+    "knowledge.auto_on_msg": {
+        "ar": "الحقن التلقائي مفعّل — ستُدمج مقاطع هذه المكتبة في كل موجّه.",
+        "en": "Auto-inject ON — chunks from this library will be folded into every prompt.",
+    },
+    "knowledge.auto_off_msg": {
+        "ar": "الحقن التلقائي معطّل.",
+        "en": "Auto-inject OFF.",
+    },
+    "knowledge.library_deleted": {
+        "ar": "حُذفت المكتبة.",
+        "en": "Library deleted.",
+    },
+    "knowledge.library_not_found": {
+        "ar": "المكتبة غير موجودة.",
+        "en": "Library not found.",
+    },
+    "knowledge.ingest_failed": {
+        "ar": "فشل الإدخال.",
+        "en": "Ingest failed.",
+    },
+    "knowledge.no_seed": {
+        "ar": "لا تملك المكتبة seed_url للتحديث منه.",
+        "en": "Library has no seed_url to refresh from.",
+    },
+    "knowledge.ui.load_failed": {
+        "ar": "فشل تحميل المكتبات: {error}",
+        "en": "Failed to load libraries: {error}",
+    },
+    "knowledge.ui.create_failed": {
+        "ar": "فشل الإنشاء",
+        "en": "Create failed",
+    },
+    "knowledge.ui.ingest_failed": {
+        "ar": "فشل الاستيعاب",
+        "en": "Ingest failed",
+    },
+    "knowledge.ui.archive_failed": {
+        "ar": "فشلت الأرشفة",
+        "en": "Archive failed",
+    },
+    "knowledge.ui.unarchive_failed": {
+        "ar": "فشل إلغاء الأرشفة",
+        "en": "Unarchive failed",
+    },
+    "knowledge.ui.search_failed": {
+        "ar": "فشل البحث",
+        "en": "Search failed",
+    },
+    "knowledge.ui.browse_failed": {
+        "ar": "فشل التصفح",
+        "en": "Browse failed",
+    },
+    "knowledge.ui.cancel": {
+        "ar": "إلغاء",
+        "en": "Cancel",
+    },
+    "knowledge.ui.refresh_failed": {
+        "ar": "فشل التحديث",
+        "en": "Refresh failed",
+    },
+    "knowledge.ui.update_failed": {
+        "ar": "فشل التحديث",
+        "en": "Update failed",
+    },
+    "knowledge.ui.delete": {
+        "ar": "حذف",
+        "en": "Delete",
+    },
+    "knowledge.ui.delete_failed": {
+        "ar": "فشل الحذف",
+        "en": "Delete failed",
+    },
+    "knowledge.job_discovered": {
+        "ar": "المكتشفة",
+        "en": "discovered",
+    },
+    "knowledge.job_fetched": {
+        "ar": "المجلوبة",
+        "en": "fetched",
+    },
+    "knowledge.job_ingested": {
+        "ar": "المستوعبة",
+        "en": "ingested",
+    },
+    "knowledge.job_skipped": {
+        "ar": "المتخطاة",
+        "en": "skipped",
+    },
+    "knowledge.job_unchanged": {
+        "ar": "دون تغيير",
+        "en": "unchanged",
+    },
+    "knowledge.job_pruned": {
+        "ar": "المحذوفة",
+        "en": "pruned",
+    },
+    "knowledge.job_failed": {
+        "ar": "الفاشلة",
+        "en": "failed",
+    },
+    "knowledge.job_current": {
+        "ar": "الحالي:",
+        "en": "current:",
+    },
+    "knowledge.job_failures": {
+        "ar": "الإخفاقات:",
+        "en": "Failures:",
+    },
+    "knowledge.loading": {
+        "ar": "جارٍ التحميل…",
+        "en": "Loading…",
+    },
+    "knowledge.seed_label": {
+        "ar": "المصدر:",
+        "en": "seed:",
+    },
+    "knowledge.hits_count": {
+        "ar": "النتائج: {n}",
+        "en": "{n} hit(s)",
+    },
+    "knowledge.hit_score": {
+        "ar": "الدرجة",
+        "en": "score",
+    },
+    "knowledge.chunks_of": {
+        "ar": "{shown} من {total} مقاطع",
+        "en": "{shown} of {total} chunks",
+    },
+    "knowledge.untitled": {
+        "ar": "(بلا عنوان)",
+        "en": "(untitled)",
+    },
 }

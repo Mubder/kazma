@@ -69,7 +69,7 @@ function documentsPage() {
         const j = await r.json();
         if (j.ok) this.documents = j.documents || [];
       } catch (e) {
-        this.toast("Failed to load documents", "error");
+        this.toast(kazmaT('documents.js.failed_to_load_documents', "Failed to load documents"), "error");
       }
     },
 
@@ -128,12 +128,12 @@ function documentsPage() {
           method: "POST",
         });
         if (dr.status === 401 || dr.status === 403) {
-          this.toast("Admin privileges required to run garbage collection", "error");
+          this.toast(kazmaT('documents.js.admin_privileges_required_to_run', "Admin privileges required to run garbage collection"), "error");
           return;
         }
         const dj = await dr.json();
         if (!dj.ok) {
-          this.toast("Garbage-collection dry-run failed", "error");
+          this.toast(kazmaT('documents.js.garbage_collection_dry_run_failed', "Garbage-collection dry-run failed"), "error");
           return;
         }
         this.gcReport = dj.report;
@@ -144,18 +144,15 @@ function documentsPage() {
           (rep.deleted_blob_rows || 0) +
           (rep.deleted_staging || 0);
         if (wouldDelete === 0) {
-          this.toast("Nothing to reclaim — the store is already clean", "info");
+          this.toast(kazmaT('documents.js.nothing_to_reclaim_the_store', "Nothing to reclaim — the store is already clean"), "info");
           await this.loadOps();
           return;
         }
         const proceed = await window.kazmaConfirm({
-          title: "Run garbage collection?",
-          message:
-            `Dry-run found ${wouldDelete} item(s) to delete ` +
-            `(~${this.fmtBytes(rep.reclaimed_bytes)} reclaimable). ` +
-            `Referenced content and current versions are never removed. Proceed?`,
-          confirmText: "Run GC",
-          cancelText: "Cancel",
+          title: kazmaT('documents.js.run_garbage_collection', "Run garbage collection?"),
+          message: kazmaT('documents.js.gc_confirm', 'Dry-run found {n} item(s) to delete (~{size} reclaimable). Referenced content and current versions are never removed. Proceed?', { n: wouldDelete, size: this.fmtBytes(rep.reclaimed_bytes) }),
+          confirmText: kazmaT('documents.js.run_gc', "Run GC"),
+          cancelText: kazmaT('common.cancel', "Cancel"),
           danger: true,
         });
         if (!proceed) return;
@@ -164,16 +161,15 @@ function documentsPage() {
         if (rj.ok) {
           this.gcReport = rj.report;
           this.toast(
-            `GC reclaimed ${rj.report.deleted_blobs} blob(s), ` +
-              `${this.fmtBytes(rj.report.reclaimed_bytes)}`,
+            kazmaT('documents.js.gc_done', 'GC reclaimed {n} blob(s), {size}', { n: rj.report.deleted_blobs, size: this.fmtBytes(rj.report.reclaimed_bytes) }),
             "success",
           );
           await this.loadOps();
         } else {
-          this.toast("Garbage collection failed", "error");
+          this.toast(kazmaT('documents.js.garbage_collection_failed', "Garbage collection failed"), "error");
         }
       } catch (e) {
-        this.toast("Garbage collection error", "error");
+        this.toast(kazmaT('documents.js.garbage_collection_error', "Garbage collection error"), "error");
       } finally {
         this.maintenanceRunning = false;
       }
@@ -216,8 +212,8 @@ function documentsPage() {
         } catch (_) {
           this.toast(
             r.status === 401
-              ? "Upload failed: not authenticated (re-login / set secret)"
-              : `Upload failed (HTTP ${r.status || "network"})`,
+              ? kazmaT('documents.js.upload_not_authed', 'Upload failed: not authenticated (re-login / set secret)')
+              : kazmaT('documents.js.upload_http', 'Upload failed (HTTP {status})', { status: r.status || 'network' }),
             "error",
           );
           return;
@@ -226,20 +222,20 @@ function documentsPage() {
           const msg =
             j.error ||
             (r.status === 401
-              ? "Not authenticated — re-login or check KAZMA_SECRET"
-              : `Upload failed (HTTP ${r.status})`);
+              ? kazmaT('documents.js.not_authed', 'Not authenticated — re-login or check KAZMA_SECRET')
+              : kazmaT('documents.js.upload_http', 'Upload failed (HTTP {status})', { status: r.status }));
           this.toast(msg, "error");
           return;
         }
-        this.toast("Uploaded — processing started", "success");
+        this.toast(kazmaT('documents.js.uploaded_processing_started', "Uploaded — processing started"), "success");
         await this.loadDocuments();
         await this.openDocument(j.document_id);
       } catch (e) {
         console.warn("[documents] upload error", e);
         this.toast(
           e && e.message
-            ? `Upload failed: ${e.message}`
-            : "Upload failed (network)",
+            ? kazmaT('documents.js.upload_failed_msg', 'Upload failed: {error}', { error: e.message })
+            : kazmaT('documents.js.upload_failed_network', 'Upload failed (network)'),
           "error",
         );
       } finally {
@@ -263,7 +259,7 @@ function documentsPage() {
         const r = await fetch(`/api/documents/${this.selected.document_id}`);
         const j = await r.json();
         if (!j.ok) {
-          this.toast(j.error || "Failed to load document", "error");
+          this.toast(j.error || kazmaT('documents.js.failed_to_load_document', "Failed to load document"), "error");
           return;
         }
         const doc = j.document;
@@ -278,7 +274,7 @@ function documentsPage() {
           this.pageCount = 0;
         }
       } catch (e) {
-        this.toast("Failed to load document", "error");
+        this.toast(kazmaT('documents.js.failed_to_load_document', "Failed to load document"), "error");
       }
     },
 
@@ -328,7 +324,7 @@ function documentsPage() {
           this.eventsFor = jobId;
         }
       } catch (e) {
-        this.toast("Failed to load events", "error");
+        this.toast(kazmaT('documents.js.failed_to_load_events', "Failed to load events"), "error");
       }
     },
 
@@ -337,13 +333,13 @@ function documentsPage() {
         const r = await fetch(`/api/documents/jobs/${jobId}/cancel`, { method: "POST" });
         const j = await r.json();
         if (j.ok) {
-          this.toast("Cancellation requested", "info");
+          this.toast(kazmaT('documents.js.cancellation_requested', "Cancellation requested"), "info");
           await this.refreshDetail();
         } else {
-          this.toast(j.error || "Cancel failed", "error");
+          this.toast(j.error || kazmaT('documents.js.cancel_failed', "Cancel failed"), "error");
         }
       } catch (e) {
-        this.toast("Cancel failed", "error");
+        this.toast(kazmaT('documents.js.cancel_failed', "Cancel failed"), "error");
       }
     },
 
@@ -352,14 +348,14 @@ function documentsPage() {
         const r = await fetch(`/api/documents/jobs/${jobId}/retry`, { method: "POST" });
         const j = await r.json();
         if (j.ok) {
-          this.toast("Retry enqueued", "success");
+          this.toast(kazmaT('documents.js.retry_enqueued', "Retry enqueued"), "success");
           await this.refreshDetail();
           this._startPoll();
         } else {
-          this.toast(j.error || "Retry failed", "error");
+          this.toast(j.error || kazmaT('documents.js.retry_failed', "Retry failed"), "error");
         }
       } catch (e) {
-        this.toast("Retry failed", "error");
+        this.toast(kazmaT('documents.js.retry_failed', "Retry failed"), "error");
       }
     },
 
@@ -380,9 +376,9 @@ function documentsPage() {
     _artifactToast(label, data) {
       const id = data && data.artifact_id;
       if (id) {
-        this.toast(`${label} — artifact ready`, "success");
+        this.toast(kazmaT('documents.js.artifact_ready', '{label} — artifact ready', { label: label }), "success");
       } else {
-        this.toast(`${label} complete`, "success");
+        this.toast(kazmaT('documents.js.op_complete', '{label} complete', { label: label }), "success");
       }
     },
 
@@ -390,7 +386,7 @@ function documentsPage() {
       if (!this.selected || this.acting) return;
       const fmt = (this.convertFormat || "").trim();
       if (!fmt) {
-        this.toast("Choose a target format", "error");
+        this.toast(kazmaT('documents.js.choose_a_target_format', "Choose a target format"), "error");
         return;
       }
       this.acting = true;
@@ -402,13 +398,13 @@ function documentsPage() {
         });
         const j = await r.json();
         if (!r.ok || !j.ok) {
-          this.toast(j.error || "Convert failed", "error");
+          this.toast(j.error || kazmaT('documents.js.convert_failed', "Convert failed"), "error");
           return;
         }
-        this._artifactToast(`Converted to ${fmt}`, j.artifact);
+        this._artifactToast(kazmaT('documents.js.converted_to', 'Converted to {format}', { format: fmt }), j.artifact);
         await this.refreshDetail();
       } catch (e) {
-        this.toast("Convert failed", "error");
+        this.toast(kazmaT('documents.js.convert_failed', "Convert failed"), "error");
       } finally {
         this.acting = false;
       }
@@ -421,14 +417,14 @@ function documentsPage() {
         const r = await fetch(`/api/documents/${this.selected.document_id}/pdf-info`);
         const j = await r.json();
         if (!r.ok || !j.ok) {
-          this.toast(j.error || "PDF info failed", "error");
+          this.toast(j.error || kazmaT('documents.js.pdf_info_failed', "PDF info failed"), "error");
           return;
         }
         const rep = j.report || {};
         this.preview = JSON.stringify(rep, null, 2);
-        this.toast("PDF info loaded", "success");
+        this.toast(kazmaT('documents.js.pdf_info_loaded', "PDF info loaded"), "success");
       } catch (e) {
-        this.toast("PDF info failed", "error");
+        this.toast(kazmaT('documents.js.pdf_info_failed', "PDF info failed"), "error");
       } finally {
         this.acting = false;
       }
@@ -448,13 +444,13 @@ function documentsPage() {
         });
         const j = await r.json();
         if (!r.ok || !j.ok) {
-          this.toast(j.error || "Split failed", "error");
+          this.toast(j.error || kazmaT('documents.js.split_failed', "Split failed"), "error");
           return;
         }
         this._artifactToast("Split", j.artifact);
         await this.refreshDetail();
       } catch (e) {
-        this.toast("Split failed", "error");
+        this.toast(kazmaT('documents.js.split_failed', "Split failed"), "error");
       } finally {
         this.acting = false;
       }
@@ -463,10 +459,9 @@ function documentsPage() {
     async redactDoc() {
       if (!this.selected || this.acting) return;
       const raw = await window.kazmaPrompt({
-        title: "Redact document",
-        message:
-          "Enter terms to redact (comma-separated). Redaction creates a new immutable artifact. Mixed image/vector PDFs fail closed and are refused.",
-        placeholder: "e.g. account number, SSN",
+        title: kazmaT('documents.js.redact_document', "Redact document"),
+        message: kazmaT('documents.js.redact_prompt', 'Enter terms to redact (comma-separated). Redaction creates a new immutable artifact. Mixed image/vector PDFs fail closed and are refused.'),
+        placeholder: kazmaT('documents.js.redact_ph', 'e.g. account number, SSN'),
       });
       if (raw === null) return;
       const terms = raw
@@ -474,13 +469,13 @@ function documentsPage() {
         .map((t) => t.trim())
         .filter((t) => t.length > 0);
       if (terms.length === 0) {
-        this.toast("Enter at least one term", "error");
+        this.toast(kazmaT('documents.js.enter_at_least_one_term', "Enter at least one term"), "error");
         return;
       }
       const ok = await window.kazmaConfirm({
-        title: "Confirm redaction",
-        message: `Physically redact ${terms.length} term(s)? This produces a new, independently-verified immutable artifact and cannot alter the original.`,
-        confirmText: "Redact",
+        title: kazmaT('documents.js.confirm_redaction', "Confirm redaction"),
+        message: kazmaT('documents.js.redact_confirm', 'Physically redact {n} term(s)? This produces a new, independently-verified immutable artifact and cannot alter the original.', { n: terms.length }),
+        confirmText: kazmaT('documents.redact', "Redact"),
       });
       if (!ok) return;
       this.acting = true;
@@ -492,13 +487,13 @@ function documentsPage() {
         });
         const j = await r.json();
         if (!r.ok || !j.ok) {
-          this.toast(j.error || "Redaction failed", "error");
+          this.toast(j.error || kazmaT('documents.js.redaction_failed', "Redaction failed"), "error");
           return;
         }
         this._artifactToast("Redacted", j.artifact);
         await this.refreshDetail();
       } catch (e) {
-        this.toast("Redaction failed", "error");
+        this.toast(kazmaT('documents.js.redaction_failed', "Redaction failed"), "error");
       } finally {
         this.acting = false;
       }
@@ -578,14 +573,10 @@ function documentsPage() {
       try {
         if (typeof window.kazmaConfirm === "function") {
           proceed = !!(await window.kazmaConfirm({
-            title: "Delete / archive document?",
-            message:
-              `Archive "${label}"?\n\n` +
-              "The document leaves your library (soft-delete). Any search index " +
-              "entries are removed. Original bytes stay until garbage collection " +
-              "reclaims unreferenced storage — this cannot be undone from the UI.",
-            confirmText: "Delete / Archive",
-            cancelText: "Cancel",
+            title: kazmaT('documents.js.delete_archive_document', "Delete / archive document?"),
+            message: kazmaT('documents.js.archive_confirm', 'Archive "{label}"?\n\nThe document leaves your library (soft-delete). Any search index entries are removed. Original bytes stay until garbage collection reclaims unreferenced storage — this cannot be undone from the UI.', { label: label }),
+            confirmText: kazmaT('documents.delete_archive', "Delete / Archive"),
+            cancelText: kazmaT('common.cancel', "Cancel"),
             danger: true,
           }));
         } else {
@@ -604,12 +595,12 @@ function documentsPage() {
         });
         const j = await r.json().catch(() => ({}));
         if (!r.ok || !j.ok) {
-          const msg = j.error || j.message || `Delete failed (HTTP ${r.status})`;
+          const msg = j.error || j.message || kazmaT('documents.js.delete_failed_http', 'Delete failed (HTTP {status})', { status: r.status });
           this.toast(msg, "error");
           console.warn("[documents] delete failed", r.status, j);
           return;
         }
-        this.toast("Document archived (soft-deleted)", "success");
+        this.toast(kazmaT('documents.js.document_archived_soft_deleted', "Document archived (soft-deleted)"), "success");
         // Optimistically drop from the local list so the UI updates even if
         // a follow-up list call races.
         this.documents = (this.documents || []).filter(
@@ -628,7 +619,7 @@ function documentsPage() {
         await this.loadDocuments();
         await this.loadOps();
       } catch (e) {
-        this.toast("Delete failed (network)", "error");
+        this.toast(kazmaT('documents.js.delete_failed_network', "Delete failed (network)"), "error");
         console.warn("[documents] delete error", e);
       } finally {
         this.acting = false;

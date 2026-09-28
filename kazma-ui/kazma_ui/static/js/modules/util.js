@@ -125,9 +125,9 @@ export const KazmaUtils = {
 
     copyToClipboard(text) {
         navigator.clipboard.writeText(text).then(() => {
-            showToast('Copied to clipboard', 'success', 2000);
+            showToast(window.kazmaT('common.ui.copied', 'Copied to clipboard'), 'success', 2000);
         }).catch(() => {
-            showToast('Failed to copy', 'error');
+            showToast(window.kazmaT('common.ui.copy_failed', 'Failed to copy'), 'error');
         });
     },
 

@@ -868,4 +868,40 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مسح الخطوات المحفوظة",
         "en": "Clear saved steps",
     },
+    "dashboard.live_connected": {
+        "ar": "• مباشر",
+        "en": "• Live",
+    },
+    "dashboard.live_disconnected": {
+        "ar": "• غير متصل",
+        "en": "• Disconnected",
+    },
+    "dashboard.live_connecting": {
+        "ar": "• جارٍ الاتصال…",
+        "en": "• Connecting…",
+    },
+    "dashboard.live_reconnecting": {
+        "ar": "• جارٍ إعادة الاتصال…",
+        "en": "• Reconnecting…",
+    },
+    "dashboard.kpi_beliefs": {
+        "ar": "المعتقدات",
+        "en": "Beliefs",
+    },
+    "dashboard.kpi_entities": {
+        "ar": "الكيانات",
+        "en": "Entities",
+    },
+    "dashboard.kpi_empty": {
+        "ar": "فارغة",
+        "en": "Empty",
+    },
+    "dashboard.kpi_isolated": {
+        "ar": "معزولة",
+        "en": "Isolated",
+    },
+    "dashboard.hitl_always_note": {
+        "ar": "هذه الأداة تتطلب الموافقة دائمًا — لا يستطيع YOLO تخطّيها.",
+        "en": "This tool always requires approval — YOLO cannot skip it.",
+    },
 }

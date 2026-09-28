@@ -1,6 +1,15 @@
 /** Settings mixin: integrations — mcp, skills, voice, email */
 (function (root) {
     "use strict";
+    // Text built here: the catalog's text in the page's language, else the
+    // English given; {name} placeholders filled from vars.
+    function _k(key, en, vars) {
+        var f = root && root.kazmaT;
+        if (typeof f === "function") return f(key, en, vars);
+        var s = en;
+        if (vars) for (var v in vars) s = s.split("{" + v + "}").join(String(vars[v]));
+        return s;
+    }
     root.KazmaSettingsMixins = root.KazmaSettingsMixins || {};
     root.KazmaSettingsMixins.integrations = function () {
         return {
@@ -18,7 +27,7 @@
         },
 
         async saveMcpServer() {
-            if (!this.newMcpServer.name) { showToast('Server name is required', 'error'); return; }
+            if (!this.newMcpServer.name) { showToast(_k('settings.int.server_name_is_required', 'Server name is required'), 'error'); return; }
             this.saving = true;
             try {
                 const data = { ...this.newMcpServer };
@@ -33,18 +42,18 @@
                 });
                 this.showMcpModal = false;
                 await this.loadMcpServers();
-                showToast('MCP server added', 'success');
+                showToast(_k('settings.int.mcp_server_added', 'MCP server added'), 'success');
             } catch (e) {
-                showToast('Failed to add server: ' + e.message, 'error');
+                showToast(_k('settings.int.failed_to_add_server', 'Failed to add server: ') + e.message, 'error');
             }
             this.saving = false;
         },
 
         async deleteMcpServer(name) {
             if (!(await window.kazmaConfirm({
-                title: 'Remove MCP server',
-                message: `Remove MCP server "${name}"? This cannot be undone.`,
-                confirmText: 'Remove',
+                title: _k('settings.int.remove_mcp_server', 'Remove MCP server'),
+                message: _k('settings.int.remove_mcp_message', 'Remove MCP server "{name}"? This cannot be undone.', { name: name }),
+                confirmText: _k('settings.int.remove', 'Remove'),
                 danger: true,
             }))) return;
             try {
@@ -55,9 +64,9 @@
                     return;
                 }
                 await this.loadMcpServers();
-                showToast('Server removed', 'success');
+                showToast(_k('settings.int.server_removed', 'Server removed'), 'success');
             } catch (e) {
-                showToast('Delete failed: ' + e.message, 'error');
+                showToast(_k('settings.int.delete_failed', 'Delete failed: ') + e.message, 'error');
             }
         },
 
@@ -69,7 +78,7 @@
                     body: JSON.stringify({ enabled }),
                 });
             } catch (e) {
-                showToast('Toggle failed: ' + e.message, 'error');
+                showToast(_k('settings.int.toggle_failed', 'Toggle failed: ') + e.message, 'error');
             }
             // Reload either way: the list shows what the server actually has.
             await this.loadMcpServers();
@@ -80,10 +89,10 @@
             try {
                 const resp = await fetch(`/api/settings/mcp/${encodeURIComponent(name)}/test`, { method: 'POST' });
                 const result = await resp.json();
-                showToast(result.success ? `${name}: ${result.tool_count} tools found` : `${name}: ${result.error}`,
+                showToast(result.success ? _k('settings.int.mcp_tools_found', '{name}: {n} tools found', { name: name, n: result.tool_count }) : `${name}: ${result.error}`,
                     result.success ? 'success' : 'error');
             } catch (e) {
-                showToast(`Test failed: ${e.message}`, 'error');
+                showToast(_k('settings.int.test_failed', 'Test failed: {error}', { error: e.message }), 'error');
             }
             this.testingMcp = null;
         },
@@ -104,23 +113,23 @@
                     body: JSON.stringify({ enabled }),
                 });
             } catch (e) {
-                showToast('Toggle failed: ' + e.message, 'error');
+                showToast(_k('settings.int.toggle_failed', 'Toggle failed: ') + e.message, 'error');
             }
             await this.loadSkills();
         },
 
         async uninstallSkill(skillId) {
             if (!(await window.kazmaConfirm({
-                title: 'Uninstall skill',
-                message: `Uninstall skill "${skillId}"? This cannot be undone.`,
-                confirmText: 'Uninstall',
+                title: _k('settings.int.uninstall_skill', 'Uninstall skill'),
+                message: _k('settings.int.uninstall_skill_message', 'Uninstall skill "{name}"? This cannot be undone.', { name: skillId }),
+                confirmText: _k('settings.int.uninstall', 'Uninstall'),
                 danger: true,
             }))) return;
             try {
                 await window.kazmaSave(`/api/settings/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' });
-                showToast('Skill uninstalled', 'success');
+                showToast(_k('settings.int.skill_uninstalled', 'Skill uninstalled'), 'success');
             } catch (e) {
-                showToast('Uninstall failed: ' + e.message, 'error');
+                showToast(_k('settings.int.uninstall_failed', 'Uninstall failed: ') + e.message, 'error');
             }
             await this.loadSkills();
         },
@@ -145,9 +154,9 @@
                 if (!resp.ok) {
                     throw new Error('HTTP ' + resp.status);
                 }
-                showToast('Voice settings saved', 'success');
+                showToast(_k('settings.int.voice_settings_saved', 'Voice settings saved'), 'success');
             } catch (e) {
-                showToast('Failed to save voice settings: ' + e.message, 'error');
+                showToast(_k('settings.int.failed_to_save_voice_settings', 'Failed to save voice settings: ') + e.message, 'error');
             } finally {
                 this.saving = false;
             }
@@ -336,21 +345,21 @@
                         url.searchParams.delete('calendar');
                         history.replaceState(null, '', url.pathname + url.search + url.hash);
                     } else if (oauth === 'error') {
-                        showToast('OAuth failed: ' + (url.searchParams.get('msg') || 'unknown'), 'error');
+                        showToast(_k('settings.int.oauth_failed', 'OAuth failed: ') + (url.searchParams.get('msg') || 'unknown'), 'error');
                         url.searchParams.delete('email_oauth');
                         url.searchParams.delete('msg');
                         history.replaceState(null, '', url.pathname + url.search + url.hash);
                     }
                     if (calOauth === 'ok') {
                         const em = url.searchParams.get('email') || '';
-                        showToast('Google Calendar connected' + (em ? ' as ' + em : ''), 'success');
+                        showToast(_k('settings.int.gcal_connected', 'Google Calendar connected') + (em ? _k('settings.int.as_account', ' as {email}', { email: em }) : ''), 'success');
                         url.searchParams.delete('calendar_oauth');
                         url.searchParams.delete('provider');
                         url.searchParams.delete('email');
                         url.searchParams.delete('msg');
                         history.replaceState(null, '', url.pathname + url.search + url.hash);
                     } else if (calOauth === 'error') {
-                        showToast('Calendar OAuth failed: ' + (url.searchParams.get('msg') || 'unknown'), 'error');
+                        showToast(_k('settings.int.calendar_oauth_failed', 'Calendar OAuth failed: ') + (url.searchParams.get('msg') || 'unknown'), 'error');
                         url.searchParams.delete('calendar_oauth');
                         url.searchParams.delete('msg');
                         history.replaceState(null, '', url.pathname + url.search + url.hash);
@@ -406,7 +415,7 @@
                 showToast(data.message || ('Gmail ' + protocol.toUpperCase() + ' connected'), 'success');
                 await this.loadEmailStatus();
             } catch (e) {
-                showToast('Gmail ' + protocol + ' failed: ' + e.message, 'error');
+                showToast(_k('settings.int.protocol_failed', '{provider} {protocol} failed: {error}', { provider: 'Gmail', protocol: protocol, error: e.message }), 'error');
             } finally {
                 this.emailSaving = false;
             }
@@ -439,7 +448,7 @@
                 showToast(data.message || ('Microsoft ' + protocol.toUpperCase() + ' connected'), 'success');
                 await this.loadEmailStatus();
             } catch (e) {
-                showToast('Microsoft ' + protocol + ' failed: ' + e.message, 'error');
+                showToast(_k('settings.int.protocol_failed', '{provider} {protocol} failed: {error}', { provider: 'Microsoft', protocol: protocol, error: e.message }), 'error');
             } finally {
                 this.emailSaving = false;
             }
@@ -463,10 +472,10 @@
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
                 this.emailGmailOAuth.client_secret = '';
-                showToast(data.message || 'Google OAuth client saved', 'success');
+                showToast(data.message || _k('settings.int.google_oauth_client_saved', 'Google OAuth client saved'), 'success');
                 await this.loadEmailStatus();
             } catch (e) {
-                showToast('Save failed: ' + e.message, 'error');
+                showToast(_k('settings.int.save_failed', 'Save failed: ') + e.message, 'error');
             } finally {
                 this.emailSaving = false;
             }
@@ -501,11 +510,11 @@
                 const resp = await fetch('/api/email/oauth/gmail/start.json', { credentials: 'same-origin' });
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok || !data.ok || !data.authorize_url) {
-                    throw new Error(data.error || 'Could not start Google OAuth (is Client ID/secret saved?)');
+                    throw new Error(data.error || _k('settings.int.could_not_start_google_oauth', 'Could not start Google OAuth (is Client ID/secret saved?)'));
                 }
                 window.location.href = data.authorize_url;
             } catch (e) {
-                showToast('Gmail OAuth failed: ' + e.message, 'error');
+                showToast(_k('settings.int.gmail_oauth_failed', 'Gmail OAuth failed: ') + e.message, 'error');
                 this.emailSaving = false;
             }
         },
@@ -519,11 +528,11 @@
                 const resp = await fetch('/api/email/oauth/microsoft/start.json', { credentials: 'same-origin' });
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok || !data.ok || !data.authorize_url) {
-                    throw new Error(data.error || 'Could not start Microsoft OAuth');
+                    throw new Error(data.error || _k('settings.int.could_not_start_microsoft_oauth', 'Could not start Microsoft OAuth'));
                 }
                 window.location.href = data.authorize_url;
             } catch (e) {
-                showToast('Microsoft OAuth failed: ' + e.message, 'error');
+                showToast(_k('settings.int.microsoft_oauth_failed', 'Microsoft OAuth failed: ') + e.message, 'error');
                 this.emailSaving = false;
             }
         },
@@ -548,10 +557,10 @@
                     throw new Error(data.error || ('HTTP ' + resp.status));
                 }
                 this.emailGmail.app_password = '';
-                showToast(data.message || 'Gmail connected', 'success');
+                showToast(data.message || _k('settings.int.gmail_connected', 'Gmail connected'), 'success');
                 await this.loadEmailStatus();
             } catch (e) {
-                showToast('Gmail connect failed: ' + e.message, 'error');
+                showToast(_k('settings.int.gmail_connect_failed', 'Gmail connect failed: ') + e.message, 'error');
             } finally {
                 this.emailSaving = false;
             }
@@ -572,11 +581,11 @@
                 const resp = await fetch('/api/calendar/oauth/google/start.json', { credentials: 'same-origin' });
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok || !data.ok || !data.authorize_url) {
-                    throw new Error(data.error || 'Could not start Google Calendar OAuth');
+                    throw new Error(data.error || _k('settings.int.could_not_start_google_calendar', 'Could not start Google Calendar OAuth'));
                 }
                 window.location.href = data.authorize_url;
             } catch (e) {
-                showToast('Calendar OAuth failed: ' + e.message, 'error');
+                showToast(_k('settings.int.calendar_oauth_failed', 'Calendar OAuth failed: ') + e.message, 'error');
                 this.emailSaving = false;
             }
         },
@@ -596,11 +605,11 @@
                     headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 });
                 const data = await resp.json().catch(() => ({}));
-                if (!resp.ok || data.ok === false) throw new Error(data.error || 'Failed');
-                showToast(data.message || 'Google Calendar disconnected', 'success');
+                if (!resp.ok || data.ok === false) throw new Error(data.error || _k('settings.int.failed', 'Failed'));
+                showToast(data.message || _k('settings.int.google_calendar_disconnected', 'Google Calendar disconnected'), 'success');
                 await this.loadEmailStatus();
             } catch (e) {
-                showToast('Disconnect failed: ' + e.message, 'error');
+                showToast(_k('settings.int.disconnect_failed', 'Disconnect failed: ') + e.message, 'error');
             } finally {
                 this.emailSaving = false;
             }
@@ -621,12 +630,12 @@
                     headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 });
                 const data = await resp.json().catch(() => ({}));
-                if (!resp.ok || data.ok === false) throw new Error(data.error || 'Failed');
+                if (!resp.ok || data.ok === false) throw new Error(data.error || _k('settings.int.failed', 'Failed'));
                 this.emailGmail = { address: '', app_password: '' };
-                showToast(data.message || 'Gmail disconnected', 'success');
+                showToast(data.message || _k('settings.int.gmail_disconnected', 'Gmail disconnected'), 'success');
                 await this.loadEmailStatus();
             } catch (e) {
-                showToast('Disconnect failed: ' + e.message, 'error');
+                showToast(_k('settings.int.disconnect_failed', 'Disconnect failed: ') + e.message, 'error');
             } finally {
                 this.emailSaving = false;
             }
@@ -650,10 +659,10 @@
                 });
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
-                showToast(data.message || 'Microsoft app saved', 'success');
+                showToast(data.message || _k('settings.int.microsoft_app_saved', 'Microsoft app saved'), 'success');
                 await this.loadEmailStatus();
             } catch (e) {
-                showToast('Save failed: ' + e.message, 'error');
+                showToast(_k('settings.int.save_failed', 'Save failed: ') + e.message, 'error');
             } finally {
                 this.emailSaving = false;
             }
@@ -686,7 +695,7 @@
                 this._startMsPoll();
             } catch (e) {
                 this.emailMsConnecting = false;
-                showToast('Microsoft connect failed: ' + e.message, 'error');
+                showToast(_k('settings.int.microsoft_connect_failed', 'Microsoft connect failed: ') + e.message, 'error');
             }
         },
 
@@ -715,7 +724,7 @@
                         this.emailMsPollTimer = null;
                         this.emailMsConnecting = false;
                         this.emailMsDevice = { user_code: '', verification_uri: '', device_code: '', message: '' };
-                        showToast(data.message || 'Microsoft connected', 'success');
+                        showToast(data.message || _k('settings.int.microsoft_connected', 'Microsoft connected'), 'success');
                         await this.loadEmailStatus();
                         return;
                     }
@@ -723,7 +732,7 @@
                         clearInterval(this.emailMsPollTimer);
                         this.emailMsPollTimer = null;
                         this.emailMsConnecting = false;
-                        showToast(data.error || 'Authorization failed', 'error');
+                        showToast(data.error || _k('settings.int.authorization_failed', 'Authorization failed'), 'error');
                     }
                     // authorization_pending / slow_down → keep polling
                 } catch (e) {
@@ -752,12 +761,12 @@
                     headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 });
                 const data = await resp.json().catch(() => ({}));
-                if (!resp.ok || data.ok === false) throw new Error(data.error || 'Failed');
+                if (!resp.ok || data.ok === false) throw new Error(data.error || _k('settings.int.failed', 'Failed'));
                 this.emailMsDevice = { user_code: '', verification_uri: '', device_code: '', message: '' };
-                showToast(data.message || 'Microsoft disconnected', 'success');
+                showToast(data.message || _k('settings.int.microsoft_disconnected', 'Microsoft disconnected'), 'success');
                 await this.loadEmailStatus();
             } catch (e) {
-                showToast('Disconnect failed: ' + e.message, 'error');
+                showToast(_k('settings.int.disconnect_failed', 'Disconnect failed: ') + e.message, 'error');
             } finally {
                 this.emailSaving = false;
             }
@@ -777,7 +786,7 @@
                     this.xForm.enabled = !!data.enabled;
                 }
             } catch (e) {
-                showToast('Failed to load X status: ' + e.message, 'error');
+                showToast(_k('settings.int.failed_to_load_x_status', 'Failed to load X status: ') + e.message, 'error');
             } finally {
                 this.xLoading = false;
             }
@@ -803,7 +812,7 @@
                 });
                 const data = await resp.json().catch(function () { return {}; });
                 if (!resp.ok || data.ok === false) {
-                    showToast(data.detail || data.error || 'Save failed', 'error');
+                    showToast(data.detail || data.error || _k('settings.int.save_failed_2', 'Save failed'), 'error');
                     return;
                 }
                 this.xForm.api_key = '';
@@ -811,9 +820,9 @@
                 this.xForm.access_token = '';
                 this.xForm.access_token_secret = '';
                 Object.assign(this.xStatus, data);
-                showToast('X credentials saved (vaulted). Test the connection next.', 'success');
+                showToast(_k('settings.int.x_credentials_saved_vaulted_test', 'X credentials saved (vaulted). Test the connection next.'), 'success');
             } catch (e) {
-                showToast('Save failed: ' + e.message, 'error');
+                showToast(_k('settings.int.save_failed', 'Save failed: ') + e.message, 'error');
             } finally {
                 this.xSaving = false;
             }
@@ -829,14 +838,14 @@
                 });
                 const data = await resp.json().catch(function () { return {}; });
                 if (!resp.ok || data.ok === false) {
-                    showToast(data.detail || data.error || 'X test failed', 'error');
+                    showToast(data.detail || data.error || _k('settings.int.x_test_failed', 'X test failed'), 'error');
                     return;
                 }
                 Object.assign(this.xStatus, data);
                 var who = data.verified_username ? (' @' + data.verified_username) : '';
-                showToast('X API ok' + who + '. Read + Write user tokens work.', 'success');
+                showToast(_k('settings.int.x_api_ok', 'X API ok{who}. Read + Write user tokens work.', { who: who }), 'success');
             } catch (e) {
-                showToast('X test failed: ' + e.message, 'error');
+                showToast(_k('settings.int.x_test_failed_2', 'X test failed: ') + e.message, 'error');
             } finally {
                 this.xSaving = false;
             }
@@ -844,9 +853,9 @@
 
         async disconnectX() {
             if (!(await window.kazmaConfirm({
-                title: 'Disconnect X',
-                message: 'Remove the four OAuth keys from the vault and disable posting?',
-                confirmText: 'Disconnect',
+                title: _k('settings.int.disconnect_x', 'Disconnect X'),
+                message: _k('settings.int.remove_the_four_oauth_keys', 'Remove the four OAuth keys from the vault and disable posting?'),
+                confirmText: _k('settings.int.disconnect', 'Disconnect'),
                 danger: true,
             }))) return;
             this.xSaving = true;
@@ -858,14 +867,14 @@
                 });
                 const data = await resp.json().catch(function () { return {}; });
                 if (!resp.ok || data.ok === false) {
-                    showToast(data.detail || data.error || 'Disconnect failed', 'error');
+                    showToast(data.detail || data.error || _k('settings.int.disconnect_failed_2', 'Disconnect failed'), 'error');
                     return;
                 }
                 Object.assign(this.xStatus, data);
                 this.xForm.enabled = false;
-                showToast('X connector disconnected.', 'success');
+                showToast(_k('settings.int.x_connector_disconnected', 'X connector disconnected.'), 'success');
             } catch (e) {
-                showToast('Disconnect failed: ' + e.message, 'error');
+                showToast(_k('settings.int.disconnect_failed', 'Disconnect failed: ') + e.message, 'error');
             } finally {
                 this.xSaving = false;
             }
@@ -883,7 +892,7 @@
                     this.xReplyProblems = [];
                 }
             } catch (e) {
-                showToast('Failed to load auto-reply settings: ' + e.message, 'error');
+                showToast(_k('settings.int.failed_to_load_auto_reply', 'Failed to load auto-reply settings: ') + e.message, 'error');
             } finally {
                 this.xReplyLoading = false;
             }
@@ -974,7 +983,7 @@
                 const data = await resp.json().catch(function () { return {}; });
                 if (!resp.ok || data.ok === false) {
                     this.xReplyProblems = data.problems || [];
-                    showToast(data.error || data.detail || 'Save failed', 'error');
+                    showToast(data.error || data.detail || _k('settings.int.save_failed_2', 'Save failed'), 'error');
                     return;
                 }
                 Object.assign(this.xReply, data);
@@ -983,14 +992,14 @@
                 // succeeded, the operator should know what they turned on.
                 (data.warnings || []).forEach(function (w) { showToast(w, 'warning'); });
                 if (data.poller_running) {
-                    showToast('Auto-reply saved. Mentions poller is live.', 'success');
+                    showToast(_k('settings.int.auto_reply_saved_mentions_poller', 'Auto-reply saved. Mentions poller is live.'), 'success');
                 } else if (data.restart_required_for_poller) {
-                    showToast('Saved. Restart Kazma to start the mentions poller.', 'warning');
+                    showToast(_k('settings.int.saved_restart_kazma_to_start', 'Saved. Restart Kazma to start the mentions poller.'), 'warning');
                 } else {
-                    showToast('Auto-reply settings saved.', 'success');
+                    showToast(_k('settings.int.auto_reply_settings_saved', 'Auto-reply settings saved.'), 'success');
                 }
             } catch (e) {
-                showToast('Save failed: ' + e.message, 'error');
+                showToast(_k('settings.int.save_failed', 'Save failed: ') + e.message, 'error');
             } finally {
                 this.xReplySaving = false;
             }
@@ -1001,7 +1010,7 @@
         // times as it takes to get the voice right.
         async runXReplyPreview() {
             if (!this.xReplyPreview.text.trim()) {
-                showToast('Paste the post you want a reply to.', 'error');
+                showToast(_k('settings.int.paste_the_post_you_want', 'Paste the post you want a reply to.'), 'error');
                 return;
             }
             this.xReplyPreview.busy = true;
@@ -1027,10 +1036,10 @@
                 const data = await resp.json().catch(function () { return {}; });
                 this.xReplyPreview.result = data;
                 if (!resp.ok && !data.reason) {
-                    showToast(data.error || 'Preview failed', 'error');
+                    showToast(data.error || _k('settings.int.preview_failed', 'Preview failed'), 'error');
                 }
             } catch (e) {
-                showToast('Preview failed: ' + e.message, 'error');
+                showToast(_k('settings.int.preview_failed_2', 'Preview failed: ') + e.message, 'error');
             } finally {
                 this.xReplyPreview.busy = false;
             }

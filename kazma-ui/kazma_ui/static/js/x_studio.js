@@ -48,7 +48,7 @@ function xStudioPage() {
           const resp = await this._mutating('POST', '/api/x/reply/poll', {});
           const pdata = await resp.json().catch(function () { return {}; });
           if (!resp.ok || pdata.ok === false) {
-            window.showToast(pdata.error || 'Could not poll X', 'error');
+            window.showToast(pdata.error || this.t('x_studio.poll_failed'), 'error');
           } else if (pdata.message) {
             window.showToast(pdata.message, 'success');
           }
@@ -72,14 +72,14 @@ function xStudioPage() {
       if (kind === 'approve' || kind === 'deny' || kind === 'delete') {
         const posted = kind === 'delete' && row.status === 'posted' && row.tweet_id;
         const ok = await window.kazmaConfirm({
-          title: kind === 'approve' ? 'Post this reply?'
+          title: kind === 'approve' ? this.t('x_studio.confirm_post_reply')
             : (kind === 'delete'
-              ? (posted ? 'Delete this reply on X?' : 'Remove from the log?')
-              : 'Discard this draft?'),
+              ? (posted ? this.t('x_studio.confirm_delete_on_x') : this.t('x_studio.confirm_remove_log'))
+              : this.t('x_studio.confirm_discard')),
           message: posted
-            ? ((row.reply || '') + '\n\nThis removes the tweet from X.')
+            ? ((row.reply || '') + '\n\n' + this.t('x_studio.removes_tweet'))
             : (row.reply || row.reason || id),
-          confirmText: kind === 'approve' ? 'Approve' : (kind === 'delete' ? 'Delete' : 'Deny'),
+          confirmText: kind === 'approve' ? this.t('common.approve') : (kind === 'delete' ? this.t('common.delete') : this.t('common.deny')),
           danger: kind !== 'approve',
         });
         if (!ok) return;
@@ -90,12 +90,12 @@ function xStudioPage() {
         const data = await resp.json().catch(function () { return {}; });
         if (resp.ok && data.ok !== false) {
           const msg = kind === 'approve' && data.url
-            ? ('Posted: ' + data.url)
-            : (kind === 'delete' ? (data.reason || 'Deleted.')
-              : (kind === 'deny' ? 'Denied.' : (data.action === 'awaiting_approval' ? 'Redrafted — approve to post.' : (data.reason || 'Done.'))));
+            ? this.t('x_studio.posted_url').replace('{url}', data.url)
+            : (kind === 'delete' ? (data.reason || this.t('x_studio.reply_deleted'))
+              : (kind === 'deny' ? this.t('x_studio.denied') : (data.action === 'awaiting_approval' ? this.t('x_studio.redrafted') : (data.reason || this.t('x_studio.done')))));
           window.showToast(msg, data.action === 'failed' ? 'error' : 'success');
         } else {
-          window.showToast(data.error || data.reason || 'Request failed', 'error');
+          window.showToast(data.error || data.reason || this.t('common.request_failed'), 'error');
         }
         await this.loadConversations();
       } catch (e) {
@@ -108,7 +108,7 @@ function xStudioPage() {
     convWhen(epoch) {
       if (!epoch) return '';
       try {
-        return new Date(Number(epoch) * 1000).toLocaleString();
+        return window.KazmaFormat ? window.KazmaFormat.dateTime(Number(epoch)) : new Date(Number(epoch) * 1000).toLocaleString();
       } catch (e) {
         return '';
       }
@@ -360,7 +360,7 @@ function xStudioPage() {
       const bits = [];
       if (entry.ts) {
         try {
-          bits.push(new Date(entry.ts).toLocaleString());
+          bits.push(window.KazmaFormat ? window.KazmaFormat.dateTime(entry.ts) : new Date(entry.ts).toLocaleString());
         } catch (_e) { bits.push(String(entry.ts)); }
       }
       if (entry.status && entry.status !== 'success') {

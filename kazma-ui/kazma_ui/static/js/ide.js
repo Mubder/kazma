@@ -53,6 +53,13 @@ function ideApp() {
       }
     },
 
+    /* A catalog string in the page's language, {name} filled from vars. */
+    _tx(key, fallback, vars) {
+      let text = window.tOr ? window.tOr(key, fallback) : fallback;
+      for (const [k, v] of Object.entries(vars || {})) text = text.split('{' + k + '}').join(String(v));
+      return text;
+    },
+
     // ── Init ──
     init() {
       this.initEditor();
@@ -91,8 +98,7 @@ function ideApp() {
         ? crypto.randomUUID() : ('ide-' + Date.now());
       this.chatMessages.push({
         role: 'system',
-        content: 'Ask about the open file, request edits, or run commands. ' +
-                 'The agent knows your workspace, repo, and tools.',
+        content: this._tx('ide.welcome', 'Ask about the open file, request edits, or run commands. The agent knows your workspace, repo, and tools.'),
       });
     },
 
@@ -120,15 +126,15 @@ function ideApp() {
           path: this.currentFile,
         });
         if (data.ok) {
-          this.showResult('Skill: ' + this.selectedSkill,
-            'Task ID: ' + (data.task_id || '(unknown)'));
-          this.toast(this.selectedSkill + ' dispatched', true);
+          this.showResult(this._tx('ide.res_skill', 'Skill: {skill}', { skill: this.selectedSkill }),
+            this._tx('ide.task_id', 'Task ID: {id}', { id: data.task_id || this._tx('ide.unknown', '(unknown)') }));
+          this.toast(this._tx('ide.toast_skill_dispatched', '{skill} dispatched', { skill: this.selectedSkill }), true);
         } else {
-          this.showResult('Skill failed', data.error || 'Unknown error');
-          this.toast('Skill failed', false);
+          this.showResult(this._tx('ide.toast_skill_failed', 'Skill failed'), data.error || this._tx('ide.unknown_error', 'Unknown error'));
+          this.toast(this._tx('ide.toast_skill_failed', 'Skill failed'), false);
         }
       } catch (err) {
-        this.toast('Skill failed', false);
+        this.toast(this._tx('ide.toast_skill_failed', 'Skill failed'), false);
       } finally {
         this.busy = false;
       }
@@ -491,7 +497,7 @@ function ideApp() {
         });
         this.treePath = data.path || '';
       } catch (err) {
-        this.toast('Failed to list files', false);
+        this.toast(this._tx('ide.toast_list_failed', 'Failed to list files'), false);
       } finally {
         this.busy = false;
       }
@@ -527,7 +533,7 @@ function ideApp() {
       try {
         var data = await this._get('/api/ide/read?path=' + encodeURIComponent(path));
         if (!data.ok) {
-          this.showResult('Read failed', data.error || 'Unknown error');
+          this.showResult(this._tx('ide.res_read_failed', 'Read failed'), data.error || this._tx('ide.unknown_error', 'Unknown error'));
           return;
         }
         var filePath = data.path || path;
@@ -545,7 +551,7 @@ function ideApp() {
         this.activeTabPath = filePath;
         this._loadFromTab(this._activeTab());
       } catch (err) {
-        this.toast('Open failed', false);
+        this.toast(this._tx('ide.toast_open_failed', 'Open failed'), false);
       }
     },
 
@@ -603,11 +609,11 @@ function ideApp() {
       if ((path === this.activeTabPath ? this.dirty : tab.dirty)) {
         var ok = window.kazmaConfirm
           ? await window.kazmaConfirm({
-              title: 'Close tab',
-              message: '"' + tab.name + '" has unsaved changes. Close anyway?',
-              confirmText: 'Close', danger: true,
+              title: this._tx('ide.dlg.close_tab_title', 'Close tab'),
+              message: this._tx('ide.dlg.close_tab_message', '"{name}" has unsaved changes. Close anyway?', { name: tab.name }),
+              confirmText: this._tx('ide.dlg.close', 'Close'), danger: true,
             })
-          : await window.confirm('"' + tab.name + '" has unsaved changes. Close anyway?');
+          : await window.confirm(this._tx('ide.dlg.close_tab_message', '"{name}" has unsaved changes. Close anyway?', { name: tab.name }));
         if (!ok) return;
       }
       this.tabs.splice(idx, 1);
@@ -628,11 +634,11 @@ function ideApp() {
     async newFile() {
       var name = window.kazmaPrompt
         ? await window.kazmaPrompt({
-            title: 'New file',
-            message: 'Path (relative to workspace root)',
+            title: this._tx('ide.dlg.new_file_title', 'New file'),
+            message: this._tx('ide.dlg.new_file_message', 'Path (relative to workspace root)'),
             placeholder: 'e.g. src/new_module.py',
             defaultValue: 'new_file.py',
-            confirmText: 'Create',
+            confirmText: this._tx('ide.dlg.create', 'Create'),
           })
         : window.prompt('New file path:', 'new_file.py');
       if (!name || !name.trim()) return;
@@ -647,7 +653,7 @@ function ideApp() {
         dirty: false,
       });
       this._loadFromTab(this.tabs[this.tabs.length - 1]);
-      this.toast('New file — press Save to create it', true);
+      this.toast(this._tx('ide.toast_new_file', 'New file — press Save to create it'), true);
     },
 
     _langFromName(name) {
@@ -669,27 +675,27 @@ function ideApp() {
       if (!this.currentFile) return;
       var ok = window.kazmaConfirm
         ? await window.kazmaConfirm({
-            title: 'Delete file',
-            message: 'Delete "' + this.currentFile + '"?\nThis cannot be undone.',
-            confirmText: 'Delete', danger: true,
+            title: this._tx('ide.dlg.delete_file_title', 'Delete file'),
+            message: this._tx('ide.dlg.delete_file_message', 'Delete "{path}"?\nThis cannot be undone.', { path: this.currentFile }),
+            confirmText: this._tx('ide.delete', 'Delete'), danger: true,
           })
-        : await window.confirm('Delete "' + this.currentFile + '"?\nThis cannot be undone.');
+        : await window.confirm(this._tx('ide.dlg.delete_file_message', 'Delete "{path}"?\nThis cannot be undone.', { path: this.currentFile }));
       if (!ok) return;
       var delPath = this.currentFile;
       this.busy = true;
       try {
         var data = await this._post('/api/ide/delete', { path: delPath });
         if (data.ok) {
-          this.toast('Deleted ' + delPath, true);
+          this.toast(this._tx('ide.toast_deleted', 'Deleted {path}', { path: delPath }), true);
           // Remove the tab for the deleted file.
           this.closeTabSilent(delPath);
           this.loadTree(this.treePath);
         } else {
-          this.showResult('Delete failed', data.error || 'Unknown error');
-          this.toast('Delete failed (approval may be pending)', false);
+          this.showResult(this._tx('ide.res_delete_failed', 'Delete failed'), data.error || this._tx('ide.unknown_error', 'Unknown error'));
+          this.toast(this._tx('ide.toast_delete_pending', 'Delete failed (approval may be pending)'), false);
         }
       } catch (err) {
-        this.toast('Delete failed', false);
+        this.toast(this._tx('ide.res_delete_failed', 'Delete failed'), false);
       } finally {
         this.busy = false;
       }
@@ -729,14 +735,14 @@ function ideApp() {
           // Sync the active tab.
           var tab = this._activeTab();
           if (tab) { tab.original = saved; tab.content = saved; tab.dirty = false; }
-          this.toast('Saved ' + this.currentFile, true);
-          this.showResult('Save', data.output || 'OK');
+          this.toast(this._tx('ide.toast_saved', 'Saved {path}', { path: this.currentFile }), true);
+          this.showResult(this._tx('ide.res_save', 'Save'), data.output || this._tx('ide.ok', 'OK'));
         } else {
-          this.showResult('Save failed', data.error || data.output || 'Unknown error');
-          this.toast('Save failed (approval may be pending)', false);
+          this.showResult(this._tx('ide.res_save_failed', 'Save failed'), data.error || data.output || this._tx('ide.unknown_error', 'Unknown error'));
+          this.toast(this._tx('ide.toast_save_pending', 'Save failed (approval may be pending)'), false);
         }
       } catch (err) {
-        this.toast('Save failed', false);
+        this.toast(this._tx('ide.res_save_failed', 'Save failed'), false);
       } finally {
         this.busy = false;
       }
@@ -808,14 +814,14 @@ function ideApp() {
           { path: path, hunk_index: hunkIndex }
         );
         if (data.ok) {
-          this.toast('Hunk restored', true);
+          this.toast(this._tx('ide.toast_hunk_restored', 'Hunk restored'), true);
           await this.openLatestReview();
           if (this.currentFile) this.openFile(this.currentFile);
         } else {
-          this.toast('Hunk restore failed', false);
+          this.toast(this._tx('ide.toast_hunk_failed', 'Hunk restore failed'), false);
         }
       } catch (err) {
-        this.toast('Hunk restore failed', false);
+        this.toast(this._tx('ide.toast_hunk_failed', 'Hunk restore failed'), false);
       } finally {
         this.busy = false;
       }
@@ -825,9 +831,9 @@ function ideApp() {
       if (!this.review.id || !path) return;
       var ok = window.kazmaConfirm
         ? await window.kazmaConfirm({
-            title: 'Reject this file',
-            message: 'Restore this file from the pre-patch checkpoint?',
-            confirmText: 'Restore file',
+            title: this._tx('ide.dlg.reject_file_title', 'Reject this file'),
+            message: this._tx('ide.dlg.reject_file_message', 'Restore this file from the pre-patch checkpoint?'),
+            confirmText: this._tx('ide.dlg.restore_file', 'Restore file'),
             danger: true,
           })
         : true;
@@ -839,14 +845,14 @@ function ideApp() {
           { path: path }
         );
         if (data.ok) {
-          this.toast('Restored ' + path, true);
+          this.toast(this._tx('ide.toast_restored_path', 'Restored {path}', { path: path }), true);
           await this.openLatestReview();
           if (this.currentFile) this.openFile(this.currentFile);
         } else {
-          this.toast('Restore failed', false);
+          this.toast(this._tx('ide.res_restore_failed', 'Restore failed'), false);
         }
       } catch (err) {
-        this.toast('Restore failed', false);
+        this.toast(this._tx('ide.res_restore_failed', 'Restore failed'), false);
       } finally {
         this.busy = false;
       }
@@ -855,9 +861,9 @@ function ideApp() {
     async rejectReview() {
       var ok = window.kazmaConfirm
         ? await window.kazmaConfirm({
-            title: 'Reject patches',
-            message: 'Restore the pre-patch checkpoint? This overwrites files on disk.',
-            confirmText: 'Restore',
+            title: this._tx('ide.dlg.reject_patches_title', 'Reject patches'),
+            message: this._tx('ide.dlg.reject_patches_message', 'Restore the pre-patch checkpoint? This overwrites files on disk.'),
+            confirmText: this._tx('ide.dlg.restore', 'Restore'),
             danger: true,
           })
         : true;
@@ -869,14 +875,14 @@ function ideApp() {
           {}
         );
         if (data.ok) {
-          this.toast('Restored checkpoint', true);
+          this.toast(this._tx('ide.toast_restored_checkpoint', 'Restored checkpoint'), true);
           this.reviewOpen = false;
           if (this.currentFile) this.openFile(this.currentFile);
         } else {
-          this.toast('Restore failed', false);
+          this.toast(this._tx('ide.res_restore_failed', 'Restore failed'), false);
         }
       } catch (err) {
-        this.toast('Restore failed', false);
+        this.toast(this._tx('ide.res_restore_failed', 'Restore failed'), false);
       } finally {
         this.busy = false;
       }
@@ -886,9 +892,9 @@ function ideApp() {
     async restoreLastCheckpoint() {
       var ok = window.kazmaConfirm
         ? await window.kazmaConfirm({
-            title: 'Restore checkpoint',
-            message: 'Restore the last workspace file checkpoint? This overwrites files on disk.',
-            confirmText: 'Restore',
+            title: this._tx('ide.dlg.restore_checkpoint_title', 'Restore checkpoint'),
+            message: this._tx('ide.dlg.restore_checkpoint_message', 'Restore the last workspace file checkpoint? This overwrites files on disk.'),
+            confirmText: this._tx('ide.dlg.restore', 'Restore'),
           })
         : true;
       if (!ok) return;
@@ -897,21 +903,21 @@ function ideApp() {
         var listed = await this._get('/api/ide/checkpoints');
         var items = (listed && listed.checkpoints) || [];
         if (!items.length) {
-          this.toast('No checkpoints yet', false);
+          this.toast(this._tx('ide.toast_no_checkpoints', 'No checkpoints yet'), false);
           return;
         }
         var cid = items[0].id;
         var data = await this._post('/api/ide/checkpoints/' + encodeURIComponent(cid) + '/restore', {});
         if (data.ok) {
-          this.toast('Restored ' + cid.slice(0, 8), true);
-          this.showResult('Restore', (data.paths || []).join('\n') || 'OK');
+          this.toast(this._tx('ide.toast_restored_path', 'Restored {path}', { path: cid.slice(0, 8) }), true);
+          this.showResult(this._tx('ide.res_restore', 'Restore'), (data.paths || []).join('\n') || this._tx('ide.ok', 'OK'));
           if (this.currentFile) this.openFile(this.currentFile);
         } else {
-          this.toast('Restore failed', false);
-          this.showResult('Restore failed', data.error || 'Unknown error');
+          this.toast(this._tx('ide.res_restore_failed', 'Restore failed'), false);
+          this.showResult(this._tx('ide.res_restore_failed', 'Restore failed'), data.error || this._tx('ide.unknown_error', 'Unknown error'));
         }
       } catch (err) {
-        this.toast('Restore failed', false);
+        this.toast(this._tx('ide.res_restore_failed', 'Restore failed'), false);
       } finally {
         this.busy = false;
       }
@@ -923,9 +929,9 @@ function ideApp() {
       this.busy = true;
       try {
         var data = await this._post('/api/ide/runfile', { path: this.currentFile });
-        this.showResult('Run: ' + this.currentFile, data.ok ? data.output : (data.error || data.output));
+        this.showResult(this._tx('ide.res_run', 'Run: {path}', { path: this.currentFile }), data.ok ? data.output : (data.error || data.output));
       } catch (err) {
-        this.toast('Run failed', false);
+        this.toast(this._tx('ide.toast_run_failed', 'Run failed'), false);
       } finally {
         this.busy = false;
       }
@@ -940,7 +946,7 @@ function ideApp() {
         var data = await this._post('/api/ide/run', { command: cmd });
         this.showResult('$ ' + cmd, data.ok ? data.output : (data.error || data.output));
       } catch (err) {
-        this.toast('Command failed', false);
+        this.toast(this._tx('ide.toast_command_failed', 'Command failed'), false);
       } finally {
         this.busy = false;
       }
@@ -951,9 +957,9 @@ function ideApp() {
       this.busy = true;
       try {
         var data = await this._post('/api/ide/git', { subcommand: sub });
-        this.showResult('git ' + sub, data.ok ? (data.output || '(clean)') : (data.error || data.output));
+        this.showResult('git ' + sub, data.ok ? (data.output || this._tx('ide.clean', '(clean)')) : (data.error || data.output));
       } catch (err) {
-        this.toast('Git failed', false);
+        this.toast(this._tx('ide.toast_git_failed', 'Git failed'), false);
       } finally {
         this.busy = false;
       }
@@ -969,10 +975,10 @@ function ideApp() {
           old: this.originalContent,
           new: this.getContent(),
         });
-        this.showResult('Diff: ' + this.currentFile,
-          data.ok ? (data.changed ? data.diff : '(no changes)') : (data.error || ''));
+        this.showResult(this._tx('ide.res_diff', 'Diff: {path}', { path: this.currentFile }),
+          data.ok ? (data.changed ? data.diff : this._tx('ide.no_changes', '(no changes)')) : (data.error || ''));
       } catch (err) {
-        this.toast('Diff failed', false);
+        this.toast(this._tx('ide.toast_diff_failed', 'Diff failed'), false);
       } finally {
         this.busy = false;
       }
@@ -987,10 +993,10 @@ function ideApp() {
         var url = '/api/ide/grep?pattern=' + encodeURIComponent(pat) +
                   '&glob=' + encodeURIComponent(this.grepGlob || '*');
         var data = await this._get(url);
-        this.showResult('Grep: ' + pat,
-          data.ok ? ((data.matches || []).join('\n') || '(no matches)') : (data.error || ''));
+        this.showResult(this._tx('ide.res_grep', 'Grep: {pattern}', { pattern: pat }),
+          data.ok ? ((data.matches || []).join('\n') || this._tx('ide.no_matches', '(no matches)')) : (data.error || ''));
       } catch (err) {
-        this.toast('Grep failed', false);
+        this.toast(this._tx('ide.toast_grep_failed', 'Grep failed'), false);
       } finally {
         this.busy = false;
       }
@@ -1011,15 +1017,15 @@ function ideApp() {
           context: ctx,
         });
         if (data.ok) {
-          this.showResult('Swarm dispatched', 'Task ID: ' + (data.task_id || '(unknown)'));
-          this.toast('Sent to swarm', true);
+          this.showResult(this._tx('ide.res_swarm_dispatched', 'Swarm dispatched'), this._tx('ide.task_id', 'Task ID: {id}', { id: data.task_id || this._tx('ide.unknown', '(unknown)') }));
+          this.toast(this._tx('ide.toast_sent_swarm', 'Sent to swarm'), true);
           this.swarmInstruction = '';
         } else {
-          this.showResult('Swarm failed', data.error || 'Unknown error');
-          this.toast('Swarm dispatch failed', false);
+          this.showResult(this._tx('ide.res_swarm_failed', 'Swarm failed'), data.error || this._tx('ide.unknown_error', 'Unknown error'));
+          this.toast(this._tx('ide.toast_swarm_dispatch_failed', 'Swarm dispatch failed'), false);
         }
       } catch (err) {
-        this.toast('Swarm failed', false);
+        this.toast(this._tx('ide.res_swarm_failed', 'Swarm failed'), false);
       } finally {
         this.busy = false;
       }
@@ -1060,7 +1066,7 @@ function ideApp() {
       if (!msg || this.chatBusy) return;
       // Require KazmaStream (loaded via streaming.js in ide.html).
       if (!window.KazmaStream || !window.KazmaStream.sse) {
-        this.toast('Chat streaming unavailable (streaming.js not loaded)', false);
+        this.toast(this._tx('ide.toast_no_streaming', 'Chat streaming unavailable (streaming.js not loaded)'), false);
         return;
       }
 
@@ -1119,7 +1125,7 @@ function ideApp() {
             self.openLatestReview();
           },
           onError: function (errMsg) {
-            self.chatMessages[asstIdx].content += '\n\n[!] ' + (errMsg || 'Stream error');
+            self.chatMessages[asstIdx].content += '\n\n[!] ' + (errMsg || self._tx('ide.dlg.stream_error', 'Stream error'));
             self.chatBusy = false;
             self.chatStream = null;
           },
@@ -1184,9 +1190,9 @@ function ideApp() {
       if (toolName === 'file_delete') {
         this.closeTabSilent(writtenPath);
         if (writtenPath !== this.currentFile) {
-          this.toast(writtenPath + ' was deleted', false);
+          this.toast(this._tx('ide.toast_file_deleted', '{path} was deleted', { path: writtenPath }), false);
         } else {
-          this.toast('Open file was deleted', false);
+          this.toast(this._tx('ide.toast_open_deleted', 'Open file was deleted'), false);
         }
         return;
       }
@@ -1201,16 +1207,16 @@ function ideApp() {
             affectedTab.content = data.content || '';
             affectedTab.original = data.content || '';
             affectedTab.dirty = false;
-            this.toast('Updated ' + writtenPath, true);
+            this.toast(this._tx('ide.toast_updated', 'Updated {path}', { path: writtenPath }), true);
           }
         } catch (e) { /* non-fatal */ }
       } else if (writtenPath === this.currentFile && this.dirty) {
         // Active tab but user has unsaved edits — don't clobber.
-        this.toast(writtenPath + ' changed on disk — save or discard to refresh', false);
+        this.toast(this._tx('ide.toast_changed_on_disk', '{path} changed on disk — save or discard to refresh', { path: writtenPath }), false);
       } else {
         // Background tab was edited — mark it stale so the user knows.
         affectedTab.original = '__STALE__';
-        this.toast(writtenPath + ' was modified — switch to it and reload', true);
+        this.toast(this._tx('ide.toast_modified', '{path} was modified — switch to it and reload', { path: writtenPath }), true);
       }
     },
 

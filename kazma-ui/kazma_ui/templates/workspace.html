@@ -25,7 +25,7 @@
         @change="switchWorkspace($event.target.value)"
       >
         <template x-for="ws in workspaces" :key="ws.id">
-          <option :value="ws.id" x-text="ws.name" :selected="ws.id === activeWorkspaceId"></option>
+          <option :value="ws.id" x-text="ws.name" translate="no" :selected="ws.id === activeWorkspaceId"></option>
         </template>
       </select>
       
@@ -97,7 +97,7 @@
             <template x-for="s in suggestList" :key="s.path">
               <div @click="pickSuggestion(s.path)" @mousedown.prevent style="padding:6px 12px;font-size:0.78rem;font-family:var(--font-mono);cursor:pointer;border-bottom:1px solid var(--tint);display:flex;align-items:center;gap:6px;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
                 <span style="color:var(--text-muted);"><span class="ki" data-icon="folder" aria-hidden="true"></span></span>
-                <span style="color:var(--text-primary);" x-text="s.name"></span>
+                <span style="color:var(--text-primary);" translate="no" x-text="s.name"></span>
               </div>
             </template>
           </div>
@@ -172,42 +172,42 @@
   <div x-show="showAppModal" class="ws-modal-overlay" style="background:rgba(0,0,0,0.6);" x-transition x-cloak>
     <div class="card" style="max-width:520px;width:100%;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
-        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);"><span class="ki" data-icon="github" aria-hidden="true"></span> Configure GitHub App</h3>
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);"><span class="ki" data-icon="github" aria-hidden="true"></span> {{ t('workspace.ws.configure_github_app') }}</h3>
         <button class="btn-icon" @click="showAppModal = false" style="font-size:1rem;"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
       </div>
 
       <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:20px;">
         <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
           <div>
-            <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">App ID *</label>
+            <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">{{ t('workspace.ws.app_id') }}</label>
             <input type="text" class="form-input" placeholder="e.g. 1234567" x-model="githubAppId" style="width:100%;font-size:0.8rem;">
           </div>
           <div>
-            <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Installation ID *</label>
+            <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">{{ t('workspace.ws.installation_id') }}</label>
             <input type="text" class="form-input" placeholder="e.g. 891011" x-model="githubAppInstallationId" style="width:100%;font-size:0.8rem;">
           </div>
         </div>
 
         <div>
-          <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">App Slug / Name (Optional)</label>
-          <input type="text" class="form-input" placeholder="e.g. kazma-agent" x-model="githubAppSlug" style="width:100%;font-size:0.8rem;">
-          <p style="margin:4px 0 0 0;font-size:0.7rem;color:var(--text-muted);">The bot's username on GitHub, e.g. <code>kazma-agent</code>. Used to auto-derive the avatar-linked commit email <code>&lt;bot_user_id&gt;+&lt;slug&gt;[bot]@users.noreply.github.com</code> by looking up the App's bot user id. Leaving this blank falls back to a no-avatar default email.</p>
+          <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">{{ t('workspace.ws.app_slug') }}</label>
+          <input type="text" class="form-input" translate="no" placeholder="e.g. kazma-agent" x-model="githubAppSlug" style="width:100%;font-size:0.8rem;">
+          <p style="margin:4px 0 0 0;font-size:0.7rem;color:var(--text-muted);">{{ t('workspace.ws.app_slug_hint') | safe }}</p>
         </div>
 
         <div>
-          <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">Private Key (PEM format)</label>
-          <textarea class="form-input" placeholder="-----BEGIN RSA PRIVATE KEY-----..." x-model="githubAppPrivateKey" rows="4" style="width:100%;font-family:var(--font-mono);font-size:0.7rem;"></textarea>
+          <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">{{ t('workspace.ws.private_key') }}</label>
+          <textarea class="form-input" translate="no" placeholder="-----BEGIN RSA PRIVATE KEY-----..." x-model="githubAppPrivateKey" rows="4" style="width:100%;font-family:var(--font-mono);font-size:0.7rem;"></textarea>
         </div>
 
         <div>
-          <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">OR Private Key File Path</label>
-          <input type="text" class="form-input" placeholder="e.g. C:\keys\kazma-app.private-key.pem" x-model="githubAppPrivateKeyPath" style="width:100%;font-size:0.8rem;font-family:var(--font-mono);">
+          <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;">{{ t('workspace.ws.private_key_path') }}</label>
+          <input type="text" class="form-input" translate="no" placeholder="e.g. C:\keys\kazma-app.private-key.pem" x-model="githubAppPrivateKeyPath" style="width:100%;font-size:0.8rem;font-family:var(--font-mono);">
         </div>
       </div>
 
       <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
-        <button type="button" class="btn btn-secondary" @click="showAppModal = false">Cancel</button>
-        <button type="button" class="btn btn-primary" @click="saveGitHubApp()" :disabled="!githubAppId.trim() || !githubAppInstallationId.trim()">Save GitHub App</button>
+        <button type="button" class="btn btn-secondary" @click="showAppModal = false">{{ t('common.cancel') }}</button>
+        <button type="button" class="btn btn-primary" @click="saveGitHubApp()" :disabled="!githubAppId.trim() || !githubAppInstallationId.trim()">{{ t('workspace.ws.save_github_app') }}</button>
       </div>
     </div>
   </div>
@@ -219,12 +219,12 @@
       {{ t('workspace.qa_run_tests') }}
     </button>
     <button class="btn btn-sm btn-secondary" disabled
-            title="No workspace build action is configured. Use Terminal to run an approved build command.">
+            title="{{ t('workspace.qa_build_none') }}">
       <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
       {{ t('workspace.qa_build') }}
     </button>
     <button class="btn btn-sm btn-secondary" disabled
-            title="No workspace deploy action is configured. Use Terminal to run an approved deployment command.">
+            title="{{ t('workspace.qa_deploy_none') }}">
       <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       {{ t('workspace.qa_deploy') }}
     </button>
@@ -350,7 +350,7 @@
           <!-- Connect options when not authenticated -->
           <div x-show="!ghAuthenticated" class="ic-row" x-cloak>
             <button class="btn btn-xs btn-primary" @click="showAppModal = true" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
-              <span class="ki" data-icon="github" aria-hidden="true"></span> Configure App
+              <span class="ki" data-icon="github" aria-hidden="true"></span> {{ t('workspace.configure_app') }}
             </button>
             <button class="btn btn-xs btn-secondary" @click="showPatModal = true" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
               <span class="ki" data-icon="key" aria-hidden="true"></span> PAT
@@ -368,26 +368,26 @@
       <!-- Not authenticated (only after status has been checked) -->
       <div x-show="ghIsGitHub && ghOAuthChecked && !ghAuthenticated" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
         <div style="font-size:1.5rem;margin-bottom:8px;"><span class="ki" data-icon="lock" aria-hidden="true"></span></div>
-        <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">Authenticate GitHub Connection</h4>
-        <p style="font-size:0.75rem;max-width:380px;margin:0 auto 16px auto;line-height:1.5;">Connect Kazma to <span style="color:var(--accent);font-family:var(--font-mono);" x-text="ghOwner + '/' + ghRepo"></span> to view live pull requests, issues, commits, and workflow runs.</p>
+        <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('workspace.ws.auth_github') }}</h4>
+        <p style="font-size:0.75rem;max-width:380px;margin:0 auto 16px auto;line-height:1.5;">{{ t('workspace.ws.connect_prefix') }} <span style="color:var(--accent);font-family:var(--font-mono);" translate="no" x-text="ghOwner + '/' + ghRepo"></span> {{ t('workspace.ws.connect_suffix') }}</p>
         
         <!-- Surface API / App errors prominently on the unauthenticated card -->
         <div x-show="ghError" x-cloak class="ic-row-start" style="margin:0 auto 16px auto;max-width:460px;padding:10px 14px;border-radius:var(--radius-sm);background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);color:#f87171;font-size:0.8rem;line-height:1.4;text-align:left;word-break:break-word;">
           <span style="color:#ef4444;font-size:1rem;flex-shrink:0;"><span class="ki" data-icon="x-circle" aria-hidden="true"></span></span>
           <div style="flex:1;">
-            <div style="font-weight:600;margin-bottom:2px;color:#ef4444;">GitHub Connection Error</div>
+            <div style="font-weight:600;margin-bottom:2px;color:#ef4444;">{{ t('workspace.ws.gh_error') }}</div>
             <div x-text="ghError" style="font-family:var(--font-mono);font-size:0.75rem;opacity:0.95;"></div>
           </div>
         </div>
         <div style="display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;">
           <button class="btn btn-sm btn-primary" @click="showAppModal = true" style="font-size:0.8rem;display:inline-flex;align-items:center;gap:6px;">
-            <span class="ki" data-icon="github" aria-hidden="true"></span> Configure GitHub App (Bot)
+            <span class="ki" data-icon="github" aria-hidden="true"></span> {{ t('workspace.ws.configure_app_bot') }}
           </button>
           <button class="btn btn-sm btn-secondary" @click="showPatModal = true" style="font-size:0.8rem;display:inline-flex;align-items:center;gap:6px;">
-            <span class="ki" data-icon="key" aria-hidden="true"></span> Enter PAT
+            <span class="ki" data-icon="key" aria-hidden="true"></span> {{ t('workspace.ws.enter_pat') }}
           </button>
           <button class="btn btn-sm btn-secondary" @click="connectGitHub()" style="font-size:0.8rem;">
-            Connect via OAuth
+            {{ t('workspace.ws.connect_oauth') }}
           </button>
         </div>
         <p style="font-size:0.65rem;color:var(--text-tertiary);margin-top:12px;">{{ t('workspace.gh_oauth_note') }}</p>
@@ -410,7 +410,7 @@
         <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-bottom:10px;">
           <div>
             <a :href="ghHtmlUrl" target="_blank" style="font-family:var(--font-mono);font-size:0.95rem;font-weight:700;color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:6px;transition:opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
-              <span x-text="ghOwner + '/' + ghRepo"></span>
+              <span translate="no" x-text="ghOwner + '/' + ghRepo"></span>
               <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/>
               </svg>
@@ -458,7 +458,7 @@
             <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
               <div style="display:flex;flex-direction:column;gap:2px;">
                 <div style="display:flex;align-items:center;gap:8px;">
-                  <span style="font-weight:600;font-size:0.8rem;color:var(--text-primary);" x-text="ghLatestWorkflow.name"></span>
+                  <span style="font-weight:600;font-size:0.8rem;color:var(--text-primary);" translate="no" x-text="ghLatestWorkflow.name"></span>
                   <code style="font-family:var(--font-mono);font-size:0.65rem;background:var(--bg-deep);padding:1px 4px;border-radius:var(--radius-xs);color:var(--accent);" x-text="ghLatestWorkflow.branch"></code>
                 </div>
                 <div style="font-size:0.7rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
@@ -513,10 +513,10 @@
             <div @click="ghOpenPr(pr.number)" style="padding:7px 8px;border-bottom:1px solid var(--tint);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
               <div style="display:flex;align-items:center;gap:6px;min-width:0;">
                 <span style="color:var(--accent);font-weight:700;font-size:0.72rem;font-family:var(--font-mono);flex-shrink:0;" x-text="'#' + pr.number"></span>
-                <span style="font-size:0.78rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" x-text="pr.title"></span>
+                <span style="font-size:0.78rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" translate="no" x-text="pr.title"></span>
               </div>
               <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-                <template x-if="pr.draft"><span style="font-size:0.6rem;color:var(--text-muted);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;">DRAFT</span></template>
+                <template x-if="pr.draft"><span style="font-size:0.6rem;color:var(--text-muted);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;">{{ t('workspace.pr_draft') }}</span></template>
                 <span style="font-size:0.65rem;color:var(--text-muted);" x-text="pr.author"></span>
               </div>
             </div>
@@ -559,12 +559,12 @@
           <template x-for="wf in ghWorkflows" :key="wf.id">
             <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;justify-content:space-between;gap:8px;">
               <div style="display:flex;align-items:center;gap:6px;min-width:0;">
-                <span style="font-size:0.75rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" x-text="wf.name || 'workflow'"></span>
+                <span style="font-size:0.75rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" translate="no" x-text="wf.name || 'workflow'"></span>
                 <code style="font-family:var(--font-mono);font-size:0.6rem;color:var(--accent);" x-text="wf.branch"></code>
               </div>
               <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
                 <span style="font-size:0.7rem;font-weight:600;" :style="{ color: wf.conclusion === 'success' ? '#10b981' : (wf.conclusion === 'failure' ? '#ef4444' : '#3b82f6') }" x-text="wf.conclusion || wf.status || '—'"></span>
-                <a :href="wf.html_url" target="_blank" style="font-size:0.65rem;color:var(--text-muted);text-decoration:none;">view ↗</a>
+                <a :href="wf.html_url" target="_blank" style="font-size:0.65rem;color:var(--text-muted);text-decoration:none;">{{ t('workspace.ws.view') }}</a>
               </div>
             </div>
           </template>
@@ -576,11 +576,11 @@
           <template x-for="rel in ghReleases" :key="rel.id">
             <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;justify-content:space-between;gap:8px;">
               <div style="display:flex;align-items:center;gap:6px;min-width:0;">
-                <span style="font-size:0.75rem;font-weight:600;color:var(--text-primary);" x-text="rel.tag"></span>
-                <template x-if="rel.prerelease"><span style="font-size:0.58rem;color:#f59e0b;background:rgba(245,158,11,0.1);padding:1px 5px;border-radius:3px;">pre</span></template>
-                <template x-if="rel.draft"><span style="font-size:0.58rem;color:var(--text-muted);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;">draft</span></template>
+                <span style="font-size:0.75rem;font-weight:600;color:var(--text-primary);" translate="no" x-text="rel.tag"></span>
+                <template x-if="rel.prerelease"><span style="font-size:0.58rem;color:#f59e0b;background:rgba(245,158,11,0.1);padding:1px 5px;border-radius:3px;">{{ t('workspace.ws.pre') }}</span></template>
+                <template x-if="rel.draft"><span style="font-size:0.58rem;color:var(--text-muted);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;">{{ t('workspace.ws.draft') }}</span></template>
               </div>
-              <a :href="rel.html_url" target="_blank" style="font-size:0.65rem;color:var(--text-muted);text-decoration:none;">view ↗</a>
+              <a :href="rel.html_url" target="_blank" style="font-size:0.65rem;color:var(--text-muted);text-decoration:none;">{{ t('workspace.ws.view') }}</a>
             </div>
           </template>
           <div x-show="ghReleases.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_releases')" x-cloak></div>
@@ -595,7 +595,7 @@
         <p style="font-size:0.75rem;max-width:320px;margin:0 auto 10px auto;line-height:1.4;" x-text="ghError || t('workspace.gh_offline_body')"></p>
         <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
           <button class="btn btn-xs btn-primary" @click="showAppModal = true">
-            <span class="ki" data-icon="github" aria-hidden="true"></span> Configure App
+            <span class="ki" data-icon="github" aria-hidden="true"></span> {{ t('workspace.configure_app') }}
           </button>
           <button class="btn btn-xs btn-secondary" @click="showPatModal = true">
             <span class="ki" data-icon="key" aria-hidden="true"></span> {{ t('workspace.configure_pat') }}
@@ -636,7 +636,7 @@
                @click="navigate(item)"
                style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;transition:background 0.15s;font-size:0.8rem;">
             <span x-html="rowIcon(item)" style="width:20px;"></span>
-            <span x-text="item.name" style="flex:1;" :style="{ fontWeight: item.is_dir ? '500' : '400' }"></span>
+            <span x-text="item.name" translate="no" style="flex:1;" :style="{ fontWeight: item.is_dir ? '500' : '400' }"></span>
             <span x-text="item.size || ''" style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
           </div>
         </template>
@@ -1084,7 +1084,7 @@ function workspaceApp() {
           this.ghHtmlUrl = data.html_url || '';
           this.ghLatestWorkflow = data.latest_workflow || null;
           this.ghRateLimited = data.rate_limited || false;
-          this.ghError = data.error || '';
+          this.ghError = data.code ? tOr('workspace.err_' + data.code, data.error || '') : (data.error || '');
         } else {
           this.ghIsGitHub = false;
           this.ghError = t('workspace.toast_gh_status_failed');

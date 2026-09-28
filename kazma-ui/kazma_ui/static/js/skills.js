@@ -1,6 +1,14 @@
 /* Kazma Skills — Alpine.js app for skills management */
 
 function skillsApp() {
+    // Text built here: the catalog's text in the page's language, else the
+    // English given; {name} placeholders filled from vars.
+    function _k(key, en, vars) {
+        if (typeof window.kazmaT === 'function') return window.kazmaT(key, en, vars);
+        var s = en;
+        if (vars) for (var v in vars) s = s.split('{' + v + '}').join(String(vars[v]));
+        return s;
+    }
     return {
         tab: 'installed',
         hubQuery: '',
@@ -16,7 +24,7 @@ function skillsApp() {
         async installAgentSkill() {
             var source = (this.agentSkillSource || '').trim();
             if (!source) {
-                showToast('Enter owner/repo or a GitHub URL', 'error');
+                showToast(_k('skills.ui.enter_repo', 'Enter owner/repo or a GitHub URL'), 'error');
                 return;
             }
             this.installing = true;
@@ -28,14 +36,14 @@ function skillsApp() {
                 });
                 var result = await resp.json();
                 if (result.status === 'ok') {
-                    showToast(result.message || 'Skill installed', 'success');
+                    showToast(result.message || _k('skills.ui.installed', 'Skill installed'), 'success');
                     this.agentSkillSource = '';
                     location.reload();
                 } else {
-                    showToast('Install failed: ' + (result.error || ''), 'error');
+                    showToast(_k('skills.ui.install_failed_error', 'Install failed: {error}', { error: result.error || '' }), 'error');
                 }
             } catch (e) {
-                showToast('Install failed', 'error');
+                showToast(_k('skills.ui.install_failed', 'Install failed'), 'error');
             } finally {
                 this.installing = false;
             }
@@ -50,15 +58,15 @@ function skillsApp() {
                 });
                 showToast(enabled ? 'Skill enabled' : 'Skill disabled', 'success');
             } catch (e) {
-                showToast('Failed to toggle skill', 'error');
+                showToast(_k('skills.ui.toggle_failed', 'Failed to toggle skill'), 'error');
             }
         },
 
         async uninstallSkill(skillId) {
             if (!(await window.kazmaConfirm({
-                title: 'Uninstall skill',
-                message: 'Uninstall this skill? This cannot be undone.',
-                confirmText: 'Uninstall',
+                title: _k('skills.ui.uninstall_title', 'Uninstall skill'),
+                message: _k('skills.ui.uninstall_message', 'Uninstall this skill? This cannot be undone.'),
+                confirmText: _k('skills.ui.uninstall', 'Uninstall'),
                 danger: true,
             }))) return;
             try {
@@ -70,13 +78,13 @@ function skillsApp() {
                 // Only "ok" removed something: "not_found" used to toast
                 // "Skill uninstalled" over a skill that was still there.
                 if (!body || body.status !== 'ok') {
-                    showToast('Nothing was uninstalled: ' + ((body && (body.error || body.status)) || 'no answer'), 'error');
+                    showToast(_k('skills.ui.nothing_uninstalled', 'Nothing was uninstalled: {reason}', { reason: (body && (body.error || body.status)) || _k('skills.ui.no_answer', 'no answer') }), 'error');
                     return;
                 }
-                showToast('Skill uninstalled', 'success');
+                showToast(_k('skills.ui.uninstalled', 'Skill uninstalled'), 'success');
                 location.reload();
             } catch (e) {
-                showToast('Failed to uninstall' + (e && e.message ? ': ' + e.message : ''), 'error');
+                showToast(e && e.message ? _k('skills.ui.uninstall_failed_error', 'Failed to uninstall: {error}', { error: e.message }) : _k('skills.ui.uninstall_failed', 'Failed to uninstall'), 'error');
             }
         },
 
@@ -89,13 +97,13 @@ function skillsApp() {
                 });
                 var result = await resp.json();
                 if (result.status === 'ok') {
-                    showToast('Skill installed', 'success');
+                    showToast(_k('skills.ui.installed', 'Skill installed'), 'success');
                     location.reload();
                 } else {
-                    showToast('Install failed: ' + (result.error || ''), 'error');
+                    showToast(_k('skills.ui.install_failed_error', 'Install failed: {error}', { error: result.error || '' }), 'error');
                 }
             } catch (e) {
-                showToast('Install failed', 'error');
+                showToast(_k('skills.ui.install_failed', 'Install failed'), 'error');
             }
         },
 
@@ -141,13 +149,13 @@ function skillsApp() {
                 });
                 var result = await resp.json();
                 if (result.status === 'ok') {
-                    showToast(result.message || 'Skill installed', 'success');
+                    showToast(result.message || _k('skills.ui.installed', 'Skill installed'), 'success');
                     location.reload();
                 } else {
-                    showToast('Install failed: ' + (result.error || ''), 'error');
+                    showToast(_k('skills.ui.install_failed_error', 'Install failed: {error}', { error: result.error || '' }), 'error');
                 }
             } catch (e) {
-                showToast('Install failed', 'error');
+                showToast(_k('skills.ui.install_failed', 'Install failed'), 'error');
             } finally {
                 this.installing = false;
             }

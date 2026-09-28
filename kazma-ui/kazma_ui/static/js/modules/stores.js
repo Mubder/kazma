@@ -4,6 +4,12 @@
 
 import { KAZMA_SEARCH_PAGES } from './search_pages.js';
 
+/* A dialog's default label in the page's language (window.tOr, base.html),
+   English when the catalog is not on the page. */
+function uiText(key, fallback) {
+    return typeof window.tOr === 'function' ? window.tOr(key, fallback) : fallback;
+}
+
 export function registerStores() {
     document.addEventListener('alpine:init', () => {
         Alpine.store('toast', {
@@ -144,8 +150,8 @@ export function registerStores() {
                     body: `<p style="color: var(--text-secondary); line-height: 1.6;">${escapedMsg}</p>`,
                     size: 'sm',
                     actions: [
-                        { label: 'Cancel', variant: 'btn-secondary' },
-                        { label: 'Confirm', variant: 'btn-primary', handler: onConfirm },
+                        { label: uiText('common.cancel', 'Cancel'), variant: 'btn-secondary' },
+                        { label: uiText('common.confirm', 'Confirm'), variant: 'btn-primary', handler: onConfirm },
                     ],
                 });
             },
@@ -165,10 +171,10 @@ export function registerStores() {
                 const answer = function (ok) {
                     return withBox ? { ok: ok, checked: ok && !!self.checkboxValue } : ok;
                 };
-                const title = opts.title || 'Confirm';
+                const title = opts.title || uiText('common.confirm', 'Confirm');
                 const message = opts.message || '';
-                const confirmText = opts.confirmText || 'Confirm';
-                const cancelText = opts.cancelText || 'Cancel';
+                const confirmText = opts.confirmText || uiText('common.confirm', 'Confirm');
+                const cancelText = opts.cancelText || uiText('common.cancel', 'Cancel');
                 // Explicit false disables danger styling; default remains true.
                 const danger = opts.danger !== false;
                 const entityMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -217,10 +223,10 @@ export function registerStores() {
              * @returns {Promise<string|null>}
              */
             promptAsync(opts = {}) {
-                const title = opts.title || 'Input';
+                const title = opts.title || uiText('common.input', 'Input');
                 const message = opts.message || '';
-                const confirmText = opts.confirmText || 'OK';
-                const cancelText = opts.cancelText || 'Cancel';
+                const confirmText = opts.confirmText || uiText('common.ok', 'OK');
+                const cancelText = opts.cancelText || uiText('common.cancel', 'Cancel');
                 const entityMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
                 const escapedMsg = String(message).replace(/[&<>"']/g, function (c) { return entityMap[c]; });
                 const self = this;
@@ -307,12 +313,12 @@ export function registerStores() {
                         resolve();
                     };
                     self.show({
-                        title: opts.title || 'Notice',
+                        title: opts.title || uiText('common.notice', 'Notice'),
                         body: `<p class="confirm-message">${escapedMsg}</p>`,
                         size: opts.size || 'sm',
                         onClose: settle,
                         actions: [
-                            { label: opts.okText || 'OK', variant: opts.variant || 'btn-primary', close: true, handler: settle },
+                            { label: opts.okText || uiText('common.ok', 'OK'), variant: opts.variant || 'btn-primary', close: true, handler: settle },
                         ],
                     });
                 });
@@ -418,8 +424,11 @@ export function registerStores() {
                 var matches = [];
 
                 this._pages.forEach(function (p) {
-                    if (p.title.toLowerCase().includes(q) || p.href.toLowerCase().includes(q)) {
-                        matches.push({ kind: 'page', title: p.title, subtitle: p.href, href: p.href });
+                    // The page's name in the reader's language, found by it,
+                    // by its English name or by its address.
+                    var name = window.tOr ? window.tOr(p.key, p.title) : p.title;
+                    if (name.toLowerCase().includes(q) || p.title.toLowerCase().includes(q) || p.href.toLowerCase().includes(q)) {
+                        matches.push({ kind: 'page', title: name, subtitle: p.href, href: p.href });
                     }
                 });
 
@@ -439,7 +448,10 @@ export function registerStores() {
                                 matches.push({
                                     kind: 'session',
                                     title: title,
-                                    subtitle: (s.platform || 'web') + ' \u00B7 ' + (s.message_count || 0) + ' msgs',
+                                    subtitle: (s.platform === 'web' || !s.platform
+                                        ? (window.tOr ? window.tOr('dashboard.platform_web', 'Web') : 'web')
+                                        : s.platform) + ' \u00B7 ' +
+                                        (window.kazmaT ? window.kazmaT('common.ui.messages_count', '{n} msgs', { n: s.message_count || 0 }) : (s.message_count || 0) + ' msgs'),
                                     href: '/chat?s=' + encodeURIComponent(sid),
                                 });
                             }

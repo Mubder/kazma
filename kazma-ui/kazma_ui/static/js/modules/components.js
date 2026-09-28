@@ -381,7 +381,7 @@ export function sidebarModel() {
                 // The server kept its model: show that, and say why.
                 console.error('Failed to save model', e);
                 if (typeof window.showToast === 'function') {
-                    window.showToast('Model not switched: ' + e.message, 'error');
+                    window.showToast(window.kazmaT('common.ui.model_not_switched', 'Model not switched: {error}', { error: e.message }), 'error');
                 }
                 if (typeof this._fetchActiveModel === 'function') this._fetchActiveModel();
             }
@@ -445,15 +445,15 @@ export function systemAlertsBanner() {
                     body: JSON.stringify({ package_name: 'sentence-transformers' }),
                 });
                 if (res.ok) {
-                    showToast('Installation of sentence-transformers started asynchronously', 'success');
+                    showToast(window.kazmaT('common.ui.st_install_started', 'Installation of sentence-transformers started asynchronously'), 'success');
                     // Poll again immediately
                     setTimeout(() => this.refreshAlerts(), 3000);
                 } else {
-                    showToast('Failed to start installation', 'error');
+                    showToast(window.kazmaT('common.ui.install_start_failed', 'Failed to start installation'), 'error');
                 }
             } catch (err) {
                 console.error('[SystemAlertsBanner] Install failed:', err);
-                showToast('Failed to start installation', 'error');
+                showToast(window.kazmaT('common.ui.install_start_failed', 'Failed to start installation'), 'error');
             } finally {
                 this.installing = false;
             }

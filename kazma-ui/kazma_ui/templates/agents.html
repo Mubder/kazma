@@ -14,11 +14,11 @@
               style="display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--text-muted);"
               :title="t('agents.state_label') + ': ' + agent.agent_state"></span>
         <div>
-          <div style="font-size:1rem;font-weight:500;color:var(--text-primary);" x-text="agent.name || 'kazma'"></div>
+          <div style="font-size:1rem;font-weight:500;color:var(--text-primary);" translate="no" x-text="agent.name || 'kazma'"></div>
           <div style="font-size:0.8rem;color:var(--text-muted);">
             <span x-text="agent.running ? (agent.agent_state === 'idle' ? t('agents.ready') : (agent.agent_state === 'thinking' ? t('agents.thinking') : t('agents.acting'))) : t('agents.stopped')"></span>
             <span style="margin:0 6px;color:var(--text-tertiary);">·</span>
-            <span x-text="t('agents.state_label') + ': ' + agent.agent_state"></span>
+            <span x-text="t('agents.state_label') + ': ' + tOr('agents.state_' + agent.agent_state, agent.agent_state)"></span>
             <template x-if="agent.last_activity">
               <span style="margin-left:6px;color:var(--text-tertiary);">— <span x-text="agent.last_activity"></span></span>
             </template>
@@ -56,7 +56,7 @@
           <div style="font-weight:700;font-size:0.88rem;margin-bottom:4px;color:var(--text-primary);" x-text="p.display_name_ar && window.KAZMA_LANG === 'ar' ? p.display_name_ar : p.name"></div>
           <div style="font-size:0.74rem;color:var(--text-secondary);line-height:1.4;" x-text="p.description_ar && window.KAZMA_LANG === 'ar' ? p.description_ar : p.description"></div>
           <template x-if="agent.personality === p.name">
-            <div style="margin-top:8px;font-size:0.68rem;font-weight:600;color:var(--brand,#6366f1);text-transform:uppercase;letter-spacing:0.5px;display:flex;align-items:center;gap:4px;"><span class="ki" data-icon="check" aria-hidden="true"></span> Active</div>
+            <div style="margin-top:8px;font-size:0.68rem;font-weight:600;color:var(--brand,#6366f1);text-transform:uppercase;letter-spacing:0.5px;display:flex;align-items:center;gap:4px;"><span class="ki" data-icon="check" aria-hidden="true"></span> {{ t('agents.personality_active') }}</div>
           </template>
         </div>
       </template>
@@ -72,13 +72,13 @@
         <span x-text="agent.running ? (agent.agent_state === 'idle' ? t('agents.ready') : (agent.agent_state === 'thinking' ? t('agents.thinking') : t('agents.acting'))) : t('agents.stopped')"
               :style="agent.running ? 'color:var(--success);' : 'color:var(--text-muted);'"></span>
       </div>
-      <div class="metric-sub" x-text="agent.running ? (agent.agent_state === 'idle' ? t('agents.waiting') : agent.agent_state) : (agent.last_activity || t('agents.idle'))"></div>
+      <div class="metric-sub" x-text="agent.running ? (agent.agent_state === 'idle' ? t('agents.waiting') : tOr('agents.state_' + agent.agent_state, agent.agent_state)) : (agent.last_activity || t('agents.idle'))"></div>
     </div>
     <div class="metric-card">
       <div class="metric-icon"><span class="ki" data-icon="brain" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('agents.state_label') }}</div>
       <div class="metric-value" id="metric-state">
-        <span x-text="agent.agent_state"
+        <span x-text="tOr('agents.state_' + agent.agent_state, agent.agent_state)"
               :class="'state-badge state-' + agent.agent_state"></span>
       </div>
       <div class="metric-sub">{{ t('agents.state_hint') }}</div>
@@ -131,9 +131,9 @@
         <template x-for="(t, idx) in toolHistory" :key="idx">
           <div style="padding:12px 20px;border-bottom:1px solid var(--border-subtle);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-              <span style="font-weight:500;font-size:0.9rem;" x-text="t.label"></span>
+              <span style="font-weight:500;font-size:0.9rem;" translate="no" x-text="t.label"></span>
               <span class="badge" :class="t.status === 'success' ? 'badge-premium' : 'badge-error'"
-                    style="font-size:0.7rem;" x-text="t.status"></span>
+                    style="font-size:0.7rem;" x-text="tOr('agents.status_' + t.status, t.status)"></span>
             </div>
             <div style="display:flex;gap:12px;font-size:0.75rem;color:var(--text-muted);">
               <span x-text="t.timestamp"></span>
@@ -168,7 +168,7 @@
         <template x-for="(step, idx) in reasoningSteps" :key="idx">
           <div style="padding:12px 20px;border-bottom:1px solid var(--border-subtle);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-              <span style="font-weight:500;font-size:0.9rem;" x-text="step.label"></span>
+              <span style="font-weight:500;font-size:0.9rem;" translate="no" x-text="step.label"></span>
               <span class="badge badge-basic" style="font-size:0.7rem;" x-text="'#' + (reasoningSteps.length - idx)"></span>
             </div>
             <div style="display:flex;gap:12px;font-size:0.75rem;color:var(--text-muted);flex-wrap:wrap;">
@@ -204,12 +204,12 @@
         <span style="color:var(--text-tertiary);">{{ t('agents.state_label') }}</span>
         <span>
           <span class="badge" :class="'state-badge state-' + agent.agent_state"
-                style="text-transform:capitalize;" x-text="agent.agent_state || 'idle'"></span>
+                style="text-transform:capitalize;" x-text="tOr('agents.state_' + (agent.agent_state || 'idle'), agent.agent_state || 'idle')"></span>
           <span style="color:var(--text-muted);margin-left:6px;font-size:0.8rem;"
                 x-text="agent.running ? t('agents.running_badge') : t('agents.stopped')"></span>
         </span>
         <span style="color:var(--text-tertiary);">{{ t('agents.active_model') }}</span>
-        <span style="font-family:var(--font-mono);font-size:0.8rem;"
+        <span style="font-family:var(--font-mono);font-size:0.8rem;" translate="no"
               x-text="(agent.llm && agent.llm.model) || '—'"></span>
         <span style="color:var(--text-tertiary);">{{ t('agents.tools_registered') }}</span>
         <span x-text="((agent.tools && agent.tools.count) || 0) + ' ' + t('agents.available')"></span>
@@ -243,8 +243,9 @@
         </template>
         <template x-for="(tool, idx) in (agent.tools && agent.tools.list) || []" :key="idx">
           <div style="padding:8px 0;border-bottom:1px solid var(--border-subtle);">
-            <div style="font-weight:500;font-size:0.85rem;" x-text="tool.name"></div>
-            <div style="font-size:0.75rem;color:var(--text-muted);" x-text="tool.description"></div>
+            <div style="font-weight:500;font-size:0.85rem;" translate="no" x-text="tool.name"></div>
+            {# The tool's own documentation, written for the model. #}
+            <div style="font-size:0.75rem;color:var(--text-muted);" translate="no" x-text="tool.description"></div>
           </div>
         </template>
       </div>

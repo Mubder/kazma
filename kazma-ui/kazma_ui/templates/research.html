@@ -64,8 +64,8 @@
       <div class="card" style="padding:1rem;max-width:100%;overflow:hidden;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:8px;">
           <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
-            <button class="btn btn-secondary btn-sm" onclick="KazmaResearch.backToList()" style="flex-shrink:0;">← Back</button>
-            <h3 style="margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="research-detail-title">Detail</h3>
+            <button class="btn btn-secondary btn-sm" onclick="KazmaResearch.backToList()" style="flex-shrink:0;">{{ t('common.back') }}</button>
+            <h3 style="margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="research-detail-title" translate="no">{{ t('common.detail') }}</h3>
           </div>
           <div style="display:flex;gap:6px;flex-shrink:0;">
             <button class="btn btn-secondary btn-sm" onclick="KazmaResearch.exportCurrent('markdown')">MD</button>
@@ -134,27 +134,27 @@
 <script>
 // Merge page keys into global i18n — do NOT wipe window.KAZMA_I18N from base.html
 window.KAZMA_I18N = Object.assign({}, window.KAZMA_I18N || {}, {
-  research_compare_desc: "{{ t('research.compare_desc') }}",
-  research_no_results: "{{ t('research.no_results') }}",
-  research_no_archived: "{{ t('research.no_archived') }}",
-  research_comparing: "{{ t('research.comparing') }}",
-  research_metric: "{{ t('research.metric') }}",
-  research_run_a: "{{ t('research.run_a') }}",
-  research_run_b: "{{ t('research.run_b') }}",
-  research_delta: "{{ t('research.delta') }}",
-  research_text_diff: "{{ t('research.text_diff') }}",
-  research_identical: "{{ t('research.identical') }}",
-  research_tab_results: "{{ t('research.tab_results') }}",
-  research_tab_archived: "{{ t('research.tab_archived') }}",
-  research_archived_msg: "{{ t('research.archived_msg') }}",
-  research_restored_msg: "{{ t('research.restored_msg') }}",
-  research_open_md: "{{ t('research.open_md') }}",
-  research_start_btn: "{{ t('research.start_btn') }}",
-  research_start_running: "{{ t('research.start_running') }}",
-  research_start_done: "{{ t('research.start_done') }}",
-  research_start_error: "{{ t('research.start_error') }}",
-  research_view_report: "{{ t('research.view_report') }}",
-  research_cancelled: "{{ t('research.cancelled') }}",
+  research_compare_desc: {{ t('research.compare_desc') | tojson }},
+  research_no_results: {{ t('research.no_results') | tojson }},
+  research_no_archived: {{ t('research.no_archived') | tojson }},
+  research_comparing: {{ t('research.comparing') | tojson }},
+  research_metric: {{ t('research.metric') | tojson }},
+  research_run_a: {{ t('research.run_a') | tojson }},
+  research_run_b: {{ t('research.run_b') | tojson }},
+  research_delta: {{ t('research.delta') | tojson }},
+  research_text_diff: {{ t('research.text_diff') | tojson }},
+  research_identical: {{ t('research.identical') | tojson }},
+  research_tab_results: {{ t('research.tab_results') | tojson }},
+  research_tab_archived: {{ t('research.tab_archived') | tojson }},
+  research_archived_msg: {{ t('research.archived_msg') | tojson }},
+  research_restored_msg: {{ t('research.restored_msg') | tojson }},
+  research_open_md: {{ t('research.open_md') | tojson }},
+  research_start_btn: {{ t('research.start_btn') | tojson }},
+  research_start_running: {{ t('research.start_running') | tojson }},
+  research_start_done: {{ t('research.start_done') | tojson }},
+  research_start_error: {{ t('research.start_error') | tojson }},
+  research_view_report: {{ t('research.view_report') | tojson }},
+  research_cancelled: {{ t('research.cancelled') | tojson }},
 });
 </script>
 <script src="/static/js/research.js?v={{ js_version() }}"></script>

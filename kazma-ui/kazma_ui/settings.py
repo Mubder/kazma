@@ -848,13 +848,13 @@ class SettingsRouterBuilder:
                 "db": db,
                 "rebuild": get_rebuild_status(),
                 "presets": [
-                    {"model": "BAAI/bge-m3", "dim": 1024, "label": "BAAI/bge-m3 — multilingual (recommended)", "multilingual": True},
-                    {"model": "BAAI/bge-large-en-v1.5", "dim": 1024, "label": "BAAI/bge-large-en-v1.5 — English", "multilingual": False},
+                    {"model": "BAAI/bge-m3", "dim": 1024, "label": "BAAI/bge-m3 — multilingual (recommended)", "note": "multilingual_recommended", "multilingual": True},
+                    {"model": "BAAI/bge-large-en-v1.5", "dim": 1024, "label": "BAAI/bge-large-en-v1.5 — English", "note": "english", "multilingual": False},
                     {"model": "intfloat/multilingual-e5-large", "dim": 1024, "label": "intfloat/multilingual-e5-large", "multilingual": True},
-                    {"model": "Snowflake/snowflake-arctic-embed-l", "dim": 1024, "label": "Snowflake arctic-embed-l (English)", "multilingual": False},
+                    {"model": "Snowflake/snowflake-arctic-embed-l", "dim": 1024, "label": "Snowflake arctic-embed-l (English)", "note": "english", "multilingual": False},
                     {"model": "nomic-ai/nomic-embed-text-v1.5", "dim": 768, "label": "nomic-embed-text-v1.5", "multilingual": False},
                     {"model": "sentence-transformers/paraphrase-multilingual-mistral", "dim": 768, "label": "paraphrase-multilingual-mistral", "multilingual": True},
-                    {"model": "all-MiniLM-L6-v2", "dim": 384, "label": "all-MiniLM-L6-v2 — lightweight (legacy)", "multilingual": False},
+                    {"model": "all-MiniLM-L6-v2", "dim": 384, "label": "all-MiniLM-L6-v2 — lightweight (legacy)", "note": "lightweight_legacy", "multilingual": False},
                 ],
             }
 

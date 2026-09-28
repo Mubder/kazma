@@ -241,7 +241,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Per-turn RAG",
     },
     "packages.layer.vector_memory": {
-        "ar": "VectorMemory",
+        "ar": "ذاكرة المتجهات",
         "en": "VectorMemory",
     },
     "packages.memory_hint": {
@@ -283,5 +283,85 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "packages.title": {
         "ar": "الحزم والتبعيات",
         "en": "Packages & Dependencies",
+    },
+    "packages.missing": {
+        "ar": "مفقود",
+        "en": "missing",
+    },
+    "packages.status_ACTIVE": {
+        "ar": "نشط",
+        "en": "ACTIVE",
+    },
+    "packages.status_DEGRADED": {
+        "ar": "متدهور",
+        "en": "DEGRADED",
+    },
+    "packages.status_INSTALLING": {
+        "ar": "قيد التثبيت",
+        "en": "INSTALLING",
+    },
+    "packages.status_DEMO": {
+        "ar": "تجريبي",
+        "en": "DEMO",
+    },
+    "packages.status_UNKNOWN": {
+        "ar": "غير معروف",
+        "en": "UNKNOWN",
+    },
+    "packages.copy": {
+        "ar": "نسخ",
+        "en": "Copy",
+    },
+    "skills.ui.enter_repo": {
+        "ar": "أدخل owner/repo أو رابط GitHub",
+        "en": "Enter owner/repo or a GitHub URL",
+    },
+    "skills.ui.installed": {
+        "ar": "ثُبّتت المهارة",
+        "en": "Skill installed",
+    },
+    "skills.ui.install_failed_error": {
+        "ar": "فشل التثبيت: {error}",
+        "en": "Install failed: {error}",
+    },
+    "skills.ui.install_failed": {
+        "ar": "فشل التثبيت",
+        "en": "Install failed",
+    },
+    "skills.ui.toggle_failed": {
+        "ar": "تعذّر تبديل المهارة",
+        "en": "Failed to toggle skill",
+    },
+    "skills.ui.uninstall_title": {
+        "ar": "إلغاء تثبيت المهارة",
+        "en": "Uninstall skill",
+    },
+    "skills.ui.uninstall_message": {
+        "ar": "إلغاء تثبيت هذه المهارة؟ لا يمكن التراجع عن ذلك.",
+        "en": "Uninstall this skill? This cannot be undone.",
+    },
+    "skills.ui.uninstall": {
+        "ar": "إلغاء التثبيت",
+        "en": "Uninstall",
+    },
+    "skills.ui.nothing_uninstalled": {
+        "ar": "لم يُلغَ تثبيت أي شيء: {reason}",
+        "en": "Nothing was uninstalled: {reason}",
+    },
+    "skills.ui.no_answer": {
+        "ar": "لا رد",
+        "en": "no answer",
+    },
+    "skills.ui.uninstalled": {
+        "ar": "أُلغي تثبيت المهارة",
+        "en": "Skill uninstalled",
+    },
+    "skills.ui.uninstall_failed": {
+        "ar": "فشل إلغاء التثبيت",
+        "en": "Failed to uninstall",
+    },
+    "skills.ui.uninstall_failed_error": {
+        "ar": "فشل إلغاء التثبيت: {error}",
+        "en": "Failed to uninstall: {error}",
     },
 }

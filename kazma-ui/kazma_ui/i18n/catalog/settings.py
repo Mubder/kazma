@@ -2672,4 +2672,2016 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مخزّن، لكن تعذّر فك تشفيره",
         "en": "stored, but cannot be decrypted",
     },
+    "settings.api_tokens_hint": {
+        "ar": "استخدم هذه الرموز لاستدعاء الواجهات المحمية من السكربتات دون لصق <code>KAZMA_SECRET</code>. أرسلها بصيغة <code>Authorization: Bearer …</code> أو <code>X-Api-Token</code>.",
+        "en": "Use these tokens to call protected APIs from scripts without pasting <code>KAZMA_SECRET</code>. Send as <code>Authorization: Bearer …</code> or <code>X-Api-Token</code>.",
+    },
+    "settings.graph_budget_auto": {
+        "ar": "ميزانية خطوات المخطط (تلقائية): ~{n} (متوافقة مع جولات الأدوات)",
+        "en": "Graph step budget (auto): ~{n} (aligned with tool rounds)",
+    },
+    "settings.email_client_secret_ph": {
+        "ar": "سرّ العميل (GOCSPX-…)",
+        "en": "Client secret (GOCSPX-…)",
+    },
+    "settings.email_azure_client_id_ph": {
+        "ar": "معرّف تطبيق Azure (العميل)",
+        "en": "Azure app (client) ID",
+    },
+    "settings.email_public_client_ph": {
+        "ar": "اختياري للعملاء العامّين",
+        "en": "Optional for public clients",
+    },
+    "settings.bk.working": {
+        "ar": "جارٍ العمل…",
+        "en": "Working…",
+    },
+    "settings.bk.phase": {
+        "ar": "المرحلة",
+        "en": "Phase",
+    },
+    "settings.bk.phase_starting": {
+        "ar": "البدء",
+        "en": "starting",
+    },
+    "settings.bk.phase_databases": {
+        "ar": "قواعد البيانات",
+        "en": "databases",
+    },
+    "settings.bk.phase_assets": {
+        "ar": "الملفات",
+        "en": "files",
+    },
+    "settings.bk.phase_postgres": {
+        "ar": "Postgres",
+        "en": "Postgres",
+    },
+    "settings.bk.phase_done": {
+        "ar": "اكتمل",
+        "en": "done",
+    },
+    "settings.bk.done_summary": {
+        "ar": "{dbs} قاعدة بيانات، {mb} ميغابايت",
+        "en": "{dbs} databases, {mb} MB",
+    },
+    "settings.bk.synced_to": {
+        "ar": "☁ نُسخت إلى {remote}",
+        "en": "☁ Synced to {remote}",
+    },
+    "settings.bk.cloud": {
+        "ar": "السحابة",
+        "en": "cloud",
+    },
+    "settings.bk.manual": {
+        "ar": "يدوي",
+        "en": "Manual",
+    },
+    "settings.bk.auto": {
+        "ar": "تلقائي",
+        "en": "Auto",
+    },
+    "settings.bk.synced_to_title": {
+        "ar": "نُسخت إلى: {remote}",
+        "en": "Synced to: {remote}",
+    },
+    "settings.bk.cloud_label": {
+        "ar": "السحابة",
+        "en": "Cloud",
+    },
+    "settings.bk.not_synced": {
+        "ar": "لم تُنسخ إلى السحابة",
+        "en": "Not synced to cloud",
+    },
+    "settings.bk.local_only": {
+        "ar": "محلية فقط",
+        "en": "local only",
+    },
+    "settings.bk.row_summary": {
+        "ar": "{dbs} قاعدة بيانات · {mb} ميغابايت",
+        "en": "{dbs} databases · {mb} MB",
+    },
+    "settings.bk.incomplete": {
+        "ar": "غير مكتملة",
+        "en": "incomplete",
+    },
+    "settings.bk.download": {
+        "ar": "تنزيل",
+        "en": "Download",
+    },
+    "settings.bk.archive": {
+        "ar": "أرشفة",
+        "en": "Archive",
+    },
+    "settings.bk.sync_active": {
+        "ar": "النسخ الخارجي مفعّل",
+        "en": "Offsite sync active",
+    },
+    "settings.bk.sync_disabled": {
+        "ar": "النسخ الخارجي معطّل",
+        "en": "Offsite sync disabled",
+    },
+    "settings.bk.pick_card": {
+        "ar": "اضغط بطاقة مزوّد لتختاره وجهةً للنسخ الاحتياطي، ثم اختبر واحفظ.",
+        "en": "Click a provider card to select it as the backup destination, then Test + Save.",
+    },
+    "settings.bk.drive_blocked_title": {
+        "ar": "الوصول إلى Drive محجوب",
+        "en": "Drive access blocked",
+    },
+    "settings.bk.drive_warning": {
+        "ar": "⚠ Drive",
+        "en": "⚠ Drive",
+    },
+    "settings.bk.active": {
+        "ar": "نشط",
+        "en": "active",
+    },
+    "settings.bk.drive_hint": {
+        "ar": "يستخدم تفويض Gmail لديك — اضغط «اتصال» للسماح بالوصول إلى Drive.",
+        "en": "Uses your Gmail OAuth — click Connect to authorize Drive access.",
+    },
+    "settings.bk.reconnect": {
+        "ar": "⚠ أعد الاتصال",
+        "en": "⚠ Reconnect",
+    },
+    "settings.bk.connected": {
+        "ar": "✓ متصل",
+        "en": "✓ Connected",
+    },
+    "settings.bk.connect": {
+        "ar": "اتصال",
+        "en": "Connect",
+    },
+    "settings.bk.drive_blocked": {
+        "ar": "Drive محجوب: {reason}. اختبر البطاقة لمعرفة خطوات الإصلاح.",
+        "en": "Drive blocked: {reason}. Test the card for the fix steps.",
+    },
+    "settings.bk.unknown_reason": {
+        "ar": "سبب غير معروف",
+        "en": "unknown reason",
+    },
+    "settings.bk.onedrive_hint": {
+        "ar": "يستخدم حساب Microsoft لديك — اضغط «اتصال» للسماح بالوصول إلى الملفات.",
+        "en": "Uses your Microsoft account — click Connect to authorize Files access.",
+    },
+    "settings.bk.webdav_hint": {
+        "ar": "WebDAV — يعمل مع WD MyCloud OS5 وأي جهاز NAS.",
+        "en": "WebDAV — works with WD MyCloud OS5 and any NAS.",
+    },
+    "settings.bk.ftp_path_ph": {
+        "ar": "المسار الأساسي على الخادم (اختياري، مثل Backups/Kazma)",
+        "en": "Base path on the server (optional, e.g. Backups/Kazma)",
+    },
+    "settings.bk.ftp_hint": {
+        "ar": "FTP عادي — يعمل مع WD MyCloud OS3 (EX4100) وأي خادم FTP.",
+        "en": "Plain FTP — works with WD MyCloud OS3 (EX4100) and any FTP server.",
+    },
+    "settings.bk.s3_key_ph": {
+        "ar": "معرّف مفتاح الوصول",
+        "en": "Access Key ID",
+    },
+    "settings.bk.s3_secret_ph": {
+        "ar": "مفتاح الوصول السري",
+        "en": "Secret Access Key",
+    },
+    "settings.bk.s3_bucket_ph": {
+        "ar": "اسم الحاوية",
+        "en": "Bucket name",
+    },
+    "settings.bk.s3_endpoint_ph": {
+        "ar": "نقطة النهاية (اختيارية، لـ B2/MinIO)",
+        "en": "Endpoint (optional, for B2/MinIO)",
+    },
+    "settings.bk.s3_hint": {
+        "ar": "Amazon S3 أو أي تخزين متوافق مع S3. الأرخص للنسخ الاحتياطي.",
+        "en": "Amazon S3 or any S3-compatible storage. Cheapest for backups.",
+    },
+    "settings.bk.pick_provider_first": {
+        "ar": "اختر مزوّدًا أولًا لتفعيل النسخ الخارجي أو تعطيله",
+        "en": "Select a provider first to enable/disable offsite sync",
+    },
+    "settings.bk.test_ok": {
+        "ar": "متصل",
+        "en": "Connected",
+    },
+    "settings.bk.test_failed": {
+        "ar": "فشل",
+        "en": "Failed",
+    },
+    "settings.docs.open_documents_page": {
+        "ar": "افتح صفحة المستندات ←",
+        "en": "Open Documents page →",
+    },
+    "settings.docs.enabled_durable_writes": {
+        "ar": "مفعّل (كتابة دائمة)",
+        "en": "Enabled (durable writes)",
+    },
+    "settings.docs.shadow_mode": {
+        "ar": "وضع الظل",
+        "en": "Shadow mode",
+    },
+    "settings.docs.default_authoritative": {
+        "ar": "مرجعي افتراضيًا",
+        "en": "Default authoritative",
+    },
+    "settings.docs.mode_live": {
+        "ar": "الوضع (الحالي)",
+        "en": "Mode (live)",
+    },
+    "settings.docs.max_file_bytes": {
+        "ar": "أقصى حجم للملف (بايت)",
+        "en": "Max file bytes",
+    },
+    "settings.docs.max_files_request": {
+        "ar": "أقصى عدد ملفات في الطلب",
+        "en": "Max files / request",
+    },
+    "settings.docs.worker_timeout_s": {
+        "ar": "مهلة العامل (ثوانٍ)",
+        "en": "Worker timeout (s)",
+    },
+    "settings.docs.worker_memory_mb": {
+        "ar": "ذاكرة العامل (ميغابايت)",
+        "en": "Worker memory (MB)",
+    },
+    "settings.docs.storage_free_floor_bytes": {
+        "ar": "الحد الأدنى للمساحة الحرة (بايت)",
+        "en": "Storage free floor (bytes)",
+    },
+    "settings.docs.malware_scan": {
+        "ar": "فحص البرمجيات الخبيثة",
+        "en": "Malware scan",
+    },
+    "settings.docs.malware_fail_closed": {
+        "ar": "الرفض عند تعذّر فحص البرمجيات الخبيثة",
+        "en": "Malware fail-closed",
+    },
+    "settings.docs.ocr_enabled": {
+        "ar": "التعرّف الضوئي مفعّل",
+        "en": "OCR enabled",
+    },
+    "settings.docs.gc_enabled": {
+        "ar": "تنظيف المساحة مفعّل",
+        "en": "GC enabled",
+    },
+    "settings.docs.indexing_enabled": {
+        "ar": "الفهرسة مفعّلة",
+        "en": "Indexing enabled",
+    },
+    "settings.docs.scanner": {
+        "ar": "الفاحص:",
+        "en": "Scanner:",
+    },
+    "settings.docs.scanner_available": {
+        "ar": "{scanner} متاح",
+        "en": "{scanner} available",
+    },
+    "settings.docs.scanner_missing": {
+        "ar": "غير موجود في PATH (الوضع التلقائي يتخطّاه ما لم يُفعَّل الرفض)",
+        "en": "not on PATH (auto skips unless fail-closed)",
+    },
+    "settings.docs.opt_auto": {
+        "ar": "تلقائي",
+        "en": "auto",
+    },
+    "settings.docs.opt_on": {
+        "ar": "تشغيل",
+        "en": "on",
+    },
+    "settings.docs.opt_off": {
+        "ar": "إيقاف",
+        "en": "off",
+    },
+    "settings.docs.mode_compatibility": {
+        "ar": "التوافق",
+        "en": "compatibility",
+    },
+    "settings.mem.leave_blank": {
+        "ar": "اتركه فارغًا للإبقاء على الحالي",
+        "en": "leave blank to keep",
+    },
+    "settings.mem.vector_url": {
+        "ar": "عنوان اتصال المتجهات / DSN",
+        "en": "Vector connection URL / DSN",
+    },
+    "settings.mem.vector_url_ph": {
+        "ar": "postgresql://… أو http://qdrant:6333",
+        "en": "postgresql://… or http://qdrant:6333",
+    },
+    "settings.mem.postgres_dsn": {
+        "ar": "Postgres DSN",
+        "en": "Postgres DSN",
+    },
+    "settings.mem.mirror_hint": {
+        "ar": "المرآة تنقل الكتابات الجديدة فقط — لا تُنسخ المعتقدات والحلقات الموجودة تلقائيًا. استخدم المزامنة مرة بعد التفعيل (ولإعادة المزامنة بعد التعديلات الكبيرة).",
+        "en": "The mirror is write-forward only — existing beliefs/episodes aren't copied automatically. Use Sync once after enabling (and to re-sync after bulk edits).",
+    },
+    "settings.mem.opt_sqlite_vec": {
+        "ar": "SQLite-vec (محلي)",
+        "en": "SQLite-vec (local)",
+    },
+    "settings.mem.opt_sqlite_only": {
+        "ar": "SQLite محلي فقط",
+        "en": "Local SQLite only",
+    },
+    "settings.mem.opt_postgres_mirror": {
+        "ar": "مرآة Postgres مزدوجة",
+        "en": "Postgres dual-mirror",
+    },
+    "settings.mem.emb_multilingual_recommended": {
+        "ar": "متعدد اللغات (موصى به)",
+        "en": "multilingual (recommended)",
+    },
+    "settings.mem.emb_english": {
+        "ar": "للإنجليزية",
+        "en": "English",
+    },
+    "settings.mem.emb_lightweight_legacy": {
+        "ar": "خفيف (قديم)",
+        "en": "lightweight (legacy)",
+    },
+    "settings.cap_vector_local": {
+        "ar": "sqlite-vec المحلي: بحث وكتابة",
+        "en": "Local sqlite-vec: search + write",
+    },
+    "settings.cap_graph_local": {
+        "ar": "رسم المعتقدات يُقدَّم من جدول المعتقدات في SQLite",
+        "en": "Belief graph served from SQLite beliefs table",
+    },
+    "settings.cap_state_local": {
+        "ar": "الحالة الأساسية في SQLite المحلي (memory_state.db)",
+        "en": "Primary state is local SQLite (memory_state.db)",
+    },
+    "settings.prov_replied_in": {
+        "ar": "ردّ خلال {ms}{model}",
+        "en": "replied in {ms}{model}",
+    },
+    "settings.prov_chat_failing_detail": {
+        "ar": "قائمة النماذج تستجيب، أما الرسالة الفعلية فلا",
+        "en": "the model list answers, a real message does not",
+    },
+    "settings.prov_no_response": {
+        "ar": "لا استجابة",
+        "en": "no response",
+    },
+    "settings.cap_tools": {
+        "ar": "الأدوات",
+        "en": "Tools",
+    },
+    "settings.cap_streaming": {
+        "ar": "البث المتدفق",
+        "en": "Streaming",
+    },
+    "settings.cap_json_mode": {
+        "ar": "وضع JSON",
+        "en": "JSON mode",
+    },
+    "settings.cap_vision": {
+        "ar": "الرؤية",
+        "en": "Vision",
+    },
+    "settings.cap_title_yes": {
+        "ar": "قيس مع هذا المزوّد وتأكّد.",
+        "en": "Measured against this provider and confirmed.",
+    },
+    "settings.cap_title_no": {
+        "ar": "قيس مع هذا المزوّد وتبيّن أنه غير مدعوم.",
+        "en": "Measured against this provider and not supported.",
+    },
+    "settings.cap_title_unknown": {
+        "ar": "لم يُتحقَّق منه. لم يقسه أحد بعد — شغّل scripts/provider_conformance.py --live.",
+        "en": "Not verified. Nobody has measured this yet — run scripts/provider_conformance.py --live.",
+    },
+    "settings.fact_api": {
+        "ar": "الواجهة",
+        "en": "API",
+    },
+    "settings.fact_system_turn": {
+        "ar": "دور النظام",
+        "en": "System turn",
+    },
+    "settings.fact_context": {
+        "ar": "السياق",
+        "en": "Context",
+    },
+    "settings.hub.chat_failing_hint": {
+        "ar": "قائمة النماذج استجابت، إذن المفتاح والمضيف سليمان. تحقّق من مقطع إصدار الواجهة في عنوان URL الأساسي ومن النموذج المختار — هذا الزوج هو ما يرفضه <code>/chat/completions</code>.",
+        "en": "The model list answered, so the key and the host are fine. Check the base URL's API version segment and the selected model — that pair is what <code>/chat/completions</code> rejects.",
+    },
+    "settings.hub.discovered_n": {
+        "ar": "المكتشفة ({n})",
+        "en": "Discovered ({n})",
+    },
+    "settings.hub.selected_n": {
+        "ar": "(المختارة: {n})",
+        "en": "({n} selected)",
+    },
+    "settings.hub.search_models_n": {
+        "ar": "ابحث في {n} نموذجًا…",
+        "en": "Search {n} models…",
+    },
+    "settings.hub.no_models_match": {
+        "ar": "لا توجد نماذج مطابقة لبحثك",
+        "en": "No models match your search",
+    },
+    "settings.hub.platform_adapters": {
+        "ar": "محوّلات المنصات",
+        "en": "Platform Adapters",
+    },
+    "settings.hub.adapters_blurb": {
+        "ar": "بيانات الاعتماد والوجهات والتوجيه لكل منصة توصيل — في مكان واحد. الرموز مشفّرة في الخزنة؛ اترك النقاط المقنّعة للإبقاء على القيمة المحفوظة.",
+        "en": "Credentials, destinations and routing for every delivery platform — all in one place. Tokens are vault-encrypted; leave the masked dots to keep the saved value.",
+    },
+    "settings.hub.applying": {
+        "ar": "جارٍ التطبيق على المحوّلات…",
+        "en": "Applying to adapters…",
+    },
+    "settings.hub.saving": {
+        "ar": "جارٍ الحفظ…",
+        "en": "Saving…",
+    },
+    "settings.hub.tg_main": {
+        "ar": "Telegram — البوت الرئيسي",
+        "en": "Telegram — Main bot",
+    },
+    "settings.hub.configured": {
+        "ar": "مُعدّ",
+        "en": "Configured",
+    },
+    "settings.hub.not_configured": {
+        "ar": "غير مُعدّ",
+        "en": "Not configured",
+    },
+    "settings.hub.enable_adapter": {
+        "ar": "تفعيل محوّل هذه المنصة",
+        "en": "Enable this platform adapter",
+    },
+    "settings.hub.testing": {
+        "ar": "جارٍ الاختبار…",
+        "en": "Testing…",
+    },
+    "settings.hub.hide": {
+        "ar": "إخفاء",
+        "en": "Hide",
+    },
+    "settings.hub.show": {
+        "ar": "إظهار",
+        "en": "Show",
+    },
+    "settings.hub.masked_hint": {
+        "ar": "القيمة المحفوظة تظهر كنقاط — اكتب لاستبدالها.",
+        "en": "Saved value shows as dots — type to replace it.",
+    },
+    "settings.hub.chat_id": {
+        "ar": "معرّف المحادثة",
+        "en": "Chat ID",
+    },
+    "settings.hub.delivery_destination": {
+        "ar": "(وجهة التوصيل)",
+        "en": "(delivery destination)",
+    },
+    "settings.hub.tg_chat_ph": {
+        "ar": "123456789 (معرّف مستخدمك) أو -100…",
+        "en": "123456789 (your user id) or -100…",
+    },
+    "settings.hub.tg_chat_hint": {
+        "ar": "حيث تصل التنبيهات وتقارير السرب عند اختيار هذا المسار.",
+        "en": "Where alerts and swarm reports land when this route is selected.",
+    },
+    "settings.hub.allowed_user_ids": {
+        "ar": "معرّفات المستخدمين المسموح لهم",
+        "en": "Allowed User IDs",
+    },
+    "settings.hub.tg_allowed_ph": {
+        "ar": "123456789 — مفصولة بفواصل؛ الفراغ يسمح للجميع (الوضع غير الصارم)",
+        "en": "123456789 — comma-separated; empty allows all (non-strict mode)",
+    },
+    "settings.hub.tg_group": {
+        "ar": "Telegram — مجموعة",
+        "en": "Telegram — Group",
+    },
+    "settings.hub.active": {
+        "ar": "نشط",
+        "en": "Active",
+    },
+    "settings.hub.off": {
+        "ar": "متوقف",
+        "en": "Off",
+    },
+    "settings.hub.enable_group": {
+        "ar": "تفعيل مسار المجموعة",
+        "en": "Enable the group route",
+    },
+    "settings.hub.group_hint": {
+        "ar": "مسار ثانٍ اختياري — اترك الرمز المخصص فارغًا لاستخدام البوت الرئيسي",
+        "en": "optional second route — leave the dedicated token empty to use the main bot",
+    },
+    "settings.hub.group_chat_id": {
+        "ar": "معرّف محادثة المجموعة",
+        "en": "Group Chat ID",
+    },
+    "settings.hub.group_chat_ph": {
+        "ar": "-100… (يعلنه البوت عند إضافته إلى مجموعة)",
+        "en": "-100… (the bot announces it when added to a group)",
+    },
+    "settings.hub.dedicated_token": {
+        "ar": "رمز بوت مخصص",
+        "en": "Dedicated Bot Token",
+    },
+    "settings.hub.optional": {
+        "ar": "(اختياري)",
+        "en": "(optional)",
+    },
+    "settings.hub.discord_token_ph": {
+        "ar": "MTIzNDU2… (من Developer Portal ← Bot ← Reset Token)",
+        "en": "MTIzNDU2… (Developer Portal → Bot → Reset Token)",
+    },
+    "settings.hub.channel_id": {
+        "ar": "معرّف القناة",
+        "en": "Channel ID",
+    },
+    "settings.hub.discord_channel_ph": {
+        "ar": "معرّف القناة (Developer Mode ← انقر القناة بالزر الأيمن ← Copy ID)",
+        "en": "channel id (Developer Mode → right-click channel → Copy ID)",
+    },
+    "settings.hub.discord_guild_ph": {
+        "ar": "معرّف الخادم (Developer Mode ← انقر الخادم بالزر الأيمن ← Copy ID)",
+        "en": "server id (Developer Mode → right-click server → Copy ID)",
+    },
+    "settings.hub.discord_allowed_ph": {
+        "ar": "111, 222 — مفصولة بفواصل",
+        "en": "111, 222 — comma-separated",
+    },
+    "settings.hub.slack_token_ph": {
+        "ar": "xoxb-… (من تثبيت تطبيق Slack)",
+        "en": "xoxb-… (from the Slack app install)",
+    },
+    "settings.hub.app_token": {
+        "ar": "رمز التطبيق",
+        "en": "App Token",
+    },
+    "settings.hub.app_token_hint": {
+        "ar": "(اختياري، Socket Mode)",
+        "en": "(optional, Socket Mode)",
+    },
+    "settings.hub.slack_workspace": {
+        "ar": "مساحة العمل",
+        "en": "Workspace",
+    },
+    "settings.hub.slack_channel_ph": {
+        "ar": "C… (انقر القناة بالزر الأيمن ← View channel details)",
+        "en": "C… (right-click channel → View channel details)",
+    },
+    "settings.hub.slack_allowed_ph": {
+        "ar": "U0123ABCD — مفصولة بفواصل",
+        "en": "U0123ABCD — comma-separated",
+    },
+    "settings.hub.adapters_routes": {
+        "ar": "المحوّلات والمسارات",
+        "en": "Adapters & Routes",
+    },
+    "settings.hub.routes_blurb": {
+        "ar": "توجيه التوصيل — اختر المنصات التي تستقبل كل نوع من الرسائل. لا يوصل المسار إلا إذا ضُبطت وجهته أعلاه.",
+        "en": "Delivery routing — pick which platforms receive each kind of message. A route only delivers when its destination above is set.",
+    },
+    "settings.hub.alerts_go_to": {
+        "ar": "تذهب التنبيهات إلى",
+        "en": "Alerts go to",
+    },
+    "settings.hub.alerts_hint": {
+        "ar": "تنبيهات التشغيل وانقطاعات MCP وبدء الخادم وإيقافه. اترك الكل دون تحديد للتوصيل إلى كل منصة مُعدّة.",
+        "en": "Ops pages, MCP outages, and server start/stop. Leave ALL unchecked to deliver to every configured platform.",
+    },
+    "settings.hub.swarm_goes_to": {
+        "ar": "تذهب مخرجات السرب إلى",
+        "en": "Swarm output goes to",
+    },
+    "settings.hub.swarm_hint": {
+        "ar": "يُرسل تقرير السرب النهائي إلى كل مسار مختار. اترك الكل دون تحديد لإرساله إلى مجموعة Telegram فقط.",
+        "en": "The final swarm report is mirrored to every selected route. Leave all unchecked for the single Telegram-group target only.",
+    },
+    "settings.hub.route_tg_group": {
+        "ar": "Telegram (مجموعة)",
+        "en": "Telegram (group)",
+    },
+    "settings.hub.restart_hint": {
+        "ar": "أعد تشغيل محوّلات المنصات دون إعادة تشغيل الخادم. الحفظ يطبّق تغييرات بيانات الاعتماد تلقائيًا.",
+        "en": "Restart the platform adapters without restarting the server. Saving applies credential changes automatically.",
+    },
+    "settings.hub.other_integrations": {
+        "ar": "تكاملات أخرى",
+        "en": "Other integrations",
+    },
+    "settings.hub.other_hint": {
+        "ar": "موصلات البريد والـ Webhook. تُدار Telegram وDiscord وSlack في محوّلات المنصات أعلاه.",
+        "en": "Email and webhook connectors. Telegram, Discord and Slack are managed in Platform Adapters above.",
+    },
+    "settings.connector_email": {
+        "ar": "البريد الإلكتروني",
+        "en": "Email",
+    },
+    "settings.connector_webhook": {
+        "ar": "Webhook",
+        "en": "Webhook",
+    },
+    "settings.connector_status_configured": {
+        "ar": "مُعدّ",
+        "en": "configured",
+    },
+    "settings.connector_status_missing": {
+        "ar": "غير مُعدّ",
+        "en": "missing",
+    },
+    "settings.hub.google_mode": {
+        "ar": "منتج Google / طريقة المصادقة",
+        "en": "Google Product / Authentication Mode",
+    },
+    "settings.hub.google_ai_studio": {
+        "ar": "Google AI Studio (مفتاح API)",
+        "en": "Google AI Studio (API Key)",
+    },
+    "settings.hub.keep_key": {
+        "ar": "اتركه فارغًا للإبقاء على المفتاح الحالي",
+        "en": "leave blank to keep current key",
+    },
+    "settings.hub.ai_studio_key_ph": {
+        "ar": "مفتاح AI Studio (AIzaSy...)",
+        "en": "AI Studio Key (AIzaSy...)",
+    },
+    "settings.hub.base_url_optional": {
+        "ar": "عنوان URL الأساسي (اختياري)",
+        "en": "Base URL (Optional)",
+    },
+    "settings.hub.gcp_project": {
+        "ar": "معرّف مشروع GCP (اختياري — يُؤخذ من gcloud/ADC عند غيابه)",
+        "en": "GCP Project ID (Optional - falls back to gcloud/ADC)",
+    },
+    "settings.hub.gcp_location": {
+        "ar": "موقع / منطقة GCP",
+        "en": "GCP Location / Region",
+    },
+    "settings.hub.adc_hint": {
+        "ar": "يصادق بأمان عبر <strong>Application Default Credentials (ADC)</strong>. اترك معرّف المشروع فارغًا ليُحدَّد تلقائيًا من إعدادات gcloud المحلية.",
+        "en": "Authenticates securely via <strong>Application Default Credentials (ADC)</strong>. Keep project ID empty to auto-resolve from local gcloud config.",
+    },
+    "settings.hub.token_ph": {
+        "ar": "رمز / مفتاح",
+        "en": "token / key",
+    },
+    "settings.hub.app_password_ph": {
+        "ar": "كلمة مرور التطبيق",
+        "en": "App password",
+    },
+    "settings.hub.shared_secret_ph": {
+        "ar": "سرّ مشترك",
+        "en": "Shared secret",
+    },
+    "settings.sys.secret_vault": {
+        "ar": "خزنة الأسرار",
+        "en": "Secret Vault",
+    },
+    "settings.sys.vault_enabled": {
+        "ar": "الخزنة مفعّلة",
+        "en": "Vault Enabled",
+    },
+    "settings.sys.vault_disabled": {
+        "ar": "الخزنة معطّلة",
+        "en": "Vault Disabled",
+    },
+    "settings.sys.secrets_stored": {
+        "ar": "الأسرار المخزّنة: {n}",
+        "en": "{n} secrets stored",
+    },
+    "settings.sys.vault_hint": {
+        "ar": "اضبط KAZMA_VAULT_KEY في ‎.env أو أعد تشغيل الخادم ليُولَّد تلقائيًا.",
+        "en": "Set KAZMA_VAULT_KEY in .env or restart the server to auto-generate one.",
+    },
+    "settings.sys.vault_tools_hint": {
+        "ar": "يستطيع الوكيل تخزين الأسرار المشفّرة واسترجاعها (مفاتيح API والرموز وكلمات المرور) عبر الأداتين <code>vault_store</code> و<code>vault_retrieve</code>. الاسترجاع يتطلب موافقة.",
+        "en": "The agent can store and retrieve encrypted secrets (API keys, tokens, passwords) using the <code>vault_store</code> and <code>vault_retrieve</code> tools. Retrieval requires HITL approval.",
+    },
+    "settings.sys.proxy_test_failed": {
+        "ar": "فشل الاختبار",
+        "en": "Test failed",
+    },
+    "settings.xt.handle_ph": {
+        "ar": "@حسابك",
+        "en": "@yourhandle",
+    },
+    "settings.xt.auto_reply": {
+        "ar": "الرد التلقائي",
+        "en": "Auto-reply",
+    },
+    "settings.xt.intro": {
+        "ar": "أشر إلى حسابك ويردّ Kazma. لا يلزم تحديد موضوع — الرمز التعبيري في الإشارة يحدد النبرة (😂 سخرية، 🤬 غضب، 🙄 جفاف، ❤️ دعم). أضف موضوعًا فقط حين تريد رأيًا معلنًا في مسألة؛ فالمواضيع تتقدّم على الصوت الافتراضي.",
+        "en": "Mention @yourhandle and Kazma replies. No subject is required — the emoji in the mention picks the tone (😂 roast, 🤬 angry, 🙄 dry, ❤️ supportive). Add a subject only when you want a declared view on a topic; those still win over the default voice.",
+    },
+    "settings.xt.live": {
+        "ar": "يعمل",
+        "en": "Live",
+    },
+    "settings.xt.not_live": {
+        "ar": "لا يعمل",
+        "en": "Not live",
+    },
+    "settings.xt.not_ready": {
+        "ar": "موصل X غير جاهز للنشر بعد — احفظ بيانات الاعتماد أعلاه واختبرها أولًا.",
+        "en": "The X connector is not posting-ready yet — save and test the credentials above first.",
+    },
+    "settings.xt.enable": {
+        "ar": "تفعيل الرد التلقائي",
+        "en": "Enable auto-reply",
+    },
+    "settings.xt.mode": {
+        "ar": "الوضع",
+        "en": "Mode",
+    },
+    "settings.xt.mode_off": {
+        "ar": "إيقاف — لا ردود أبدًا",
+        "en": "off — never reply",
+    },
+    "settings.xt.mode_draft": {
+        "ar": "مسودة — اسألني قبل النشر",
+        "en": "draft — ask me before posting",
+    },
+    "settings.xt.mode_auto": {
+        "ar": "تلقائي — انشر دون سؤال",
+        "en": "auto — post without asking",
+    },
+    "settings.xt.auto_warning": {
+        "ar": "الوضع التلقائي ينشر نصًا لم تقرأه باسمك. ابدأ بالمسودة.",
+        "en": "Auto publishes text you have not read, under your name. Start with draft.",
+    },
+    "settings.xt.who": {
+        "ar": "من يمكنه استدعاؤه",
+        "en": "Who can summon it",
+    },
+    "settings.xt.who_allowlist": {
+        "ar": "الحسابات التي أحددها فقط",
+        "en": "only the handles I list",
+    },
+    "settings.xt.who_anyone": {
+        "ar": "أي شخص يشير إليّ",
+        "en": "anyone who mentions me",
+    },
+    "settings.xt.anyone_warning": {
+        "ar": "يستطيع أي غريب إطلاق رد. ومع ذلك تبقى مطابقة المواضيع والحدود وحد المتابعين الأدنى وفحص المحتوى سارية.",
+        "en": "Any stranger can trigger a reply. Subject matching, the caps, the follower floor and the content screen all still apply.",
+    },
+    "settings.xt.trusted": {
+        "ar": "الحسابات الموثوقة",
+        "en": "Trusted handles",
+    },
+    "settings.xt.trusted_ph": {
+        "ar": "حسابك, شريكك",
+        "en": "yourhandle, cohost",
+    },
+    "settings.xt.trusted_hint": {
+        "ar": "مفصولة بفواصل. الفراغ يعني لا أحد — خطأ في الإعداد يجب ألا يفتح الحساب للجميع.",
+        "en": "Comma-separated. Empty means nobody — a config mistake must not open the account to the world.",
+    },
+    "settings.xt.anyone_hint": {
+        "ar": "كل من يشير إلى الحساب يستطيع الاستدعاء. وتبقى الحدود والفحص ساريين.",
+        "en": "Anyone who mentions the account can summon. Caps and the screen still apply.",
+    },
+    "settings.xt.open_marker": {
+        "ar": "وسم فتح السلسلة (اختياري)",
+        "en": "Open-thread marker (optional)",
+    },
+    "settings.xt.open_marker_hint": {
+        "ar": "بدونه لا يحصل على رد إلا الحسابات الموثوقة. ضع الوسم في إشارتك <em>أنت</em> إن أردت أن يحصل كل من يرد على ذلك المنشور على Kazma أيضًا. يُطابَق الوسم كاملًا: <code>#Open</code> لا يطابق <code>#OpenAI</code>. اتركه فارغًا = أنت فقط.",
+        "en": "Without this, only trusted handles get a reply. Put the hashtag in <em>your</em> mention if you want anyone who replies on that post to get Kazma too. Matched as a whole tag: <code>#Open</code> does not match <code>#OpenAI</code>. Leave empty = strictly you.",
+    },
+    "settings.xt.close_marker": {
+        "ar": "وسم إغلاق السلسلة (اختياري)",
+        "en": "Close-thread marker (optional)",
+    },
+    "settings.xt.close_marker_hint": {
+        "ar": "أشر إلى Kazma بهذا الوسم لإيقاف الغرباء في تلك السلسلة. يبقى بإمكانك الحديث. مثال: <code>@KazmaAI #Close</code>.",
+        "en": "Mention Kazma with this tag to stop strangers on that thread. You can still talk. Example: <code>@KazmaAI #Close</code>.",
+    },
+    "settings.xt.trigger": {
+        "ar": "عبارة التشغيل (اختيارية)",
+        "en": "Trigger phrase (optional)",
+    },
+    "settings.xt.trigger_ph": {
+        "ar": "ما رأيك",
+        "en": "what do you think",
+    },
+    "settings.xt.trigger_hint": {
+        "ar": "عند ضبطها يجب أن تحتويها الإشارة لتُعدّ استدعاءً.",
+        "en": "When set, a mention must contain this to count as a summon.",
+    },
+    "settings.xt.emoji_tone": {
+        "ar": "دع الرمز التعبيري يحدد النبرة",
+        "en": "Let an emoji set the tone",
+    },
+    "settings.xt.emoji_hint": {
+        "ar": "«ما رأيك يا Kazma؟ 😂» تحصل على سخرية؛ والعبارة نفسها مع 🤬 تحصل على رد غاضب. النبرة فقط — لا يستطيع الرمز التعبيري المساس برأي الموضوع أو خطوطه الحمراء، ولا يضبطه إلا الحسابات الموثوقة.",
+        "en": "“what do you think Kazma? 😂” gets a roast; the same line with 🤬 gets an angry one. Tone only — an emoji can never reach the subject’s view or its hard lines, and only trusted handles can set it.",
+    },
+    "settings.xt.stance": {
+        "ar": "تحقّق أن المسودة تدافع عن رأيك",
+        "en": "Check the draft argues your view",
+    },
+    "settings.xt.stance_hint": {
+        "ar": "استدعاء قصير إضافي للنموذج لكل رد. فحص المحتوى يلتقط التهديدات والإطالة فقط — ولا يعرف موقفك، فمسودة تدافع بهدوء عن الطرف الآخر (أو تبدو متعاطفة معه) تجتازه. هذا يمنع التناقض والحياد وانقلابات «لا تهاجمهم».",
+        "en": "One extra short model call per reply. The content screen only catches threats and over-length — it has no idea what your position is, so a draft that quietly argues the other side (or sounds sympathetic to it) passes it. This blocks contradictions, fence-sitting, and “don’t attack them” polarity flips.",
+    },
+    "settings.xt.stance_off_warning": {
+        "ar": "مع إيقاف هذا والوضع تلقائي، لا شيء يتحقق من الرد قبل نشره.",
+        "en": "With this off and mode set to auto, nothing verifies a reply before it publishes.",
+    },
+    "settings.xt.unmatched": {
+        "ar": "إن لم يطابق أي موضوع",
+        "en": "If no subject matches",
+    },
+    "settings.xt.unmatched_skip": {
+        "ar": "التزم الصمت (صارم)",
+        "en": "stay silent (strict)",
+    },
+    "settings.xt.unmatched_voice": {
+        "ar": "ردّ على أي حال، والرمز التعبيري يحدد النبرة",
+        "en": "reply anyway, emoji sets the tone",
+    },
+    "settings.xt.unmatched_hint": {
+        "ar": "الوضع الصارم هو الافتراضي حين تكون لديك مواضيع. ومع ذلك تستطيع الإشارة تحديد الجانب دون بطاقة: 😂/🤬/🙄/👎 = انتقد هذا المنشور، ❤️/👍 = دافع عنه (أو الكلمتان against / support). والكلمة المفتاحية <code>*</code> تجيب على كل شيء.",
+        "en": "Strict is the default once you have subjects. A mention can still set the side without a card: 😂/🤬/🙄/👎 = criticise this post, ❤️/👍 = defend it (or the words against / support). A <code>*</code> keyword still answers everything.",
+    },
+    "settings.xt.use_kb": {
+        "ar": "استند في المسودات إلى المكتبة المعرفية",
+        "en": "Ground drafts in the Knowledge Base",
+    },
+    "settings.xt.use_kb_hint": {
+        "ar": "يسحب حتى ثلاثة مقتطفات محاطة إلى المسودة كحقائق. لا تتجاوز أبدًا جانب البطاقة (مع/ضد). معطّل افتراضيًا. أدخل مكتبة في <a href=\"/knowledge\">المكتبة المعرفية</a> أولًا، ثم <strong>جرّبه</strong> — تخبرك المعاينة بعدد المقتطفات المستخدمة.",
+        "en": "Pulls up to three fenced snippets into the draft as facts. They never override the card’s against/support side. Off by default. Ingest a library on <a href=\"/knowledge\">Knowledge</a> first, then <strong>Try it</strong> — the preview says how many snippets landed.",
+    },
+    "settings.xt.library": {
+        "ar": "المكتبة",
+        "en": "Library",
+    },
+    "settings.xt.all_libraries": {
+        "ar": "كل المكتبات التي تحوي مقاطع",
+        "en": "All libraries with chunks",
+    },
+    "settings.xt.lib_chunks": {
+        "ar": "{name} ({n} مقطعًا)",
+        "en": "{name} ({n} chunks)",
+    },
+    "settings.xt.no_libraries": {
+        "ar": "لا مكتبات بعد. أضف واحدة في صفحة المكتبة المعرفية ثم أعد تحميل هذا التبويب.",
+        "en": "No libraries yet. Add one on the Knowledge page, then reload this tab.",
+    },
+    "settings.xt.max_day": {
+        "ar": "أقصى ردود في اليوم",
+        "en": "Max replies / day",
+    },
+    "settings.xt.max_account": {
+        "ar": "أقصى ردود لكل حساب في اليوم",
+        "en": "Max per account / day",
+    },
+    "settings.xt.cooldown": {
+        "ar": "فترة تهدئة السلسلة (ث)",
+        "en": "Thread cooldown (s)",
+    },
+    "settings.xt.min_followers": {
+        "ar": "أدنى عدد متابعين",
+        "en": "Min follower count",
+    },
+    "settings.xt.poll": {
+        "ar": "فاصل الاستطلاع (ث)",
+        "en": "Poll interval (s)",
+    },
+    "settings.xt.floor_hint": {
+        "ar": "حد المتابعين الأدنى يمنع الردود غير المطلوبة على الحسابات الصغيرة. استطلاع الإشارات يتطلب خطة X مدفوعة ويستهلك حصة القراءة الشهرية.",
+        "en": "The follower floor stops unsolicited replies at small accounts. Polling mentions needs a paid X plan and spends monthly read quota.",
+    },
+    "settings.xt.subjects": {
+        "ar": "المواضيع",
+        "en": "Subjects",
+    },
+    "settings.xt.add_subject": {
+        "ar": "+ إضافة موضوع",
+        "en": "+ Add subject",
+    },
+    "settings.xt.no_subjects": {
+        "ar": "لا مواضيع — لا بأس. يبقى Kazma يرد؛ ورمز الاستدعاء يحدد النبرة. أضف موضوعًا حين تريد أن يدافع عن رأي كتبته، أو أعطِ موضوعًا الكلمة المفتاحية <code>*</code> لتكتب الصوت بنفسك.",
+        "en": "No subjects — that is fine. Kazma still replies; the summon emoji picks the tone. Add a subject when you want it to argue a view you wrote, or give one the keyword <code>*</code> to write the voice yourself.",
+    },
+    "settings.xt.unnamed": {
+        "ar": "(بلا اسم)",
+        "en": "(unnamed)",
+    },
+    "settings.xt.id": {
+        "ar": "المعرّف",
+        "en": "Id",
+    },
+    "settings.xt.topic_ph": {
+        "ar": "الموضوع",
+        "en": "topic",
+    },
+    "settings.xt.side": {
+        "ar": "الجانب — دائمًا هذا، والرمز التعبيري للنبرة فقط",
+        "en": "Side — always this, emoji is tone only",
+    },
+    "settings.xt.side_against": {
+        "ar": "ضد — انتقد دائمًا",
+        "en": "against — always criticise",
+    },
+    "settings.xt.side_support": {
+        "ar": "مع — دافع دائمًا",
+        "en": "support — always defend",
+    },
+    "settings.xt.side_legacy": {
+        "ar": "(قديم: استخدم نص الرأي)",
+        "en": "(legacy: use the view text)",
+    },
+    "settings.xt.side_value_against": {
+        "ar": "ضد",
+        "en": "against",
+    },
+    "settings.xt.side_value_support": {
+        "ar": "مع",
+        "en": "support",
+    },
+    "settings.xt.fallback_mood": {
+        "ar": "المزاج الاحتياطي (إن خلا الاستدعاء من رمز تعبيري)",
+        "en": "Fallback mood (if the summon has no emoji)",
+    },
+    "settings.xt.keywords": {
+        "ar": "الكلمات المفتاحية",
+        "en": "Keywords",
+    },
+    "settings.xt.keywords_ph": {
+        "ar": "اسم، اسم بديل، كلمة مفتاحية  —  أو * وحدها",
+        "en": "name, alias, keyword  —  or just *",
+    },
+    "settings.xt.keywords_hint": {
+        "ar": "تُطابَق كلمات كاملة، فلا تنطلق «var» على «variable». استخدم <code>*</code> وحدها للرد على <strong>كل</strong> منشور — ثم يحدد رمز الاستدعاء النبرة. تُجرَّب المواضيع المحددة أولًا، فلا يضعفها الموضوع العام.",
+        "en": "Matched as whole words, so \"var\" will not fire on \"variable\". Use <code>*</code> on its own to answer <strong>every</strong> post — the summon emoji then picks the tone. Specific subjects are still tried first, so a catch-all never blunts them.",
+    },
+    "settings.xt.extra": {
+        "ar": "إضافة اختيارية (من / لماذا — الجانب نفسه)",
+        "en": "Optional extra (who / why — still the same side)",
+    },
+    "settings.xt.extra_ph": {
+        "ar": "اختياري: من أو ما الذي ينطبق عليه هذا الجانب",
+        "en": "optional: who or what this side applies to",
+    },
+    "settings.xt.extra_hint": {
+        "ar": "ضد + 😂 = سخرية من ذلك الموضوع. مع + 🤬 = غضب <em>لأجله</em> (غضب على منتقديه، لا على الموضوع أبدًا).",
+        "en": "Against + 😂 = roast that subject. Support + 🤬 = angry <em>for</em> it (anger at its critics, never at the subject).",
+    },
+    "settings.xt.register": {
+        "ar": "اللهجة (اختيارية)",
+        "en": "Register (optional)",
+    },
+    "settings.xt.register_ph": {
+        "ar": "خليجية",
+        "en": "gulf arabic",
+    },
+    "settings.xt.hard_lines": {
+        "ar": "الخطوط الحمراء — واحد في كل سطر",
+        "en": "Hard lines — one per line",
+    },
+    "settings.xt.hard_lines_ph": {
+        "ar": "لا تمدح الطرف الآخر أبدًا",
+        "en": "never praise the other side",
+    },
+    "settings.xt.hard_lines_hint": {
+        "ar": "أشياء يجب ألا يقولها أبدًا، إضافةً إلى القواعد العامة (لا إهانات ولا تهديدات).",
+        "en": "Things it must never say, on top of the universal rules (no slurs, no threats).",
+    },
+    "settings.xt.examples": {
+        "ar": "أمثلة — واحد في كل سطر",
+        "en": "Examples — one per line",
+    },
+    "settings.xt.examples_ph": {
+        "ar": "ردّ كتبته فعلًا.",
+        "en": "A reply you actually wrote.",
+    },
+    "settings.xt.examples_hint": {
+        "ar": "أنفع من الرأي في ضبط الصوت. اثنان أو ثلاثة تكفي.",
+        "en": "Worth more than the view for voice. Two or three is enough.",
+    },
+    "settings.xt.save": {
+        "ar": "حفظ الرد التلقائي",
+        "en": "Save auto-reply",
+    },
+    "settings.xt.recent": {
+        "ar": "الاستدعاءات الأخيرة",
+        "en": "Recent summons",
+    },
+    "settings.xt.try_it": {
+        "ar": "جرّبه",
+        "en": "Try it",
+    },
+    "settings.xt.try_hint": {
+        "ar": "يصوغ ردًا على منشور تلصقه. لا يُنشر شيء ولا يُسجَّل. اختر نبرة أدناه لترى أثر الرمز التعبيري.",
+        "en": "Drafts against a pasted post. Nothing is published or recorded. Pick a tone below to see how the emoji would land.",
+    },
+    "settings.xt.try_open": {
+        "ar": "يستخدم بطاقة الموضوع المفتوحة، بما فيها التعديلات غير المحفوظة.",
+        "en": "Uses the subject card you have open, including edits you have not saved.",
+    },
+    "settings.xt.try_voice_only": {
+        "ar": "لا موضوع مفتوح — الصياغة بوضع الصوت فقط (منتقي الرمز/النبرة).",
+        "en": "No subject open — this drafts in voice-only mode (emoji/tone picker).",
+    },
+    "settings.xt.post_text": {
+        "ar": "نص المنشور",
+        "en": "Post text",
+    },
+    "settings.xt.post_ph": {
+        "ar": "الصق المنشور الذي سترد عليه.",
+        "en": "Paste the post you would be replying to.",
+    },
+    "settings.xt.their_handle": {
+        "ar": "حسابه (اختياري)",
+        "en": "Their handle (optional)",
+    },
+    "settings.xt.tone": {
+        "ar": "النبرة (اختيارية)",
+        "en": "Tone (optional)",
+    },
+    "settings.xt.tone_default": {
+        "ar": "نبرة الموضوع نفسه",
+        "en": "the subject's own",
+    },
+    "settings.xt.force_subject": {
+        "ar": "فرض موضوع (اختياري)",
+        "en": "Force a subject (optional)",
+    },
+    "settings.xt.auto_detect": {
+        "ar": "اكتشاف تلقائي",
+        "en": "auto-detect",
+    },
+    "settings.xt.drafting": {
+        "ar": "جارٍ الصياغة…",
+        "en": "Drafting…",
+    },
+    "settings.xt.draft_reply": {
+        "ar": "صُغ ردًا",
+        "en": "Draft a reply",
+    },
+    "settings.xt.subject_label": {
+        "ar": "الموضوع:",
+        "en": "subject:",
+    },
+    "settings.xt.kb_hits": {
+        "ar": "المكتبة: {n} مقتطف",
+        "en": "KB: {n} snippet(s)",
+    },
+    "settings.xt.kb_from": {
+        "ar": "من {libs}",
+        "en": "from {libs}",
+    },
+    "settings.xt.kb_none": {
+        "ar": "· المكتبة مفعّلة، ولم يطابق أي مقتطف",
+        "en": "· KB on, no snippets matched",
+    },
+    "settings.xt.full_guide": {
+        "ar": "الدليل الكامل:",
+        "en": "Full guide:",
+    },
+    "settings.xt.guide_link": {
+        "ar": "الرد التلقائي على X",
+        "en": "X auto-reply",
+    },
+    "settings.xt.mood_roast": {
+        "ar": "سخرية",
+        "en": "roast",
+    },
+    "settings.xt.mood_angry": {
+        "ar": "غضب",
+        "en": "angry",
+    },
+    "settings.xt.mood_dry": {
+        "ar": "جاف",
+        "en": "dry",
+    },
+    "settings.xt.mood_supportive": {
+        "ar": "داعم",
+        "en": "supportive",
+    },
+    "settings.xt.mood_neutral": {
+        "ar": "محايد",
+        "en": "neutral",
+    },
+    "settings.xt.mood_playful": {
+        "ar": "مرح",
+        "en": "playful",
+    },
+    "settings.xt.mood_serious": {
+        "ar": "جاد",
+        "en": "serious",
+    },
+    "settings.xt.mood_sarcastic": {
+        "ar": "تهكّمي",
+        "en": "sarcastic",
+    },
+    "settings.category_swarm": {
+        "ar": "السرب",
+        "en": "swarm",
+    },
+    "settings.category_browser": {
+        "ar": "المتصفح",
+        "en": "browser",
+    },
+    "settings.category_knowledge": {
+        "ar": "المعرفة",
+        "en": "knowledge",
+    },
+    "settings.category_research": {
+        "ar": "البحث",
+        "en": "research",
+    },
+    "settings.category_mcp": {
+        "ar": "MCP",
+        "en": "MCP",
+    },
+    "settings.category_skills": {
+        "ar": "المهارات",
+        "en": "skills",
+    },
+    "settings.category_calendar": {
+        "ar": "التقويم",
+        "en": "calendar",
+    },
+    "settings.category_document": {
+        "ar": "المستندات",
+        "en": "document",
+    },
+    "settings.category_email": {
+        "ar": "البريد",
+        "en": "email",
+    },
+    "settings.category_security": {
+        "ar": "الأمان",
+        "en": "security",
+    },
+    "settings.category_social": {
+        "ar": "التواصل الاجتماعي",
+        "en": "social",
+    },
+    "settings.xt.mood_deadpan": {
+        "ar": "جامد",
+        "en": "deadpan",
+    },
+    "settings.int.gcal_connected": {
+        "ar": "تم ربط Google Calendar",
+        "en": "Google Calendar connected",
+    },
+    "settings.int.as_account": {
+        "ar": " بالحساب {email}",
+        "en": " as {email}",
+    },
+    "settings.int.protocol_failed": {
+        "ar": "فشل {protocol} في {provider}: {error}",
+        "en": "{provider} {protocol} failed: {error}",
+    },
+    "settings.int.x_api_ok": {
+        "ar": "واجهة X تعمل{who}. رموز المستخدم للقراءة والكتابة تعمل.",
+        "en": "X API ok{who}. Read + Write user tokens work.",
+    },
+    "settings.int.server_name_is_required": {
+        "ar": "اسم الخادم مطلوب",
+        "en": "Server name is required",
+    },
+    "settings.int.mcp_server_added": {
+        "ar": "أُضيف خادم MCP",
+        "en": "MCP server added",
+    },
+    "settings.int.failed_to_add_server": {
+        "ar": "فشلت إضافة الخادم: ",
+        "en": "Failed to add server: ",
+    },
+    "settings.int.remove_mcp_server": {
+        "ar": "إزالة خادم MCP",
+        "en": "Remove MCP server",
+    },
+    "settings.int.remove": {
+        "ar": "إزالة",
+        "en": "Remove",
+    },
+    "settings.int.server_removed": {
+        "ar": "أُزيل الخادم",
+        "en": "Server removed",
+    },
+    "settings.int.delete_failed": {
+        "ar": "فشل الحذف: ",
+        "en": "Delete failed: ",
+    },
+    "settings.int.toggle_failed": {
+        "ar": "فشل التبديل: ",
+        "en": "Toggle failed: ",
+    },
+    "settings.int.uninstall_skill": {
+        "ar": "إلغاء تثبيت المهارة",
+        "en": "Uninstall skill",
+    },
+    "settings.int.uninstall": {
+        "ar": "إلغاء التثبيت",
+        "en": "Uninstall",
+    },
+    "settings.int.skill_uninstalled": {
+        "ar": "أُلغي تثبيت المهارة",
+        "en": "Skill uninstalled",
+    },
+    "settings.int.uninstall_failed": {
+        "ar": "فشل إلغاء التثبيت: ",
+        "en": "Uninstall failed: ",
+    },
+    "settings.int.voice_settings_saved": {
+        "ar": "حُفظت إعدادات الصوت",
+        "en": "Voice settings saved",
+    },
+    "settings.int.failed_to_save_voice_settings": {
+        "ar": "فشل حفظ إعدادات الصوت: ",
+        "en": "Failed to save voice settings: ",
+    },
+    "settings.int.oauth_failed": {
+        "ar": "فشل OAuth: ",
+        "en": "OAuth failed: ",
+    },
+    "settings.int.calendar_oauth_failed": {
+        "ar": "فشل OAuth للتقويم: ",
+        "en": "Calendar OAuth failed: ",
+    },
+    "settings.int.google_oauth_client_saved": {
+        "ar": "حُفظ عميل Google OAuth",
+        "en": "Google OAuth client saved",
+    },
+    "settings.int.save_failed": {
+        "ar": "فشل الحفظ: ",
+        "en": "Save failed: ",
+    },
+    "settings.int.could_not_start_google_oauth": {
+        "ar": "تعذّر بدء Google OAuth (هل حُفظ معرّف العميل والسر؟)",
+        "en": "Could not start Google OAuth (is Client ID/secret saved?)",
+    },
+    "settings.int.gmail_oauth_failed": {
+        "ar": "فشل OAuth لـ Gmail: ",
+        "en": "Gmail OAuth failed: ",
+    },
+    "settings.int.could_not_start_microsoft_oauth": {
+        "ar": "تعذّر بدء Microsoft OAuth",
+        "en": "Could not start Microsoft OAuth",
+    },
+    "settings.int.microsoft_oauth_failed": {
+        "ar": "فشل OAuth لـ Microsoft: ",
+        "en": "Microsoft OAuth failed: ",
+    },
+    "settings.int.gmail_connected": {
+        "ar": "تم ربط Gmail",
+        "en": "Gmail connected",
+    },
+    "settings.int.gmail_connect_failed": {
+        "ar": "فشل ربط Gmail: ",
+        "en": "Gmail connect failed: ",
+    },
+    "settings.int.could_not_start_google_calendar": {
+        "ar": "تعذّر بدء OAuth لـ Google Calendar",
+        "en": "Could not start Google Calendar OAuth",
+    },
+    "settings.int.failed": {
+        "ar": "فشل",
+        "en": "Failed",
+    },
+    "settings.int.google_calendar_disconnected": {
+        "ar": "فُصل Google Calendar",
+        "en": "Google Calendar disconnected",
+    },
+    "settings.int.disconnect_failed": {
+        "ar": "فشل الفصل: ",
+        "en": "Disconnect failed: ",
+    },
+    "settings.int.gmail_disconnected": {
+        "ar": "فُصل Gmail",
+        "en": "Gmail disconnected",
+    },
+    "settings.int.microsoft_app_saved": {
+        "ar": "حُفظ تطبيق Microsoft",
+        "en": "Microsoft app saved",
+    },
+    "settings.int.microsoft_connect_failed": {
+        "ar": "فشل ربط Microsoft: ",
+        "en": "Microsoft connect failed: ",
+    },
+    "settings.int.microsoft_connected": {
+        "ar": "تم ربط Microsoft",
+        "en": "Microsoft connected",
+    },
+    "settings.int.authorization_failed": {
+        "ar": "فشل التفويض",
+        "en": "Authorization failed",
+    },
+    "settings.int.microsoft_disconnected": {
+        "ar": "فُصل Microsoft",
+        "en": "Microsoft disconnected",
+    },
+    "settings.int.failed_to_load_x_status": {
+        "ar": "فشل تحميل حالة X: ",
+        "en": "Failed to load X status: ",
+    },
+    "settings.int.save_failed_2": {
+        "ar": "فشل الحفظ",
+        "en": "Save failed",
+    },
+    "settings.int.x_credentials_saved_vaulted_test": {
+        "ar": "حُفظت بيانات اعتماد X (في الخزنة). اختبر الاتصال بعدها.",
+        "en": "X credentials saved (vaulted). Test the connection next.",
+    },
+    "settings.int.x_test_failed": {
+        "ar": "فشل اختبار X",
+        "en": "X test failed",
+    },
+    "settings.int.x_test_failed_2": {
+        "ar": "فشل اختبار X: ",
+        "en": "X test failed: ",
+    },
+    "settings.int.disconnect_x": {
+        "ar": "فصل X",
+        "en": "Disconnect X",
+    },
+    "settings.int.remove_the_four_oauth_keys": {
+        "ar": "إزالة مفاتيح OAuth الأربعة من الخزنة وتعطيل النشر؟",
+        "en": "Remove the four OAuth keys from the vault and disable posting?",
+    },
+    "settings.int.disconnect": {
+        "ar": "فصل",
+        "en": "Disconnect",
+    },
+    "settings.int.disconnect_failed_2": {
+        "ar": "فشل الفصل",
+        "en": "Disconnect failed",
+    },
+    "settings.int.x_connector_disconnected": {
+        "ar": "فُصل موصّل X.",
+        "en": "X connector disconnected.",
+    },
+    "settings.int.failed_to_load_auto_reply": {
+        "ar": "فشل تحميل إعدادات الرد التلقائي: ",
+        "en": "Failed to load auto-reply settings: ",
+    },
+    "settings.int.auto_reply_saved_mentions_poller": {
+        "ar": "حُفظ الرد التلقائي. متابِع الإشارات يعمل.",
+        "en": "Auto-reply saved. Mentions poller is live.",
+    },
+    "settings.int.saved_restart_kazma_to_start": {
+        "ar": "حُفظ. أعد تشغيل Kazma لبدء متابِع الإشارات.",
+        "en": "Saved. Restart Kazma to start the mentions poller.",
+    },
+    "settings.int.auto_reply_settings_saved": {
+        "ar": "حُفظت إعدادات الرد التلقائي.",
+        "en": "Auto-reply settings saved.",
+    },
+    "settings.int.paste_the_post_you_want": {
+        "ar": "الصق المنشور الذي تريد الرد عليه.",
+        "en": "Paste the post you want a reply to.",
+    },
+    "settings.int.preview_failed": {
+        "ar": "فشلت المعاينة",
+        "en": "Preview failed",
+    },
+    "settings.int.preview_failed_2": {
+        "ar": "فشلت المعاينة: ",
+        "en": "Preview failed: ",
+    },
+    "settings.int.remove_mcp_message": {
+        "ar": "إزالة خادم MCP «{name}»؟ لا يمكن التراجع عن ذلك.",
+        "en": "Remove MCP server \"{name}\"? This cannot be undone.",
+    },
+    "settings.int.mcp_tools_found": {
+        "ar": "{name}: عُثر على {n} أدوات",
+        "en": "{name}: {n} tools found",
+    },
+    "settings.int.test_failed": {
+        "ar": "فشل الاختبار: {error}",
+        "en": "Test failed: {error}",
+    },
+    "settings.int.uninstall_skill_message": {
+        "ar": "إلغاء تثبيت المهارة «{name}»؟ لا يمكن التراجع عن ذلك.",
+        "en": "Uninstall skill \"{name}\"? This cannot be undone.",
+    },
+    "settings.hub.default_set": {
+        "ar": "صار الافتراضي لـ «{task}» هو {model}",
+        "en": "Default for \"{task}\" set to {model}",
+    },
+    "settings.hub.delete_profile_message": {
+        "ar": "حذف الملف الشخصي «{name}»؟ لا يمكن التراجع عن ذلك.",
+        "en": "Delete profile \"{name}\"? This cannot be undone.",
+    },
+    "settings.hub.loaded_profile": {
+        "ar": "حُمّل الملف الشخصي «{name}»",
+        "en": "Loaded profile \"{name}\"",
+    },
+    "settings.hub.platform_saved_refreshed": {
+        "ar": "حُفظت إعدادات {platform}. حُدّثت البوابة ({n} محوّلات).",
+        "en": "{platform} settings saved. Gateway refreshed ({n} adapters).",
+    },
+    "settings.hub.platform_saved_refresh_failed": {
+        "ar": "حُفظت إعدادات {platform}، لكن فشل تحديث البوابة. استخدم زر «تحديث البوابة».",
+        "en": "{platform} settings saved, but gateway refresh failed. Use \"Refresh Gateway\" button.",
+    },
+    "settings.hub.gateway_refreshed": {
+        "ar": "حُدّثت البوابة — {n} محوّلات: {names}",
+        "en": "Gateway refreshed — {n} adapter(s): {names}",
+    },
+    "settings.hub.test_failed_error": {
+        "ar": "فشل الاختبار: {error}",
+        "en": "Test failed: {error}",
+    },
+    "settings.hub.delete_provider_message": {
+        "ar": "حذف المزوّد «{name}»؟ لا يمكن التراجع عن ذلك.",
+        "en": "Delete provider \"{name}\"? This cannot be undone.",
+    },
+    "settings.hub.model_not_in_list": {
+        "ar": "{model} ليس في القائمة",
+        "en": "{model} is not in the list",
+    },
+    "settings.hub.clear_models_message": {
+        "ar": "مسح النماذج المكتشفة لـ «{name}»؟ ستُمسح أيضًا النماذج التي اخترتها لهذا المزوّد.",
+        "en": "Clear discovered models for \"{name}\"? Your selected models for this provider will also be cleared.",
+    },
+    "settings.hub.delete_connector_message": {
+        "ar": "حذف الموصّل «{name}»؟ لا يمكن التراجع عن ذلك.",
+        "en": "Delete connector \"{name}\"? This cannot be undone.",
+    },
+    "settings.hub.connection_test_ok": {
+        "ar": "نجح اختبار الاتصال",
+        "en": "Connection test succeeded",
+    },
+    "settings.hub.enter_a_base_url_first": {
+        "ar": "أدخل عنوان URL الأساسي أولًا",
+        "en": "Enter a base URL first",
+    },
+    "settings.hub.no_models_returned_check_your": {
+        "ar": "لم تُرجع أي نماذج. تحقّق من مفتاح API.",
+        "en": "No models returned. Check your API key.",
+    },
+    "settings.hub.fetch_failed": {
+        "ar": "فشل الجلب: ",
+        "en": "Fetch failed: ",
+    },
+    "settings.hub.model_settings_saved": {
+        "ar": "حُفظت إعدادات النموذج",
+        "en": "Model settings saved",
+    },
+    "settings.hub.save_failed": {
+        "ar": "فشل الحفظ",
+        "en": "Save failed",
+    },
+    "settings.hub.enter_a_profile_name": {
+        "ar": "أدخل اسمًا للملف الشخصي",
+        "en": "Enter a profile name",
+    },
+    "settings.hub.failed_to_save_profile": {
+        "ar": "فشل حفظ الملف الشخصي: ",
+        "en": "Failed to save profile: ",
+    },
+    "settings.hub.delete_profile": {
+        "ar": "حذف الملف الشخصي",
+        "en": "Delete profile",
+    },
+    "settings.hub.delete": {
+        "ar": "حذف",
+        "en": "Delete",
+    },
+    "settings.hub.failed_to_delete_profile": {
+        "ar": "فشل حذف الملف الشخصي: ",
+        "en": "Failed to delete profile: ",
+    },
+    "settings.hub.enter_a_prompt_and_select": {
+        "ar": "اكتب طلبًا واختر النماذج",
+        "en": "Enter a prompt and select models",
+    },
+    "settings.hub.comparison_failed": {
+        "ar": "فشلت المقارنة: ",
+        "en": "Comparison failed: ",
+    },
+    "settings.hub.gateway_refresh_failed": {
+        "ar": "فشل تحديث البوابة: ",
+        "en": "Gateway refresh failed: ",
+    },
+    "settings.hub.nothing_to_save_no_changes": {
+        "ar": "لا شيء للحفظ — لا تغييرات.",
+        "en": "Nothing to save — no changes.",
+    },
+    "settings.hub.saved": {
+        "ar": "حُفظ.",
+        "en": "Saved.",
+    },
+    "settings.hub.adapters_refreshed": {
+        "ar": "حُدّثت المحوّلات.",
+        "en": "Adapters refreshed.",
+    },
+    "settings.hub.saved_but_adapter_refresh_failed": {
+        "ar": "حُفظ، لكن فشل تحديث المحوّلات — استخدم «تحديث المحوّلات».",
+        "en": "Saved, but adapter refresh failed — use Refresh Adapters.",
+    },
+    "settings.hub.save_failed_2": {
+        "ar": "فشل الحفظ: ",
+        "en": "Save failed: ",
+    },
+    "settings.hub.test_failed": {
+        "ar": "فشل الاختبار: ",
+        "en": "Test failed: ",
+    },
+    "settings.hub.name_and_base_url_are": {
+        "ar": "الاسم وعنوان URL الأساسي مطلوبان",
+        "en": "Name and Base URL are required",
+    },
+    "settings.hub.provider_saved": {
+        "ar": "حُفظ المزوّد",
+        "en": "Provider saved",
+    },
+    "settings.hub.failed_to_save_provider": {
+        "ar": "فشل حفظ المزوّد: ",
+        "en": "Failed to save provider: ",
+    },
+    "settings.hub.delete_provider": {
+        "ar": "حذف المزوّد",
+        "en": "Delete provider",
+    },
+    "settings.hub.provider_removed": {
+        "ar": "أُزيل المزوّد",
+        "en": "Provider removed",
+    },
+    "settings.hub.failed_to_delete_provider": {
+        "ar": "فشل حذف المزوّد: ",
+        "en": "Failed to delete provider: ",
+    },
+    "settings.hub.toggle_failed": {
+        "ar": "فشل التبديل: ",
+        "en": "Toggle failed: ",
+    },
+    "settings.hub.enter_a_provider_name_and": {
+        "ar": "أدخل اسم المزوّد وعنوان URL الأساسي أولًا",
+        "en": "Enter a provider name and base URL first",
+    },
+    "settings.hub.connection_test_succeeded": {
+        "ar": "نجح اختبار الاتصال",
+        "en": "Connection test succeeded",
+    },
+    "settings.hub.discover_failed": {
+        "ar": "فشل الاكتشاف: ",
+        "en": "Discover failed: ",
+    },
+    "settings.hub.failed_to_save_model_selection": {
+        "ar": "فشل حفظ اختيار النماذج",
+        "en": "Failed to save model selection",
+    },
+    "settings.hub.failed_to_remove_model": {
+        "ar": "فشلت إزالة النموذج",
+        "en": "Failed to remove model",
+    },
+    "settings.hub.failed_to_remove_model_2": {
+        "ar": "فشلت إزالة النموذج: ",
+        "en": "Failed to remove model: ",
+    },
+    "settings.hub.clear_discovered_models": {
+        "ar": "مسح النماذج المكتشفة",
+        "en": "Clear discovered models",
+    },
+    "settings.hub.clear": {
+        "ar": "مسح",
+        "en": "Clear",
+    },
+    "settings.hub.cleared_discovered_models": {
+        "ar": "مُسحت النماذج المكتشفة",
+        "en": "Cleared discovered models",
+    },
+    "settings.hub.failed_to_clear_models": {
+        "ar": "فشل مسح النماذج",
+        "en": "Failed to clear models",
+    },
+    "settings.hub.failed_to_clear_models_2": {
+        "ar": "فشل مسح النماذج: ",
+        "en": "Failed to clear models: ",
+    },
+    "settings.hub.connector_name_is_required": {
+        "ar": "اسم الموصّل مطلوب",
+        "en": "Connector name is required",
+    },
+    "settings.hub.connector_saved": {
+        "ar": "حُفظ الموصّل",
+        "en": "Connector saved",
+    },
+    "settings.hub.failed_to_save_connector": {
+        "ar": "فشل حفظ الموصّل: ",
+        "en": "Failed to save connector: ",
+    },
+    "settings.hub.delete_connector": {
+        "ar": "حذف الموصّل",
+        "en": "Delete connector",
+    },
+    "settings.hub.connector_removed": {
+        "ar": "أُزيل الموصّل",
+        "en": "Connector removed",
+    },
+    "settings.hub.failed_to_delete_connector": {
+        "ar": "فشل حذف الموصّل: ",
+        "en": "Failed to delete connector: ",
+    },
+    "settings.hub.select_a_connector_name_first": {
+        "ar": "اختر اسم موصّل أولًا",
+        "en": "Select a connector name first",
+    },
+    "settings.hub.profile_name_is_required": {
+        "ar": "اسم الملف الشخصي مطلوب",
+        "en": "Profile name is required",
+    },
+    "settings.agentjs.synced_neo4j": {
+        "ar": "زُامنت {n} معتقدات إلى Neo4j",
+        "en": "Synced {n} beliefs to Neo4j",
+    },
+    "settings.agentjs.rebuild_started_status": {
+        "ar": "بدأت إعادة البناء (راجع الحالة في صفحة المُضمِّن)",
+        "en": "Rebuild started (see status on Embedder page)",
+    },
+    "settings.agentjs.status_failed": {
+        "ar": "فشل",
+        "en": "Failed",
+    },
+    "settings.agentjs.save_failed": {
+        "ar": "فشل الحفظ: ",
+        "en": "Save failed: ",
+    },
+    "settings.agentjs.non_stop_settings_saved_applies": {
+        "ar": "حُفظت إعدادات التشغيل المتواصل — تُطبّق فورًا",
+        "en": "Non-stop settings saved — applies live",
+    },
+    "settings.agentjs.save_failed_2": {
+        "ar": "فشل الحفظ",
+        "en": "Save failed",
+    },
+    "settings.agentjs.memory_isolation_mode_saved_takes": {
+        "ar": "حُفظ وضع عزل الذاكرة — يسري من الدور التالي",
+        "en": "Memory isolation mode saved — takes effect next turn",
+    },
+    "settings.agentjs.memory_knowledge_settings_saved": {
+        "ar": "حُفظت إعدادات الذاكرة / المعرفة",
+        "en": "Memory / Knowledge settings saved",
+    },
+    "settings.agentjs.memory_backends_saved": {
+        "ar": "حُفظت خلفيات الذاكرة",
+        "en": "Memory backends saved",
+    },
+    "settings.agentjs.neo4j_connected": {
+        "ar": "تم الاتصال بـ Neo4j",
+        "en": "Neo4j connected",
+    },
+    "settings.agentjs.neo4j_test_failed": {
+        "ar": "فشل اختبار Neo4j",
+        "en": "Neo4j test failed",
+    },
+    "settings.agentjs.neo4j_sync_failed": {
+        "ar": "فشلت المزامنة مع Neo4j",
+        "en": "Neo4j sync failed",
+    },
+    "settings.agentjs.postgres_sync_failed": {
+        "ar": "فشلت المزامنة مع Postgres",
+        "en": "Postgres sync failed",
+    },
+    "settings.agentjs.memory_backends_reset_to_local": {
+        "ar": "أُعيدت خلفيات الذاكرة إلى المحلية",
+        "en": "Memory backends reset to local",
+    },
+    "settings.agentjs.reset_failed": {
+        "ar": "فشلت إعادة الضبط",
+        "en": "Reset failed",
+    },
+    "settings.agentjs.rebuild_embeddings": {
+        "ar": "إعادة بناء التضمينات؟",
+        "en": "Rebuild embeddings?",
+    },
+    "settings.agentjs.re_embed_episodes_beliefs_for": {
+        "ar": "إعادة تضمين الحلقات والمعتقدات للنموذج الحالي. قد يستغرق دقائق.",
+        "en": "Re-embed episodes/beliefs for the current model. May take minutes.",
+    },
+    "settings.agentjs.rebuild_failed": {
+        "ar": "فشلت إعادة البناء",
+        "en": "Rebuild failed",
+    },
+    "settings.agentjs.logging_settings_saved_restart_for": {
+        "ar": "حُفظت إعدادات السجلات (أعد التشغيل لتطبيق تغييرات التدوير)",
+        "en": "Logging settings saved (restart for rotation changes)",
+    },
+    "settings.agentjs.document_settings_saved": {
+        "ar": "حُفظت إعدادات المستندات",
+        "en": "Document settings saved",
+    },
+    "settings.agentjs.document_settings_save_failed": {
+        "ar": "فشل حفظ إعدادات المستندات",
+        "en": "Document settings save failed",
+    },
+    "settings.agentjs.model_is_required": {
+        "ar": "النموذج مطلوب",
+        "en": "Model is required",
+    },
+    "settings.agentjs.embedder_settings_saved_restart_the": {
+        "ar": "حُفظت إعدادات المُضمِّن. أعد تشغيل الخادم لتطبيقها.",
+        "en": "Embedder settings saved. Restart the server to apply.",
+    },
+    "settings.agentjs.all_memory_rows_not_in": {
+        "ar": "ستُعاد ترميز كل صفوف الذاكرة غير الموجودة في فضاء المتجهات الحالي بالنموذج النشط. يعمل ذلك في الخلفية وقد يطول للمخازن الكبيرة. تُنشأ نسخة احتياطية تلقائيًا أولًا.",
+        "en": "All memory rows not in the current vector space will be re-encoded with the active model. This runs in the background and can take a while for large stores. A backup is created automatically first.",
+    },
+    "settings.agentjs.rebuild_started_in_the_background": {
+        "ar": "بدأت إعادة البناء في الخلفية.",
+        "en": "Rebuild started in the background.",
+    },
+    "settings.agentjs.a_rebuild_is_already_running": {
+        "ar": "إعادة بناء تعمل بالفعل.",
+        "en": "A rebuild is already running.",
+    },
+    "settings.agentjs.failed_to_start_rebuild": {
+        "ar": "تعذّر بدء إعادة البناء",
+        "en": "Failed to start rebuild",
+    },
+    "settings.agentjs.rebuild_failed_to_start": {
+        "ar": "تعذّر بدء إعادة البناء: ",
+        "en": "Rebuild failed to start: ",
+    },
+    "settings.agentjs.embedding_rebuild_complete": {
+        "ar": "اكتملت إعادة بناء التضمينات.",
+        "en": "Embedding rebuild complete.",
+    },
+    "settings.agentjs.embedding_rebuild_failed": {
+        "ar": "فشلت إعادة بناء التضمينات: ",
+        "en": "Embedding rebuild failed: ",
+    },
+    "settings.agentjs.unknown_error": {
+        "ar": "خطأ غير معروف",
+        "en": "unknown error",
+    },
+    "settings.agentjs.notification_preference_saved": {
+        "ar": "حُفظ تفضيل الإشعارات.",
+        "en": "Notification preference saved.",
+    },
+    "settings.agentjs.snapshots_per_thread_must_be": {
+        "ar": "يجب ألا تقل اللقطات لكل محادثة عن 1",
+        "en": "Snapshots per thread must be at least 1",
+    },
+    "settings.agentjs.retention_days_must_be_at": {
+        "ar": "يجب ألا تقل أيام الاحتفاظ عن 1",
+        "en": "Retention days must be at least 1",
+    },
+    "settings.agentjs.time_travel_settings_saved_restart": {
+        "ar": "حُفظت إعدادات السفر عبر الزمن. أعد تشغيل الخادم لتطبيقها.",
+        "en": "Time travel settings saved. Restart the server to apply.",
+    },
+    "settings.ops.install_extra_message": {
+        "ar": "تثبيت الحزمة الإضافية «{name}» في بيئة Python هذه؟ يعمل ذلك عبر uv/pip في الخلفية.",
+        "en": "Install the \"{name}\" extra into this Python environment? This runs uv/pip in the background.",
+    },
+    "settings.ops.install_extra_native": {
+        "ar": "تثبيت الحزمة الإضافية الاختيارية «{name}»؟",
+        "en": "Install optional extra \"{name}\"?",
+    },
+    "settings.ops.install_failed_to_start": {
+        "ar": "تعذّر بدء التثبيت",
+        "en": "Install failed to start",
+    },
+    "settings.ops.installing_extra": {
+        "ar": "جارٍ تثبيت «{name}» في الخلفية… حدّث هذا التبويب بعد دقيقة.",
+        "en": "Installing \"{name}\" in the background… Refresh this tab in a minute.",
+    },
+    "settings.ops.network_error": {
+        "ar": "خطأ في الشبكة",
+        "en": "Network error",
+    },
+    "settings.ops.installed_extra": {
+        "ar": "ثُبّتت «{name}». جارٍ إعادة تحميل قائمة الحزم…",
+        "en": "Installed \"{name}\". Reloading package list…",
+    },
+    "settings.ops.install_failed": {
+        "ar": "فشل التثبيت: {error}",
+        "en": "Install failed: {error}",
+    },
+    "settings.ops.see_server_logs": {
+        "ar": "راجع سجلات الخادم",
+        "en": "see server logs",
+    },
+    "settings.ops.delete_backup_message": {
+        "ar": "حذف النسخة الاحتياطية {date}؟ لا يمكن التراجع عن ذلك.",
+        "en": "Delete backup {date}? This cannot be undone.",
+    },
+    "settings.drive_run_test": {
+        "ar": "شغّل «اختبار» للتشخيص",
+        "en": "run Test to diagnose",
+    },
+    "settings.ops.shortcut_not_saved": {
+        "ar": "لم يُحفظ الاختصار: ",
+        "en": "Shortcut not saved: ",
+    },
+    "settings.ops.reset_shortcuts": {
+        "ar": "إعادة ضبط الاختصارات",
+        "en": "Reset shortcuts",
+    },
+    "settings.ops.reset_all_shortcuts_to_defaults": {
+        "ar": "إعادة كل الاختصارات إلى الافتراضي؟",
+        "en": "Reset all shortcuts to defaults?",
+    },
+    "settings.ops.reset": {
+        "ar": "إعادة ضبط",
+        "en": "Reset",
+    },
+    "settings.ops.reset_failed": {
+        "ar": "فشلت إعادة الضبط: ",
+        "en": "Reset failed: ",
+    },
+    "settings.ops.revoke_token": {
+        "ar": "إلغاء الرمز",
+        "en": "Revoke token",
+    },
+    "settings.ops.revoke_this_token_this_cannot": {
+        "ar": "إلغاء هذا الرمز؟ لا يمكن التراجع عن ذلك. ستحصل البرامج التي تستخدمه على 401.",
+        "en": "Revoke this token? This cannot be undone. Scripts using it will get 401.",
+    },
+    "settings.ops.revoke": {
+        "ar": "إلغاء",
+        "en": "Revoke",
+    },
+    "settings.ops.copied_to_clipboard": {
+        "ar": "نُسخ إلى الحافظة",
+        "en": "Copied to clipboard",
+    },
+    "settings.ops.install_optional_dependency": {
+        "ar": "تثبيت حزمة اختيارية",
+        "en": "Install optional dependency",
+    },
+    "settings.ops.install": {
+        "ar": "تثبيت",
+        "en": "Install",
+    },
+    "settings.ops.reset_all_settings": {
+        "ar": "إعادة ضبط كل الإعدادات",
+        "en": "Reset all settings",
+    },
+    "settings.ops.this_will_reset_all_settings": {
+        "ar": "[!]  سيعيد هذا كل الإعدادات إلى الافتراضي. هل أنت متأكد؟",
+        "en": "[!]  This will reset ALL settings to defaults. Are you sure?",
+    },
+    "settings.ops.final_confirmation": {
+        "ar": "التأكيد الأخير",
+        "en": "Final confirmation",
+    },
+    "settings.ops.reset_everything_this_cannot_be": {
+        "ar": "إعادة ضبط كل شيء؟ لا يمكن التراجع عن ذلك.",
+        "en": "Reset everything? This cannot be undone.",
+    },
+    "settings.ops.reset_everything": {
+        "ar": "أعد ضبط كل شيء",
+        "en": "Reset everything",
+    },
+    "settings.ops.reset_settings": {
+        "ar": "إعادة ضبط الإعدادات",
+        "en": "Reset settings",
+    },
+    "settings.ops.reset_all_settings_to_defaults": {
+        "ar": "إعادة كل الإعدادات إلى الافتراضي؟ لا يمكن التراجع عن ذلك.",
+        "en": "Reset ALL settings to defaults? This cannot be undone.",
+    },
+    "settings.ops.delete_backup": {
+        "ar": "حذف النسخة الاحتياطية",
+        "en": "Delete backup",
+    },
+    "settings.ops.delete": {
+        "ar": "حذف",
+        "en": "Delete",
+    },
+    "settings.core.no_restart_needed_config_already": {
+        "ar": "لا حاجة لإعادة التشغيل — الإعدادات تطابق الخادم العامل.",
+        "en": "No restart needed — config already matches the running server.",
+    },
+    "settings.core.restart_failed": {
+        "ar": "فشلت إعادة التشغيل",
+        "en": "Restart failed",
+    },
+    "settings.core.restarting_server_the_page_will": {
+        "ar": "جارٍ إعادة تشغيل الخادم… ستُعاد تحميل الصفحة بعد قليل.",
+        "en": "Restarting server… the page will reload shortly.",
+    },
+    "settings.core.server_did_not_come_back": {
+        "ar": "لم يعد الخادم — تحقّق من الطرفية.",
+        "en": "Server did not come back — check the terminal.",
+    },
+    "settings.core.restart_request_failed": {
+        "ar": "فشل طلب إعادة التشغيل: ",
+        "en": "Restart request failed: ",
+    },
+    "settings.token_created_once": {
+        "ar": "أُنشئ الرمز — انسخه الآن (يظهر مرة واحدة)",
+        "en": "Token created — copy now (shown once)",
+    },
+    "settings.copy_token": {
+        "ar": "نسخ الرمز",
+        "en": "Copy token",
+    },
+    "settings.copy_curl": {
+        "ar": "نسخ مثال curl",
+        "en": "Copy curl example",
+    },
+    "settings.token_prefix": {
+        "ar": "البادئة",
+        "en": "Prefix",
+    },
+    "settings.last_active": {
+        "ar": "آخر نشاط",
+        "en": "Last active",
+    },
+    "settings.stt_api_key": {
+        "ar": "مفتاح API لتحويل الكلام إلى نص",
+        "en": "STT API key",
+    },
+    "settings.keep_stored_key": {
+        "ar": "اتركه فارغًا للإبقاء على المفتاح المحفوظ",
+        "en": "Leave blank to keep the stored key",
+    },
+    "settings.keep_stored_secret": {
+        "ar": "اتركه فارغًا للإبقاء على السر المحفوظ",
+        "en": "Leave blank to keep the stored secret",
+    },
+    "settings.stored_in_vault_hint": {
+        "ar": "يُحفظ مشفّرًا في الخزنة. يظهر هكذا <code>********</code> عند تعيينه — تفريغ الحقل لا يحذفه.",
+        "en": "Stored encrypted in the vault. Shown as <code>********</code> when one is set — clearing the box does not delete it.",
+    },
+    "settings.voice_auto_hint": {
+        "ar": "يختار صوتًا لكل رد حسب نصه. أي خيار آخر هنا يثبّت صوتًا واحدًا لكل الردود، بكل اللغات.",
+        "en": "Picks a voice per reply from the text. Anything else here pins one voice to every reply, in every language.",
+    },
+    "settings.english_voice": {
+        "ar": "الصوت الإنجليزي",
+        "en": "English voice",
+    },
+    "settings.arabic_voice": {
+        "ar": "الصوت العربي",
+        "en": "Arabic voice",
+    },
+    "settings.voice_default": {
+        "ar": "الافتراضي ({voice})",
+        "en": "Default ({voice})",
+    },
+    "settings.no_arabic_voices": {
+        "ar": "لم يُبلغ هذا المزوّد عن أصوات عربية.",
+        "en": "No Arabic voices reported by this provider.",
+    },
+    "settings.custom_voice_placeholder": {
+        "ar": "أدخل معرّف صوت مخصص",
+        "en": "Enter custom voice ID",
+    },
+    "settings.livekit_title": {
+        "ar": "الصوت المباشر ثنائي الاتجاه (LiveKit)",
+        "en": "Live duplex voice (LiveKit)",
+    },
+    "settings.livekit_hint": {
+        "ar": "اختياري. مطلوب فقط للوضع المباشر الذي يمكن مقاطعته في أي وقت — التسجيل والقراءة بصوت عالٍ يعملان بدونه.",
+        "en": "Optional. Only needed for the live, interrupt-anytime mode — recording and read-aloud work without it.",
+    },
+    "settings.livekit_url": {
+        "ar": "رابط LiveKit",
+        "en": "LiveKit URL",
+    },
+    "settings.livekit_api_key": {
+        "ar": "مفتاح API لـ LiveKit",
+        "en": "LiveKit API key",
+    },
+    "settings.livekit_api_secret": {
+        "ar": "سر API لـ LiveKit",
+        "en": "LiveKit API secret",
+    },
+    "settings.livekit_vault_hint": {
+        "ar": "يُحفظ كلاهما مشفّرًا في الخزنة ويظهران هكذا <code>********</code> بعد التعيين.",
+        "en": "Both are stored encrypted in the vault and shown as <code>********</code> once set.",
+    },
+    "settings.preset_deep": {
+        "ar": "معمّق",
+        "en": "Deep",
+    },
+    "settings.preset_research": {
+        "ar": "بحث",
+        "en": "Research",
+    },
+    "settings.preset_chat": {
+        "ar": "محادثة",
+        "en": "Chat",
+    },
+    "settings.role_viewer": {
+        "ar": "مشاهد",
+        "en": "viewer",
+    },
+    "settings.role_operator": {
+        "ar": "مشغّل",
+        "en": "operator",
+    },
+    "settings.role_admin": {
+        "ar": "مشرف",
+        "en": "admin",
+    },
+    "settings.tts_voice_auto": {
+        "ar": "تلقائي — بلغة الرسالة",
+        "en": "Auto — match the message language",
+    },
 }

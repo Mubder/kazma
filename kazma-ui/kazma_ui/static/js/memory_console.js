@@ -31,6 +31,35 @@
     _memWin = [];
   };
   var I18N = window.__DASH_MEM_I18N || window.I18N || {};
+  // Text this console builds: the catalog's text for *key* in the page's
+  // language, else *fallback* (English), {name} placeholders from *vars*.
+  function _mt(key, fallback, vars) {
+    if (typeof window.kazmaT === 'function') return window.kazmaT(key, fallback, vars);
+    var text = fallback;
+    if (vars) for (var k in vars) text = text.split('{' + k + '}').join(String(vars[k]));
+    return text;
+  }
+  // When a memory was made, in the page's language.
+  function _memWhen(epochSeconds) {
+    return window.KazmaFormat ? window.KazmaFormat.dateTime(epochSeconds) : new Date(epochSeconds * 1000).toLocaleString();
+  }
+  function _memDay(epochSeconds) {
+    return window.KazmaFormat ? window.KazmaFormat.date(epochSeconds) : new Date(epochSeconds * 1000).toLocaleDateString();
+  }
+  // A value from the data shown as a label (an entity type, a predicate
+  // type): the catalog's name for it, else the value itself, marked as
+  // content (translate="no") -- it is the data's own word.
+  function _mtData(prefix, value) {
+    var v = String(value == null ? '' : value);
+    var text = typeof window.tOr === 'function' ? window.tOr(prefix + v.toLowerCase(), '') : '';
+    return text ? { text: text, attr: '' } : { text: v, attr: ' translate="no"' };
+  }
+  // _mt as HTML: the catalog text escaped, each var already HTML.
+  function _mtHtml(key, fallback, htmlVars) {
+    var text = _esc(typeof window.tOr === 'function' ? window.tOr(key, fallback) : fallback);
+    if (htmlVars) for (var k in htmlVars) text = text.split('{' + k + '}').join(String(htmlVars[k]));
+    return text;
+  }
   // Visible build stamp — if missing in browser console, JS is stale/cached
   window.__KAZMA_MEMORY_CONSOLE_BUILD = 'comp-collapse-2026-08-04';
   // Memory & Governance Polling
@@ -39,10 +68,10 @@
   const installBtn = document.getElementById('install-ml-btn');
 
   function formatBytes(bytes, decimals = 2) {
-    if (bytes === null || bytes === undefined || bytes === 0) return '0 Bytes';
+    if (bytes === null || bytes === undefined || bytes === 0) return '0 ' + _mt('memory.console.bytes', 'Bytes');
     const k = 1024;
     const dm = decimals < 0 ? 0 : decimals;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const sizes = [_mt('memory.console.bytes', 'Bytes'), 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
   }
@@ -98,7 +127,7 @@
             statusLabel +
           '</span>' +
         '</div>' +
-        '<div style="font-size:0.7rem;line-height:1.4;color:var(--text-secondary);overflow-wrap:break-word;">' + detail + '</div>' +
+        '<div translate="no" style="font-size:0.7rem;line-height:1.4;color:var(--text-secondary);overflow-wrap:break-word;">' + detail + '</div>' +
       '</div>'
     );
   }
@@ -120,8 +149,8 @@
       var st = f.status || (f.ok ? 'ok' : 'off');
       var s = _chipStyle(st);
       return (
-        '<span title="' + String(f.detail || ch.label).replace(/"/g, '&quot;') + '" style="display:inline-flex;align-items:center;gap:5px;font-size:0.68rem;font-weight:600;padding:3px 8px;border-radius:999px;border:' + s.border + ';background:' + s.bg + ';color:' + s.label + ';">' +
-          '<span style="width:6px;height:6px;border-radius:50%;background:' + s.dot + ';"></span>' + ch.label +
+        '<span' + (f.detail ? ' translate="no"' : '') + ' title="' + String(f.detail || ch.label).replace(/"/g, '&quot;') + '" style="display:inline-flex;align-items:center;gap:5px;font-size:0.68rem;font-weight:600;padding:3px 8px;border-radius:999px;border:' + s.border + ';background:' + s.bg + ';color:' + s.label + ';">' +
+          '<span style="width:6px;height:6px;border-radius:50%;background:' + s.dot + ';"></span><span translate="yes">' + ch.label + '</span>' +
         '</span>'
       );
     }).join('');
@@ -148,21 +177,21 @@
     
     // Beliefs card: show active count, subtitle shows superseded
     set('kpi-vector-count', data.v2 ? String(activeBeliefs) : '–');
-    set('kpi-vector-size', data.v2 ? (supersededBeliefs + ' superseded') : '–');
+    set('kpi-vector-size', data.v2 ? _mt('memory.console.superseded_n', '{n} superseded', { n: supersededBeliefs }) : '–');
     
     // Episodes card: show episodic count, subtitle shows working
     set('kpi-fts-count', data.v2 ? String(episodicCount) : '–');
-    set('kpi-fts-size', data.v2 ? (workingCount + ' working') : '–');
+    set('kpi-fts-size', data.v2 ? _mt('memory.console.working_n', '{n} working', { n: workingCount }) : '–');
     
     // Entities card: show total count
     set('kpi-graph-nodes', data.v2 ? String(entitiesTotal) : '0');
-    set('kpi-graph-edges', data.v2 ? 'total entities' : '–');
+    set('kpi-graph-edges', data.v2 ? _mt('memory.console.total_entities', 'total entities') : '–');
     
     var comps = Array.isArray(data.components) ? data.components : [];
     var okN = comps.filter(function(c) { return c.status === 'ok'; }).length;
     set('kpi-health-summary', comps.length ? (okN + '/' + comps.length + ' ' + okLbl) : (data.summary || '–'));
-    set('graph-size-metric', data.v2 ? String(activeBeliefs) + ' beliefs' : '–');
-    set('graph-count-metric', (data.v2 ? entitiesTotal : 0) + ' entities');
+    set('graph-size-metric', data.v2 ? _mt('memory.console.beliefs_n', '{n} beliefs', { n: activeBeliefs }) : '–');
+    set('graph-count-metric', _mt('memory.console.entities_n', '{n} entities', { n: data.v2 ? entitiesTotal : 0 }));
   }
 
   // Component-health group open state (survives poll re-renders). Default: collapsed.
@@ -182,10 +211,10 @@
       else if (st === 'off') offN++;
       else errN++;
     });
-    var parts = [okN + '/' + cards.length + ' OK'];
-    if (warnN) parts.push(warnN + ' warn');
-    if (errN) parts.push(errN + ' err');
-    if (offN) parts.push(offN + ' off');
+    var parts = [_mt('memory.console.group_ok', '{ok}/{n} OK', { ok: okN, n: cards.length })];
+    if (warnN) parts.push(_mt('memory.console.group_warn', '{n} warn', { n: warnN }));
+    if (errN) parts.push(_mt('memory.console.group_err', '{n} err', { n: errN }));
+    if (offN) parts.push(_mt('memory.console.group_off', '{n} off', { n: offN }));
     return parts.join(' · ');
   }
 
@@ -209,7 +238,7 @@
     if (!btn || !grid) return;
     var panels = grid.querySelectorAll('.mem-comp-group');
     if (!panels.length) {
-      btn.textContent = 'Expand all';
+      btn.textContent = _mt('memory.console.expand_all', 'Expand all');
       return;
     }
     var openN = 0;
@@ -217,7 +246,9 @@
       if (p.getAttribute('data-open') === '1') openN++;
     });
     // If any open → offer collapse all; if all closed → expand all
-    btn.textContent = openN > 0 ? 'Collapse all' : 'Expand all';
+    btn.textContent = openN > 0
+      ? _mt('memory.console.collapse_all', 'Collapse all')
+      : _mt('memory.console.expand_all', 'Expand all');
   }
 
   function _memCompSetGroupOpen(groupEl, open) {
@@ -307,7 +338,9 @@
 
     const components = Array.isArray(data.components) ? data.components : [];
     if (summaryEl) {
-      summaryEl.textContent = data.summary || (components.length ? `${components.filter(c => c.status === 'ok').length}/${components.length} OK` : '');
+      summaryEl.textContent = components.length
+        ? _mt('memory.console.components_healthy', '{ok}/{n} components healthy', { ok: components.filter(c => c.status === 'ok').length, n: components.length })
+        : '';
     }
 
     renderMemoryPipeline(data);
@@ -331,7 +364,7 @@
       }).join('');
       var rest = components.filter(function(c) { return !used[c.id]; });
       if (rest.length) {
-        html += _memGroupHtml('Other', rest);
+        html += _memGroupHtml(_mt('memory.console.group_other', 'Other'), rest);
       }
       grid.innerHTML = html;
       _memCompWireGroups(grid);
@@ -367,8 +400,20 @@
         memoryBadge.textContent = I18N.memoryActive;
         memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(46, 213, 115, 0.15);color:#2ed573;border:1px solid rgba(46, 213, 115, 0.3);';
         // Prefer live headline (Postgres + vector status) over static Chroma-only copy
+        memoryDesc.removeAttribute('translate');
         if (data.headline) {
-          memoryDesc.textContent = data.headline + (data.summary ? ' · ' + data.summary : '');
+          const comps = Array.isArray(data.components) ? data.components : [];
+          const backend = data.backend || {};
+          const engineOk = comps.some(c => c.id === 'vector_memory' && c.status === 'ok');
+          const okN = comps.filter(c => c.status === 'ok').length;
+          memoryDesc.textContent = _mt('memory.console.headline',
+            'Persistence: {config} (config/sessions/swarm); checkpoints: {checkpoints}. {engine}.', {
+              config: backend.config || 'sqlite',
+              checkpoints: backend.checkpoints || 'sqlite',
+              engine: engineOk
+                ? _mt('memory.console.engine_ok', 'V2 cognitive engine operational')
+                : _mt('memory.console.engine_degraded', 'V2 memory degraded or offline'),
+            }) + (comps.length ? ' · ' + _mt('memory.console.components_healthy', '{ok}/{n} components healthy', { ok: okN, n: comps.length }) : '');
         } else {
           memoryDesc.textContent = data.summary
             ? (I18N.memoryDescActive + ' ' + data.summary)
@@ -378,13 +423,15 @@
         installBtn.disabled = false;
         installBtn.textContent = I18N.installMl;
       } else if (status === 'DEMO') {
-        memoryBadge.textContent = 'DEMO';
+        memoryBadge.textContent = _mt('memory.console.demo_badge', 'DEMO');
         memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(59,130,246,0.15);color:#3b82f6;border:1px solid rgba(59,130,246,0.3);';
-        memoryDesc.textContent = 'Demo mode — RAG memory is disabled. The full version includes ChromaDB vector search and sentence-transformers.';
+        memoryDesc.removeAttribute('translate');
+        memoryDesc.textContent = _mt('memory.console.demo_desc', 'Demo mode — RAG memory is disabled. The full version includes ChromaDB vector search and sentence-transformers.');
         installBtn.style.display = 'none';
       } else if (status === 'INSTALLING') {
         memoryBadge.textContent = I18N.memoryInstalling;
         memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(245, 158, 11, 0.15);color:#f59e0b;border:1px solid rgba(245, 158, 11, 0.3);';
+        memoryDesc.removeAttribute('translate');
         memoryDesc.textContent = I18N.memoryDescInstalling;
         installBtn.style.display = 'inline-block';
         installBtn.disabled = true;
@@ -393,8 +440,11 @@
         memoryBadge.textContent = I18N.memoryDegraded;
         memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(255, 71, 87, 0.15);color:#ff4757;border:1px solid rgba(255, 71, 87, 0.3);';
         // Prefer first live issue as the headline reason.
-        const firstIssue = (data.issues && data.issues[0]) || I18N.memoryDescDegraded;
-        memoryDesc.textContent = firstIssue;
+        const firstIssue = data.issues && data.issues[0];
+        // A live issue is the server's diagnostic, shown as written.
+        if (firstIssue) memoryDesc.setAttribute('translate', 'no');
+        else memoryDesc.removeAttribute('translate');
+        memoryDesc.textContent = firstIssue || I18N.memoryDescDegraded;
         installBtn.style.display = 'inline-block';
         installBtn.disabled = false;
         installBtn.textContent = I18N.installMl;
@@ -441,7 +491,7 @@
           body: JSON.stringify({ extra: 'rag' })
         });
       } catch (e) {
-        window.kazmaAlert({ title: 'Install failed', message: I18N.installFailed, variant: 'btn-danger' });
+        window.kazmaAlert({ title: _mt('memory.console.install_failed_title', 'Install failed'), message: I18N.installFailed, variant: 'btn-danger' });
         installBtn.disabled = false;
         installBtn.textContent = I18N.installMl;
       }
@@ -467,9 +517,9 @@
 
       tbody.innerHTML = '';
       backups.forEach(backup => {
-        const ftsSize = backup.fts5_size ? formatBytes(backup.fts5_size) : 'None';
-        const vecSize = backup.vector_size ? formatBytes(backup.vector_size) : 'None';
-        const created = new Date(backup.timestamp).toLocaleString();
+        const ftsSize = backup.fts5_size ? formatBytes(backup.fts5_size) : _mt('memory.console.none', 'None');
+        const vecSize = backup.vector_size ? formatBytes(backup.vector_size) : _mt('memory.console.none', 'None');
+        const created = window.KazmaFormat ? window.KazmaFormat.dateTime(backup.timestamp) : new Date(backup.timestamp).toLocaleString();
         const tr = document.createElement('tr');
         tr.style.borderBottom = '1px solid var(--border-subtle)';
         tr.style.transition = 'background 0.2s';
@@ -483,7 +533,7 @@
 
         const tdFts = document.createElement('td');
         tdFts.style.padding = '10px 16px';
-        tdFts.textContent = `${ftsSize} (${backup.fts5_count || 0} docs)`;
+        tdFts.textContent = _mt('memory.console.fts_docs', '{size} ({n} docs)', { size: ftsSize, n: backup.fts5_count || 0 });
 
         const tdVec = document.createElement('td');
         tdVec.style.padding = '10px 16px';
@@ -518,7 +568,7 @@
       document.querySelectorAll('.restore-btn').forEach(btn => {
         btn.addEventListener('click', async function() {
           const name = this.getAttribute('data-name');
-          if (await window.kazmaConfirm({ title: 'Restore backup', message: I18N.confirmRestore + ` "${name}"? ` + I18N.restoreWarning, confirmText: 'Restore', danger: true })) {
+          if (await window.kazmaConfirm({ title: _mt('memory.console.restore_title', 'Restore backup'), message: I18N.confirmRestore + ` "${name}"? ` + I18N.restoreWarning, confirmText: _mt('memory.console.restore', 'Restore'), danger: true })) {
             this.disabled = true;
             this.textContent = I18N.restoring;
             try {
@@ -529,14 +579,14 @@
               });
               const res = await r.json();
               if (res.status === 'success') {
-                window.kazmaAlert({ title: 'Restore complete', message: I18N.restoreSuccess });
+                window.kazmaAlert({ title: _mt('memory.console.restore_complete', 'Restore complete'), message: I18N.restoreSuccess });
                 pollMemoryStatus();
                 loadBackups();
               } else {
-                window.kazmaAlert({ title: 'Error', message: 'Restoration error: ' + (res.detail || 'unknown error'), variant: 'btn-danger' });
+                window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: _mt('memory.console.restoration_error', 'Restoration error: {error}', { error: res.detail || _mt('memory.console.unknown_error', 'unknown error') }), variant: 'btn-danger' });
               }
             } catch (e) {
-              window.kazmaAlert({ title: 'Error', message: 'Restoration failed: ' + e, variant: 'btn-danger' });
+              window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: _mt('memory.console.restoration_failed', 'Restoration failed: {error}', { error: e }), variant: 'btn-danger' });
             } finally {
               this.disabled = false;
               this.textContent = I18N.restore;
@@ -546,7 +596,7 @@
       });
       
     } catch (e) {
-      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:#ff4757;">Failed to load backups.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:#ff4757;">${_esc(_mt('memory.console.backups_load_failed', 'Failed to load backups.'))}</td></tr>`;
     }
   }
 
@@ -572,14 +622,14 @@
       const resp = await fetch('/api/system/memory/backup', { method: 'POST' });
       const res = await resp.json();
       if (res.status === 'success') {
-        window.kazmaAlert({ title: 'Backup complete', message: I18N.backupSuccess + `: ${res.manifest.name}` });
+        window.kazmaAlert({ title: _mt('memory.console.backup_complete', 'Backup complete'), message: I18N.backupSuccess + `: ${res.manifest.name}` });
         loadBackups();
         pollMemoryStatus();
       } else {
-        window.kazmaAlert({ title: 'Error', message: I18N.backupFailed + ': ' + (res.detail || 'unknown error'), variant: 'btn-danger' });
+        window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: I18N.backupFailed + ': ' + (res.detail || _mt('memory.console.unknown_error', 'unknown error')), variant: 'btn-danger' });
       }
     } catch (e) {
-      window.kazmaAlert({ title: 'Error', message: I18N.backupFailed + ': ' + e, variant: 'btn-danger' });
+      window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: I18N.backupFailed + ': ' + e, variant: 'btn-danger' });
     } finally {
       backupBtn.disabled = false;
       backupSpinner.style.display = 'none';
@@ -598,18 +648,18 @@
       if (res.status === 'success') {
         let msg = I18N.optimizeSuccess + '\n\n';
         if (res.details.fts5) {
-          msg += `• FTS5 keyword index optimized (VACUUM & ANALYZE completed).\n  Reclaimed space: ${formatBytes(res.details.fts5.reclaimed_bytes)}\n\n`;
+          msg += _mt('memory.console.optimize_fts', '• FTS5 keyword index optimized (VACUUM & ANALYZE completed).\n  Reclaimed space: {size}\n\n', { size: formatBytes(res.details.fts5.reclaimed_bytes) });
         }
         if (res.details.vector) {
-          msg += `• Vector index optimized.\n  Reclaimed space: ${formatBytes(res.details.vector.reclaimed_bytes)}\n`;
+          msg += _mt('memory.console.optimize_vector', '• Vector index optimized.\n  Reclaimed space: {size}\n', { size: formatBytes(res.details.vector.reclaimed_bytes) });
         }
-        window.kazmaAlert({ title: 'Optimization complete', message: msg });
+        window.kazmaAlert({ title: _mt('memory.console.optimize_complete', 'Optimization complete'), message: msg });
         pollMemoryStatus();
       } else {
-        window.kazmaAlert({ title: 'Error', message: I18N.optimizeFailed + ': ' + (res.detail || 'unknown error'), variant: 'btn-danger' });
+        window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: I18N.optimizeFailed + ': ' + (res.detail || _mt('memory.console.unknown_error', 'unknown error')), variant: 'btn-danger' });
       }
     } catch (e) {
-      window.kazmaAlert({ title: 'Error', message: I18N.optimizeFailed + ': ' + e, variant: 'btn-danger' });
+      window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: I18N.optimizeFailed + ': ' + e, variant: 'btn-danger' });
     } finally {
       optimizeBtn.disabled = false;
       optimizeSpinner.style.display = 'none';
@@ -625,7 +675,7 @@
       const ok = await window.kazmaConfirm({
         title: I18N.snapshotMaintainTitle || 'Clean up time-travel snapshots?',
         message: I18N.snapshotMaintainConfirm || 'Snapshots older than the retention window will be deleted and the database vacuumed to reclaim disk space. Replay history inside the window is kept.',
-        confirmText: 'Clean up',
+        confirmText: _mt('memory.console.clean_up', 'Clean up'),
         danger: true,
       });
       if (!ok) return;
@@ -637,19 +687,26 @@
         if (res.status === 'success') {
           const s = res.stats || {};
           const parts = [];
-          if (s.deleted != null) parts.push(`${s.deleted} snapshot${s.deleted === 1 ? '' : 's'} older than ${s.retention_days}d`);
-          if (s.reclaimed != null) parts.push(`${formatBytes(s.reclaimed)} reclaimed`);
-          if (s.prune && s.prune !== 'ok') parts.push(`prune: ${s.prune}`);
-          if (s.vacuum && s.vacuum !== 'ok') parts.push(`vacuum: ${s.vacuum}`);
+          if (s.deleted != null) {
+            parts.push(s.deleted === 1
+              ? _mt('memory.console.snapshots_deleted_one', '1 snapshot older than {days}d', { days: s.retention_days })
+              : _mt('memory.console.snapshots_deleted', '{n} snapshots older than {days}d', { n: s.deleted, days: s.retention_days }));
+          }
+          if (s.reclaimed != null) parts.push(_mt('memory.console.snapshots_reclaimed', '{size} reclaimed', { size: formatBytes(s.reclaimed) }));
+          if (s.prune && s.prune !== 'ok') parts.push(_mt('memory.console.snapshots_prune', 'prune: {state}', { state: s.prune }));
+          if (s.vacuum && s.vacuum !== 'ok') parts.push(_mt('memory.console.snapshots_vacuum', 'vacuum: {state}', { state: s.vacuum }));
           window.kazmaAlert({
-            title: 'Snapshot cleanup complete',
-            message: (parts.length ? parts.join('\n') : 'Nothing to clean — no snapshots outside the retention window.') + (res.auto_maintain ? '\n\nAuto-maintenance is ON (daily).' : '\n\nAuto-maintenance is OFF — run manually here.'),
+            title: _mt('memory.console.snapshots_done_title', 'Snapshot cleanup complete'),
+            message: (parts.length ? parts.join('\n') : _mt('memory.console.snapshots_nothing', 'Nothing to clean — no snapshots outside the retention window.')) +
+              (res.auto_maintain
+                ? _mt('memory.console.auto_maintain_on', '\n\nAuto-maintenance is ON (daily).')
+                : _mt('memory.console.auto_maintain_off', '\n\nAuto-maintenance is OFF — run manually here.')),
           });
         } else {
-          window.kazmaAlert({ title: 'Error', message: 'Cleanup failed: ' + (res.detail || 'unknown error'), variant: 'btn-danger' });
+          window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: _mt('memory.console.cleanup_failed', 'Cleanup failed: {error}', { error: res.detail || _mt('memory.console.unknown_error', 'unknown error') }), variant: 'btn-danger' });
         }
       } catch (e) {
-        window.kazmaAlert({ title: 'Error', message: 'Cleanup failed: ' + e, variant: 'btn-danger' });
+        window.kazmaAlert({ title: _mt('memory.console.error', 'Error'), message: _mt('memory.console.cleanup_failed', 'Cleanup failed: {error}', { error: e }), variant: 'btn-danger' });
       } finally {
         snapshotsBtn.disabled = false;
         snapshotsSpinner.style.display = 'none';
@@ -665,10 +722,10 @@
   // ── V2 Cognitive Engine panel ─────────────────────────────────
   function _v2ChipStyle(status) {
     const map = {
-      ACTIVE:      { bg:'rgba(46,213,115,0.12)', color:'#2ed573', label:'Active' },
-      DUAL_WRITE:  { bg:'rgba(59,130,246,0.12)', color:'#60a5fa', label:'Dual-write' },
-      DEGRADED:    { bg:'rgba(245,158,11,0.12)', color:'#fbbf24', label:'Degraded' },
-      OFF:         { bg:'rgba(148,163,184,0.12)', color:'#94a3b8', label:'Off' },
+      ACTIVE:      { bg:'rgba(46,213,115,0.12)', color:'#2ed573', label:_mt('memory.console.chip_active', 'Active') },
+      DUAL_WRITE:  { bg:'rgba(59,130,246,0.12)', color:'#60a5fa', label:_mt('memory.console.chip_dual_write', 'Dual-write') },
+      DEGRADED:    { bg:'rgba(245,158,11,0.12)', color:'#fbbf24', label:_mt('memory.console.chip_degraded', 'Degraded') },
+      OFF:         { bg:'rgba(148,163,184,0.12)', color:'#94a3b8', label:_mt('memory.console.chip_off', 'Off') },
     };
     return map[status] || map.OFF;
   }
@@ -683,59 +740,73 @@
       const chip = _v2ChipStyle(h.status);
       const badge = document.getElementById('v2-status-badge');
       if (badge) {
-        badge.textContent = chip.label + (h.use_new_stack ? ' · LIVE' : '');
+        badge.textContent = chip.label + (h.use_new_stack ? ' · ' + _mt('memory.console.chip_live', 'LIVE') : '');
         badge.style.background = chip.bg;
         badge.style.color = chip.color;
       }
       const desc = document.getElementById('v2-status-desc');
       if (desc) {
         if (!h.db_available) {
-          desc.textContent = 'V2 database not initialized yet. Beliefs will populate after the first turn.';
+          desc.textContent = _mt('memory.console.v2_no_db', 'V2 database not initialized yet. Beliefs will populate after the first turn.');
         } else if (h.use_new_stack) {
-          desc.textContent = 'V2 is the active read path (use_new_stack=true). Recall serves bi-temporal beliefs + tiered episodes.';
+          desc.textContent = _mt('memory.console.v2_live_desc', 'V2 is the active read path (use_new_stack=true). Recall serves bi-temporal beliefs + tiered episodes.');
         } else {
-          desc.textContent = 'V2 is off (use_new_stack=false). Recall injection and post-turn consolidation are paused. There is no legacy reader to fall back to.';
+          desc.textContent = _mt('memory.console.v2_off_desc', 'V2 is off (use_new_stack=false). Recall injection and post-turn consolidation are paused. There is no legacy reader to fall back to.');
         }
       }
       // KPIs
       const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
       setEl('v2-kpi-beliefs-active', fmtNum(h.beliefs.active));
-      setEl('v2-kpi-beliefs-meta', (h.beliefs.superseded||0) + ' superseded · ' + (h.beliefs.archived||0) + ' archived');
+      setEl('v2-kpi-beliefs-meta', _mt('memory.console.beliefs_meta', '{superseded} superseded · {archived} archived', { superseded: h.beliefs.superseded || 0, archived: h.beliefs.archived || 0 }));
       setEl('v2-kpi-episodes-recall', fmtNum(h.episodes.recall));
-      setEl('v2-kpi-episodes-meta', (h.episodes.episodic||0) + ' episodic · ' + (h.episodes.archived||0) + ' archived');
+      setEl('v2-kpi-episodes-meta', _mt('memory.console.episodes_meta', '{episodic} episodic · {archived} archived', { episodic: h.episodes.episodic || 0, archived: h.episodes.archived || 0 }));
       setEl('v2-kpi-entities', fmtNum(h.entities));
-      setEl('v2-kpi-procedural-meta', (h.procedural_dags.active||0) + ' active · ' + (h.procedural_dags.quarantine||0) + ' quarantined');
+      setEl('v2-kpi-procedural-meta', _mt('memory.console.procedural_meta', '{active} active · {quarantined} quarantined', { active: h.procedural_dags.active || 0, quarantined: h.procedural_dags.quarantine || 0 }));
       // A tenant's view (scope "tenant") counts that tenant's memories and
       // leaves out the install's own state: queue, post-turn, reconsolidation.
       const installView = h.scope !== 'tenant';
       const q = h.queue || null;
       setEl('v2-kpi-queue', q ? fmtNum((q.pending||0) + (q.processing||0)) : '–');
       setEl('v2-kpi-queue-meta', q
-        ? (q.failed||0) + ' failed · ' + (h.recent_audits||0) + ' audits/24h'
-        : 'install queue: admins only');
+        ? _mt('memory.console.queue_meta', '{failed} failed · {audits} audits/24h', { failed: q.failed || 0, audits: h.recent_audits || 0 })
+        : _mt('memory.console.queue_admins_only', 'install queue: admins only'));
       // Post-turn / embedder strip
       const pt = h.post_turn || {};
       const okEl = document.getElementById('v2-post-turn-ok');
-      if (okEl) okEl.textContent = !installView ? 'post-turn: –' : 'ok: ' + (pt.ok || 0) + ' · fail m/e/q: ' +
-        (pt.mirror_fail||0) + '/' + (pt.extract_fail||0) + '/' + (pt.enqueue_fail||0);
+      if (okEl) {
+        okEl.textContent = !installView
+          ? _mt('memory.console.post_turn_none', 'post-turn: –')
+          : _mt('memory.console.post_turn_ok', 'ok: {ok} · fail m/e/q: {m}/{e}/{q}', {
+            ok: pt.ok || 0, m: pt.mirror_fail || 0, e: pt.extract_fail || 0, q: pt.enqueue_fail || 0,
+          });
+        okEl.title = _mt('memory.console.post_turn_ok_title', 'Failed post-turn steps: m = mirror write, e = fact extraction, q = queue');
+      }
       const errEl = document.getElementById('v2-post-turn-err');
       if (errEl) {
         const le = pt.last_error || h.last_error;
-        errEl.textContent = !installView ? '' : (le ? ('last error: ' + String(le).slice(0, 80)) : 'last error: none');
+        errEl.textContent = !installView ? '' : (le
+          ? _mt('memory.console.last_error', 'last error: {error}', { error: String(le).slice(0, 80) })
+          : _mt('memory.console.last_error_none', 'last error: none'));
         errEl.style.color = le ? '#f87171' : 'var(--text-muted)';
       }
       const embEl = document.getElementById('v2-embedder-ready');
-      if (embEl) embEl.textContent = 'embedder: ' + (h.embedder_ready ? 'ready' : 'unavailable');
+      if (embEl) {
+        embEl.textContent = h.embedder_ready
+          ? _mt('memory.console.embedder_ready', 'embedder: ready')
+          : _mt('memory.console.embedder_unavailable', 'embedder: unavailable');
+      }
       const rc = document.getElementById('v2-reconsol-meta');
       if (rc) {
         const lr = h.last_reconsolidation;
         if (!installView) {
-          rc.textContent = 'reconsol: –';
+          rc.textContent = _mt('memory.console.reconsol_none', 'reconsol: –');
         } else if (lr && lr.finished_at) {
-          rc.textContent = 'reconsol: merged ' + (lr.duplicate_beliefs_merged||0) +
-            ' · emb ' + ((lr.episodes_embedded||0)+(lr.beliefs_embedded||0));
+          rc.textContent = _mt('memory.console.reconsol_done', 'reconsol: merged {merged} · emb {embedded}', {
+            merged: lr.duplicate_beliefs_merged || 0,
+            embedded: (lr.episodes_embedded || 0) + (lr.beliefs_embedded || 0),
+          });
         } else {
-          rc.textContent = 'reconsol: never';
+          rc.textContent = _mt('memory.console.reconsol_never', 'reconsol: never');
         }
       }
       const gEl = document.getElementById('v2-graph-backend');
@@ -743,20 +814,22 @@
         const g = h.graph || {};
         const prov = g.provider || 'sqlite';
         if (prov === 'neo4j') {
-          const on = g.online ? 'online' : 'offline→sqlite fallback';
-          gEl.textContent = 'graph: neo4j dual-write · ' + on + ' · paint sqlite';
+          const on = g.online
+            ? _mt('memory.console.graph_online', 'online')
+            : _mt('memory.console.graph_offline', 'offline→sqlite fallback');
+          gEl.textContent = _mt('memory.console.graph_neo4j', 'graph: neo4j dual-write · {state} · paint sqlite', { state: on });
           gEl.style.color = g.online ? '#2ed573' : '#fbbf24';
         } else {
-          gEl.textContent = 'graph: sqlite';
+          gEl.textContent = _mt('memory.console.graph_sqlite', 'graph: sqlite');
           gEl.style.color = 'var(--text-muted)';
         }
       }
       const bmEl = document.getElementById('v2-backends-mode');
       if (bmEl) {
-        bmEl.textContent = 'backends: ' + (h.backends_mode || 'local');
+        bmEl.textContent = _mt('memory.console.backends', 'backends: {mode}', { mode: h.backends_mode || 'local' });
         const vc = h.vector_capability || {};
         if (vc.provider || vc.status) {
-          bmEl.textContent += ' · vector ' + (vc.provider || vc.status || '');
+          bmEl.textContent += _mt('memory.console.backends_vector', ' · vector {provider}', { provider: vc.provider || vc.status || '' });
         }
       }
       const strip = document.getElementById('v2-post-turn-strip');
@@ -772,10 +845,10 @@
         if (failedQ > 0 || hasErr || h.status === 'DEGRADED') {
           banner.style.display = 'block';
           const parts = [];
-          if (failedQ > 0) parts.push(failedQ + ' failed queue task(s)');
-          if (pt.last_error || h.last_error) parts.push('last post-turn error recorded');
-          if (h.status === 'DEGRADED') parts.push('status DEGRADED');
-          if (bannerText) bannerText.textContent = ' ' + (parts.join(' · ') || 'Check queue and post-turn strip.');
+          if (failedQ > 0) parts.push(_mt('memory.console.banner_failed', '{n} failed queue task(s)', { n: failedQ }));
+          if (pt.last_error || h.last_error) parts.push(_mt('memory.console.banner_last_error', 'last post-turn error recorded'));
+          if (h.status === 'DEGRADED') parts.push(_mt('memory.console.banner_degraded', 'status DEGRADED'));
+          if (bannerText) bannerText.textContent = ' ' + (parts.join(' · ') || _mt('memory.console.banner_check', 'Check queue and post-turn strip.'));
         } else {
           banner.style.display = 'none';
         }
@@ -784,24 +857,26 @@
       const tb = document.getElementById('v2-tier-breakdown');
       if (tb) {
         const tiers = [
-          ['Working', h.episodes.working, '#60a5fa'],
-          ['Episodic', h.episodes.episodic, '#2ed573'],
-          ['Recall', h.episodes.recall, '#fbbf24'],
-          ['Archived', h.episodes.archived, '#94a3b8'],
+          ['working', 'Working', 'Work', h.episodes.working, '#60a5fa'],
+          ['episodic', 'Episodic', 'Epis', h.episodes.episodic, '#2ed573'],
+          ['recall', 'Recall', 'Reca', h.episodes.recall, '#fbbf24'],
+          ['archived', 'Archived', 'Arch', h.episodes.archived, '#94a3b8'],
         ];
-        const total = tiers.reduce((s,t) => s + (t[1]||0), 0) || 1;
-        tb.innerHTML = tiers.map(([name, count, color]) => {
+        const total = tiers.reduce((s,t) => s + (t[3]||0), 0) || 1;
+        tb.innerHTML = tiers.map(([id, full, short, count, color]) => {
           const pct = Math.round(((count||0) / total) * 100);
-          return '<span title="' + name + ': ' + (count||0) + ' (' + pct + '%)" style="display:inline-flex;align-items:center;gap:4px;font-size:0.65rem;padding:2px 6px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.03);">' +
+          const name = _mt('memory.console.tier_' + id, full);
+          const tip = _mt('memory.console.tier_title', '{name}: {count} ({pct}%)', { name: name, count: count || 0, pct: pct });
+          return '<span title="' + _esc(tip) + '" style="display:inline-flex;align-items:center;gap:4px;font-size:0.65rem;padding:2px 6px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.03);">' +
                  '<span style="width:7px;height:7px;border-radius:50%;background:' + color + ';flex-shrink:0;"></span>' +
-                 '<span style="color:var(--text-muted);">' + name.slice(0, 4) + '</span>' +
+                 '<span style="color:var(--text-muted);">' + _esc(_mt('memory.console.tier_short_' + id, short)) + '</span>' +
                  '<span style="font-family:var(--font-mono);color:var(--text-primary);">' + (count||0) + '</span>' +
                  '</span>';
         }).join('');
       }
       const pb = document.getElementById('v2-procedural-breakdown');
       if (pb) {
-        pb.textContent = (h.procedural_dags.active||0) + ' active skills · ' + (h.procedural_dags.quarantine||0) + ' quarantined';
+        pb.textContent = _mt('memory.console.procedural_breakdown', '{active} active skills · {quarantined} quarantined', { active: h.procedural_dags.active || 0, quarantined: h.procedural_dags.quarantine || 0 });
       }
     } catch (e) {
       // silent — panel just stays stale
@@ -829,8 +904,8 @@
     const out = document.getElementById('v2-probe-results');
     if (!input || !out) return;
     const q = (input.value || '').trim();
-    if (!q) { out.textContent = 'Enter a query.'; return; }
-    out.textContent = 'Probing…';
+    if (!q) { out.textContent = _mt('memory.console.enter_query', 'Enter a query.'); return; }
+    out.textContent = _mt('memory.console.probing', 'Probing…');
     try {
       const resp = await fetch('/api/memory/v2/probe', {
         method: 'POST',
@@ -838,7 +913,7 @@
         body: JSON.stringify({ query: q, limit: 5 }),
       });
       const data = await resp.json();
-      if (!data.ok) { out.textContent = data.error || 'Probe failed'; return; }
+      if (!data.ok) { out.textContent = data.error || _mt('memory.console.probe_failed', 'Probe failed'); return; }
       _v2gCollectSeedsFromHits([].concat(data.beliefs || [], data.episodes || []));
       // also seed from query words
       q.split(/\s+/).forEach(function(w) { if (w.length > 2) _v2gLastQuerySeeds.push(w); });
@@ -853,36 +928,36 @@
           else if (key.indexOf('dense') >= 0) color = '#38bdf8';
           else if (key.indexOf('fts') >= 0 || key.indexOf('belief') >= 0) color = '#34d399';
           else if (key.indexOf('session') >= 0) color = '#fbbf24';
-          return '<span style="display:inline-block;margin-right:3px;padding:1px 6px;border-radius:999px;font-size:0.62rem;font-weight:600;background:rgba(255,255,255,0.06);color:' + color + ';">' + _esc(s) + '</span>';
+          return '<span translate="no" style="display:inline-block;margin-right:3px;padding:1px 6px;border-radius:999px;font-size:0.62rem;font-weight:600;background:rgba(255,255,255,0.06);color:' + color + ';">' + _esc(s) + '</span>';
         }).join('');
       }
       (data.beliefs || []).forEach(function(h) {
-        lines.push('<div style="margin-bottom:6px;padding:6px 8px;border-radius:6px;background:rgba(46,213,115,0.06);"><span style="color:#2ed573;font-size:0.65rem;font-weight:700;">BELIEF</span> ' +
-          _esc(h.content || '') +
+        lines.push('<div style="margin-bottom:6px;padding:6px 8px;border-radius:6px;background:rgba(46,213,115,0.06);"><span style="color:#2ed573;font-size:0.65rem;font-weight:700;">' + _esc(_mt('memory.console.hit_belief', 'BELIEF')) + '</span> ' +
+          '<span translate="no">' + _esc(h.content || '') + '</span>' +
           '<div style="margin-top:3px;">' + _srcChips(h) +
-          ' <span style="color:var(--text-muted);font-size:0.68rem;">score ' +
-          (h.score != null ? Number(h.score).toFixed(3) : '') + '</span></div></div>');
+          ' <span style="color:var(--text-muted);font-size:0.68rem;">' +
+          _esc(_mt('memory.console.score', 'score {n}', { n: h.score != null ? Number(h.score).toFixed(3) : '' })) + '</span></div></div>');
       });
       (data.episodes || []).forEach(function(h) {
-        lines.push('<div style="margin-bottom:6px;padding:6px 8px;border-radius:6px;background:rgba(96,165,250,0.06);"><span style="color:#60a5fa;font-size:0.65rem;font-weight:700;">EPISODE</span> ' +
-          _esc((h.content || '').slice(0, 200)) +
+        lines.push('<div style="margin-bottom:6px;padding:6px 8px;border-radius:6px;background:rgba(96,165,250,0.06);"><span style="color:#60a5fa;font-size:0.65rem;font-weight:700;">' + _esc(_mt('memory.console.hit_episode', 'EPISODE')) + '</span> ' +
+          '<span translate="no">' + _esc((h.content || '').slice(0, 200)) + '</span>' +
           '<div style="margin-top:3px;">' + _srcChips(h) + '</div></div>');
       });
       if (!lines.length) {
         const hints = (data.hints || []).map(function(hh) {
-          return '<div style="color:#fbbf24;margin-top:4px;">• ' + _esc(hh) + '</div>';
+          return '<div translate="no" style="color:#fbbf24;margin-top:4px;">• ' + _esc(hh) + '</div>';
         }).join('');
-        out.innerHTML = '<span style="color:var(--text-muted);">No hits.</span>' + hints;
+        out.innerHTML = '<span style="color:var(--text-muted);">' + _esc(_mt('memory.console.no_hits', 'No hits.')) + '</span>' + hints;
       } else {
         out.innerHTML = lines.join('') +
-          '<div style="margin-top:6px;font-size:0.68rem;color:var(--text-muted);">Channels: fts5 · dense · belief_ppr · session_boost (enable Explain recall in Settings → Memory)</div>' +
-          '<button type="button" class="btn btn-sm" id="v2-probe-path-btn" style="margin-top:8px;font-size:0.72rem;">Show path on graph →</button>' +
-          '<button type="button" class="btn btn-sm" id="v2-eval-golden-btn" style="margin-top:8px;margin-left:6px;font-size:0.72rem;">Run golden eval</button>';
+          '<div style="margin-top:6px;font-size:0.68rem;color:var(--text-muted);">' + _esc(_mt('memory.console.channels_hint', 'Channels: fts5 · dense · belief_ppr · session_boost (enable Explain recall in Settings → Memory)')) + '</div>' +
+          '<button type="button" class="btn btn-sm" id="v2-probe-path-btn" style="margin-top:8px;font-size:0.72rem;">' + _esc(_mt('memory.console.show_path', 'Show path on graph →')) + '</button>' +
+          '<button type="button" class="btn btn-sm" id="v2-eval-golden-btn" style="margin-top:8px;margin-left:6px;font-size:0.72rem;">' + _esc(_mt('memory.console.run_golden_eval', 'Run golden eval')) + '</button>';
         document.getElementById('v2-probe-path-btn')?.addEventListener('click', function() { _v2gApplyPathFromQuery(); });
         document.getElementById('v2-eval-golden-btn')?.addEventListener('click', runGoldenEval);
       }
     } catch (e) {
-      out.textContent = 'Probe error: ' + e;
+      out.textContent = _mt('memory.console.probe_error', 'Probe error: {error}', { error: e });
     }
   }
 
@@ -893,12 +968,12 @@
     const body = document.getElementById('v2-belief-drawer-body');
     if (!drawer || !body) return;
     drawer.style.display = 'block';
-    body.textContent = 'Loading…';
+    body.textContent = _mt('memory.console.loading', 'Loading…');
     try {
       const resp = await fetch('/api/memory/v2/beliefs/' + encodeURIComponent(beliefId));
       const data = await resp.json();
       if (!data.ok || !data.belief) {
-        body.textContent = data.error || 'Not found';
+        body.textContent = data.error || _mt('memory.console.not_found', 'Not found');
         return;
       }
       const b = data.belief;
@@ -913,16 +988,18 @@
         const tr = await fetch('/api/memory/v2/beliefs/' + encodeURIComponent(beliefId) + '/recall-trail');
         const td = await tr.json();
         if (td && td.ok) {
-          const last = td.last_accessed ? new Date((td.last_accessed||0) * 1000).toLocaleString() : 'never';
+          const last = td.last_accessed ? _memWhen(td.last_accessed) : _mt('memory.console.never', 'never');
           const ep = td.origin && td.origin.episode;
           const originTxt = ep
-            ? ' · from <span style="color:var(--text-secondary);">' + _esc(ep.preview) + '</span>'
-            : (td.origin && td.origin.session ? ' · session ' + _esc(td.origin.session) : '');
+            ? ' · ' + _esc(_mt('memory.console.from', 'from')) + ' <span translate="no" style="color:var(--text-secondary);">' + _esc(ep.preview) + '</span>'
+            : (td.origin && td.origin.session ? ' · ' + _esc(_mt('memory.console.session', 'session')) + ' <span translate="no">' + _esc(td.origin.session) + '</span>' : '');
           trailHtml =
             '<div style="margin-top:6px;color:var(--text-muted);">' +
-              'recalled <b style="color:var(--text-secondary);">' + (td.access_count||0) + '×</b>' +
-              ' · last ' + _esc(last) +
-              ' · via ' + _esc(td.extraction_method || '?') +
+              _mt('memory.console.recall_trail', 'recalled {count} · last {last} · via {method}', {
+                count: '<b style="color:var(--text-secondary);">' + (td.access_count || 0) + '×</b>',
+                last: _esc(last),
+                method: '<span translate="no">' + _esc(td.extraction_method || '?') + '</span>',
+              }) +
               originTxt +
             '</div>';
         }
@@ -930,17 +1007,20 @@
 
       // "Probe from this belief" — seeds the probe box with the object text so
       // the operator can see what else this belief recalls alongside.
-      const probeBtn = '<button type="button" id="v2-belief-probe" style="margin-top:6px;font-size:0.7rem;padding:2px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);cursor:pointer;">Probe from this belief →</button>';
+      const probeBtn = '<button type="button" id="v2-belief-probe" style="margin-top:6px;font-size:0.7rem;padding:2px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);cursor:pointer;">' + _esc(_mt('memory.console.probe_from_belief', 'Probe from this belief →')) + '</button>';
 
       body.innerHTML =
-        '<div><b>' + _esc(b.subject) + '</b> ' + _esc((b.predicate||'').replace(/_/g,' ')) +
+        '<div translate="no"><b>' + _esc(b.subject) + '</b> ' + _esc((b.predicate||'').replace(/_/g,' ')) +
         ' <b>' + _esc(b.object) + '</b></div>' +
-        '<div style="color:var(--text-muted);margin-top:4px;">id: ' + _esc(b.id) +
-        ' · conf ' + Math.round((b.confidence||0)*100) + '%' +
-        ' · imp ' + (b.structural_importance||'?') +
-        ' · access ' + (b.access_count||0) + '</div>' +
+        '<div style="color:var(--text-muted);margin-top:4px;">' +
+        _mt('memory.console.belief_meta', 'id: {id} · conf {conf}% · imp {imp} · access {access}', {
+          id: '<span translate="no">' + _esc(b.id) + '</span>',
+          conf: Math.round((b.confidence || 0) * 100),
+          imp: _esc(b.structural_importance || '?'),
+          access: b.access_count || 0,
+        }) + '</div>' +
         trailHtml +
-        (chain ? '<div style="margin-top:6px;color:var(--text-muted);">supersedes chain: ' + chain + '</div>' : '') +
+        (chain ? '<div style="margin-top:6px;color:var(--text-muted);">' + _mt('memory.console.supersedes_chain', 'supersedes chain: {chain}', { chain: '<span translate="no">' + chain + '</span>' }) + '</div>' : '') +
         probeBtn;
 
       // Wire the probe button.
@@ -958,7 +1038,7 @@
         });
       }
     } catch (e) {
-      body.textContent = 'Load failed';
+      body.textContent = _mt('memory.console.load_failed', 'Load failed');
     }
   }
   document.getElementById('v2-belief-drawer-close')?.addEventListener('click', function() {
@@ -968,14 +1048,17 @@
   document.getElementById('v2-belief-invalidate')?.addEventListener('click', async function() {
     if (!_openBeliefId) return;
     const ok = window.kazmaConfirm
-      ? await window.kazmaConfirm({ title: 'Unlink belief?', message: 'Soft-invalidate this edge from active memory.' })
-      : await window.confirm('Unlink (invalidate) belief?');
+      ? await window.kazmaConfirm({
+        title: _mt('memory.console.unlink_title', 'Unlink belief?'),
+        message: _mt('memory.console.unlink_message', 'Soft-invalidate this edge from active memory.'),
+      })
+      : await window.confirm(_mt('memory.console.unlink_native', 'Unlink (invalidate) belief?'));
     if (!ok) return;
     try {
       await window.kazmaSave('/api/memory/v2/beliefs/' + encodeURIComponent(_openBeliefId) + '/invalidate', { method: 'POST' });
     } catch (e) {
       // Keep the drawer open: the belief is still active.
-      window.kazmaAlert({ title: 'Unlink failed', message: e.message, variant: 'btn-danger' });
+      window.kazmaAlert({ title: _mt('memory.console.unlink_failed', 'Unlink failed'), message: e.message, variant: 'btn-danger' });
       return;
     }
     const d = document.getElementById('v2-belief-drawer');
@@ -993,17 +1076,18 @@
     if (!el) return;
     try {
       const resp = await fetch('/api/memory/v2/queue?limit=20');
-      if (resp.status === 403) { el.textContent = 'The task queue is the install\'s: admins only.'; return; }
+      if (resp.status === 403) { el.textContent = _mt('memory.console.queue_admins', "The task queue is the install's: admins only."); return; }
       const data = await resp.json();
       const tasks = data.tasks || [];
-      if (!tasks.length) { el.textContent = 'Queue empty.'; return; }
+      if (!tasks.length) { el.textContent = _mt('memory.console.queue_empty', 'Queue empty.'); return; }
       el.innerHTML = tasks.map(function(t) {
         const st = t.status || '';
         const retry = st === 'failed'
-          ? ' <button type="button" data-retry="' + _esc(t.id) + '" class="v2-queue-retry" style="font-size:0.65rem;padding:1px 6px;cursor:pointer;">retry</button>'
+          ? ' <button type="button" data-retry="' + _esc(t.id) + '" class="v2-queue-retry" style="font-size:0.65rem;padding:1px 6px;cursor:pointer;">' + _esc(_mt('memory.console.retry', 'retry')) + '</button>'
           : '';
         return '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
-          _esc(t.task_type) + ' · ' + _esc(st) + ' · a' + (t.attempts||0) + retry + '</div>';
+          '<span translate="no">' + _esc(t.task_type) + ' · ' + _esc(st) + '</span> · ' +
+          _esc(_mt('memory.console.attempts', '{n} attempts', { n: t.attempts || 0 })) + retry + '</div>';
       }).join('');
       el.querySelectorAll('.v2-queue-retry').forEach(function(btn) {
         btn.addEventListener('click', async function() {
@@ -1011,22 +1095,25 @@
           try {
             await window.kazmaSave('/api/memory/v2/queue/' + encodeURIComponent(id) + '/retry', { method: 'POST' });
           } catch (e) {
-            window.kazmaAlert({ title: 'Retry failed', message: e.message, variant: 'btn-danger' });
+            window.kazmaAlert({ title: _mt('memory.console.retry_failed', 'Retry failed'), message: e.message, variant: 'btn-danger' });
           }
           loadV2Queue();
         });
       });
-    } catch (e) { el.textContent = 'Queue load failed'; }
+    } catch (e) { el.textContent = _mt('memory.console.queue_load_failed', 'Queue load failed'); }
   }
   document.getElementById('v2-queue-clear-failed')?.addEventListener('click', async function() {
     const ok = window.kazmaConfirm
-      ? await window.kazmaConfirm({ title: 'Clear failed tasks?', message: 'Permanently delete dead-letter queue rows.' })
-      : await window.confirm('Clear all failed queue tasks?');
+      ? await window.kazmaConfirm({
+        title: _mt('memory.console.clear_failed_title', 'Clear failed tasks?'),
+        message: _mt('memory.console.clear_failed_message', 'Permanently delete dead-letter queue rows.'),
+      })
+      : await window.confirm(_mt('memory.console.clear_failed_native', 'Clear all failed queue tasks?'));
     if (!ok) return;
     try {
       const r = await fetch('/api/memory/v2/queue/clear-failed', { method: 'POST' });
       const d = await r.json();
-      if (window.showToast) window.showToast(d.ok ? ('Cleared ' + (d.deleted || 0) + ' failed') : (d.error || d.detail || 'Failed'), d.ok ? 'success' : 'error');
+      if (window.showToast) window.showToast(d.ok ? _mt('memory.console.cleared_failed', 'Cleared {n} failed', { n: d.deleted || 0 }) : (d.error || d.detail || _mt('memory.console.failed', 'Failed')), d.ok ? 'success' : 'error');
       loadV2Queue();
       pollV2Health();
     } catch (e) { /* silent */ }
@@ -1039,14 +1126,14 @@
       const resp = await fetch('/api/memory/v2/entity-merges?limit=20');
       const data = await resp.json();
       const merges = data.merges || [];
-      if (!merges.length) { el.textContent = 'No pending merges.'; return; }
+      if (!merges.length) { el.textContent = _mt('memory.console.no_pending_merges', 'No pending merges.'); return; }
       el.innerHTML = merges.map(function(m) {
         return '<div style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
-          '<span>' + _esc(m.source_entity_id) + ' → ' + _esc(m.target_entity_id) +
+          '<span translate="no">' + _esc(m.source_entity_id) + ' → ' + _esc(m.target_entity_id) +
           ' <span style="color:var(--text-muted);">(' + _esc(m.merge_tier) + ' · ' +
           (m.confidence != null ? Number(m.confidence).toFixed(2) : '') + ')</span></span>' +
-          '<button type="button" data-mid="' + _esc(m.id) + '" data-act="approve" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;" aria-label="Approve">' + KazmaIcons.span('check') + '</button>' +
-          '<button type="button" data-mid="' + _esc(m.id) + '" data-act="reject" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;" aria-label="Reject">' + KazmaIcons.span('x') + '</button>' +
+          '<button type="button" data-mid="' + _esc(m.id) + '" data-act="approve" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;" aria-label="' + _esc(_mt('memory.console.approve', 'Approve')) + '">' + KazmaIcons.span('check') + '</button>' +
+          '<button type="button" data-mid="' + _esc(m.id) + '" data-act="reject" class="v2-merge-act btn btn-sm" style="font-size:0.65rem;padding:1px 6px;" aria-label="' + _esc(_mt('memory.console.reject', 'Reject')) + '">' + KazmaIcons.span('x') + '</button>' +
           '</div>';
       }).join('');
       el.querySelectorAll('.v2-merge-act').forEach(function(btn) {
@@ -1060,12 +1147,12 @@
               body: JSON.stringify({ action: act }),
             });
           } catch (e) {
-            window.kazmaAlert({ title: 'Merge action failed', message: e.message, variant: 'btn-danger' });
+            window.kazmaAlert({ title: _mt('memory.console.merge_action_failed', 'Merge action failed'), message: e.message, variant: 'btn-danger' });
           }
           loadV2Merges();
         });
       });
-    } catch (e) { el.textContent = 'Merges load failed'; }
+    } catch (e) { el.textContent = _mt('memory.console.merges_load_failed', 'Merges load failed'); }
   }
 
   async function runFederatedSearch() {
@@ -1074,8 +1161,8 @@
     const sum = document.getElementById('v2-fed-summary');
     if (!input || !out) return;
     const q = (input.value || '').trim();
-    if (!q) { out.textContent = 'Enter a query.'; return; }
-    out.textContent = 'Searching memory + knowledge…';
+    if (!q) { out.textContent = _mt('memory.console.enter_query', 'Enter a query.'); return; }
+    out.textContent = _mt('memory.console.searching', 'Searching memory + knowledge…');
     if (sum) sum.textContent = '';
     const includeKb = !!(document.getElementById('v2-fed-include-kb') || {}).checked;
     try {
@@ -1091,11 +1178,12 @@
         }),
       });
       const data = await resp.json();
-      if (!data.ok) { out.textContent = data.error || 'Search failed'; return; }
+      if (!data.ok) { out.textContent = data.error || _mt('memory.console.search_failed', 'Search failed'); return; }
       const s = data.summary || {};
       if (sum) {
-        sum.textContent = 'memory: ' + (s.memory || 0) + ' · knowledge: ' + (s.knowledge || 0) +
-          ' · total: ' + (s.total || 0) + '  (stores stay separate — labels only)';
+        sum.textContent = _mt('memory.console.fed_summary',
+          'memory: {memory} · knowledge: {knowledge} · total: {total}  (stores stay separate — labels only)',
+          { memory: s.memory || 0, knowledge: s.knowledge || 0, total: s.total || 0 });
       }
       const lines = (data.hits || []).map(function(h) {
         const store = h.store === 'knowledge' ? 'KB' : 'MEM';
@@ -1106,9 +1194,9 @@
           ? (prov.document_title || prov.source_url || prov.library_id || '')
           : ((h.sources && h.sources.join(',')) || h.source || '');
         return '<div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,0.04);">' +
-          '<span style="color:' + color + ';font-size:0.65rem;font-weight:700;">' + store + '/' + kind + '</span> ' +
-          _esc((h.content || '').slice(0, 220)) +
-          (extra ? ' <span style="color:var(--text-muted);font-size:0.68rem;">[' + _esc(String(extra).slice(0, 80)) + ']</span>' : '') +
+          '<span translate="no" style="color:' + color + ';font-size:0.65rem;font-weight:700;">' + store + '/' + _esc(kind) + '</span> ' +
+          '<span translate="no">' + _esc((h.content || '').slice(0, 220)) + '</span>' +
+          (extra ? ' <span translate="no" style="color:var(--text-muted);font-size:0.68rem;">[' + _esc(String(extra).slice(0, 80)) + ']</span>' : '') +
           '</div>';
       });
       _v2gCollectSeedsFromHits(data.hits || []);
@@ -1116,18 +1204,18 @@
       qWords.split(/\s+/).forEach(function(w) { if (w.length > 2) _v2gLastQuerySeeds.push(w); });
       if (lines.length) {
         out.innerHTML = lines.join('') +
-          '<button type="button" class="btn btn-sm" id="v2-fed-path-btn" style="margin-top:8px;font-size:0.72rem;">Show path on graph →</button>';
+          '<button type="button" class="btn btn-sm" id="v2-fed-path-btn" style="margin-top:8px;font-size:0.72rem;">' + _esc(_mt('memory.console.show_path', 'Show path on graph →')) + '</button>';
         document.getElementById('v2-fed-path-btn')?.addEventListener('click', function() { _v2gApplyPathFromQuery(); });
       } else {
-        out.innerHTML = '<span style="color:var(--text-muted);">No hits in either store.</span>';
+        out.innerHTML = '<span style="color:var(--text-muted);">' + _esc(_mt('memory.console.no_hits_either', 'No hits in either store.')) + '</span>';
       }
     } catch (e) {
-      out.textContent = 'Federated search error: ' + e;
+      out.textContent = _mt('memory.console.fed_error', 'Federated search error: {error}', { error: e });
     }
   }
   async function runGoldenEval() {
     const out = document.getElementById('v2-probe-results');
-    if (out) out.textContent = 'Running golden eval…';
+    if (out) out.textContent = _mt('memory.console.running_eval', 'Running golden eval…');
     try {
       const resp = await fetch('/api/memory/v2/eval/golden', {
         method: 'POST',
@@ -1138,28 +1226,31 @@
       if (!out) return;
       if (!resp.ok) {
         // 403: the benchmark is the install's, admins only.
-        out.textContent = data.detail || data.error || ('Eval failed: HTTP ' + resp.status);
+        out.textContent = data.detail || data.error || _mt('memory.console.eval_failed_http', 'Eval failed: HTTP {status}', { status: resp.status });
         return;
       }
       if (!data.ok && data.error && !data.total) {
-        out.textContent = data.error || 'Eval failed';
+        out.textContent = data.error || _mt('memory.console.eval_failed', 'Eval failed');
         return;
       }
       const lines = [
-        '<div style="margin-bottom:6px;"><strong>Golden eval</strong> — pass ' +
-        (data.passed || 0) + '/' + (data.total || 0) +
-        ' (rate ' + ((data.pass_rate != null) ? data.pass_rate : '—') + ')' +
-        (data.skipped ? ' · skipped ' + data.skipped : '') + '</div>'
+        '<div style="margin-bottom:6px;">' +
+        _mt('memory.console.eval_summary', '<strong>Golden eval</strong> — pass {passed}/{total} (rate {rate})', {
+          passed: data.passed || 0,
+          total: data.total || 0,
+          rate: _esc((data.pass_rate != null) ? data.pass_rate : '—'),
+        }) +
+        (data.skipped ? ' · ' + _esc(_mt('memory.console.eval_skipped', 'skipped {n}', { n: data.skipped })) : '') + '</div>'
       ];
       (data.cases || []).forEach(function(c) {
         const color = c.status === 'pass' ? '#2ed573' : (c.status === 'skipped' ? '#94a3b8' : '#f87171');
         lines.push('<div style="font-size:0.72rem;margin-bottom:2px;"><span style="color:' + color + ';font-weight:700;">' +
-          _esc(c.status || '?').toUpperCase() + '</span> ' + _esc(c.id || '') +
-          (c.query ? ' — ' + _esc(c.query) : '') + '</div>');
+          _esc(_mt('memory.console.case_' + String(c.status || 'unknown').toLowerCase(), String(c.status || '?').toUpperCase())) + '</span> ' +
+          '<span translate="no">' + _esc(c.id || '') + (c.query ? ' — ' + _esc(c.query) : '') + '</span></div>');
       });
       out.innerHTML = lines.join('');
     } catch (e) {
-      if (out) out.textContent = 'Eval error: ' + e;
+      if (out) out.textContent = _mt('memory.console.eval_error', 'Eval error: {error}', { error: e });
     }
   }
   document.getElementById('v2-probe-btn')?.addEventListener('click', runV2Probe);
@@ -1176,7 +1267,7 @@
     try {
       const r = await fetch('/api/memory/v2/reconsolidate', { method: 'POST' });
       const d = await r.json();
-      if (window.showToast) window.showToast(d.ok ? 'Reconsolidation enqueued' : (d.error || d.detail || 'Failed'), d.ok ? 'success' : 'error');
+      if (window.showToast) window.showToast(d.ok ? _mt('memory.console.reconsol_enqueued', 'Reconsolidation enqueued') : (d.error || d.detail || _mt('memory.console.failed', 'Failed')), d.ok ? 'success' : 'error');
       loadV2Queue();
     } catch (e) { /* silent */ }
   });
@@ -1187,15 +1278,15 @@
       const resp = await fetch('/api/memory/v2/procedural?limit=15');
       const data = await resp.json();
       const dags = data.dags || [];
-      if (!dags.length) { el.textContent = 'No active skills yet.'; return; }
+      if (!dags.length) { el.textContent = _mt('memory.console.no_active_skills', 'No active skills yet.'); return; }
       el.innerHTML = dags.map(function(d) {
-        return '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
+        return '<div translate="no" style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
           '<b style="color:var(--text-primary);">' + _esc(d.name || d.id) + '</b> · C=' +
           (d.confidence != null ? Number(d.confidence).toFixed(2) : '?') +
           ' · n=' + (d.total_trials || 0) +
           '<div style="color:var(--text-muted);">' + _esc((d.description || '').slice(0, 80)) + '</div></div>';
       }).join('');
-    } catch (e) { el.textContent = 'Skills load failed'; }
+    } catch (e) { el.textContent = _mt('memory.console.skills_load_failed', 'Skills load failed'); }
   }
   async function loadV2Quality() {
     const scoreEl = document.getElementById('v2-quality-score');
@@ -1207,8 +1298,9 @@
       if (!data.ok) { scoreEl.textContent = '–'; return; }
       scoreEl.textContent = (data.grade || '') + ' ' + (data.score != null ? data.score + '%' : '');
       if (detEl) {
-        detEl.textContent = (data.passed || 0) + '/' + (data.total || 0) + ' checks · ' +
-          (data.checks || []).filter(function(c) { return !c.ok; }).map(function(c) { return c.name; }).join(', ') || 'all green';
+        const failing = (data.checks || []).filter(function(c) { return !c.ok; }).map(function(c) { return c.name; });
+        detEl.innerHTML = _esc(_mt('memory.console.quality_checks', '{passed}/{total} checks', { passed: data.passed || 0, total: data.total || 0 })) + ' · ' +
+          (failing.length ? '<span translate="no">' + _esc(failing.join(', ')) + '</span>' : _esc(_mt('memory.console.all_green', 'all green')));
       }
     } catch (e) { if (scoreEl) scoreEl.textContent = '–'; }
   }
@@ -1223,37 +1315,44 @@
       const resp = await fetch('/api/memory/v2/episodes?limit=30');
       const data = await resp.json();
       const eps = data.episodes || [];
-      if (!eps.length) { el.textContent = 'No memories of conversations yet.'; return; }
+      if (!eps.length) { el.textContent = _mt('memory.console.no_memories', 'No memories of conversations yet.'); return; }
       el.innerHTML = eps.map(function(ep) {
-        const when = ep.created_at ? new Date(ep.created_at * 1000).toLocaleString() : '';
-        const chat = ep.session_id ? ' · chat ' + _esc(String(ep.session_id).slice(0, 12)) : '';
+        const when = ep.created_at ? _memWhen(ep.created_at) : '';
+        const chat = ep.session_id ? ' · ' + _esc(_mt('memory.console.chat', 'chat')) + ' <span translate="no">' + _esc(String(ep.session_id).slice(0, 12)) + '</span>' : '';
         return '<div style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
-          '<span style="min-width:0;overflow-wrap:anywhere;"><span style="color:var(--text-primary);">' + _esc(ep.preview || ep.id) + '</span>' +
+          '<span style="min-width:0;overflow-wrap:anywhere;"><span translate="no" style="color:var(--text-primary);">' + _esc(ep.preview || ep.id) + '</span>' +
           '<span style="display:block;color:var(--text-muted);font-size:0.65rem;">' + _esc(when) + chat + '</span></span>' +
-          '<button type="button" class="btn btn-sm v2-memory-forget" data-id="' + _esc(ep.id).replace(/"/g, '&quot;') + '" style="font-size:0.65rem;padding:1px 6px;flex-shrink:0;">Forget</button></div>';
+          '<button type="button" class="btn btn-sm v2-memory-forget" data-id="' + _esc(ep.id).replace(/"/g, '&quot;') + '" style="font-size:0.65rem;padding:1px 6px;flex-shrink:0;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button></div>';
       }).join('');
       el.querySelectorAll('.v2-memory-forget').forEach(function(btn) {
         btn.addEventListener('click', async function() {
           const ok = await window.kazmaConfirm({
-            title: 'Forget this memory?',
-            message: 'Kazma stops remembering this part of the conversation and the facts it learned from it. The chat itself stays as it is.',
-            confirmText: 'Forget',
+            title: _mt('memory.console.forget_memory_title', 'Forget this memory?'),
+            message: _mt('memory.console.forget_memory_message', 'Kazma stops remembering this part of the conversation and the facts it learned from it. The chat itself stays as it is.'),
+            confirmText: _mt('memory.console.forget', 'Forget'),
             danger: true,
           });
           if (!ok) return;
           try {
             const r = await window.kazmaSave('/api/memory/v2/episodes/' + encodeURIComponent(btn.getAttribute('data-id')) + '/forget', { method: 'POST' });
             if (window.showToast) {
-              window.showToast(r && r.ok ? 'Forgotten' + (r.facts_forgotten ? ' (and ' + r.facts_forgotten + ' fact' + (r.facts_forgotten === 1 ? '' : 's') + ')' : '') : ((r && r.error) || 'Forget failed'), r && r.ok ? 'success' : 'error');
+              const forgotText = !r || !r.ok
+                ? ((r && r.error) || _mt('memory.console.forget_failed', 'Forget failed'))
+                : (!r.facts_forgotten
+                  ? _mt('memory.console.forgotten', 'Forgotten')
+                  : (r.facts_forgotten === 1
+                    ? _mt('memory.console.forgotten_with_fact', 'Forgotten (and 1 fact)')
+                    : _mt('memory.console.forgotten_with_facts', 'Forgotten (and {n} facts)', { n: r.facts_forgotten })));
+              window.showToast(forgotText, r && r.ok ? 'success' : 'error');
             }
           } catch (e) {
-            window.kazmaAlert({ title: 'Forget failed', message: e.message, variant: 'btn-danger' });
+            window.kazmaAlert({ title: _mt('memory.console.forget_failed', 'Forget failed'), message: e.message, variant: 'btn-danger' });
           }
           loadV2Memories();
           pollV2Health();
         });
       });
-    } catch (e) { el.textContent = 'Memories load failed'; }
+    } catch (e) { el.textContent = _mt('memory.console.memories_load_failed', 'Memories load failed'); }
   }
   document.getElementById('v2-memories-refresh')?.addEventListener('click', loadV2Memories);
   loadV2Memories();
@@ -1270,51 +1369,55 @@
       const data = await resp.json();
       const st = data.state || {};
       if (stateEl) {
-        const parts = [(st.weeks_done || 0) + ' week' + (st.weeks_done === 1 ? '' : 's') + ' summarized'];
-        if (st.weeks_queued) parts.push(st.weeks_queued + ' in progress');
-        if (st.weeks_failed) parts.push(st.weeks_failed + ' failed');
+        const parts = [st.weeks_done === 1
+          ? _mt('memory.console.weeks_done_one', '1 week summarized')
+          : _mt('memory.console.weeks_done', '{n} weeks summarized', { n: st.weeks_done || 0 })];
+        if (st.weeks_queued) parts.push(_mt('memory.console.weeks_queued', '{n} in progress', { n: st.weeks_queued }));
+        if (st.weeks_failed) parts.push(_mt('memory.console.weeks_failed', '{n} failed', { n: st.weeks_failed }));
         stateEl.textContent = parts.join(' · ');
       }
       const rows = data.summaries || [];
       if (!rows.length) {
-        el.textContent = 'No weekly summaries yet. Kazma writes them a day after each week ends.';
+        el.textContent = _mt('memory.console.no_summaries', 'No weekly summaries yet. Kazma writes them a day after each week ends.');
         return;
       }
       el.innerHTML = rows.map(function(s) {
-        const monday = s.period_start ? new Date(s.period_start * 1000).toLocaleDateString() : '';
-        const size = (s.turn_count || 0) + ' turn' + (s.turn_count === 1 ? '' : 's') +
-          ((s.chat_count || 0) > 1 ? ' in ' + s.chat_count + ' chats' : '');
+        const monday = s.period_start ? _memDay(s.period_start) : '';
+        const size = (s.turn_count === 1
+          ? _mt('memory.console.summary_turns_one', '1 turn')
+          : _mt('memory.console.summary_turns', '{n} turns', { n: s.turn_count || 0 })) +
+          ((s.chat_count || 0) > 1 ? _mt('memory.console.summary_chats', ' in {n} chats', { n: s.chat_count }) : '');
         const pending = s.status === 'rebuild';
-        const title = pending ? 'Being rewritten without a forgotten conversation' : (s.title || s.id);
+        const title = pending ? _mt('memory.console.summary_rebuilding', 'Being rewritten without a forgotten conversation') : (s.title || s.id);
         return '<div style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
           '<span style="min-width:0;overflow-wrap:anywhere;">' +
-          '<span style="color:var(--text-primary);font-weight:600;">' + _esc(title) + '</span>' +
-          '<span style="display:block;color:var(--text-muted);font-size:0.65rem;">Week of ' + _esc(monday) + ' · ' + _esc(size) + '</span>' +
-          (pending ? '' : '<span style="display:block;margin-top:2px;white-space:pre-wrap;">' + _esc(s.summary_text || '') + '</span>') +
+          '<span' + (pending ? '' : ' translate="no"') + ' style="color:var(--text-primary);font-weight:600;">' + _esc(title) + '</span>' +
+          '<span style="display:block;color:var(--text-muted);font-size:0.65rem;">' + _esc(_mt('memory.console.week_of', 'Week of {date}', { date: monday })) + ' · ' + _esc(size) + '</span>' +
+          (pending ? '' : '<span translate="no" style="display:block;margin-top:2px;white-space:pre-wrap;">' + _esc(s.summary_text || '') + '</span>') +
           '</span>' +
-          '<button type="button" class="btn btn-sm v2-summary-forget" data-id="' + _esc(s.id).replace(/"/g, '&quot;') + '" style="font-size:0.65rem;padding:1px 6px;flex-shrink:0;">Forget</button></div>';
+          '<button type="button" class="btn btn-sm v2-summary-forget" data-id="' + _esc(s.id).replace(/"/g, '&quot;') + '" style="font-size:0.65rem;padding:1px 6px;flex-shrink:0;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button></div>';
       }).join('');
       el.querySelectorAll('.v2-summary-forget').forEach(function(btn) {
         btn.addEventListener('click', async function() {
           const ok = await window.kazmaConfirm({
-            title: 'Forget this summary?',
-            message: 'Kazma stops using this summary and never writes it again. The conversations it was written from stay as they are.',
-            confirmText: 'Forget',
+            title: _mt('memory.console.forget_summary_title', 'Forget this summary?'),
+            message: _mt('memory.console.forget_summary_message', 'Kazma stops using this summary and never writes it again. The conversations it was written from stay as they are.'),
+            confirmText: _mt('memory.console.forget', 'Forget'),
             danger: true,
           });
           if (!ok) return;
           try {
             const r = await window.kazmaSave('/api/memory/v2/summaries/' + encodeURIComponent(btn.getAttribute('data-id')) + '/forget', { method: 'POST' });
             if (window.showToast) {
-              window.showToast(r && r.ok ? 'Summary forgotten' : ((r && r.error) || 'Forget failed'), r && r.ok ? 'success' : 'error');
+              window.showToast(r && r.ok ? _mt('memory.console.summary_forgotten', 'Summary forgotten') : ((r && r.error) || _mt('memory.console.forget_failed', 'Forget failed')), r && r.ok ? 'success' : 'error');
             }
           } catch (e) {
-            window.kazmaAlert({ title: 'Forget failed', message: e.message, variant: 'btn-danger' });
+            window.kazmaAlert({ title: _mt('memory.console.forget_failed', 'Forget failed'), message: e.message, variant: 'btn-danger' });
           }
           loadV2Summaries();
         });
       });
-    } catch (e) { el.textContent = 'Weekly summaries load failed'; }
+    } catch (e) { el.textContent = _mt('memory.console.summaries_load_failed', 'Weekly summaries load failed'); }
   }
   document.getElementById('v2-summaries-refresh')?.addEventListener('click', loadV2Summaries);
   loadV2Summaries();
@@ -1334,7 +1437,7 @@
       const beliefs = data.beliefs || [];
       const emptyCta = document.getElementById('v2-belief-empty-cta');
       if (!beliefs.length) {
-        list.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:0.78rem;">No active beliefs yet.</div>';
+        list.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:0.78rem;">' + _esc(_mt('memory.console.no_active_beliefs', 'No active beliefs yet.')) + '</div>';
         if (emptyCta) emptyCta.style.display = 'block';
         return;
       }
@@ -1343,12 +1446,13 @@
       list.innerHTML = beliefs.map((b, idx) => {
         const conf = Math.round((b.confidence||0) * 100);
         const pc = ptypeColor[b.predicate_type] || '#94a3b8';
+        const ptype = _mtData('memory.console.ptype_', b.predicate_type || '?');
         const objRaw = String(b.object || '');
         const objFull = _esc(objRaw);
         const objShown = objRaw.length > 160 ? objFull.slice(0, 160) + '…' : objFull;
         return '<div class="v2-belief-row" data-id="' + _esc(b.id) + '" data-subject="' + _esc(b.subject) + '" data-object="' + _esc(b.object) + '" data-predicate="' + _esc(b.predicate) + '" style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);display:flex;align-items:flex-start;gap:8px;cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background=\'rgba(99,102,241,0.08)\'" onmouseout="this.style.background=\'transparent\'">' +
-               '<span style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:' + pc + '22;color:' + pc + ';text-transform:uppercase;font-weight:600;flex-shrink:0;margin-top:2px;">' + (b.predicate_type||'?') + '</span>' +
-               '<div style="flex:1;color:var(--text-primary);min-width:0;word-break:break-word;line-height:1.4;"><b>' + _esc(b.subject) + '</b> ' + _esc(b.predicate.replace(/_/g,' ')) + ' <b title="' + objFull + '">' + objShown + '</b></div>' +
+               '<span' + ptype.attr + ' style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:' + pc + '22;color:' + pc + ';text-transform:uppercase;font-weight:600;flex-shrink:0;margin-top:2px;">' + _esc(ptype.text) + '</span>' +
+               '<div translate="no" style="flex:1;color:var(--text-primary);min-width:0;word-break:break-word;line-height:1.4;"><b>' + _esc(b.subject) + '</b> ' + _esc(b.predicate.replace(/_/g,' ')) + ' <b title="' + objFull + '">' + objShown + '</b></div>' +
                '<span style="font-size:0.68rem;color:var(--text-muted);font-family:var(--font-mono);flex-shrink:0;margin-top:2px;">i' + b.structural_importance + ' · ' + conf + '%</span>' +
                '</div>';
       }).join('');
@@ -1464,7 +1568,7 @@
     }
     // Soft-inject hub/self node if still missing (empty person shell)
     if (idx < 0 && (opts.isSelf || focusId === 'user' || id === 'user')) {
-      var label = opts.name || 'You';
+      var label = opts.name || _mt('memory.mc.legend_you', 'You');
       _v2gRawNodes = _v2gRawNodes || [];
       var exists = false;
       for (var r = 0; r < _v2gRawNodes.length; r++) {
@@ -1640,7 +1744,7 @@
     if (/^you\s*\(user\)$/i.test(raw)) raw = 'You';
     if (_v2gIsUser(p)) {
       var low = raw.toLowerCase();
-      if (!raw || low === 'user' || low === 'you' || low === 'me') return 'You';
+      if (!raw || low === 'user' || low === 'you' || low === 'me') return _mt('memory.mc.legend_you', 'You');
       return raw; // e.g. Mubder / Kazma
     }
     return raw || String(p.id || '');
@@ -1850,7 +1954,7 @@
       }
       if (isUser) {
         var low = rawName.toLowerCase();
-        if (!rawName || low === 'user' || low === 'you' || low === 'me') display = 'You';
+        if (!rawName || low === 'user' || low === 'you' || low === 'me') display = _mt('memory.mc.legend_you', 'You');
         // else keep branded name (Mubder, Kazma, …)
       }
       return { rawName: rawName, display: display, isUser: isUser, isBlob: isBlob };
@@ -2318,7 +2422,7 @@
       }
       // window.confirm may be async (overridden by stores.js) — always await
       var native = window._nativeConfirm || window.confirm;
-      var res = native.call(window, (opts && (opts.message || opts.title)) || 'Confirm?');
+      var res = native.call(window, (opts && (opts.message || opts.title)) || _mt('memory.console.confirm_q', 'Confirm?'));
       return !!(await Promise.resolve(res));
     } catch (e) {
       return false;
@@ -2380,47 +2484,47 @@
     var linkBtn = document.getElementById('v2g-ops-link');
     var mergeBtn = document.getElementById('v2g-ops-merge');
     if (srcEl) {
-      srcEl.textContent = 'src: ' + (_v2gOps.sourceId ? _v2gShortId(_v2gOps.sourceId) : '—');
-      srcEl.title = _v2gOps.sourceId || 'Source entity';
+      srcEl.textContent = _mt('memory.console.ops_src', 'src: {id}', { id: _v2gOps.sourceId ? _v2gShortId(_v2gOps.sourceId) : '—' });
+      srcEl.title = _v2gOps.sourceId || _mt('memory.mc.source_entity', 'Source entity');
       srcEl.style.borderColor = _v2gOps.sourceId ? 'var(--accent,#22d3ee)' : 'var(--border-subtle)';
     }
     if (tgtEl) {
-      tgtEl.textContent = 'tgt: ' + (_v2gOps.targetId ? _v2gShortId(_v2gOps.targetId) : '—');
-      tgtEl.title = _v2gOps.targetId || 'Target entity';
+      tgtEl.textContent = _mt('memory.console.ops_tgt', 'tgt: {id}', { id: _v2gOps.targetId ? _v2gShortId(_v2gOps.targetId) : '—' });
+      tgtEl.title = _v2gOps.targetId || _mt('memory.mc.target_entity', 'Target entity');
       tgtEl.style.borderColor = _v2gOps.targetId ? 'var(--secondary,#3b82f6)' : 'var(--border-subtle)';
     }
     if (hint) {
       if (_v2gOps.mode === 'link') {
         hint.textContent = _v2gOps.sourceId
-          ? 'Link mode: click the target node…'
-          : 'Link mode: click the source node…';
+          ? _mt('memory.console.hint_link_target', 'Link mode: click the target node…')
+          : _mt('memory.console.hint_link_source', 'Link mode: click the source node…');
         hint.style.color = 'var(--accent,#22d3ee)';
       } else if (_v2gOps.mode === 'merge') {
         hint.textContent = _v2gOps.sourceId
-          ? 'Merge mode: click the target (survivor)…'
-          : 'Merge mode: click the source (will be retired)…';
+          ? _mt('memory.console.hint_merge_target', 'Merge mode: click the target (survivor)…')
+          : _mt('memory.console.hint_merge_source', 'Merge mode: click the source (will be retired)…');
         hint.style.color = 'var(--warning,#f59e0b)';
       } else if (_v2gOps.mode === 'repoint') {
-        hint.textContent = 'Move mode: click the new endpoint node… (Clear to cancel)';
+        hint.textContent = _mt('memory.console.hint_move', 'Move mode: click the new endpoint node… (Clear to cancel)');
         hint.style.color = 'var(--accent,#22d3ee)';
       } else if (_v2gOps.mode === 'group') {
-        hint.textContent = 'Group mode: click the PARENT node… (Clear to cancel)';
+        hint.textContent = _mt('memory.console.hint_group', 'Group mode: click the PARENT node… (Clear to cancel)');
         hint.style.color = 'var(--accent,#22d3ee)';
       } else if (_v2gOps.sourceId && _v2gOps.targetId) {
-        hint.textContent = 'Ready — press Link or Merge, or click an edge to edit/unlink.';
+        hint.textContent = _mt('memory.console.hint_ready', 'Ready — press Link or Merge, or click an edge to edit/unlink.');
         hint.style.color = 'var(--text-secondary)';
       } else {
-        hint.textContent = 'Click node → inspect. Click edge → edit/unlink. Link: set src+tgt or use pick mode.';
+        hint.textContent = _mt('memory.console.hint_idle', 'Click node → inspect. Click edge → edit/unlink. Link: set src+tgt or use pick mode.');
         hint.style.color = 'var(--text-muted)';
       }
     }
     if (linkBtn) {
       linkBtn.classList.toggle('btn-primary', _v2gOps.mode === 'link' || !!(!_v2gOps.mode && _v2gOps.sourceId && _v2gOps.targetId));
-      linkBtn.textContent = _v2gOps.mode === 'link' ? 'Linking…' : 'Link';
+      linkBtn.textContent = _v2gOps.mode === 'link' ? _mt('memory.console.linking', 'Linking…') : _mt('memory.mc.link', 'Link');
     }
     if (mergeBtn) {
       mergeBtn.classList.toggle('btn-primary', _v2gOps.mode === 'merge');
-      mergeBtn.textContent = _v2gOps.mode === 'merge' ? 'Merging…' : 'Merge';
+      mergeBtn.textContent = _v2gOps.mode === 'merge' ? _mt('memory.console.merging', 'Merging…') : _mt('memory.mc.merge', 'Merge');
     }
   }
 
@@ -2486,11 +2590,11 @@
     tgt = String(tgt || '').trim();
     pred = String(pred || _v2gOpsPredicate()).trim() || 'related_to';
     if (!src || !tgt) {
-      _v2gToast('Set source and target first', 'error');
+      _v2gToast(_mt('memory.console.need_slots', 'Set source and target first'), 'error');
       return false;
     }
     if (src === tgt) {
-      _v2gToast('Source and target must differ', 'error');
+      _v2gToast(_mt('memory.console.slots_differ', 'Source and target must differ'), 'error');
       return false;
     }
     try {
@@ -2499,13 +2603,14 @@
         body: JSON.stringify({ subject: src, predicate: pred, object: tgt }),
       });
       if (!data.ok) {
-        _v2gToast(data.error || 'Link failed', 'error');
+        _v2gToast(data.error || _mt('memory.console.link_failed', 'Link failed'), 'error');
         console.warn('[v2g] link failed', data);
         return false;
       }
       _v2gToast(
-        (data.already ? 'Already linked · ' : 'Linked ') +
-          _v2gShortId(data.subject || src) + ' —' + pred + '→ ' + _v2gShortId(data.object || tgt),
+        _mt(data.already ? 'memory.console.already_linked' : 'memory.console.linked',
+          data.already ? 'Already linked · {subject} —{predicate}→ {object}' : 'Linked {subject} —{predicate}→ {object}',
+          { subject: _v2gShortId(data.subject || src), predicate: pred, object: _v2gShortId(data.object || tgt) }),
         'success'
       );
       _v2gOps.mode = null;
@@ -2521,7 +2626,7 @@
       } catch (e) { /* ignore */ }
       return true;
     } catch (err) {
-      _v2gToast('Link failed: ' + (err && err.message ? err.message : err), 'error');
+      _v2gToast(_mt('memory.console.link_failed_error', 'Link failed: {error}', { error: err && err.message ? err.message : err }), 'error');
       console.warn('[v2g] link exception', err);
       return false;
     }
@@ -2531,16 +2636,16 @@
     src = String(src || '').trim();
     tgt = String(tgt || '').trim();
     if (!src || !tgt) {
-      _v2gToast('Set source and target first', 'error');
+      _v2gToast(_mt('memory.console.need_slots', 'Set source and target first'), 'error');
       return false;
     }
     if (src === tgt) {
-      _v2gToast('Source and target must differ', 'error');
+      _v2gToast(_mt('memory.console.slots_differ', 'Source and target must differ'), 'error');
       return false;
     }
     var ok = await _v2gConfirm({
-      title: 'Merge entities',
-      message: 'Merge ' + src + ' into ' + tgt + '?\nBeliefs rewire to the target; source is retired.',
+      title: _mt('memory.console.merge_title', 'Merge entities'),
+      message: _mt('memory.console.merge_message', 'Merge {source} into {target}?\nBeliefs rewire to the target; source is retired.', { source: src, target: tgt }),
     });
     if (!ok) return false;
     try {
@@ -2552,10 +2657,10 @@
       });
       var data = await resp.json().catch(function() { return {}; });
       if (!resp.ok || !data.ok) {
-        _v2gToast(data.error || 'Merge failed', 'error');
+        _v2gToast(data.error || _mt('memory.console.merge_failed', 'Merge failed'), 'error');
         return false;
       }
-      _v2gToast('Merged ' + _v2gShortId(src) + ' → ' + _v2gShortId(tgt), 'success');
+      _v2gToast(_mt('memory.console.merged', 'Merged {source} → {target}', { source: _v2gShortId(src), target: _v2gShortId(tgt) }), 'success');
       _v2gOps.sourceId = null;
       _v2gOps.targetId = tgt;
       _v2gOps.mode = null;
@@ -2567,7 +2672,7 @@
       } catch (e) { /* ignore */ }
       return true;
     } catch (err) {
-      _v2gToast('Merge failed', 'error');
+      _v2gToast(_mt('memory.console.merge_failed', 'Merge failed'), 'error');
       return false;
     }
   }
@@ -2628,18 +2733,18 @@
     var object = String(seed.object || seed.objectText || seed.targetId || '').trim();
     if (!beliefId) beliefId = seed.beliefId || null;
     if (!beliefId && !(subject && predicate && object)) {
-      if (!opts.silent) _v2gToast('Cannot cut — missing belief id and edge triple', 'error');
+      if (!opts.silent) _v2gToast(_mt('memory.console.cut_missing', 'Cannot cut — missing belief id and edge triple'), 'error');
       return false;
     }
     if (!opts.skipConfirm) {
       var ok = await _v2gConfirm({
-        title: 'Cut connection',
+        title: _mt('memory.console.cut_title', 'Cut connection'),
         message:
-          'Remove this edge from active memory?\n' +
+          _mt('memory.console.cut_message', 'Remove this edge from active memory?') + '\n' +
           (subject && predicate
             ? subject + ' —' + predicate + '→ ' + object
-            : 'Soft-invalidate (recoverable via Hygiene).'),
-        confirmText: 'Cut',
+            : _mt('memory.console.cut_message_soft', 'Soft-invalidate (recoverable via Hygiene).')),
+        confirmText: _mt('memory.console.cut', 'Cut'),
         danger: true,
       });
       if (!ok) return false;
@@ -2667,13 +2772,13 @@
       }
       if (!data.ok) {
         if (!opts.silent) {
-          _v2gToast(data.error || 'Cut failed', 'error');
+          _v2gToast(data.error || _mt('memory.console.cut_failed', 'Cut failed'), 'error');
           console.warn('[v2g] unlink failed', data, { beliefId: beliefId, seed: seed });
         }
         return false;
       }
       if (!opts.silent && !opts.skipReload) {
-        _v2gToast(data.already ? 'Already cut' : 'Connection cut', 'success');
+        _v2gToast(data.already ? _mt('memory.console.already_cut', 'Already cut') : _mt('memory.console.connection_cut', 'Connection cut'), 'success');
       }
       if (!opts.skipReload) {
         _v2gOps.selectedEdgeIdx = -1;
@@ -2696,7 +2801,7 @@
       return true;
     } catch (err) {
       if (!opts.silent) {
-        _v2gToast('Cut failed: ' + (err && err.message ? err.message : err), 'error');
+        _v2gToast(_mt('memory.console.cut_failed_error', 'Cut failed: {error}', { error: err && err.message ? err.message : err }), 'error');
         console.warn('[v2g] unlink exception', err);
       }
       return false;
@@ -2711,17 +2816,18 @@
     opts = opts || {};
     items = (items || []).filter(Boolean);
     if (!items.length) {
-      _v2gToast('No edges to cut', 'info');
+      _v2gToast(_mt('memory.console.no_edges_to_cut', 'No edges to cut'), 'info');
       return 0;
     }
     var msg =
       opts.message ||
-      ('Cut ' + items.length + ' connection' + (items.length > 1 ? 's' : '') +
-        ' from active memory?');
+      (items.length === 1
+        ? _mt('memory.console.cut_n_message_one', 'Cut 1 connection from active memory?')
+        : _mt('memory.console.cut_n_message', 'Cut {n} connections from active memory?', { n: items.length }));
     var ok = await _v2gConfirm({
-      title: opts.title || 'Cut connections',
+      title: opts.title || _mt('memory.console.cut_connections_title', 'Cut connections'),
       message: msg,
-      confirmText: opts.confirmText || ('Cut ' + items.length),
+      confirmText: opts.confirmText || _mt('memory.console.cut_n', 'Cut {n}', { n: items.length }),
       danger: true,
     });
     if (!ok) return 0;
@@ -2738,7 +2844,9 @@
       if (done) n++;
     }
     if (n > 0) {
-      _v2gToast('Cut ' + n + ' connection' + (n > 1 ? 's' : ''), 'success');
+      _v2gToast(n === 1
+        ? _mt('memory.console.cut_done_one', 'Cut 1 connection')
+        : _mt('memory.console.cut_done', 'Cut {n} connections', { n: n }), 'success');
       _v2gOps.selectedEdgeIdx = -1;
       await _v2gReloadGraph();
       try {
@@ -2752,7 +2860,7 @@
         }));
       } catch (e2) { /* ignore */ }
     } else {
-      _v2gToast('No edges were cut', 'error');
+      _v2gToast(_mt('memory.console.no_edges_cut', 'No edges were cut'), 'error');
     }
     return n;
   }
@@ -2761,33 +2869,34 @@
   async function _v2gCutHubLinks(nodeId) {
     var edges = _v2gEdgesForNode(nodeId).filter(function(x) { return x.toHub; });
     if (!edges.length) {
-      _v2gToast('No direct hub link on this node', 'info');
+      _v2gToast(_mt('memory.console.no_hub_link', 'No direct hub link on this node'), 'info');
       return 0;
     }
     var otherLinks = _v2gEdgesForNode(nodeId).filter(function(x) { return !x.toHub; });
     var hint = otherLinks.length
-      ? '\n\nKeeps links to: ' +
-        otherLinks
-          .map(function(x) { return _v2gDisplayName(x.other); })
-          .slice(0, 6)
-          .join(', ') +
-        (otherLinks.length > 6 ? '…' : '') +
-        '\nUseful when the chain should be leaf → parent → hub (not leaf → hub).'
+      ? '\n\n' + _mt('memory.console.hub_keeps', 'Keeps links to: {names}', {
+          names: otherLinks
+            .map(function(x) { return _v2gDisplayName(x.other); })
+            .slice(0, 6)
+            .join(', ') +
+            (otherLinks.length > 6 ? '…' : ''),
+        }) +
+        '\n' + _mt('memory.console.hub_chain_hint', 'Useful when the chain should be leaf → parent → hub (not leaf → hub).')
       : '';
     return _v2gCutEdges(
       edges.map(function(x) {
         return { beliefId: x.ed.beliefId, seed: x.seed, ed: x.ed };
       }),
       {
-        title: 'Cut hub shortcut',
+        title: _mt('memory.console.cut_hub_title', 'Cut hub shortcut'),
         message:
-          'Remove ' +
-          edges.length +
-          ' direct link' +
-          (edges.length > 1 ? 's' : '') +
-          ' to the hub (You/Mubder)?' +
+          (edges.length === 1
+            ? _mt('memory.console.cut_hub_message_one', 'Remove 1 direct link to the hub (you)?')
+            : _mt('memory.console.cut_hub_message', 'Remove {n} direct links to the hub (you)?', { n: edges.length })) +
           hint,
-        confirmText: 'Cut hub link' + (edges.length > 1 ? 's' : ''),
+        confirmText: edges.length > 1
+          ? _mt('memory.console.cut_hub_links', 'Cut hub links')
+          : _mt('memory.console.cut_hub_link', 'Cut hub link'),
       }
     );
   }
@@ -2795,7 +2904,7 @@
   async function _v2gEditBeliefById(beliefId, seed) {
     seed = seed || {};
     if (!beliefId) {
-      _v2gToast('No belief id — cannot edit', 'error');
+      _v2gToast(_mt('memory.console.no_belief_id_edit', 'No belief id — cannot edit'), 'error');
       return false;
     }
     // Prefer live detail so we edit the current triple
@@ -2818,26 +2927,26 @@
     } catch (e) { /* use seed */ }
 
     var object = await _v2gPrompt({
-      title: 'Edit belief — object',
-      message: 'Fact / object text. Cancel aborts.',
+      title: _mt('memory.console.edit_object_title', 'Edit belief — object'),
+      message: _mt('memory.console.edit_object_message', 'Fact / object text. Cancel aborts.'),
       defaultValue: b.object || '',
-      confirmText: 'Next',
-      placeholder: 'e.g. Paris',
+      confirmText: _mt('memory.console.next', 'Next'),
+      placeholder: _mt('memory.console.edit_object_ph', 'e.g. Paris'),
     });
     if (object == null) return false;
     var predicate = await _v2gPrompt({
-      title: 'Edit belief — predicate',
-      message: 'Relation name (snake_case ok).',
+      title: _mt('memory.console.edit_predicate_title', 'Edit belief — predicate'),
+      message: _mt('memory.console.edit_predicate_message', 'Relation name (snake_case ok).'),
       defaultValue: b.predicate || '',
-      confirmText: 'Next',
+      confirmText: _mt('memory.console.next', 'Next'),
       placeholder: 'lives_in',
     });
     if (predicate == null) return false;
     var subject = await _v2gPrompt({
-      title: 'Edit belief — subject',
-      message: 'Subject entity id.',
+      title: _mt('memory.console.edit_subject_title', 'Edit belief — subject'),
+      message: _mt('memory.console.edit_subject_message', 'Subject entity id.'),
       defaultValue: b.subject || '',
-      confirmText: 'Save',
+      confirmText: _mt('memory.console.save', 'Save'),
       placeholder: 'user',
     });
     if (subject == null) return false;
@@ -2845,7 +2954,7 @@
     predicate = String(predicate).trim();
     object = String(object).trim();
     if (!subject || !predicate || !object) {
-      _v2gToast('Subject, predicate, and object are required', 'error');
+      _v2gToast(_mt('memory.console.spo_required', 'Subject, predicate, and object are required'), 'error');
       return false;
     }
     if (subject === b.subject && predicate === b.predicate && object === b.object) return false;
@@ -2858,10 +2967,10 @@
       });
       var data = await resp.json().catch(function() { return {}; });
       if (!resp.ok || !data.ok) {
-        _v2gToast(data.error || 'Edit failed', 'error');
+        _v2gToast(data.error || _mt('memory.console.edit_failed', 'Edit failed'), 'error');
         return false;
       }
-      _v2gToast('Belief updated', 'success');
+      _v2gToast(_mt('memory.console.belief_updated', 'Belief updated'), 'success');
       _v2gOps.selectedEdgeIdx = -1;
       await _v2gReloadGraph();
       try {
@@ -2874,7 +2983,7 @@
       } catch (e3) { /* ignore */ }
       return true;
     } catch (err) {
-      _v2gToast('Edit failed', 'error');
+      _v2gToast(_mt('memory.console.edit_failed', 'Edit failed'), 'error');
       return false;
     }
   }
@@ -2885,7 +2994,7 @@
   // the destructive cut+relink two-step that left nodes adrift.
   function _v2gRepointBelief(beliefId, seed) {
     seed = seed || {};
-    if (!beliefId) { _v2gToast('No belief id — cannot move', 'error'); return false; }
+    if (!beliefId) { _v2gToast(_mt('memory.console.no_belief_id_move', 'No belief id — cannot move'), 'error'); return false; }
     var subj = seed.subject || '';
     var obj = seed.object || '';
     var fromId = _v2gSelectedId;
@@ -2893,16 +3002,17 @@
     // most common case (move the OTHER end away from the inspected node) is
     // one click.
     _v2gConfirm({
-      title: 'Move which end of the edge?',
-      message: 'Subject = ' + _v2gShortId(subj) + ' · Object = ' + _v2gShortId(obj)
-        + '. Pick the end to move to another node.',
-      confirmText: 'Move subject',
-      cancelText: 'Move object',
+      title: _mt('memory.console.move_title', 'Move which end of the edge?'),
+      message: _mt('memory.console.move_message', 'Subject = {subject} · Object = {object}. Pick the end to move to another node.', {
+        subject: _v2gShortId(subj), object: _v2gShortId(obj),
+      }),
+      confirmText: _mt('memory.console.move_subject', 'Move subject'),
+      cancelText: _mt('memory.console.move_object', 'Move object'),
     }).then(function (moveSubject) {
       _v2gOps.mode = 'repoint';
       _v2gOps.repoint = { beliefId: beliefId, side: moveSubject ? 'subject' : 'object' };
       _v2gSyncOpsBar();
-      _v2gToast('Click the new endpoint node…', 'info');
+      _v2gToast(_mt('memory.console.click_new_endpoint', 'Click the new endpoint node…'), 'info');
     });
     return true;
   }
@@ -2916,13 +3026,14 @@
         body: JSON.stringify(payload),
       });
       if (!data.ok) {
-        _v2gToast(data.error || 'Move failed', 'error');
+        _v2gToast(data.error || _mt('memory.console.move_failed', 'Move failed'), 'error');
         return false;
       }
       var warn = data.warn_orphaned && data.warn_orphaned.length
-        ? ' · stranded: ' + data.warn_orphaned.join(', ')
+        ? _mt('memory.console.moved_stranded', ' · stranded: {ids}', { ids: data.warn_orphaned.join(', ') })
         : '';
-      _v2gToast('Moved edge to ' + _v2gShortId(newEndpoint) + (data.undo_token ? ' · Undo' : '') + warn, 'success');
+      _v2gToast(_mt('memory.console.moved_edge', 'Moved edge to {id}', { id: _v2gShortId(newEndpoint) }) +
+        (data.undo_token ? _mt('memory.console.moved_undo', ' · Undo') : '') + warn, 'success');
       _v2gOps.mode = null;
       _v2gOps.repoint = null;
       _v2gSyncOpsBar();
@@ -2935,7 +3046,7 @@
       } catch (e) { /* ignore */ }
       return true;
     } catch (err) {
-      _v2gToast('Move failed', 'error');
+      _v2gToast(_mt('memory.console.move_failed', 'Move failed'), 'error');
       return false;
     }
   }
@@ -2953,29 +3064,31 @@
         method: 'POST',
         body: JSON.stringify({ major: newMajor }),
       });
-      if (!data.ok) { _v2gToast(data.error || 'Toggle failed', 'error'); return; }
+      if (!data.ok) { _v2gToast(data.error || _mt('memory.console.toggle_failed', 'Toggle failed'), 'error'); return; }
       p.isMajor = newMajor;
-      _v2gToast((newMajor ? 'Marked ' : 'Unmarked ') + _v2gShortId(p.id) + (newMajor ? ' as major' : ''), 'success');
+      _v2gToast(newMajor
+        ? _mt('memory.console.marked_major', 'Marked {id} as major', { id: _v2gShortId(p.id) })
+        : _mt('memory.console.unmarked_major', 'Unmarked {id}', { id: _v2gShortId(p.id) }), 'success');
       _v2gRepaint();
       try {
         window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', { detail: { op: 'major', id: p.id, major: newMajor } }));
       } catch (e) { /* ignore */ }
     } catch (e) {
-      _v2gToast('Toggle failed', 'error');
+      _v2gToast(_mt('memory.console.toggle_failed', 'Toggle failed'), 'error');
     }
   }
 
   function _v2gGroupUnder(memberId) {
     memberId = String(memberId || '').trim();
-    if (!memberId) { _v2gToast('Pick a node first', 'error'); return false; }
+    if (!memberId) { _v2gToast(_mt('memory.console.pick_node_first', 'Pick a node first'), 'error'); return false; }
     if (_v2gIsUser({ id: memberId })) {
-      _v2gToast('The hub is the top-level root — not groupable', 'info');
+      _v2gToast(_mt('memory.console.hub_not_groupable', 'The hub is the top-level root — not groupable'), 'info');
       return false;
     }
     _v2gOps.mode = 'group';
     _v2gOps.group = { member: memberId };
     _v2gSyncOpsBar();
-    _v2gToast('Click the PARENT node to group "' + _v2gShortId(memberId) + '" under…', 'info');
+    _v2gToast(_mt('memory.console.group_pick_parent', 'Click the PARENT node to group "{id}" under…', { id: _v2gShortId(memberId) }), 'info');
     return true;
   }
 
@@ -2986,12 +3099,13 @@
         body: JSON.stringify({ group_root: rootId, member: memberId }),
       });
       if (!data.ok) {
-        _v2gToast(data.error || 'Group failed', 'error');
+        _v2gToast(data.error || _mt('memory.console.group_failed', 'Group failed'), 'error');
         return false;
       }
       _v2gToast(
-        'Grouped ' + _v2gShortId(memberId) + ' under ' + _v2gShortId(rootId)
-        + ' (tier ' + data.member_tier + ') · view-only, memory untouched',
+        _mt('memory.console.grouped', 'Grouped {member} under {root} (tier {tier}) · view-only, memory untouched', {
+          member: _v2gShortId(memberId), root: _v2gShortId(rootId), tier: data.member_tier,
+        }),
         'success'
       );
       _v2gOps.mode = null;
@@ -3007,7 +3121,7 @@
       } catch (e) { /* ignore */ }
       return true;
     } catch (err) {
-      _v2gToast('Group failed', 'error');
+      _v2gToast(_mt('memory.console.group_failed', 'Group failed'), 'error');
       return false;
     }
   }
@@ -3017,7 +3131,7 @@
     if (!memberId) return false;
     var row = (_v2gGroups || []).find(function(g) { return g.member === memberId; });
     if (!row || !row.id) {
-      _v2gToast('Not grouped', 'info');
+      _v2gToast(_mt('memory.console.not_grouped', 'Not grouped'), 'info');
       return false;
     }
     try {
@@ -3025,26 +3139,26 @@
         method: 'DELETE',
       });
       if (!data.ok) {
-        _v2gToast(data.error || 'Ungroup failed', 'error');
+        _v2gToast(data.error || _mt('memory.console.ungroup_failed', 'Ungroup failed'), 'error');
         return false;
       }
-      _v2gToast('Ungrouped ' + _v2gShortId(memberId) + ' · view-only, memory untouched', 'success');
+      _v2gToast(_mt('memory.console.ungrouped', 'Ungrouped {id} · view-only, memory untouched', { id: _v2gShortId(memberId) }), 'success');
       await _v2gReloadGraph();
       return true;
     } catch (err) {
-      _v2gToast('Ungroup failed', 'error');
+      _v2gToast(_mt('memory.console.ungroup_failed', 'Ungroup failed'), 'error');
       return false;
     }
   }
 
   async function _v2gDeleteEntity(id) {
     if (!id || id === 'user') {
-      _v2gToast('Cannot delete protected hub', 'error');
+      _v2gToast(_mt('memory.console.cannot_delete_hub', 'Cannot delete protected hub'), 'error');
       return false;
     }
     var ok = await _v2gConfirm({
-      title: 'Delete entity',
-      message: 'Delete entity shell “' + id + '”? (Protected / non-empty may fail.)',
+      title: _mt('memory.console.delete_title', 'Delete entity'),
+      message: _mt('memory.console.delete_message', 'Delete entity shell “{id}”? (Protected / non-empty may fail.)', { id: id }),
     });
     if (!ok) return false;
     try {
@@ -3055,10 +3169,10 @@
       });
       var data = await resp.json().catch(function() { return {}; });
       if (!resp.ok || !data.ok) {
-        _v2gToast(data.error || 'Delete failed', 'error');
+        _v2gToast(data.error || _mt('memory.console.delete_failed', 'Delete failed'), 'error');
         return false;
       }
-      _v2gToast('Deleted ' + _v2gShortId(id), 'success');
+      _v2gToast(_mt('memory.console.deleted', 'Deleted {id}', { id: _v2gShortId(id) }), 'success');
       if (_v2gOps.sourceId === id) _v2gOps.sourceId = null;
       if (_v2gOps.targetId === id) _v2gOps.targetId = null;
       _v2gBroadcastSlots();
@@ -3068,7 +3182,7 @@
       } catch (e) { /* ignore */ }
       return true;
     } catch (err) {
-      _v2gToast('Delete failed', 'error');
+      _v2gToast(_mt('memory.console.delete_failed', 'Delete failed'), 'error');
       return false;
     }
   }
@@ -3080,7 +3194,7 @@
     if (_v2gOps.mode === 'repoint') {
       var rp = _v2gOps.repoint || {};
       if (!rp.beliefId || !rp.side) { _v2gOps.mode = null; _v2gSyncOpsBar(); return true; }
-      if (p.id === _v2gSelectedId) { _v2gToast('Pick a different node', 'info'); return true; }
+      if (p.id === _v2gSelectedId) { _v2gToast(_mt('memory.console.pick_different_node', 'Pick a different node'), 'info'); return true; }
       var beliefId = rp.beliefId, side = rp.side, endpoint = p.id;
       _v2gOps.mode = null;
       _v2gOps.repoint = null;
@@ -3095,7 +3209,7 @@
       _v2gOps.mode = null;
       _v2gOps.group = null;
       _v2gSyncOpsBar();
-      if (!member || p.id === member) { _v2gToast('Pick a different parent node', 'info'); return true; }
+      if (!member || p.id === member) { _v2gToast(_mt('memory.console.pick_different_parent', 'Pick a different parent node'), 'info'); return true; }
       _v2gDoGroup(member, p.id);
       return true;
     }
@@ -3105,7 +3219,7 @@
       return true;
     }
     if (p.id === _v2gOps.sourceId) {
-      _v2gToast('Pick a different node as target', 'info');
+      _v2gToast(_mt('memory.console.pick_different_target', 'Pick a different node as target'), 'info');
       return true;
     }
     _v2gSetSlot('target', p.id);
@@ -3151,7 +3265,7 @@
     el.classList.add('is-open');
     el.innerHTML =
       '<div class="v2g-inspect-head">' +
-        '<button type="button" class="v2g-inspect-close" aria-label="Close">×</button>' +
+        '<button type="button" class="v2g-inspect-close" aria-label="' + _esc(_mt('memory.console.close', 'Close')) + '">×</button>' +
       '</div>' + (bodyHtml || '');
     var close = el.querySelector('.v2g-inspect-close');
     if (close) {
@@ -3176,24 +3290,26 @@
     _v2gHighlightObj = B.id;
     var pcolor = _V2G_PRED_COLORS[ed.type] || _v2gTheme().accent;
     var pred = ed.fullLabel || ed.label || '';
-    var html = '<div style="font-weight:700;font-size:0.8rem;color:#fbbf24;word-break:break-word;margin-bottom:6px;">Edge · belief</div>';
-    html += '<div style="font-size:0.74rem;line-height:1.45;margin-bottom:8px;color:var(--text-primary);">';
+    var html = '<div style="font-weight:700;font-size:0.8rem;color:#fbbf24;word-break:break-word;margin-bottom:6px;">' + _esc(_mt('memory.console.edge_belief', 'Edge · belief')) + '</div>';
+    html += '<div translate="no" style="font-size:0.74rem;line-height:1.45;margin-bottom:8px;color:var(--text-primary);">';
     html += '<b>' + _v2gEsc(_v2gDisplayName(A)) + '</b> ';
     html += '<span style="color:' + pcolor + ';">' + _v2gEsc(String(pred).replace(/_/g, ' ')) + '</span> ';
     html += '<b>' + _v2gEsc(_v2gDisplayName(B)) + '</b>';
     html += '</div>';
     html += '<div style="color:var(--text-muted);font-size:0.65rem;margin-bottom:8px;font-family:var(--font-mono);">';
-    if (ed.beliefId) html += 'id: ' + _v2gEsc(String(ed.beliefId).slice(0, 20));
-    else html += 'id: (missing — unlink may fail)';
-    html += ' · ' + _v2gEsc(ed.type || '?') + ' · conf ' + Math.round((ed.confidence || 0) * 100) + '%';
-    if (ed.superseded) html += ' · superseded';
+    if (ed.beliefId) html += _v2gEsc(_mt('memory.console.edge_id', 'id: {id}', { id: String(ed.beliefId).slice(0, 20) }));
+    else html += _v2gEsc(_mt('memory.console.edge_id_missing', 'id: (missing — unlink may fail)'));
+    var edType = _mtData('memory.console.ptype_', ed.type || '?');
+    html += ' · <span' + edType.attr + '>' + _v2gEsc(edType.text) + '</span>' +
+      _v2gEsc(_mt('memory.console.edge_conf', ' · conf {n}%', { n: Math.round((ed.confidence || 0) * 100) }));
+    if (ed.superseded) html += _v2gEsc(_mt('memory.console.superseded', ' · superseded'));
     html += '</div>';
     html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;">';
-    html += '<button type="button" class="btn btn-sm btn-danger v2g-edge-act" data-act="unlink" style="font-size:0.65rem;padding:2px 8px;" title="Cut this edge">Cut</button>';
-    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="edit" style="font-size:0.65rem;padding:2px 8px;">Edit</button>';
-    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="src" style="font-size:0.65rem;padding:2px 8px;">Src←A</button>';
-    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="tgt" style="font-size:0.65rem;padding:2px 8px;">Tgt→B</button>';
-    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="list" style="font-size:0.65rem;padding:2px 8px;">In list</button>';
+    html += '<button type="button" class="btn btn-sm btn-danger v2g-edge-act" data-act="unlink" style="font-size:0.65rem;padding:2px 8px;" title="' + _v2gEsc(_mt('memory.console.cut_this_edge', 'Cut this edge')) + '">' + _v2gEsc(_mt('memory.console.cut', 'Cut')) + '</button>';
+    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="edit" style="font-size:0.65rem;padding:2px 8px;">' + _v2gEsc(_mt('memory.console.edit', 'Edit')) + '</button>';
+    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="src" style="font-size:0.65rem;padding:2px 8px;">' + _v2gEsc(_mt('memory.console.src_from_a', 'Src←A')) + '</button>';
+    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="tgt" style="font-size:0.65rem;padding:2px 8px;">' + _v2gEsc(_mt('memory.console.tgt_to_b', 'Tgt→B')) + '</button>';
+    html += '<button type="button" class="btn btn-sm btn-secondary v2g-edge-act" data-act="list" style="font-size:0.65rem;padding:2px 8px;">' + _v2gEsc(_mt('memory.console.in_list', 'In list')) + '</button>';
     html += '</div>';
     // Stash edge triple on the panel for delegated clicks (survives re-renders better)
     el.setAttribute('data-edge-belief-id', ed.beliefId || '');
@@ -3457,12 +3573,15 @@
     var color = _v2gNodeColor(p);
     var fullName = _v2gDisplayName(p);
     var title = _v2gTitle(fullName);
-    var html = '<div style="color:' + color + ';font-weight:700;font-size:0.82rem;word-break:break-word;margin-bottom:4px;padding-right:28px;">' + _v2gEsc(title) + '</div>';
+    var html = '<div translate="no" style="color:' + color + ';font-weight:700;font-size:0.82rem;word-break:break-word;margin-bottom:4px;padding-right:28px;">' + _v2gEsc(title) + '</div>';
     html += '<div style="color:var(--text-muted);font-size:0.68rem;margin-bottom:6px;">';
-    html += _v2gIsUser(p) ? 'you · memory hub' : ('type: ' + p.type);
-    if (p.id) html += ' · id: <code style="font-size:0.65rem;">' + _v2gEsc(String(p.id)) + '</code>';
-    if (p.isHighStakes) html += ' · <span style="color:#ef4444;display:inline-flex;align-items:center;gap:3px;">' + KazmaIcons.span('alert') + ' high-stakes</span>';
-    if (p.isVirtual) html += ' · fact node';
+    var pType = _mtData('memory.console.etype_', p.type);
+    html += _v2gIsUser(p)
+      ? _v2gEsc(_mt('memory.console.insp_you_hub', 'you · memory hub'))
+      : _mtHtml('memory.console.insp_type', 'type: {type}', { type: '<span' + pType.attr + '>' + _v2gEsc(pType.text) + '</span>' });
+    if (p.id) html += ' · ' + _v2gEsc(_mt('memory.console.insp_id', 'id:')) + ' <code style="font-size:0.65rem;">' + _v2gEsc(String(p.id)) + '</code>';
+    if (p.isHighStakes) html += ' · <span style="color:#ef4444;display:inline-flex;align-items:center;gap:3px;">' + KazmaIcons.span('alert') + ' ' + _v2gEsc(_mt('memory.console.high_stakes', 'high-stakes')) + '</span>';
+    if (p.isVirtual) html += _v2gEsc(_mt('memory.console.fact_node', ' · fact node'));
     html += '</div>';
     // Collect connections once for cut-hub + list UI
     var nodeEdges = _v2gEdgesForNode(p.id);
@@ -3475,40 +3594,41 @@
     if (!p.isEpisode) {
       function _actBtn(act, cls, label, title) {
         return '<button type="button" class="btn btn-sm ' + cls + ' v2g-node-act" data-act="' + act +
-          '" style="font-size:0.65rem;padding:2px 8px;" title="' + title + '">' + label + '</button>';
+          '" style="font-size:0.65rem;padding:2px 8px;" title="' + _v2gEsc(title) + '">' + _v2gEsc(label) + '</button>';
       }
       var extra = '';
-      extra += _actBtn('src', 'btn-secondary', 'Src', 'Set as link/merge source');
-      extra += _actBtn('tgt', 'btn-secondary', 'Tgt', 'Set as link/merge target');
-      extra += _actBtn('merge-from', 'btn-secondary', 'Merge→', 'Start merge from this node (will be retired)');
+      extra += _actBtn('src', 'btn-secondary', _mt('memory.console.act_src', 'Src'), _mt('memory.console.act_src_title', 'Set as link/merge source'));
+      extra += _actBtn('tgt', 'btn-secondary', _mt('memory.console.act_tgt', 'Tgt'), _mt('memory.console.act_tgt_title', 'Set as link/merge target'));
+      extra += _actBtn('merge-from', 'btn-secondary', _mt('memory.console.act_merge_from', 'Merge→'), _mt('memory.console.act_merge_from_title', 'Start merge from this node (will be retired)'));
       if (!_v2gIsUser(p)) {
-        extra += _actBtn('group-under', 'btn-secondary', 'Group under→', 'Group this node under a parent');
+        extra += _actBtn('group-under', 'btn-secondary', _mt('memory.console.act_group_under', 'Group under→'), _mt('memory.console.act_group_under_title', 'Group this node under a parent'));
         var grouped = (_v2gGroups || []).some(function(g) { return g.member === p.id; });
         if (grouped) {
-          extra += _actBtn('ungroup', 'btn-secondary', 'Ungroup', 'Remove view-only grouping for this node');
+          extra += _actBtn('ungroup', 'btn-secondary', _mt('memory.console.act_ungroup', 'Ungroup'), _mt('memory.console.act_ungroup_title', 'Remove view-only grouping for this node'));
         }
       }
       if (nodeEdges.length >= 1 && !_v2gIsUser(p)) {
-        extra += _actBtn('cut-all', 'btn-secondary', 'Cut all (' + nodeEdges.length + ')', 'Cut every edge on this node');
+        extra += _actBtn('cut-all', 'btn-secondary', _mt('memory.console.act_cut_all', 'Cut all ({n})', { n: nodeEdges.length }), _mt('memory.console.act_cut_all_title', 'Cut every edge on this node'));
       }
       if (!_v2gIsUser(p) && !p.isVirtual) {
         var isMaj = !!p.isMajor;
         extra += '<button type="button" class="btn btn-sm v2g-node-act" data-act="major" style="font-size:0.65rem;padding:2px 8px;' +
           (isMaj ? 'border-color:#a855f7;color:#c084fc;' : '') +
-          '" title="Mark as major">' + (isMaj ? KazmaIcons.span('star') + ' Major' : 'Major') + '</button>';
+          '" title="' + _v2gEsc(_mt('memory.console.act_major_title', 'Mark as major')) + '">' +
+          (isMaj ? KazmaIcons.span('star') + ' ' : '') + _v2gEsc(_mt('memory.console.act_major', 'Major')) + '</button>';
       }
-      extra += _actBtn('rename', 'btn-secondary', 'Rename', 'Change display name');
-      extra += _actBtn('list', 'btn-secondary', 'In list', 'Highlight in entities list');
+      extra += _actBtn('rename', 'btn-secondary', _mt('memory.console.act_rename', 'Rename'), _mt('memory.console.act_rename_title', 'Change display name'));
+      extra += _actBtn('list', 'btn-secondary', _mt('memory.console.in_list', 'In list'), _mt('memory.console.act_in_list_title', 'Highlight in entities list'));
       if (!_v2gIsUser(p) && !p.isVirtual) {
-        extra += _actBtn('delete', 'btn-danger', 'Del', 'Delete empty entity shell');
+        extra += _actBtn('delete', 'btn-danger', _mt('memory.console.act_delete', 'Del'), _mt('memory.console.act_delete_title', 'Delete empty entity shell'));
       }
       html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">';
-      html += _actBtn('link-from', 'btn-primary', 'Link→', 'Start link from this node — click target next');
+      html += _actBtn('link-from', 'btn-primary', _mt('memory.console.act_link_from', 'Link→'), _mt('memory.console.act_link_from_title', 'Start link from this node — click target next'));
       if (hubEdges.length && !_v2gIsUser(p)) {
-        html += _actBtn('cut-hub', 'btn-danger', 'Cut hub', 'Remove direct link(s) to You/Mubder');
+        html += _actBtn('cut-hub', 'btn-danger', _mt('memory.console.act_cut_hub', 'Cut hub'), _mt('memory.console.act_cut_hub_title', 'Remove direct link(s) to the hub (you)'));
       }
       if (phone) {
-        html += '<button type="button" class="btn btn-sm btn-secondary" id="v2g-inspect-more-btn" style="font-size:0.65rem;padding:2px 8px;">More</button>';
+        html += '<button type="button" class="btn btn-sm btn-secondary" id="v2g-inspect-more-btn" style="font-size:0.65rem;padding:2px 8px;">' + _v2gEsc(_mt('memory.console.more', 'More')) + '</button>';
         html += '</div><div id="v2g-inspect-extra" hidden style="display:flex;flex-wrap:wrap;gap:4px;margin:-4px 0 8px;">' + extra + '</div>';
       } else {
         html += extra + '</div>';
@@ -3525,23 +3645,25 @@
         if (uniqParents.indexOf(n) < 0) uniqParents.push(n);
       });
       html += '<div style="margin-bottom:8px;padding:8px 10px;border-radius:8px;border:1px solid rgba(245,158,11,0.45);background:rgba(245,158,11,0.12);font-size:0.7rem;line-height:1.4;color:#fcd34d;">';
-      html += '<strong style="color:#fbbf24;">Hub shortcut</strong> — direct link to hub while also linked to ';
-      html += '<b>' + _v2gEsc(uniqParents.slice(0, 4).map(function(n) { return _v2gShortLabel(n, 30); }).join(', ')) + (uniqParents.length > 4 ? '…' : '') + '</b>.';
-      html += '<div style="margin-top:4px;color:var(--text-muted);font-size:0.65rem;">Preferred: this → parent → hub (You/Mubder). Use <b>Cut hub</b> to drop the shortcut edge.</div>';
-      html += '<button type="button" class="btn btn-sm btn-danger v2g-node-act" data-act="cut-hub" style="margin-top:6px;font-size:0.68rem;padding:3px 10px;">Cut hub link' + (hubEdges.length > 1 ? 's' : '') + '</button>';
+      html += _mt('memory.console.hub_shortcut', '<strong style="color:#fbbf24;">Hub shortcut</strong> — direct link to hub while also linked to {parents}.', {
+        parents: '<b translate="no">' + _v2gEsc(uniqParents.slice(0, 4).map(function(n) { return _v2gShortLabel(n, 30); }).join(', ')) + (uniqParents.length > 4 ? '…' : '') + '</b>',
+      });
+      html += '<div style="margin-top:4px;color:var(--text-muted);font-size:0.65rem;">' + _mt('memory.console.hub_shortcut_hint', 'Preferred: this → parent → hub (you). Use <b>Cut hub</b> to drop the shortcut edge.') + '</div>';
+      html += '<button type="button" class="btn btn-sm btn-danger v2g-node-act" data-act="cut-hub" style="margin-top:6px;font-size:0.68rem;padding:3px 10px;">' +
+        _v2gEsc(hubEdges.length > 1 ? _mt('memory.console.cut_hub_links', 'Cut hub links') : _mt('memory.console.cut_hub_link', 'Cut hub link')) + '</button>';
       html += '</div>';
     } else if (hubEdges.length && !_v2gIsUser(p) && nonHubEdges.length === 0) {
-      html += '<div style="margin-bottom:8px;padding:6px 10px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.03);font-size:0.68rem;color:var(--text-muted);">Linked only to hub. Use <b style="color:#f87171;">Cut</b> on the connection row to detach.</div>';
+      html += '<div style="margin-bottom:8px;padding:6px 10px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.03);font-size:0.68rem;color:var(--text-muted);">' + _mt('memory.console.hub_only', 'Linked only to hub. Use <b style="color:#f87171;">Cut</b> on the connection row to detach.') + '</div>';
     }
 
     // Contents — the full text of this belief/entity, shown exactly once.
     if (fullName !== title) {
-      html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Contents</div>';
-      html += '<div class="v2g-inspect-contents" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:6px;padding:6px 8px;font-size:0.72rem;color:var(--text-secondary);word-break:break-word;margin-bottom:8px;">' + _v2gContents(fullName) + '</div>';
+      html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">' + _v2gEsc(_mt('memory.console.contents', 'Contents')) + '</div>';
+      html += '<div class="v2g-inspect-contents" translate="no" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:6px;padding:6px 8px;font-size:0.72rem;color:var(--text-secondary);word-break:break-word;margin-bottom:8px;">' + _v2gContents(fullName) + '</div>';
     }
     // Connections — one Cut per neighbor (easy topology cleanup)
     if (nodeEdges.length) {
-      html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">Connections (' + nodeEdges.length + ')</div>';
+      html += '<div style="font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;">' + _v2gEsc(_mt('memory.console.connections', 'Connections ({n})', { n: nodeEdges.length })) + '</div>';
       html += '<div class="v2g-inspect-edges" style="display:flex;flex-direction:column;gap:3px;">';
       var edgeLimit = (phone && !_v2gInspectAllEdges) ? 4 : nodeEdges.length;
       for (var r = 0; r < Math.min(edgeLimit, nodeEdges.length); r++) {
@@ -3552,31 +3674,31 @@
         var neighLabel = _v2gEsc(_v2gShortLabel(_v2gDisplayName(row.other), 30));
         var dir = row.outbound ? '→' : '←';
         var hubBadge = row.toHub
-          ? ' <span style="font-size:0.58rem;padding:1px 5px;border-radius:3px;background:rgba(245,158,11,0.2);color:#fbbf24;">hub</span>'
+          ? ' <span style="font-size:0.58rem;padding:1px 5px;border-radius:3px;background:rgba(245,158,11,0.2);color:#fbbf24;">' + _v2gEsc(_mt('memory.console.hub_badge', 'hub')) + '</span>'
           : '';
         var rowBg = row.toHub && hubShortcut ? 'rgba(245,158,11,0.1)' : 'transparent';
         var rowBorder = row.toHub && hubShortcut ? 'rgba(245,158,11,0.35)' : 'transparent';
         html += '<div class="v2g-belief-row" data-edge-idx="' + row.idx + '" style="color:var(--text-secondary);line-height:1.35;font-size:0.72rem;word-break:break-word;padding:5px 6px;border-radius:6px;cursor:pointer;border:1px solid ' + rowBorder + ';background:' + rowBg + ';" onmouseover="this.style.background=\'rgba(251,191,36,0.1)\'" onmouseout="this.style.background=\'' + rowBg + '\'">';
         html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;">';
         html += '<div style="min-width:0;flex:1;">';
-        html += '<span style="color:var(--text-muted);">' + dir + '</span> <b>' + neighLabel + '</b>' + hubBadge;
-        html += '<div style="font-size:0.62rem;color:var(--text-muted);margin-top:1px;"><span style="color:' + pcolor + ';">' + predLabel + '</span>' +
-          (ed.superseded ? ' · superseded' : '') + '</div>';
+        html += '<span style="color:var(--text-muted);">' + dir + '</span> <b translate="no">' + neighLabel + '</b>' + hubBadge;
+        html += '<div style="font-size:0.62rem;color:var(--text-muted);margin-top:1px;"><span translate="no" style="color:' + pcolor + ';">' + predLabel + '</span>' +
+          (ed.superseded ? _v2gEsc(_mt('memory.console.superseded', ' · superseded')) : '') + '</div>';
         html += '</div>';
         html += '<div style="display:flex;flex-direction:column;gap:3px;flex-shrink:0;" onclick="event.stopPropagation()">';
-        html += '<button type="button" class="btn btn-sm btn-danger v2g-rel-act" data-act="cut" data-edge-idx="' + row.idx + '" style="font-size:0.62rem;padding:2px 8px;" title="Cut this edge only">Cut</button>';
+        html += '<button type="button" class="btn btn-sm btn-danger v2g-rel-act" data-act="cut" data-edge-idx="' + row.idx + '" style="font-size:0.62rem;padding:2px 8px;" title="' + _v2gEsc(_mt('memory.console.cut_this_edge_only', 'Cut this edge only')) + '">' + _v2gEsc(_mt('memory.console.cut', 'Cut')) + '</button>';
         if (!phone) {
-          html += '<button type="button" class="btn btn-sm btn-secondary v2g-rel-act" data-act="edit" data-edge-idx="' + row.idx + '" style="font-size:0.6rem;padding:1px 6px;">Edit</button>';
-          html += '<button type="button" class="btn btn-sm btn-secondary v2g-rel-act" data-act="move" data-edge-idx="' + row.idx + '" style="font-size:0.6rem;padding:1px 6px;" title="Move this edge to another node (repoint)">Move</button>';
+          html += '<button type="button" class="btn btn-sm btn-secondary v2g-rel-act" data-act="edit" data-edge-idx="' + row.idx + '" style="font-size:0.6rem;padding:1px 6px;">' + _v2gEsc(_mt('memory.console.edit', 'Edit')) + '</button>';
+          html += '<button type="button" class="btn btn-sm btn-secondary v2g-rel-act" data-act="move" data-edge-idx="' + row.idx + '" style="font-size:0.6rem;padding:1px 6px;" title="' + _v2gEsc(_mt('memory.console.move_title_btn', 'Move this edge to another node (repoint)')) + '">' + _v2gEsc(_mt('memory.console.move', 'Move')) + '</button>';
         }
         html += '</div></div></div>';
       }
       if (phone && nodeEdges.length > 4 && !_v2gInspectAllEdges) {
-        html += '<button type="button" class="btn btn-sm btn-secondary" id="v2g-inspect-more-edges" style="font-size:0.65rem;padding:3px 8px;margin-top:2px;">+' + (nodeEdges.length - 4) + ' more</button>';
+        html += '<button type="button" class="btn btn-sm btn-secondary" id="v2g-inspect-more-edges" style="font-size:0.65rem;padding:3px 8px;margin-top:2px;">' + _v2gEsc(_mt('memory.console.more_edges', '+{n} more', { n: nodeEdges.length - 4 })) + '</button>';
       }
       html += '</div>';
     } else {
-      html += '<div style="color:var(--text-muted);font-size:0.7rem;">No direct beliefs — use Link→ to connect it.</div>';
+      html += '<div style="color:var(--text-muted);font-size:0.7rem;">' + _v2gEsc(_mt('memory.console.no_direct_beliefs', 'No direct beliefs — use Link→ to connect it.')) + '</div>';
     }
     el = _v2gInspectSet(html, true);
     if (!el) return;
@@ -3587,7 +3709,7 @@
         ev.stopPropagation();
         var extraBox = el.querySelector('#v2g-inspect-extra');
         if (extraBox) extraBox.hidden = !extraBox.hidden;
-        moreBtn.textContent = extraBox && !extraBox.hidden ? 'Less' : 'More';
+        moreBtn.textContent = extraBox && !extraBox.hidden ? _mt('memory.console.less', 'Less') : _mt('memory.console.more', 'More');
       });
     }
     var moreEdges = el.querySelector('#v2g-inspect-more-edges');
@@ -3607,22 +3729,22 @@
         var act = btn.getAttribute('data-act');
         if (act === 'src') {
           _v2gSetSlot('source', p.id);
-          _v2gToast('Source = ' + _v2gShortId(p.id), 'info');
+          _v2gToast(_mt('memory.console.toast_source', 'Source = {id}', { id: _v2gShortId(p.id) }), 'info');
         } else if (act === 'tgt') {
           _v2gSetSlot('target', p.id);
-          _v2gToast('Target = ' + _v2gShortId(p.id), 'info');
+          _v2gToast(_mt('memory.console.toast_target', 'Target = {id}', { id: _v2gShortId(p.id) }), 'info');
         } else if (act === 'link-from') {
           _v2gOps.sourceId = p.id;
           _v2gOps.targetId = null;
           _v2gOps.mode = 'link';
           _v2gBroadcastSlots();
-          _v2gToast('Link from ' + _v2gShortId(p.id) + ' — click target on graph', 'info');
+          _v2gToast(_mt('memory.console.toast_link_from', 'Link from {id} — click target on graph', { id: _v2gShortId(p.id) }), 'info');
         } else if (act === 'merge-from') {
           _v2gOps.sourceId = p.id;
           _v2gOps.targetId = null;
           _v2gOps.mode = 'merge';
           _v2gBroadcastSlots();
-          _v2gToast('Merge from ' + _v2gShortId(p.id) + ' — click survivor target', 'info');
+          _v2gToast(_mt('memory.console.toast_merge_from', 'Merge from {id} — click survivor target', { id: _v2gShortId(p.id) }), 'info');
         } else if (act === 'group-under') {
           // F: view-only grouping — pick the parent next.
           _v2gGroupUnder(p.id);
@@ -3641,14 +3763,11 @@
               return { beliefId: x.ed.beliefId, seed: x.seed, ed: x.ed };
             }),
             {
-              title: 'Cut all connections',
-              message:
-                'Detach “' +
-                _v2gDisplayName(p) +
-                '” from all ' +
-                all.length +
-                ' neighbor(s)? Node shell stays.',
-              confirmText: 'Cut all',
+              title: _mt('memory.console.cut_all_title', 'Cut all connections'),
+              message: _mt('memory.console.cut_all_message', 'Detach “{name}” from all {n} neighbor(s)? Node shell stays.', {
+                name: _v2gDisplayName(p), n: all.length,
+              }),
+              confirmText: _mt('memory.console.cut_all', 'Cut all'),
             }
           ).then(function() {
             var idx2 = _v2gFindNodeIndex(p.id);
@@ -3704,8 +3823,8 @@
     } catch (inspectErr) {
       console.error('[v2g] inspect failed', inspectErr);
       try {
-        el.innerHTML = '<div style="color:#f87171;font-size:0.75rem;">Inspect error: ' +
-          _v2gEsc(String(inspectErr && inspectErr.message ? inspectErr.message : inspectErr)) +
+        el.innerHTML = '<div style="color:#f87171;font-size:0.75rem;">' +
+          _v2gEsc(_mt('memory.console.inspect_error', 'Inspect error: {error}', { error: String(inspectErr && inspectErr.message ? inspectErr.message : inspectErr) })) +
           '</div>';
       } catch (e2) { /* ignore */ }
     }
@@ -3714,15 +3833,15 @@
   async function _v2gRenameNode(p) {
     if (!p || p.isEpisode) return;
     var current = _v2gDisplayName(p);
-    var msg = 'Display name for this node. The id stays "' + String(p.id) + '" so all beliefs keep linking correctly.';
+    var msg = _mt('memory.console.rename_message', 'Display name for this node. The id stays "{id}" so all beliefs keep linking correctly.', { id: String(p.id) });
     var name;
     if (window.kazmaPrompt) {
       name = await window.kazmaPrompt({
-        title: 'Rename node',
+        title: _mt('memory.console.rename_title', 'Rename node'),
         message: msg,
-        defaultValue: current === 'You' && _v2gIsUser(p) ? 'You' : current,
-        confirmText: 'Rename',
-        placeholder: _v2gIsUser(p) ? 'e.g. Mubder or Kazma' : 'e.g. ShipX',
+        defaultValue: current,
+        confirmText: _mt('memory.console.rename', 'Rename'),
+        placeholder: _v2gIsUser(p) ? _mt('memory.console.rename_ph_user', 'e.g. your name') : _mt('memory.console.rename_ph', 'e.g. a project name'),
       });
     } else {
       name = window.prompt(msg, current);
@@ -3730,7 +3849,7 @@
     if (name == null) return;
     name = String(name).trim();
     if (!name) {
-      if (window.showToast) window.showToast('Name cannot be empty', 'error');
+      if (window.showToast) window.showToast(_mt('memory.console.name_empty', 'Name cannot be empty'), 'error');
       return;
     }
     if (name === current) return;
@@ -3743,10 +3862,10 @@
       });
       var data = await resp.json().catch(function() { return {}; });
       if (!resp.ok || !data.ok) {
-        if (window.showToast) window.showToast(data.error || 'Rename failed', 'error');
+        if (window.showToast) window.showToast(data.error || _mt('memory.console.rename_failed', 'Rename failed'), 'error');
         return;
       }
-      if (window.showToast) window.showToast('Renamed to “' + name + '”', 'success');
+      if (window.showToast) window.showToast(_mt('memory.console.renamed_to', 'Renamed to “{name}”', { name: name }), 'success');
       // Update cached raw node so filters don't flash old label
       for (var i = 0; i < (_v2gRawNodes || []).length; i++) {
         if (_v2gRawNodes[i] && _v2gRawNodes[i].id === p.id) {
@@ -3767,7 +3886,7 @@
       _v2gNotifyList({ type: 'entity', id: p.id, name: name });
       _v2gRepaint();
     } catch (err) {
-      if (window.showToast) window.showToast('Rename failed', 'error');
+      if (window.showToast) window.showToast(_mt('memory.console.rename_failed', 'Rename failed'), 'error');
     }
   }
 
@@ -3823,8 +3942,10 @@
     var nodes = (stats && stats.nodes) || 0;
     var links = (stats && stats.links) || 0;
     var focus = _v2gSelectedId || '';
-    var base = 'V2 belief topology graph. Arrow keys pan, plus minus zoom, Home resets. Click edges to edit or unlink beliefs.';
-    canvas.setAttribute('aria-label', base + ' Currently showing ' + nodes + ' nodes and ' + links + ' edges.' + (focus ? ' Focused on ' + focus + '.' : ''));
+    var base = _mt('memory.mc.v2_belief_topology_graph_arrow', 'V2 belief topology graph. Arrow keys pan, plus minus zoom, Home resets. Click edges to edit or unlink beliefs.');
+    canvas.setAttribute('aria-label', base + ' ' +
+      _mt('memory.console.aria_showing', 'Currently showing {nodes} nodes and {links} edges.', { nodes: nodes, links: links }) +
+      (focus ? ' ' + _mt('memory.console.aria_focused', 'Focused on {id}.', { id: focus }) : ''));
   }
 
   async function _v2gLoad() {
@@ -3901,9 +4022,9 @@
     var parts = [];
     if (hasUser) {
       parts.push(
-        '<span title="You"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' +
+        '<span title="' + _esc(_mt('memory.mc.legend_you', 'You')) + '"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' +
         theme.user + ';margin-right:4px;box-shadow:0 0 6px ' + _v2gHexAlpha(theme.user, 0.5) +
-        ';"></span>You</span>'
+        ';"></span>' + _esc(_mt('memory.mc.legend_you', 'You')) + '</span>'
       );
     }
     var order = ['person', 'tool', 'concept', 'location', 'project', 'entity'];
@@ -3916,13 +4037,14 @@
       // person count includes user — still show type chip in accent family
       var c = _V2G_TYPE_COLORS[k] || theme.accent;
       var n = entCounts[k] || 0;
+      var kl = _mtData('memory.console.etype_', k);
       parts.push(
-        '<span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' +
+        '<span' + kl.attr + '><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:' +
         c + ';margin-right:4px;box-shadow:0 0 5px ' + _v2gHexAlpha(c, 0.35) +
-        ';"></span>' + k + (n ? ' <span style="opacity:0.7">(' + n + ')</span>' : '') + '</span>'
+        ';"></span>' + _esc(kl.text) + (n ? ' <span style="opacity:0.7">(' + n + ')</span>' : '') + '</span>'
       );
     });
-    parts.push('<span style="opacity:0.7;margin-left:2px;">· site accent</span>');
+    parts.push('<span style="opacity:0.7;margin-left:2px;">' + _esc(_mt('memory.console.site_accent', '· site accent')) + '</span>');
     leg.innerHTML = parts.join('');
   }
 
@@ -4001,14 +4123,16 @@
       var st = _v2gLastStats || {};
       var paint = st.paint_source || st.source || 'sqlite';
       var gprov = st.graph_provider || paint;
-      var parts = [nodes.length + ' nodes · ' + links.length + ' beliefs'];
-      if (isolatedCount > 0) parts.push(isolatedCount + ' isolated');
-      parts.push('paint ' + paint);
+      var parts = [_mt('memory.console.stats_nodes', '{nodes} nodes · {links} beliefs', { nodes: nodes.length, links: links.length })];
+      if (isolatedCount > 0) parts.push(_mt('memory.console.stats_isolated', '{n} isolated', { n: isolatedCount }));
+      parts.push(_mt('memory.console.stats_paint', 'paint {source}', { source: paint }));
       if (gprov === 'neo4j') {
-        parts.push(st.graph_online ? 'neo4j dual-write online' : 'neo4j offline');
+        parts.push(st.graph_online
+          ? _mt('memory.console.stats_neo4j_online', 'neo4j dual-write online')
+          : _mt('memory.console.stats_neo4j_offline', 'neo4j offline'));
       }
       if (activeEnt.length || activePred.length || search) {
-        parts.push('filtered from ' + _v2gRawNodes.length);
+        parts.push(_mt('memory.console.stats_filtered', 'filtered from {n}', { n: _v2gRawNodes.length }));
       }
       sl.textContent = parts.join(' · ');
     }
@@ -4071,7 +4195,7 @@
     // Exact match → no hint.
     for (var i = 0; i < _v2gPredVocab.length; i++) {
       if (String(_v2gPredVocab[i].name).toLowerCase() === typed) {
-        hintEl.textContent = 'Reusing existing predicate.';
+        hintEl.textContent = _mt('memory.console.reuse_predicate', 'Reusing existing predicate.');
         return;
       }
     }
@@ -4082,7 +4206,9 @@
       var name = String(_v2gPredVocab[j].name).toLowerCase();
       if (name.length < 4) continue;
       if (typed !== name && typedTokens.indexOf(name) >= 0) {
-        hintEl.innerHTML = 'Similar to <b style="color:var(--accent);cursor:pointer;" data-adopt="' + _esc(name) + '">' + _esc(name) + '</b>? Click to reuse.';
+        hintEl.innerHTML = _mtHtml('memory.console.similar_predicate', 'Similar to {name}? Click to reuse.', {
+          name: '<b translate="no" style="color:var(--accent);cursor:pointer;" data-adopt="' + _esc(name) + '">' + _esc(name) + '</b>',
+        });
         var adopt = hintEl.querySelector('[data-adopt]');
         if (adopt) adopt.addEventListener('click', function () {
           var predEl = document.getElementById('v2g-ops-predicate');
@@ -4124,11 +4250,13 @@
       });
       if (!predTypes.length) predTypes = corePred.slice();
     }
-    function makeToggle(label, group, key, color, count) {
+    function makeToggle(value, group, key, color, count) {
       var id = 'v2g-ft-' + group + '-' + key;
       var active = !!_v2gFilters[group][key];
+      var lbl = _mtData(group === 'entity' ? 'memory.console.etype_' : 'memory.console.ptype_', value);
+      var label = _esc(lbl.text);
       var cnt = (count != null && count > 0) ? ' <span style="opacity:0.7;font-family:var(--font-mono);">' + count + '</span>' : '';
-      return '<label title="' + label + (count != null ? ': ' + count : '') + '" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.65rem;padding:2px 7px;border-radius:999px;border:1px solid ' + (active ? color : 'var(--border-subtle)') + ';background:' + (active ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)') + ';' + (active ? 'color:var(--text-primary);' : 'color:var(--text-muted);') + '">' +
+      return '<label' + lbl.attr + ' title="' + label + (count != null ? ': ' + count : '') + '" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.65rem;padding:2px 7px;border-radius:999px;border:1px solid ' + (active ? color : 'var(--border-subtle)') + ';background:' + (active ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)') + ';' + (active ? 'color:var(--text-primary);' : 'color:var(--text-muted);') + '">' +
              '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + (active ? color : 'transparent') + ';border:1px solid ' + color + ';flex-shrink:0;"></span>' +
              '<input type="checkbox" id="' + id + '" ' + (active ? 'checked' : '') + ' style="display:none;">' + label + cnt + '</label>';
     }
@@ -4158,12 +4286,15 @@
     // Active filter chips + reset button
     var chips = document.getElementById('v2g-active-filters');
     if (chips) {
-      var all = Object.keys(_v2gFilters.entity).map(function(k) { return { group: 'entity', key: k, label: 'entity:' + k }; })
-        .concat(Object.keys(_v2gFilters.predicate).map(function(k) { return { group: 'predicate', key: k, label: 'pred:' + k }; }));
+      var all = Object.keys(_v2gFilters.entity).map(function(k) {
+        return { group: 'entity', key: k, label: _esc(_mt('memory.console.filter_entity', 'entity:{type}', { type: _mtData('memory.console.etype_', k).text })) };
+      }).concat(Object.keys(_v2gFilters.predicate).map(function(k) {
+        return { group: 'predicate', key: k, label: _esc(_mt('memory.console.filter_pred', 'pred:{type}', { type: _mtData('memory.console.ptype_', k).text })) };
+      }));
       var html = all.map(function(c, idx) {
         return '<span data-fg="' + c.group + '" data-fk="' + c.key + '" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(59,130,246,0.15);color:#93c5fd;cursor:pointer;display:inline-flex;align-items:center;gap:3px;">' + c.label + ' ' + KazmaIcons.span('x') + '</span>';
       }).join('');
-      if (all.length) html += '<span id="v2g-reset-filters" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(239,68,68,0.12);color:#f87171;cursor:pointer;margin-left:4px;">Reset all</span>';
+      if (all.length) html += '<span id="v2g-reset-filters" style="font-size:0.62rem;padding:2px 6px;border-radius:4px;background:rgba(239,68,68,0.12);color:#f87171;cursor:pointer;margin-left:4px;">' + _esc(_mt('memory.console.reset_all', 'Reset all')) + '</span>';
       chips.innerHTML = html;
       chips.querySelectorAll('span[data-fg]').forEach(function(span) {
         span.addEventListener('click', function() {
@@ -4272,9 +4403,9 @@
       a.download = 'kazma-v2-topology.png';
       a.href = canvas.toDataURL('image/png');
       a.click();
-      if (window.showToast) window.showToast('PNG downloaded', 'success');
+      if (window.showToast) window.showToast(_mt('memory.console.png_downloaded', 'PNG downloaded'), 'success');
     } catch (e) {
-      if (window.showToast) window.showToast('PNG export failed', 'error');
+      if (window.showToast) window.showToast(_mt('memory.console.png_export_failed', 'PNG export failed'), 'error');
     }
   }
 
@@ -4308,7 +4439,7 @@
     a.href = URL.createObjectURL(blob);
     a.click();
     setTimeout(function() { URL.revokeObjectURL(a.href); }, 2000);
-    if (window.showToast) window.showToast('SVG downloaded', 'success');
+    if (window.showToast) window.showToast(_mt('memory.console.svg_downloaded', 'SVG downloaded'), 'success');
   }
 
   function _v2gWireControls() {
@@ -4342,7 +4473,7 @@
         } else if (_v2gOps.mode === 'link') {
           _v2gOps.mode = null;
           _v2gSyncOpsBar();
-          _v2gToast('Link mode cancelled', 'info');
+          _v2gToast(_mt('memory.console.link_mode_cancelled', 'Link mode cancelled'), 'info');
         } else {
           _v2gEnterMode('link');
         }
@@ -4358,7 +4489,7 @@
         } else if (_v2gOps.mode === 'merge') {
           _v2gOps.mode = null;
           _v2gSyncOpsBar();
-          _v2gToast('Merge mode cancelled', 'info');
+          _v2gToast(_mt('memory.console.merge_mode_cancelled', 'Merge mode cancelled'), 'info');
         } else {
           _v2gEnterMode('merge');
         }
@@ -4377,7 +4508,7 @@
     if (clearBtn) {
       clearBtn.addEventListener('click', function() {
         _v2gClearSlots();
-        _v2gToast('Slots cleared', 'info');
+        _v2gToast(_mt('memory.console.slots_cleared', 'Slots cleared'), 'info');
       });
     }
     var predEl = document.getElementById('v2g-ops-predicate');
@@ -4442,14 +4573,14 @@
     var label = document.getElementById('v2g-time-label');
     var liveBtn = document.getElementById('v2g-time-live');
     var playBtn = document.getElementById('v2g-time-play');
-    if (playBtn) playBtn.setAttribute('data-play-label', playBtn.textContent || 'Play');
+    if (playBtn) playBtn.setAttribute('data-play-label', playBtn.textContent || _mt('dashboard.memory_play', 'Play'));
     function _updateTimeLabel() {
       if (!slider || !label) return;
       var v = parseFloat(slider.value);
-      if (v >= 99.5) label.textContent = 'Live (now)';
+      if (v >= 99.5) label.textContent = _mt('dashboard.memory_live_now', 'Live (now)');
       else if (_v2gTimeRange.max > 0) {
         var ts = _v2gTimeRange.min + (v / 100) * (_v2gTimeRange.max - _v2gTimeRange.min);
-        label.textContent = new Date(ts * 1000).toLocaleDateString();
+        label.textContent = _memDay(ts);
       } else label.textContent = '—';
     }
     if (slider) {
@@ -4459,7 +4590,7 @@
     if (liveBtn) liveBtn.addEventListener('click', function() {
       _v2gStopPlay();
       if (slider) slider.value = 100;
-      if (label) label.textContent = 'Live (now)';
+      if (label) label.textContent = _mt('dashboard.memory_live_now', 'Live (now)');
       _v2gLoad();
     });
     if (playBtn && slider) {
@@ -4476,7 +4607,7 @@
           _v2gStopPlay();
           return;
         }
-        playBtn.textContent = playBtn.getAttribute('data-pause-label') || 'Pause';
+        playBtn.textContent = playBtn.getAttribute('data-pause-label') || _mt('dashboard.memory_pause', 'Pause');
         if (parseFloat(slider.value) >= 99) slider.value = '0';
         _v2gPlayTimer = setInterval(function() {
           var cur = parseFloat(slider.value);

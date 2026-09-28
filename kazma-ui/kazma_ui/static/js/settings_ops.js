@@ -27,6 +27,15 @@
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.appearance),
                 });
+            } catch (e) {
+                showToast(_t('settings.save_failed', 'Save failed'), 'error');
+                this.saving = false;
+                return;
+            }
+            this.saving = false;
+            // The save succeeded. Applying it to this page is a separate
+            // step, and a failure there must not report the save as failed.
+            try {
                 // Apply theme immediately. 'auto' resolves to the OS preference
                 // (same logic as previewTheme) so the live preview matches the
                 // saved state.
@@ -43,11 +52,10 @@
                     }
                 }
                 this._applyAccentColor(this.appearance.accent_color);
-                showToast(_t('settings.appearance_saved', 'Appearance saved'), 'success');
             } catch (e) {
-                showToast(_t('settings.save_failed', 'Save failed'), 'error');
+                console.warn('[settings] appearance saved; applying it to this page failed:', e);
             }
-            this.saving = false;
+            showToast(_t('settings.appearance_saved', 'Appearance saved'), 'success');
         },
 
         previewTheme(theme) {
@@ -154,23 +162,23 @@
                 showToast(_t('settings.shortcut_updated', 'Shortcut for "{action}" updated', {action: action}), 'success');
             } catch (e) {
                 this.shortcuts[action] = previous; // the server kept the old one
-                showToast('Shortcut not saved: ' + e.message, 'error');
+                showToast(_t('settings.ops.shortcut_not_saved', 'Shortcut not saved: ') + e.message, 'error');
             }
             this.shortcutConflicts = this.detectConflicts();
         },
 
         async resetShortcuts() {
             if (!(await window.kazmaConfirm({
-                title: 'Reset shortcuts',
-                message: 'Reset all shortcuts to defaults?',
-                confirmText: 'Reset',
+                title: _t('settings.ops.reset_shortcuts', 'Reset shortcuts'),
+                message: _t('settings.ops.reset_all_shortcuts_to_defaults', 'Reset all shortcuts to defaults?'),
+                confirmText: _t('settings.ops.reset', 'Reset'),
                 danger: false,
             }))) return;
             try {
                 await window.kazmaSave('/api/settings/shortcuts/reset', { method: 'POST' });
                 showToast(_t('settings.shortcuts_reset', 'Shortcuts reset'), 'success');
             } catch (e) {
-                showToast('Reset failed: ' + e.message, 'error');
+                showToast(_t('settings.ops.reset_failed', 'Reset failed: ') + e.message, 'error');
             }
             this.shortcuts = await this._fetch('/api/settings/shortcuts') || {};
             this.shortcutConflicts = this.detectConflicts();
@@ -392,9 +400,9 @@
                 return;
             }
             if (!(await window.kazmaConfirm({
-                title: 'Revoke token',
-                message: 'Revoke this token? This cannot be undone. Scripts using it will get 401.',
-                confirmText: 'Revoke',
+                title: _t('settings.ops.revoke_token', 'Revoke token'),
+                message: _t('settings.ops.revoke_this_token_this_cannot', 'Revoke this token? This cannot be undone. Scripts using it will get 401.'),
+                confirmText: _t('settings.ops.revoke', 'Revoke'),
                 danger: true,
             }))) return;
             try {
@@ -561,7 +569,7 @@
 
         get pkgMemoryLayerRows() {
             const layers = (this.pkgMemory && this.pkgMemory.layers) || {};
-            const t = (typeof this.t === 'function') ? this.t.bind(this) : (k) => k;
+            const t = (k) => (typeof window.tOr === 'function' ? window.tOr(k, k) : k);
             const order = [
                 ['embedder', 'packages.layer.embedder', 'Embedder'],
                 ['vector_memory', 'packages.layer.vector_memory', 'VectorMemory'],
@@ -587,6 +595,8 @@
                 }
                 rows.push({
                     id,
+                    // A package's row is named by the package: a name.
+                    isName: !i18nKey,
                     name: name || c.name || fallback,
                     ok: !!c.ok,
                     status: c.status || (c.ok ? 'ok' : 'error'),
@@ -609,7 +619,7 @@
             if (navigator.clipboard) {
                 navigator.clipboard.writeText(cmd);
                 if (window.KazmaStream && window.KazmaStream.toast) {
-                    window.KazmaStream.toast('Copied to clipboard', 'success', 2000);
+                    window.KazmaStream.toast(_t('settings.ops.copied_to_clipboard', 'Copied to clipboard'), 'success', 2000);
                 }
             }
         },
@@ -618,11 +628,11 @@
             if (!extraName || this.pkgInstalling) return;
             const ok = window.kazmaConfirm
                 ? await window.kazmaConfirm({
-                    title: 'Install optional dependency',
-                    message: `Install the "${extraName}" extra into this Python environment? This runs uv/pip in the background.`,
-                    confirmText: 'Install',
+                    title: _t('settings.ops.install_optional_dependency', 'Install optional dependency'),
+                    message: _t('settings.ops.install_extra_message', 'Install the "{name}" extra into this Python environment? This runs uv/pip in the background.', { name: extraName }),
+                    confirmText: _t('settings.ops.install', 'Install'),
                 })
-                : await confirm(`Install optional extra "${extraName}"?`);
+                : await confirm(_t('settings.ops.install_extra_native', 'Install optional extra "{name}"?', { name: extraName }));
             if (!ok) return;
 
             this.pkgInstalling = extraName;
@@ -638,18 +648,18 @@
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok || data.status === 'error' || data.status === 'unavailable') {
                     this.pkgInstallOk = false;
-                    this.pkgInstallMsg = data.message || data.detail || 'Install failed to start';
+                    this.pkgInstallMsg = data.message || data.detail || _t('settings.ops.install_failed_to_start', 'Install failed to start');
                     if (window.showToast) window.showToast(this.pkgInstallMsg, 'error', 4000);
                 } else {
                     this.pkgInstallOk = true;
-                    this.pkgInstallMsg = `Installing "${extraName}" in the background… Refresh this tab in a minute.`;
+                    this.pkgInstallMsg = _t('settings.ops.installing_extra', 'Installing "{name}" in the background… Refresh this tab in a minute.', { name: extraName });
                     if (window.showToast) window.showToast(this.pkgInstallMsg, 'success', 4000);
                     // Poll status a few times then reload package list
                     this._pollInstallStatus(extraName);
                 }
             } catch (e) {
                 this.pkgInstallOk = false;
-                this.pkgInstallMsg = e.message || 'Network error';
+                this.pkgInstallMsg = e.message || _t('settings.ops.network_error', 'Network error');
             }
             this.pkgInstalling = '';
         },
@@ -664,8 +674,8 @@
                     if (st && (st.status === 'OK' || st.status === 'FAILED')) {
                         self.pkgInstallOk = st.status === 'OK';
                         self.pkgInstallMsg = st.status === 'OK'
-                            ? `Installed "${extraName}". Reloading package list…`
-                            : (`Install failed: ${st.error || 'see server logs'}`);
+                            ? _t('settings.ops.installed_extra', 'Installed "{name}". Reloading package list…', { name: extraName })
+                            : _t('settings.ops.install_failed', 'Install failed: {error}', { error: st.error || _t('settings.ops.see_server_logs', 'see server logs') });
                         await self.loadPackages();
                         return;
                     }
@@ -701,15 +711,15 @@
 
         async systemReset() {
             if (!(await window.kazmaConfirm({
-                title: 'Reset all settings',
-                message: '[!]  This will reset ALL settings to defaults. Are you sure?',
-                confirmText: 'Reset',
+                title: _t('settings.ops.reset_all_settings', 'Reset all settings'),
+                message: _t('settings.ops.this_will_reset_all_settings', '[!]  This will reset ALL settings to defaults. Are you sure?'),
+                confirmText: _t('settings.ops.reset', 'Reset'),
                 danger: true,
             }))) return;
             if (!(await window.kazmaConfirm({
-                title: 'Final confirmation',
-                message: 'Reset everything? This cannot be undone.',
-                confirmText: 'Reset everything',
+                title: _t('settings.ops.final_confirmation', 'Final confirmation'),
+                message: _t('settings.ops.reset_everything_this_cannot_be', 'Reset everything? This cannot be undone.'),
+                confirmText: _t('settings.ops.reset_everything', 'Reset everything'),
                 danger: true,
             }))) return;
             try {
@@ -771,9 +781,9 @@
 
         async resetToDefaults() {
             if (!(await window.kazmaConfirm({
-                title: 'Reset settings',
-                message: 'Reset ALL settings to defaults? This cannot be undone.',
-                confirmText: 'Reset',
+                title: _t('settings.ops.reset_settings', 'Reset settings'),
+                message: _t('settings.ops.reset_all_settings_to_defaults', 'Reset ALL settings to defaults? This cannot be undone.'),
+                confirmText: _t('settings.ops.reset', 'Reset'),
                 danger: true,
             }))) return;
             try {
@@ -860,7 +870,7 @@
                             if (pending === 'google_drive' && status.drive_ok === false) {
                                 // OAuth succeeded but Drive itself is blocked —
                                 // say exactly why instead of the green toast.
-                                showToast(_t('settings.google_drive_failed', 'Google connected, but Drive access failed: {error}. Test the card for the fix steps.', {error: (status.drive_error || 'run Test to diagnose')}), 'error');
+                                showToast(_t('settings.google_drive_failed', 'Google connected, but Drive access failed: {error}. Test the card for the fix steps.', {error: (status.drive_error || _t('settings.drive_run_test', 'run Test to diagnose'))}), 'error');
                             } else {
                                 showToast(_t('settings.offsite_connected', '☁️ {provider} connected — offsite backup active', {provider: (this.offsiteActiveProviderLabel || pending)}), 'success');
                             }
@@ -1056,9 +1066,11 @@
 
         async deleteBackup(dirName) {
             if (!(await window.kazmaConfirm({
-                title: 'Delete backup',
-                message: 'Delete backup ' + new Date(parseInt(dirName) * 1000).toLocaleString() + '? This cannot be undone.',
-                confirmText: 'Delete', danger: true,
+                title: _t('settings.ops.delete_backup', 'Delete backup'),
+                message: _t('settings.ops.delete_backup_message', 'Delete backup {date}? This cannot be undone.', {
+                    date: window.KazmaFormat ? window.KazmaFormat.dateTime(parseInt(dirName)) : new Date(parseInt(dirName) * 1000).toLocaleString(),
+                }),
+                confirmText: _t('settings.ops.delete', 'Delete'), danger: true,
             }))) return;
             try {
                 const resp = await fetch('/api/backup/' + encodeURIComponent(dirName), { method: 'DELETE' });

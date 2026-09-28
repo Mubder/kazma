@@ -184,4 +184,124 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "عرض التقرير",
         "en": "View report",
     },
+    "research.exporting_to": {
+        "ar": "جارٍ التصدير إلى {format}…",
+        "en": "Exporting to {format}…",
+    },
+    "research.export_failed_error": {
+        "ar": "فشل التصدير: {error}",
+        "en": "Export failed: {error}",
+    },
+    "research.exported": {
+        "ar": "صُدّر: {name}",
+        "en": "Exported: {name}",
+    },
+    "research.papers_list_error": {
+        "ar": "قائمة الأوراق: {error}",
+        "en": "Papers list: {error}",
+    },
+    "research.ui.no_running_session": {
+        "ar": "لا جلسة تعمل",
+        "en": "No running session",
+    },
+    "research.ui.cancel_failed": {
+        "ar": "فشل الإلغاء",
+        "en": "Cancel failed",
+    },
+    "research.ui.enter_a_research_topic": {
+        "ar": "أدخل موضوع البحث",
+        "en": "Enter a research topic",
+    },
+    "research.ui.could_not_start_research": {
+        "ar": "تعذّر بدء البحث",
+        "en": "Could not start research",
+    },
+    "research.ui.session_not_found": {
+        "ar": "الجلسة غير موجودة",
+        "en": "Session not found",
+    },
+    "research.ui.deep_research": {
+        "ar": "بحث معمّق",
+        "en": "Deep research",
+    },
+    "research.ui.could_not_load_session": {
+        "ar": "تعذّر تحميل الجلسة",
+        "en": "Could not load session",
+    },
+    "research.ui.paper_not_found": {
+        "ar": "الورقة غير موجودة",
+        "en": "Paper not found",
+    },
+    "research.ui.paper": {
+        "ar": "ورقة",
+        "en": "Paper",
+    },
+    "research.ui.loading": {
+        "ar": "جارٍ التحميل…",
+        "en": "Loading…",
+    },
+    "research.ui.could_not_load_report_file": {
+        "ar": "تعذّر تحميل ملف التقرير.",
+        "en": "Could not load report file.",
+    },
+    "research.ui.could_not_load_paper": {
+        "ar": "تعذّر تحميل الورقة",
+        "en": "Could not load paper",
+    },
+    "research.ui.could_not_load": {
+        "ar": "تعذّر التحميل",
+        "en": "Could not load",
+    },
+    "research.ui.research": {
+        "ar": "بحث",
+        "en": "Research",
+    },
+    "research.ui.select_a_research_result_first": {
+        "ar": "اختر نتيجة بحث أولًا",
+        "en": "Select a research result first",
+    },
+    "research.ui.export_request_failed": {
+        "ar": "فشل طلب التصدير",
+        "en": "Export request failed",
+    },
+    "research.ui.delete_failed": {
+        "ar": "فشل الحذف: ",
+        "en": "Delete failed: ",
+    },
+    "research.ui.deleted": {
+        "ar": "حُذف",
+        "en": "Deleted",
+    },
+    "research.ui.delete_failed_2": {
+        "ar": "فشل الحذف",
+        "en": "Delete failed",
+    },
+    "research.ui.archive_failed": {
+        "ar": "فشلت الأرشفة: ",
+        "en": "Archive failed: ",
+    },
+    "research.ui.archive_failed_2": {
+        "ar": "فشلت الأرشفة",
+        "en": "Archive failed",
+    },
+    "research.ui.restore_failed": {
+        "ar": "فشل الاسترجاع: ",
+        "en": "Restore failed: ",
+    },
+    "research.ui.restore_failed_2": {
+        "ar": "فشل الاسترجاع",
+        "en": "Restore failed",
+    },
+    "research.ui.pick_two_runs": {
+        "ar": "اختر تشغيلتين",
+        "en": "Pick two runs",
+    },
+    "research.ui.compare_failed": {
+        "ar": "فشلت المقارنة",
+        "en": "Compare failed",
+    },
+    "research.ui.no_prompt": {
+        "ar": "(بلا طلب)",
+        "en": "(no prompt)",
+    },
 }

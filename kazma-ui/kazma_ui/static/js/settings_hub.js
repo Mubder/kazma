@@ -1,6 +1,15 @@
 /** Settings mixin: hub — providers, models, hub providers/connectors/profiles */
 (function (root) {
     "use strict";
+    // Text built here: the catalog's text in the page's language, else the
+    // English given; {name} placeholders filled from vars.
+    function _k(key, en, vars) {
+        var f = root && root.kazmaT;
+        if (typeof f === "function") return f(key, en, vars);
+        var s = en;
+        if (vars) for (var v in vars) s = s.split("{" + v + "}").join(String(vars[v]));
+        return s;
+    }
     root.KazmaSettingsMixins = root.KazmaSettingsMixins || {};
     root.KazmaSettingsMixins.hub = function () {
         return {
@@ -15,7 +24,7 @@
         // than left as a second thing to keep in step.
 
         async fetchModels() {
-            if (!this.currentModel.base_url) { showToast('Enter a base URL first', 'error'); return; }
+            if (!this.currentModel.base_url) { showToast(_k('settings.hub.enter_a_base_url_first', 'Enter a base URL first'), 'error'); return; }
             this.fetchingModels = true;
             try {
                 const data = await ModelsManager.discover(this.modelProvider, this.currentModel.base_url, this.currentModel.api_key);
@@ -25,10 +34,10 @@
                     this.availableModels = data.models;
                     showToast(data.models.length + ' models found', 'success');
                 } else {
-                    showToast('No models returned. Check your API key.', 'error');
+                    showToast(_k('settings.hub.no_models_returned_check_your', 'No models returned. Check your API key.'), 'error');
                 }
             } catch (e) {
-                showToast('Fetch failed: ' + e.message, 'error');
+                showToast(_k('settings.hub.fetch_failed', 'Fetch failed: ') + e.message, 'error');
             }
             this.fetchingModels = false;
         },
@@ -72,9 +81,9 @@
                     await this.saveModelProfile();
                 }
 
-                showToast('Model settings saved', 'success');
+                showToast(_k('settings.hub.model_settings_saved', 'Model settings saved'), 'success');
             } catch (e) {
-                showToast('Save failed', 'error');
+                showToast(_k('settings.hub.save_failed', 'Save failed'), 'error');
             }
             this.saving = false;
         },
@@ -102,12 +111,12 @@
 
         async saveModelDefault(taskType) {
             await ModelsManager.setDefault(taskType, this.modelDefaults[taskType]);
-            showToast(`Default for "${taskType}" set to ${this.modelDefaults[taskType]}`, 'success');
+            showToast(_k('settings.hub.default_set', 'Default for "{task}" set to {model}', { task: taskType, model: this.modelDefaults[taskType] }), 'success');
         },
 
         async saveModelProfile() {
             const name = (this.profileName || '').trim();
-            if (!name) { showToast('Enter a profile name', 'error'); return; }
+            if (!name) { showToast(_k('settings.hub.enter_a_profile_name', 'Enter a profile name'), 'error'); return; }
             try {
                 const resp = await fetch('/api/models/saved', {
                     method: 'POST',
@@ -129,15 +138,15 @@
                 await this.loadSavedModels();
                 showToast(`Profile "${name}" saved`, 'success');
             } catch (e) {
-                showToast('Failed to save profile: ' + e.message, 'error');
+                showToast(_k('settings.hub.failed_to_save_profile', 'Failed to save profile: ') + e.message, 'error');
             }
         },
 
         async deleteModelProfile(name) {
             if (!(await window.kazmaConfirm({
-                title: 'Delete profile',
-                message: `Delete profile "${name}"? This cannot be undone.`,
-                confirmText: 'Delete',
+                title: _k('settings.hub.delete_profile', 'Delete profile'),
+                message: _k('settings.hub.delete_profile_message', 'Delete profile "{name}"? This cannot be undone.', { name: name }),
+                confirmText: _k('settings.hub.delete', 'Delete'),
                 danger: true,
             }))) return;
             try {
@@ -145,7 +154,7 @@
                 await this.loadSavedModels();
                 showToast(`Profile "${name}" deleted`, 'success');
             } catch (e) {
-                showToast('Failed to delete profile: ' + e.message, 'error');
+                showToast(_k('settings.hub.failed_to_delete_profile', 'Failed to delete profile: ') + e.message, 'error');
             }
         },
 
@@ -166,19 +175,19 @@
             if (profile.api_key && profile.api_key !== '***') {
                 this.currentModel.api_key = profile.api_key;
             }
-            showToast(`Loaded profile "${name}"`, 'success');
+            showToast(_k('settings.hub.loaded_profile', 'Loaded profile "{name}"', { name: name }), 'success');
         },
 
         async runModelComparison() {
             if (!this.comparePrompt || this.compareModels.length === 0) {
-                showToast('Enter a prompt and select models', 'error');
+                showToast(_k('settings.hub.enter_a_prompt_and_select', 'Enter a prompt and select models'), 'error');
                 return;
             }
             this.comparing = true;
             try {
                 this.compareResults = await ModelsManager.compare(this.comparePrompt, this.compareModels);
             } catch (e) {
-                showToast('Comparison failed: ' + e.message, 'error');
+                showToast(_k('settings.hub.comparison_failed', 'Comparison failed: ') + e.message, 'error');
             }
             this.comparing = false;
         },
@@ -196,13 +205,13 @@
                 try {
                     const refreshResp = await fetch('/api/gateway/refresh-adapters', { method: 'POST' });
                     const refreshData = await refreshResp.json();
-                    showToast(`${platform} settings saved. Gateway refreshed (${refreshData.adapters_count || 0} adapters).`, 'success');
+                    showToast(_k('settings.hub.platform_saved_refreshed', '{platform} settings saved. Gateway refreshed ({n} adapters).', { platform: platform, n: refreshData.adapters_count || 0 }), 'success');
                 } catch (refreshErr) {
                     console.warn('[Settings] Gateway refresh failed:', refreshErr);
-                    showToast(`${platform} settings saved, but gateway refresh failed. Use "Refresh Gateway" button.`, 'warning');
+                    showToast(_k('settings.hub.platform_saved_refresh_failed', '{platform} settings saved, but gateway refresh failed. Use "Refresh Gateway" button.', { platform: platform }), 'warning');
                 }
             } catch (e) {
-                showToast('Save failed', 'error');
+                showToast(_k('settings.hub.save_failed', 'Save failed'), 'error');
             }
             this.saving = false;
         },
@@ -214,12 +223,12 @@
                 const data = await resp.json();
                 if (resp.ok) {
                     const names = (data.adapters || []).join(', ') || 'none';
-                    showToast(`Gateway refreshed — ${data.adapters_count || 0} adapter(s): ${names}`, 'success');
+                    showToast(_k('settings.hub.gateway_refreshed', 'Gateway refreshed — {n} adapter(s): {names}', { n: data.adapters_count || 0, names: names }), 'success');
                 } else {
-                    showToast('Gateway refresh failed: ' + (data.detail || resp.statusText), 'error');
+                    showToast(_k('settings.hub.gateway_refresh_failed', 'Gateway refresh failed: ') + (data.detail || resp.statusText), 'error');
                 }
             } catch (e) {
-                showToast('Gateway refresh failed: ' + e.message, 'error');
+                showToast(_k('settings.hub.gateway_refresh_failed', 'Gateway refresh failed: ') + e.message, 'error');
             }
             this.saving = false;
         },
@@ -235,7 +244,7 @@
                 const result = await resp.json();
                 showToast(result.success ? `${platform}: Connected!` : `${platform}: ${result.error}`, result.success ? 'success' : 'error');
             } catch (e) {
-                showToast(`Test failed: ${e.message}`, 'error');
+                showToast(_k('settings.hub.test_failed_error', 'Test failed: {error}', { error: e.message }), 'error');
             }
             this.testingConnector = null;
         },
@@ -543,14 +552,14 @@
                 }
 
                 if (puts.length === 0) {
-                    showToast('Nothing to save — no changes.', 'info');
+                    showToast(_k('settings.hub.nothing_to_save_no_changes', 'Nothing to save — no changes.'), 'info');
                     this.adapterRoutingSaving = false;
                     return;
                 }
                 const results = await Promise.all(puts);
                 const bad = results.find(x => !x.ok);
                 if (bad) throw new Error('HTTP ' + bad.status);
-                showToast('Saved.', 'success');
+                showToast(_k('settings.hub.saved', 'Saved.'), 'success');
                 this.adapterRoutingSnapshot = JSON.stringify(curr);
 
                 // Adapter rebuild (seconds) runs AFTER the save confirms —
@@ -560,17 +569,17 @@
                     fetch('/api/gateway/refresh-adapters', { method: 'POST' })
                         .then(resp => {
                             if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                            showToast('Adapters refreshed.', 'success');
+                            showToast(_k('settings.hub.adapters_refreshed', 'Adapters refreshed.'), 'success');
                         })
                         .catch(eRef => {
                             console.warn('[Hub] Gateway refresh failed:', eRef);
-                            showToast('Saved, but adapter refresh failed — use Refresh Adapters.', 'error');
+                            showToast(_k('settings.hub.saved_but_adapter_refresh_failed', 'Saved, but adapter refresh failed — use Refresh Adapters.'), 'error');
                         })
                         .finally(() => { this.adapterRoutingApplying = false; });
                 }
                 this.loadAdapterRouting();
             } catch (e) {
-                showToast('Save failed: ' + e.message, 'error');
+                showToast(_k('settings.hub.save_failed_2', 'Save failed: ') + e.message, 'error');
             }
             this.adapterRoutingSaving = false;
         },
@@ -598,7 +607,7 @@
                 showToast(result.success ? 'Connection test succeeded' : 'Test failed: ' + (result.error || 'unknown'), result.success ? 'success' : 'error');
             } catch (e) {
                 this.adapterRoutingTest = { name, success: false, error: e.message };
-                showToast('Test failed: ' + e.message, 'error');
+                showToast(_k('settings.hub.test_failed', 'Test failed: ') + e.message, 'error');
             }
             this.adapterRoutingTesting = '';
         },
@@ -676,7 +685,7 @@
 
         async saveHubProvider() {
             if (!this.hubEditingProvider.name || (!this.hubEditingProvider.base_url && this.hubEditingProvider.name !== 'google')) {
-                showToast('Name and Base URL are required', 'error');
+                showToast(_k('settings.hub.name_and_base_url_are', 'Name and Base URL are required'), 'error');
                 return;
             }
             this.saving = true;
@@ -698,27 +707,27 @@
                 } else {
                     this.hubProviderModal = false;
                     await this.loadHubProviders();
-                    showToast('Provider saved', 'success');
+                    showToast(_k('settings.hub.provider_saved', 'Provider saved'), 'success');
                 }
             } catch (e) {
-                showToast('Failed to save provider: ' + e.message, 'error');
+                showToast(_k('settings.hub.failed_to_save_provider', 'Failed to save provider: ') + e.message, 'error');
             }
             this.saving = false;
         },
 
         async deleteHubProvider(name) {
             if (!(await window.kazmaConfirm({
-                title: 'Delete provider',
-                message: `Delete provider "${name}"? This cannot be undone.`,
-                confirmText: 'Delete',
+                title: _k('settings.hub.delete_provider', 'Delete provider'),
+                message: _k('settings.hub.delete_provider_message', 'Delete provider "{name}"? This cannot be undone.', { name: name }),
+                confirmText: _k('settings.hub.delete', 'Delete'),
                 danger: true,
             }))) return;
             try {
                 await window.kazmaSave(`/api/providers/${encodeURIComponent(name)}`, { method: 'DELETE' });
                 await this.loadHubProviders();
-                showToast('Provider removed', 'success');
+                showToast(_k('settings.hub.provider_removed', 'Provider removed'), 'success');
             } catch (e) {
-                showToast('Failed to delete provider: ' + e.message, 'error');
+                showToast(_k('settings.hub.failed_to_delete_provider', 'Failed to delete provider: ') + e.message, 'error');
             }
         },
 
@@ -731,7 +740,7 @@
                 });
                 await this.loadHubProviders();
             } catch (e) {
-                showToast('Toggle failed: ' + e.message, 'error');
+                showToast(_k('settings.hub.toggle_failed', 'Toggle failed: ') + e.message, 'error');
             }
         },
 
@@ -828,7 +837,7 @@
         async testHubProviderFromModal() {
             const name = this.hubEditingProvider.name;
             if (!name || (!this.hubEditingProvider.base_url && name !== 'google')) {
-                showToast('Enter a provider name and base URL first', 'error');
+                showToast(_k('settings.hub.enter_a_provider_name_and', 'Enter a provider name and base URL first'), 'error');
                 return;
             }
             this.hubTestingProvider = 'modal';
@@ -871,14 +880,14 @@
                 this.hubTestResult = { type: 'provider', source: 'modal', success, error: errorMsg, ...result };
                 this.hubProviderTested = true; // attempt completed: enable save
                 if (success) {
-                    showToast('Connection test succeeded', 'success');
+                    showToast(_k('settings.hub.connection_test_succeeded', 'Connection test succeeded'), 'success');
                 } else {
-                    showToast(`Test failed: ${errorMsg}`, 'error');
+                    showToast(_k('settings.hub.test_failed_error', 'Test failed: {error}', { error: errorMsg }), 'error');
                 }
             } catch (e) {
                 this.hubTestResult = { type: 'provider', source: 'modal', success: false, error: e.message };
                 this.hubProviderTested = true; // attempt completed on exception: enable save
-                showToast('Test failed: ' + e.message, 'error');
+                showToast(_k('settings.hub.test_failed', 'Test failed: ') + e.message, 'error');
             }
             this.hubTestingProvider = null;
         },
@@ -897,7 +906,7 @@
                 showToast(msg, count > 0 ? 'success' : 'warning');
                 await this.loadHubProviders();
             } catch (e) {
-                showToast('Discover failed: ' + e.message, 'error');
+                showToast(_k('settings.hub.discover_failed', 'Discover failed: ') + e.message, 'error');
             }
             this.hubDiscoveringProvider = null;
         },
@@ -934,7 +943,7 @@
                     body: JSON.stringify({ models: p.selected_models }),
                 });
             } catch (e) {
-                showToast('Failed to save model selection', 'error');
+                showToast(_k('settings.hub.failed_to_save_model_selection', 'Failed to save model selection'), 'error');
             }
         },
 
@@ -960,7 +969,7 @@
                     body: JSON.stringify({ models: p.selected_models }),
                 });
             } catch (e) {
-                showToast('Failed to save model selection', 'error');
+                showToast(_k('settings.hub.failed_to_save_model_selection', 'Failed to save model selection'), 'error');
             }
         },
 
@@ -974,21 +983,21 @@
                 if (result && result.status === 'ok') {
                     showToast(`Removed ${model}`, 'success');
                 } else if (result && result.status === 'not_found') {
-                    showToast(`${model} is not in the list`, 'info');
+                    showToast(_k('settings.hub.model_not_in_list', '{model} is not in the list', { model: model }), 'info');
                 } else {
-                    showToast('Failed to remove model', 'error');
+                    showToast(_k('settings.hub.failed_to_remove_model', 'Failed to remove model'), 'error');
                 }
                 await this.loadHubProviders();
             } catch (e) {
-                showToast('Failed to remove model: ' + e.message, 'error');
+                showToast(_k('settings.hub.failed_to_remove_model_2', 'Failed to remove model: ') + e.message, 'error');
             }
         },
 
         async clearHubDiscovered(providerName) {
             if (!(await window.kazmaConfirm({
-                title: 'Clear discovered models',
-                message: `Clear discovered models for "${providerName}"? Your selected models for this provider will also be cleared.`,
-                confirmText: 'Clear',
+                title: _k('settings.hub.clear_discovered_models', 'Clear discovered models'),
+                message: _k('settings.hub.clear_models_message', 'Clear discovered models for "{name}"? Your selected models for this provider will also be cleared.', { name: providerName }),
+                confirmText: _k('settings.hub.clear', 'Clear'),
                 danger: true,
             }))) return;
             try {
@@ -997,13 +1006,13 @@
                     headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 });
                 if (resp.ok) {
-                    showToast('Cleared discovered models', 'success');
+                    showToast(_k('settings.hub.cleared_discovered_models', 'Cleared discovered models'), 'success');
                     await this.loadHubProviders();
                 } else {
-                    showToast('Failed to clear models', 'error');
+                    showToast(_k('settings.hub.failed_to_clear_models', 'Failed to clear models'), 'error');
                 }
             } catch (e) {
-                showToast('Failed to clear models: ' + e.message, 'error');
+                showToast(_k('settings.hub.failed_to_clear_models_2', 'Failed to clear models: ') + e.message, 'error');
             }
         },
 
@@ -1041,7 +1050,7 @@
 
         async saveHubConnector() {
             if (!this.hubEditingConnector.name) {
-                showToast('Connector name is required', 'error');
+                showToast(_k('settings.hub.connector_name_is_required', 'Connector name is required'), 'error');
                 return;
             }
             this.saving = true;
@@ -1067,27 +1076,27 @@
                     } catch (refreshErr) {
                         console.warn('[Hub] Gateway refresh failed:', refreshErr);
                     }
-                    showToast('Connector saved', 'success');
+                    showToast(_k('settings.hub.connector_saved', 'Connector saved'), 'success');
                 }
             } catch (e) {
-                showToast('Failed to save connector: ' + e.message, 'error');
+                showToast(_k('settings.hub.failed_to_save_connector', 'Failed to save connector: ') + e.message, 'error');
             }
             this.saving = false;
         },
 
         async deleteHubConnector(name) {
             if (!(await window.kazmaConfirm({
-                title: 'Delete connector',
-                message: `Delete connector "${name}"? This cannot be undone.`,
-                confirmText: 'Delete',
+                title: _k('settings.hub.delete_connector', 'Delete connector'),
+                message: _k('settings.hub.delete_connector_message', 'Delete connector "{name}"? This cannot be undone.', { name: name }),
+                confirmText: _k('settings.hub.delete', 'Delete'),
                 danger: true,
             }))) return;
             try {
                 await window.kazmaSave(`/api/connectors/${encodeURIComponent(name)}`, { method: 'DELETE' });
                 await this.loadHubConnectors();
-                showToast('Connector removed', 'success');
+                showToast(_k('settings.hub.connector_removed', 'Connector removed'), 'success');
             } catch (e) {
-                showToast('Failed to delete connector: ' + e.message, 'error');
+                showToast(_k('settings.hub.failed_to_delete_connector', 'Failed to delete connector: ') + e.message, 'error');
             }
         },
 
@@ -1100,7 +1109,7 @@
                 });
                 await this.loadHubConnectors();
             } catch (e) {
-                showToast('Toggle failed: ' + e.message, 'error');
+                showToast(_k('settings.hub.toggle_failed', 'Toggle failed: ') + e.message, 'error');
             }
         },
 
@@ -1119,7 +1128,7 @@
         async testHubConnectorFromModal() {
             const name = this.hubEditingConnector.name;
             if (!name) {
-                showToast('Select a connector name first', 'error');
+                showToast(_k('settings.hub.select_a_connector_name_first', 'Select a connector name first'), 'error');
                 return;
             }
             this.hubTestingConnector = 'modal';
@@ -1142,10 +1151,10 @@
                 if (result.success) {
                     this.hubConnectorTested = true;
                 }
-                showToast(result.success ? 'Connection test succeeded' : `Test failed: ${result.error}`, result.success ? 'success' : 'error');
+                showToast(result.success ? _k('settings.hub.connection_test_ok', 'Connection test succeeded') : _k('settings.hub.test_failed_error', 'Test failed: {error}', { error: result.error }), result.success ? 'success' : 'error');
             } catch (e) {
                 this.hubTestResult = { type: 'connector', success: false, error: e.message };
-                showToast('Test failed: ' + e.message, 'error');
+                showToast(_k('settings.hub.test_failed', 'Test failed: ') + e.message, 'error');
             }
             this.hubTestingConnector = null;
         },
@@ -1181,12 +1190,12 @@
             this.currentModel.model = p.model || '';
             this.currentModel.api_key = (p.api_key && p.api_key !== '***') ? p.api_key : this.currentModel.api_key;
             this.modelProvider = p.provider || '';
-            showToast(`Loaded profile "${name}"`, 'success');
+            showToast(_k('settings.hub.loaded_profile', 'Loaded profile "{name}"', { name: name }), 'success');
         },
 
         async saveHubProfile() {
             const name = (this.hubEditingProfile.name || '').trim();
-            if (!name) { showToast('Profile name is required', 'error'); return; }
+            if (!name) { showToast(_k('settings.hub.profile_name_is_required', 'Profile name is required'), 'error'); return; }
             this.saving = true;
             try {
                 const resp = await fetch('/api/models/profiles', {
@@ -1203,16 +1212,16 @@
                     showToast(`Profile "${name}" saved`, 'success');
                 }
             } catch (e) {
-                showToast('Failed to save profile: ' + e.message, 'error');
+                showToast(_k('settings.hub.failed_to_save_profile', 'Failed to save profile: ') + e.message, 'error');
             }
             this.saving = false;
         },
 
         async deleteHubProfile(name) {
             if (!(await window.kazmaConfirm({
-                title: 'Delete profile',
-                message: `Delete profile "${name}"? This cannot be undone.`,
-                confirmText: 'Delete',
+                title: _k('settings.hub.delete_profile', 'Delete profile'),
+                message: _k('settings.hub.delete_profile_message', 'Delete profile "{name}"? This cannot be undone.', { name: name }),
+                confirmText: _k('settings.hub.delete', 'Delete'),
                 danger: true,
             }))) return;
             try {
@@ -1220,7 +1229,7 @@
                 await this.loadHubProfiles();
                 showToast(`Profile "${name}" deleted`, 'success');
             } catch (e) {
-                showToast('Failed to delete profile: ' + e.message, 'error');
+                showToast(_k('settings.hub.failed_to_delete_profile', 'Failed to delete profile: ') + e.message, 'error');
             }
         },
         };

@@ -204,7 +204,7 @@
     {# Compact ops strip — chips + tabs, no long blurb #}
     <div class="card mem-ops-strip" style="padding:0.55rem 0.85rem;margin-bottom:0.75rem;">
       <div style="display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;">
-        <strong style="font-size:0.85rem;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;" title="Browse entities, beliefs, merges, hygiene"><span class="ki" data-icon="brain" aria-hidden="true"></span> Ops</strong>
+        <strong style="font-size:0.85rem;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;" title="{{ t('memory.pg.browse_entities_beliefs_merges_hygiene') }}"><span class="ki" data-icon="brain" aria-hidden="true"></span> {{ t('memory.pg.ops') }}</strong>
         <template x-for="chip in summaryChips" :key="chip.k">
           <span style="font-size:0.68rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);" :title="chip.k">
             <span style="color:var(--text-muted);" x-text="chip.k"></span>
@@ -223,7 +223,7 @@
           ></button>
         </template>
         <button class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:3px 10px;" @click="loadAll()" :disabled="loading" x-text="S.refresh || 'Refresh'"></button>
-        <a href="#console" class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:3px 10px;text-decoration:none;">Graph ↑</a>
+        <a href="#console" class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:3px 10px;text-decoration:none;">{{ t('memory.pg.graph') }}</a>
       </div>
     </div>
 
@@ -236,11 +236,11 @@
       </div>
       <div class="card" style="padding:0;overflow:auto;max-height:50vh;-webkit-overflow-scrolling:touch;">
         <table class="table" style="width:100%;font-size:0.85rem;min-width:560px;">
-          <caption class="sr-only" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">Active beliefs — select to invalidate, or use row actions to focus, edit, or unlink.</caption>
+          <caption class="sr-only" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">{{ t('memory.pg.active_beliefs_select_to_invalidate') }}</caption>
           <thead>
             <tr>
-              <th scope="col" style="width:2rem;"><input type="checkbox" aria-label="Select all beliefs" @change="toggleAllBeliefs($event.target.checked)"></th>
-              <th scope="col">Subject</th><th scope="col">Predicate</th><th scope="col">Object</th><th scope="col">Type</th><th scope="col"><span class="sr-only" aria-hidden="true">Actions</span></th>
+              <th scope="col" style="width:2rem;"><input type="checkbox" aria-label="{{ t('memory.pg.select_all_beliefs') }}" @change="toggleAllBeliefs($event.target.checked)"></th>
+              <th scope="col">{{ t('memory.pg.subject') }}</th><th scope="col">{{ t('memory.pg.predicate') }}</th><th scope="col">{{ t('memory.pg.object') }}</th><th scope="col">{{ t('common.type') }}</th><th scope="col"><span class="sr-only" aria-hidden="true">{{ t('chat.actions') }}</span></th>
             </tr>
           </thead>
           <tbody>
@@ -261,8 +261,8 @@
                 <td x-text="b.predicate_type || ''"></td>
                 <td @click.stop>
                   <div class="mem-actions">
-                    <button class="btn btn-sm btn-secondary" @click="focusBelief(b)" title="Focus on graph">Graph</button>
-                    <button class="btn btn-sm btn-secondary" @click="editBelief(b)" x-text="S.edit || 'Edit'" title="Edit subject / predicate / object"></button>
+                    <button class="btn btn-sm btn-secondary" @click="focusBelief(b)" title="{{ t('memory.pg.focus_on_graph') }}">{{ t('memory.pg.graph_2') }}</button>
+                    <button class="btn btn-sm btn-secondary" @click="editBelief(b)" x-text="S.edit || 'Edit'" title="{{ t('memory.pg.edit_subject_predicate_object') }}"></button>
                     <button class="btn btn-sm btn-danger" @click="invalidateOne(b.id)" :title="S.unlink || 'Unlink (invalidate edge)'" x-text="S.unlink || S.invalidate || 'Unlink'"></button>
                   </div>
                 </td>
@@ -275,7 +275,7 @@
         <span x-text="rangeText(beliefsPage, beliefs.length)"></span>
         <button class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:2px 10px;"
           x-show="hasMore(beliefsPage, beliefs.length)" @click="loadMoreBeliefs()"
-          :disabled="loading">Load more</button>
+          :disabled="loading">{{ t('memory.pg.load_more') }}</button>
       </div>
     </div>
 
@@ -298,22 +298,16 @@
          A row's Src/Tgt buttons (and Shift+click on the canvas) fill the
          slots shown in the live preview below; actuate from the Ops bar. #}
       <div class="card" style="padding:0.6rem 0.9rem;margin-bottom:0.75rem;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-        <span style="font-size:0.74rem;color:var(--text-muted);line-height:1.4;">
-          To link or merge: click a row's
-          <strong>Src</strong>/<strong>Tgt</strong> (or Shift-click nodes on the graph),
-          then use the <strong>graph Ops bar</strong>
-          <a href="#console" style="text-decoration:none;">↑</a>.
-          Click an <em>edge</em> to edit or unlink a belief.
-        </span>
+        <span style="font-size:0.74rem;color:var(--text-muted);line-height:1.4;">{{ t('memory.pg.link_merge_hint') | safe }}</span>
         <span style="flex:1;min-width:4px;"></span>
-        <span x-show="canLinkOrMerge" style="font-size:0.72rem;font-family:var(--font-mono);color:var(--text-muted);" :title="'Source → target (actuate from the graph Ops bar)'" x-text="(mergeSource || '') + ' → ' + (mergeTarget || '')"></span>
+        <span x-show="canLinkOrMerge" style="font-size:0.72rem;font-family:var(--font-mono);color:var(--text-muted);" title="{{ t('memory.pg.source_target_title') }}" x-text="(mergeSource || '') + ' → ' + (mergeTarget || '')"></span>
       </div>
       <div class="card mem-table-wrap" style="padding:0;width:100%;max-width:100%;min-width:0;box-sizing:border-box;">
         <table class="mem-table">
-          <caption class="sr-only" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">Entities — click a row to focus it on the graph; use Src/Tgt then the graph Ops bar to link or merge.</caption>
+          <caption class="sr-only" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">{{ t('memory.pg.entities_click_a_row_to') }}</caption>
           <thead>
             <tr>
-              <th scope="col">ID</th><th scope="col">Type</th><th scope="col">Name</th><th scope="col">Beliefs</th><th scope="col">Links</th><th scope="col">Flags</th><th scope="col"><span class="sr-only" aria-hidden="true">Actions</span></th>
+              <th scope="col">ID</th><th scope="col">{{ t('common.type') }}</th><th scope="col">{{ t('agents.name') }}</th><th scope="col">{{ t('dashboard.vector_store') }}</th><th scope="col">{{ t('memory.pg.links') }}</th><th scope="col">{{ t('memory.pg.flags') }}</th><th scope="col"><span class="sr-only" aria-hidden="true">{{ t('chat.actions') }}</span></th>
             </tr>
           </thead>
           <tbody>
@@ -334,16 +328,16 @@
                 <td x-text="e.belief_count"></td>
                 <td x-text="e.linked_others"></td>
                 <td style="font-size:0.72rem;">
-                  <span x-show="e.empty" class="badge">empty</span>
-                  <span x-show="e.isolated" class="badge" style="background:var(--warning,#f59e0b);">isolated</span>
-                  <span x-show="e.protected" class="badge">protected</span>
+                  <span x-show="e.empty" class="badge">{{ t('memory.pg.empty') }}</span>
+                  <span x-show="e.isolated" class="badge" style="background:var(--warning,#f59e0b);">{{ t('memory.pg.isolated') }}</span>
+                  <span x-show="e.protected" class="badge">{{ t('memory.pg.protected') }}</span>
                 </td>
                 <td @click.stop>
                   <div class="mem-actions">
-                    <button class="btn btn-sm btn-secondary" @click="focusEntity(e.id, { skipPick: true, entity: e })" title="Focus on graph">Graph</button>
-                    <button class="btn btn-sm btn-secondary" @click="renameEntity(e)" x-text="S.rename || 'Rename'" title="Change display name (id stays the same)"></button>
-                    <button class="btn btn-sm btn-secondary" @click="mergeSource = e.id; selectedEntityId = e.id; pushSlotsToGraph()" title="Set as link/merge source (syncs to graph)">Src</button>
-                    <button class="btn btn-sm btn-secondary" @click="mergeTarget = e.id; selectedEntityId = e.id; pushSlotsToGraph()" title="Set as link/merge target (syncs to graph)">Tgt</button>
+                    <button class="btn btn-sm btn-secondary" @click="focusEntity(e.id, { skipPick: true, entity: e })" title="{{ t('memory.pg.focus_on_graph_2') }}">{{ t('memory.pg.graph_3') }}</button>
+                    <button class="btn btn-sm btn-secondary" @click="renameEntity(e)" x-text="S.rename || 'Rename'" title="{{ t('memory.pg.change_display_name_id_stays') }}"></button>
+                    <button class="btn btn-sm btn-secondary" @click="mergeSource = e.id; selectedEntityId = e.id; pushSlotsToGraph()" title="{{ t('memory.pg.set_as_link_merge_source') }}">{{ t('memory.pg.src_2') }}</button>
+                    <button class="btn btn-sm btn-secondary" @click="mergeTarget = e.id; selectedEntityId = e.id; pushSlotsToGraph()" title="{{ t('memory.pg.set_as_link_merge_target') }}">{{ t('memory.pg.tgt_2') }}</button>
                     <button class="btn btn-sm btn-danger" @click="deleteEntity(e)" :disabled="e.protected" x-text="S.delete || 'Delete'"></button>
                   </div>
                 </td>
@@ -356,7 +350,7 @@
         <span x-text="rangeText(entitiesPage, entities.length)"></span>
         <button class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:2px 10px;"
           x-show="hasMore(entitiesPage, entities.length)" @click="loadMoreEntities()"
-          :disabled="loading">Load more</button>
+          :disabled="loading">{{ t('memory.pg.load_more_2') }}</button>
       </div>
     </div>
 
@@ -365,7 +359,7 @@
       <div class="card" style="padding:0;overflow:auto;max-height:50vh;-webkit-overflow-scrolling:touch;">
         <table class="table" style="width:100%;font-size:0.85rem;min-width:560px;">
           <thead>
-            <tr><th scope="col">ID</th><th scope="col">Source</th><th scope="col">Target</th><th scope="col">Tier</th><th scope="col">Conf</th><th scope="col"><span class="sr-only" aria-hidden="true">Actions</span></th></tr>
+            <tr><th scope="col">ID</th><th scope="col">{{ t('memory.source') }}</th><th scope="col">{{ t('memory.target') }}</th><th scope="col">{{ t('memory.pg.tier') }}</th><th scope="col">{{ t('memory.pg.conf') }}</th><th scope="col"><span class="sr-only" aria-hidden="true">{{ t('chat.actions') }}</span></th></tr>
           </thead>
           <tbody>
             <template x-if="!merges.length">
@@ -379,8 +373,8 @@
                 <td x-text="m.merge_tier || ''"></td>
                 <td x-text="m.confidence != null ? Number(m.confidence).toFixed(2) : ''"></td>
                 <td>
-                  <button class="btn btn-sm btn-primary" @click="decideMerge(m.id, true)">Approve</button>
-                  <button class="btn btn-sm btn-secondary" @click="decideMerge(m.id, false)">Reject</button>
+                  <button class="btn btn-sm btn-primary" @click="decideMerge(m.id, true)">{{ t('common.approve') }}</button>
+                  <button class="btn btn-sm btn-secondary" @click="decideMerge(m.id, false)">{{ t('settings.soul_reject') }}</button>
                 </td>
               </tr>
             </template>
@@ -391,7 +385,7 @@
         <span x-text="rangeText(mergesPage, merges.length)"></span>
         <button class="btn btn-secondary btn-sm" style="font-size:0.72rem;padding:2px 10px;"
           x-show="hasMore(mergesPage, merges.length)" @click="loadMoreMerges()"
-          :disabled="loading">Load more</button>
+          :disabled="loading">{{ t('memory.pg.load_more_3') }}</button>
       </div>
     </div>
 
@@ -419,20 +413,20 @@
         <button class="btn btn-secondary btn-sm" @click="loadHygiene()" style="margin-left:6px;" x-text="S.refresh || 'Refresh'"></button>
       </div>
       <div class="card" style="padding:1rem;margin-bottom:0.75rem;" x-show="(hygienePreview.isolated_entities || []).length">
-        <strong>Isolated entities</strong>
+        <strong>{{ t('memory.pg.isolated_entities') }}</strong>
         <ul style="margin:0.5rem 0 0;padding-left:1.2rem;font-size:0.85rem;">
           <template x-for="e in (hygienePreview.isolated_entities || []).slice(0,40)" :key="e.id">
             <li>
               <code x-text="e.id"></code>
               <span x-text="' · ' + (e.belief_count || 0) + ' beliefs'"></span>
-              <button class="btn btn-sm btn-secondary" style="margin-left:6px;" @click="tab='entities'; mergeSource=e.id; loadEntities()">Open</button>
+              <button class="btn btn-sm btn-secondary" style="margin-left:6px;" @click="tab='entities'; mergeSource=e.id; loadEntities()">{{ t('common.open') }}</button>
             </li>
           </template>
         </ul>
       </div>
     </div>
 
-    <div x-show="loading" role="status" aria-live="polite" style="padding:0.5rem;color:var(--text-muted);font-size:0.85rem;">Loading…</div>
+    <div x-show="loading" role="status" aria-live="polite" style="padding:0.5rem;color:var(--text-muted);font-size:0.85rem;">{{ t('common.loading') }}</div>
     <div x-show="error" role="alert" aria-live="assertive" style="padding:0.5rem;color:#ef4444;font-size:0.85rem;" x-text="error"></div>
   </div>
 </div>

@@ -14,7 +14,7 @@
            instead of collapsing (DS v5 single-owner mobile nav). #}
         <button class="sidebar-toggle"
                 @click="window.innerWidth <= 768 ? closeMobileNav() : toggleSidebar()"
-                :title="window.innerWidth <= 768 ? 'Close menu' : (sidebarCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)')">
+                :title="window.innerWidth <= 768 ? t('common.close_menu') : (sidebarCollapsed ? t('common.expand_sidebar') : t('common.collapse_sidebar'))">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
                 {# x-show on real <g> children, NOT <template x-if> — Alpine
                    can't clone template content inside SVG (browser parses it
@@ -208,9 +208,11 @@
     <div class="sidebar-footer">
         {# Model Selector Dropdown #}
         <div class="sidebar-model-selector sidebar-collapsed-hide" x-show="!sidebarCollapsed" x-cloak>
+            {# Model ids under provider names: names, not interface text. #}
             <select
                 x-model="activeModel"
                 @change="onModelChange($event)"
+                translate="no"
                 class="sidebar-model-dropdown">
                 <template x-for="group in modelOptions" :key="group.label">
                     <optgroup :label="group.label">
@@ -225,10 +227,10 @@
         <div class="sidebar-user" x-data="{ open: false }" @click.outside="open = false">
             <img src="/static/img/kazma-icon.png" alt="Kazma" class="user-avatar-img">
             <div class="sidebar-footer-info">
-                <div class="user-name">Kazma Agent</div>
+                <div class="user-name">{{ t('common.agent_name') }}</div>
                 <div class="user-role sidebar-collapsed-hide">
                     <span class="status-dot status-ok" style="display:inline-block;width:6px;height:6px;vertical-align:middle;margin-right:4px"></span>
-                    <span x-text="activeModel || 'No model selected'"></span>
+                    <span translate="no" x-show="activeModel" x-text="activeModel"></span><span x-show="!activeModel">{{ t('common.no_model_selected') }}</span>
                 </div>
             </div>
         </div>

@@ -3096,6 +3096,24 @@ writes.
   only if no dialog opened meanwhile -- it cleared regardless, and an alert
   shown right after a confirm sat open with no text and no buttons
   (`tests/js/test_modal_store.js`, 2026-09-27).
+- **Every interface word comes from the catalog; content is marked
+  `translate="no"`** (2026-09-28). Templates use `{{ t('key') }}`; scripts
+  use `window.kazmaT(key, english, vars)` (or the page's own helper that
+  calls it; chat.js and agentStore.js use `ti`/`tiFmt` through
+  `CHAT_I18N`). Never read `window.KAZMA_I18N[key]` yourself: an entry is
+  `{en, ar}`, and research.js printed "[object Object]" that way. Dates and
+  numbers go through `window.KazmaFormat` (Latin digits in Arabic). What
+  stays as written -- the user's words and chat titles, the model's replies,
+  names, a tool's or skill's own documentation, server diagnostics -- is
+  marked `translate="no"`. Gates: `tests/test_i18n_keys_exist.py` (every key
+  a page names exists in both languages), `tests/test_templates_have_no_english.py`
+  (no English literal in a template), `tests/e2e/test_pages_read_in_arabic.py`
+  (every page, and a chat turn, rendered in Arabic). Names that are the same
+  in every language live in `tests/_ui_names.py`.
+- **A save the server accepted never reports failure.** Only the request
+  sits in the save's `try`; applying the result to the page is a separate
+  step (`tests/js/test_settings_saves_report_truth.js` runs every Settings
+  save against an accepting server).
 - **Toasts:** use `window.showToast(msg, type, duration)` or
   `Alpine.store('toast').add(...)`. `streaming.js`'s `KazmaStream.toast`
   delegates to `$store.toast` — there is one toast system.

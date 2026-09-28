@@ -11,6 +11,14 @@
 
 (function() {
   'use strict';
+  // Text built here: the catalog's text in the page's language, else the
+  // English given; {name} placeholders filled from vars.
+  function _k(key, en, vars) {
+    if (typeof window.kazmaT === 'function') return window.kazmaT(key, en, vars);
+    var s = en;
+    if (vars) for (var v in vars) s = s.split('{' + v + '}').join(String(vars[v]));
+    return s;
+  }
 
   var mediaRecorder = null;
   var audioChunks = [];
@@ -73,7 +81,7 @@
   async function startRecording() {
     if (isRecording || _micWanted) return;
     if (isStreaming) {
-      showToast('Please stop Live Voice Mode first', 'warning');
+      showToast(_k('voice.ui.please_stop_live_voice_mode', 'Please stop Live Voice Mode first'), 'warning');
       return;
     }
     _micWanted = true;
@@ -108,7 +116,7 @@
         var blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
         cleanup();
         if (held < _MIN_HOLD_MS || blob.size < _MIN_BLOB_BYTES) {
-          showToast('Hold the mic to record', 'info', 2000);
+          showToast(_k('voice.ui.hold_the_mic_to_record', 'Hold the mic to record'), 'info', 2000);
           return;
         }
         await sendForTranscription(blob);
@@ -125,7 +133,7 @@
     } catch (err) {
       _micWanted = false;
       console.error('[Voice] Microphone access denied:', err);
-      showToast('Microphone access denied. Please allow microphone access.', 'error');
+      showToast(_k('voice.ui.microphone_access_denied_please_allow', 'Microphone access denied. Please allow microphone access.'), 'error');
     }
   }
 
@@ -168,17 +176,17 @@
     formData.append('language', 'auto');
 
     try {
-      showToast('Transcribing...', 'info', 2000);
+      showToast(_k('voice.ui.transcribing', 'Transcribing...'), 'info', 2000);
       var resp = await fetch('/api/voice/stt', { method: 'POST', body: formData });
       if (!resp.ok) {
         var err = await resp.json().catch(function() { return { detail: 'STT failed' }; });
-        showToast('Transcription failed: ' + (err.detail || resp.statusText), 'error');
+        showToast(_k('voice.ui.transcription_failed', 'Transcription failed: ') + (err.detail || resp.statusText), 'error');
         return;
       }
       var data = await resp.json();
       var said = data && data.text ? String(data.text).trim() : '';
       if (!said || data.ignored) {
-        showToast('No speech detected', 'info', 2000);
+        showToast(_k('voice.ui.no_speech_detected', 'No speech detected'), 'info', 2000);
         return;
       }
       // Insert transcribed text into the chat input
@@ -189,10 +197,10 @@
         inputEl.dispatchEvent(new Event('input'));
         inputEl.focus();
       }
-      showToast('Transcribed: "' + said.substring(0, 60) + '..."', 'success', 3000);
+      showToast(_k('voice.ui.transcribed', 'Transcribed: "{text}..."', { text: said.substring(0, 60) }), 'success', 3000);
     } catch (err) {
       console.error('[Voice] STT request failed:', err);
-      showToast('Transcription request failed', 'error');
+      showToast(_k('voice.ui.transcription_request_failed', 'Transcription request failed'), 'error');
     }
   }
 
@@ -337,7 +345,7 @@
           _ttsUnavailable = true;
           try { sessionStorage.setItem('kazma_tts_unavailable', '1'); } catch (e1) {}
           try {
-            showToast('Voice output unavailable (TTS not configured) — silenced until /voice on.', 'info', 4500);
+            showToast(_k('voice.ui.voice_output_unavailable_tts_not', 'Voice output unavailable (TTS not configured) — silenced until /voice on.'), 'info', 4500);
           } catch (e0) { /* toast system absent */ }
         }
         console.warn('[Voice] TTS failed:', resp.status);
@@ -380,34 +388,34 @@
         localStorage.setItem(TTS_ENABLED_KEY, 'true');
         _ttsUnavailable = false;  // explicit opt-in — re-probe the server
         try { sessionStorage.removeItem('kazma_tts_unavailable'); } catch (e1) {}
-        showToast('Voice replies enabled', 'success');
+        showToast(_k('voice.ui.voice_replies_enabled', 'Voice replies enabled'), 'success');
       return true;
     }
     if (lower === '/voice off' || lower === '/voice disable') {
       localStorage.setItem(TTS_ENABLED_KEY, 'false');
-      showToast('Voice replies disabled', 'info');
+      showToast(_k('voice.ui.voice_replies_disabled', 'Voice replies disabled'), 'info');
       return true;
     }
     if (lower.startsWith('/voice stt ')) {
       var p = text.trim().substring(11).trim();
       localStorage.setItem(STT_PROVIDER_KEY, p);
-      showToast('STT provider set to: ' + p, 'success');
+      showToast(_k('voice.ui.stt_provider_set_to', 'STT provider set to: ') + p, 'success');
       return true;
     }
     if (lower.startsWith('/voice tts ')) {
       var p2 = text.trim().substring(11).trim();
       localStorage.setItem(TTS_PROVIDER_KEY, p2);
-      showToast('TTS provider set to: ' + p2, 'success');
+      showToast(_k('voice.ui.tts_provider_set_to', 'TTS provider set to: ') + p2, 'success');
       return true;
     }
     if (lower === '/voice live' || lower === '/voice stream') {
-      showToast('Starting live streaming mode...', 'info', 2000);
+      showToast(_k('voice.ui.starting_live_streaming_mode', 'Starting live streaming mode...'), 'info', 2000);
       startStreaming();
       return true;
     }
     if (lower === '/voice stop' || lower === '/voice exit') {
       stopStreaming();
-      showToast('Live mode stopped', 'info');
+      showToast(_k('voice.ui.live_mode_stopped', 'Live mode stopped'), 'info');
       return true;
     }
     if (lower === '/voice' || lower === '/voice status') {
@@ -495,7 +503,7 @@
         _captureAudioForStreaming();
         _maybeJoinLiveKit(sessionId);
         isStreaming = true;
-        showToast('Live voice mode active — speak; you can interrupt', 'success', 3000);
+        showToast(_k('voice.ui.live_voice_mode_active_speak', 'Live voice mode active — speak; you can interrupt'), 'success', 3000);
         updateStreamingUI(true);
       };
 
@@ -510,7 +518,7 @@
 
       ws.onerror = function() {
         console.error('[Voice] WebSocket error');
-        showToast('Voice connection error', 'error');
+        showToast(_k('voice.ui.voice_connection_error', 'Voice connection error'), 'error');
       };
 
       ws.onclose = function() {
@@ -521,7 +529,7 @@
 
     } catch (err) {
       console.error('[Voice] Failed to start streaming:', err);
-      showToast('Cannot access microphone for streaming', 'error');
+      showToast(_k('voice.ui.cannot_access_microphone_for_streaming', 'Cannot access microphone for streaming'), 'error');
     }
   }
 
@@ -621,7 +629,7 @@
 
     } catch (err) {
       console.error('[Voice] Audio capture error:', err);
-      showToast('Microphone capture failed', 'error');
+      showToast(_k('voice.ui.microphone_capture_failed', 'Microphone capture failed'), 'error');
       stopStreaming();
     }
   }
@@ -629,8 +637,8 @@
   function _handleStreamMessage(msg) {
     var type = msg.type;
     if (type === 'ready') { /* connection accepted */ }
-    else if (type === 'listening') showToast('Listening...', 'info', 1000);
-    else if (type === 'transcribing') showToast('Transcribing...', 'info', 1000);
+    else if (type === 'listening') showToast(_k('voice.ui.listening', 'Listening...'), 'info', 1000);
+    else if (type === 'transcribing') showToast(_k('voice.ui.transcribing', 'Transcribing...'), 'info', 1000);
     else if (type === 'transcribed') {
       // This socket authors the USER row (like Send); the journal authors
       // the assistant. Without the user row, the next turn's tokens latch
@@ -641,13 +649,13 @@
       }
     }
     else if (type === 'tool_call') {
-      showToast('Tool: ' + msg.name, 'info', 2000);
+      showToast(_k('voice.ui.tool', 'Tool: ') + msg.name, 'info', 2000);
     }
     else if (type === 'tool_result') {
       /* tool completed */
     }
     else if (type === 'hitl_paused') {
-      showToast('Approval needed — answer the card in chat to continue', 'info', 5000);
+      showToast(_k('voice.ui.approval_needed_answer_the_card', 'Approval needed — answer the card in chat to continue'), 'info', 5000);
     }
     else if (type === 'tts_chunk') {
       // One COMPLETE sentence clip (valid MP3) — play as it arrives.
@@ -663,10 +671,10 @@
       /* turn finished server-side; the journal projection closes the bubble */
     }
     else if (type === 'error') {
-      showToast('Voice error: ' + (msg.content || ''), 'error');
+      showToast(_k('voice.ui.voice_error', 'Voice error: ') + (msg.content || ''), 'error');
     }
     else if (type === 'config_updated') {
-      showToast('Voice config updated', 'info', 1500);
+      showToast(_k('voice.ui.voice_config_updated', 'Voice config updated'), 'info', 1500);
     }
   }
 
@@ -765,7 +773,7 @@
       lkRoom = new LK.Room();
       await lkRoom.connect(data.url, data.token);
       await lkRoom.localParticipant.setMicrophoneEnabled(true);
-      showToast('Duplex: LiveKit WebRTC (brain is still Kazma)', 'success', 2500);
+      showToast(_k('voice.ui.duplex_livekit_webrtc_brain_is', 'Duplex: LiveKit WebRTC (brain is still Kazma)'), 'success', 2500);
     } catch (err) {
       console.warn('[Voice] LiveKit optional skip:', err);
     }
@@ -814,7 +822,7 @@
   function toggleLiveVoice() {
     if (isStreaming) {
       stopStreaming();
-      showToast('Live voice mode stopped', 'info');
+      showToast(_k('voice.ui.live_voice_mode_stopped', 'Live voice mode stopped'), 'info');
     } else {
       startStreaming();
     }

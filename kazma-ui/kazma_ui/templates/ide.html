@@ -234,25 +234,25 @@
   <!-- ── Toolbar ── -->
   <div class="card ide-toolbar">
     <span class="ide-toolbar-label" x-html="KazmaIcons.code({class:'icon-md'})"></span>
-    <code class="code-chip" x-text="currentFile || 'no file open'"></code>
+    <code class="code-chip" x-text="currentFile || t('ide.no_file')"></code>
     <span x-show="dirty" class="ide-dirty-dot" x-cloak x-html="KazmaIcons.alert({class:'icon-sm'})"></span>
-    <span x-show="dirty" class="ide-dirty-text" x-cloak>unsaved</span>
+    <span x-show="dirty" class="ide-dirty-text" x-cloak>{{ t('ide.unsaved') }}</span>
     <div class="ide-toolbar-actions">
       <button class="btn btn-sm btn-primary" @click="save()" :disabled="!currentFile || busy">
-        <span x-html="KazmaIcons.save()"></span> Save
+        <span x-html="KazmaIcons.save()"></span> {{ t('ide.save') }}
       </button>
-      <button class="btn btn-sm btn-secondary" @click="newFile()" :disabled="busy" title="Create a new file">
-        <span x-html="KazmaIcons['file-plus']()"></span> New
+      <button class="btn btn-sm btn-secondary" @click="newFile()" :disabled="busy" title="{{ t('ide.new_file_title') }}">
+        <span x-html="KazmaIcons['file-plus']()"></span> {{ t('ide.new') }}
       </button>
-      <button class="btn btn-sm btn-secondary" @click="deleteFile()" :disabled="!currentFile || busy" title="Delete the open file">
-        <span x-html="KazmaIcons.trash()"></span> Delete
+      <button class="btn btn-sm btn-secondary" @click="deleteFile()" :disabled="!currentFile || busy" title="{{ t('ide.delete_file_title') }}">
+        <span x-html="KazmaIcons.trash()"></span> {{ t('ide.delete') }}
       </button>
       <span class="toolbar-sep" aria-hidden="true"></span>
       <button class="btn btn-sm btn-secondary" @click="runFile()" :disabled="!currentFile || busy">
-        <span x-html="KazmaIcons.play()"></span> Run
+        <span x-html="KazmaIcons.play()"></span> {{ t('ide.run') }}
       </button>
       <button class="btn btn-sm btn-secondary" @click="showDiff()" :disabled="!currentFile || busy">
-        <span x-html="KazmaIcons.diff()"></span> Diff
+        <span x-html="KazmaIcons.diff()"></span> {{ t('ide.diff') }}
       </button>
       <button class="btn btn-sm btn-secondary" @click="restoreLastCheckpoint()" :disabled="busy"
               title="{{ t('ide.undo_patch') }}">
@@ -260,22 +260,22 @@
       </button>
       <span class="toolbar-sep" aria-hidden="true"></span>
       <button class="btn btn-sm btn-secondary" @click="gitCmd('status -s')" :disabled="busy">
-        <span x-html="KazmaIcons['git-branch']()"></span> Status
+        <span x-html="KazmaIcons['git-branch']()"></span> {{ t('ide.status') }}
       </button>
       <button class="btn btn-sm btn-secondary" @click="gitCmd('diff')" :disabled="busy">
-        <span x-html="KazmaIcons.diff()"></span> Git diff
+        <span x-html="KazmaIcons.diff()"></span> {{ t('ide.git_diff') }}
       </button>
       <span class="toolbar-sep" aria-hidden="true"></span>
       <select class="form-input ide-skill-select" x-model="selectedSkill" x-show="skills.length" x-cloak>
         <template x-for="s in skills" :key="s.name">
-          <option :value="s.name" x-text="s.name"></option>
+          <option :value="s.name" translate="no" x-text="s.name"></option>
         </template>
       </select>
-      <button class="btn btn-sm btn-secondary" @click="runSkill()" :disabled="!currentFile || busy || !skills.length" title="Run selected coding skill via the swarm">
-        <span x-html="KazmaIcons.wrench()"></span> Skill
+      <button class="btn btn-sm btn-secondary" @click="runSkill()" :disabled="!currentFile || busy || !skills.length" title="{{ t('ide.run_skill_title') }}">
+        <span x-html="KazmaIcons.wrench()"></span> {{ t('ide.skill') }}
       </button>
-      <button class="btn btn-sm" :class="chatOpen ? 'btn-primary' : 'btn-secondary'" @click="toggleChat()" title="Toggle the AI chat panel">
-        <span x-html="KazmaIcons.message()"></span> Chat
+      <button class="btn btn-sm" :class="chatOpen ? 'btn-primary' : 'btn-secondary'" @click="toggleChat()" title="{{ t('ide.toggle_chat_title') }}">
+        <span x-html="KazmaIcons.message()"></span> {{ t('ide.chat') }}
       </button>
     </div>
   </div>
@@ -310,15 +310,15 @@
       <div class="ide-panel-header">
         <div class="ide-panel-title">
           <span x-html="KazmaIcons.folder({class:'icon-md'})"></span>
-          <h3>Files</h3>
+          <h3>{{ t('ide.files') }}</h3>
         </div>
-        <button class="btn btn-xs btn-secondary" @click="loadTree(treePath)" title="Refresh">
+        <button class="btn btn-xs btn-secondary" @click="loadTree(treePath)" title="{{ t('common.refresh') }}">
           <span x-html="KazmaIcons.refresh()"></span>
         </button>
       </div>
       <div class="ide-breadcrumb">
         <span class="ide-breadcrumb-sep">/</span>
-        <code x-text="treePath || '(root)'"></code>
+        <code x-text="treePath || t('ide.root')"></code>
       </div>
       <div>
         <div x-show="treePath" x-cloak @click="goUp()" class="ide-tree-row ide-tree-up">
@@ -328,23 +328,23 @@
         <template x-for="item in tree" :key="item.path">
           <div class="ide-tree-row" :class="{ 'ide-tree-active': item.path === activeTabPath }" @click="navigate(item)">
             <span class="ide-file-glyph" :data-ext="item.ext"></span>
-            <span class="ide-tree-name" x-text="item.name"></span>
+            <span class="ide-tree-name" translate="no" x-text="item.name"></span>
           </div>
         </template>
-        <div x-show="tree.length === 0 && !busy" x-cloak class="ide-tree-empty">Empty</div>
+        <div x-show="tree.length === 0 && !busy" x-cloak class="ide-tree-empty">{{ t('ide.empty') }}</div>
       </div>
     </div>
 
     <!-- ── Resizer: tree | editor ── -->
-    <div class="ide-resizer" @mousedown="startResize('tree', $event)" title="Drag to resize"></div>
+    <div class="ide-resizer" @mousedown="startResize('tree', $event)" title="{{ t('ide.drag_resize') }}"></div>
 
     <!-- ── Editor + Panels ── -->
     <div class="ide-main">
       <div class="card" style="flex:1;display:flex;flex-direction:column;padding:0;overflow:hidden;border:1px solid var(--border-subtle);min-height:260px;">
         <div class="card-header" style="display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border-subtle);padding:6px 8px;">
-          <span style="font-size:0.85rem;font-weight:600;color:var(--text-primary);">Editor</span>
-          <span x-show="!cmReady" style="font-size:0.7rem;color:var(--text-muted);" x-cloak>plain file</span>
-          <span style="font-size:0.68rem;color:var(--text-muted);margin-left:auto;" x-show="cmReady" x-cloak>line numbers · syntax</span>
+          <span style="font-size:0.85rem;font-weight:600;color:var(--text-primary);">{{ t('ide.editor') }}</span>
+          <span x-show="!cmReady" style="font-size:0.7rem;color:var(--text-muted);" x-cloak>{{ t('ide.plain_file') }}</span>
+          <span style="font-size:0.68rem;color:var(--text-muted);margin-left:auto;" x-show="cmReady" x-cloak>{{ t('ide.editor_features') }}</span>
         </div>
         <!-- ── Tab bar ── -->
         <div class="ide-tabs" x-show="tabs.length > 0" x-cloak style="padding:4px 6px 0 6px;">
@@ -352,8 +352,8 @@
             <div class="ide-tab" :class="{ 'active': tab.path === activeTabPath }"
                  @click="switchTab(tab.path)" @mousedown.middle.prevent="closeTab(tab.path)">
               <span class="ide-tab-dot" x-show="tab.dirty || (tab.path === activeTabPath && dirty)" x-cloak>●</span>
-              <span class="ide-tab-name" x-text="tab.name" :title="tab.path"></span>
-              <button class="ide-tab-close" @click.stop="closeTab(tab.path)" title="Close tab">×</button>
+              <span class="ide-tab-name" translate="no" x-text="tab.name" :title="tab.path"></span>
+              <button class="ide-tab-close" @click.stop="closeTab(tab.path)" title="{{ t('ide.close_tab') }}">×</button>
             </div>
           </template>
         </div>
@@ -362,43 +362,43 @@
            so Alpine cannot replace this node when tabs change. #}
         <div id="ide-editor-wrap" class="ide-editor-wrap" x-ignore>
           <textarea id="ide-fallback" class="ide-fallback" spellcheck="false"
-                    placeholder="Open a file from the tree…"></textarea>
+                    placeholder="{{ t('ide.open_file_ph') }}"></textarea>
         </div>
       </div>
 
       <!-- Command + Grep + Swarm bar -->
       <div class="card" style="padding:10px 12px;display:flex;flex-direction:column;gap:8px;border:1px solid var(--border-subtle);">
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <input type="text" class="form-input" placeholder="Shell command (e.g. pytest -q)"
+          <input type="text" class="form-input" placeholder="{{ t('ide.command_ph') }}"
                  x-model="command" @keydown.enter="runCommand()" style="flex:1;min-width:180px;font-family:var(--font-mono);font-size:0.8rem;">
-          <button class="btn btn-sm btn-secondary" @click="runCommand()" :disabled="busy">Run command</button>
+          <button class="btn btn-sm btn-secondary" @click="runCommand()" :disabled="busy">{{ t('ide.run_command') }}</button>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <input type="text" class="form-input" placeholder="Grep pattern"
+          <input type="text" class="form-input" placeholder="{{ t('ide.grep_ph') }}"
                  x-model="grepPattern" @keydown.enter="grep()" style="flex:1;min-width:140px;font-size:0.8rem;">
-          <input type="text" class="form-input" placeholder="glob (*.py)"
+          <input type="text" class="form-input" placeholder="{{ t('ide.glob_ph') }}"
                  x-model="grepGlob" style="max-width:120px;font-size:0.8rem;font-family:var(--font-mono);">
-          <button class="btn btn-sm btn-secondary" @click="grep()" :disabled="busy">Grep</button>
+          <button class="btn btn-sm btn-secondary" @click="grep()" :disabled="busy">{{ t('ide.grep') }}</button>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <input type="text" class="form-input" placeholder="Send instruction to swarm…"
+          <input type="text" class="form-input" placeholder="{{ t('ide.swarm_ph') }}"
                  x-model="swarmInstruction" @keydown.enter="sendToSwarm()" style="flex:1;min-width:180px;font-size:0.8rem;">
-          <button class="btn btn-sm btn-primary" @click="sendToSwarm()" :disabled="busy"><span class="ki" data-icon="swarm" aria-hidden="true"></span> Send to swarm</button>
+          <button class="btn btn-sm btn-primary" @click="sendToSwarm()" :disabled="busy"><span class="ki" data-icon="swarm" aria-hidden="true"></span> {{ t('ide.send_to_swarm') }}</button>
         </div>
       </div>
 
       <!-- Results -->
       <div class="card" style="padding:10px 12px;border:1px solid var(--border-subtle);">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-          <span style="font-size:0.8rem;font-weight:600;color:var(--text-primary);" x-text="resultTitle || 'Output'"></span>
-          <button class="btn btn-xs btn-secondary" @click="result=''" x-cloak x-show="result">Clear</button>
+          <span style="font-size:0.8rem;font-weight:600;color:var(--text-primary);" x-text="resultTitle || t('ide.output')"></span>
+          <button class="btn btn-xs btn-secondary" @click="result=''" x-cloak x-show="result">{{ t('ide.clear') }}</button>
         </div>
-        <pre class="ide-results" x-text="result || '(no output yet)'"></pre>
+        <pre class="ide-results" x-text="result || t('ide.no_output')"></pre>
       </div>
     </div>
 
     <!-- ── Resizer: editor | chat ── -->
-    <div class="ide-resizer ide-resizer-chat" x-show="chatOpen" x-cloak @mousedown="startResize('chat', $event)" title="Drag to resize"></div>
+    <div class="ide-resizer ide-resizer-chat" x-show="chatOpen" x-cloak @mousedown="startResize('chat', $event)" title="{{ t('ide.drag_resize') }}"></div>
 
     <!-- ── AI Chat panel (third column; reuses /api/chat/stream) ── -->
     <div class="card ide-chat" x-show="chatOpen" x-cloak
@@ -406,13 +406,13 @@
       <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:8px 12px;">
         <div style="display:flex;align-items:center;gap:6px;">
           <span><span class="ki" data-icon="message" aria-hidden="true"></span></span>
-          <h3 style="margin:0;font-size:0.9rem;font-weight:600;">AI Chat</h3>
+          <h3 style="margin:0;font-size:0.9rem;font-weight:600;">{{ t('ide.ai_chat') }}</h3>
           <span x-cloak x-show="currentFile" style="font-size:0.68rem;color:var(--text-muted);"
-                x-text="'· ' + currentFile"></span>
+                translate="no" x-text="'· ' + currentFile"></span>
         </div>
         <div style="display:flex;gap:6px;">
-          <button class="btn btn-xs btn-secondary" @click="clearChat()" title="Clear conversation"><span class="ki" data-icon="sparkles" aria-hidden="true"></span></button>
-          <button class="btn btn-xs btn-secondary" @click="toggleChat()" title="Close panel"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
+          <button class="btn btn-xs btn-secondary" @click="clearChat()" title="{{ t('ide.clear_chat_title') }}"><span class="ki" data-icon="sparkles" aria-hidden="true"></span></button>
+          <button class="btn btn-xs btn-secondary" @click="toggleChat()" title="{{ t('ide.close_panel_title') }}"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
         </div>
       </div>
       <div id="ide-chat-messages" class="ide-chat-msgs" style="padding:12px;flex:1;">
@@ -421,33 +421,33 @@
             <!-- user / assistant bubbles -->
             <template x-if="m.role === 'user' || m.role === 'assistant' || m.role === 'system'">
               <div class="chat-bubble" :class="m.role">
-                <span x-show="m.role === 'user'" style="font-weight:600;font-size:0.7rem;color:var(--accent);">You</span>
+                <span x-show="m.role === 'user'" style="font-weight:600;font-size:0.7rem;color:var(--accent);">{{ t('ide.you') }}</span>
                 <span x-show="m.role === 'assistant' && m.content" style="font-weight:600;font-size:0.7rem;color:var(--success);">Kazma</span>
                 <div x-html="_renderMd(m.content)"></div>
                 <span x-show="m.role === 'assistant' && chatBusy && i === chatMessages.length - 1 && !m.content"
-                      style="color:var(--text-muted);font-size:0.75rem;">thinking…</span>
+                      style="color:var(--text-muted);font-size:0.75rem;">{{ t('ide.thinking') }}</span>
               </div>
             </template>
             <!-- tool call -->
             <template x-if="m.role === 'tool_call'">
               <div class="chat-tool">
-                <span style="font-weight:600;color:var(--accent);"><span class="ki" data-icon="wrench" aria-hidden="true"></span> <span x-text="m.tool"></span></span>
+                <span style="font-weight:600;color:var(--accent);"><span class="ki" data-icon="wrench" aria-hidden="true"></span> <span translate="no" x-text="m.tool"></span></span>
                 <pre x-text="_fmtToolArgs(m.args)"></pre>
               </div>
             </template>
             <!-- tool result -->
             <template x-if="m.role === 'tool_result'">
               <div class="chat-tool" style="border-left-color:var(--text-muted);">
-                <span style="font-weight:600;color:var(--text-muted);">↳ <span x-text="m.tool"></span> result</span>
+                <span style="font-weight:600;color:var(--text-muted);">↳ <span translate="no" x-text="m.tool"></span> {{ t('ide.result') }}</span>
                 <pre x-text="String(m.result).slice(0, 2000)"></pre>
               </div>
             </template>
             <!-- HITL approval -->
             <template x-if="m.role === 'approval'">
               <div class="chat-bubble" style="background:var(--warning-bg, #fef3c7);border:1px solid var(--warning);">
-                <span style="font-weight:600;"><span class="ki" data-icon="alert" aria-hidden="true"></span> Approval required</span>
-                <div x-text="m.message || ('Tool: ' + m.tool)" style="font-size:0.78rem;margin-top:4px;"></div>
-                <div style="margin-top:6px;font-size:0.72rem;color:var(--text-muted);">Approve via the chat or Telegram/Discord.</div>
+                <span style="font-weight:600;"><span class="ki" data-icon="alert" aria-hidden="true"></span> {{ t('ide.approval_required') }}</span>
+                <div x-text="m.message || t('ide.tool').replace('{tool}', m.tool)" style="font-size:0.78rem;margin-top:4px;"></div>
+                <div style="margin-top:6px;font-size:0.72rem;color:var(--text-muted);">{{ t('ide.approve_hint') }}</div>
               </div>
             </template>
           </div>
@@ -455,7 +455,7 @@
       </div>
       <div class="chat-input-row" style="padding:10px 12px;">
         <textarea id="ide-chat-input" class="form-input" rows="2"
-                  placeholder="Ask about the open file, request edits… (Enter to send, Shift+Enter for newline)"
+                  placeholder="{{ t('ide.chat_ph') }}"
                   x-model="chatInput" @keydown="chatKeydown($event)"
                   :disabled="chatBusy"
                   style="flex:1;resize:none;font-size:0.82rem;font-family:inherit;"></textarea>

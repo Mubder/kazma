@@ -568,4 +568,100 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مستوى واحد للأعلى",
         "en": "Up one level",
     },
+    "workspace.err_not_git_repo": {
+        "ar": "مساحة العمل هذه ليست مستودع Git.",
+        "en": "This workspace is not a Git repository.",
+    },
+    "workspace.qa_build_none": {
+        "ar": "لم يُضبط إجراء بناء لمساحة العمل. استخدم الطرفية لتشغيل أمر بناء معتمد.",
+        "en": "No workspace build action is configured. Use Terminal to run an approved build command.",
+    },
+    "workspace.qa_deploy_none": {
+        "ar": "لم يُضبط إجراء نشر لمساحة العمل. استخدم الطرفية لتشغيل أمر نشر معتمد.",
+        "en": "No workspace deploy action is configured. Use Terminal to run an approved deployment command.",
+    },
+    "workspace.configure_app": {
+        "ar": "إعداد التطبيق",
+        "en": "Configure App",
+    },
+    "workspace.ws.configure_github_app": {
+        "ar": "إعداد تطبيق GitHub",
+        "en": "Configure GitHub App",
+    },
+    "workspace.ws.app_id": {
+        "ar": "معرّف التطبيق *",
+        "en": "App ID *",
+    },
+    "workspace.ws.installation_id": {
+        "ar": "معرّف التثبيت *",
+        "en": "Installation ID *",
+    },
+    "workspace.ws.app_slug": {
+        "ar": "المعرّف المختصر / اسم التطبيق (اختياري)",
+        "en": "App Slug / Name (Optional)",
+    },
+    "workspace.ws.app_slug_hint": {
+        "ar": "اسم مستخدم البوت على GitHub، مثل <code>kazma-agent</code>. يُستخدم لاشتقاق بريد الإيداعات المرتبط بالصورة الرمزية <code>&lt;bot_user_id&gt;+&lt;slug&gt;[bot]@users.noreply.github.com</code> بالبحث عن معرّف مستخدم بوت التطبيق. تركه فارغًا يعني استخدام بريد افتراضي بلا صورة رمزية.",
+        "en": "The bot's username on GitHub, e.g. <code>kazma-agent</code>. Used to auto-derive the avatar-linked commit email <code>&lt;bot_user_id&gt;+&lt;slug&gt;[bot]@users.noreply.github.com</code> by looking up the App's bot user id. Leaving this blank falls back to a no-avatar default email.",
+    },
+    "workspace.ws.private_key": {
+        "ar": "المفتاح الخاص (بصيغة PEM)",
+        "en": "Private Key (PEM format)",
+    },
+    "workspace.ws.private_key_path": {
+        "ar": "أو مسار ملف المفتاح الخاص",
+        "en": "OR Private Key File Path",
+    },
+    "workspace.ws.save_github_app": {
+        "ar": "حفظ تطبيق GitHub",
+        "en": "Save GitHub App",
+    },
+    "workspace.ws.auth_github": {
+        "ar": "مصادقة اتصال GitHub",
+        "en": "Authenticate GitHub Connection",
+    },
+    "workspace.ws.connect_prefix": {
+        "ar": "اربط Kazma بـ",
+        "en": "Connect Kazma to",
+    },
+    "workspace.ws.connect_suffix": {
+        "ar": "لعرض طلبات السحب والمشكلات والإيداعات وتشغيلات سير العمل مباشرة.",
+        "en": "to view live pull requests, issues, commits, and workflow runs.",
+    },
+    "workspace.ws.gh_error": {
+        "ar": "خطأ في اتصال GitHub",
+        "en": "GitHub Connection Error",
+    },
+    "workspace.ws.configure_app_bot": {
+        "ar": "إعداد تطبيق GitHub (بوت)",
+        "en": "Configure GitHub App (Bot)",
+    },
+    "workspace.ws.enter_pat": {
+        "ar": "أدخل PAT",
+        "en": "Enter PAT",
+    },
+    "workspace.ws.connect_oauth": {
+        "ar": "الاتصال عبر OAuth",
+        "en": "Connect via OAuth",
+    },
+    "workspace.ws.view": {
+        "ar": "عرض ↗",
+        "en": "view ↗",
+    },
+    "workspace.ws.pre": {
+        "ar": "تجريبي",
+        "en": "pre",
+    },
+    "workspace.ws.draft": {
+        "ar": "مسودة",
+        "en": "draft",
+    },
+    "workspace.bookmark_title": {
+        "ar": "إشارة مرجعية",
+        "en": "Bookmark",
+    },
+    "workspace.pr_draft": {
+        "ar": "مسودة",
+        "en": "DRAFT",
+    },
 }

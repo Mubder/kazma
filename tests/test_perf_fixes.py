@@ -338,7 +338,11 @@ def _make_error_test_app() -> FastAPI:
     # error.html now uses the app's i18n/theme globals (kazma_ui/app.py
     # registers them) — without these, rendering dies with UndefinedError
     # INSIDE the exception handler, masking the very error under test.
-    templates.env.globals["t"] = lambda key, **_: key
+    # The page's words come from the catalog (the page is translated,
+    # 2026-09-28): the real English translator, not the key.
+    from kazma_ui.i18n import t as _translate
+
+    templates.env.globals["t"] = lambda key, **kw: _translate(key, "en", **kw)
     templates.env.globals["theme"] = lambda: "light"
     templates.env.globals["lang"] = lambda: "en"
     templates.env.globals["dir"] = lambda: "ltr"
