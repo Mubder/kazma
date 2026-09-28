@@ -21,7 +21,9 @@ Where things live:
 account writes that account's keys and nothing else. Until this module the
 extra accounts shared the main ones' writers: refreshing a second Google or
 Microsoft account wrote its tokens over the main account's, and from then on
-"my inbox" read the other mailbox.
+"my inbox" read the other mailbox. A refresh is kept only while the account
+still holds the grant it refreshed (``persist_account_tokens(replaces=)``),
+so a Remove or a new sign-in during the request is not undone.
 """
 
 from __future__ import annotations
@@ -189,15 +191,35 @@ def _vault_drop(alias: str) -> None:
     vault_delete(*(_vault_key(alias, f) for f in _SECRET_FIELDS))
 
 
-def persist_account_tokens(alias: str, access: str = "", refresh: str = "", scopes: str = "") -> None:
-    """Keep a refreshed grant of ONE extra account: its own vault keys only,
-    never the main account's (the bug this module ends)."""
+def _keep_tokens(alias: str, access: str = "", refresh: str = "", scopes: str = "") -> None:
     if access and access != "pending_refresh":
         _vault_put(alias, "access_token", access)
     if refresh:
         _vault_put(alias, "refresh_token", refresh)
     if scopes:
         _vault_put(alias, "scopes", scopes)
+
+
+def persist_account_tokens(
+    alias: str, access: str = "", refresh: str = "", scopes: str = "", *, replaces: str
+) -> bool:
+    """Keep a refreshed grant of ONE extra account: its own vault keys only,
+    never the main account's (the bug this module ends) -- and only while the
+    account still holds the grant that was refreshed (*replaces*: its refresh
+    token as the backend read it). An account removed or signed in again
+    while the request ran is left as it is now; the main accounts follow the
+    same rule (``refreshed_grants``). Returns whether the tokens were kept."""
+    from kazma_skills.native.email_manager.credentials import account_config
+
+    if not replaces or account_config(alias).get("refresh_token") != replaces:
+        logger.info(
+            "[email.accounts] refreshed tokens of %s not kept: the account was "
+            "removed or signed in again while the request ran",
+            alias,
+        )
+        return False
+    _keep_tokens(alias, access, refresh, scopes)
+    return True
 
 
 # ── who holds an address ─────────────────────────────────────────────────
@@ -292,7 +314,7 @@ def upsert_oauth_account(
     if address:
         _refuse_duplicate(alias, address)
     previous = stored_account(alias) or {}
-    persist_account_tokens(alias, access, refresh, scopes)
+    _keep_tokens(alias, access, refresh, scopes)
     row = {
         "alias": alias,
         "type": kind,

@@ -2614,9 +2614,23 @@ in the vault and does **not** automatically feed Calendar.
   version's refresh wrote a second account's tokens over the MAIN account's.
   Gate: `tests/test_email_extra_accounts.py::test_every_refreshing_backend_takes_an_account`
   plus the per-backend isolation test (old Graph code as the control).
+- **A refreshed sign-in is kept only where it is still held**
+  (`email_manager/refreshed_grants.py`, 2026-09-29): a refresh writes its
+  new tokens to each place holding the grant it refreshed -- compared by
+  refresh token, read env-first as the backends read it: Gmail and Google
+  Calendar, the Microsoft mailbox and Outlook Calendar, an extra account
+  (`persist_account_tokens(replaces=)`, a required keyword) -- and nowhere
+  else. The Gmail refresh (run by every connector-health pass) copied its
+  grant over a calendar signed in as another Google account, and every
+  refresh undid a disconnect or a new sign-in made while it ran. The
+  Microsoft mail refresh asks `openid profile` too (the bare mail scopes
+  when refused) and records the address its id_token names; its narrowed
+  token is kept for mail only. Gate: `tests/test_refreshed_grants.py`
+  (every refreshing backend, enumerated from source, main and extra, with
+  nothing / a disconnect / a new sign-in in between).
 
 Tests: `tests/test_calendar_connector.py`, `tests/test_connector_health.py`,
-`tests/test_email_extra_accounts.py`,
+`tests/test_email_extra_accounts.py`, `tests/test_refreshed_grants.py`,
 `tests/test_calendar_disconnect.py`, `tests/test_calendar_card_providers.py`.
 
 ### 35. Class gates from the 2026-09-22 audit — fix the class, not the instance

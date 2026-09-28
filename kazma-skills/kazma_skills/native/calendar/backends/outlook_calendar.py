@@ -23,25 +23,21 @@ def _keep_refreshed_tokens(
     """Store a refreshed calendar grant (vault I/O: run off the loop).
 
     An extra account's (*alias*) goes to its own keys only -- its mail and
-    calendar share that grant. For the main account, mail gets the new tokens
-    only while it holds this very grant (a mail sign-in copies the same
-    tokens to the calendar). A calendar refresh used to write them
+    calendar share that grant. For the main account, the calendar and the
+    mailbox each get the new tokens only while they hold this very grant (a
+    mail sign-in copies the same tokens to the calendar;
+    ``refreshed_grants``). A calendar refresh used to write them
     unconditionally -- back after the owner disconnected Microsoft mail, and
     over a mailbox signed in as another account.
     """
     if alias:
         from kazma_skills.native.email_manager.accounts import persist_account_tokens
 
-        persist_account_tokens(alias, access, new_refresh)
+        persist_account_tokens(alias, access, new_refresh, replaces=used_refresh)
         return
-    from kazma_skills.native.calendar.credentials import persist_microsoft_tokens
-    from kazma_skills.native.email_manager.credentials import vault_retrieve, vault_store
+    from kazma_skills.native.email_manager.refreshed_grants import keep_refreshed_microsoft_grant
 
-    persist_microsoft_tokens(access, new_refresh, scope)
-    if used_refresh and vault_retrieve("email.microsoft.refresh_token") == used_refresh:
-        vault_store("email.microsoft.access_token", access, category="email")
-        if new_refresh:
-            vault_store("email.microsoft.refresh_token", new_refresh, category="email")
+    keep_refreshed_microsoft_grant(used_refresh, access, new_refresh, scope)
 
 
 class OutlookCalendarBackend:

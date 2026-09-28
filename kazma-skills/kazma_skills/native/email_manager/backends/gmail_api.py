@@ -108,8 +108,9 @@ class GmailApiBackend:
     async def _refresh(self) -> None:
         from kazma_skills.native.email_manager.oauth_gmail import refresh_gmail_access_token
 
+        used_refresh = self.refresh_token
         access, refresh = await refresh_gmail_access_token(
-            self.refresh_token,
+            used_refresh,
             client_id=self.client_id,
             client_secret=self.client_secret,
             persist=not self.account_alias,
@@ -119,7 +120,9 @@ class GmailApiBackend:
         if self.account_alias:
             from kazma_skills.native.email_manager.accounts import persist_account_tokens
 
-            await asyncio.to_thread(persist_account_tokens, self.account_alias, access, refresh)
+            await asyncio.to_thread(
+                persist_account_tokens, self.account_alias, access, refresh, replaces=used_refresh
+            )
 
     def _map(self, meta: dict[str, Any], body: str = "") -> EmailMessage:
         headers = {h["name"].lower(): h["value"] for h in (meta.get("payload") or {}).get("headers") or []}

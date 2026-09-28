@@ -278,8 +278,15 @@ def _refreshers():
 def test_a_refresh_writes_only_its_own_account(vault, monkeypatch, kind) -> None:
     import httpx
 
+    from kazma_skills.native.email_manager import accounts
+
     _main_gmail(vault)
     _main_microsoft(vault)
+    provider = "gmail" if kind in ("gmail", "google_calendar") else "microsoft"
+    accounts.upsert_oauth_account(
+        "work", provider, "work@example.com", "old", "w-r",
+        GMAIL_SCOPES if provider == "gmail" else MS_SCOPES,
+    )
     before = _main_keys(vault)
     build, module, method = _refreshers()[kind]
     fake = _fake_client({"access_token": "new-access", "refresh_token": "new-refresh",
@@ -439,7 +446,9 @@ def test_adding_a_password_account_tries_the_login_first(vault, monkeypatch) -> 
     c = _client()
     monkeypatch.setattr(router, "backend_for_account", lambda alias, cfg: Refused())
     r = c.post("/api/email/accounts", json=body)
-    assert r.status_code == 400 and "did not work" in r.json()["error"]
+    error = r.json()["error"]
+    assert r.status_code == 400 and "imap.gmail.com refused the address and password" in error
+    assert "app password" in error and "AUTHENTICATIONFAILED" in error, "the server's own words stay"
     assert "email.account.side-box.password" not in vault, "a login that fails is never kept"
 
     seen = {}
@@ -459,6 +468,40 @@ def test_adding_a_password_account_tries_the_login_first(vault, monkeypatch) -> 
     r = c.post("/api/email/accounts/side-box/remove")
     assert r.status_code == 200
     assert not any(a["alias"] == "side-box" for a in c.get("/api/email/accounts").json()["accounts"])
+
+
+def _failures():
+    import socket
+    import ssl
+
+    return [
+        (socket.gaierror(11001, "getaddrinfo failed"),
+         "The mail server imap.example.invalid could not be found. Check its name."),
+        (ConnectionRefusedError(10061, "No connection could be made"),
+         "imap.example.invalid refused the connection"),
+        (ssl.SSLError(1, "[SSL: WRONG_VERSION_NUMBER] wrong version number"),
+         "The secure connection to imap.example.invalid failed"),
+        (RuntimeError("Cannot select folder INBOX"), "The login did not work: Cannot select folder INBOX"),
+    ]
+
+
+@pytest.mark.parametrize("raised, says", _failures(), ids=["not-found", "refused", "tls", "other"])
+def test_a_failed_login_says_what_to_fix(vault, monkeypatch, raised, says) -> None:
+    """A mistyped server name came back as "[Errno 11001] getaddrinfo
+    failed" on the live install (2026-09-29)."""
+    from kazma_skills.native.email_manager import router
+
+    class Fails:
+        async def list_messages(self, query):
+            raise raised
+
+    monkeypatch.setattr(router, "backend_for_account", lambda alias, cfg: Fails())
+    r = _client().post("/api/email/accounts", json={
+        "alias": "box", "type": "imap", "address": "b@example.invalid", "password": "not-a-password",
+        "imap_host": "imap.example.invalid",
+    })
+    assert r.status_code == 400 and says in r.json()["error"], r.json()
+    assert "email.account.box.password" not in vault
 
 
 def test_the_sign_in_routes_take_the_account(vault, monkeypatch) -> None:

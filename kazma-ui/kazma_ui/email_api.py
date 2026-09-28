@@ -572,6 +572,52 @@ async def email_accounts() -> JSONResponse:
         return _safe_error(exc)
 
 
+#: What a refused login says, whichever protocol said it (IMAP, POP, SMTP).
+_AUTH_REFUSALS = (
+    "authenticationfailed", "invalid credentials", "login failed",
+    "authentication failed", "not accepted",
+)
+
+
+def _login_refusal(exc: BaseException, kind: str, cfg: dict[str, str]) -> str:
+    """A failed login, said so the person adding the account can act on it.
+    A mistyped server name used to come back as the socket's own words,
+    "[Errno 11001] getaddrinfo failed" (2026-09-29, live)."""
+    import smtplib
+    import socket
+    import ssl
+
+    from kazma_core.errors import validation_error
+
+    host = (
+        cfg.get("imap_host")
+        or cfg.get("pop_host")
+        or {"gmail": "imap.gmail.com", "microsoft": "outlook.office365.com"}.get(kind)
+        or "The mail server"
+    )
+    if isinstance(exc, socket.gaierror):
+        return f"The mail server {host} could not be found. Check its name."
+    if isinstance(exc, ConnectionRefusedError):
+        return f"{host} refused the connection. Check the server name and port."
+    said = validation_error(exc)
+    if isinstance(exc, ssl.SSLError):
+        return (
+            f"The secure connection to {host} failed ({said}). Check the port: "
+            "IMAP is usually 993 and POP 995."
+        )
+    if isinstance(exc, smtplib.SMTPAuthenticationError) or any(
+        word in said.lower() for word in _AUTH_REFUSALS
+    ):
+        hint = (
+            " Gmail and Outlook take an app password here: the account's own "
+            "password is refused when two-step sign-in is on."
+            if kind in ("gmail", "microsoft")
+            else ""
+        )
+        return f"{host} refused the address and password ({said}).{hint}"
+    return f"The login did not work: {said}"
+
+
 @protected_router.post("/accounts", dependencies=[Depends(_verify_same_origin)])
 async def email_account_add(body: _AccountAddBody) -> JSONResponse:
     """Add an extra account that signs in with a password. Its login is
@@ -613,10 +659,7 @@ async def email_account_add(body: _AccountAddBody) -> JSONResponse:
             status_code=400,
         )
     except Exception as exc:  # noqa: BLE001 -- the login's own answer is the reply
-        return JSONResponse(
-            {"ok": False, "error": f"The login did not work: {validation_error(exc)}"},
-            status_code=400,
-        )
+        return JSONResponse({"ok": False, "error": _login_refusal(exc, kind, cfg)}, status_code=400)
     try:
         row = await asyncio.to_thread(
             add_password_account, alias, kind, cfg["address"], password, **hosts
