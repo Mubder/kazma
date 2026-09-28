@@ -49,9 +49,9 @@ async def send_voice_reply(
             await rate_limiter.acquire()
         import json
 
-        fmt = str(live_voice_settings().get("tts_output_format") or "mp3")
-        ext = "mp3" if fmt in ("mp3", "mpeg") else fmt
-        mime = "audio/mpeg" if ext == "mp3" else f"audio/{ext}"
+        from kazma_core.voice.audio_format import audio_label
+
+        ext, mime = audio_label(audio, str(live_voice_settings().get("tts_output_format") or ""))
         resp = await http.post(
             f"/channels/{channel_id}/messages",
             data={"payload_json": json.dumps({"content": ""})},

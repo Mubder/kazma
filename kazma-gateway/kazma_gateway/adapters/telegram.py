@@ -1155,7 +1155,10 @@ class TelegramAdapter(BaseAdapter):
         if not self._http:
             return False
         try:
-            files = {"voice": ("reply.ogg", audio_bytes, "audio/ogg")}
+            from kazma_core.voice.audio_format import audio_label
+
+            ext, mime = audio_label(audio_bytes, str(self._live_voice_settings().get("tts_output_format") or ""))
+            files = {"voice": (f"reply.{ext}", audio_bytes, mime)}
             data: dict[str, Any] = {"chat_id": chat_id}
             if reply_to:
                 data["reply_to_message_id"] = reply_to

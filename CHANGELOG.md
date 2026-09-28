@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Round 8 on the live install: background jobs, documents, research, knowledge, voice (2026-09-28)
+
+Checked on the live install against its own records, not assumed: the daily
+digest went out at 05:16 UTC (its first send since the schedulers were
+fixed this morning); the six-hourly backup ran 10:06 → 16:06 across four
+restarts, with both restic snapshots, the offsite copy and a fresh Postgres
+dump, and the restore drill passed 34/34; a document uploaded, parsed in
+under a second, indexed into a library and answered from in chat with its
+citation; a brief research run finished in 50 s with four sources and a
+full rubric; a one-page Knowledge crawl gave seven chunks, all searchable
+by meaning. Test data was archived afterwards.
+
+**Read-aloud and voice replies were labelled with the format Settings
+asked for, not the one they were in.** The default voice (edge-tts) always
+returns MP3; with the output format set to `opus` the web served MP3 as
+`audio/opus`, Telegram uploaded it as `reply.ogg`, and Discord and Slack as
+`reply.opus`. Chrome played it anyway; stricter players (Safari, a chat
+app's) are entitled not to. The label now comes from the audio itself.
+
 ## Mail, calendar and X, tested end to end on the live install (2026-09-28)
 
 With the owner's approval, Kazma was driven through its chat like a person
