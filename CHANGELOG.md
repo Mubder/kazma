@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## The live install, fourth pass: the Dashboard's chats, and pages that stop the server (2026-09-28)
+
+**The Dashboard's session table named no chat.** On the live install all 50
+rows read "unknown / anonymous / 0 messages / created —". Each row now shows
+the chat's title (a link to it), its platform, its message count, how many
+steps are saved for it and when it was last active. Its buttons say what they
+do: Delete removes that chat and its saved steps (what Kazma remembered from
+it stays in memory); "Clear saved steps" removes every chat's saved steps and
+keeps the chats, which carry on from their messages. Both used to say
+"session".
+
+**Opening the chat page held up every other conversation.** Listing the
+chats (on every page load), opening one, renaming, archiving, pinning,
+checking a chat's status and deleting it read or wrote the chat store on the
+server's event loop; on Postgres that took 150–400 ms per list, during which
+every live stream and connection waited. They now run beside it.
+
+**Adding a document to a Knowledge library** meant typing the library's
+internal id into a bare "library_id" box on the Documents page. It is now a
+list of your libraries by name, with "New library…" to create one on the
+spot.
+
+**A finished answer's tab title and desktop notification** showed its
+markdown ("[Open this chat in Time Trav…") and the notification was always in
+English. Both are plain text now, and the notification follows the page's
+language. Dates and times on the Dashboard follow it too ("2 hours ago" /
+"قبل ساعتين"), through one formatter every page can use.
+
+The Dashboard's capability card said the IDE uses Monaco; it uses CodeMirror.
+
 ## The live install, third pass (2026-09-28)
 
 **The IDE fix of the second pass went too far.** At a 918-pixel window it

@@ -35,6 +35,23 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 logger = logging.getLogger(__name__)
 
+#: Each thread's newest root checkpoint and how many it keeps, newest first.
+#: LangGraph ids are uuid6, which sort by time: ordering by id is ordering by
+#: last activity.
+_NEWEST_PER_THREAD_PG = """
+    SELECT thread_id, checkpoint_id, steps FROM (
+        SELECT thread_id, checkpoint_id,
+               ROW_NUMBER() OVER (PARTITION BY thread_id ORDER BY checkpoint_id DESC) AS rn,
+               COUNT(*) OVER (PARTITION BY thread_id) AS steps
+        FROM checkpoints
+        WHERE checkpoint_ns = ''
+    ) newest
+    WHERE rn = 1
+    ORDER BY checkpoint_id DESC
+    LIMIT %s
+"""
+_NEWEST_PER_THREAD_SQLITE = _NEWEST_PER_THREAD_PG.replace("%s", "?")
+
 __all__ = [
     "CheckpointManager",
     "create_checkpointer",
@@ -288,18 +305,19 @@ class CheckpointManager(BaseCheckpointSaver):
         self._tenant_savers.clear()
 
     async def list_checkpoints(self, limit: int = 50) -> list[dict[str, Any]]:
-        """List checkpointed threads with their latest checkpoint metadata.
+        """List checkpointed threads, newest activity first.
 
-        Queries the underlying checkpoint store for distinct thread_ids
-        and returns summary info for each. Supports both SQLite
-        (AsyncSqliteSaver) and Postgres (AsyncPostgresSaver) backends.
+        One row per thread: its newest checkpoint, how many checkpoints it
+        keeps (``steps``), when the newest was saved (``last_activity``,
+        ISO-8601, read from the uuid6 id -- the checkpoint's own ``ts`` when
+        the id is not one), and ``message_count``: the messages inside the
+        newest checkpoint, or ``None`` when the checkpoint does not carry
+        them. The Postgres saver keeps messages in ``checkpoint_blobs``, so
+        there it is always ``None``; the Dashboard takes the count from the
+        chat instead. It used to report 0 for every thread (live
+        2026-09-28: 50 rows of "0 messages, created -").
 
-        Args:
-            limit: Maximum number of threads to return.
-
-        Returns:
-            List of dicts with keys: thread_id, checkpoint_id, created_at,
-            message_count, context_tokens.
+        Only the root graph's checkpoints count (``checkpoint_ns = ''``).
         """
         saver = await self._get_saver()
         saver_type = type(saver).__name__
@@ -317,56 +335,23 @@ class CheckpointManager(BaseCheckpointSaver):
             )
             return []
         try:
-            cursor = await conn.execute(
-                """
-                SELECT
-                    thread_id,
-                    checkpoint_id,
-                    COALESCE(type, '') AS type
-                FROM (
-                    SELECT
-                        thread_id,
-                        checkpoint_id,
-                        type,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY thread_id
-                            ORDER BY checkpoint_id DESC
-                        ) AS rn
-                    FROM checkpoints
-                )
-                WHERE rn = 1
-                ORDER BY checkpoint_id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            )
+            cursor = await conn.execute(_NEWEST_PER_THREAD_SQLITE, (limit,))
             rows = await cursor.fetchall()
             results: list[dict[str, Any]] = []
-            for row in rows:
-                thread_id = row[0]
-                checkpoint_id = row[1]
-                msg_count = 0
-                created_at = ""
+            for thread_id, checkpoint_id, steps in rows:
+                checkpoint: dict[str, Any] | None = None
                 try:
                     blob_cursor = await conn.execute(
-                        "SELECT checkpoint, metadata FROM checkpoints "
-                        "WHERE thread_id = ? AND checkpoint_id = ? LIMIT 1",
+                        "SELECT checkpoint FROM checkpoints "
+                        "WHERE thread_id = ? AND checkpoint_ns = '' AND checkpoint_id = ? LIMIT 1",
                         (thread_id, checkpoint_id),
                     )
                     blob_row = await blob_cursor.fetchone()
                     if blob_row and blob_row[0]:
-                        msg_count = self._try_decode_message_count(blob_row[0])
-                    if blob_row and blob_row[1]:
-                        created_at = self._try_decode_created_at(blob_row[1])
+                        checkpoint = self._decode_checkpoint(blob_row[0])
                 except Exception as exc:
                     logger.debug("Checkpoint blob decode failed for thread %s: %s", thread_id, exc)
-                results.append({
-                    "thread_id": thread_id,
-                    "checkpoint_id": str(checkpoint_id),
-                    "created_at": created_at,
-                    "message_count": msg_count,
-                    "context_tokens": 0,
-                })
+                results.append(self._thread_row(thread_id, checkpoint_id, steps, checkpoint))
             return results
         except Exception:
             logger.warning("[Checkpoint] list_checkpoints query failed", exc_info=True)
@@ -378,9 +363,8 @@ class CheckpointManager(BaseCheckpointSaver):
         """Postgres variant of list_checkpoints using the AsyncConnectionPool.
 
         The ``AsyncPostgresSaver`` stores its pool in ``saver.conn`` (an
-        ``AsyncConnectionPool``). We acquire a connection from the pool,
-        run the equivalent query with ``%s`` placeholders, and decode
-        blobs the same way as the SQLite path.
+        ``AsyncConnectionPool``). The ``checkpoint`` column is JSONB, which
+        psycopg hands back already parsed.
         """
         pool = saver.conn if hasattr(saver, "conn") else None
         if pool is None:
@@ -388,128 +372,87 @@ class CheckpointManager(BaseCheckpointSaver):
         try:
             async with pool.connection() as conn:  # type: ignore[union-attr]
                 async with conn.cursor() as cur:  # type: ignore[union-attr]
-                    await cur.execute(
-                        """
-                        SELECT thread_id, checkpoint_id
-                        FROM (
-                            SELECT
-                                thread_id,
-                                checkpoint_id,
-                                ROW_NUMBER() OVER (
-                                    PARTITION BY thread_id
-                                    ORDER BY checkpoint_id DESC
-                                ) AS rn
-                            FROM checkpoints
-                        ) sub
-                        WHERE rn = 1
-                        ORDER BY checkpoint_id DESC
-                        LIMIT %s
-                        """,
-                        (limit,),
-                    )
+                    await cur.execute(_NEWEST_PER_THREAD_PG, (limit,))
                     rows = await cur.fetchall()
 
                 results: list[dict[str, Any]] = []
                 for row in rows:
-                    # psycopg dict_row returns dict; aiosqlite returns tuple.
-                    # Support both for safety.
+                    # psycopg dict_row returns dict; a plain cursor a tuple.
                     if isinstance(row, dict):
-                        thread_id = row["thread_id"]
-                        checkpoint_id = row["checkpoint_id"]
+                        thread_id, checkpoint_id, steps = row["thread_id"], row["checkpoint_id"], row["steps"]
                     else:
-                        thread_id = row[0]
-                        checkpoint_id = row[1]
-                    msg_count = 0
-                    created_at = ""
+                        thread_id, checkpoint_id, steps = row[0], row[1], row[2]
+                    checkpoint: dict[str, Any] | None = None
                     try:
                         async with conn.cursor() as bcur:  # type: ignore[union-attr]
                             await bcur.execute(
-                                "SELECT checkpoint, metadata FROM checkpoints "
-                                "WHERE thread_id = %s AND checkpoint_id = %s LIMIT 1",
+                                "SELECT checkpoint FROM checkpoints "
+                                "WHERE thread_id = %s AND checkpoint_ns = '' AND checkpoint_id = %s LIMIT 1",
                                 (thread_id, checkpoint_id),
                             )
                             blob_row = await bcur.fetchone()
-                        _blob = blob_row.get("checkpoint") if isinstance(blob_row, dict) else (blob_row[0] if blob_row else None)
-                        _meta = blob_row.get("metadata") if isinstance(blob_row, dict) else (blob_row[1] if blob_row else None)
-                        if _blob:
-                            if isinstance(_blob, memoryview):
-                                _blob = bytes(_blob)
-                            msg_count = self._try_decode_message_count(_blob)
-                        if _meta:
-                            if isinstance(_meta, memoryview):
-                                _meta = bytes(_meta)
-                            created_at = self._try_decode_created_at(_meta)
+                        blob = blob_row.get("checkpoint") if isinstance(blob_row, dict) else (blob_row[0] if blob_row else None)
+                        if isinstance(blob, memoryview):
+                            blob = bytes(blob)
+                        if blob:
+                            checkpoint = self._decode_checkpoint(blob)
                     except Exception as exc:
                         logger.debug("Checkpoint blob decode failed for thread %s: %s", thread_id, exc)
-                    results.append({
-                        "thread_id": thread_id,
-                        "checkpoint_id": str(checkpoint_id),
-                        "created_at": created_at,
-                        "message_count": msg_count,
-                        "context_tokens": 0,
-                    })
+                    results.append(self._thread_row(thread_id, checkpoint_id, steps, checkpoint))
                 return results
         except Exception:
             logger.warning("[Checkpoint] list_checkpoints (postgres) query failed", exc_info=True)
             return []
 
     @staticmethod
-    def _try_decode_message_count(blob: Any) -> int:
-        """Decode message count from LangGraph checkpoint blob.
+    def _thread_row(
+        thread_id: str, checkpoint_id: Any, steps: Any, checkpoint: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """One ``list_checkpoints`` row from the newest checkpoint of a thread."""
+        from datetime import UTC, datetime
 
-        Tries msgpack first (LangGraph's serde), then JSON as fallback.
-        Also handles the Postgres JSONB case where psycopg's dict_row
-        factory already deserializes the blob into a Python dict.
-        Returns 0 on any decode failure.
+        from kazma_core.checkpoint_retention import checkpoint_time
+
+        last_activity = ""
+        born = checkpoint_time(str(checkpoint_id))
+        if born is not None:
+            last_activity = datetime.fromtimestamp(born, UTC).isoformat()
+        elif checkpoint and isinstance(checkpoint.get("ts"), str):
+            last_activity = checkpoint["ts"]
+        message_count: int | None = None
+        if checkpoint:
+            messages = (checkpoint.get("channel_values") or {}).get("messages")
+            if isinstance(messages, list):
+                message_count = len(messages)
+        return {
+            "thread_id": thread_id,
+            "checkpoint_id": str(checkpoint_id),
+            "steps": int(steps or 0),
+            "last_activity": last_activity,
+            "message_count": message_count,
+        }
+
+    @staticmethod
+    def _decode_checkpoint(blob: Any) -> dict[str, Any] | None:
+        """A stored checkpoint as a dict, or ``None`` when it cannot be read.
+
+        Postgres JSONB arrives parsed; SQLite stores the serializer's
+        msgpack bytes (JSON in very old files).
         """
-        # Postgres JSONB: psycopg dict_row already parsed it to a dict.
         if isinstance(blob, dict):
-            msgs = blob.get("channel_values", {}).get("messages", [])
-            return len(msgs) if isinstance(msgs, list) else 0
-
-        # SQLite: stored as msgpack bytes.
+            return blob
         try:
             import msgpack
-            cp_data = msgpack.unpackb(blob, raw=False)
+
+            data = msgpack.unpackb(blob, raw=False, strict_map_key=False)
         except Exception:
             try:
                 import json
-                cp_data = json.loads(blob if isinstance(blob, str) else blob.decode("utf-8", errors="replace"))
+
+                data = json.loads(blob if isinstance(blob, str) else blob.decode("utf-8", errors="replace"))
             except Exception:
-                return 0
-        if not isinstance(cp_data, dict):
-            return 0
-        msgs = cp_data.get("channel_values", {}).get("messages", [])
-        return len(msgs) if isinstance(msgs, list) else 0
-
-    @staticmethod
-    def _try_decode_created_at(metadata_blob: Any) -> str:
-        """Best-effort extraction of a created-at timestamp from metadata.
-
-        LangGraph stores ``metadata`` as JSON.  Standard savers do not
-        record a timestamp, but custom metadata or tracing integrations
-        may include ``created_at``/``ts``/``timestamp``.  Returns ``""``
-        when no timestamp is found. Also handles the Postgres JSONB case
-        where psycopg's dict_row factory already deserializes to a dict.
-        """
-        import json
-
-        try:
-            # Postgres JSONB: already a dict.
-            if isinstance(metadata_blob, dict):
-                data = metadata_blob
-            else:
-                raw = metadata_blob if isinstance(metadata_blob, str) else metadata_blob.decode("utf-8", errors="replace")
-                data = json.loads(raw)
-            if not isinstance(data, dict):
-                return ""
-            for key in ("created_at", "ts", "timestamp", "created"):
-                val = data.get(key)
-                if isinstance(val, str) and val:
-                    return val
-        except Exception:
-            return ""
-        return ""
+                return None
+        return data if isinstance(data, dict) else None
 
     @property
     def active_locks(self) -> int:

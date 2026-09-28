@@ -113,11 +113,11 @@ def _counts(path: Path, thread: str) -> tuple[int, int, int]:
 def test_a_checkpoint_id_carries_its_creation_time():
     from langgraph.checkpoint.base.id import uuid6
 
-    born = cr._checkpoint_time(str(uuid6()))
+    born = cr.checkpoint_time(str(uuid6()))
     assert born is not None and abs(born - time.time()) < 5
-    assert cr._checkpoint_time(str(uuid.uuid4())) is None, "not a uuid6: age unknown"
-    assert cr._checkpoint_time("not-an-id") is None
-    assert cr._checkpoint_time(None) is None
+    assert cr.checkpoint_time(str(uuid.uuid4())) is None, "not a uuid6: age unknown"
+    assert cr.checkpoint_time("not-an-id") is None
+    assert cr.checkpoint_time(None) is None
 
 
 # ── SQLite, on the saver the product uses ────────────────────────────────

@@ -6,6 +6,7 @@ Extracted from the former 3,099-line ``kazma_ui/sse_chat.py``
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -280,7 +281,10 @@ async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
             messages = messages + [
                 {"role": "assistant", "content": asst, "turn_id": _heal_turn}
             ]
-        if persist_reply(session.session_id, _heal_turn, asst, thread_id=tid):
+        # A store write, and this runs inside the history route: off the loop.
+        if await asyncio.to_thread(
+            persist_reply, session.session_id, _heal_turn, asst, thread_id=tid
+        ):
             logger.info(
                 "[SSE] Backfilled unanswered turn from checkpoint for "
                 "session=%s (%d chars)",

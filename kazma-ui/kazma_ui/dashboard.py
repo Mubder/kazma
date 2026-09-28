@@ -6,6 +6,7 @@ metrics, and circuit breaker status with auto-refresh.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from pathlib import Path
@@ -329,26 +330,49 @@ async def dashboard_status() -> JSONResponse:
 # ══════════════════════════════════════════════════════════════════════════
 
 
+def _chats_by_thread() -> dict[str, dict[str, Any]]:
+    """Every chat of the caller's tenant, archived and empty ones included,
+    keyed by its thread. Blocking store reads: callers run it in a thread."""
+    from kazma_ui.session_manager import get_session_manager
+
+    chats: dict[str, dict[str, Any]] = {}
+    for session in get_session_manager().list_all(
+        include_archived=True, include_empty=True, prune_empty=False
+    ):
+        summary = session.to_summary()
+        chats.setdefault(str(summary.get("thread_id") or ""), summary)
+    return chats
+
+
+def _delete_chats_of_thread(thread_id: str) -> None:
+    """Delete every chat whose thread or id is *thread_id*. Blocking."""
+    from kazma_ui.session_manager import get_session_manager
+
+    sm = get_session_manager()
+    doomed = {thread_id} | {
+        s.session_id
+        for s in sm.list_all(include_archived=True, include_empty=True, prune_empty=False)
+        if thread_id in (s.thread_id, s.session_id)
+    }
+    for session_id in doomed:
+        sm.delete(session_id)
+
+
 @router.get("/api/sessions")
 async def list_sessions(request: Request, limit: int = 50) -> JSONResponse:
-    """List all checkpointed sessions with metadata.
-    
-    Args:
-        limit: Maximum number of sessions to return (default 50).
-    
-    Returns:
-        JSONResponse with list of sessions:
-        [
-            {
-                "thread_id": str,
-                "checkpoint_id": str,
-                "created_at": str,
-                "context_tokens": int,
-                "message_count": int,
-                "platform": str | None,
-                "display_name": str | None,
-            }
-        ]
+    """The checkpointed threads, newest activity first, each with its chat.
+
+    A thread's title, platform and message count come from the chat it
+    belongs to (``kazma_chat_sessions``): the rows used to be enriched from
+    the gateway's five-minute session cache and the checkpoint's own blob,
+    so on the live install every row read "unknown / anonymous / 0 / -"
+    (2026-09-28). A thread no chat owns (a deleted chat's leftovers, a
+    worker's run) has an empty ``session_id`` and no title.
+
+    Returns ``{"sessions": [...], "count": n}``; each row has ``thread_id``,
+    ``checkpoint_id``, ``steps`` (checkpoints kept), ``last_activity``,
+    ``session_id``, ``title``, ``platform``, ``message_count`` (``None``
+    when unknown) and ``archived``.
     """
     # Every thread, every tenant: this is the instance's checkpoint store, so
     # it is an admin view. It used to be open to any role — a viewer could list
@@ -361,32 +385,27 @@ async def list_sessions(request: Request, limit: int = 50) -> JSONResponse:
 
     try:
         checkpoints = await _checkpoint_manager.list_checkpoints(limit=limit)
-
-        # Build a lookup of session metadata from the session store so we can
-        # enrich checkpointed sessions with platform and display_name.
-        session_meta: dict[str, dict[str, Any]] = {}
-        if _session_store is not None:
-            try:
-                for entry in await _session_store.list_active():
-                    session_meta[entry["thread_id"]] = {
-                        "platform": entry.get("platform", "unknown"),
-                        "display_name": entry.get("display_name", "unknown"),
-                    }
-            except Exception:
-                logger.exception("Failed to load session metadata")
+        try:
+            chats = await asyncio.to_thread(_chats_by_thread)
+        except Exception:
+            logger.warning("[Dashboard] chat list unavailable for the session table", exc_info=True)
+            chats = {}
 
         sessions = []
         for cp in checkpoints:
-            thread_id = cp.get("thread_id", cp.get("id", "unknown"))
-            meta = session_meta.get(thread_id, {})
+            thread_id = str(cp.get("thread_id") or "")
+            chat = chats.get(thread_id) or {}
+            count = chat.get("message_count") if chat else cp.get("message_count")
             sessions.append({
                 "thread_id": thread_id,
-                "checkpoint_id": cp.get("checkpoint_id", cp.get("id", "")),
-                "created_at": cp.get("created_at", ""),
-                "context_tokens": cp.get("context_tokens", 0),
-                "message_count": cp.get("message_count", 0),
-                "platform": meta.get("platform"),
-                "display_name": meta.get("display_name"),
+                "checkpoint_id": str(cp.get("checkpoint_id") or ""),
+                "steps": int(cp.get("steps") or 0),
+                "last_activity": str(cp.get("last_activity") or ""),
+                "session_id": str(chat.get("session_id") or ""),
+                "title": str(chat.get("title") or ""),
+                "platform": str(chat.get("platform") or ""),
+                "message_count": count,
+                "archived": bool(chat.get("archived")),
             })
 
         return JSONResponse({"sessions": sessions, "count": len(sessions)})
@@ -437,16 +456,10 @@ async def delete_session(request: Request, thread_id: str) -> JSONResponse:
         except Exception as exc:
             logger.debug("gateway session store delete skipped: %s", exc)
 
-        # Web UI chat projection
+        # The chat the thread belongs to (web and platform ids alike). Store
+        # writes: off the event loop.
         try:
-            from kazma_ui.session_manager import get_session_manager
-
-            sm = get_session_manager()
-            sm.delete(thread_id)
-            # Also try platform-prefixed ids that share this thread
-            for s in list(sm.list_all(include_archived=True)):
-                if s.thread_id == thread_id or s.session_id == thread_id:
-                    sm.delete(s.session_id)
+            await asyncio.to_thread(_delete_chats_of_thread, thread_id)
         except Exception as exc:
             logger.debug("SessionManager delete skipped: %s", exc)
 

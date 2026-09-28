@@ -478,6 +478,21 @@
     var text = DASH_I18N[key] || fallback;
     return n === undefined ? text : text.replace('{n}', n);
   }
+  // Labels shared with the mobile cards (dash_lists.js loads first).
+  var LISTS = window.KazmaDashLists || {};
+  function label(key, fallback, vars) {
+    if (LISTS.tr) return LISTS.tr(key, fallback, vars);
+    var text = fallback;
+    for (var k in (vars || {})) text = text.split('{' + k + '}').join(String(vars[k]));
+    return text;
+  }
+  function platformLabel(p) {
+    return LISTS.platformLabel ? LISTS.platformLabel(p) : String(p || '');
+  }
+  var FMT = window.KazmaFormat;
+  function fmtNumber(n) { return FMT ? FMT.number(n) : String(n); }
+  function fmtRelative(v) { return FMT ? FMT.relative(v) : (v || ''); }
+  function fmtDateTime(v) { return FMT ? FMT.dateTime(v) : (v || ''); }
   var _sessionsExpanded = false;
   var _sessionsCache = [];
 
@@ -510,27 +525,51 @@
           td.textContent = inner;
           return td;
         }
-        var tidTd = makeTd(s.thread_id || 'unknown', 'padding:10px 12px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;');
-        tidTd.title = s.thread_id || '';
-        tr.appendChild(tidTd);
+        // The chat: its title (the user's own words, not translated) linking
+        // to it, the thread id under it. A thread no chat owns says so.
+        var chatTd = document.createElement('td');
+        chatTd.style.cssText = 'padding:10px 12px;max-width:320px;';
+        var titleEl = document.createElement(s.session_id ? 'a' : 'span');
+        if (s.session_id) titleEl.href = '/chat?session=' + encodeURIComponent(s.session_id);
+        titleEl.textContent = s.title || label('dashboard.no_chat', 'No chat');
+        if (s.title) titleEl.setAttribute('translate', 'no');
+        titleEl.style.cssText = 'display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' +
+          (s.title ? '' : 'color:var(--text-muted);font-style:italic;');
+        chatTd.appendChild(titleEl);
+        var tidEl = document.createElement('code');
+        tidEl.textContent = s.thread_id || '';
+        tidEl.title = s.thread_id || '';
+        tidEl.setAttribute('translate', 'no');
+        tidEl.style.cssText = 'display:block;font-size:0.7rem;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        chatTd.appendChild(tidEl);
+        tr.appendChild(chatTd);
         var platTd = document.createElement('td');
         platTd.style.cssText = 'padding:10px 12px;';
         var badge = document.createElement('span');
         badge.className = 'badge badge-basic';
         badge.style.cssText = 'font-size:0.7rem;';
-        badge.textContent = s.platform || 'unknown';
+        badge.textContent = platformLabel(s.platform);
         platTd.appendChild(badge);
+        if (s.archived) {
+          var arch = document.createElement('span');
+          arch.className = 'badge badge-subtle';
+          arch.style.cssText = 'font-size:0.65rem;margin-inline-start:4px;';
+          arch.textContent = label('dashboard.chat_archived', 'Archived');
+          platTd.appendChild(arch);
+        }
         tr.appendChild(platTd);
-        tr.appendChild(makeTd(s.display_name || 'anonymous', 'padding:10px 12px;font-weight:500;'));
-        tr.appendChild(makeTd(String(s.message_count || 0), 'padding:10px 12px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;'));
-        tr.appendChild(makeTd(String(s.context_tokens || 0), 'padding:10px 12px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;'));
-        tr.appendChild(makeTd(s.created_at ? new Date(s.created_at).toLocaleString() : '—', 'padding:10px 12px;font-size:0.75rem;color:var(--text-muted);'));
+        var numStyle = 'padding:10px 12px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;';
+        tr.appendChild(makeTd(s.message_count == null ? '—' : fmtNumber(s.message_count), numStyle));
+        tr.appendChild(makeTd(fmtNumber(s.steps || 0), numStyle));
+        var whenTd = makeTd(fmtRelative(s.last_activity) || '—', 'padding:10px 12px;font-size:0.75rem;color:var(--text-muted);');
+        whenTd.title = fmtDateTime(s.last_activity);
+        tr.appendChild(whenTd);
         var delTd = document.createElement('td');
         delTd.style.cssText = 'padding:10px 12px;text-align:center;';
         var btn = document.createElement('button');
         btn.className = 'btn btn-sm btn-danger';
         btn.style.cssText = 'padding:4px 8px;font-size:0.7rem;';
-        btn.textContent = 'Delete';
+        btn.textContent = label('dashboard.delete', 'Delete');
         btn.onclick = function() { window._deleteSession && window._deleteSession(s.thread_id); };
         delTd.appendChild(btn);
         tr.appendChild(delTd);
@@ -604,33 +643,40 @@
       });
     }
 
+    // Delete removes the chat the thread belongs to (and its saved steps);
+    // Clear removes every chat's saved steps and leaves the chats. Each
+    // dialog says which (they both used to say "session").
     window._deleteSession = async function(threadId) {
+      var row = (_sessionsCache || []).filter(function(s) { return s.thread_id === threadId; })[0] || {};
+      var message = row.session_id
+        ? label('dashboard.confirm_delete_session', 'Delete the chat “{title}”? Its messages and saved steps are deleted. What Kazma remembered from it stays in memory.', { title: row.title || threadId })
+        : label('dashboard.confirm_delete_thread', 'Delete the saved steps of thread {thread_id}? No chat belongs to it.', { thread_id: threadId });
       if (!(await window.kazmaConfirm({
-        title: 'Delete session',
-        message: 'Delete session ' + threadId + '?',
-        confirmText: 'Delete',
+        title: label('dashboard.delete_chat_title', 'Delete chat'),
+        message: message,
+        confirmText: label('dashboard.delete', 'Delete'),
         danger: true,
       }))) return;
       try {
         await window.kazmaSave('/api/sessions/' + encodeURIComponent(threadId), { method: 'DELETE', credentials: 'same-origin' });
         loadSessions();
       } catch (e) {
-        window.kazmaAlert && window.kazmaAlert({ title: 'Error', message: 'Error deleting session', variant: 'btn-danger' });
+        window.kazmaAlert && window.kazmaAlert({ title: label('common.error', 'Error'), message: label('dashboard.error_deleting', 'Error deleting session'), variant: 'btn-danger' });
       }
     };
 
     window._clearAllSessions = async function() {
       if (!(await window.kazmaConfirm({
-        title: 'Clear all sessions',
-        message: 'Clear ALL sessions? This cannot be undone.',
-        confirmText: 'Clear all',
+        title: label('dashboard.clear_all_title', 'Clear saved steps'),
+        message: label('dashboard.confirm_clear_all', 'Clear the saved steps of every chat? The chats and their messages stay, and each continues from its messages. Approvals waiting in any chat are cancelled. This cannot be undone.'),
+        confirmText: label('dashboard.clear_all', 'Clear saved steps'),
         danger: true,
       }))) return;
       try {
         await window.kazmaSave('/api/sessions/clear-all', { method: 'POST', credentials: 'same-origin' });
         loadSessions();
       } catch (e) {
-        window.kazmaAlert && window.kazmaAlert({ title: 'Error', message: 'Error clearing sessions', variant: 'btn-danger' });
+        window.kazmaAlert && window.kazmaAlert({ title: label('common.error', 'Error'), message: label('dashboard.error_clearing', 'Error clearing sessions'), variant: 'btn-danger' });
       }
     };
 

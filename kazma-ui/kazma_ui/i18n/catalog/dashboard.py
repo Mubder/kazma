@@ -81,8 +81,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "IDE + code index",
     },
     "dashboard.cap.ide_desc": {
-        "ar": "Monaco وترقيع الملفات وcodebase_search (tree-sitter أو regex)",
-        "en": "Monaco, apply-patch, codebase_search (tree-sitter extra or regex)",
+        "ar": "محرر CodeMirror وترقيع الملفات وcodebase_search (tree-sitter أو regex)",
+        "en": "CodeMirror editor, apply-patch, codebase_search (tree-sitter extra or regex)",
     },
     "dashboard.cap.mcp": {
         "ar": "MCP والمهارات",
@@ -157,8 +157,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "WARNING",
     },
     "dashboard.clear_all": {
-        "ar": "مسح الكل",
-        "en": "Clear All",
+        "ar": "مسح الخطوات المحفوظة",
+        "en": "Clear saved steps",
     },
     "dashboard.clear_all_confirm": {
         "ar": "مسح كل الموافقات المعلقة؟",
@@ -289,12 +289,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Vector memory",
     },
     "dashboard.confirm_clear_all": {
-        "ar": "حذف جميع الجلسات؟ لا يمكن التراجع عن هذا الإجراء.",
-        "en": "Delete ALL sessions? This cannot be undone.",
+        "ar": "مسح الخطوات المحفوظة لكل المحادثات؟ تبقى المحادثات ورسائلها، وتُستأنف كل محادثة من رسائلها. تُلغى الموافقات المعلّقة في أي محادثة، ولا يمكن التراجع عن ذلك.",
+        "en": "Clear the saved steps of every chat? The chats and their messages stay, and each continues from its messages. Approvals waiting in any chat are cancelled. This cannot be undone.",
     },
     "dashboard.confirm_delete_session": {
-        "ar": "حذف الجلسة {thread_id}؟",
-        "en": "Delete session {thread_id}?",
+        "ar": "حذف المحادثة «{title}»؟ تُحذف رسائلها وخطواتها المحفوظة، ويبقى في الذاكرة ما تعلّمه Kazma منها.",
+        "en": "Delete the chat “{title}”? Its messages and saved steps are deleted. What Kazma remembered from it stays in memory.",
     },
     "dashboard.confirm_restore": {
         "ar": "هل أنت متأكد تماماً من رغبتك في استعادة النسخة الاحتياطية",
@@ -827,5 +827,45 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.vectors": {
         "ar": "متجه",
         "en": "vectors",
+    },
+    "dashboard.col_chat": {
+        "ar": "المحادثة",
+        "en": "Chat",
+    },
+    "dashboard.col_steps": {
+        "ar": "الخطوات المحفوظة",
+        "en": "Saved steps",
+    },
+    "dashboard.col_last_activity": {
+        "ar": "آخر نشاط",
+        "en": "Last activity",
+    },
+    "dashboard.no_chat": {
+        "ar": "بلا محادثة",
+        "en": "No chat",
+    },
+    "dashboard.chat_archived": {
+        "ar": "مؤرشفة",
+        "en": "Archived",
+    },
+    "dashboard.platform_web": {
+        "ar": "الويب",
+        "en": "Web",
+    },
+    "dashboard.platform_gateway": {
+        "ar": "البوابة",
+        "en": "Gateway",
+    },
+    "dashboard.delete_chat_title": {
+        "ar": "حذف المحادثة",
+        "en": "Delete chat",
+    },
+    "dashboard.confirm_delete_thread": {
+        "ar": "حذف الخطوات المحفوظة للمسار {thread_id}؟ لا تنتمي إليه أي محادثة.",
+        "en": "Delete the saved steps of thread {thread_id}? No chat belongs to it.",
+    },
+    "dashboard.clear_all_title": {
+        "ar": "مسح الخطوات المحفوظة",
+        "en": "Clear saved steps",
     },
 }

@@ -102,9 +102,9 @@ def test_dash_lists_session_card_is_the_shipped_builder() -> None:
         "const ctx={};ctx.globalThis=ctx;vm.createContext(ctx);"
         "vm.runInContext(fs.readFileSync(process.argv[1],'utf8'),ctx);"
         "const html=ctx.KazmaDashLists.buildSessionCard({"
-        "thread_id:'gw-t-1',platform:'telegram',display_name:'Ali',"
-        "message_count:4,context_tokens:12,created_at:'2026-08-17T12:00:00Z'});"
-        "if(!html.includes('telegram')) process.exit(2);"
+        "thread_id:'gw-t-1',platform:'telegram',title:'Ali',session_id:'s-1',"
+        "message_count:4,steps:12,last_activity:'2026-08-17T12:00:00Z'});"
+        "if(!html.includes('Telegram')) process.exit(2);"
         "if(!html.includes('gw-t-1')) process.exit(3);"
         "if(!html.includes('Ali')) process.exit(4);"
         "if(!html.includes('dash-session-delete')) process.exit(5);"
@@ -119,8 +119,11 @@ def test_dash_lists_session_card_is_the_shipped_builder() -> None:
     assert proc.returncode == 0, proc.stderr
     html = proc.stdout
     assert 'data-thread-id="gw-t-1"' in html
-    assert "telegram" in html
-    assert "Ali" in html
+    assert "Telegram" in html
+    # The chat's title is the user's own words: linked to the chat, never
+    # translated (2026-09-28: every card read "anonymous").
+    assert '<a href="/chat?session=s-1"><strong class="dash-mobile-card-name" translate="no">Ali</strong></a>' in html
+    assert "Messages: 4" in html and "Saved steps: 12" in html
 
 
 def test_settings_and_swarm_tabs_are_nowrap_rails() -> None:

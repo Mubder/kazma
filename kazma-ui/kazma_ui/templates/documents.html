@@ -107,8 +107,18 @@
 
         <div class="docs-actions" style="margin-bottom:.6rem;">
           <button class="btn btn-sm" @click="refreshDetail()">Refresh</button>
-          <input class="mini-input" style="max-width:120px;" x-model="libraryId" placeholder="library_id">
-          <button class="btn btn-sm" @click="indexDoc()" :disabled="currentState !== 'ready'">Index</button>
+          {# A library by name, or a new one: this used to be a bare
+             "library_id" text box that had to hold an existing slug. #}
+          <select class="mini-input" style="max-width:220px;" x-model="libraryId"
+                  aria-label="{{ t('documents.library_pick') }}" @focus="loadLibraries()">
+            <option value="">{{ t('documents.library_pick') }}</option>
+            <template x-for="lib in libraries" :key="lib.id">
+              <option :value="lib.id" x-text="lib.name || lib.id" translate="no"></option>
+            </template>
+            <option value="__new__">{{ t('documents.library_new') }}</option>
+          </select>
+          <button class="btn btn-sm" @click="addToLibrary()"
+                  :disabled="currentState !== 'ready' || !libraryId || acting">{{ t('documents.add_to_library') }}</button>
           <button type="button" class="btn btn-sm btn-danger"
                   title="Delete / archive this document"
                   :disabled="acting || !selected"

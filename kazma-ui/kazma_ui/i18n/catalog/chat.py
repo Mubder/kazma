@@ -745,4 +745,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "اختياري للمحلي",
         "en": "Optional for local",
     },
+    "chat.notify_done_title": {
+        "ar": "Kazma — اكتملت المهمة",
+        "en": "Kazma — task finished",
+    },
+    "chat.notify_done_body": {
+        "ar": "اكتملت مهمتك.",
+        "en": "Your task completed.",
+    },
 }

@@ -22,6 +22,8 @@ function documentsPage() {
     uploading: false,
     forceOcr: false,
     libraryId: "",
+    libraries: [],
+    _librariesLoaded: false,
     events: [],
     eventsFor: null,
     convertFormat: "pdf",
@@ -502,26 +504,66 @@ function documentsPage() {
       }
     },
 
-    async indexDoc() {
-      const lib = (this.libraryId || "").trim();
-      if (!lib) {
-        this.toast("Enter a library_id first", "error");
-        return;
-      }
+    /* The Knowledge libraries a document can be added to, loaded once. */
+    async loadLibraries(force = false) {
+      if (this._librariesLoaded && !force) return;
+      const data = await window.kazmaGetJson("/api/kb/libraries");
+      if (!data || !data.ok) return;
+      this.libraries = (data.libraries || []).map((lib) => ({ id: lib.id, name: lib.name || lib.id }));
+      this._librariesLoaded = true;
+    },
+
+    _tr(key, fallback, vars) {
+      let text = typeof window.t === "function" ? window.t(key) : key;
+      if (!text || text === key) text = fallback;
+      for (const [k, v] of Object.entries(vars || {})) text = text.split("{" + k + "}").join(String(v));
+      return text;
+    },
+
+    /* Add the selected document to a Knowledge library -- an existing one,
+       or a new one named here (the library must exist before a document
+       can be indexed into it). */
+    async addToLibrary() {
+      if (!this.selected || this.acting) return;
+      let lib = (this.libraryId || "").trim();
+      if (!lib) return;
+      this.acting = true;
       try {
+        if (lib === "__new__") {
+          const name = await window.kazmaPrompt({
+            title: this._tr("documents.library_new_title", "New library"),
+            message: this._tr("documents.library_new_prompt", "Name of the library to add this document to:"),
+            defaultValue: this.selected.title || "",
+          });
+          if (!name || !name.trim()) return;
+          const created = await fetch("/api/kb/libraries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: name.trim(), name: name.trim() }),
+          }).then((r) => r.json()).catch(() => ({ ok: false, error: "request failed" }));
+          if (!created.ok) {
+            this.toast(this._tr("documents.library_failed", "Could not add it to the library: {error}", { error: created.error || "" }), "error");
+            return;
+          }
+          lib = created.library.id;
+          await this.loadLibraries(true);
+          this.libraryId = lib;
+        }
         const r = await fetch(`/api/documents/${this.selected.document_id}/index`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ library_id: lib }),
         });
-        const j = await r.json();
+        const j = await r.json().catch(() => ({ ok: false, error: "request failed" }));
+        const shown = (this.libraries.find((l) => l.id === lib) || { name: lib }).name;
         if (j.ok) {
-          this.toast(`Indexed ${j.index.chunk_count} chunk(s) into ${lib}`, "success");
+          const n = (j.index && (j.index.chunk_count ?? j.index.chunks)) || 0;
+          this.toast(this._tr("documents.library_added", "Added {n} passage(s) to “{library}”.", { n, library: shown }), "success");
         } else {
-          this.toast(j.error || "Index failed", "error");
+          this.toast(this._tr("documents.library_failed", "Could not add it to the library: {error}", { error: j.error || "" }), "error");
         }
-      } catch (e) {
-        this.toast("Index failed", "error");
+      } finally {
+        this.acting = false;
       }
     },
 
