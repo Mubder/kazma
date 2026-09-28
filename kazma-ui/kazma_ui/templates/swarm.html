@@ -25,8 +25,9 @@
     <div class="metric-card">
       <div class="metric-icon"><span x-html="KazmaIcons.zap()"></span></div>
       <div class="metric-label">{{ t('swarm.status') }}</div>
-      <div class="metric-value" id="metric-swarm-status" style="color:var(--text-muted);">{{ t('swarm.running') if started else t('swarm.stopped') }}</div>
-      <div class="metric-sub">{{ t('swarm.swarm_active') if started else t('swarm.swarm_idle') }}</div>
+      {% set on_demand = not started and not worker_count and template_count %}
+      <div class="metric-value" id="metric-swarm-status" style="color:var(--text-muted);">{{ t('swarm.running') if started else (t('swarm.on_demand') if on_demand else t('swarm.stopped')) }}</div>
+      <div class="metric-sub" id="metric-swarm-status-sub">{{ t('swarm.swarm_active') if started else (t('swarm.on_demand_sub') if on_demand else t('swarm.swarm_idle')) }}</div>
     </div>
     <div class="metric-card">
       <div class="metric-icon"><span class="ki" data-icon="bar-chart" aria-hidden="true"></span></div>
@@ -98,6 +99,11 @@
             <div id="worker-select-container" style="border:1px solid var(--border);border-radius:var(--radius);padding:8px;min-height:80px;background:rgba(255,255,255,0.02);max-height:200px;overflow-y:auto;">
               <!-- Worker checkboxes rendered by JS with capability badges -->
               <div id="worker-checkboxes" style="display:flex;flex-direction:column;gap:4px;">
+                <label style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.85rem;" class="worker-check-label">
+                  <input type="checkbox" name="selected_workers" value="auto" {% if not workers %}checked{% endif %} style="accent-color:var(--accent);">
+                  <span style="font-weight:500;">{{ t('swarm.auto_worker') }}</span>
+                  <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto;">{{ t('swarm.auto_worker_hint') }}</span>
+                </label>
                 {% for w in workers %}
                 <label style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.85rem;" class="worker-check-label">
                   <input type="checkbox" name="selected_workers" value="{{ w.name }}" style="accent-color:var(--accent);">
@@ -311,6 +317,11 @@
             <label class="form-label">{{ t('swarm.workers_label') }} *</label>
             <div id="play-worker-select-container" style="border:1px solid var(--border);border-radius:var(--radius);padding:8px;min-height:80px;background:rgba(255,255,255,0.02);max-height:150px;overflow-y:auto;">
               <div id="play-worker-checkboxes" style="display:flex;flex-direction:column;gap:4px;">
+                <label style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.85rem;" class="worker-check-label">
+                  <input type="checkbox" name="play_selected_workers" value="auto" {% if not workers %}checked{% endif %} style="accent-color:var(--accent);">
+                  <span style="font-weight:500;">{{ t('swarm.auto_worker') }}</span>
+                  <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto;">{{ t('swarm.auto_worker_hint') }}</span>
+                </label>
                 {% for w in workers %}
                 <label style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.85rem;" class="worker-check-label">
                   <input type="checkbox" name="play_selected_workers" value="{{ w.name }}" style="accent-color:var(--accent);">

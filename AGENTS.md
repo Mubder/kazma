@@ -323,6 +323,13 @@ workspace. Three new modules; understanding their interaction is essential.
 - Native GitHub tools (`git_github_manager/tools.py`) use the shared
   `GitHubClient` (OAuth→PAT→env token) via lazy import, with env-var fallback
   for headless mode. Don't revert to `os.getenv("GITHUB_TOKEN")`-only.
+- **An empty list from GitHub is not "none".** GitHub filters an endpoint
+  to what the token may read (a fine-grained token without "Issues" gets
+  `[]`, not a 403), so `github_list_issues` checks an empty answer against
+  the repository's `open_issues_count` and says the token may lack the
+  permission; on the live install the agent reported "no open issues" over
+  #20 (2026-09-28). Pull requests are dropped BEFORE the list is cut.
+  `tests/test_github_list_issues.py`.
 
 **F. Transports**
 - Web: `/ide` page + `/api/ide/*` router (`ide_api.py`); file-aware AI chat
@@ -412,6 +419,13 @@ after every supervisor iteration and persists it to
   need `graph.aupdate_state`. The resolver only handles read-only subcommands
   (`list`, `compare`, `clear`) which don't need graph access.
 
+**E. The web chat answers `/replay` and `/fork` without the model**
+(`kazma_ui/sse_chat/_time_travel.py`, 2026-09-28): the chat's saved steps and
+a link, `/replay?thread=<id>`, that `replay.js` opens on that chat's
+timeline, where restore and fork are buttons beside what each step holds.
+Before, the text reached the model, which searched the source for what
+"replay" means. `tests/test_web_time_travel_command.py`.
+
 ### 13. Proxy Provider Addon (`kazma-core/kazma_core/proxy/`)
 
 An opt-in, pluggable scraping proxy so `read_url` / `crawl_site` / `web_search`
@@ -462,6 +476,12 @@ swarm works with zero pre-registered workers.
 - **Handoff cycle guards (§4) still apply** to auto-spawned instances — they are
   regular `InProcessWorker`s once spawned. Idle-reap after 5 min;
   `record_activity` refreshes the timer.
+- **The Swarm page offers "auto"** in both worker pickers, chosen by default
+  when nothing is registered, and the status says "On demand" when templates
+  exist and nothing runs (`/api/swarm/status` `templates`). Until 2026-09-28
+  the page refused to dispatch without a registered worker and said "Stopped"
+  over a swarm that answered through the API in 3 s.
+  `tests/test_swarm_auto_worker.py`.
 
 ### 15. V2 Memory Worker & Schedulers (`kazma-core/kazma_core/memory/worker_bootstrap.py`)
 
@@ -976,6 +996,19 @@ out would miss. Legacy rows with empty `delivery_target` fall back to
 `thread_id`, then `"{platform}:unknown"`. The platform-isolation invariant
 (§2) is preserved — `chat_id` never enters graph state; `delivery_target`
 joins `thread_id`/`platform` in the internal `_gateway` routing sub-dict.
+
+**B2. A web turn's delivery target is for reminders, not for answers.**
+`web_gateway_block` stamps the operator's Telegram as a web turn's
+`delivery_target` so a reminder booked on the web rings somewhere. A tool that
+answers INTO the conversation reads the conversation's platform
+(`send_message.get_current_platform()`, bound beside the delivery target in
+the tool worker), never the delivery target alone: `send_file` did, and a web
+chat's files went to Telegram while the answer said "sent to this chat"
+(2026-09-28). On a web turn `send_file` and `generate_image` share a copy into
+the chat (`kazma_core/chat_files.py`, `<data dir>/attachments/shared/`),
+served by `GET /api/chat/files/{id}` to that chat's owner only (raster images
+inline, everything else a sandboxed download) and shown through the Markdown
+the tool hands the model. `tests/test_web_chat_files.py`.
 
 **C. The store's connection is autocommit (2026-09-27).** `SQLiteCronStore`
 opens cron.db with `isolation_level=None`, so every statement is its own
@@ -2415,6 +2448,15 @@ transport when a proxy is configured — CONNECT would break scraping.
 Peer-private abort still runs. Tests: `tests/test_audit_wave8.py`.
 httpx `>=0.27`.
 
+**Every browser context Kazma drives carries the egress guard**
+(`security/browser_egress.py`: a route on the context aborts any request
+`validate_url` would refuse — redirects, subresources, script fetches).
+The "already guarded" mark lives ON the context. It was a set of
+`id(context)`: `read_url` and the Knowledge crawler close their context
+after each fetch, CPython hands the id to the next one, and that context
+was skipped (2026-09-28). `tests/test_browser_egress_every_context.py`
+(real Chromium included).
+
 
 ### 33. Ops alerting — three paths, no fourth notifier
 
@@ -3057,6 +3099,21 @@ writes.
   template compiles in node; `<template x-for>` scope; no second `init()`),
   `tests/js/test_settings_mixins.js`, `tests/test_vendor_codemirror.py` —
   each with a negative control.
+- **Every `KazmaX.member` a page reads exists** (2026-09-28). The Swarm
+  Templates tab called `KazmaUtils.esc` (the helper is `escapeHtml`), the
+  render threw, and its fetch's `catch` showed "Failed to load templates"
+  over three good ones. `tests/js/test_namespace_members.js` loads every
+  script that defines a namespace in a sandbox where no page is ready and
+  checks every member reference in the static JS and the templates.
+- **A control is wired once** (2026-09-28): never an inline `on<event>` in a
+  template and a script listener for the same element and event -- Start
+  All and Stop All sent every click twice. A handler that only prevents the
+  default (`onsubmit="return false;"`) is not an action.
+  `tests/test_ui_double_wiring.py`.
+- **A list shows its empty state only after it has loaded.** The chat
+  sidebar painted "No sessions yet" for a second on every visit (an early
+  re-render replaced the "Loading…" placeholder).
+  `tests/e2e/test_session_list_loading.py`.
 - **A poller reads through `window.kazmaGetJson`** (`auth-guard.js`): the
   parsed body of a 2xx JSON response, else null (an error status, a proxy's
   HTML page, no network); it never throws or logs. While the server restarts
@@ -3129,11 +3186,13 @@ new *guard* (its own code, or other OS-level variables) still needs the
 - **Compile check (Python):** `& '.venv\Scripts\python.exe' -c "import py_compile; py_compile.compile(r'<file>', doraise=True); print('OK')"`
 - **Syntax check (JS):** `node --check "<file>"`
 - **Run tests (single file):** `& '.venv\Scripts\python.exe' -m pytest <path> -v`
-- **Fast FULL suite (use this — ~5 min, not 20+):**
+- **Fast FULL suite (use this — ~10 min, not 40):**
   `python scripts/fast_test.py`
   Crash-tolerant chunked runner: file-chunks run as independent serial pytest
   processes; crashed/empty chunks are retried per-file; poison files are
-  reported. It PRINTS the per-chunk FAILURES tracebacks (deep-audit
+  reported. One chunk per CPU, at most 8 (`DEFAULT_MAX_CHUNKS`: 32 chunks
+  each loading torch crashed 12 of them, 2026-09-25); CI passes
+  `--chunks 4`. It PRINTS the per-chunk FAILURES tracebacks (deep-audit
   2026-08-19 — they used to be captured and discarded, leaving CI-only
   failures undiagnosable) and treats pytest exit 5 ("no tests collected",
   i.e. module-level importorskip like the Playwright e2e suite on a
@@ -3141,7 +3200,8 @@ new *guard* (its own code, or other OS-level variables) still needs the
   pytest-xdist here — worker segfaults (native lib) make
   it silently drop ~half the suite. The serial monolithic run intermittently
   segfaults and takes 20+ min.
-- **Manual verification:** Restart server, test via Telegram and Web UI
+- **Manual verification:** reload through the guard (Server Management
+  above — never a hand restart), then test via Telegram and the Web UI
 
 ## Key References
 

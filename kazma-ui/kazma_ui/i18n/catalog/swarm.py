@@ -120,6 +120,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "اللهجة العربية: ",
         "en": "Arabic Dialect: ",
     },
+    "swarm.auto_worker": {
+        "ar": "تلقائي",
+        "en": "Auto",
+    },
+    "swarm.auto_worker_hint": {
+        "ar": "أفضل عامل مسجل، أو عامل يُنشأ من قالب",
+        "en": "the best registered worker, or one spawned from a template",
+    },
     "swarm.avg_latency": {
         "ar": "متوسط الاستجابة",
         "en": "Avg Latency",
@@ -645,8 +653,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "No workers registered",
     },
     "swarm.no_workers_registered": {
-        "ar": "لا يوجد عمال مسجلون. أضف عمالاً في تبويب سجل العمال.",
-        "en": "No workers registered. Add workers in the Worker Registry tab.",
+        "ar": "لا يوجد عمال مسجلون بعد — الخيار «تلقائي» ينشئ عاملاً من قالب. أضف عمالك في تبويب سجل العمال.",
+        "en": "No workers registered yet — Auto spawns one from a template. Add your own in the Worker Registry tab.",
     },
     "swarm.no_yaml": {
         "ar": "لا يوجد نص YAML لنسخه.",
@@ -663,6 +671,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "swarm.observer": {
         "ar": "المراقب",
         "en": "Observer",
+    },
+    "swarm.on_demand": {
+        "ar": "عند الطلب",
+        "en": "On demand",
+    },
+    "swarm.on_demand_sub": {
+        "ar": "يُنشأ العمال لكل مهمة",
+        "en": "workers spawn per task",
     },
     "swarm.orchestration_pattern": {
         "ar": "نمط التنسيق",
@@ -1095,6 +1111,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "swarm.status_failed": {
         "ar": "فشل",
         "en": "Failed",
+    },
+    "swarm.status_on_demand": {
+        "ar": "● السرب جاهز — يُنشأ العمال من القوالب عند وصول مهمة",
+        "en": "● Swarm ready — workers are spawned from templates when a task arrives",
     },
     "swarm.status_partial": {
         "ar": "جزئي",

@@ -105,6 +105,7 @@ def register_general_routes(
                         "workers": workers,
                         "worker_count": len(workers),
                         "started": started,
+                        "template_count": svc.template_count(),
                         "has_swarm_core": svc.has_swarm_core(),
                         "config": None,
                         "active_page": "swarm",
@@ -125,6 +126,9 @@ def register_general_routes(
             "workers": workers,
             "count": len(workers),
             "started": svc.is_started(),
+            # Templates that spawn a worker when a task arrives: with any, a
+            # swarm with nothing running is ready, not stopped.
+            "templates": svc.template_count(),
             "has_swarm_core": svc.has_swarm_core(),
             "setup_instructions": None,
         }

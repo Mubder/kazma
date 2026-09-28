@@ -18,9 +18,13 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["DEFAULT_HEIGHT", "DEFAULT_WIDTH", "IMAGE_DIR", "MAX_HEIGHT", "MAX_PROMPT_CHARS", "MAX_WIDTH", "MIN_DIMENSION", "generate_image"]
 
@@ -153,11 +157,36 @@ async def generate_image(
         return f"Error: Could not save image to {filepath} — {exc}"
 
     size_kb = len(image_bytes) / 1024
-    return (
+    result = (
         f"Image generated successfully.\n"
         f"  Description: {desc}\n"
         f"  Provider:    {chosen}\n"
         f"  Dimensions:  {width}x{height}\n"
         f"  Size:        {size_kb:.1f} KB\n"
         f"  Saved to:    {filepath}"
+    )
+    return result + await _shown_in_web_chat(filepath)
+
+
+async def _shown_in_web_chat(filepath: Path) -> str:
+    """On a web turn, the line that shows the image in the chat.
+
+    A web chat never displayed a generated image: the agent had to send it,
+    and ``send_file`` sent a web chat's files to Telegram (2026-09-28). The
+    image is the tool's own output, so sharing it into the chat that asked
+    for it needs no second step.
+    """
+    from kazma_core.chat_files import share_file, web_chat_thread
+
+    thread = web_chat_thread()
+    if not thread:
+        return ""
+    try:
+        shared = await asyncio.to_thread(share_file, filepath, thread_id=thread)
+    except (OSError, ValueError) as exc:
+        logger.warning("[image_gen] could not show the image in the web chat: %s", exc)
+        return ""
+    return (
+        "\n  Shown in this chat only where your answer includes this line, "
+        f"exactly as it is: {shared.markdown()}"
     )

@@ -3328,6 +3328,13 @@ details.kazma-working > summary {
   align-items: start;
 }
 @media (max-width: 900px) { .pc-grid { grid-template-columns: 1fr; } }
+/* The two columns need about 700px of their own, and the window's width
+   does not say whether they have it: with the sidebar open a 918px window
+   left the panel ~680px and clipped the detail pane on one side, in both
+   directions (2026-09-28). Collapse on the width the panel actually has;
+   the media query above stays for browsers without container queries. */
+.pc-scope { container-type: inline-size; }
+@container (max-width: 760px) { .pc-grid { grid-template-columns: 1fr; } }
 
 .pc-panel {
   background: var(--tint);

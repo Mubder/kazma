@@ -1,5 +1,82 @@
 # CHANGELOG
 
+## Found by using the live install like a person would (2026-09-28)
+
+**A file asked for in the web chat went to Telegram.** Asked in the web chat
+to generate an image and show it, the agent made the image, sent it with
+`send_file`, and answered "sent to this chat above"; the page showed nothing.
+The file had gone to the operator's Telegram. A web turn's delivery address is
+the operator's Telegram, so that a reminder booked on the web rings somewhere,
+and `send_file` used that address. A web turn now shares a copy into the chat
+itself: the file is stored beside the chat uploads and shown in the answer,
+an image inline and anything else as a download link, only to the owner of
+that chat. `generate_image` shows its own picture the same way, with no
+second step. Telegram, Discord and Slack deliver as before.
+
+**Browser fetches could skip their private-network guard.** The page reader's
+real-browser fallback and the Knowledge crawler open a fresh browser context
+per fetch. The guard that stops a page from redirecting into private addresses
+remembered guarded contexts by their Python `id()`, and a closed context's id
+is handed to the next one, which was then taken for guarded and left without
+it. The mark now lives on the context itself.
+
+**The Swarm page could not use the swarm it describes.** Workers are created on
+demand from templates, and a task sent to "auto" worked (3 s on the live
+install), but the page offered no "auto": with no registered worker it said
+"No workers registered" and refused to dispatch, and the status read
+"Stopped". Both task forms now offer Auto, chosen by default when nothing is
+registered, and the status says the swarm is ready on demand. The Templates tab
+said "Failed to load templates" over three good templates (it called a helper
+that does not exist), and Start All and Stop All sent every click twice.
+
+**The GitHub tool said a repository had no open issues when it had one.** On
+the live install GitHub gave Kazma's token an empty issue list (a token that
+may not read issues gets an empty list, not an error) and the agent reported
+"no open issues" as fact while issue #20 was open. An empty list is now
+checked against the repository's own open count, and the answer says the
+token may lack the permission instead of "none". The list is also cut to ten
+after pull requests are dropped, not before: ten newer pull requests used to
+hide every issue.
+
+**`/replay` and `/fork` in the web chat.** They are commands on Telegram,
+Discord and Slack; typed in the web chat they went to the model, which spent
+40 seconds searching the source code for what "replay" means. The web chat
+now answers at once with the chat's saved steps and a link that opens the
+Time Travel page on that chat.
+
+**A finished answer's header kept a stale clock.** It froze at the last
+progress stamp ("0:13" over a 24-second answer) while a reload showed none;
+a finished answer's duration is on its meta line, and the header now shows
+no clock once it is done.
+
+**Settings → Providers.** The status pills stayed English on the Arabic page,
+the health summary counted switched-off providers ("Chat failing" for an
+Ollama that is turned off), and the provider list and detail pane overflowed
+at common window sizes with the sidebar open. The Research page tagged a
+one-line web search from the chat "[Deep]"; it is now "[Chat]".
+
+**The chat list said "No sessions yet" while it loaded.** For about a second on
+every visit, over 128 chats. It now says it is loading until it has loaded.
+The Archived view offered "Start a new chat" when empty, showed English titles
+in Arabic, and deleted the session count beside its title for good.
+
+**The Workspace page's recent files took 30 s and came back empty.** They were
+found by walking the whole workspace, virtual environments and backups
+included, and one unreadable folder emptied the list. A repository's files now
+come from git; any other folder gets a walk that skips hidden and generated
+folders, and an unreadable folder costs only itself (0.2 s on the live
+install).
+
+**README shows the real test count.** It showed the static count of test
+functions (9,475) while the suite runs 11,400+ tests and the website shows
+that figure. It now shows the collected count, and CI checks it.
+`scripts/fast_test.py` runs at most 8 chunks by default: one per CPU started
+32 torch-loading processes on a 32-thread machine and crashed 12 of them.
+
+Each fix has a test that fails on the old code. Two new class gates: every
+member a page reads from a `Kazma*` script namespace must exist, and no control
+may carry an inline handler and a script listener for the same event.
+
 ## `kazma project init` no longer promises what Kazma does not do (2026-09-28)
 
 The `.kazma/` files it creates (`rules.yaml`, `context.md`, `personality.yaml`,

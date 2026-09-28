@@ -64,6 +64,9 @@ SCHEMA_VERSION = 1
 #: hung import.
 COLLECT_TIMEOUT_S = 600
 
+#: Browser tests, not counted as "collected" (see count_collected_tests).
+E2E_DIR = "tests/e2e"
+
 # Regex patterns counted per-file
 RE_DEF = re.compile(r"^\s*def\s+\w+", re.M)
 RE_ASYNC_DEF = re.compile(r"^\s*async\s+def\s+\w+", re.M)
@@ -309,8 +312,14 @@ def count_collected_tests() -> tuple[int, str]:
     venv_python = str(REPO_ROOT / ".venv" / "Scripts" / "python.exe")
     py = venv_python if (REPO_ROOT / ".venv" / "Scripts" / "python.exe").exists() else "python"
     try:
+        # The suite scripts/fast_test.py runs: tests/e2e (Playwright, their
+        # own CI job) are left out. An environment without Playwright cannot
+        # collect them, so counting them made the figure depend on where it
+        # was measured -- 59 of 11,530 on 2026-09-28, most of the README
+        # gate's slack between a development machine and CI.
         out = subprocess.run(
-            [py, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider"],
+            [py, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider",
+             f"--ignore={E2E_DIR}"],
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,
@@ -341,7 +350,7 @@ def bucket(files: list[str], prefixes: list[str]) -> list[str]:
 
 def collect(runtime_tests: bool = True) -> dict:
     """Measure the repository. ``runtime_tests=False`` skips the pytest
-    collection (the README gate compares static counts only)."""
+    collection (tests that only need the static counts)."""
     py = git_files("*.py")
     src = bucket(py, PACKAGES)
     # Tests live both in the root suite AND in per-package _tests directories
@@ -592,8 +601,10 @@ def render(m: dict) -> str:
         f"| Test LOC | {tests['total']:,} |",
         f"| Test-to-source LOC ratio | ~{ratio:.2f}:1 |",
         "",
-        "> **Collected at runtime** is the real test count pytest would run",
-        "> (`pytest --collect-only`), including `@pytest.mark.parametrize` expansion.",
+        "> **Collected at runtime** is the real test count the main suite runs",
+        "> (`pytest --collect-only`, `tests/e2e` browser tests excluded as",
+        "> `scripts/fast_test.py` excludes them), including `@pytest.mark.parametrize`",
+        "> expansion.",
         "> The `def test_*` / Total test functions counts are static source greps,",
         "> so they under-report — one parametrized function produces many cases.",
         "",
@@ -779,13 +790,20 @@ README_FILE = REPO_ROOT / "README.md"
 
 
 def readme_values(m: dict) -> dict[str, str]:
-    """The handful of numbers README.md restates from METRICS.md."""
+    """The handful of numbers README.md restates from METRICS.md.
+
+    ``tests`` is the count pytest collects (parametrized cases included),
+    the figure the website shows. README showed the static ``def test_*``
+    count until 2026-09-28: 9,475 beside the website's 11,360 and a suite
+    that ran 11,279, so it read as out of date. ``""`` when pytest could not
+    collect -- README's test figures are then left as they are.
+    """
     py, t, a, g = m["python"], m["tests"], m["assets"], m["git"]
     return {
         "loc_k": f"{round(py['total'] / 1000)}K",
         "code_k": f"{round(py['pure_code'] / 1000)}K",
         "js_k": f"{round(a['js_loc'] / 1000)}K",
-        "test_functions": f"{t['test_functions_total']:,}",
+        "tests": f"{t['collected']:,}" if t["collected"] else "",
         "test_files": f"{t['files']:,}",
         "commits": f"{g['commits']:,}",
         "packages": str(len(m["packages"])),
@@ -804,22 +822,25 @@ def sync_readme(m: dict, text: str) -> str:
     """
     v = readme_values(m)
     subs = [
-        # Shields badges
-        (r"(Tests-)[\d%A-Za-z,\.]+?(-10B981)",
-         lambda mm: mm.group(1) + v["test_functions"].replace(",", "%2C") + mm.group(2)),
         (r"(Commits-)[\d%A-Za-z,\.]+?(-6366F1)",
          lambda mm: mm.group(1) + v["commits"].replace(",", "%2C") + "%2B" + mm.group(2)),
         # Headline table row
         (r"\*\*~[\d.]+K LOC\*\* \([\d.]+K Python code \+ [\d.]+K JS\)",
          lambda mm: f"**~{v['loc_k']} LOC** ({v['code_k']} Python code + {v['js_k']} JS)"),
-        (r"\*\*[\d,]+ test functions\*\* \([\d,]+ test files\)",
-         lambda mm: f"**{v['test_functions']} test functions** ({v['test_files']} test files)"),
         (r"\*\*[\d,]+\+ commits\*\* across",
          lambda mm: f"**{v['commits']}+ commits** across"),
         # Typed by hand until 2026-09-28, and it said 7 for a year after
         # kazma-memory was retired.
         (r"across \d+ packages", lambda mm: f"across {v['packages']} packages"),
     ]
+    if v["tests"]:
+        subs += [
+            (r"(Tests-)[\d%A-Za-z,\.]+?(-10B981)",
+             lambda mm: mm.group(1) + v["tests"].replace(",", "%2C") + mm.group(2)),
+            # "test functions" is the static count README showed before.
+            (r"\*\*[\d,]+ test(?:s| functions)\*\* \([\d,]+ test files\)",
+             lambda mm: f"**{v['tests']} tests** ({v['test_files']} test files)"),
+        ]
     for pattern, repl in subs:
         text = re.sub(pattern, repl, text)
     return text
@@ -833,8 +854,11 @@ README_COMMIT_SLACK = 250
 #: Drift tolerated before README's headline counts count as misleading.
 #: Sized to catch the real incident (README said 7,346 tests / ~409K LOC
 #: against 7,659 / 430K) while surviving the ordinary case of a commit that
-#: adds a few tests before the sync-metrics bot regenerates.
+#: adds a few tests before README is regenerated -- and, for the collected
+#: count, the environment: CI's Tests job lacks a few optional packages the
+#: development venv has, so it collected 16 fewer on 2026-09-27.
 README_TEST_SLACK = 75
+README_TEST_FILE_SLACK = 10
 README_LOC_K_SLACK = 5
 
 
@@ -850,8 +874,10 @@ def check_readme(m: dict, text: str) -> list[str]:
 
     So each figure is checked against the relation README actually claims:
 
-    * LOC / test counts are stated as facts -> must match exactly (they move
-      only on real changes, and `--write` keeps them current);
+    * LOC / test counts are stated as facts -> within a small slack (they
+      move only on real changes, and `--write` keeps them current). The test
+      count is the one pytest collects, so ``m`` must carry a collection;
+      without one the check fails with pytest's reason;
     * commits is stated as ``N+`` -> a LOWER BOUND. It may lag, but it may
       never overstate, and it may not rot indefinitely.
     """
@@ -867,17 +893,32 @@ def check_readme(m: dict, text: str) -> list[str]:
     # advertised 7,346 tests against a real 7,659, and ~409K LOC against 430K.
     # A five-test lag is not that. So: bounded drift, and always fail when
     # README contradicts ITSELF, which no amount of lag can excuse.
-    tests_now = m["tests"]["test_functions_total"]
-    stated_tests = re.search(r"\*\*([\d,]+) test functions\*\*", text)
+    tests_now = m["tests"]["collected"]
+    stated_tests = re.search(r"\*\*([\d,]+) tests\*\* \(([\d,]+) test files\)", text)
     if not stated_tests:
-        problems.append("could not find the '**N test functions**' claim")
+        problems.append("could not find the '**N tests** (M test files)' claim")
+    elif not tests_now:
+        # README states the collected count; a gate that cannot collect
+        # cannot check it, and says why rather than passing.
+        problems.append(
+            "cannot check README's test count: pytest could not collect here:\n"
+            + m["tests"]["collect_problem"]
+        )
     else:
         claimed = int(stated_tests.group(1).replace(",", ""))
         if abs(claimed - tests_now) > README_TEST_SLACK:
             problems.append(
-                f"claims {claimed:,} test functions, repository has "
-                f"{tests_now:,} ({abs(claimed - tests_now):,} out, slack is "
+                f"claims {claimed:,} tests, pytest collects {tests_now:,} here "
+                f"({abs(claimed - tests_now):,} out, slack is "
                 f"{README_TEST_SLACK}) — regenerate"
+            )
+    if stated_tests:
+        files_claimed = int(stated_tests.group(2).replace(",", ""))
+        files_now = m["tests"]["files"]
+        if abs(files_claimed - files_now) > README_TEST_FILE_SLACK:
+            problems.append(
+                f"claims {files_claimed:,} test files, repository has "
+                f"{files_now:,} (slack is {README_TEST_FILE_SLACK}) — regenerate"
             )
 
     loc_k_now = round(m["python"]["total"] / 1000)
@@ -994,8 +1035,9 @@ def main(argv: list[str] | None = None) -> int:
         print("error: not a git repository (or not run from repo root)", file=sys.stderr)
         return 2
 
-    # The README gate compares static counts; it has no use for a pytest run.
-    metrics = collect(runtime_tests=not args.check_readme)
+    # Every mode collects: README states the collected count, so its gate
+    # needs it too (8 s locally; check_readme reports a failed collection).
+    metrics = collect(runtime_tests=True)
     if not args.check_readme and not metrics["tests"]["collected"]:
         problem = metrics["tests"]["collect_problem"]
         if args.require_collected:
@@ -1005,7 +1047,11 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        print(f"warning: 'Collected at runtime' will read n/a:\n{problem}", file=sys.stderr)
+        print(
+            f"warning: 'Collected at runtime' will read n/a, and README's test "
+            f"count is left as it is:\n{problem}",
+            file=sys.stderr,
+        )
     rendered = render(metrics)
 
     if args.check_readme:

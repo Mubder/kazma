@@ -252,6 +252,17 @@ class SwarmService:
             return engine.get_autoscaler()
         return getattr(engine, "_autoscaler", None)
 
+    def template_count(self) -> int:
+        """How many autoscaler templates can spawn a worker for a task.
+
+        With none registered and none running, the swarm is not "stopped":
+        a task sent to ``auto`` spawns a worker from one of these. An
+        autoscaler that failed to start is None here (the engine logs and
+        alerts it), so this counts none.
+        """
+        scaler = self.get_autoscaler()
+        return len(scaler.list_templates()) if scaler is not None else 0
+
     def get_circuit_breaker_status(self, name: str) -> dict[str, Any]:
         """Return circuit breaker status for a worker."""
         engine = self._get_engine()

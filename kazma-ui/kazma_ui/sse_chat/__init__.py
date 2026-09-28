@@ -422,6 +422,32 @@ def create_sse_chat_router(
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
+        # /replay and /fork: this chat's saved steps and the Time Travel
+        # link, without the model (it used to search the codebase for what
+        # "replay" means, 2026-09-28).
+        from kazma_ui.sse_chat._time_travel import is_time_travel_command, time_travel_reply
+
+        if is_time_travel_command(raw_msg):
+            import sqlite3
+
+            _recorder = getattr(_get_agent(), "_snapshot_recorder", None)
+            try:
+                _tt = await asyncio.to_thread(time_travel_reply, raw_msg, thread_id, _recorder)
+            except (sqlite3.Error, OSError, ValueError) as exc:
+                logger.warning("[SSE] time-travel command could not read snapshots: %s", exc)
+                _tt = "Could not read this chat's saved steps; the server log says why."
+            _persist_instant_turn(session, thread_id, raw_msg, _tt)
+
+            async def _time_travel_gen() -> AsyncGenerator[str, None]:
+                yield await _journal_fast_path(thread_id, "token", {"content": _tt})
+                yield await _journal_fast_path(thread_id, "done", {"tokens": 0, "cost": 0.0, "duration_ms": 0})
+
+            return StreamingResponse(
+                _time_travel_gen(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
         from kazma_ui.sse_chat._capacity import intercept_capacity_fast_path
 
         _cap_resp, _cap_rewrite = intercept_capacity_fast_path(

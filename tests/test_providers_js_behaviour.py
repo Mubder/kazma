@@ -39,8 +39,11 @@ def _run(script: str) -> object:
         "const M = globalThis.ProvidersManager;\n"
         f"console.log(JSON.stringify((() => {{ {script} }})()));\n"
     )
+    # node writes UTF-8 whatever the console code page; decode it as such
+    # (text=True alone read Arabic labels as cp1252 on Windows).
     out = subprocess.run(
-        ["node", "-e", harness], capture_output=True, text=True, timeout=30
+        ["node", "-e", harness], capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=30,
     )
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout.strip().splitlines()[-1])
@@ -89,3 +92,35 @@ class TestCardState:
         """Not 'unreachable'. Nobody has looked, and saying otherwise invents a
         failure."""
         assert _run("return M.cardState({}, null);") == "untested"
+
+
+class TestSummaryAndLabels:
+    """Live 2026-09-28: the summary counted a switched-off Ollama as "Chat
+    failing" and a switched-off ASR endpoint as "Unreachable", and the row
+    pills stayed English on the Arabic page."""
+
+    def test_disabled_providers_are_not_counted(self):
+        counts = _run(
+            "return M.stateCounts(["
+            "{enabled: true, health: 'healthy'},"
+            "{enabled: false, health: 'chat_failing'},"
+            "{enabled: false, health: 'down'},"
+            "{enabled: true}]);"
+        )
+        assert counts == {"working": 1, "chat_failing": 0, "unreachable": 0, "untested": 1}
+
+    def test_a_provider_without_the_flag_counts(self):
+        """Negative control: only an explicit enabled=false is left out."""
+        assert _run("return M.stateCounts([{health: 'down'}]);")["unreachable"] == 1
+
+    def test_labels_follow_the_page_language(self):
+        label = _run(
+            "window.t = (k) => ({'settings.state_working': 'يعمل'})[k] || k;"
+            "return M.stateLabel('working');"
+        )
+        assert label == "يعمل"
+
+    def test_labels_fall_back_to_english(self):
+        assert _run("return M.stateLabel('chat_failing');") == "Chat failing"
+        assert _run("return M.stateLabel('models_ok_chat_failing');") == "models ok · chat failing"
+        assert _run("return M.stateLabel('no-such-state');") == "Not tested"

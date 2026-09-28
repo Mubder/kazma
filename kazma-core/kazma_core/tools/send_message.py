@@ -26,6 +26,9 @@ __all__ = [
     "get_current_delivery_target",
     "set_current_delivery_target",
     "reset_current_delivery_target",
+    "get_current_platform",
+    "set_current_platform",
+    "reset_current_platform",
     "is_valid_delivery_target",
     "operator_telegram_target",
     "resolve_delivery_target",
@@ -82,6 +85,32 @@ def get_current_delivery_target() -> str | None:
     Returns None when no conversation is active (e.g. headless cron execution).
     """
     return _current_delivery_target.get()
+
+
+# The conversation's own platform ("web", "telegram", ...), bound beside the
+# delivery target from the same ``_gateway`` block. They differ on the web:
+# a web turn's delivery target is the operator's Telegram (where a reminder
+# booked there rings, see ``web_gateway_block``), but a file asked for in the
+# web chat belongs in the web chat -- ``send_file`` read the delivery target
+# alone and sent it to Telegram (2026-09-28).
+_current_platform: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_current_platform", default=None
+)
+
+
+def set_current_platform(platform: str | None) -> contextvars.Token[str | None]:
+    """Bind the running conversation's platform; returns the reset token."""
+    return _current_platform.set((platform or "").strip().lower() or None)
+
+
+def reset_current_platform(token: contextvars.Token[str | None]) -> None:
+    """Restore the prior platform binding."""
+    _current_platform.reset(token)
+
+
+def get_current_platform() -> str | None:
+    """The running conversation's platform, or None outside a conversation."""
+    return _current_platform.get()
 
 
 def is_valid_delivery_target(target: str | None) -> bool:

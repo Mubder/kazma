@@ -44,8 +44,15 @@
 
   // ── Public API ──
   window.KazmaReplay = {
+    /** A thread named by the address (/replay?thread=...), opened once.
+     *  The chat's /replay and /fork answers link here (2026-09-28). */
+    _linked: '',
+
     init: function () {
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      try {
+        this._linked = new URLSearchParams(window.location.search).get('thread') || '';
+      } catch (e) { this._linked = ''; }
       this.loadThreads();
       pollTimer = setInterval(this.loadThreads.bind(this), 10000);
       _registerSoftNavTeardown();
@@ -119,6 +126,14 @@
             sel.appendChild(opt);
           });
           if (prev && (data.threads || []).indexOf(prev) !== -1) sel.value = prev;
+          var linked = KazmaReplay._linked;
+          if (linked) {
+            KazmaReplay._linked = '';
+            if ((data.threads || []).indexOf(linked) !== -1) {
+              sel.value = linked;
+              KazmaReplay.loadTimeline(linked);
+            }
+          }
         })
         .catch(function () { /* network blip — retry on next poll */ });
     },

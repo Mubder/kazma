@@ -98,12 +98,29 @@ var ProvidersManager = window.ProvidersManager = {
         return 'untested';
     },
 
-    /** Human label for a card state. */
+    /** Human label for a card state (English; see stateLabel). */
     STATE_LABELS: {
         working: 'Working',
         chat_failing: 'Chat failing',
         unreachable: 'Unreachable',
         untested: 'Not tested',
+        // The list row's note for chat_failing: the model list answered.
+        models_ok_chat_failing: 'models ok · chat failing',
+    },
+
+    /**
+     * A card state's label in the page's language. The row pills read
+     * STATE_LABELS directly and stayed English on the Arabic page while the
+     * summary above them was translated (2026-09-28); the catalog has had
+     * settings.state_* all along.
+     */
+    stateLabel(state) {
+        var key = 'settings.state_' + state;
+        if (typeof window !== 'undefined' && typeof window.t === 'function') {
+            var translated = window.t(key);
+            if (translated && translated !== key) return translated;
+        }
+        return this.STATE_LABELS[state] || this.STATE_LABELS.untested;
     },
 
     /**
@@ -194,6 +211,10 @@ var ProvidersManager = window.ProvidersManager = {
     stateCounts(providers) {
         var counts = { working: 0, chat_failing: 0, unreachable: 0, untested: 0 };
         (providers || []).forEach(function (p) {
+            // A disabled provider serves nothing: its last result -- often an
+            // old failure -- is not the health of the providers in use. The
+            // live summary counted a switched-off Ollama as "Chat failing".
+            if (p && p.enabled === false) return;
             var state = ProvidersManager.cardState(p, p && p._test);
             if (counts[state] !== undefined) counts[state] += 1;
         });
