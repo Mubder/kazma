@@ -1,0 +1,55 @@
+{
+  "about": "Which part of a scheduled prompt, draft or status the page shows as its text. One rule in two languages: kazma_core.text_display.extract_post_body (server) and KazmaBidi.extractPostBody (bidi.js, used by the Scheduled page and X Studio). tests/test_text_display.py and tests/js/test_post_body_cases.js both read this file, so the two cannot drift: on 2026-09-28 the server copy was fixed and the page kept showing the owner's reminders as \"done\" from its own copy.",
+  "cases": [
+    {
+      "name": "the owner's reminder quotes the reply word it asks for",
+      "text": "⏰ CANCELLATION REMINDER — CoPilot Pro+ renews on October 1, 2026. If you want to avoid the charge, cancel before the renewal date. Reply \"done\" to stop these daily reminders.",
+      "body": "⏰ CANCELLATION REMINDER — CoPilot Pro+ renews on October 1, 2026. If you want to avoid the charge, cancel before the renewal date. Reply \"done\" to stop these daily reminders."
+    },
+    {
+      "name": "a tweet quoting a phrase is the tweet",
+      "text": "Our motto is \"ship it\" and we mean it: every fix lands with a test.",
+      "body": "Our motto is \"ship it\" and we mean it: every fix lands with a test."
+    },
+    {
+      "name": "a quote after a colon that does not end the text",
+      "text": "The rule: \"ship it\" -- and every fix lands with a test, always.",
+      "body": "The rule: \"ship it\" -- and every fix lands with a test, always."
+    },
+    {
+      "name": "an arrow is not a blockquote",
+      "text": "Pipeline researcher -> writer finished in 12 seconds with no errors at all.",
+      "body": "Pipeline researcher -> writer finished in 12 seconds with no errors at all."
+    },
+    {
+      "name": "a short Arabic tweet the wrapper hands over",
+      "text": "Rescheduled batch job 2/8 — POST ONE TWEET ONLY. Call x_post with EXACTLY this text: \"كاظمه لا تجيب فقط — بل تنفّذ وفق جدول.\"",
+      "body": "كاظمه لا تجيب فقط — بل تنفّذ وفق جدول."
+    },
+    {
+      "name": "a short post that is most of the prompt",
+      "text": "Post on X: \"Kazma 0.12 is out, faster recall\"",
+      "body": "Kazma 0.12 is out, faster recall"
+    },
+    {
+      "name": "an unclosed quote at the end of a long wrapper",
+      "text": "Rescheduled batch job 2/8 — POST ONE TWEET ONLY. Call x_post with EXACTLY this text (do not alter, translate, or add hashtags): \"كاظمه لا تجيب فقط — بل تنفّذ وفق جدول. حدد مهمة في التاسعة صباحًا وستعم",
+      "body": "كاظمه لا تجيب فقط — بل تنفّذ وفق جدول. حدد مهمة في التاسعة صباحًا وستعم"
+    },
+    {
+      "name": "a status that hands the tweet over as a blockquote",
+      "text": "Status for batch job 2/8 — tweet posting: 1. **x_post attempted** with the exact locked text (unchanged, no extra hashtags): > كاظمه لا تجيب فقط — بل تنفّذ وفق جدول. حدد مهمة في التاسعة صباحًا وست",
+      "body": "كاظمه لا تجيب فقط — بل تنفّذ وفق جدول. حدد مهمة في التاسعة صباحًا وست"
+    },
+    {
+      "name": "a plain tweet is itself",
+      "text": "كاظمه لا تجيب فقط — بل تنفّذ وفق جدول. حدد مهمة في التاسعة صباحًا وستعم",
+      "body": "كاظمه لا تجيب فقط — بل تنفّذ وفق جدول. حدد مهمة في التاسعة صباحًا وستعم"
+    },
+    {
+      "name": "whitespace is collapsed",
+      "text": "hello\n  from   kazma",
+      "body": "hello from kazma"
+    }
+  ]
+}

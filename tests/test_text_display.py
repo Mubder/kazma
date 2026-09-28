@@ -115,6 +115,19 @@ def test_a_short_post_that_is_most_of_the_prompt_is_still_the_post() -> None:
     assert extract_post_body(prompt) == "Kazma 0.12 is out, faster recall"
 
 
+def test_the_shared_cases_hold_for_the_server_copy() -> None:
+    """The same file tests/js/test_post_body_cases.js holds bidi.js to."""
+    import json
+    from pathlib import Path
+
+    cases = json.loads(
+        (Path(__file__).parent / "fixtures" / "post_body_cases.json").read_text(encoding="utf-8")
+    )["cases"]
+    assert len(cases) >= 8
+    wrong = {c["name"]: extract_post_body(c["text"]) for c in cases if extract_post_body(c["text"]) != c["body"]}
+    assert not wrong, wrong
+
+
 def test_empty_input() -> None:
     assert extract_post_body("") == ""
     assert extract_post_body("   ") == ""

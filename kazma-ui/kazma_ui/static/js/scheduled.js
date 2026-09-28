@@ -148,7 +148,9 @@ function scheduledPage() {
         },
 
         summaryKicker(task) {
-            if (task && task.kicker) return String(task.kicker);
+            // The server decides the kicker for its own rows, an empty one
+            // included; only text without one is worked out here.
+            if (task && typeof task.kicker === 'string') return task.kicker;
             const bidi = window.KazmaBidi;
             if (bidi && bidi.displayKicker) {
                 return bidi.displayKicker((task && task.summary) || '');

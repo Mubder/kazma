@@ -9,7 +9,13 @@ of its prompt (`… EXACTLY this text: "…"`); a reminder that says *Reply
 reminder's own text disappeared. A quoted fragment is now the text only
 when the prompt hands it over with a colon and ends with it, or when it is
 most of the message; a tweet quoting a phrase and an arrow ("researcher ->
-writer") are left whole.
+writer") are left whole. The rule lived twice — on the server and in the
+page's own script, which kept saying "done" after the server was fixed —
+and both now read one set of cases (`tests/fixtures/post_body_cases.json`),
+so they cannot drift apart again. With the text visible, the two
+reminders turned out to be different ones: SuperGrok Heavy (renewal date
+September 25, already past, so the agent answers it is out of date) and
+CoPilot Pro+ (October 1).
 
 Polish on the way: the Knowledge page counts chunks in proper Arabic
 ("4539 مقطعاً", not "4539 مقطع") through a plural helper every page can use
