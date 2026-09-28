@@ -1,6 +1,15 @@
 /** Settings mixin: core — state, init, _fetch, onTabChange, restartServer */
 (function (root) {
     "use strict";
+    // Text built here: the catalog's text in the page's language, else the
+    // English given; {name} placeholders filled from vars.
+    function _k(key, en, vars) {
+        var f = root && root.kazmaT;
+        if (typeof f === "function") return f(key, en, vars);
+        var s = en;
+        if (vars) for (var v in vars) s = s.split("{" + v + "}").join(String(vars[v]));
+        return s;
+    }
     root.KazmaSettingsMixins = root.KazmaSettingsMixins || {};
     root.KazmaSettingsMixins.core = function () {
         return {
@@ -135,13 +144,13 @@
         embedder: { provider: 'local', model: 'BAAI/bge-m3', dim: 1024, base_url: '', api_key_env: 'KAZMA_EMBED_API_KEY', _preset: 'BAAI/bge-m3' },
         embedderStatus: { config: {}, active: null, db: { episodes: {}, beliefs: {} } },
         embedderPresets: [
-            { model: 'BAAI/bge-m3', dim: 1024, label: 'BAAI/bge-m3 — multilingual (recommended)' },
-            { model: 'BAAI/bge-large-en-v1.5', dim: 1024, label: 'BAAI/bge-large-en-v1.5 — English' },
+            { model: 'BAAI/bge-m3', dim: 1024, label: 'BAAI/bge-m3 — multilingual (recommended)', note: 'multilingual_recommended' },
+            { model: 'BAAI/bge-large-en-v1.5', dim: 1024, label: 'BAAI/bge-large-en-v1.5 — English', note: 'english' },
             { model: 'intfloat/multilingual-e5-large', dim: 1024, label: 'intfloat/multilingual-e5-large' },
-            { model: 'Snowflake/snowflake-arctic-embed-l', dim: 1024, label: 'Snowflake arctic-embed-l (English)' },
+            { model: 'Snowflake/snowflake-arctic-embed-l', dim: 1024, label: 'Snowflake arctic-embed-l (English)', note: 'english' },
             { model: 'nomic-ai/nomic-embed-text-v1.5', dim: 768, label: 'nomic-embed-text-v1.5' },
             { model: 'sentence-transformers/paraphrase-multilingual-mistral', dim: 768, label: 'paraphrase-multilingual-mistral' },
-            { model: 'all-MiniLM-L6-v2', dim: 384, label: 'all-MiniLM-L6-v2 — lightweight (legacy)' },
+            { model: 'all-MiniLM-L6-v2', dim: 384, label: 'all-MiniLM-L6-v2 — lightweight (legacy)', note: 'lightweight_legacy' },
         ],
         embedderSaving: false,
         embedderRestarting: false,
@@ -632,7 +641,7 @@
             const title = opts.title || 'Restart server?';
             const message = opts.message || 'The server will restart with the saved embedder config. The page will reconnect automatically. Unsaved chat sessions are persisted.';
             if (!restartNeeded()) {
-                showToast(opts.noRestartMsg || 'No restart needed — config already matches the running server.', 'info');
+                showToast(opts.noRestartMsg || _k('settings.core.no_restart_needed_config_already', 'No restart needed — config already matches the running server.'), 'info');
                 return;
             }
             const ok = await window.kazmaConfirm({ title, message, danger: true });
@@ -645,11 +654,11 @@
                 });
                 const data = await resp.json();
                 if (data.status === 'error') {
-                    showToast(data.detail || 'Restart failed', 'error');
+                    showToast(data.detail || _k('settings.core.restart_failed', 'Restart failed'), 'error');
                     setBusy(false);
                     return;
                 }
-                showToast('Restarting server… the page will reload shortly.', 'info', 5000);
+                showToast(_k('settings.core.restarting_server_the_page_will', 'Restarting server… the page will reload shortly.'), 'info', 5000);
                 // Poll the health endpoint until it comes back, then reload.
                 const start = Date.now();
                 const poll = async () => {
@@ -661,7 +670,7 @@
                         }
                     } catch (e) { /* server down — expected during restart */ }
                     if (Date.now() - start > 60000) {
-                        showToast('Server did not come back — check the terminal.', 'error');
+                        showToast(_k('settings.core.server_did_not_come_back', 'Server did not come back — check the terminal.'), 'error');
                         setBusy(false);
                         return;
                     }
@@ -669,7 +678,7 @@
                 };
                 setTimeout(poll, 1000);
             } catch (e) {
-                showToast('Restart request failed: ' + e.message, 'error');
+                showToast(_k('settings.core.restart_request_failed', 'Restart request failed: ') + e.message, 'error');
                 setBusy(false);
             }
         },

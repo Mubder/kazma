@@ -39,8 +39,7 @@
 <div class="docs-wrap" x-data="documentsPage()" role="main" aria-label="{{ t('nav.documents') }}">
 
   <div class="card" style="padding:1rem 1.25rem;margin-bottom:1rem;">
-    <strong>{{ t('nav.documents') }}</strong> — upload a document; it is quarantined, validated,
-    parsed out-of-process, and made available by opaque ID. Processing is durable and restart-safe.
+    <strong>{{ t('nav.documents') }}</strong> {{ t('documents.intro') }}
   </div>
 
   <div class="docs-grid">
@@ -48,7 +47,7 @@
     <div>
       <div class="card" style="padding:1rem;margin-bottom:1rem;">
         <div class="drop-zone" :class="{ 'dragover': dragover }"
-             role="region" aria-label="Upload document"
+             role="region" aria-label="{{ t('documents.upload_region') }}"
              @click="$refs.file.click()"
              @dragover.prevent="dragover = true"
              @dragleave.prevent="dragover = false"
@@ -56,38 +55,38 @@
           <svg width="28" height="28" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" style="margin-bottom:6px;">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
           </svg>
-          <div x-show="!uploading" x-cloak>Drop a file here or click to choose</div>
-          <div x-show="uploading" x-cloak>Uploading…</div>
+          <div x-show="!uploading" x-cloak>{{ t('documents.drop_hint') }}</div>
+          <div x-show="uploading" x-cloak>{{ t('documents.uploading') }}</div>
           <input type="file" x-ref="file" style="display:none" @change="onPick($event)">
         </div>
         <label style="display:flex;align-items:center;gap:6px;margin-top:.6rem;font-size:.78rem;color:var(--text-muted);">
-          <input type="checkbox" x-model="forceOcr"> Force OCR on this upload
+          <input type="checkbox" x-model="forceOcr"> {{ t('documents.force_ocr') }}
         </label>
       </div>
 
       <div class="card" style="padding:1rem;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;">
-          <strong>Library</strong>
-          <button class="btn btn-sm" @click="loadDocuments()">Refresh</button>
+          <strong>{{ t('documents.library') }}</strong>
+          <button class="btn btn-sm" @click="loadDocuments()">{{ t('common.refresh') }}</button>
         </div>
-        <div x-show="documents.length === 0" x-cloak style="color:var(--text-muted);font-size:.8rem;">No documents yet.</div>
+        <div x-show="documents.length === 0" x-cloak style="color:var(--text-muted);font-size:.8rem;">{{ t('documents.no_documents') }}</div>
         <template x-for="d in documents" :key="d.document_id">
           <div class="doc-row" :class="{ selected: selected && selected.document_id === d.document_id }" @click="openDocument(d.document_id)">
             <div style="min-width:0;flex:1;">
-              <div class="doc-title" dir="auto" x-text="d.title"></div>
-              <div class="doc-meta" x-text="d.document_id.slice(0,8)"></div>
+              <div class="doc-title" dir="auto" translate="no" x-text="d.title"></div>
+              <div class="doc-meta" translate="no" x-text="d.document_id.slice(0,8)"></div>
             </div>
             <div class="doc-row-actions">
-              <span class="state-badge" :class="stateClass(d.state)" x-text="d.state || 'unknown'"></span>
+              <span class="state-badge" :class="stateClass(d.state)" x-text="tOr('documents.state_' + (d.state || 'unknown'), (d.state || 'unknown'))"></span>
               <button type="button" class="btn btn-sm btn-danger"
-                      title="Delete / archive this document"
+                      title="{{ t('documents.delete_title') }}"
                       :disabled="acting"
-                      @click.stop="deleteDocument(d.document_id, d.title)">Delete</button>
+                      @click.stop="deleteDocument(d.document_id, d.title)">{{ t('common.delete') }}</button>
             </div>
           </div>
         </template>
         <p style="margin:.55rem 0 0;font-size:.7rem;color:var(--text-muted);">
-          Delete archives the document (soft-delete). Indexed copies are removed; file bytes are reclaimed later by GC.
+          {{ t('documents.delete_hint') }}
         </p>
       </div>
     </div>
@@ -95,18 +94,18 @@
     {# ── Right: detail ── #}
     <div>
       <div class="card" style="padding:1rem;" x-show="!selected" x-cloak>
-        <span style="color:var(--text-muted);font-size:.85rem;">Select a document to inspect its content, versions, and jobs.</span>
+        <span style="color:var(--text-muted);font-size:.85rem;">{{ t('documents.select_hint') }}</span>
       </div>
 
       <div class="card" style="padding:1rem;" x-show="selected" x-cloak>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.5rem;">
-          <strong dir="auto" x-text="selected ? selected.title : ''"></strong>
-          <span class="state-badge" :class="stateClass(currentState)" x-text="currentState || ''"></span>
+          <strong dir="auto" translate="no" x-text="selected ? selected.title : ''"></strong>
+          <span class="state-badge" :class="stateClass(currentState)" x-text="currentState ? tOr('documents.state_' + currentState, currentState) : ''"></span>
         </div>
-        <div class="doc-meta" x-text="selected ? selected.document_id : ''" style="margin-bottom:.6rem;"></div>
+        <div class="doc-meta" translate="no" x-text="selected ? selected.document_id : ''" style="margin-bottom:.6rem;"></div>
 
         <div class="docs-actions" style="margin-bottom:.6rem;">
-          <button class="btn btn-sm" @click="refreshDetail()">Refresh</button>
+          <button class="btn btn-sm" @click="refreshDetail()">{{ t('common.refresh') }}</button>
           {# A library by name, or a new one: this used to be a bare
              "library_id" text box that had to hold an existing slug. #}
           <select class="mini-input" style="max-width:220px;" x-model="libraryId"
@@ -120,18 +119,18 @@
           <button class="btn btn-sm" @click="addToLibrary()"
                   :disabled="currentState !== 'ready' || !libraryId || acting">{{ t('documents.add_to_library') }}</button>
           <button type="button" class="btn btn-sm btn-danger"
-                  title="Delete / archive this document"
+                  title="{{ t('documents.delete_title') }}"
                   :disabled="acting || !selected"
-                  @click="deleteDocument(selected.document_id, selected.title)">Delete / Archive</button>
+                  @click="deleteDocument(selected.document_id, selected.title)">{{ t('documents.delete_archive') }}</button>
         </div>
 
         {# Document actions — gated by capability health #}
         <div class="doc-actions-card two-col-grid" x-show="currentState === 'ready'" x-cloak
              style="margin-bottom:.6rem;">
           <div>
-            <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.25rem;">Convert</div>
+            <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.25rem;">{{ t('documents.convert') }}</div>
             <div class="docs-actions">
-              <select class="mini-input" x-model="convertFormat">
+              <select class="mini-input" x-model="convertFormat" translate="no">
                 <option value="pdf">pdf</option>
                 <option value="html">html</option>
                 <option value="docx">docx</option>
@@ -139,37 +138,37 @@
               </select>
               <button class="btn btn-sm" @click="convertDoc()"
                       :disabled="acting || !rendererReady()"
-                      :title="rendererReady() ? '' : 'No renderer engine available'">Convert</button>
+                      :title="rendererReady() ? '' : t('documents.no_renderer')">{{ t('documents.convert') }}</button>
             </div>
           </div>
           <div>
-            <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.25rem;">PDF tools</div>
+            <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.25rem;">{{ t('documents.pdf_tools') }}</div>
             <div class="docs-actions" style="align-items:center;">
               <button class="btn btn-sm" @click="pdfInfo()"
                       :disabled="acting || !mutatorReady()"
-                      :title="mutatorReady() ? '' : 'No PDF engine available'">PDF info</button>
-              <input class="mini-input" type="number" min="1" style="max-width:60px;" x-model.number="splitStart" placeholder="from">
-              <input class="mini-input" type="number" min="0" style="max-width:60px;" x-model.number="splitEnd" placeholder="to">
+                      :title="mutatorReady() ? '' : t('documents.no_pdf_engine')">{{ t('documents.pdf_info') }}</button>
+              <input class="mini-input" type="number" min="1" style="max-width:60px;" x-model.number="splitStart" placeholder="{{ t('documents.from') }}">
+              <input class="mini-input" type="number" min="0" style="max-width:60px;" x-model.number="splitEnd" placeholder="{{ t('documents.to') }}">
               <button class="btn btn-sm" @click="splitDoc()"
                       :disabled="acting || !mutatorReady()"
-                      :title="mutatorReady() ? '' : 'No PDF engine available'">Split</button>
+                      :title="mutatorReady() ? '' : t('documents.no_pdf_engine')">{{ t('documents.split') }}</button>
               <button class="btn btn-sm" @click="redactDoc()"
                       :disabled="acting || !mutatorReady()"
-                      :title="mutatorReady() ? '' : 'No PDF engine available'">Redact</button>
+                      :title="mutatorReady() ? '' : t('documents.no_pdf_engine')">{{ t('documents.redact') }}</button>
             </div>
           </div>
         </div>
 
         {# Derived artifacts — downloadable by opaque ID #}
         <details x-show="artifacts.length" x-cloak style="margin-bottom:.4rem;">
-          <summary style="cursor:pointer;font-size:.8rem;">Artifacts (<span x-text="artifacts.length"></span>)</summary>
+          <summary style="cursor:pointer;font-size:.8rem;">{{ t('documents.artifacts') }} (<span x-text="artifacts.length"></span>)</summary>
           <template x-for="a in artifacts" :key="a.artifact_id">
             <div class="evt-row" style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;">
               <span>
-                <span x-text="a.operation"></span> ·
-                <span x-text="(a.output && a.output.extension) || ''"></span>
+                <span translate="no" x-text="a.operation"></span> ·
+                <span translate="no" x-text="(a.output && a.output.extension) || ''"></span>
               </span>
-              <a class="btn btn-sm" :href="artifactUrl(a.artifact_id)" download>Download</a>
+              <a class="btn btn-sm" :href="artifactUrl(a.artifact_id)" download>{{ t('documents.download') }}</a>
             </div>
           </template>
         </details>
@@ -177,48 +176,48 @@
         {# Content preview — dir=auto for Arabic/English BiDi (Phase 10 a11y) #}
         <div style="margin-bottom:.6rem;">
           <div style="display:flex;align-items:center;justify-content:space-between;">
-            <span style="font-size:.75rem;color:var(--text-muted);">Content preview</span>
-            <span class="doc-meta" x-show="pageCount" x-text="pageCount + ' page(s)'" x-cloak></span>
+            <span style="font-size:.75rem;color:var(--text-muted);">{{ t('documents.content_preview') }}</span>
+            <span class="doc-meta" x-show="pageCount" x-text="t('documents.pages_n').replace('{n}', pageCount)" x-cloak></span>
           </div>
           <div class="doc-preview document-content" dir="auto"
-               x-text="preview || (currentState === 'ready' ? '(empty)' : 'Not ready — still processing.')"></div>
+               translate="no" x-text="preview || (currentState === 'ready' ? t('documents.empty') : t('documents.not_ready'))"></div>
         </div>
 
         {# Versions #}
         <details style="margin-bottom:.4rem;">
-          <summary style="cursor:pointer;font-size:.8rem;">Versions (<span x-text="versions.length"></span>)</summary>
+          <summary style="cursor:pointer;font-size:.8rem;">{{ t('documents.versions') }} (<span x-text="versions.length"></span>)</summary>
           <template x-for="v in versions" :key="v.version_id">
             <div class="evt-row">
-              v<span x-text="v.version_number"></span> · <span dir="auto" x-text="v.original_filename"></span> · <span x-text="v.mime_type"></span>
+              v<span x-text="v.version_number"></span> · <span dir="auto" translate="no" x-text="v.original_filename"></span> · <span translate="no" x-text="v.mime_type"></span>
             </div>
           </template>
         </details>
 
         {# Jobs + dead-letter diagnostics #}
         <details open>
-          <summary style="cursor:pointer;font-size:.8rem;">Jobs &amp; diagnostics</summary>
+          <summary style="cursor:pointer;font-size:.8rem;">{{ t('documents.jobs') }}</summary>
           <template x-for="j in jobs" :key="j.job_id">
             <div style="border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:.4rem .5rem;margin:.35rem 0;">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:.4rem;">
-                <span class="doc-meta" x-text="j.job_id.slice(0,8)"></span>
-                <span class="state-badge" :class="stateClass(j.state)" x-text="j.state"></span>
+                <span class="doc-meta" translate="no" x-text="j.job_id.slice(0,8)"></span>
+                <span class="state-badge" :class="stateClass(j.state)" x-text="tOr('documents.state_' + j.state, j.state)"></span>
               </div>
               <div class="doc-meta" x-show="j.error_code" x-cloak>
-                <span class="evt-err" x-text="j.error_code"></span>: <span dir="auto" x-text="j.error_message"></span>
+                <span class="evt-err" translate="no" x-text="j.error_code"></span>: <span dir="auto" translate="no" x-text="j.error_message"></span>
               </div>
               <div class="docs-actions" style="margin-top:.3rem;">
-                <button class="btn btn-sm" @click="showEvents(j.job_id)">Events</button>
+                <button class="btn btn-sm" @click="showEvents(j.job_id)">{{ t('documents.events') }}</button>
                 <button class="btn btn-sm" @click="cancelJob(j.job_id)"
-                        x-show="!['ready','cancelled','dead_letter','rejected'].includes(j.state)" x-cloak>Cancel</button>
+                        x-show="!['ready','cancelled','dead_letter','rejected'].includes(j.state)" x-cloak>{{ t('common.cancel') }}</button>
                 <button class="btn btn-sm" @click="retryJob(j.job_id)"
-                        x-show="['dead_letter','rejected'].includes(j.state)" x-cloak>Retry</button>
+                        x-show="['dead_letter','rejected'].includes(j.state)" x-cloak>{{ t('common.retry') }}</button>
               </div>
               <template x-if="eventsFor === j.job_id">
                 <div style="margin-top:.35rem;">
                   <template x-for="e in events" :key="e.created_at + e.to_state">
                     <div class="evt-row">
-                      <span x-text="e.to_state"></span>
-                      <span x-show="e.error_code" class="evt-err" x-cloak> · <span x-text="e.error_code"></span></span>
+                      <span x-text="tOr('documents.state_' + e.to_state, e.to_state)"></span>
+                      <span x-show="e.error_code" class="evt-err" x-cloak> · <span translate="no" x-text="e.error_code"></span></span>
                     </div>
                   </template>
                 </div>
@@ -231,29 +230,29 @@
       {# Capability health #}
       <div class="card" style="padding:1rem;margin-top:1rem;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">
-          <strong>Capabilities</strong>
-          <button class="btn btn-sm" @click="loadHealth()">Refresh</button>
+          <strong>{{ t('documents.capabilities') }}</strong>
+          <button class="btn btn-sm" @click="loadHealth()">{{ t('common.refresh') }}</button>
         </div>
         <div x-show="health" x-cloak>
           <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.3rem;">
-            Worker: <span x-text="health && health.worker && health.worker.running ? 'running' : 'stopped'"></span>
+            {{ t('documents.worker') }} <span x-text="health && health.worker && health.worker.running ? t('documents.worker_running') : t('documents.worker_stopped')"></span>
           </div>
           <template x-for="p in (health ? health.parsers : [])" :key="p.parser_id">
-            <span class="cap-pill" :class="capClass(p.readiness)"><span x-text="p.parser_id"></span>: <span x-text="p.readiness"></span></span>
+            <span class="cap-pill" :class="capClass(p.readiness)"><span translate="no" x-text="p.parser_id"></span>: <span x-text="tOr('documents.cap_' + p.readiness, p.readiness)"></span></span>
           </template>
           <div style="margin-top:.3rem;">
             <template x-for="r in (health ? health.renderers : [])" :key="r.renderer_id">
-              <span class="cap-pill" :class="capClass(r.readiness)"><span x-text="r.renderer_id"></span>: <span x-text="r.readiness"></span></span>
+              <span class="cap-pill" :class="capClass(r.readiness)"><span translate="no" x-text="r.renderer_id"></span>: <span x-text="tOr('documents.cap_' + r.readiness, r.readiness)"></span></span>
             </template>
           </div>
           <div style="margin-top:.3rem;">
             <template x-for="m in (health ? health.mutators : [])" :key="m.renderer_id">
-              <span class="cap-pill" :class="capClass(m.readiness)"><span x-text="m.renderer_id"></span>: <span x-text="m.readiness"></span></span>
+              <span class="cap-pill" :class="capClass(m.readiness)"><span translate="no" x-text="m.renderer_id"></span>: <span x-text="tOr('documents.cap_' + m.readiness, m.readiness)"></span></span>
             </template>
           </div>
           <div style="margin-top:.3rem;" x-show="health && health.ocr" x-cloak>
             <span class="cap-pill" :class="capClass(health && health.ocr ? health.ocr.readiness : 'unavailable')">
-              OCR: <span x-text="health && health.ocr ? health.ocr.readiness : 'unavailable'"></span>
+              {{ t('documents.ocr') }} <span x-text="tOr('documents.cap_' + (health && health.ocr ? health.ocr.readiness : 'unavailable'), (health && health.ocr ? health.ocr.readiness : 'unavailable'))"></span>
             </span>
           </div>
         </div>
@@ -262,71 +261,71 @@
       {# ── Operations: queue, capacity, dead-letters, storage, audit, GC ── #}
       <div class="card" style="padding:1rem;margin-top:1rem;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">
-          <strong>Operations</strong>
-          <button class="btn btn-sm" @click="loadOps()">Refresh</button>
+          <strong>{{ t('documents.operations') }}</strong>
+          <button class="btn btn-sm" @click="loadOps()">{{ t('common.refresh') }}</button>
         </div>
 
         <div x-show="capacity" x-cloak>
           <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem;">
             <span class="cap-pill" :class="capStatusClass(capacity ? capacity.status : '')">
-              status: <span x-text="capacity ? capacity.status : '—'"></span>
+              {{ t('documents.status') }} <span x-text="capacity ? tOr('documents.cap_' + capacity.status, capacity.status) : '—'"></span>
             </span>
             <template x-for="reason in (capacity ? capacity.degraded_reasons : [])" :key="reason">
-              <span class="cap-pill cap-degraded" x-text="reason"></span>
+              <span class="cap-pill cap-degraded" translate="no" x-text="reason"></span>
             </template>
           </div>
 
           {# Queue metrics #}
           <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem;font-size:.74rem;">
-            <div>Queue depth: <strong x-text="capacity && capacity.queue ? (capacity.queue.depth ?? '—') : '—'"></strong></div>
-            <div>Active leases: <strong x-text="capacity && capacity.queue ? (capacity.queue.active_leases ?? '—') : '—'"></strong></div>
-            <div>Retry waiting: <strong x-text="capacity && capacity.queue ? (capacity.queue.retry_waiting ?? '—') : '—'"></strong></div>
-            <div>Dead letters: <strong class="evt-err" x-text="capacity && capacity.queue ? (capacity.queue.dead_letter ?? '—') : '—'"></strong></div>
-            <div>Oldest age (s): <strong x-text="capacity && capacity.queue ? (capacity.queue.oldest_age_seconds ?? '—') : '—'"></strong></div>
-            <div>Backlog: <strong x-text="capacity && capacity.queue ? (capacity.queue.non_terminal ?? '—') : '—'"></strong></div>
+            <div>{{ t('documents.queue_depth') }} <strong x-text="capacity && capacity.queue ? (capacity.queue.depth ?? '—') : '—'"></strong></div>
+            <div>{{ t('documents.active_leases') }} <strong x-text="capacity && capacity.queue ? (capacity.queue.active_leases ?? '—') : '—'"></strong></div>
+            <div>{{ t('documents.retry_waiting') }} <strong x-text="capacity && capacity.queue ? (capacity.queue.retry_waiting ?? '—') : '—'"></strong></div>
+            <div>{{ t('documents.dead_letters') }} <strong class="evt-err" x-text="capacity && capacity.queue ? (capacity.queue.dead_letter ?? '—') : '—'"></strong></div>
+            <div>{{ t('documents.oldest_age') }} <strong x-text="capacity && capacity.queue ? (capacity.queue.oldest_age_seconds ?? '—') : '—'"></strong></div>
+            <div>{{ t('documents.backlog') }} <strong x-text="capacity && capacity.queue ? (capacity.queue.non_terminal ?? '—') : '—'"></strong></div>
           </div>
 
           {# Storage metrics #}
           <div style="margin-top:.4rem;font-size:.74rem;" x-show="ops && ops.storage" x-cloak>
-            Storage: logical <strong x-text="ops && ops.storage ? fmtBytes(ops.storage.logical_bytes) : '—'"></strong>
-            · physical <strong x-text="ops && ops.storage ? fmtBytes(ops.storage.physical_bytes) : '—'"></strong>
-            · dedup <strong x-text="ops && ops.storage ? ops.storage.dedup_ratio + '×' : '—'"></strong>
+            {{ t('documents.storage_logical') }} <strong x-text="ops && ops.storage ? fmtBytes(ops.storage.logical_bytes) : '—'"></strong>
+            {{ t('documents.storage_physical') }} <strong x-text="ops && ops.storage ? fmtBytes(ops.storage.physical_bytes) : '—'"></strong>
+            {{ t('documents.storage_dedup') }} <strong x-text="ops && ops.storage ? ops.storage.dedup_ratio + '×' : '—'"></strong>
           </div>
           <div style="margin-top:.2rem;font-size:.74rem;" x-show="ops && ops.tenant_quota" x-cloak>
-            Quota: <strong x-text="ops && ops.tenant_quota ? fmtBytes(ops.tenant_quota.used_bytes) : '—'"></strong>
+            {{ t('documents.quota') }} <strong x-text="ops && ops.tenant_quota ? fmtBytes(ops.tenant_quota.used_bytes) : '—'"></strong>
             / <span x-text="ops && ops.tenant_quota ? fmtBytes(ops.tenant_quota.quota_bytes) : '—'"></span>
           </div>
 
           {# Multi-replica readiness #}
           <div style="margin-top:.3rem;" x-show="readiness" x-cloak>
             <span class="cap-pill" :class="capStatusClass(readiness ? readiness.status : '')">
-              storage: <span x-text="readiness ? readiness.status : '—'"></span>
+              {{ t('documents.storage_status') }} <span x-text="readiness ? tOr('documents.cap_' + readiness.status, readiness.status) : '—'"></span>
             </span>
-            <span class="cap-pill" x-text="'jobs: ' + (readiness ? readiness.jobs_backend : '—')"></span>
-            <span class="cap-pill" x-text="(readiness && readiness.jobs_multi_replica) ? 'multi-replica' : 'single-node'"></span>
+            <span class="cap-pill" x-text="t('documents.jobs_backend').replace('{backend}', readiness ? readiness.jobs_backend : '—')"></span>
+            <span class="cap-pill" x-text="(readiness && readiness.jobs_multi_replica) ? t('documents.multi_replica') : t('documents.single_node')"></span>
           </div>
         </div>
 
         {# Garbage collection — dry-run then confirm #}
         <div style="margin-top:.6rem;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;">
           <button class="btn btn-sm" @click="runGc()" :disabled="maintenanceRunning">
-            <span x-show="!maintenanceRunning" x-cloak>Run garbage collection…</span>
-            <span x-show="maintenanceRunning" x-cloak>Working…</span>
+            <span x-show="!maintenanceRunning" x-cloak>{{ t('documents.run_gc') }}</span>
+            <span x-show="maintenanceRunning" x-cloak>{{ t('documents.working') }}</span>
           </button>
           <span class="doc-meta" x-show="gcReport" x-cloak>
-            reclaimed <span x-text="fmtBytes(gcReport ? gcReport.reclaimed_bytes : 0)"></span>,
-            <span x-text="gcReport ? gcReport.deleted_blobs : 0"></span> blob(s)
+            {{ t('documents.reclaimed') }} <span x-text="fmtBytes(gcReport ? gcReport.reclaimed_bytes : 0)"></span>,
+            <span x-text="gcReport ? gcReport.deleted_blobs : 0"></span> {{ t('documents.blobs') }}
           </span>
         </div>
 
         {# Operational audit history #}
         <details style="margin-top:.5rem;">
-          <summary style="cursor:pointer;font-size:.8rem;">Audit history (<span x-text="auditEvents.length"></span>)</summary>
-          <div x-show="auditEvents.length === 0" x-cloak style="color:var(--text-muted);font-size:.74rem;padding:.3rem 0;">No audit events yet.</div>
+          <summary style="cursor:pointer;font-size:.8rem;">{{ t('documents.audit_history') }} (<span x-text="auditEvents.length"></span>)</summary>
+          <div x-show="auditEvents.length === 0" x-cloak style="color:var(--text-muted);font-size:.74rem;padding:.3rem 0;">{{ t('documents.no_audit') }}</div>
           <template x-for="a in auditEvents" :key="a.id">
             <div class="evt-row" style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;">
               <span>
-                <span x-text="a.event_type"></span>·<span x-text="a.action"></span>
+                <span translate="no" x-text="a.event_type"></span>·<span translate="no" x-text="a.action"></span>
                 <span class="evt-err" x-show="a.outcome !== 'success'" x-cloak x-text="' (' + a.outcome + ')'"></span>
               </span>
               <span class="doc-meta" x-text="(a.created_at || '').slice(0,19).replace('T',' ')"></span>

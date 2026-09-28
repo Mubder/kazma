@@ -29,12 +29,21 @@ _COUNT = re.compile(r"\btiCount\(\s*'([a-z0-9_]+)'")
 _LINE = re.compile(r"^\s*([a-z0-9_]+):\s*\{\{\s*(t|plural_forms)\('([a-z0-9_.]+)'\)", re.M)
 
 
+# chat.js's turn header reads its phase label as ti(pair[0], pair[1]) from
+# this table; each name is a bridge line like any literal ti() key. Until
+# 2026-09-28 they were not, and an Arabic turn ended under "Completed".
+_PHASE_TABLE = re.compile(r"var _HEADER_PHASE_LABELS = \{(.*?)\};", re.S)
+_PHASE_NAME = re.compile(r"\[\s*'([a-z0-9_]+)'\s*,")
+
+
 def used_keys(sources: list[str]) -> tuple[set[str], set[str]]:
     plain: set[str] = set()
     counts: set[str] = set()
     for src in sources:
         plain |= set(_PLAIN.findall(src))
         counts |= set(_COUNT.findall(src))
+        for table in _PHASE_TABLE.findall(src):
+            plain |= set(_PHASE_NAME.findall(table))
     return plain, counts
 
 
@@ -81,6 +90,14 @@ def test_every_line_names_a_catalog_key_in_both_languages():
 def test_a_key_the_page_never_gets_is_caught():
     """Negative control."""
     template = TEMPLATE.read_text(encoding="utf-8")
-    assert missing(["x = ti('never_bridged_key', 'x'); y = tiCount('never_counted', 2, 'a', 'b');"],
+    assert missing(["x = ti('never_bridged_key', 'x'); y = tiCount('never_counted', 2, 'a', 'b');",
+                    "var _HEADER_PHASE_LABELS = {\n  gone: ['never_bridged_phase', 'Gone'],\n};"],
                    template) == ["ti('never_bridged_key') has no CHAT_I18N line",
+                                 "ti('never_bridged_phase') has no CHAT_I18N line",
                                  "tiCount('never_counted') has no plural line"]
+
+
+def test_the_phase_table_is_read():
+    """The scan finds the header's phase names in the real chat.js."""
+    plain, _counts = used_keys([(STATIC / "chat.js").read_text(encoding="utf-8")])
+    assert {"completed", "approval_required", "interrupted"} <= plain

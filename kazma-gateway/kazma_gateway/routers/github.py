@@ -252,8 +252,10 @@ async def github_status() -> JSONResponse:
     # 2. Check if git repository and get remote URL
     git_dir = Path(cwd) / ".git"
     if not git_dir.exists():
+        # ``code`` lets the page say it in its own language (2026-09-28).
         return JSONResponse({
             "is_github": False,
+            "code": "not_git_repo",
             "error": "Workspace is not a Git repository."
         })
 

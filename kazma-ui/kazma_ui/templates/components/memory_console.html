@@ -22,19 +22,19 @@
     <!-- KPI strip: V2-aligned labels (embeddings / FTS / beliefs / health) -->
     <div id="memory-kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:14px;">
       <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Embeddings</div>
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('memory.mc.embeddings') }}</div>
         <div id="kpi-vector-count" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
-        <div id="kpi-vector-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">vector backend</div>
+        <div id="kpi-vector-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('memory.mc.vector_backend') }}</div>
       </div>
       <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">FTS index</div>
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('memory.mc.fts_index') }}</div>
         <div id="kpi-fts-count" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
-        <div id="kpi-fts-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">episodes + working</div>
+        <div id="kpi-fts-size" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('memory.mc.episodes_working') }}</div>
       </div>
       <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Belief graph</div>
+        <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('memory.mc.belief_graph') }}</div>
         <div id="kpi-graph-nodes" style="font-size:1.35rem;font-weight:700;margin-top:6px;font-family:var(--font-mono);">–</div>
-        <div id="kpi-graph-edges" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">active triples</div>
+        <div id="kpi-graph-edges" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">{{ t('memory.mc.active_triples') }}</div>
       </div>
       <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
         <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.memory_health_kpi') }}</div>
@@ -49,7 +49,7 @@
         <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);">{{ t('dashboard.memory_components') }}</span>
         <span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <span id="memory-health-summary" style="font-size:0.72rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
-          <button type="button" id="memory-components-toggle-all" class="btn btn-sm" style="font-size:0.68rem;padding:3px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);border-radius:6px;" title="Expand or collapse all health groups">Expand all</button>
+          <button type="button" id="memory-components-toggle-all" class="btn btn-sm" style="font-size:0.68rem;padding:3px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);border-radius:6px;" title="{{ t('memory.mc.expand_or_collapse_all_health') }}">{{ t('memory.mc.expand_all') }}</button>
         </span>
       </div>
       <div id="memory-components-grid" style="display:flex;flex-direction:column;gap:8px;">
@@ -65,32 +65,32 @@
       <!-- ── Header ── -->
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
         <div style="display:flex;align-items:center;gap:10px;">
-          <span style="font-size:1.05rem;font-weight:700;color:var(--text-primary);">V2 Cognitive Engine</span>
+          <span style="font-size:1.05rem;font-weight:700;color:var(--text-primary);">{{ t('memory.mc.v2_cognitive_engine') }}</span>
           <span id="v2-status-badge" style="font-size:0.68rem;font-weight:700;padding:3px 9px;border-radius:999px;background:rgba(148,163,184,0.15);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">—</span>
         </div>
-        <button id="v2-refresh-btn" style="background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);color:var(--text-secondary);font-size:0.75rem;padding:5px 12px;border-radius:8px;cursor:pointer;">Refresh</button>
+        <button id="v2-refresh-btn" style="background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);color:var(--text-secondary);font-size:0.75rem;padding:5px 12px;border-radius:8px;cursor:pointer;">{{ t('common.refresh') }}</button>
       </div>
-      <div id="v2-status-desc" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:14px;">Loading V2 status…</div>
+      <div id="v2-status-desc" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:14px;">{{ t('memory.mc.loading_v2_status') }}</div>
 
       <!-- ── KPI grid ── -->
       <div id="v2-kpi-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px;">
         <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Active Beliefs</div>
+          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('memory.mc.active_beliefs') }}</div>
           <div id="v2-kpi-beliefs-active" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
           <div id="v2-kpi-beliefs-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
         </div>
         <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Recall Episodes</div>
+          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('memory.mc.recall_episodes') }}</div>
           <div id="v2-kpi-episodes-recall" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
           <div id="v2-kpi-episodes-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
         </div>
         <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Entities</div>
+          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('dashboard.memory_graph_title') }}</div>
           <div id="v2-kpi-entities" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
           <div id="v2-kpi-procedural-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
         </div>
         <div class="mem-kpi" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:10px;padding:12px 14px;">
-          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">Queue</div>
+          <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);font-weight:600;">{{ t('memory.mc.queue') }}</div>
           <div id="v2-kpi-queue" style="font-size:1.35rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">–</div>
           <div id="v2-kpi-queue-meta" style="font-size:0.72rem;color:var(--text-muted);">…</div>
         </div>
@@ -98,21 +98,21 @@
 
       <!-- Sticky alert when post-turn failed or queue has dead-letters -->
       <div id="v2-alert-banner" style="display:none;margin-bottom:12px;padding:10px 12px;border-radius:8px;border:1px solid rgba(248,113,113,0.45);background:rgba(248,113,113,0.1);font-size:0.8rem;color:#fecaca;">
-        <strong>Memory needs attention.</strong>
+        <strong>{{ t('memory.mc.memory_needs_attention') }}</strong>
         <span id="v2-alert-banner-text"></span>
-        <a href="#v2-queue-table" style="margin-left:8px;color:#fca5a5;">Jump to queue ↓</a>
+        <a href="#v2-queue-table" style="margin-left:8px;color:#fca5a5;">{{ t('memory.mc.jump_to_queue') }}</a>
       </div>
 
       <!-- Post-turn health strip -->
       <div id="v2-post-turn-strip" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px;padding:10px 12px;border-radius:8px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.02);font-size:0.78rem;">
-        <span style="font-weight:600;color:var(--text-secondary);">Post-turn</span>
-        <span id="v2-post-turn-ok" style="color:var(--text-muted);">ok: –</span>
-        <span id="v2-post-turn-err" style="color:var(--text-muted);">last error: –</span>
-        <span id="v2-embedder-ready" style="color:var(--text-muted);">embedder: –</span>
-        <span id="v2-reconsol-meta" style="color:var(--text-muted);">reconsol: –</span>
-        <span id="v2-graph-backend" style="color:var(--text-muted);">graph: –</span>
-        <span id="v2-backends-mode" style="color:var(--text-muted);">backends: –</span>
-        <a href="/settings?tab=memory" style="margin-left:auto;font-size:0.72rem;color:var(--accent);">Memory settings →</a>
+        <span style="font-weight:600;color:var(--text-secondary);">{{ t('memory.mc.post_turn') }}</span>
+        <span id="v2-post-turn-ok" style="color:var(--text-muted);">–</span>
+        <span id="v2-post-turn-err" style="color:var(--text-muted);">{{ t('memory.mc.last_error') }}</span>
+        <span id="v2-embedder-ready" style="color:var(--text-muted);">{{ t('memory.mc.embedder') }}</span>
+        <span id="v2-reconsol-meta" style="color:var(--text-muted);">{{ t('memory.mc.reconsol') }}</span>
+        <span id="v2-graph-backend" style="color:var(--text-muted);">{{ t('memory.mc.graph') }}</span>
+        <span id="v2-backends-mode" style="color:var(--text-muted);">{{ t('memory.mc.backends') }}</span>
+        <a href="/settings?tab=memory" style="margin-left:auto;font-size:0.72rem;color:var(--accent);">{{ t('memory.mc.memory_settings') }}</a>
       </div>
 
       <!-- ── Full-width V2 Belief Topology Graph ── -->
@@ -120,37 +120,37 @@
         <div id="v2g-panel" style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;display:flex;flex-direction:column;width:100%;">
           <div style="padding:8px 12px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
             <div>
-              <span style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;">V2 Belief Topology</span>
+              <span style="font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;">{{ t('memory.mc.v2_belief_topology') }}</span>
               <div id="v2g-stats-line" style="font-size:0.7rem;color:var(--text-muted);font-family:var(--font-mono);">–</div>
             </div>
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-              <input id="v2g-search" type="search" placeholder="filter…" style="min-width:100px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.2);color:var(--text-primary);font-size:0.72rem;">
-              <button id="v2g-path-query" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:4px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" title="Highlight entities from last probe/federated search">Path from query</button>
+              <input id="v2g-search" type="search" placeholder="{{ t('memory.mc.filter') }}" style="min-width:100px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.2);color:var(--text-primary);font-size:0.72rem;">
+              <button id="v2g-path-query" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:4px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" title="{{ t('memory.mc.highlight_entities_from_last_probe') }}">{{ t('memory.mc.path_from_query') }}</button>
               <label style="font-size:0.68rem;color:var(--text-muted);display:inline-flex;align-items:center;gap:4px;cursor:pointer;user-select:none;">
-                <input type="checkbox" id="v2g-episode-overlay" style="accent-color:var(--accent);"> Episodes
+                <input type="checkbox" id="v2g-episode-overlay" style="accent-color:var(--accent);"> {{ t('dashboard.fts5_db') }}
               </label>
               <button id="v2g-refresh" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">↻</button>
-              <button id="v2g-export-png" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:4px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">PNG</button>
-              <button id="v2g-export-svg" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:4px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">SVG</button>
-              <a id="v2g-export-json" href="/api/memory/v2/graph/export?format=json" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);text-decoration:none;">JSON</a>
-              <a id="v2g-export-graphml" href="/api/memory/v2/graph/export?format=graphml" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);text-decoration:none;">GraphML</a>
+              <button id="v2g-export-png" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:4px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" translate="no">PNG</button>
+              <button id="v2g-export-svg" type="button" class="btn btn-sm" style="font-size:0.68rem;padding:4px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" translate="no">SVG</button>
+              <a id="v2g-export-json" href="/api/memory/v2/graph/export?format=json" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);text-decoration:none;">{{ t('settings.logging_format_json') }}</a>
+              <a id="v2g-export-graphml" href="/api/memory/v2/graph/export?format=graphml" class="btn btn-sm" style="font-size:0.7rem;padding:4px 10px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);text-decoration:none;" translate="no">GraphML</a>
             </div>
           </div>
           <div id="v2g-legend" style="padding:4px 12px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:8px;font-size:0.65rem;color:var(--text-muted);align-items:center;">
-            <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--warning,#f59e0b);margin-right:4px;box-shadow:0 0 6px rgba(245,158,11,0.45);"></span>You</span>
-            <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--accent,#22d3ee);margin-right:4px;box-shadow:0 0 6px var(--accent-glow);"></span>entity</span>
-            <span style="opacity:0.75;">edges · accent blue</span>
+            <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--warning,#f59e0b);margin-right:4px;box-shadow:0 0 6px rgba(245,158,11,0.45);"></span>{{ t('ide.you') }}</span>
+            <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--accent,#22d3ee);margin-right:4px;box-shadow:0 0 6px var(--accent-glow);"></span>{{ t('dashboard.memory_legend_entity') }}</span>
+            <span style="opacity:0.75;">{{ t('memory.mc.edges_accent_blue') }}</span>
           </div>
           <div id="v2g-ops-bar" style="padding:6px 10px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:rgba(0,0,0,0.18);">
-            <span style="font-size:0.65rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-tertiary);margin-right:2px;">Ops</span>
-            <span id="v2g-ops-source" title="Source entity" style="font-size:0.68rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(34,211,238,0.08);color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">src: —</span>
-            <span id="v2g-ops-target" title="Target entity" style="font-size:0.68rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(59,130,246,0.08);color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">tgt: —</span>
-            <input id="v2g-ops-predicate" type="text" value="related_to" placeholder="predicate" title="Link predicate" style="width:100px;padding:3px 8px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.25);color:var(--text-primary);font-size:0.68rem;font-family:var(--font-mono);">
-            <button type="button" id="v2g-ops-link" class="btn btn-sm btn-primary" style="font-size:0.68rem;padding:3px 10px;" title="Link source —pred→ target (or enter pick mode)">Link</button>
-            <button type="button" id="v2g-ops-merge" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 10px;" title="Merge source into target">Merge</button>
-            <button type="button" id="v2g-ops-swap" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 8px;" title="Swap source ↔ target">⇄</button>
-            <button type="button" id="v2g-ops-clear" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 8px;" title="Clear source/target and cancel pick mode">Clear</button>
-            <span id="v2g-ops-hint" style="font-size:0.65rem;color:var(--text-muted);flex:1;min-width:140px;">Click node → inspect. Click edge → edit/unlink.</span>
+            <span style="font-size:0.65rem;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-tertiary);margin-right:2px;">{{ t('memory.mc.ops') }}</span>
+            <span id="v2g-ops-source" title="{{ t('memory.mc.source_entity') }}" style="font-size:0.68rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(34,211,238,0.08);color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ t('memory.mc.src') }}</span>
+            <span id="v2g-ops-target" title="{{ t('memory.mc.target_entity') }}" style="font-size:0.68rem;font-family:var(--font-mono);padding:2px 8px;border-radius:999px;border:1px solid var(--border-subtle);background:rgba(59,130,246,0.08);color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ t('memory.mc.tgt') }}</span>
+            <input id="v2g-ops-predicate" type="text" value="related_to" placeholder="{{ t('memory.mc.predicate') }}" title="{{ t('memory.mc.link_predicate') }}" style="width:100px;padding:3px 8px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(0,0,0,0.25);color:var(--text-primary);font-size:0.68rem;font-family:var(--font-mono);">
+            <button type="button" id="v2g-ops-link" class="btn btn-sm btn-primary" style="font-size:0.68rem;padding:3px 10px;" title="{{ t('memory.mc.link_source_pred_target_or') }}">{{ t('memory.mc.link') }}</button>
+            <button type="button" id="v2g-ops-merge" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 10px;" title="{{ t('memory.mc.merge_source_into_target') }}">{{ t('memory.mc.merge') }}</button>
+            <button type="button" id="v2g-ops-swap" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 8px;" title="{{ t('memory.mc.swap_source_target') }}">⇄</button>
+            <button type="button" id="v2g-ops-clear" class="btn btn-sm btn-secondary" style="font-size:0.68rem;padding:3px 8px;" title="{{ t('memory.mc.clear_source_target_and_cancel') }}">{{ t('ide.clear') }}</button>
+            <span id="v2g-ops-hint" style="font-size:0.65rem;color:var(--text-muted);flex:1;min-width:140px;">{{ t('memory.mc.click_node_inspect_click_edge') }}</span>
           </div>
           <!-- F4: predicate chips — sourced from /vocab so the operator reuses
                existing predicate names instead of inventing near-duplicates
@@ -159,20 +159,20 @@
                predicate input value; the input stays free-text for genuinely
                new predicates. -->
           <div id="v2g-pred-chips" style="padding:5px 10px;border-bottom:1px solid var(--border-subtle);display:flex;flex-wrap:wrap;gap:4px;align-items:center;background:rgba(0,0,0,0.12);max-height:64px;overflow-y:auto;">
-            <span style="font-size:0.6rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);margin-right:2px;">pred</span>
+            <span style="font-size:0.6rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-tertiary);margin-right:2px;">{{ t('memory.mc.pred') }}</span>
             <span id="v2g-pred-chips-list" style="display:flex;flex-wrap:wrap;gap:4px;"></span>
           </div>
           <!-- Canvas + floating inspect -->
           <div id="v2g-canvas-wrap" style="position:relative;flex:1;min-height:min(68vh,720px);height:min(68vh,720px);width:100%;border-radius:0;background:radial-gradient(ellipse at 50% 40%, rgba(34,211,238,0.09) 0%, rgba(59,130,246,0.04) 42%, rgba(0,0,0,0.35) 100%);overflow:hidden;">
-            <canvas id="v2g-canvas" width="1200" height="700" tabindex="0" role="img" aria-label="V2 belief topology graph. Arrow keys pan, plus minus zoom, Home resets view. Click edges to edit or unlink beliefs." style="width:100%;height:100%;display:block;cursor:grab;touch-action:none;outline:none;"></canvas>
+            <canvas id="v2g-canvas" width="1200" height="700" tabindex="0" role="img" aria-label="{{ t('memory.mc.v2_belief_topology_graph_arrow') }}" style="width:100%;height:100%;display:block;cursor:grab;touch-action:none;outline:none;"></canvas>
             <div id="v2g-tooltip" style="display:none;position:absolute;z-index:5;pointer-events:none;max-width:280px;padding:8px 12px;border-radius:8px;background:rgba(10,15,20,0.94);border:1px solid rgba(34,211,238,0.25);color:var(--text-primary);font-size:0.75rem;line-height:1.4;box-shadow:0 8px 28px rgba(0,0,0,0.45), 0 0 0 1px rgba(34,211,238,0.08);"></div>
             <div id="v2g-empty" style="display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.85rem;text-align:center;padding:20px;gap:12px;">
-              <div>No beliefs yet — the graph populates as Kazma learns.</div>
-              <a href="/chat" class="btn btn-sm btn-primary" style="font-size:0.78rem;text-decoration:none;" title="Remember my favorite color is teal.">Teach me a fact →</a>
+              <div>{{ t('memory.mc.no_beliefs_yet_the_graph') }}</div>
+              <a href="/chat" class="btn btn-sm btn-primary" style="font-size:0.78rem;text-decoration:none;" title="{{ t('memory.mc.remember_my_favorite_color_is') }}">{{ t('memory.mc.teach_me_a_fact') }}</a>
             </div>
             <!-- Inspect docked on the canvas (doesn't steal layout from filters) -->
-            <div id="v2g-inspect" class="v2g-inspect" hidden>Click a node or edge to inspect.</div>
-            <div style="position:absolute;bottom:8px;left:10px;font-size:0.62rem;color:var(--text-muted);opacity:0.75;pointer-events:none;">←↑↓→ pan · +/− zoom · edge click = edit · Esc cancel · Home reset</div>
+            <div id="v2g-inspect" class="v2g-inspect" hidden>{{ t('memory.mc.click_a_node_or_edge') }}</div>
+            <div style="position:absolute;bottom:8px;left:10px;font-size:0.62rem;color:var(--text-muted);opacity:0.75;pointer-events:none;">{{ t('memory.mc.pan_zoom_edge_click_edit') }}</div>
           </div>
           <div id="v2g-trunc-banner" style="display:none;margin-top:6px;padding:5px 10px;font-size:0.7rem;border-radius:6px;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.35);color:var(--text-secondary);" role="status"></div>
         </div>
@@ -181,26 +181,26 @@
       <!-- Compact filter / meta strip (small + informative) -->
       <div id="v2g-meta-strip" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-bottom:12px;">
         <div class="v2g-meta-card" style="border:1px solid var(--border-subtle);border-radius:8px;background:rgba(0,0,0,0.12);padding:8px 10px;font-size:0.72rem;min-width:0;">
-          <div style="font-size:0.62rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">Entities</div>
+          <div style="font-size:0.62rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">{{ t('dashboard.memory_graph_title') }}</div>
           <div id="v2g-filters-entity" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;"></div>
         </div>
         <div class="v2g-meta-card" style="border:1px solid var(--border-subtle);border-radius:8px;background:rgba(0,0,0,0.12);padding:8px 10px;font-size:0.72rem;min-width:0;">
-          <div style="font-size:0.62rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">Predicates</div>
+          <div style="font-size:0.62rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">{{ t('memory.mc.predicates') }}</div>
           <div id="v2g-filters-predicate" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;"></div>
           <div id="v2g-active-filters" style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;min-height:0;"></div>
         </div>
         <div class="v2g-meta-card" style="border:1px solid var(--border-subtle);border-radius:8px;background:rgba(0,0,0,0.12);padding:8px 10px;font-size:0.72rem;min-width:0;">
-          <div style="font-size:0.62rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">Tiers · procedural</div>
+          <div style="font-size:0.62rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">{{ t('memory.mc.tiers_procedural') }}</div>
           <div id="v2-tier-breakdown" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;"></div>
           <div id="v2-procedural-breakdown" style="font-size:0.68rem;color:var(--text-muted);margin-top:4px;line-height:1.3;">–</div>
         </div>
         <div class="v2g-meta-card" style="border:1px solid var(--border-subtle);border-radius:8px;background:rgba(0,0,0,0.12);padding:8px 10px;font-size:0.72rem;min-width:0;">
           <div style="font-size:0.62rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;">{{ t('dashboard.memory_bitemporal') }}</div>
-          <input id="v2g-time-slider" type="range" min="0" max="100" value="100" step="0.5" style="width:100%;accent-color:var(--text-link,#60a5fa);height:18px;" aria-label="Bi-temporal scrub" title="{{ t('dashboard.memory_bitemporal_hint') }}">
+          <input id="v2g-time-slider" type="range" min="0" max="100" value="100" step="0.5" style="width:100%;accent-color:var(--text-link,#60a5fa);height:18px;" aria-label="{{ t('memory.mc.bi_temporal_scrub') }}" title="{{ t('dashboard.memory_bitemporal_hint') }}">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;gap:4px;flex-wrap:wrap;">
             <span id="v2g-time-label" style="font-size:0.65rem;color:var(--text-muted);font-family:var(--font-mono);">{{ t('dashboard.memory_live_now') }}</span>
             <span style="display:inline-flex;gap:3px;">
-              <button id="v2g-time-play" type="button" class="btn btn-sm" style="font-size:0.62rem;padding:2px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" aria-label="Play scrub">{{ t('dashboard.memory_play') }}</button>
+              <button id="v2g-time-play" type="button" class="btn btn-sm" style="font-size:0.62rem;padding:2px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);" aria-label="{{ t('memory.mc.play_scrub') }}">{{ t('dashboard.memory_play') }}</button>
               <button id="v2g-time-live" class="btn btn-sm" style="font-size:0.62rem;padding:2px 8px;border:1px solid var(--border-subtle);background:transparent;color:var(--text-secondary);">{{ t('dashboard.memory_live') }}</button>
             </span>
           </div>
@@ -210,22 +210,22 @@
       <!-- Known Beliefs — compact browser below the graph (not competing for width) -->
       <div id="v2-known-beliefs" style="border:1px solid var(--border-subtle);border-radius:10px;background:rgba(0,0,0,0.12);overflow:hidden;margin-bottom:8px;">
         <div style="padding:6px 12px;border-bottom:1px solid var(--border-subtle);font-size:0.68rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.03em;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          Known beliefs
-          <span style="font-weight:400;text-transform:none;color:var(--text-muted);letter-spacing:0;">currently valid · click to focus on graph</span>
-          <input id="v2-belief-search" type="text" placeholder="filter…" style="margin-left:auto;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);border-radius:6px;color:var(--text-primary);font-size:0.72rem;padding:3px 8px;width:140px;outline:none;">
+          {{ t('memory.mc.known_beliefs') }}
+          <span style="font-weight:400;text-transform:none;color:var(--text-muted);letter-spacing:0;">{{ t('memory.mc.currently_valid_click_to_focus') }}</span>
+          <input id="v2-belief-search" type="text" placeholder="{{ t('memory.mc.filter_2') }}" style="margin-left:auto;background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);border-radius:6px;color:var(--text-primary);font-size:0.72rem;padding:3px 8px;width:140px;outline:none;">
         </div>
         <div id="v2-belief-list" style="max-height:220px;overflow-y:auto;font-size:0.78rem;padding:4px 8px;"></div>
         <div id="v2-belief-empty-cta" style="display:none;padding:12px;text-align:center;border-top:1px solid var(--border-subtle);">
-          <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:8px;">No beliefs yet — teach Kazma a fact.</div>
-          <a href="/chat" class="btn btn-sm btn-primary" style="font-size:0.75rem;text-decoration:none;">Teach me a fact →</a>
+          <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:8px;">{{ t('memory.mc.no_beliefs_yet_teach_kazma') }}</div>
+          <a href="/chat" class="btn btn-sm btn-primary" style="font-size:0.75rem;text-decoration:none;">{{ t('memory.mc.teach_me_a_fact_2') }}</a>
         </div>
         <div id="v2-belief-drawer" style="display:none;border-top:1px solid var(--border-subtle);padding:8px 12px;background:rgba(0,0,0,0.2);font-size:0.75rem;max-height:160px;overflow-y:auto;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-            <strong style="color:var(--text-secondary);">Belief detail</strong>
-            <button type="button" id="v2-belief-drawer-close" style="background:none;border:none;color:var(--text-muted);cursor:pointer;" aria-label="Close"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
+            <strong style="color:var(--text-secondary);">{{ t('memory.mc.belief_detail') }}</strong>
+            <button type="button" id="v2-belief-drawer-close" style="background:none;border:none;color:var(--text-muted);cursor:pointer;" aria-label="{{ t('common.close') }}"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
           </div>
           <div id="v2-belief-drawer-body" style="color:var(--text-primary);line-height:1.45;"></div>
-          <button type="button" id="v2-belief-invalidate" class="btn btn-sm" style="margin-top:8px;font-size:0.7rem;color:#f87171;border-color:rgba(248,113,113,0.4);">Unlink belief</button>
+          <button type="button" id="v2-belief-invalidate" class="btn btn-sm" style="margin-top:8px;font-size:0.7rem;color:#f87171;border-color:rgba(248,113,113,0.4);">{{ t('memory.mc.unlink_belief') }}</button>
         </div>
       </div>
 
@@ -240,9 +240,9 @@
             </label>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <input id="v2-probe-input" type="text" placeholder="What color do I like? / How does the API auth work?" style="flex:1;min-width:180px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.04);color:var(--text-primary);font-size:0.8rem;" />
-            <button id="v2-probe-btn" type="button" class="btn btn-sm" style="padding:6px 14px;font-size:0.78rem;" title="Memory only">{{ t('dashboard.memory_probe_memory') }}</button>
-            <button id="v2-federated-btn" type="button" class="btn btn-sm btn-primary" style="padding:6px 14px;font-size:0.78rem;" title="Memory + Knowledge Library">{{ t('dashboard.memory_probe_federated') }}</button>
+            <input id="v2-probe-input" type="text" placeholder="{{ t('memory.mc.what_color_do_i_like') }}" style="flex:1;min-width:180px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);background:rgba(255,255,255,0.04);color:var(--text-primary);font-size:0.8rem;" />
+            <button id="v2-probe-btn" type="button" class="btn btn-sm" style="padding:6px 14px;font-size:0.78rem;" title="{{ t('memory.mc.memory_only') }}">{{ t('dashboard.memory_probe_memory') }}</button>
+            <button id="v2-federated-btn" type="button" class="btn btn-sm btn-primary" style="padding:6px 14px;font-size:0.78rem;" title="{{ t('memory.mc.memory_knowledge_library') }}">{{ t('dashboard.memory_probe_federated') }}</button>
           </div>
           <div id="v2-fed-summary" style="margin-top:8px;font-size:0.72rem;color:var(--text-muted);font-family:var(--font-mono);"></div>
           <div id="v2-probe-results" style="margin-top:10px;font-size:0.78rem;color:var(--text-secondary);max-height:220px;overflow-y:auto;"></div>
@@ -252,31 +252,31 @@
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:8px;">
           <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap;">
-              <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Task queue</span>
+              <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">{{ t('memory.mc.task_queue') }}</span>
               <span style="display:inline-flex;gap:4px;">
-                <button id="v2-queue-clear-failed" type="button" class="btn btn-sm" style="font-size:0.65rem;padding:2px 8px;" title="Delete failed dead-letter tasks">Clear failed</button>
+                <button id="v2-queue-clear-failed" type="button" class="btn btn-sm" style="font-size:0.65rem;padding:2px 8px;" title="{{ t('memory.mc.delete_failed_dead_letter_tasks') }}">{{ t('memory.mc.clear_failed') }}</button>
                 <button id="v2-queue-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
               </span>
             </div>
             <div id="v2-queue-table" style="font-size:0.72rem;font-family:var(--font-mono);max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
-            <button id="v2-reconsolidate-btn" type="button" class="btn btn-sm" style="margin-top:8px;font-size:0.72rem;">Run reconsolidation</button>
+            <button id="v2-reconsolidate-btn" type="button" class="btn btn-sm" style="margin-top:8px;font-size:0.72rem;">{{ t('memory.mc.run_reconsolidation') }}</button>
           </div>
           <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-              <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Pending entity merges</span>
+              <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">{{ t('memory.mc.pending_entity_merges') }}</span>
               <button id="v2-merges-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
             </div>
             <div id="v2-merges-list" style="font-size:0.72rem;max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
           </div>
           <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-              <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Procedural skills</span>
+              <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">{{ t('memory.mc.procedural_skills') }}</span>
               <button id="v2-procedural-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
             </div>
             <div id="v2-procedural-list" style="font-size:0.72rem;max-height:140px;overflow-y:auto;color:var(--text-muted);">–</div>
           </div>
           <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);">
-            <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);margin-bottom:8px;">Memory quality</div>
+            <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);margin-bottom:8px;">{{ t('memory.mc.memory_quality') }}</div>
             <div id="v2-quality-score" style="font-size:1.4rem;font-weight:700;font-family:var(--font-mono);">–</div>
             <div id="v2-quality-detail" style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;">–</div>
           </div>
@@ -285,9 +285,9 @@
              away (plan U1, kazma_core/memory/forget.py). -->
         <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);margin-bottom:8px;">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap;">
-            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Memories of conversations</span>
+            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">{{ t('memory.mc.memories_of_conversations') }}</span>
             <span style="display:inline-flex;gap:4px;">
-              <a id="v2-memory-export" class="btn btn-sm" href="/api/memory/v2/export" download style="font-size:0.65rem;padding:2px 8px;" title="Download everything Kazma remembers, as JSON">Export</a>
+              <a id="v2-memory-export" class="btn btn-sm" href="/api/memory/v2/export" download style="font-size:0.65rem;padding:2px 8px;" title="{{ t('memory.mc.download_everything_kazma_remembers_as') }}">{{ t('dashboard.export') }}</a>
               <button id="v2-memories-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>
             </span>
           </div>
@@ -298,7 +298,7 @@
              kazma_core/memory/topic_summaries.py). -->
         <div style="border:1px solid var(--border-subtle);border-radius:10px;padding:10px;background:rgba(0,0,0,0.1);margin-bottom:8px;">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap;">
-            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">Weekly summaries</span>
+            <span style="font-size:0.72rem;font-weight:600;text-transform:uppercase;color:var(--text-secondary);">{{ t('memory.mc.weekly_summaries') }}</span>
             <span style="display:inline-flex;gap:6px;align-items:center;">
               <span id="v2-summaries-state" style="font-size:0.65rem;color:var(--text-muted);"></span>
               <button id="v2-summaries-refresh" type="button" class="btn btn-sm" style="font-size:0.7rem;padding:2px 8px;">↻</button>

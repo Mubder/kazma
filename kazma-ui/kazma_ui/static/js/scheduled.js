@@ -363,10 +363,10 @@ function scheduledPage() {
                 if (resp.ok && data.ok) {
                     this.tasks = data.tasks || [];
                 } else {
-                    window.showToast(data.error || 'Failed to load scheduled tasks', 'error');
+                    window.showToast(data.error || window.kazmaT('scheduled.ui.load_failed', 'Failed to load scheduled tasks'), 'error');
                 }
             } catch (e) {
-                window.showToast('Failed to load scheduled tasks: ' + e.message, 'error');
+                window.showToast(window.kazmaT('scheduled.ui.load_failed_error', 'Failed to load scheduled tasks: {error}', { error: e.message }), 'error');
             } finally {
                 this.loading = false;
             }
@@ -438,10 +438,10 @@ function scheduledPage() {
                     this.showCronModal = false;
                     await this.load();
                 } else {
-                    window.showToast(data.error || 'Save failed', 'error');
+                    window.showToast(data.error || window.kazmaT('scheduled.ui.save_failed', 'Save failed'), 'error');
                 }
             } catch (e) {
-                window.showToast('Save failed: ' + e.message, 'error');
+                window.showToast(window.kazmaT('scheduled.ui.save_failed_error', 'Save failed: {error}', { error: e.message }), 'error');
             } finally {
                 this.cronSaving = false;
             }
@@ -476,10 +476,10 @@ function scheduledPage() {
                     this.showXModal = false;
                     await this.load();
                 } else {
-                    window.showToast(data.error || 'Save failed', 'error');
+                    window.showToast(data.error || window.kazmaT('scheduled.ui.save_failed', 'Save failed'), 'error');
                 }
             } catch (e) {
-                window.showToast('Save failed: ' + e.message, 'error');
+                window.showToast(window.kazmaT('scheduled.ui.save_failed_error', 'Save failed: {error}', { error: e.message }), 'error');
             } finally {
                 this.xSaving = false;
             }
@@ -504,10 +504,10 @@ function scheduledPage() {
                     window.showToast(window.t('scheduled.deleted'), 'success');
                     await this.load();
                 } else {
-                    window.showToast(data.error || 'Delete failed', 'error');
+                    window.showToast(data.error || window.kazmaT('scheduled.ui.delete_failed', 'Delete failed'), 'error');
                 }
             } catch (e) {
-                window.showToast('Delete failed: ' + e.message, 'error');
+                window.showToast(window.kazmaT('scheduled.ui.delete_failed_error', 'Delete failed: {error}', { error: e.message }), 'error');
             }
         },
     };

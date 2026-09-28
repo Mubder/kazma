@@ -125,7 +125,7 @@ function agentsPage() {
         }
       } catch (err) {
         console.error('[AgentsPage] switchPersonality failed:', err);
-        if (window.KazmaStream) KazmaStream.toast('Failed to switch personality', 'error', 5000);
+        if (window.KazmaStream) KazmaStream.toast(window.kazmaT('agents.ui.personality_switch_failed', 'Failed to switch personality'), 'error', 5000);
       }
     },
   };

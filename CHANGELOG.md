@@ -1,5 +1,45 @@
 # CHANGELOG
 
+## Every page reads in Arabic (2026-09-28)
+
+Kazma promised an English and Arabic interface on every page. Touring the
+live install in Arabic found the Memory page almost entirely in English, and
+English on nearly every other page: the approval card's buttons ("Approve
+once", "Deny", "YOLO session"), the turn's "Completed", every message's
+Copy / Edit / Read aloud, "web · 2 msgs · just now" under each chat, "11:32
+am", the IDE's dialogs, most toasts, and the login page, whose Arabic
+strings had been in the catalog all along without the page using them (it
+was also left-to-right).
+
+Every page and every Settings tab now reads in Arabic, and so does a chat
+turn, paused at its approval card and after it finishes. Dates, times and
+counts follow the page's language, with Latin digits. What stays as written
+is content: your own words and chat titles, the model's replies, names, a
+tool's or skill's own documentation, and what the server reports in its
+diagnostics and logs.
+
+Found while translating, and fixed:
+
+- **Settings → Proxy said "Save failed" after a successful save.** Its
+  success toast read a variable only the Dashboard defines; on Settings the
+  line threw after the save, and the error path spoke. A failure applying a
+  new theme to the page could likewise report a saved Appearance as failed.
+  Every Settings save is now run against a server that accepts it, and must
+  not report failure.
+- **Research's Compare view headed its table "[object Object]"**, and some
+  toasts showed a raw key ("research_cancelled").
+- **The Memory page's quality line never said "all green"**, and ended in a
+  stray separator when nothing failed.
+- Two Memory graph strings named the owner ("You/Mubder"); they say "the
+  hub (you)" now.
+
+New checks: the rendered pages in a browser, in Arabic
+(`tests/e2e/test_pages_read_in_arabic.py`, in CI); every template read for
+English literals outside `translate="no"`
+(`tests/test_templates_have_no_english.py`); every catalog key a page names
+exists in both languages (`tests/test_i18n_keys_exist.py`); the chat page's
+bridge now covers the turn header's phase names too.
+
 ## The live install, fourth pass: the Dashboard's chats, and pages that stop the server (2026-09-28)
 
 **The Dashboard's session table named no chat.** On the live install all 50

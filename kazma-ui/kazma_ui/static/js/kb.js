@@ -75,6 +75,14 @@ function knowledgePage() {
     if (window.showToast) window.showToast(msg, type);
     else console.log(`[${type}] ${msg}`);
   }
+  // Text built here: the catalog's text in the page's language, else the
+  // English given; {name} placeholders filled from vars.
+  function _k(key, en, vars) {
+    if (typeof window.kazmaT === "function") return window.kazmaT(key, en, vars);
+    let s = en;
+    if (vars) for (const v in vars) s = s.split("{" + v + "}").join(String(vars[v]));
+    return s;
+  }
 
   return {
     // The page's own strings, for the template's `S.tab_active` and friends.
@@ -112,7 +120,7 @@ function knowledgePage() {
         if (!data.ok) throw new Error(data.error || "failed");
         this.libraries = (data.libraries || []).map(withStrings);
       } catch (e) {
-        toast("Failed to load libraries: " + e.message, "error");
+        toast(_k("knowledge.ui.load_failed", "Failed to load libraries: {error}", { error: e.message }), "error");
       } finally {
         this.loading = false;
       }
@@ -132,7 +140,7 @@ function knowledgePage() {
       });
       let data = await r.json();
       if (!data.ok && !(data.error || "").includes("already exists")) {
-        toast(data.error || "create failed", "error");
+        toast(data.error || _k("knowledge.ui.create_failed", "Create failed"), "error");
         return;
       }
 
@@ -144,7 +152,7 @@ function knowledgePage() {
           body: JSON.stringify({ library_id: lib_id, url: url, mode: mode }),
         });
         data = await r.json();
-        if (!data.ok) throw new Error(data.error || "ingest failed");
+        if (!data.ok) throw new Error(data.error || _k("knowledge.ui.ingest_failed", "Ingest failed"));
 
         if (mode === "page") {
           // Page ingest: show clean toast from structured fields, not raw internal message.
@@ -250,7 +258,7 @@ function knowledgePage() {
       try {
         const r = await fetch(`/api/kb/libraries/${lib.id}/archive`, { method: "POST" });
         const data = await r.json();
-        if (!data.ok) throw new Error(data.error || "archive failed");
+        if (!data.ok) throw new Error(data.error || _k("knowledge.ui.archive_failed", "Archive failed"));
         toast(S.archived_msg || "Library archived.", "info");
         await this.load();
       } catch (e) {
@@ -262,7 +270,7 @@ function knowledgePage() {
       try {
         const r = await fetch(`/api/kb/libraries/${lib.id}/unarchive`, { method: "POST" });
         const data = await r.json();
-        if (!data.ok) throw new Error(data.error || "unarchive failed");
+        if (!data.ok) throw new Error(data.error || _k("knowledge.ui.unarchive_failed", "Unarchive failed"));
         toast(S.restored_msg || "Library restored.", "success");
         await this.load();
       } catch (e) {
@@ -285,7 +293,7 @@ function knowledgePage() {
           body: JSON.stringify({ library_id: lib.id, query: lib._query, top_k: 5 }),
         });
         const data = await r.json();
-        if (!data.ok) throw new Error(data.error || "search failed");
+        if (!data.ok) throw new Error(data.error || _k("knowledge.ui.search_failed", "Search failed"));
         lib._hits = data.hits;
       } catch (e) {
         toast(e.message, "error");
@@ -301,7 +309,7 @@ function knowledgePage() {
         try {
           const r = await fetch(`/api/kb/libraries/${lib.id}/chunks?limit=100`);
           const data = await r.json();
-          if (!data.ok) throw new Error(data.error || "browse failed");
+          if (!data.ok) throw new Error(data.error || _k("knowledge.ui.browse_failed", "Browse failed"));
           lib._chunks = data.chunks;
           lib._chunk_total = data.total;
         } catch (e) {
@@ -318,14 +326,14 @@ function knowledgePage() {
           title: (S.refresh_confirm_title || "Re-ingest library?"),
           message: (S.refresh_confirm_msg || "Re-crawl seed."),
           confirmText: lib._t_refresh,
-          cancelText: "Cancel",
+          cancelText: _k("knowledge.ui.cancel", "Cancel"),
         });
       }
       if (!ok) return;
       try {
         const r = await fetch(`/api/kb/libraries/${lib.id}/refresh`, { method: "POST" });
         const data = await r.json();
-        if (!data.ok) throw new Error(data.error || "refresh failed");
+        if (!data.ok) throw new Error(data.error || _k("knowledge.ui.refresh_failed", "Refresh failed"));
         this.activeJob = { phase: "starting", message: "refreshing…", library_id: lib.id };
         this._pollJob(data.job_id);
         toast(S.refresh_started || "Refresh started.", "info");
@@ -345,7 +353,7 @@ function knowledgePage() {
           body: JSON.stringify({ auto_inject: value }),
         });
         const data = await r.json();
-        if (!data.ok) throw new Error(data.error || "update failed");
+        if (!data.ok) throw new Error(data.error || _k("knowledge.ui.update_failed", "Update failed"));
         toast(
           value ? (S.auto_on_msg || "Auto-inject ON.") : (S.auto_off_msg || "Auto-inject OFF."),
           value ? "success" : "info",
@@ -364,8 +372,8 @@ function knowledgePage() {
         ok = await window.kazmaConfirm({
           title: title,
           message: msg,
-          confirmText: "Delete",
-          cancelText: "Cancel",
+          confirmText: _k("knowledge.ui.delete", "Delete"),
+          cancelText: _k("knowledge.ui.cancel", "Cancel"),
           danger: true,
         });
       }
@@ -373,7 +381,7 @@ function knowledgePage() {
       try {
         const r = await fetch(`/api/kb/libraries/${lib.id}`, { method: "DELETE" });
         const data = await r.json();
-        if (!data.ok) throw new Error(data.error || "delete failed");
+        if (!data.ok) throw new Error(data.error || _k("knowledge.ui.delete_failed", "Delete failed"));
         toast(S.library_deleted || "Library deleted.", "success");
         await this.load();
       } catch (e) {

@@ -25,14 +25,18 @@
             {% for skill in installed_skills %}
             <div class="skill-card">
                 <div class="skill-header">
-                    <h3>{{ skill.name }}</h3>
-                    <span class="badge badge-{{ skill.certification_level }}">{{ skill.certification_level }}</span>
+                    <h3 translate="no">{{ skill.name }}</h3>
+                    {% set _ck = 'skills.cert_' ~ skill.certification_level %}{% set _cv = t(_ck) %}
+                    <span class="badge badge-{{ skill.certification_level }}">{{ _cv if _cv != _ck else skill.certification_level }}</span>
                 </div>
-                <p class="skill-desc" dir="auto">{{ skill.description }}</p>
+                {# A native skill's description is in the catalog; any other
+                   skill's is its SKILL.md text, shown as its author wrote it. #}
+                {% set _dk = 'skill.desc.' ~ skill.name %}{% set _dv = t(_dk) %}
+                {% if _dv != _dk %}<p class="skill-desc" dir="auto">{{ _dv }}</p>{% else %}<p class="skill-desc" dir="auto" translate="no">{{ skill.description }}</p>{% endif %}
                 <div class="skill-meta">
                     <span>v{{ skill.version }}</span>
                     <span class="security-score">{{ skill.security_score }}/100</span>
-                    <span class="text-muted">{{ skill.author }}</span>
+                    <span class="text-muted" translate="no">{{ skill.author }}</span>
                 </div>
                 <div class="skill-actions">
                     <label class="toggle">
@@ -62,7 +66,7 @@
             <h3>{{ t('skills.install_heading') }}</h3>
             <p class="text-muted" style="margin-bottom:0.75rem">
                 {{ t('skills.install_hint') }}
-                <a href="https://agentskills.io/" target="_blank" rel="noopener">Agent Skills</a>
+                <a href="https://agentskills.io/" target="_blank" rel="noopener" translate="no">Agent Skills</a>
             </p>
             <div class="form-row">
                 <div class="form-group" style="flex:1">
@@ -84,12 +88,12 @@
             <template x-for="skill in hubResults" :key="skill.id">
                 <div class="skill-card">
                     <div class="skill-header">
-                        <h3 x-text="skill.name"></h3>
+                        <h3 translate="no" x-text="skill.name"></h3>
                     </div>
-                    <p class="skill-desc" x-text="skill.description"></p>
+                    <p class="skill-desc" translate="no" x-text="skill.description"></p>
                     <div class="skill-meta">
                         <span x-text="'v' + skill.version"></span>
-                        <span class="text-muted" x-text="skill.author"></span>
+                        <span class="text-muted" translate="no" x-text="skill.author"></span>
                     </div>
                     <div class="skill-actions">
                         <button class="btn btn-primary btn-sm" @click="installSkill(skill.id)">{{ t('skills.install') }}</button>
@@ -116,10 +120,10 @@
             <template x-for="skill in marketResults" :key="skill.id">
                 <div class="skill-card">
                     <div class="skill-header">
-                        <h3><a :href="skill.html_url" target="_blank" rel="noopener" x-text="skill.name"></a></h3>
+                        <h3 translate="no"><a :href="skill.html_url" target="_blank" rel="noopener" x-text="skill.name"></a></h3>
                         <span class="badge">★ <span x-text="skill.stars"></span></span>
                     </div>
-                    <p class="skill-desc" dir="auto" x-text="skill.description"></p>
+                    <p class="skill-desc" dir="auto" translate="no" x-text="skill.description"></p>
                     <div class="skill-actions">
                         <button class="btn btn-primary btn-sm" @click="installFromMarket(skill.source)"
                                 :disabled="installing">
@@ -150,7 +154,7 @@
             </div>
             <div x-show="validateResult" x-cloak class="validation-result">
                 <div :class="validateResult?.passed ? 'text-success' : 'text-error'" x-text="validateResult?.passed ? t('skills.validate_passed') : t('skills.validate_failed')"></div>
-                <div x-text="'Score: ' + (validateResult?.score || 0) + '/100'"></div>
+                <div x-text="t('skills.score').replace('{n}', validateResult?.score || 0)"></div>
                 <template x-if="validateResult?.errors?.length">
                     <ul class="error-list">
                         <template x-for="err in validateResult.errors" :key="err">

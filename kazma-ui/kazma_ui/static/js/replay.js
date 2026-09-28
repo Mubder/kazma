@@ -32,14 +32,13 @@
   }
   function timeAgo(iso) {
     if (!iso) return '—';
-    try {
-      var d = new Date(iso);
-      var s = Math.floor((Date.now() - d.getTime()) / 1000);
-      if (s < 60) return s + 's ago';
-      if (s < 3600) return Math.floor(s / 60) + 'm ago';
-      if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-      return d.toLocaleDateString();
-    } catch (e) { return iso; }
+    return window.KazmaFormat ? (window.KazmaFormat.relative(iso) || iso) : iso;
+  }
+  /* A catalog string in the page's language, {name} filled from *vars*. */
+  function tx(key, fallback, vars) {
+    var text = window.tOr ? window.tOr(key, fallback) : fallback;
+    for (var k in (vars || {})) text = text.split('{' + k + '}').join(String(vars[k]));
+    return text;
   }
 
   // ── Public API ──
@@ -71,16 +70,15 @@
         sel.innerHTML = '';
         var opt = document.createElement('option');
         opt.value = '';
-        opt.textContent = 'Time travel unavailable (API ' + status + ')';
+        opt.textContent = tx('replay.unavailable_option', 'Time travel unavailable (API {status})', { status: status });
         sel.appendChild(opt);
       }
       var listEl = $('replay-timeline-list');
       if (listEl) {
         listEl.innerHTML =
           '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' +
-          'Time travel is unavailable on this server (replay API returned ' + status + '). ' +
-          'Check the server log for "[Replay] snapshot recorder creation failed" and restart the server. ' +
-          '<button class="btn btn-sm btn-primary" style="margin-top:12px" onclick="KazmaReplay.retry()">Retry</button>' +
+          esc(tx('replay.unavailable_body', 'Time travel is unavailable on this server (replay API returned {status}). Check the server log for "[Replay] snapshot recorder creation failed" and restart the server.', { status: status })) + ' ' +
+          '<button class="btn btn-sm btn-primary" style="margin-top:12px" onclick="KazmaReplay.retry()">' + esc(tx('common.retry', 'Retry')) + '</button>' +
           '</div>';
       }
     },
@@ -119,7 +117,7 @@
           var sel = $('replay-thread-select');
           if (!sel) return;
           var prev = sel.value;
-          sel.innerHTML = '<option value="">— Select a thread —</option>';
+          sel.innerHTML = '<option value="">' + esc(tx('replay.select_thread', '— Select a thread —')) + '</option>';
           (data.threads || []).forEach(function (t) {
             var opt = document.createElement('option');
             opt.value = t; opt.textContent = t;
@@ -145,18 +143,18 @@
       var listEl = $('replay-timeline-list');
 
       if (!threadId) {
-        listEl.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">Select a thread above to see its snapshot timeline.</div>';
+        listEl.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(tx('replay.pick_thread_hint', 'Select a thread above to see its snapshot timeline.')) + '</div>';
         $('replay-snapshot-count').textContent = '';
         return;
       }
 
-      listEl.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">Loading…</div>';
+      listEl.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(tx('common.loading', 'Loading…')) + '</div>';
 
       fetch('/api/replay/snapshots/' + encodeURIComponent(threadId), { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : { snapshots: [], count: 0 }; })
         .then(function (data) {
           var snaps = data.snapshots || [];
-          $('replay-snapshot-count').textContent = snaps.length + ' snapshot' + (snaps.length !== 1 ? 's' : '');
+          $('replay-snapshot-count').textContent = tx('replay.snapshot_count', 'Snapshots: {n}', { n: snaps.length });
 
           // Populate diff dropdowns too
           ['replay-diff-a', 'replay-diff-b'].forEach(function (id) {
@@ -165,7 +163,7 @@
             dd.innerHTML = '';
             snaps.forEach(function (s) {
               var opt = document.createElement('option');
-              opt.value = s.iteration; opt.textContent = 'Iteration ' + s.iteration;
+              opt.value = s.iteration; opt.textContent = tx('replay.iteration_n', 'Iteration {n}', { n: s.iteration });
               dd.appendChild(opt);
             });
             if (snaps.length >= 2) { $(id).value = snaps[Math.max(0, snaps.length - 2)].iteration; }
@@ -173,7 +171,7 @@
           });
 
           if (!snaps.length) {
-            listEl.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">No snapshots for this thread yet. Snapshots are captured after each agent turn.</div>';
+            listEl.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(tx('replay.no_snapshots', 'No snapshots for this thread yet. Snapshots are captured after each agent turn.')) + '</div>';
             return;
           }
 
@@ -181,11 +179,11 @@
             return '<div class="card replay-snap-card" style="padding:12px 16px;cursor:pointer;" data-iteration="' + s.iteration + '">' +
               '<div style="display:flex;align-items:center;justify-content:space-between;">' +
                 '<div>' +
-                  '<span style="font-weight:600;color:var(--text-primary);">Iteration ' + s.iteration + '</span>' +
-                  '<span style="margin-left:8px;font-size:0.85rem;color:var(--text-muted);">' + esc(s.model || '—') + '</span>' +
+                  '<span style="font-weight:600;color:var(--text-primary);">' + esc(tx('replay.iteration_n', 'Iteration {n}', { n: s.iteration })) + '</span>' +
+                  '<span translate="no" style="margin-inline-start:8px;font-size:0.85rem;color:var(--text-muted);">' + esc(s.model || '—') + '</span>' +
                 '</div>' +
                 '<div style="display:flex;gap:12px;font-size:0.85rem;color:var(--text-muted);">' +
-                  '<span>' + s.message_count + ' msgs</span>' +
+                  '<span>' + esc(tx('replay.messages_n', 'Messages: {n}', { n: s.message_count })) + '</span>' +
                   '<span>' + timeAgo(s.timestamp) + '</span>' +
                 '</div>' +
               '</div>' +
@@ -202,7 +200,7 @@
           }
         })
         .catch(function (err) {
-          listEl.innerHTML = '<div style="padding:1rem;color:var(--error);">Failed to load: ' + esc(err.message) + '</div>';
+          listEl.innerHTML = '<div style="padding:1rem;color:var(--error);">' + esc(tx('replay.load_failed', 'Failed to load: {error}', { error: err.message })) + '</div>';
         });
     },
 
@@ -215,12 +213,12 @@
       fetch('/api/replay/snapshots/' + encodeURIComponent(currentThread) + '/' + iteration, { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (data) {
-          if (!data || data.error) { toast('Could not load snapshot', 'error'); return; }
-          $('replay-detail-title').textContent = 'Iteration ' + iteration;
+          if (!data || data.error) { toast(tx('replay.snapshot_failed', 'Could not load snapshot'), 'error'); return; }
+          $('replay-detail-title').textContent = tx('replay.iteration_n', 'Iteration {n}', { n: iteration });
           $('replay-detail-meta').innerHTML =
-            '<span>Model: <strong>' + esc(data.model || '—') + '</strong></span> · ' +
-            '<span>Cost: $' + (data.cost_usd || 0).toFixed(4) + '</span> · ' +
-            '<span>' + data.message_count + ' messages</span>';
+            '<span>' + esc(tx('replay.meta_model', 'Model')) + ': <strong translate="no">' + esc(data.model || '—') + '</strong></span> · ' +
+            '<span>' + esc(tx('replay.meta_cost', 'Cost')) + ': $' + (data.cost_usd || 0).toFixed(4) + '</span> · ' +
+            '<span>' + esc(tx('replay.messages_n', 'Messages: {n}', { n: data.message_count })) + '</span>';
           var msgs = data.messages || [];
           $('replay-detail-messages').innerHTML = msgs.map(function (m) {
             var role = m.role || '?';
@@ -229,16 +227,16 @@
             var cls = role === 'user' ? 'replay-msg-user' : (role === 'assistant' ? 'replay-msg-assistant' : 'replay-msg-tool');
             return '<div class="' + cls + '" style="padding:8px 12px;border-radius:6px;margin-bottom:4px;font-size:0.85rem;' +
               'background:' + (role === 'user' ? 'rgba(99,102,241,0.08)' : role === 'assistant' ? 'rgba(34,197,94,0.08)' : 'rgba(161,161,170,0.08)') + ';">' +
-              '<strong>' + esc(role) + ':</strong> ' + esc(content.slice(0, 500)) + (content.length > 500 ? '…' : '') +
+              '<strong>' + esc(tx('replay.role_' + role, role)) + ':</strong> <span translate="no">' + esc(content.slice(0, 500)) + (content.length > 500 ? '…' : '') + '</span>' +
               '</div>';
           }).join('');
         })
-        .catch(function () { toast('Failed to load snapshot detail', 'error'); });
+        .catch(function () { toast(tx('replay.detail_failed', 'Failed to load snapshot detail'), 'error'); });
     },
 
     restoreCurrent: async function () {
-      if (!currentThread || currentIteration == null) { toast('Select a snapshot first', 'error'); return; }
-      if (!await confirm('Rewind this thread to iteration ' + currentIteration + '? Later turns will be lost (use Fork to preserve them).')) return;
+      if (!currentThread || currentIteration == null) { toast(tx('replay.pick_snapshot', 'Select a snapshot first'), 'error'); return; }
+      if (!await confirm(tx('replay.confirm_restore', 'Rewind this thread to iteration {n}? Later turns will be lost (use Fork to preserve them).', { n: currentIteration }))) return;
       fetch('/api/replay/restore', {
         method: 'POST',
         credentials: 'same-origin',
@@ -247,14 +245,14 @@
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-          if (data.error) { toast('Restore failed: ' + data.error, 'error'); return; }
-          toast('Restored iteration ' + currentIteration + ' (' + data.message_count + ' msgs)', 'success');
+          if (data.error) { toast(tx('replay.restore_failed', 'Restore failed: {error}', { error: data.error }), 'error'); return; }
+          toast(tx('replay.restored', 'Restored iteration {n} ({count} messages)', { n: currentIteration, count: data.message_count }), 'success');
         })
-        .catch(function () { toast('Restore request failed', 'error'); });
+        .catch(function () { toast(tx('replay.restore_request_failed', 'Restore request failed'), 'error'); });
     },
 
     forkCurrent: function () {
-      if (!currentThread || currentIteration == null) { toast('Select a snapshot first', 'error'); return; }
+      if (!currentThread || currentIteration == null) { toast(tx('replay.pick_snapshot', 'Select a snapshot first'), 'error'); return; }
       fetch('/api/replay/fork', {
         method: 'POST',
         credentials: 'same-origin',
@@ -263,18 +261,18 @@
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-          if (data.error) { toast('Fork failed: ' + data.error, 'error'); return; }
-          toast('Forked into ' + data.new_thread_id, 'success');
+          if (data.error) { toast(tx('replay.fork_failed', 'Fork failed: {error}', { error: data.error }), 'error'); return; }
+          toast(tx('replay.forked', 'Forked into {thread}', { thread: data.new_thread_id }), 'success');
         })
-        .catch(function () { toast('Fork request failed', 'error'); });
+        .catch(function () { toast(tx('replay.fork_request_failed', 'Fork request failed'), 'error'); });
     },
 
     compare: function () {
-      if (!currentThread) { toast('Select a thread first', 'error'); return; }
+      if (!currentThread) { toast(tx('replay.pick_thread_first', 'Select a thread first'), 'error'); return; }
       var a = $('replay-diff-a').value;
       var b = $('replay-diff-b').value;
-      if (!a || !b) { toast('Pick two iterations', 'error'); return; }
-      $('replay-diff-result').innerHTML = '<div style="padding:1rem;color:var(--text-muted);">Comparing…</div>';
+      if (!a || !b) { toast(tx('replay.pick_two', 'Pick two iterations'), 'error'); return; }
+      $('replay-diff-result').innerHTML = '<div style="padding:1rem;color:var(--text-muted);">' + esc(tx('replay.comparing', 'Comparing…')) + '</div>';
       fetch('/api/replay/compare', {
         method: 'POST',
         credentials: 'same-origin',
@@ -285,27 +283,29 @@
         .then(function (data) {
           if (data.error) { $('replay-diff-result').innerHTML = '<div style="color:var(--error);">' + esc(data.error) + '</div>'; return; }
           var d = data.diff;
-          if (!d) { $('replay-diff-result').innerHTML = '<div>No diff available.</div>'; return; }
+          if (!d) { $('replay-diff-result').innerHTML = '<div>' + esc(tx('replay.no_diff', 'No diff available.')) + '</div>'; return; }
           function arrow(v) { return v > 0 ? '+' + v : String(v); }
+          var changed = tx('replay.changed', 'changed');
+          var same = tx('replay.same', 'same');
           $('replay-diff-result').innerHTML =
             '<table class="data-table" style="width:100%;border-collapse:collapse;font-size:0.9rem;">' +
-              '<thead><tr><th style="text-align:left;padding:8px;border-bottom:1px solid var(--border);">Metric</th>' +
-              '<th style="text-align:right;padding:8px;border-bottom:1px solid var(--border);">Iter ' + a + '</th>' +
-              '<th style="text-align:right;padding:8px;border-bottom:1px solid var(--border);">Iter ' + b + '</th>' +
-              '<th style="text-align:right;padding:8px;border-bottom:1px solid var(--border);">Delta</th></tr></thead>' +
+              '<thead><tr><th style="text-align:start;padding:8px;border-bottom:1px solid var(--border);">' + esc(tx('replay.col_metric', 'Metric')) + '</th>' +
+              '<th style="text-align:end;padding:8px;border-bottom:1px solid var(--border);">' + esc(tx('replay.iteration_n', 'Iteration {n}', { n: a })) + '</th>' +
+              '<th style="text-align:end;padding:8px;border-bottom:1px solid var(--border);">' + esc(tx('replay.iteration_n', 'Iteration {n}', { n: b })) + '</th>' +
+              '<th style="text-align:end;padding:8px;border-bottom:1px solid var(--border);">' + esc(tx('replay.col_delta', 'Delta')) + '</th></tr></thead>' +
               '<tbody>' +
-                row('Messages', d.original_message_count, d.replayed_message_count, arrow(d.message_count_delta)) +
-                row('Iteration #', d.original_iteration, d.replayed_iteration, arrow(d.iteration_delta)) +
-                row('Model', d.original_model || '—', d.replayed_model || '—', d.model_changed ? 'changed' : 'same') +
-                row('Cost (USD)', d.original_cost_usd.toFixed(4), d.replayed_cost_usd.toFixed(4), arrow(d.cost_delta_usd.toFixed(4))) +
-                row('Tool calls', d.original_tool_calls, d.replayed_tool_calls, arrow(d.tool_calls_delta)) +
-                row('Next node', d.original_next_node || '—', d.replayed_next_node || '—', d.routing_changed ? 'changed' : 'same') +
+                row(tx('replay.row_messages', 'Messages'), d.original_message_count, d.replayed_message_count, arrow(d.message_count_delta)) +
+                row(tx('replay.row_iteration', 'Iteration #'), d.original_iteration, d.replayed_iteration, arrow(d.iteration_delta)) +
+                row(tx('replay.meta_model', 'Model'), d.original_model || '—', d.replayed_model || '—', d.model_changed ? changed : same) +
+                row(tx('replay.row_cost', 'Cost (USD)'), d.original_cost_usd.toFixed(4), d.replayed_cost_usd.toFixed(4), arrow(d.cost_delta_usd.toFixed(4))) +
+                row(tx('replay.row_tool_calls', 'Tool calls'), d.original_tool_calls, d.replayed_tool_calls, arrow(d.tool_calls_delta)) +
+                row(tx('replay.row_next_node', 'Next node'), d.original_next_node || '—', d.replayed_next_node || '—', d.routing_changed ? changed : same) +
               '</tbody>' +
             '</table>' +
             (d.identical ? '<p style="margin-top:1rem;color:var(--success);display:flex;align-items:center;gap:6px;">' +
-              KazmaIcons.span('check-circle') + ' States are identical.</p>' : '');
+              KazmaIcons.span('check-circle') + ' ' + esc(tx('replay.identical', 'States are identical.')) + '</p>' : '');
         })
-        .catch(function () { toast('Compare failed', 'error'); });
+        .catch(function () { toast(tx('replay.compare_failed', 'Compare failed'), 'error'); });
     },
 
     /** Hook for live snapshot events from the chat SSE stream. */
@@ -320,9 +320,9 @@
 
   function row(label, a, b, delta) {
     return '<tr><td style="padding:8px;border-bottom:1px solid var(--border);">' + esc(label) + '</td>' +
-      '<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);">' + esc(a) + '</td>' +
-      '<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);">' + esc(b) + '</td>' +
-      '<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);font-weight:600;">' + esc(delta) + '</td></tr>';
+      '<td translate="no" style="text-align:end;padding:8px;border-bottom:1px solid var(--border);">' + esc(a) + '</td>' +
+      '<td translate="no" style="text-align:end;padding:8px;border-bottom:1px solid var(--border);">' + esc(b) + '</td>' +
+      '<td style="text-align:end;padding:8px;border-bottom:1px solid var(--border);font-weight:600;">' + esc(delta) + '</td></tr>';
   }
 
   function _registerSoftNavTeardown() {

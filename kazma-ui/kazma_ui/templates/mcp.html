@@ -13,8 +13,8 @@
         <div class="mcp-card" x-data="{ expanded: false }">
             <div class="mcp-card-header">
                 <div class="status-dot status-{{ server.status }}"></div>
-                <h3>{{ server.name }}</h3>
-                <span class="badge badge-{{ server.transport }}">{{ server.transport }}</span>
+                <h3 translate="no">{{ server.name }}</h3>
+                <span class="badge badge-{{ server.transport }}" translate="no">{{ server.transport }}</span>
                 <span class="tool-count">{{ server.tool_count }} {{ t('mcp.tools_suffix') }}</span>
             </div>
             <div class="mcp-card-body">
@@ -49,13 +49,14 @@
                 </button>
                 <button class="btn btn-sm btn-danger"
                         hx-delete="/api/mcp/servers/{{ server.name }}"
-                        hx-on::after-request="showToast('Server removed', 'success')">Remove</button>
+                        hx-on::after-request="showToast({{ t('mcp.server_removed')|tojson|forceescape }}, 'success')">{{ t('common.remove') }}</button>
             </div>
             <div x-show="expanded" x-cloak class="mcp-tools-list">
                 {% for tool in server.tools %}
                 <div class="tool-item">
                     <code class="tool-name">{{ tool.name }}</code>
-                    <span class="tool-desc">{{ tool.description }}</span>
+                    {# The tool's own documentation, written by its server. #}
+                    <span class="tool-desc" translate="no">{{ tool.description }}</span>
                 </div>
                 {% endfor %}
                 {% if not server.tools %}
@@ -94,7 +95,7 @@
             </div>
             <div class="form-group">
                 <label>{{ t('mcp.field_name') }}</label>
-                <input type="text" x-model="newServer.name" class="form-input" placeholder="my-server">
+                <input type="text" x-model="newServer.name" class="form-input" translate="no" placeholder="my-server">
             </div>
             <div class="form-group">
                 <label>{{ t('mcp.field_transport') }}</label>
@@ -108,10 +109,9 @@
                 <div>
                     <div class="form-group">
                         <label>{{ t('mcp.field_command') }}</label>
-                        <input type="text" x-model="newServer.commandStr" @input="onCommandInput()" class="form-input" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp">
+                        <input type="text" x-model="newServer.commandStr" @input="onCommandInput()" class="form-input" translate="no" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp">
                         <p style="font-size:0.78rem;color:var(--text-secondary);margin:4px 0 0 0;">
-                            Paste the <strong>run</strong> command (usually <code>npx -y &lt;pkg&gt;</code>), not <code>npm install</code>.
-                            Common docs say <code>npm install</code> — Kazma auto-rewrites that to <code>npx -y</code>.
+                            {{ t('mcp.command_hint') | safe }}
                         </p>
                     </div>
                     <template x-if="rewriteNotice">
@@ -131,7 +131,7 @@
                     </div>
                     <div class="form-group">
                         <label>{{ t('mcp.field_auth_token') }}</label>
-                        <input type="password" x-model="newServer.authToken" class="form-input" placeholder="optional bearer token">
+                        <input type="password" x-model="newServer.authToken" class="form-input" placeholder="{{ t('mcp.bearer_placeholder') }}">
                     </div>
                 </div>
             </template>
@@ -143,22 +143,22 @@
                     </div>
                     <div class="form-group">
                         <label>{{ t('mcp.field_auth_token') }}</label>
-                        <input type="password" x-model="newServer.authToken" class="form-input" placeholder="optional bearer token">
+                        <input type="password" x-model="newServer.authToken" class="form-input" placeholder="{{ t('mcp.bearer_placeholder') }}">
                     </div>
                 </div>
             </template>
             <div class="form-group">
-                <label>{{ t('mcp.field_env')|default('Environment variables') }}</label>
+                <label>{{ t('mcp.field_env') }}</label>
                 <template x-for="(row, idx) in (newServer._envRows || [])" :key="idx">
                     <div style="display:flex;gap:6px;margin-bottom:4px;">
-                        <input type="text" x-model="row.key" class="form-input" placeholder="API_KEY" style="flex:1;">
-                        <input type="text" x-model="row.value" class="form-input" placeholder="value" style="flex:2;">
-                        <button class="btn btn-secondary btn-sm" @click="removeEnvRow(idx)" title="Remove">×</button>
+                        <input type="text" x-model="row.key" class="form-input" translate="no" placeholder="API_KEY" style="flex:1;">
+                        <input type="text" x-model="row.value" class="form-input" placeholder="{{ t('mcp.env_value_placeholder') }}" style="flex:2;">
+                        <button class="btn btn-secondary btn-sm" @click="removeEnvRow(idx)" title="{{ t('common.remove') }}">×</button>
                     </div>
                 </template>
-                <button class="btn btn-secondary btn-sm" @click="addEnvRow()">+ Add variable</button>
+                <button class="btn btn-secondary btn-sm" @click="addEnvRow()">{{ t('mcp.add_variable') }}</button>
                 <p style="font-size:0.78rem;color:var(--text-secondary);margin:4px 0 0 0;">
-                    Most MCP servers need an API key — check the server's docs for the env var name.
+                    {{ t('mcp.env_hint') }}
                 </p>
             </div>
             <div class="form-group">
@@ -175,7 +175,7 @@
                 <button class="btn btn-secondary" @click="showAddModal = false" :disabled="adding">{{ t('mcp.cancel') }}</button>
                 <button class="btn btn-primary" @click="addServer()" :disabled="adding">
                     <span x-show="!adding" x-cloak>{{ t('mcp.add_server') }}</span>
-                    <span x-show="adding" x-cloak>Validating…</span>
+                    <span x-show="adding" x-cloak>{{ t('mcp.validating') }}</span>
                 </button>
             </div>
         </div>

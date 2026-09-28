@@ -900,4 +900,936 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تم التنفيذ: {tools}",
         "en": "Completed: {tools}",
     },
+    "common.menu": {
+        "ar": "القائمة",
+        "en": "Menu",
+    },
+    "common.search_shortcut": {
+        "ar": "بحث (Ctrl+K)",
+        "en": "Search (Ctrl+K)",
+    },
+    "common.notifications": {
+        "ar": "الإشعارات",
+        "en": "Notifications",
+    },
+    "common.no_system_alerts": {
+        "ar": "لا توجد تنبيهات للنظام",
+        "en": "No system alerts",
+    },
+    "common.alert": {
+        "ar": "تنبيه",
+        "en": "alert",
+    },
+    "common.switch_to_light": {
+        "ar": "التبديل إلى الوضع الفاتح",
+        "en": "Switch to light",
+    },
+    "common.switch_to_dark": {
+        "ar": "التبديل إلى الوضع الداكن",
+        "en": "Switch to dark",
+    },
+    "common.account": {
+        "ar": "الحساب",
+        "en": "Account",
+    },
+    "common.dismiss": {
+        "ar": "إخفاء",
+        "en": "Dismiss",
+    },
+    "common.open": {
+        "ar": "فتح",
+        "en": "Open",
+    },
+    "common.resolve": {
+        "ar": "معالجة",
+        "en": "Resolve",
+    },
+    "common.installing": {
+        "ar": "جارٍ التثبيت…",
+        "en": "Installing…",
+    },
+    "common.primary_navigation": {
+        "ar": "التنقل الرئيسي",
+        "en": "Primary navigation",
+    },
+    "common.close_menu": {
+        "ar": "إغلاق القائمة",
+        "en": "Close menu",
+    },
+    "common.expand_sidebar": {
+        "ar": "توسيع الشريط الجانبي (Ctrl+B)",
+        "en": "Expand sidebar (Ctrl+B)",
+    },
+    "common.collapse_sidebar": {
+        "ar": "طيّ الشريط الجانبي (Ctrl+B)",
+        "en": "Collapse sidebar (Ctrl+B)",
+    },
+    "common.agent_name": {
+        "ar": "وكيل Kazma",
+        "en": "Kazma Agent",
+    },
+    "common.no_model_selected": {
+        "ar": "لم يُحدَّد نموذج",
+        "en": "No model selected",
+    },
+    "common.cancel": {
+        "ar": "إلغاء",
+        "en": "Cancel",
+    },
+    "common.ok": {
+        "ar": "حسنًا",
+        "en": "OK",
+    },
+    "common.refresh": {
+        "ar": "تحديث",
+        "en": "Refresh",
+    },
+    "common.remove": {
+        "ar": "إزالة",
+        "en": "Remove",
+    },
+    "common.retry": {
+        "ar": "إعادة المحاولة",
+        "en": "Retry",
+    },
+    "common.approve": {
+        "ar": "موافقة",
+        "en": "Approve",
+    },
+    "common.deny": {
+        "ar": "رفض",
+        "en": "Deny",
+    },
+    "common.back": {
+        "ar": "→ رجوع",
+        "en": "← Back",
+    },
+    "common.detail": {
+        "ar": "التفاصيل",
+        "en": "Detail",
+    },
+    "common.role_admin": {
+        "ar": "مسؤول",
+        "en": "admin",
+    },
+    "common.role_operator": {
+        "ar": "مشغّل",
+        "en": "operator",
+    },
+    "common.role_viewer": {
+        "ar": "مشاهد",
+        "en": "viewer",
+    },
+    "common.error_title": {
+        "ar": "خطأ {code}",
+        "en": "Error {code}",
+    },
+    "common.error_404": {
+        "ar": "الصفحة التي تبحث عنها غير موجودة أو نُقلت.",
+        "en": "The page you're looking for doesn't exist or has been moved.",
+    },
+    "common.error_500": {
+        "ar": "حدث خطأ لدينا. حاول مرة أخرى.",
+        "en": "Something went wrong on our end. Please try again.",
+    },
+    "common.error_other": {
+        "ar": "حدث خطأ غير متوقع.",
+        "en": "An unexpected error occurred.",
+    },
+    "common.go_home": {
+        "ar": "الصفحة الرئيسية",
+        "en": "Go Home",
+    },
+    "common.go_back": {
+        "ar": "رجوع",
+        "en": "Go Back",
+    },
+    "common.input": {
+        "ar": "إدخال",
+        "en": "Input",
+    },
+    "common.notice": {
+        "ar": "تنبيه",
+        "en": "Notice",
+    },
+    "common.not_found": {
+        "ar": "الصفحة غير موجودة",
+        "en": "Page not found",
+    },
+    "common.server_error": {
+        "ar": "خطأ داخلي في الخادم",
+        "en": "Internal server error",
+    },
+    "replay.unavailable_option": {
+        "ar": "السفر عبر الزمن غير متاح (الواجهة {status})",
+        "en": "Time travel unavailable (API {status})",
+    },
+    "replay.unavailable_body": {
+        "ar": "السفر عبر الزمن غير متاح على هذا الخادم (أعادت واجهة الإعادة {status}). ابحث في سجل الخادم عن \"[Replay] snapshot recorder creation failed\" ثم أعد تشغيل الخادم.",
+        "en": "Time travel is unavailable on this server (replay API returned {status}). Check the server log for \"[Replay] snapshot recorder creation failed\" and restart the server.",
+    },
+    "replay.pick_thread_hint": {
+        "ar": "اختر محادثة في الأعلى لعرض الجدول الزمني للقطاتها.",
+        "en": "Select a thread above to see its snapshot timeline.",
+    },
+    "replay.snapshot_count": {
+        "ar": "اللقطات: {n}",
+        "en": "Snapshots: {n}",
+    },
+    "replay.iteration_n": {
+        "ar": "التكرار {n}",
+        "en": "Iteration {n}",
+    },
+    "replay.no_snapshots": {
+        "ar": "لا توجد لقطات لهذه المحادثة بعد. تُلتقط اللقطات بعد كل دور للوكيل.",
+        "en": "No snapshots for this thread yet. Snapshots are captured after each agent turn.",
+    },
+    "replay.messages_n": {
+        "ar": "الرسائل: {n}",
+        "en": "Messages: {n}",
+    },
+    "replay.load_failed": {
+        "ar": "تعذّر التحميل: {error}",
+        "en": "Failed to load: {error}",
+    },
+    "replay.snapshot_failed": {
+        "ar": "تعذّر تحميل اللقطة",
+        "en": "Could not load snapshot",
+    },
+    "replay.detail_failed": {
+        "ar": "تعذّر تحميل تفاصيل اللقطة",
+        "en": "Failed to load snapshot detail",
+    },
+    "replay.meta_model": {
+        "ar": "النموذج",
+        "en": "Model",
+    },
+    "replay.meta_cost": {
+        "ar": "التكلفة",
+        "en": "Cost",
+    },
+    "replay.role_user": {
+        "ar": "المستخدم",
+        "en": "user",
+    },
+    "replay.role_assistant": {
+        "ar": "المساعد",
+        "en": "assistant",
+    },
+    "replay.role_tool": {
+        "ar": "أداة",
+        "en": "tool",
+    },
+    "replay.role_system": {
+        "ar": "النظام",
+        "en": "system",
+    },
+    "replay.pick_snapshot": {
+        "ar": "اختر لقطة أولًا",
+        "en": "Select a snapshot first",
+    },
+    "replay.confirm_restore": {
+        "ar": "إرجاع هذه المحادثة إلى التكرار {n}؟ ستضيع الأدوار اللاحقة (استخدم التفريع للاحتفاظ بها).",
+        "en": "Rewind this thread to iteration {n}? Later turns will be lost (use Fork to preserve them).",
+    },
+    "replay.restore_failed": {
+        "ar": "فشلت الاستعادة: {error}",
+        "en": "Restore failed: {error}",
+    },
+    "replay.restored": {
+        "ar": "استُعيد التكرار {n} ({count} رسالة)",
+        "en": "Restored iteration {n} ({count} messages)",
+    },
+    "replay.restore_request_failed": {
+        "ar": "فشل طلب الاستعادة",
+        "en": "Restore request failed",
+    },
+    "replay.fork_failed": {
+        "ar": "فشل التفريع: {error}",
+        "en": "Fork failed: {error}",
+    },
+    "replay.forked": {
+        "ar": "فُرّعت إلى {thread}",
+        "en": "Forked into {thread}",
+    },
+    "replay.fork_request_failed": {
+        "ar": "فشل طلب التفريع",
+        "en": "Fork request failed",
+    },
+    "replay.pick_thread_first": {
+        "ar": "اختر محادثة أولًا",
+        "en": "Select a thread first",
+    },
+    "replay.pick_two": {
+        "ar": "اختر تكرارين",
+        "en": "Pick two iterations",
+    },
+    "replay.comparing": {
+        "ar": "جارٍ المقارنة…",
+        "en": "Comparing…",
+    },
+    "replay.no_diff": {
+        "ar": "لا توجد فروق متاحة.",
+        "en": "No diff available.",
+    },
+    "replay.col_metric": {
+        "ar": "المقياس",
+        "en": "Metric",
+    },
+    "replay.col_delta": {
+        "ar": "الفرق",
+        "en": "Delta",
+    },
+    "replay.row_messages": {
+        "ar": "الرسائل",
+        "en": "Messages",
+    },
+    "replay.row_iteration": {
+        "ar": "رقم التكرار",
+        "en": "Iteration #",
+    },
+    "replay.row_cost": {
+        "ar": "التكلفة (USD)",
+        "en": "Cost (USD)",
+    },
+    "replay.row_tool_calls": {
+        "ar": "استدعاءات الأدوات",
+        "en": "Tool calls",
+    },
+    "replay.row_next_node": {
+        "ar": "العقدة التالية",
+        "en": "Next node",
+    },
+    "replay.changed": {
+        "ar": "تغيّر",
+        "en": "changed",
+    },
+    "replay.same": {
+        "ar": "بلا تغيير",
+        "en": "same",
+    },
+    "replay.identical": {
+        "ar": "الحالتان متطابقتان.",
+        "en": "States are identical.",
+    },
+    "replay.compare_failed": {
+        "ar": "فشلت المقارنة",
+        "en": "Compare failed",
+    },
+    "replay.snapshot_detail": {
+        "ar": "تفاصيل اللقطة",
+        "en": "Snapshot detail",
+    },
+    "mcp.server_removed": {
+        "ar": "أُزيل الخادم",
+        "en": "Server removed",
+    },
+    "common.request_failed": {
+        "ar": "فشل الطلب",
+        "en": "Request failed",
+    },
+    "skills.cert_native": {
+        "ar": "مدمجة",
+        "en": "native",
+    },
+    "skills.cert_verified": {
+        "ar": "موثّقة",
+        "en": "verified",
+    },
+    "skills.cert_community": {
+        "ar": "مجتمعية",
+        "en": "community",
+    },
+    "skills.cert_unverified": {
+        "ar": "غير موثّقة",
+        "en": "unverified",
+    },
+    "skills.score": {
+        "ar": "الدرجة: {n}/100",
+        "en": "Score: {n}/100",
+    },
+    "ide.new_file_title": {
+        "ar": "إنشاء ملف جديد",
+        "en": "Create a new file",
+    },
+    "ide.delete_file_title": {
+        "ar": "حذف الملف المفتوح",
+        "en": "Delete the open file",
+    },
+    "ide.run_skill_title": {
+        "ar": "تشغيل مهارة البرمجة المختارة عبر السرب",
+        "en": "Run selected coding skill via the swarm",
+    },
+    "ide.toggle_chat_title": {
+        "ar": "إظهار لوحة المحادثة الذكية أو إخفاؤها",
+        "en": "Toggle the AI chat panel",
+    },
+    "ide.root": {
+        "ar": "(الجذر)",
+        "en": "(root)",
+    },
+    "ide.empty": {
+        "ar": "فارغ",
+        "en": "Empty",
+    },
+    "ide.drag_resize": {
+        "ar": "اسحب لتغيير الحجم",
+        "en": "Drag to resize",
+    },
+    "ide.editor": {
+        "ar": "المحرر",
+        "en": "Editor",
+    },
+    "ide.plain_file": {
+        "ar": "ملف عادي",
+        "en": "plain file",
+    },
+    "ide.editor_features": {
+        "ar": "أرقام الأسطر · تلوين الصياغة",
+        "en": "line numbers · syntax",
+    },
+    "ide.close_tab": {
+        "ar": "إغلاق التبويب",
+        "en": "Close tab",
+    },
+    "ide.open_file_ph": {
+        "ar": "افتح ملفًا من الشجرة…",
+        "en": "Open a file from the tree…",
+    },
+    "ide.command_ph": {
+        "ar": "أمر الطرفية (مثل pytest -q)",
+        "en": "Shell command (e.g. pytest -q)",
+    },
+    "ide.run_command": {
+        "ar": "تشغيل الأمر",
+        "en": "Run command",
+    },
+    "ide.grep_ph": {
+        "ar": "نمط البحث",
+        "en": "Grep pattern",
+    },
+    "ide.glob_ph": {
+        "ar": "نمط الملفات (*.py)",
+        "en": "glob (*.py)",
+    },
+    "ide.grep": {
+        "ar": "بحث",
+        "en": "Grep",
+    },
+    "ide.swarm_ph": {
+        "ar": "أرسل تعليمة إلى السرب…",
+        "en": "Send instruction to swarm…",
+    },
+    "ide.output": {
+        "ar": "المخرجات",
+        "en": "Output",
+    },
+    "ide.clear": {
+        "ar": "مسح",
+        "en": "Clear",
+    },
+    "ide.no_output": {
+        "ar": "(لا مخرجات بعد)",
+        "en": "(no output yet)",
+    },
+    "ide.ai_chat": {
+        "ar": "المحادثة الذكية",
+        "en": "AI Chat",
+    },
+    "ide.clear_chat_title": {
+        "ar": "مسح المحادثة",
+        "en": "Clear conversation",
+    },
+    "ide.close_panel_title": {
+        "ar": "إغلاق اللوحة",
+        "en": "Close panel",
+    },
+    "ide.you": {
+        "ar": "أنت",
+        "en": "You",
+    },
+    "ide.thinking": {
+        "ar": "يفكّر…",
+        "en": "thinking…",
+    },
+    "ide.result": {
+        "ar": "النتيجة",
+        "en": "result",
+    },
+    "ide.approval_required": {
+        "ar": "مطلوب موافقة",
+        "en": "Approval required",
+    },
+    "ide.tool": {
+        "ar": "الأداة: {tool}",
+        "en": "Tool: {tool}",
+    },
+    "ide.approve_hint": {
+        "ar": "وافق عبر المحادثة أو Telegram/Discord.",
+        "en": "Approve via the chat or Telegram/Discord.",
+    },
+    "ide.chat_ph": {
+        "ar": "اسأل عن الملف المفتوح أو اطلب تعديلات… (Enter للإرسال، Shift+Enter لسطر جديد)",
+        "en": "Ask about the open file, request edits… (Enter to send, Shift+Enter for newline)",
+    },
+    "ide.welcome": {
+        "ar": "اسأل عن الملف المفتوح أو اطلب تعديلات أو شغّل أوامر. يعرف الوكيل مساحة عملك ومستودعك وأدواتك.",
+        "en": "Ask about the open file, request edits, or run commands. The agent knows your workspace, repo, and tools.",
+    },
+    "ide.toast_skill_dispatched": {
+        "ar": "أُرسلت {skill}",
+        "en": "{skill} dispatched",
+    },
+    "ide.toast_skill_failed": {
+        "ar": "فشلت المهارة",
+        "en": "Skill failed",
+    },
+    "ide.res_skill": {
+        "ar": "المهارة: {skill}",
+        "en": "Skill: {skill}",
+    },
+    "ide.task_id": {
+        "ar": "معرّف المهمة: {id}",
+        "en": "Task ID: {id}",
+    },
+    "ide.unknown": {
+        "ar": "(غير معروف)",
+        "en": "(unknown)",
+    },
+    "ide.unknown_error": {
+        "ar": "خطأ غير معروف",
+        "en": "Unknown error",
+    },
+    "ide.toast_list_failed": {
+        "ar": "تعذّر عرض الملفات",
+        "en": "Failed to list files",
+    },
+    "ide.res_read_failed": {
+        "ar": "فشلت القراءة",
+        "en": "Read failed",
+    },
+    "ide.toast_open_failed": {
+        "ar": "فشل الفتح",
+        "en": "Open failed",
+    },
+    "ide.toast_new_file": {
+        "ar": "ملف جديد — اضغط «حفظ» لإنشائه",
+        "en": "New file — press Save to create it",
+    },
+    "ide.toast_deleted": {
+        "ar": "حُذف {path}",
+        "en": "Deleted {path}",
+    },
+    "ide.res_delete_failed": {
+        "ar": "فشل الحذف",
+        "en": "Delete failed",
+    },
+    "ide.toast_delete_pending": {
+        "ar": "فشل الحذف (قد تكون الموافقة معلّقة)",
+        "en": "Delete failed (approval may be pending)",
+    },
+    "ide.toast_saved": {
+        "ar": "حُفظ {path}",
+        "en": "Saved {path}",
+    },
+    "ide.res_save": {
+        "ar": "حفظ",
+        "en": "Save",
+    },
+    "ide.ok": {
+        "ar": "تم",
+        "en": "OK",
+    },
+    "ide.res_save_failed": {
+        "ar": "فشل الحفظ",
+        "en": "Save failed",
+    },
+    "ide.toast_save_pending": {
+        "ar": "فشل الحفظ (قد تكون الموافقة معلّقة)",
+        "en": "Save failed (approval may be pending)",
+    },
+    "ide.toast_hunk_restored": {
+        "ar": "استُعيد الجزء",
+        "en": "Hunk restored",
+    },
+    "ide.toast_hunk_failed": {
+        "ar": "فشلت استعادة الجزء",
+        "en": "Hunk restore failed",
+    },
+    "ide.toast_restored_path": {
+        "ar": "استُعيد {path}",
+        "en": "Restored {path}",
+    },
+    "ide.res_restore_failed": {
+        "ar": "فشلت الاستعادة",
+        "en": "Restore failed",
+    },
+    "ide.toast_restored_checkpoint": {
+        "ar": "استُعيدت نقطة الحفظ",
+        "en": "Restored checkpoint",
+    },
+    "ide.toast_no_checkpoints": {
+        "ar": "لا توجد نقاط حفظ بعد",
+        "en": "No checkpoints yet",
+    },
+    "ide.res_restore": {
+        "ar": "استعادة",
+        "en": "Restore",
+    },
+    "ide.res_run": {
+        "ar": "تشغيل: {path}",
+        "en": "Run: {path}",
+    },
+    "ide.toast_run_failed": {
+        "ar": "فشل التشغيل",
+        "en": "Run failed",
+    },
+    "ide.toast_command_failed": {
+        "ar": "فشل الأمر",
+        "en": "Command failed",
+    },
+    "ide.clean": {
+        "ar": "(نظيف)",
+        "en": "(clean)",
+    },
+    "ide.toast_git_failed": {
+        "ar": "فشل Git",
+        "en": "Git failed",
+    },
+    "ide.res_diff": {
+        "ar": "الفروقات: {path}",
+        "en": "Diff: {path}",
+    },
+    "ide.no_changes": {
+        "ar": "(لا تغييرات)",
+        "en": "(no changes)",
+    },
+    "ide.toast_diff_failed": {
+        "ar": "فشل عرض الفروقات",
+        "en": "Diff failed",
+    },
+    "ide.res_grep": {
+        "ar": "بحث: {pattern}",
+        "en": "Grep: {pattern}",
+    },
+    "ide.no_matches": {
+        "ar": "(لا نتائج)",
+        "en": "(no matches)",
+    },
+    "ide.toast_grep_failed": {
+        "ar": "فشل البحث",
+        "en": "Grep failed",
+    },
+    "ide.res_swarm_dispatched": {
+        "ar": "أُرسل إلى السرب",
+        "en": "Swarm dispatched",
+    },
+    "ide.toast_sent_swarm": {
+        "ar": "أُرسل إلى السرب",
+        "en": "Sent to swarm",
+    },
+    "ide.res_swarm_failed": {
+        "ar": "فشل السرب",
+        "en": "Swarm failed",
+    },
+    "ide.toast_swarm_dispatch_failed": {
+        "ar": "فشل الإرسال إلى السرب",
+        "en": "Swarm dispatch failed",
+    },
+    "ide.toast_no_streaming": {
+        "ar": "بثّ المحادثة غير متاح (لم يُحمَّل streaming.js)",
+        "en": "Chat streaming unavailable (streaming.js not loaded)",
+    },
+    "ide.toast_file_deleted": {
+        "ar": "حُذف {path}",
+        "en": "{path} was deleted",
+    },
+    "ide.toast_open_deleted": {
+        "ar": "حُذف الملف المفتوح",
+        "en": "Open file was deleted",
+    },
+    "ide.toast_updated": {
+        "ar": "حُدّث {path}",
+        "en": "Updated {path}",
+    },
+    "ide.toast_changed_on_disk": {
+        "ar": "تغيّر {path} على القرص — احفظ أو تجاهل للتحديث",
+        "en": "{path} changed on disk — save or discard to refresh",
+    },
+    "ide.toast_modified": {
+        "ar": "عُدّل {path} — انتقل إليه وأعد التحميل",
+        "en": "{path} was modified — switch to it and reload",
+    },
+    "voice.ui.transcribed": {
+        "ar": "نُسخ: «{text}...»",
+        "en": "Transcribed: \"{text}...\"",
+    },
+    "voice.ui.please_stop_live_voice_mode": {
+        "ar": "أوقف وضع الصوت المباشر أولًا",
+        "en": "Please stop Live Voice Mode first",
+    },
+    "voice.ui.hold_the_mic_to_record": {
+        "ar": "اضغط مطوّلًا على الميكروفون للتسجيل",
+        "en": "Hold the mic to record",
+    },
+    "voice.ui.microphone_access_denied_please_allow": {
+        "ar": "رُفض الوصول إلى الميكروفون. اسمح بالوصول إليه.",
+        "en": "Microphone access denied. Please allow microphone access.",
+    },
+    "voice.ui.transcribing": {
+        "ar": "جارٍ التفريغ…",
+        "en": "Transcribing...",
+    },
+    "voice.ui.transcription_failed": {
+        "ar": "فشل التفريغ: ",
+        "en": "Transcription failed: ",
+    },
+    "voice.ui.no_speech_detected": {
+        "ar": "لم يُكتشف كلام",
+        "en": "No speech detected",
+    },
+    "voice.ui.transcription_request_failed": {
+        "ar": "فشل طلب التفريغ",
+        "en": "Transcription request failed",
+    },
+    "voice.ui.voice_output_unavailable_tts_not": {
+        "ar": "إخراج الصوت غير متاح (تحويل النص إلى كلام غير مُعدّ) — صامت حتى /voice on.",
+        "en": "Voice output unavailable (TTS not configured) — silenced until /voice on.",
+    },
+    "voice.ui.voice_replies_enabled": {
+        "ar": "فُعّلت الردود الصوتية",
+        "en": "Voice replies enabled",
+    },
+    "voice.ui.voice_replies_disabled": {
+        "ar": "عُطّلت الردود الصوتية",
+        "en": "Voice replies disabled",
+    },
+    "voice.ui.stt_provider_set_to": {
+        "ar": "مزوّد تحويل الكلام إلى نص: ",
+        "en": "STT provider set to: ",
+    },
+    "voice.ui.tts_provider_set_to": {
+        "ar": "مزوّد تحويل النص إلى كلام: ",
+        "en": "TTS provider set to: ",
+    },
+    "voice.ui.starting_live_streaming_mode": {
+        "ar": "جارٍ بدء وضع البث المباشر…",
+        "en": "Starting live streaming mode...",
+    },
+    "voice.ui.live_mode_stopped": {
+        "ar": "توقف الوضع المباشر",
+        "en": "Live mode stopped",
+    },
+    "voice.ui.live_voice_mode_active_speak": {
+        "ar": "وضع الصوت المباشر نشط — تحدّث؛ يمكنك المقاطعة",
+        "en": "Live voice mode active — speak; you can interrupt",
+    },
+    "voice.ui.voice_connection_error": {
+        "ar": "خطأ في اتصال الصوت",
+        "en": "Voice connection error",
+    },
+    "voice.ui.cannot_access_microphone_for_streaming": {
+        "ar": "تعذّر الوصول إلى الميكروفون للبث",
+        "en": "Cannot access microphone for streaming",
+    },
+    "voice.ui.microphone_capture_failed": {
+        "ar": "فشل التقاط الميكروفون",
+        "en": "Microphone capture failed",
+    },
+    "voice.ui.listening": {
+        "ar": "جارٍ الاستماع…",
+        "en": "Listening...",
+    },
+    "voice.ui.tool": {
+        "ar": "أداة: ",
+        "en": "Tool: ",
+    },
+    "voice.ui.approval_needed_answer_the_card": {
+        "ar": "مطلوب موافقة — أجب على البطاقة في المحادثة للمتابعة",
+        "en": "Approval needed — answer the card in chat to continue",
+    },
+    "voice.ui.voice_error": {
+        "ar": "خطأ صوتي: ",
+        "en": "Voice error: ",
+    },
+    "voice.ui.voice_config_updated": {
+        "ar": "حُدّثت إعدادات الصوت",
+        "en": "Voice config updated",
+    },
+    "voice.ui.duplex_livekit_webrtc_brain_is": {
+        "ar": "ثنائي الاتجاه: LiveKit WebRTC (العقل ما زال Kazma)",
+        "en": "Duplex: LiveKit WebRTC (brain is still Kazma)",
+    },
+    "voice.ui.live_voice_mode_stopped": {
+        "ar": "توقف وضع الصوت المباشر",
+        "en": "Live voice mode stopped",
+    },
+    "ide.dlg.close_tab_title": {
+        "ar": "إغلاق التبويب",
+        "en": "Close tab",
+    },
+    "ide.dlg.close_tab_message": {
+        "ar": "في «{name}» تغييرات غير محفوظة. أتغلقه على أي حال؟",
+        "en": "\"{name}\" has unsaved changes. Close anyway?",
+    },
+    "ide.dlg.close": {
+        "ar": "إغلاق",
+        "en": "Close",
+    },
+    "ide.dlg.new_file_title": {
+        "ar": "ملف جديد",
+        "en": "New file",
+    },
+    "ide.dlg.new_file_message": {
+        "ar": "المسار (بالنسبة إلى جذر مساحة العمل)",
+        "en": "Path (relative to workspace root)",
+    },
+    "ide.dlg.create": {
+        "ar": "إنشاء",
+        "en": "Create",
+    },
+    "ide.dlg.delete_file_title": {
+        "ar": "حذف الملف",
+        "en": "Delete file",
+    },
+    "ide.dlg.delete_file_message": {
+        "ar": "حذف «{path}»؟\nلا يمكن التراجع عن ذلك.",
+        "en": "Delete \"{path}\"?\nThis cannot be undone.",
+    },
+    "ide.dlg.reject_file_title": {
+        "ar": "رفض هذا الملف",
+        "en": "Reject this file",
+    },
+    "ide.dlg.reject_file_message": {
+        "ar": "استعادة هذا الملف من نقطة الحفظ السابقة للتعديل؟",
+        "en": "Restore this file from the pre-patch checkpoint?",
+    },
+    "ide.dlg.restore_file": {
+        "ar": "استعادة الملف",
+        "en": "Restore file",
+    },
+    "ide.dlg.reject_patches_title": {
+        "ar": "رفض التعديلات",
+        "en": "Reject patches",
+    },
+    "ide.dlg.reject_patches_message": {
+        "ar": "استعادة نقطة الحفظ السابقة للتعديل؟ سيكتب هذا فوق الملفات على القرص.",
+        "en": "Restore the pre-patch checkpoint? This overwrites files on disk.",
+    },
+    "ide.dlg.restore": {
+        "ar": "استعادة",
+        "en": "Restore",
+    },
+    "ide.dlg.restore_checkpoint_title": {
+        "ar": "استعادة نقطة الحفظ",
+        "en": "Restore checkpoint",
+    },
+    "ide.dlg.restore_checkpoint_message": {
+        "ar": "استعادة آخر نقطة حفظ لملفات مساحة العمل؟ سيكتب هذا فوق الملفات على القرص.",
+        "en": "Restore the last workspace file checkpoint? This overwrites files on disk.",
+    },
+    "ide.dlg.stream_error": {
+        "ar": "خطأ في البث",
+        "en": "Stream error",
+    },
+    "mcp.ui.oauth_failed": {
+        "ar": "فشل تسجيل الدخول عبر OAuth",
+        "en": "OAuth login failed",
+    },
+    "mcp.ui.test_failed_detail": {
+        "ar": "فشل اختبار الاتصال: {error}",
+        "en": "Connection test failed: {error}",
+    },
+    "mcp.ui.no_error_detail": {
+        "ar": "لا تفاصيل للخطأ",
+        "en": "no error detail",
+    },
+    "mcp.ui.start_failed": {
+        "ar": "فشل: {error}",
+        "en": "Failed: {error}",
+    },
+    "mcp.ui.unable_to_start": {
+        "ar": "تعذّر تشغيل الخادم",
+        "en": "Unable to start server",
+    },
+    "mcp.ui.unable_to_stop": {
+        "ar": "تعذّر إيقاف الخادم",
+        "en": "Unable to stop server",
+    },
+    "mcp.ui.test_failed": {
+        "ar": "فشل الاختبار: {error}",
+        "en": "Test failed: {error}",
+    },
+    "mcp.ui.no_detail": {
+        "ar": "لا تفاصيل",
+        "en": "no detail",
+    },
+    "mcp.ui.unknown_error": {
+        "ar": "خطأ غير معروف",
+        "en": "unknown error",
+    },
+    "common.ui.model_not_switched": {
+        "ar": "لم يُبدَّل النموذج: {error}",
+        "en": "Model not switched: {error}",
+    },
+    "common.ui.st_install_started": {
+        "ar": "بدأ تثبيت sentence-transformers في الخلفية",
+        "en": "Installation of sentence-transformers started asynchronously",
+    },
+    "common.ui.install_start_failed": {
+        "ar": "تعذّر بدء التثبيت",
+        "en": "Failed to start installation",
+    },
+    "common.ui.copied": {
+        "ar": "نُسخ إلى الحافظة",
+        "en": "Copied to clipboard",
+    },
+    "common.ui.copy_failed": {
+        "ar": "فشل النسخ",
+        "en": "Failed to copy",
+    },
+    "common.ui.messages_count": {
+        "ar": "الرسائل: {n}",
+        "en": "{n} msgs",
+    },
+    "login.page_title": {
+        "ar": "Kazma — تسجيل الدخول",
+        "en": "Kazma — Login",
+    },
+    "login.secret_placeholder": {
+        "ar": "قيمة KAZMA_SECRET",
+        "en": "KAZMA_SECRET value",
+    },
+    "login.failed": {
+        "ar": "فشل تسجيل الدخول",
+        "en": "Login failed",
+    },
+    "login.network_error": {
+        "ar": "خطأ في الشبكة — حاول مرة أخرى",
+        "en": "Network error — try again",
+    },
+    "mcp.command_hint": {
+        "ar": "الصق أمر <strong>التشغيل</strong> (عادةً <code>npx -y &lt;pkg&gt;</code>)، لا <code>npm install</code>. كثير من الوثائق تذكر <code>npm install</code> — ويحوّله Kazma تلقائيًا إلى <code>npx -y</code>.",
+        "en": "Paste the <strong>run</strong> command (usually <code>npx -y &lt;pkg&gt;</code>), not <code>npm install</code>. Common docs say <code>npm install</code> — Kazma auto-rewrites that to <code>npx -y</code>.",
+    },
+    "mcp.bearer_placeholder": {
+        "ar": "رمز bearer اختياري",
+        "en": "optional bearer token",
+    },
+    "mcp.env_value_placeholder": {
+        "ar": "القيمة",
+        "en": "value",
+    },
+    "mcp.add_variable": {
+        "ar": "+ إضافة متغير",
+        "en": "+ Add variable",
+    },
+    "mcp.env_hint": {
+        "ar": "تحتاج معظم خوادم MCP إلى مفتاح API — راجع وثائق الخادم لمعرفة اسم متغير البيئة.",
+        "en": "Most MCP servers need an API key — check the server's docs for the env var name.",
+    },
+    "mcp.validating": {
+        "ar": "جارٍ التحقق…",
+        "en": "Validating…",
+    },
 }

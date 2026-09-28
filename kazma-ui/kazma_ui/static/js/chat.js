@@ -761,7 +761,7 @@
       try {
         var btn = document.createElement('button');
         btn.className = 'btn btn-sm btn-primary';
-        btn.textContent = '↻ Retry';
+        btn.textContent = '↻ ' + ti('task_retry', 'Retry');
         btn.addEventListener('click', function() {
           if (window.KazmaChat && typeof window.KazmaChat.retry === 'function') {
             window.KazmaChat.retry();
@@ -784,9 +784,10 @@
           var b = d && d.build;
           var el = document.getElementById('build-badge');
           if (!b || !el) return;
-          var started = b.started_at
-            ? new Date(b.started_at * 1000).toLocaleTimeString() : '';
-          el.textContent = 'build ' + (b.commit || '?') + (started ? ' · up since ' + started : '');
+          var started = b.started_at && window.KazmaFormat
+            ? window.KazmaFormat.time(b.started_at) : '';
+          el.textContent = tiFmt('build_badge', 'build {commit}', { commit: b.commit || '?' }) +
+            (started ? ' · ' + tiFmt('build_since', 'up since {time}', { time: started }) : '');
         })
         .catch(function() { /* badge is best-effort */ });
     } catch (e) { /* ignore */ }
@@ -1232,8 +1233,8 @@
     sendBtn.classList.remove('stop-mode');
     sendBtn.innerHTML = _SEND_SVG;
     sendBtn.title = _awaitingApproval
-      ? 'Send steer or command'
-      : 'Send (Enter / Ctrl+Enter)';
+      ? ti('send_steer', 'Send steer or command')
+      : ti('send_title', 'Send (Enter / Ctrl+Enter)');
   }
 
   function ensureSlashMenu() {
@@ -2063,12 +2064,12 @@
     _clearStatusStrip();
     if (inputEl) {
       inputEl.disabled = false;
-      inputEl.placeholder = 'Type a message or /yolo \u2026 (Enter to send)';
+      inputEl.placeholder = _defaultPlaceholder();
     }
     if (sendBtn) {
       sendBtn.disabled = false;
       sendBtn.classList.remove('stop-mode');
-      sendBtn.title = 'Send (Enter / Ctrl+Enter)';
+      sendBtn.title = ti('send_title', 'Send (Enter / Ctrl+Enter)');
       sendBtn.innerHTML = _SEND_SVG;
     }
     syncSendButtonForDraft();
@@ -2110,7 +2111,7 @@
     // endTurn already finalizes progress as stopped when we mark it first
     if (_progressEl) {
       var titleEl = _progressEl.querySelector('.agent-progress-title');
-      if (titleEl) titleEl.textContent = 'Stopped';
+      if (titleEl) titleEl.textContent = ti('stopped', 'Stopped');
     }
     endTurn();
   }
@@ -2135,12 +2136,12 @@
     // leave dead air when the inline card was late — 2026-09-03).
     if (inputEl) {
       inputEl.disabled = false;
-      inputEl.placeholder = 'Approve above — or /steer /abort /long /yolo';
+      inputEl.placeholder = ti('placeholder_paused', 'Approve above — or /steer /abort /long /yolo');
     }
     if (sendBtn) {
       sendBtn.disabled = false;
       sendBtn.classList.remove('stop-mode');
-      sendBtn.title = 'Send steer or command';
+      sendBtn.title = ti('send_steer', 'Send steer or command');
       sendBtn.innerHTML = _SEND_SVG;
     }
     syncSendButtonForDraft();
@@ -2171,7 +2172,7 @@
     if (activeStream) {
       activeStream.abort();
       activeStream = null;
-      if (!opts.silent && KS.toast) KS.toast('Generation stopped', 'info', 2000);
+      if (!opts.silent && KS.toast) KS.toast(ti('generation_stopped', 'Generation stopped'), 'info', 2000);
     }
     // The SSE turn runs detached server-side (refresh-safe) — aborting the
     // fetch alone would NOT stop the generation. Tell the server to cancel
@@ -2345,14 +2346,14 @@
         renderPendingAttachments();
       };
       reader.onerror = function() {
-        KS.toast('Failed to read ' + file.name, 'error', 3000);
+        KS.toast(tiFmt('file_read_failed', 'Failed to read {name}', { name: file.name }), 'error', 3000);
       };
       reader.readAsText(file);
       return;
     }
     // Everything else (images, PDFs, docs, large text) is uploaded.
     if (file.size > 20 * 1024 * 1024) {
-      KS.toast('File too large (max 20MB): ' + file.name, 'error', 3000);
+      KS.toast(tiFmt('file_too_large', 'File too large (max 20MB): {name}', { name: file.name }), 'error', 3000);
       return;
     }
     var localId = 'local-' + (++_attachChipSeq);
@@ -2402,7 +2403,7 @@
           return u._localId !== localId;
         });
         renderPendingAttachments();
-        KS.toast('Upload failed: ' + (err && err.message ? err.message : err), 'error', 3500);
+        KS.toast(tiFmt('upload_failed', 'Upload failed: {error}', { error: err && err.message ? err.message : err }), 'error', 3500);
       });
   }
 
@@ -2555,7 +2556,7 @@
                 if (models.length > 0) {
                   providerGroups.push({
                     name: p.name || 'unknown',
-                    label: p.display_name || p.name || 'Unknown',
+                    label: p.display_name || p.name || ti('provider_unknown', 'Unknown'),
                     models: models
                   });
                 }
@@ -2569,7 +2570,7 @@
         // If both fetches fail, at least show the persisted model
         var fallback = [];
         if (selectedModel) {
-          fallback.push({ name: 'active', label: 'Active', models: [selectedModel] });
+          fallback.push({ name: 'active', label: ti('models_active', 'Active'), models: [selectedModel] });
         }
         populateModelSelector(fallback, savedModels);
       });
@@ -2670,7 +2671,7 @@
             try { localStorage.setItem(MODEL_LS_KEY, selectedModel); } catch(e) {}
           }
         }).catch(function() {
-          if (window.KS && KS.toast) KS.toast('Model switch request failed', 'error', 3000);
+          if (window.KS && KS.toast) KS.toast(ti('model_switch_failed', 'Model switch request failed'), 'error', 3000);
         });
     }
   }
@@ -2713,8 +2714,8 @@
         return '`' + c.cmd + '` — ' + c.desc;
       }).join('\n');
       appendMessage('user', text);
-      appendMessage('assistant', '**Slash commands**\n\n' + helpLines +
-        '\n\nOn danger tools you can also **Allow tool (session)** to stop repeat prompts without full YOLO.');
+      appendMessage('assistant', '**' + ti('slash_commands_heading', 'Slash commands') + '**\n\n' + helpLines +
+        '\n\n' + ti('slash_allow_tool_tip', 'On danger tools you can also **Allow tool (session)** to stop repeat prompts without full YOLO.'));
       inputEl.value = '';
       inputEl.style.height = 'auto';
       return;
@@ -2745,7 +2746,7 @@
         // command that only toasts reads as "not really working"
         // (command audit 2026-08-19).
         appendMessage('user', '/abort');
-        if (window.showToast) window.showToast('⛔ Aborting task…', 'warning', 2500);
+        if (window.showToast) window.showToast(ti('aborting_task', '⛔ Aborting task…'), 'warning', 2500);
         _releaseHitlComposer('abort');
         if (activeStream) { try { activeStream.abort(); } catch (_e) {} activeStream = null; }
         fetch('/api/chat/abort', {
@@ -2810,12 +2811,12 @@
               if (inputEl) inputEl.value = fallback;
               sendMessage();
             } else if (window.showToast) {
-              window.showToast('No active task to steer.', 'info', 3000);
+              window.showToast(ti('no_task_to_steer', 'No active task to steer.'), 'info', 3000);
             }
             return;
           }
           if (body.reason && window.showToast) {
-            window.showToast('Steer failed: ' + body.reason, 'error', 3500);
+            window.showToast(tiFmt('steer_failed', 'Steer failed: {reason}', { reason: body.reason }), 'error', 3500);
           }
           return;
         }
@@ -2905,7 +2906,7 @@
         '<div class="chat-welcome">' +
           '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
           '<h2>Kazma</h2>' +
-          '<p>How can I help you today?</p>' +
+          '<p>' + escapeHtml(ti('welcome_subtitle', 'How can I help you today?')) + '</p>' +
         '</div>';
       resetSessionStats();
       currentMsgEl = null;
@@ -3229,8 +3230,8 @@
                   + '↻ Retry</button>';
               }
               emptyEl.innerHTML = (KS.markdown
-                ? KS.markdown('_No response received._ Check server logs or Pending Approvals.')
-                : '<em>No response received.</em>') + retryHtml;
+                ? KS.markdown(ti('no_response_md', '_No response received._ Check server logs or Pending Approvals.'))
+                : '<em>' + escapeHtml(ti('no_response_received', 'No response received.')) + '</em>') + retryHtml;
             }
           }, 600);
         }
@@ -3378,7 +3379,7 @@
         _pinLiveAssistantBubble();
         var textEl = currentMsgEl.querySelector('.message-text');
         textEl.innerHTML = '<div class="error-message">\u26A0 ' + escapeHtml(msg) +
-          '<br><button class="btn btn-sm btn-danger" onclick="window.KazmaChat.retry()">Retry</button></div>';
+          '<br><button class="btn btn-sm btn-danger" onclick="window.KazmaChat.retry()">' + escapeHtml(ti('task_retry', 'Retry')) + '</button></div>';
         endTurn();
         _resyncDelivery('sse-fail');
         // A dead stream can also mean the turn parked on a HITL interrupt
@@ -3425,11 +3426,19 @@
     }
     var now = new Date();
     var sameDay = d.toDateString() === now.toDateString();
-    var time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true });
-    var fullStr = time;
-    if (!sameDay) {
-      var day = d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
-      fullStr = day + ' ' + time;
+    var fullStr;
+    if (window.KazmaFormat && (window.KAZMA_LANG || 'en') !== 'en') {
+      // The page's language, Latin digits (KazmaFormat's rule).
+      fullStr = sameDay
+        ? window.KazmaFormat.time(d)
+        : window.KazmaFormat.dateTime(d, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } else {
+      var time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true });
+      fullStr = time;
+      if (!sameDay) {
+        var day = d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
+        fullStr = day + ' ' + time;
+      }
     }
     // Return pure isolated text string using Unicode LRI (\u2066) and PDI (\u2069).
     // Plain-text Unicode isolators work in textContent, innerHTML, escapeHtml(),
@@ -3912,7 +3921,7 @@
     function buildDetails(inner) {
       // Content-preserving: the original <pre> inner markup (lang label,
       // escaped code, copy button) moves inside the details verbatim.
-      return '<details class="kazma-plan"><summary>Plan</summary>'
+      return '<details class="kazma-plan"><summary>' + ti('plan', 'Plan') + '</summary>'
         + '<div class="kazma-plan-body"><pre>' + inner + '</pre></div></details>';
     }
 
@@ -4043,6 +4052,25 @@
     m = s.match(/^running\s+(.+?)\s*[.…]*$/i);
     if (m && !/after/i.test(s)) return tiFmt('running_tool', s, { tool: m[1] });
     return s;
+  }
+
+  /** The server's approval summary ("Agent wants to run: tool(args)") in
+   *  the reader's language: the prefix translated, the call shown as it is
+   *  (translate="no" -- a tool name and its arguments are content). Any
+   *  other message is the server's words, also shown as they are. */
+  function _hitlMessageHtml(msg) {
+    var s = String(msg || '');
+    var m = /^Agent wants to run: ([\s\S]*)$/.exec(s);
+    if (m) {
+      return escapeHtml(ti('hitl_wants_to_run', 'Agent wants to run:')) +
+        ' <span translate="no">' + escapeHtml(m[1]) + '</span>';
+    }
+    m = /^Agent wants to run (\d+) danger tools: ([\s\S]*)$/.exec(s);
+    if (m) {
+      return escapeHtml(tiFmt('hitl_wants_to_run_n', 'Agent wants to run {n} danger tools:', { n: m[1] })) +
+        ' <span translate="no">' + escapeHtml(m[2]) + '</span>';
+    }
+    return s ? '<span translate="no">' + escapeHtml(s) + '</span>' : '';
   }
 
   /** Localized state label for tool rows (Done / Failed / Running…). */
@@ -4257,7 +4285,7 @@
       } else if (ok === 'empty') {
         // The turn terminal'd without painting any reply — never claim Done.
         titleEl.textContent = ti('no_response', 'No response');
-        titleEl.title = 'Turn ended without a reply — see the message area or window.KazmaChat.diagnostics()';
+        titleEl.title = ti('no_reply_title', 'Turn ended without a reply — see the message area or window.KazmaChat.diagnostics()');
       } else {
         // Turn summary bar: "Done · N tools · M steps · Xs · $cost · tokens"
         // One line that stays readable when the panel is collapsed.
@@ -4598,7 +4626,7 @@
       iso = new Date().toISOString();
     }
     var avatarHtml = role === 'user'
-      ? '<div class="message-avatar message-avatar-user">You</div>'
+      ? '<div class="message-avatar message-avatar-user">' + escapeHtml(ti('you_avatar', 'You')) + '</div>'
       : '<div class="message-avatar message-avatar-agent" title="Kazma">' +
           '<img src="/static/img/kazma-icon.png" alt="Kazma" class="message-avatar-img" ' +
           'onerror="this.style.display=\'none\';this.parentNode.textContent=\'K\';" />' +
@@ -4664,9 +4692,9 @@
       var actions = document.createElement('div');
       actions.className = 'message-actions';
       actions.innerHTML =
-        '<button class="msg-action" title="Edit" data-action="edit">\u270E</button>' +
-        '<button class="msg-action" title="Copy" data-action="copy">\u2398</button>' +
-        '<button class="msg-action" title="Regenerate" data-action="regenerate">\u21BB</button>';
+        '<button class="msg-action" title="' + escapeHtml(ti('msg_edit', 'Edit')) + '" data-action="edit">\u270E</button>' +
+        '<button class="msg-action" title="' + escapeHtml(ti('msg_copy', 'Copy')) + '" data-action="copy">\u2398</button>' +
+        '<button class="msg-action" title="' + escapeHtml(ti('msg_regenerate', 'Regenerate')) + '" data-action="regenerate">\u21BB</button>';
       wrapper.querySelector('.message-content').appendChild(actions);
 
       // Wire up actions
@@ -4689,10 +4717,10 @@
       // control (or a second speaker icon in the composer, which nobody
       // could tell from the live-voice mic) is not a way to stop audio.
       aActions.innerHTML =
-        '<button class="msg-action speak-action" title="Read aloud" data-action="speak" aria-label="Read this message aloud">\uD83D\uDD0A</button>' +
-        '<button class="msg-action reaction-btn" title="Helpful" data-reaction="up">\uD83D\uDC4D</button>' +
-        '<button class="msg-action reaction-btn" title="Not helpful" data-reaction="down">\uD83D\uDC4E</button>' +
-        '<button class="msg-action" title="Copy" data-action="copy">\u2398</button>';
+        '<button class="msg-action speak-action" title="' + escapeHtml(ti('msg_read_aloud', 'Read aloud')) + '" data-action="speak" aria-label="' + escapeHtml(ti('msg_read_aloud_aria', 'Read this message aloud')) + '">\uD83D\uDD0A</button>' +
+        '<button class="msg-action reaction-btn" title="' + escapeHtml(ti('msg_helpful', 'Helpful')) + '" data-reaction="up">\uD83D\uDC4D</button>' +
+        '<button class="msg-action reaction-btn" title="' + escapeHtml(ti('msg_not_helpful', 'Not helpful')) + '" data-reaction="down">\uD83D\uDC4E</button>' +
+        '<button class="msg-action" title="' + escapeHtml(ti('msg_copy', 'Copy')) + '" data-action="copy">\u2398</button>';
       wrapper.querySelector('.message-content').appendChild(aActions);
 
       aActions.addEventListener('click', function(e) {
@@ -4897,7 +4925,7 @@
 
   function markApprovalTimedOut(msg, data) {
     data = data || {};
-    var text = String(msg || 'Approval timed out — continuing without this tool.');
+    var text = String(msg || ti('approval_expired', 'Approval timed out — continuing without this tool.'));
     var iid = String(data.interrupt_id || '');
     // Only a timeout that names its gate may touch the document. Without an
     // id the event became a separate part keyed 'hitl:' -- a stray row next
@@ -5668,7 +5696,7 @@
           }).then(function(res) {
             if (res.status === 409) {
               _awaitingApproval = false;
-              if (act) act.innerHTML = '<span class="hitl-status">Already resolved</span>';
+              if (act) act.innerHTML = '<span class="hitl-status">' + escapeHtml(ti('hitl_already_resolved', 'Already resolved')) + '</span>';
               _reattachAfterApproval('approve-409');
               return;
             }
@@ -5738,9 +5766,10 @@
           '<div class="hitl-proposal" style="margin:8px 0;padding:8px 10px;border-radius:8px;' +
           'background:color-mix(in srgb, var(--accent, #6c8cff) 7%, transparent);' +
           'border:1px solid color-mix(in srgb, var(--accent, #6c8cff) 20%, transparent);">' +
-          '<p style="margin:0 0 6px 0;font-size:0.8rem;"><strong>Content to publish</strong>' +
-          (_propPid ? ' — stored proposal <code>' + escapeHtml(_propPid) + '</code>' : '') +
-          ' (verified against what you approved):</p>' +
+          '<p style="margin:0 0 6px 0;font-size:0.8rem;"><strong>' + escapeHtml(ti('hitl_publish', 'Content to publish')) + '</strong>' +
+          (_propPid ? ' — ' + escapeHtml(tiFmt('hitl_stored_proposal', 'stored proposal {pid}', { pid: '\u0001' }))
+            .replace('\u0001', '<code>' + escapeHtml(_propPid) + '</code>') : '') +
+          ' ' + escapeHtml(ti('hitl_verified', '(verified against what you approved):')) + '</p>' +
           '<ul class="hitl-proposal-items" style="margin:0;padding-left:18px;font-size:0.78rem;">' +
           _propItems.map(function(i) {
             return '<li style="margin:3px 0;"><code>' + escapeHtml(String(i.id || '')) +
@@ -5764,26 +5793,27 @@
     // offering a YOLO button there reads as "approve once" when it re-prompts.
     var yoloOk = data.yolo_allowed !== false;
     card.innerHTML =
-      '<div class="hitl-approval-header"><span class="hitl-header-title">\u26A0 Approval Required</span></div>' +
+      '<div class="hitl-approval-header"><span class="hitl-header-title">' + escapeHtml(ti('hitl_title', '\u26A0 Approval Required')) + '</span></div>' +
       '<div class="hitl-approval-body">' +
-        '<p><strong>Tool:</strong> <code>' + escapeHtml(data.tool || '') + '</code></p>' +
+        '<p><strong>' + escapeHtml(ti('hitl_tool_label', 'Tool:')) + '</strong> <code>' + escapeHtml(data.tool || '') + '</code></p>' +
         (tools.length <= 1
-          ? '<p><strong>Args:</strong></p><div class="hitl-approval-args">' + renderApprovalArgsHtml(data.tool, data.args) + '</div>'
+          ? '<p><strong>' + escapeHtml(ti('hitl_args_label', 'Args:')) + '</strong></p><div class="hitl-approval-args">' + renderApprovalArgsHtml(data.tool, data.args) + '</div>'
           : toolsHtml) +
         proposalHtml +
         (data.jail_note
           ? '<p class="hitl-jail-note">' + escapeHtml(String(data.jail_note)) + '</p>'
           : '') +
-        '<p class="hitl-message">' + escapeHtml(truncateStr(data.message || '', 400)) + '</p>' +
+        '<p class="hitl-message">' + _hitlMessageHtml(truncateStr(data.message || '', 400)) + '</p>' +
         '<p class="hitl-scope-hint" style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;">' +
           (yoloOk
-            ? 'Tip: <strong>Allow tool</strong> stops repeat prompts for this tool only. ' +
-              '<strong>YOLO session</strong> skips every danger tool (native + MCP) until you <code>/yolo off</code> or TTL.'
-            : 'This tool <strong>always requires approval</strong> (safety fail-safe) — YOLO and session grants cannot skip it.') +
+            ? ti('hitl_tip_yolo', 'Tip: <strong>Allow tool</strong> stops repeat prompts for this tool only. ' +
+              '<strong>YOLO session</strong> skips every danger tool (native + MCP) until you <code>/yolo off</code> or TTL.')
+            : ti('hitl_tip_always', 'This tool <strong>always requires approval</strong> (safety fail-safe) — YOLO and session grants cannot skip it.')) +
         '</p>' +
       '</div>' +
       '<div class="hitl-approval-actions" style="flex-wrap:wrap;gap:6px;">' +
-        '<button class="btn btn-sm btn-success hitl-approve" data-scope="once" title="This call only">Approve once</button>' +
+        '<button class="btn btn-sm btn-success hitl-approve" data-scope="once" title="' + escapeHtml(ti('hitl_approve_once_title', 'This call only')) + '">' +
+          escapeHtml(ti('hitl_approve_once', 'Approve once')) + '</button>' +
         // "Allow tool" is singular, but on a GROUPED card this grants every
         // tool in the batch — `_extract_pending_tools_from_snapshot` returns
         // all of their names and each gets `grant_tool()`. A button that says
@@ -5791,14 +5821,17 @@
         // hides which tools one approval covers (2026-09-21). Say the number.
         (tools.length > 1
           ? '<button class="btn btn-sm btn-primary hitl-approve-tool" data-scope="tool" title="' +
-            escapeHtml('Allow these ' + tools.length + ' tools for ~30m in this session: ' +
-              tools.map(function (t) { return t.name || ''; }).join(', ')) +
-            '">' + escapeHtml('Allow these ' + tools.length + ' tools (session)') + '</button>'
-          : '<button class="btn btn-sm btn-primary hitl-approve-tool" data-scope="tool" title="Allow this tool for ~30m in this session">Allow tool (session)</button>') +
+            escapeHtml(tiFmt('hitl_allow_n_title', 'Allow these {n} tools for ~30m in this session: {names}', {
+              n: tools.length, names: tools.map(function (t) { return t.name || ''; }).join(', '),
+            })) +
+            '">' + escapeHtml(tiFmt('hitl_allow_n', 'Allow these {n} tools (session)', { n: tools.length })) + '</button>'
+          : '<button class="btn btn-sm btn-primary hitl-approve-tool" data-scope="tool" title="' + escapeHtml(ti('hitl_allow_tool_title', 'Allow this tool for ~30m in this session')) + '">' +
+            escapeHtml(ti('hitl_allow_tool', 'Allow tool (session)')) + '</button>') +
         (yoloOk
-          ? '<button class="btn btn-sm btn-warning hitl-approve-yolo" data-scope="yolo" title="Skip all danger tools for this session">YOLO session</button>'
+          ? '<button class="btn btn-sm btn-warning hitl-approve-yolo" data-scope="yolo" title="' + escapeHtml(ti('hitl_yolo_title', 'Skip all danger tools for this session')) + '">' +
+            escapeHtml(ti('hitl_yolo', 'YOLO session')) + '</button>'
           : '') +
-        '<button class="btn btn-sm btn-danger hitl-deny" data-scope="once">Deny</button>' +
+        '<button class="btn btn-sm btn-danger hitl-deny" data-scope="once">' + escapeHtml(ti('hitl_deny', 'Deny')) + '</button>' +
       '</div>';
     // Attach only — TurnView's next pass moves it to its declared slot.
     content.appendChild(card);
@@ -5997,10 +6030,10 @@
           interrupt_id: data.interrupt_id || '',
         });
         if (scope === 'yolo' && KS.toast) {
-          KS.toast('YOLO on for this session \u2014 danger tools auto-approved', 'warning', 4000);
+          KS.toast(ti('yolo_session_on', 'YOLO on for this session \u2014 danger tools auto-approved'), 'warning', 4000);
         }
         if (scope === 'tool' && KS.toast) {
-          KS.toast('Allowed ' + (data.tool || 'tool') + ' for this session (~30m)', 'success', 3000);
+          KS.toast(tiFmt('tool_allowed_session', 'Allowed {tool} for this session (~30m)', { tool: data.tool || 'tool' }), 'success', 3000);
         }
         _reattachAfterApproval('approve-json');
         _resyncDelivery('approve-json');
@@ -6035,20 +6068,20 @@
     var siblings = Array.from(messagesEl.querySelectorAll('.message'));
     var idx = siblings.indexOf(msgEl);
     for (var i = idx; i < siblings.length; i++) siblings[i].remove();
-    KS.toast('Edit your message and press Enter to resend', 'info', 2500);
+    KS.toast(ti('edit_resend_hint', 'Edit your message and press Enter to resend'), 'info', 2500);
   }
 
   function copyMessage(msgEl) {
     var text = msgEl.querySelector('.message-text').textContent;
     navigator.clipboard.writeText(text).then(function() {
-      KS.toast('Copied to clipboard', 'success', 2000);
+      KS.toast(ti('copied', 'Copied to clipboard'), 'success', 2000);
     });
   }
 
   function copyAssistantMessage(msgEl) {
     var text = msgEl.querySelector('.message-text').textContent;
     navigator.clipboard.writeText(text).then(function() {
-      KS.toast('Copied to clipboard', 'success', 2000);
+      KS.toast(ti('copied', 'Copied to clipboard'), 'success', 2000);
     });
   }
 
@@ -6074,7 +6107,7 @@
     // unstoppable, because only the last one had a handle (2026-09-17).
     if (KazmaVoice.isBusy(id)) { KazmaVoice.stopTTS(); return; }
     var text = (msgEl.querySelector('.message-text') || {}).textContent || '';
-    if (!text.trim()) { KS.toast('Nothing to read in this message', 'info', 2000); return; }
+    if (!text.trim()) { KS.toast(ti('nothing_to_read', 'Nothing to read in this message'), 'info', 2000); return; }
     KazmaVoice.playTTS(text, null, id);
   }
 
@@ -6203,7 +6236,7 @@
     if (userCount === 0 && !lastSentUserText) return null;
     return {
       session_id: sid,
-      title: firstUser || (lastSentUserText || '').trim().slice(0, 60) || 'New chat',
+      title: firstUser || (lastSentUserText || '').trim().slice(0, 60) || ti('untitled_chat', 'New chat'),
       message_count: Math.max(userCount * 2, userCount || 1),
       platform: 'web',
       created_at: new Date().toISOString(),
@@ -6224,7 +6257,7 @@
       : 1;
     upsertSessionLocal({
       session_id: chatSessionId,
-      title: (existing && existing.title) ? existing.title : (titleHint || 'New chat'),
+      title: (existing && existing.title) ? existing.title : (titleHint || ti('untitled_chat', 'New chat')),
       message_count: nextCount,
       platform: 'web',
       updated_at: new Date().toISOString(),
@@ -6235,6 +6268,9 @@
 
   function relativeTime(isoStr) {
     if (!isoStr) return '';
+    if (window.KazmaFormat && (window.KAZMA_LANG || 'en') !== 'en') {
+      return window.KazmaFormat.relative(isoStr);
+    }
     try {
       var then = new Date(isoStr);
       var now = new Date();
@@ -6245,6 +6281,13 @@
       if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
       return then.toLocaleDateString();
     } catch (e) { return ''; }
+  }
+
+  /** A chat platform as the reader names it: "web" in their language,
+   *  Telegram / Discord / Slack as they are. */
+  function _platformName(p) {
+    var v = String(p || 'web');
+    return v === 'web' ? ti('platform_web', 'web') : v;
   }
 
   // Session id whose kebab menu is open (single open menu at a time)
@@ -6280,13 +6323,18 @@
     var title = s.title || (s.session_id || '').slice(0, 8);
     var plat = s.platform || 'web';
     var absTime = '';
-    try { absTime = new Date(s.updated_at || s.created_at).toLocaleString(); } catch (e) {}
+    try {
+      absTime = window.KazmaFormat
+        ? window.KazmaFormat.dateTime(s.updated_at || s.created_at)
+        : new Date(s.updated_at || s.created_at).toLocaleString();
+    } catch (e) {}
     var lastPlat = s.last_platform || s.platform || 'web';
-    var meta = lastPlat + ' \u00B7 ' + s.message_count + ' msgs \u00B7 ' + relativeTime(s.updated_at || s.created_at);
+    var meta = _platformName(lastPlat) + ' \u00B7 ' + tiFmt('session_msgs', '{n} msgs', { n: s.message_count }) +
+      ' \u00B7 ' + relativeTime(s.updated_at || s.created_at);
     var html = '<div class="session-item' + (isActive ? ' active' : '') + (s.pinned ? ' pinned' : '') + (isMenuOpen ? ' menu-open' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '" data-platform="' + escapeHtml(plat) + '">' +
-      '<span class="session-platform-dot dot-' + escapeHtml(plat) + '" title="' + escapeHtml(plat) + '"></span>' +
+      '<span class="session-platform-dot dot-' + escapeHtml(plat) + '" title="' + escapeHtml(_platformName(plat)) + '"></span>' +
       '<div class="session-info">' +
-        '<span class="session-title" dir="auto" title="' + escapeHtml(title) + (absTime ? ' \u00B7 ' + absTime : '') + '">' + highlightTitle(title, q) + '</span>' +
+        '<span class="session-title" dir="auto" translate="no" title="' + escapeHtml(title) + (absTime ? ' \u00B7 ' + absTime : '') + '">' + highlightTitle(title, q) + '</span>' +
         '<span class="session-meta" dir="auto">' + escapeHtml(meta) + '</span>' +
       '</div>';
     if (showArchived) {
@@ -6456,7 +6504,7 @@
       KS.toast(remembered ? ti('memory_off_done', "Kazma won't remember this chat")
                           : ti('memory_on_done', 'Kazma remembers this chat again'), 'success', 2500);
     } catch (e) {
-      KS.toast((e && e.message) || 'Memory setting failed', 'error', 3000);
+      KS.toast((e && e.message) || ti('memory_setting_failed', 'Memory setting failed'), 'error', 3000);
     }
   }
 
@@ -6475,10 +6523,10 @@
           renderSessionList();
           refreshSessionsSoon();
         } else {
-          KS.toast(data.error || 'Pin failed', 'error', 3000);
+          KS.toast(data.error || ti('pin_failed', 'Pin failed'), 'error', 3000);
         }
       })
-      .catch(function() { KS.toast('Pin failed', 'error', 3000); });
+      .catch(function() { KS.toast(ti('pin_failed', 'Pin failed'), 'error', 3000); });
   }
 
   function archiveSession(sessionId) {
@@ -6486,14 +6534,14 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.status === 'ok') {
-          KS.toast('Session archived', 'success', 2000);
+          KS.toast(ti('session_archived', 'Session archived'), 'success', 2000);
           loadSessions();
           if (sessionId === chatSessionId) newSession();
         } else {
-          KS.toast(data.error || 'Archive failed', 'error', 3000);
+          KS.toast(data.error || ti('archive_failed', 'Archive failed'), 'error', 3000);
         }
       })
-      .catch(function() { KS.toast('Archive failed', 'error', 3000); });
+      .catch(function() { KS.toast(ti('archive_failed', 'Archive failed'), 'error', 3000); });
   }
 
   function unarchiveSession(sessionId) {
@@ -6501,13 +6549,13 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.status === 'ok') {
-          KS.toast('Session restored', 'success', 2000);
+          KS.toast(ti('session_restored', 'Session restored'), 'success', 2000);
           loadArchivedSessions();
         } else {
-          KS.toast(data.error || 'Restore failed', 'error', 3000);
+          KS.toast(data.error || ti('restore_failed', 'Restore failed'), 'error', 3000);
         }
       })
-      .catch(function() { KS.toast('Restore failed', 'error', 3000); });
+      .catch(function() { KS.toast(ti('restore_failed', 'Restore failed'), 'error', 3000); });
   }
 
   function loadArchivedSessions() {
@@ -6557,7 +6605,7 @@
     var link = window.location.origin + '/chat?s=' + encodeURIComponent(text);
     var payload = text + '\n' + link;
     var done = function() {
-      if (window.KS && KS.toast) KS.toast('Copied ID — /session ' + text.slice(-8) + ' on Telegram/Discord', 'success', 3500);
+      if (window.KS && KS.toast) KS.toast(tiFmt('copied_session_id', 'Copied ID — /session {id} on Telegram/Discord', { id: text.slice(-8) }), 'success', 3500);
     };
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(payload).then(done).catch(function() {
@@ -6572,10 +6620,10 @@
     var s = sessions.find(function(x) { return x.session_id === sessionId; });
     var current = s ? (s.title || sessionId.slice(0, 8)) : '';
     var title = await window.kazmaPrompt({
-      title: 'Rename session',
-      label: 'Session title',
+      title: ti('rename_session', 'Rename session'),
+      label: ti('session_title_label', 'Session title'),
       defaultValue: current,
-      confirmText: 'Rename',
+      confirmText: ti('rename', 'Rename'),
     });
     if (!title || !title.trim()) return;
     fetch('/api/chat/sessions/' + encodeURIComponent(sessionId), {
@@ -6586,13 +6634,13 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.status === 'ok') {
-          KS.toast('Session renamed', 'success', 2000);
+          KS.toast(ti('session_renamed', 'Session renamed'), 'success', 2000);
           loadSessions();
         } else {
-          KS.toast(data.error || 'Rename failed', 'error', 3000);
+          KS.toast(data.error || ti('rename_failed', 'Rename failed'), 'error', 3000);
         }
       })
-      .catch(function() { KS.toast('Rename failed', 'error', 3000); });
+      .catch(function() { KS.toast(ti('rename_failed', 'Rename failed'), 'error', 3000); });
   }
 
   // Bounded retries for a transient session-messages fetch (restart window).
@@ -6676,8 +6724,8 @@
           messagesEl.innerHTML =
             '<div class="chat-welcome">' +
               '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
-              '<h2>Session ' + escapeHtml(sessionId.slice(0, 8)) + '</h2>' +
-              '<p>No messages in this session yet.</p>' +
+              '<h2>' + escapeHtml(tiFmt('session_heading', 'Session {id}', { id: sessionId.slice(0, 8) })) + '</h2>' +
+              '<p>' + escapeHtml(ti('session_empty', 'No messages in this session yet.')) + '</p>' +
             '</div>';
           return;
         }
@@ -6836,7 +6884,7 @@
       var btn = e.target.closest('[data-cap]');
       if (!btn || !inputEl) return;
       if (_isGenerating) {
-        if (KS && KS.toast) KS.toast('Please wait for generation to finish or abort first', 'info', 2500);
+        if (KS && KS.toast) KS.toast(ti('wait_or_abort', 'Please wait for generation to finish or abort first'), 'info', 2500);
         return;
       }
       var cap = btn.getAttribute('data-cap') || '';
@@ -6857,11 +6905,11 @@
       var status = document.getElementById('capacity-status');
       if (status) {
         var bits = [];
-        if (snap.plan_active) bits.push('Plan');
+        if (snap.plan_active) bits.push(ti('plan', 'Plan'));
         if (snap.long_active) {
-          bits.push(snap.mode === 'mission' ? 'Mission' : 'Long');
+          bits.push(snap.mode === 'mission' ? ti('mode_mission', 'Mission') : ti('mode_long', 'Long'));
         }
-        if (!bits.length) bits.push('Chat');
+        if (!bits.length) bits.push(ti('mode_chat', 'Chat'));
         var modeLabel = bits.join(' · ');
         var budget = String(snap.max_iterations != null ? snap.max_iterations : '');
         if (snap.iteration != null && budget) {
@@ -6869,9 +6917,9 @@
         } else {
           status.textContent = budget ? (modeLabel + ' · ' + budget) : modeLabel;
         }
-        status.title = snap.yolo_active
-          ? (status.textContent + ' · YOLO on')
-          : (status.textContent + ' · HITL on');
+        status.title = status.textContent + ' · ' + (snap.yolo_active
+          ? ti('yolo_active', 'YOLO on')
+          : ti('hitl_on', 'HITL on'));
       }
       var bar = document.getElementById('capacity-bar');
       if (!bar) return;
@@ -6906,7 +6954,7 @@
       '<div class="chat-welcome">' +
         '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
         '<h2>Kazma</h2>' +
-        '<p>How can I help you today?</p>' +
+        '<p>' + escapeHtml(ti('welcome_subtitle', 'How can I help you today?')) + '</p>' +
       '</div>';
     resetSessionStats();
     currentMsgEl = null;
@@ -6956,7 +7004,7 @@
         var forgot = await window.kazmaSave(
           '/api/memory/v2/chats/' + encodeURIComponent(sessionId) + '/memory',
           { method: 'PUT', body: { remember: false, forget_past: true } });
-        if (!forgot || !forgot.ok) throw new Error((forgot && forgot.error) || 'forget failed');
+        if (!forgot || !forgot.ok) throw new Error((forgot && forgot.error) || ti('forget_failed', 'Forget failed'));
       }
       await window.kazmaSave('/api/chat/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' });
       KS.toast(choice.checked ? ti('delete_chat_forgot', 'Chat deleted, and what Kazma learned from it forgotten')
@@ -6988,7 +7036,7 @@
     }
     if (costBadge) costBadge.textContent = KS.formatCost(_sessionTotals.cost);
     if (tokensBadge) {
-      tokensBadge.textContent = formatCompactCount(_sessionTotals.tokens) + ' tok';
+      tokensBadge.textContent = formatCompactCount(_sessionTotals.tokens) + ' ' + ti('tok_unit', 'tok');
       tokensBadge.title = KS.formatTokens(_sessionTotals.tokens) + ' ' + ti('tokens', 'tokens');
     }
   }
@@ -6999,7 +7047,7 @@
     _sessionTotals.cost = 0;
     if (costBadge) costBadge.textContent = KS.formatCost(0);
     if (tokensBadge) {
-      tokensBadge.textContent = '0 tok';
+      tokensBadge.textContent = '0 ' + ti('tok_unit', 'tok');
       tokensBadge.title = '0 ' + ti('tokens', 'tokens');
     }
   }
@@ -7049,7 +7097,7 @@
       tokens: totalTokens.toLocaleString(),
     });
     contextBadge.textContent = totalTokens
-      ? ('~' + formatCompactCount(totalTokens) + ' ctx')
+      ? ('~' + formatCompactCount(totalTokens) + ' ' + ti('ctx_unit', 'ctx'))
       : '—';
     contextBadge.title = full;
   }
@@ -8068,7 +8116,7 @@
       ? String(resolvedState) : _hitlDisplayState(part);
     if (!show) return;
     if (show === 'pending') {
-      _setHitlHeaderTitle(card, '\u26A0 Approval Required');
+      _setHitlHeaderTitle(card, ti('hitl_title', '\u26A0 Approval Required'));
       // Only a gate the registry confirms is live gets a ticker. Re-arming
       // it on every render of anything that merely *looks* pending is what
       // let a stale part resurrect a countdown after the fact.
@@ -8106,8 +8154,8 @@
       var wasCollapsed = card.classList.contains('hitl-collapsed');
       card.className = 'hitl-approval-card hitl-' + kind + (wasCollapsed ? ' hitl-collapsed' : '');
       var errLabel = show === 'timeout'
-        ? 'Approval timed out — continuing without this tool.'
-        : (show === 'error' ? 'No longer pending' : 'Denied');
+        ? ti('approval_expired', 'Approval timed out — continuing without this tool.')
+        : (show === 'error' ? ti('hitl_no_longer_pending', 'No longer pending') : ti('hitl_status_denied', 'Denied'));
       if (actions) {
         actions.innerHTML = '<span class="hitl-status hitl-' + kind + '">' +
           escapeHtml(errLabel) + '</span>';
@@ -8119,9 +8167,9 @@
     if (show === 'approved' || show === 'inflight' || show === 'settled') {
       var wasCol = card.classList.contains('hitl-collapsed');
       card.className = 'hitl-approval-card hitl-approved' + (wasCol ? ' hitl-collapsed' : '');
-      var okLabel = show === 'inflight' ? 'Approved — running…' : 'Approved';
+      var okLabel = show === 'inflight' ? ti('hitl_status_running', 'Approved — running…') : ti('hitl_status_approved', 'Approved');
       if (actions) {
-        actions.innerHTML = '<span class="hitl-status hitl-approved">' + okLabel + '</span>';
+        actions.innerHTML = '<span class="hitl-status hitl-approved">' + escapeHtml(okLabel) + '</span>';
       }
       _setHitlHeaderTitle(card, _hitlToolOf(part) || okLabel);
       _collapseClaimedHitlCard(card);
@@ -8505,7 +8553,7 @@
       icon.className = 'context-compacted-chip-icon';
       icon.textContent = '🗜️';
       var label = document.createElement('span');
-      label.textContent = 'Earlier context compacted';
+      label.textContent = ti('context_compacted', 'Earlier context compacted');
       chip.appendChild(icon);
       chip.appendChild(label);
       var hover = document.createElement('div');

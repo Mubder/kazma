@@ -56,16 +56,26 @@ var ProvidersManager = window.ProvidersManager = {
         if (state === 'working') {
             const ms = result.chat_ms != null ? `${result.chat_ms} ms` : '';
             const model = result.chat_model ? ` · ${result.chat_model}` : '';
-            return { label: 'Working', tone: 'success', detail: `replied in ${ms}${model}` };
+            return {
+                label: this.stateLabel('working'),
+                tone: 'success',
+                detail: this._t('settings.prov_replied_in', 'replied in {ms}{model}').replace('{ms}', ms).replace('{model}', model),
+            };
         }
         if (state === 'chat_failing') {
             return {
-                label: 'Chat failing',
+                label: this.stateLabel('chat_failing'),
                 tone: 'warning',
-                detail: result.error || 'the model list answers, a real message does not',
+                detail: result.error || this._t('settings.prov_chat_failing_detail', 'the model list answers, a real message does not'),
             };
         }
-        return { label: 'Unreachable', tone: 'danger', detail: result.error || 'no response' };
+        return { label: this.stateLabel('unreachable'), tone: 'danger', detail: result.error || this._t('settings.prov_no_response', 'no response') };
+    },
+
+    /** A catalog string in the page's language (window.tOr), else English. */
+    _t(key, fallback) {
+        if (typeof window !== 'undefined' && typeof window.tOr === 'function') return window.tOr(key, fallback);
+        return fallback;
     },
 
     /** Display names for the capability keys the provider layer declares. */
@@ -142,12 +152,12 @@ var ProvidersManager = window.ProvidersManager = {
         return Object.keys(this.CAPABILITY_LABELS).map(function (key) {
             var value = supports[key];
             var state = value === true ? 'yes' : (value === false ? 'no' : 'unknown');
-            var title = {
+            var title = self._t('settings.cap_title_' + state, {
                 yes: 'Measured against this provider and confirmed.',
                 no: 'Measured against this provider and not supported.',
                 unknown: 'Not verified. Nobody has measured this yet — run scripts/provider_conformance.py --live.',
-            }[state];
-            return { key: key, label: self.CAPABILITY_LABELS[key], state: state, title: title };
+            }[state]);
+            return { key: key, label: self._t('settings.cap_' + key, self.CAPABILITY_LABELS[key]), state: state, title: title };
         });
     },
 
@@ -161,10 +171,10 @@ var ProvidersManager = window.ProvidersManager = {
     wireFacts(provider) {
         var caps = (provider && provider.capabilities) || null;
         if (!caps) return [];
-        var facts = [{ label: 'API', value: String(caps.api_style || 'openai') }];
-        facts.push({ label: 'System turn', value: String(caps.system_role || 'system') });
+        var facts = [{ label: this._t('settings.fact_api', 'API'), value: String(caps.api_style || 'openai') }];
+        facts.push({ label: this._t('settings.fact_system_turn', 'System turn'), value: String(caps.system_role || 'system') });
         if (caps.max_context) {
-            facts.push({ label: 'Context', value: String(caps.max_context) });
+            facts.push({ label: this._t('settings.fact_context', 'Context'), value: String(caps.max_context) });
         }
         return facts;
     },

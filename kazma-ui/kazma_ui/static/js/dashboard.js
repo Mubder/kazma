@@ -113,13 +113,13 @@
   function updateConnectionStatus(status) {
     var el = $('connection-status');
     if (!el) return;
-    var states = {
-      'connected': { text: '• Live', color: 'var(--success)' },
-      'disconnected': { text: '• Disconnected', color: 'var(--danger)' },
-      'connecting': { text: '• Connecting…', color: 'var(--warning)' },
-      'reconnecting': { text: '• Reconnecting…', color: 'var(--warning)' },
+    var colors = {
+      'connected': 'var(--success)',
+      'disconnected': 'var(--danger)',
+      'connecting': 'var(--warning)',
+      'reconnecting': 'var(--warning)',
     };
-    var state = states[status] || { text: '• ' + status, color: 'var(--text-muted)' };
+    var state = { text: window.tOr('dashboard.live_' + status, '• ' + status), color: colors[status] || 'var(--text-muted)' };
     el.textContent = state.text;
     el.style.color = state.color;
   }

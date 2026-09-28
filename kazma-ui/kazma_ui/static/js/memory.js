@@ -6,6 +6,16 @@
 function memoryPage() {
   const S = window.__MEM_STRINGS || {};
 
+  // Text this page builds: the catalog's text in the page's language, else
+  // the English fallback, {name} placeholders filled from vars.
+  function tx(key, fallback, vars) {
+    if (window.kazmaT) return window.kazmaT(key, fallback, vars);
+    let text = fallback;
+    if (vars) for (const k in vars) text = text.split("{" + k + "}").join(String(vars[k]));
+    return text;
+  }
+  const num = (n) => (window.KazmaFormat ? window.KazmaFormat.number(n) : Number(n).toLocaleString());
+
   function toast(msg, type) {
     if (window.showToast) window.showToast(msg, type || "info");
     else console.warn(`[memory ${type || "info"}] ${msg}`);  // fallback only (toast system not loaded)
@@ -17,7 +27,7 @@ function memoryPage() {
   function undoToast(message, undoToken, { kind, duration } = {}) {
     const container = document.querySelector('.toast-container');
     if (!container || !undoToken) {
-      toast(message + (undoToken ? ' (undo available)' : ''), 'success');
+      toast(message + (undoToken ? tx('memory.page.undo_available', ' (undo available)') : ''), 'success');
       return;
     }
     const el = document.createElement('div');
@@ -28,7 +38,7 @@ function memoryPage() {
     text.style.cssText = 'flex:1;min-width:0;';
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.textContent = 'Undo';
+    btn.textContent = tx('memory.page.undo', 'Undo');
     btn.className = 'btn btn-sm btn-secondary';
     btn.style.cssText = 'flex:0 0 auto;font-size:0.74rem;padding:2px 10px;';
     let done = false;
@@ -42,14 +52,14 @@ function memoryPage() {
           method: 'POST',
         });
         if (r && r.ok) {
-          toast('Undone: ' + (r.label || kind || 'action'), 'success');
+          toast(tx('memory.page.undone', 'Undone: {what}', { what: r.label || kind || tx('memory.page.action', 'action') }), 'success');
           // Trigger the standard post-ops refresh so lists/graph update.
           try { window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', { detail: { op: 'undo', kind } })); } catch (_) { /* */ }
         } else {
-          toast((r && r.error) || 'Undo failed', 'error');
+          toast((r && r.error) || tx('memory.page.undo_failed', 'Undo failed'), 'error');
         }
       } catch (e) {
-        toast('Undo failed: ' + e, 'error');
+        toast(tx('memory.page.undo_failed_error', 'Undo failed: {error}', { error: e }), 'error');
       } finally {
         el.remove();
       }
@@ -64,7 +74,7 @@ function memoryPage() {
 
   async function confirm(opts) {
     if (window.kazmaConfirm) return window.kazmaConfirm(opts);
-    return window.confirm(opts.message || opts.title || "Confirm?");
+    return window.confirm(opts.message || opts.title || tx("memory.console.confirm_q", "Confirm?"));
   }
 
   async function api(path, opts) {
@@ -165,12 +175,12 @@ function memoryPage() {
     get summaryChips() {
       const s = this.summary || {};
       return [
-        { k: "Beliefs", v: s.beliefs_live ?? "—" },
-        { k: "Invalidated", v: s.beliefs_invalidated ?? "—" },
-        { k: "Entities", v: s.entities ?? "—" },
-        { k: "Empty", v: s.entities_empty ?? "—" },
-        { k: "Isolated", v: s.entities_isolated ?? "—" },
-        { k: "Episodes", v: s.episodes ?? "—" },
+        { k: tx("memory.page.chip_beliefs", "Beliefs"), v: s.beliefs_live ?? "—" },
+        { k: tx("memory.page.chip_invalidated", "Invalidated"), v: s.beliefs_invalidated ?? "—" },
+        { k: tx("memory.page.chip_entities", "Entities"), v: s.entities ?? "—" },
+        { k: tx("memory.page.chip_empty", "Empty"), v: s.entities_empty ?? "—" },
+        { k: tx("memory.page.chip_isolated", "Isolated"), v: s.entities_isolated ?? "—" },
+        { k: tx("memory.page.chip_episodes", "Episodes"), v: s.episodes ?? "—" },
       ];
     },
 
@@ -180,7 +190,7 @@ function memoryPage() {
       if (!total) return "";
       const start = ((page && page.offset) || 0) + 1;
       const end = Math.min(start + len - 1, total);
-      return `Showing ${start.toLocaleString()}–${end.toLocaleString()} of ${total.toLocaleString()}`;
+      return tx("memory.page.showing", "Showing {start}–{end} of {total}", { start: num(start), end: num(end), total: num(total) });
     },
 
     /** Can we load another window? (offset + fetched < total) */
@@ -431,7 +441,7 @@ function memoryPage() {
             })
           : false;
       if (!ok && !opts.quiet) {
-        toast("Node not on graph (filtered out or no beliefs)", "info");
+        toast(tx("memory.page.node_not_on_graph", "Node not on graph (filtered out or no beliefs)"), "info");
       }
       if (opts.scrollGraph !== false) scrollToConsole();
     },
@@ -450,7 +460,7 @@ function memoryPage() {
           : false;
       // _v2gSelectBelief notifies list — suppress double-switch by notify path already ok
       if (!ok && !opts.quiet) {
-        toast("Belief endpoints not on graph (try refresh)", "info");
+        toast(tx("memory.page.belief_not_on_graph", "Belief endpoints not on graph (try refresh)"), "info");
       }
       if (opts.scrollGraph !== false) scrollToConsole();
     },
@@ -466,11 +476,11 @@ function memoryPage() {
         body: "{}",
       });
       if (d.ok) {
-        toast("Invalidated " + String(id).slice(0, 16), "success");
+        toast(tx("memory.page.invalidated_one", "Invalidated {id}", { id: String(id).slice(0, 16) }), "success");
         await this.loadBeliefs();
         await this.loadSummary();
         await refreshGraph();
-      } else toast(d.error || "Failed", "error");
+      } else toast(d.error || tx("memory.console.failed", "Failed"), "error");
     },
 
     async invalidateSelected() {
@@ -490,14 +500,16 @@ function memoryPage() {
       });
       if (d.ok) {
         undoToast(
-          "Invalidated " + d.invalidated + " belief" + (d.invalidated === 1 ? "" : "s") + ".",
+          d.invalidated === 1
+            ? tx("memory.page.invalidated_n_one", "Invalidated 1 belief.")
+            : tx("memory.page.invalidated_n", "Invalidated {n} beliefs.", { n: d.invalidated }),
           d.undo_token,
           { kind: "invalidate" }
         );
         await this.loadBeliefs();
         await this.loadSummary();
         await refreshGraph();
-      } else toast(d.error || "Failed", "error");
+      } else toast(d.error || tx("memory.console.failed", "Failed"), "error");
     },
 
     async editBelief(b) {
@@ -509,11 +521,11 @@ function memoryPage() {
       const store = window.Alpine && Alpine.store('modal');
       if (!store) {
         // Legacy fallback (pre-Alpine) — keep the 3-step native prompt.
-        let object = window.prompt("Object (fact text)", b.object || "");
+        let object = window.prompt(tx("memory.page.prompt_object", "Object (fact text)"), b.object || "");
         if (object == null) return;
-        let predicate = window.prompt("Predicate", b.predicate || "");
+        let predicate = window.prompt(tx("memory.page.prompt_predicate", "Predicate"), b.predicate || "");
         if (predicate == null) return;
-        let subject = window.prompt("Subject", b.subject || "");
+        let subject = window.prompt(tx("memory.page.prompt_subject", "Subject"), b.subject || "");
         if (subject == null) return;
         return this._submitBeliefEdit(b, subject, predicate, object);
       }
@@ -522,21 +534,21 @@ function memoryPage() {
       const labelStyle = "font-size:0.72rem;color:var(--text-muted);";
       const escHtml = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
       store.show({
-        title: S.edit || "Edit belief",
+        title: S.edit || tx("memory.page.edit_title", "Edit belief"),
         size: 'sm',
         body:
           '<div style="display:flex;flex-direction:column;gap:10px;">' +
-          '<div><label style="' + labelStyle + '">Subject (entity id)</label>' +
+          '<div><label style="' + labelStyle + '">' + escHtml(tx("memory.page.label_subject", "Subject (entity id)")) + '</label>' +
           '<input id="' + fid + '-subject" type="text" value="' + escHtml(b.subject) + '" style="' + fieldStyle + '" placeholder="user"></div>' +
-          '<div><label style="' + labelStyle + '">Predicate</label>' +
+          '<div><label style="' + labelStyle + '">' + escHtml(tx("memory.page.prompt_predicate", "Predicate")) + '</label>' +
           '<input id="' + fid + '-predicate" type="text" value="' + escHtml(b.predicate) + '" style="' + fieldStyle + '" placeholder="has_project"></div>' +
-          '<div><label style="' + labelStyle + '">Object (fact text)</label>' +
-          '<input id="' + fid + '-object" type="text" value="' + escHtml(b.object) + '" style="' + fieldStyle + '" placeholder="e.g. ShipX platform description…"></div>' +
+          '<div><label style="' + labelStyle + '">' + escHtml(tx("memory.page.prompt_object", "Object (fact text)")) + '</label>' +
+          '<input id="' + fid + '-object" type="text" value="' + escHtml(b.object) + '" style="' + fieldStyle + '" placeholder="' + escHtml(tx("memory.page.label_object_ph", "e.g. what the fact says…")) + '"></div>' +
           '</div>',
         actions: [
-          { label: 'Cancel', variant: 'btn-secondary', close: true },
+          { label: tx('memory.page.cancel', 'Cancel'), variant: 'btn-secondary', close: true },
           {
-            label: 'Save', variant: 'btn-primary', close: true,
+            label: tx('memory.console.save', 'Save'), variant: 'btn-primary', close: true,
             handler: () => {
               const subject = (document.getElementById(fid + '-subject') || {}).value;
               const predicate = (document.getElementById(fid + '-predicate') || {}).value;
@@ -553,7 +565,7 @@ function memoryPage() {
       predicate = String(predicate || "").trim();
       object = String(object || "").trim();
       if (!subject || !predicate || !object) {
-        toast("Subject, predicate, and object are required", "error");
+        toast(tx("memory.console.spo_required", "Subject, predicate, and object are required"), "error");
         return;
       }
       if (
@@ -571,7 +583,7 @@ function memoryPage() {
         }
       );
       if (d.ok) {
-        undoToast("Belief updated.", d.undo_token, { kind: "edit" });
+        undoToast(tx("memory.page.belief_updated", "Belief updated."), d.undo_token, { kind: "edit" });
         await this.loadBeliefs();
         await this.loadEntities();
         await this.loadSummary();
@@ -581,7 +593,7 @@ function memoryPage() {
           { id: b.id, subject, predicate, object },
           { quiet: true }
         );
-      } else toast(d.error || "Edit failed", "error");
+      } else toast(d.error || tx("memory.console.edit_failed", "Edit failed"), "error");
     },
 
     pickEntity(id) {
@@ -602,13 +614,13 @@ function memoryPage() {
         method: "DELETE",
       });
       if (d.ok) {
-        undoToast("Deleted entity " + e.id + ".", d.undo_token, { kind: "delete-entity" });
+        undoToast(tx("memory.page.deleted_entity", "Deleted entity {id}.", { id: e.id }), d.undo_token, { kind: "delete-entity" });
         if (this.selectedEntityId === e.id) this.selectedEntityId = null;
         await this.loadEntities();
         await this.loadSummary();
         await this.loadHygiene();
         await refreshGraph();
-      } else toast(d.error || "Failed", "error");
+      } else toast(d.error || tx("memory.console.failed", "Failed"), "error");
     },
 
     async renameEntity(e) {
@@ -617,23 +629,21 @@ function memoryPage() {
       let name;
       if (window.kazmaPrompt) {
         name = await window.kazmaPrompt({
-          title: S.rename || "Rename entity",
+          title: S.rename || tx("memory.page.rename_title", "Rename entity"),
           message:
-            (S.rename_hint ||
-              "Display name only — id stays the same so beliefs keep linking.") +
-            "\nid: " +
-            e.id,
+            tx("memory.page.rename_hint", "Display name only — id stays the same so beliefs keep linking.") +
+            "\n" + tx("memory.page.id_line", "id: {id}", { id: e.id }),
           defaultValue: current,
-          confirmText: S.rename || "Rename",
-          placeholder: "e.g. ShipX / Mubder",
+          confirmText: S.rename || tx("memory.console.rename", "Rename"),
+          placeholder: tx("memory.console.rename_ph", "e.g. a project name"),
         });
       } else {
-        name = window.prompt("New display name for " + e.id, current);
+        name = window.prompt(tx("memory.page.rename_native", "New display name for {id}", { id: e.id }), current);
       }
       if (name == null) return;
       name = String(name).trim();
       if (!name) {
-        toast("Name cannot be empty", "error");
+        toast(tx("memory.console.name_empty", "Name cannot be empty"), "error");
         return;
       }
       if (name === current) return;
@@ -645,7 +655,7 @@ function memoryPage() {
         }
       );
       if (d.ok) {
-        toast("Renamed to “" + name + "”", "success");
+        toast(tx("memory.console.renamed_to", "Renamed to “{name}”", { name: name }), "success");
         this.selectedEntityId = e.id;
         await this.loadEntities();
         // Force graph reload so hub label (You→Mubder) re-fetches from server
@@ -659,14 +669,14 @@ function memoryPage() {
             name: name,
           });
         }
-      } else toast(d.error || "Rename failed", "error");
+      } else toast(d.error || tx("memory.console.rename_failed", "Rename failed"), "error");
     },
 
     async doMerge() {
       const src = (this.mergeSource || "").trim();
       const tgt = (this.mergeTarget || "").trim();
       if (!src || !tgt) {
-        toast("Set source and target entity ids (or pick on the graph)", "error");
+        toast(tx("memory.page.merge_need_slots", "Set source and target entity ids (or pick on the graph)"), "error");
         scrollToConsole();
         return;
       }
@@ -703,7 +713,9 @@ function memoryPage() {
         // instead so the operator sees exactly what moved.
         const rewired = (d.receipt && d.receipt.beliefs_rewired) || 0;
         toast(
-          "Merged " + src + " → " + tgt + ": " + rewired + " belief" + (rewired === 1 ? "" : "s") + " rewired.",
+          rewired === 1
+            ? tx("memory.page.merged_one", "Merged {source} → {target}: 1 belief rewired.", { source: src, target: tgt })
+            : tx("memory.page.merged_n", "Merged {source} → {target}: {n} beliefs rewired.", { source: src, target: tgt, n: rewired }),
           "success"
         );
         this.mergeSource = "";
@@ -717,7 +729,7 @@ function memoryPage() {
         if (typeof window._v2gSelectEntity === "function") {
           window._v2gSelectEntity(tgt, { notify: false });
         }
-      } else toast(d.error || "Merge failed", "error");
+      } else toast(d.error || tx("memory.console.merge_failed", "Merge failed"), "error");
     },
 
     async doLink() {
@@ -725,7 +737,7 @@ function memoryPage() {
       const tgt = (this.mergeTarget || "").trim();
       const pred = (this.linkPredicate || "related_to").trim() || "related_to";
       if (!src || !tgt) {
-        toast("Set source and target for link (or pick on the graph)", "error");
+        toast(tx("memory.page.link_need_slots", "Set source and target for link (or pick on the graph)"), "error");
         scrollToConsole();
         return;
       }
@@ -744,7 +756,9 @@ function memoryPage() {
       });
       if (d.ok) {
         undoToast(
-          "Linked " + src + " —" + pred + "→ " + tgt + (d.already ? " (already linked)" : "") + ".",
+          tx(d.already ? "memory.page.linked_already" : "memory.page.linked",
+            d.already ? "Linked {source} —{predicate}→ {target} (already linked)." : "Linked {source} —{predicate}→ {target}.",
+            { source: src, predicate: pred, target: tgt }),
           d.undo_token,
           { kind: "link" }
         );
@@ -755,7 +769,7 @@ function memoryPage() {
         if (typeof window._v2gSelectEntity === "function") {
           window._v2gSelectEntity(tgt, { notify: false });
         }
-      } else toast(d.error || "Link failed", "error");
+      } else toast(d.error || tx("memory.console.link_failed", "Link failed"), "error");
     },
 
     async decideMerge(id, approve) {
@@ -764,11 +778,11 @@ function memoryPage() {
         body: JSON.stringify({ action: approve ? "approve" : "reject" }),
       });
       if (d.ok) {
-        toast(approve ? "Merge approved" : "Merge rejected", "success");
+        toast(approve ? tx("memory.page.merge_approved", "Merge approved") : tx("memory.page.merge_rejected", "Merge rejected"), "success");
         await this.loadMerges();
         await this.loadEntities();
         await refreshGraph();
-      } else toast(d.error || "Failed", "error");
+      } else toast(d.error || tx("memory.console.failed", "Failed"), "error");
     },
 
     async runHygiene() {
@@ -784,10 +798,10 @@ function memoryPage() {
           body: JSON.stringify(this.hygiene),
         });
         if (d.ok) {
-          toast("Hygiene complete", "success");
+          toast(tx("memory.page.hygiene_complete", "Hygiene complete"), "success");
           await this.loadAll();
           await refreshGraph();
-        } else toast(d.error || "Hygiene failed", "error");
+        } else toast(d.error || tx("memory.page.hygiene_failed", "Hygiene failed"), "error");
       } finally {
         this.hygieneRunning = false;
       }

@@ -208,4 +208,36 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "بانتظار الرسائل",
         "en": "waiting for messages",
     },
+    "agents.state_idle": {
+        "ar": "خامل",
+        "en": "idle",
+    },
+    "agents.state_thinking": {
+        "ar": "يفكّر",
+        "en": "thinking",
+    },
+    "agents.state_acting": {
+        "ar": "ينفّذ",
+        "en": "acting",
+    },
+    "agents.state_error": {
+        "ar": "خطأ",
+        "en": "error",
+    },
+    "agents.personality_active": {
+        "ar": "النشطة",
+        "en": "Active",
+    },
+    "agents.status_success": {
+        "ar": "نجاح",
+        "en": "success",
+    },
+    "agents.status_error": {
+        "ar": "خطأ",
+        "en": "error",
+    },
+    "agents.ui.personality_switch_failed": {
+        "ar": "تعذّر تبديل الشخصية",
+        "en": "Failed to switch personality",
+    },
 }

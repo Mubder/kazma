@@ -37,7 +37,7 @@
             {# Header #}
             <div class="modal-header">
                 <h2 id="modal-title" x-text="$store.modal.title"></h2>
-                <button class="modal-close" @click="$store.modal.close()" aria-label="Close modal">
+                <button class="modal-close" @click="$store.modal.close()" aria-label="{{ t('common.close') }}">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M18 6L6 18M6 6l12 12"/>
                     </svg>

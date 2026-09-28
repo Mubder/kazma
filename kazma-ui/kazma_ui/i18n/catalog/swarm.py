@@ -1552,4 +1552,40 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "يعمل (تمت معالجة ",
         "en": "is working (Processed ",
     },
+    "swarm.ui.remove_worker_title": {
+        "ar": "إزالة العامل",
+        "en": "Remove worker",
+    },
+    "swarm.ui.remove": {
+        "ar": "إزالة",
+        "en": "Remove",
+    },
+    "swarm.ui.delete_template_message": {
+        "ar": "حذف القالب «{name}»؟",
+        "en": "Delete template \"{name}\"?",
+    },
+    "swarm.ui.delete": {
+        "ar": "حذف",
+        "en": "Delete",
+    },
+    "swarm.ui.delete_failed": {
+        "ar": "فشل الحذف: {error}",
+        "en": "Delete failed: {error}",
+    },
+    "swarm.ui.reap_failed": {
+        "ar": "فشل التنظيف",
+        "en": "Reap failed",
+    },
+    "swarm.tokens_zero": {
+        "ar": "0 رموز",
+        "en": "0 tokens",
+    },
+    "swarm.output_routing_moved": {
+        "ar": "صار توجيه المخرجات مع بقية إعدادات المحوّلات: <strong>الإعدادات ← المزوّدون والموصلات ← موصلات المنصات ← التسليم والتوجيه</strong>.",
+        "en": "Output routing now lives with the other adapter settings: <strong>Settings → Providers &amp; Connectors → Platform Connectors → Delivery &amp; Routing</strong>.",
+    },
+    "swarm.cb_failures": {
+        "ar": "الإخفاقات: {n}/{max}",
+        "en": "Failures: {n}/{max}",
+    },
 }

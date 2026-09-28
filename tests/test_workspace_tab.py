@@ -110,7 +110,9 @@ class TestWorkspaceCommandRouting:
         assert "if (!response.ok || !data.ok)" in source
 
     def test_build_and_deploy_are_disabled_without_configured_actions(self) -> None:
-        source = (_UI_DIR / "templates" / "workspace.html").read_text(encoding="utf-8")
+        from tests._template_english import template_english
+
+        source = template_english(_UI_DIR / "templates" / "workspace.html")
 
         assert 'class="btn btn-sm btn-secondary" disabled' in source
         assert "No workspace build action is configured" in source

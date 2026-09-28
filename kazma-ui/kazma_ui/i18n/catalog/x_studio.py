@@ -175,4 +175,128 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "متى",
         "en": "When",
     },
+    "x_studio.tab_conversations": {
+        "ar": "المحادثات",
+        "en": "Conversations",
+    },
+    "x_studio.writes_only": {
+        "ar": "الكتابات فقط",
+        "en": "writes only",
+    },
+    "x_studio.conv_refresh_hint": {
+        "ar": "التحديث يجلب الإشارات من X، أما إعادة تحميل الصفحة فتعيد قراءة السجل المحلي فقط.",
+        "en": "Refresh fetches mentions from X. A page reload only rereads the local log.",
+    },
+    "x_studio.conv_empty": {
+        "ar": "لا استدعاءات بعد. أشر إلى الحساب مع رمز تعبيري يحدد النبرة (😂 سخرية، 🤬 غضب، 🙄 جفاف، ❤️ دعم) —",
+        "en": "No summons yet. Mention the account with an emoji for tone (😂 roast, 🤬 angry, 🙄 dry, ❤️ supportive) —",
+    },
+    "x_studio.auto_reply_settings": {
+        "ar": "إعدادات الرد التلقائي",
+        "en": "auto-reply settings",
+    },
+    "x_studio.who_posted": {
+        "ar": "نشر @{who}",
+        "en": "@{who} posted",
+    },
+    "x_studio.someone": {
+        "ar": "شخص ما",
+        "en": "someone",
+    },
+    "x_studio.text_not_recorded": {
+        "ar": "(لم يُسجَّل النص)",
+        "en": "(text not recorded)",
+    },
+    "x_studio.who_summoned": {
+        "ar": "استدعى @{who}",
+        "en": "@{who} summoned",
+    },
+    "x_studio.kazma_replied": {
+        "ar": "ردّ Kazma",
+        "en": "Kazma replied",
+    },
+    "x_studio.kazma_no_reply": {
+        "ar": "لم يردّ Kazma",
+        "en": "Kazma did not reply",
+    },
+    "x_studio.status_awaiting_approval": {
+        "ar": "بانتظار الموافقة",
+        "en": "awaiting approval",
+    },
+    "x_studio.status_failed": {
+        "ar": "فشل",
+        "en": "failed",
+    },
+    "x_studio.status_skipped": {
+        "ar": "تُخطّي",
+        "en": "skipped",
+    },
+    "x_studio.status_posted": {
+        "ar": "نُشر",
+        "en": "posted",
+    },
+    "x_studio.status_deleted": {
+        "ar": "حُذف",
+        "en": "deleted",
+    },
+    "x_studio.status_pending": {
+        "ar": "معلّق",
+        "en": "pending",
+    },
+    "x_studio.status_drafting": {
+        "ar": "قيد الصياغة",
+        "en": "drafting",
+    },
+    "x_studio.open_on_x": {
+        "ar": "افتح على X",
+        "en": "open on X",
+    },
+    "x_studio.poll_failed": {
+        "ar": "تعذّر جلب الإشارات من X",
+        "en": "Could not poll X",
+    },
+    "x_studio.confirm_post_reply": {
+        "ar": "نشر هذا الرد؟",
+        "en": "Post this reply?",
+    },
+    "x_studio.confirm_delete_on_x": {
+        "ar": "حذف هذا الرد على X؟",
+        "en": "Delete this reply on X?",
+    },
+    "x_studio.confirm_remove_log": {
+        "ar": "إزالته من السجل؟",
+        "en": "Remove from the log?",
+    },
+    "x_studio.confirm_discard": {
+        "ar": "تجاهل هذه المسودة؟",
+        "en": "Discard this draft?",
+    },
+    "x_studio.removes_tweet": {
+        "ar": "سيحذف هذا التغريدة من X.",
+        "en": "This removes the tweet from X.",
+    },
+    "x_studio.posted_url": {
+        "ar": "نُشر: {url}",
+        "en": "Posted: {url}",
+    },
+    "x_studio.reply_deleted": {
+        "ar": "حُذف.",
+        "en": "Deleted.",
+    },
+    "x_studio.denied": {
+        "ar": "رُفض.",
+        "en": "Denied.",
+    },
+    "x_studio.redrafted": {
+        "ar": "أُعيدت الصياغة — وافق للنشر.",
+        "en": "Redrafted — approve to post.",
+    },
+    "x_studio.done": {
+        "ar": "تم.",
+        "en": "Done.",
+    },
+    "x_studio.refresh": {
+        "ar": "تحديث",
+        "en": "Refresh",
+    },
 }

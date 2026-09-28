@@ -49,7 +49,8 @@ def test_metrics_share_button_row_and_shape() -> None:
     assert "flex: 1 0 100%" in css
     assert ".char-badge.is-empty { display: none; }" in css.replace("\n", " ")
     assert "formatCompactCount" in js
-    assert "'~' + formatCompactCount(totalTokens) + ' ctx'" in js
+    # The unit is the reader's language's (CHAT_I18N ctx_unit, 2026-09-28).
+    assert "'~' + formatCompactCount(totalTokens) + ' ' + ti('ctx_unit', 'ctx')" in js
     assert "charBadge.hidden = n === 0" in js
     assert "YOLO' : 'HITL'" not in js
 

@@ -9,7 +9,7 @@
         {# Mobile hamburger — toggles the slide-in nav drawer (≤768px only).
            Visibility is CSS-gated (.hamburger-btn is display:none on desktop). #}
         <button class="hamburger-btn" @click="toggleMobileNav()"
-                :aria-expanded="mobileNavOpen" aria-label="Menu">
+                :aria-expanded="mobileNavOpen" aria-label="{{ t('common.menu') }}">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                  stroke-linecap="round">
                 <line x1="3" y1="6" x2="21" y2="6"/>
@@ -33,7 +33,7 @@
         </button>
 
         {# Search button #}
-        <button class="header-btn" @click="$store.search.open = !$store.search.open" title="Search (Ctrl+K)">
+        <button class="header-btn" @click="$store.search.open = !$store.search.open" title="{{ t('common.search_shortcut') }}">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                 <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
             </svg>
@@ -41,7 +41,7 @@
 
         {# Notifications — live /api/alerts/recent (not a dead empty store) #}
         <div class="user-menu" x-init="$store.notifications.refresh()" @click.outside="$store.notifications.open = false">
-            <button class="header-btn" @click="$store.notifications.open = !$store.notifications.open" title="Notifications">
+            <button class="header-btn" @click="$store.notifications.open = !$store.notifications.open" title="{{ t('common.notifications') }}">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                     <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/>
                 </svg>
@@ -49,11 +49,11 @@
             </button>
             <div class="user-menu-dropdown notif-dropdown" x-show="$store.notifications.open" x-cloak>
                 <template x-if="$store.notifications.items.length === 0">
-                    <div class="dropdown-item" style="cursor:default;opacity:0.7">No system alerts</div>
+                    <div class="dropdown-item" style="cursor:default;opacity:0.7">{{ t('common.no_system_alerts') }}</div>
                 </template>
                 <template x-for="item in $store.notifications.items" :key="item.id">
                     <div class="dropdown-item" style="cursor:default;flex-direction:column;align-items:flex-start;gap:2px">
-                        <span x-text="(item.severity || '') + ' · ' + (item.subsystem || item.title || 'alert')"></span>
+                        <span x-text="(item.severity || '') + ' · ' + (item.subsystem || item.title || t('common.alert'))"></span>
                         <span style="font-size:0.75rem;opacity:0.7" x-text="item.reason || item.status || ''"></span>
                     </div>
                 </template>
@@ -61,12 +61,12 @@
         </div>
 
         {# Language Toggle #}
-        <button class="theme-toggle lang-toggle" @click="toggleLanguage()" :title="lang === 'ar' ? 'English' : 'العربية'">
+        <button class="theme-toggle lang-toggle" translate="no" @click="toggleLanguage()" :title="lang === 'ar' ? 'English' : 'العربية'">
             <span style="font-size:0.85rem;font-weight:600;" x-text="lang === 'ar' ? 'EN' : 'ع'"></span>
         </button>
 
         {# Theme Toggle #}
-        <button class="theme-toggle" @click="toggleTheme()" :title="theme === 'dark' ? 'Switch to light' : 'Switch to dark'">
+        <button class="theme-toggle" @click="toggleTheme()" :title="theme === 'dark' ? t('common.switch_to_light') : t('common.switch_to_dark')">
             {# x-show spans, NOT <template x-if> — Alpine can't clone template
                content inside <button> (cloneNode/_x_dataStack errors). #}
             <span x-show="theme === 'dark'" x-cloak>
@@ -88,13 +88,13 @@
               .then(d => { me = d; })
               .catch(() => {})
           " @click.outside="open = false">
-            <button class="user-menu-btn" @click="open = !open" :title="(me && me.username) ? (me.username + ' · ' + (me.role || '')) : 'Account'">
+            <button class="user-menu-btn" @click="open = !open" :title="(me && me.username) ? (me.username + ' · ' + (me.role ? tOr('common.role_' + me.role, me.role) : '')) : t('common.account')">
                 <div class="user-avatar" style="width:24px;height:24px;font-size:0.65rem"
                      x-text="(me && me.username) ? me.username.slice(0,1).toUpperCase() : 'K'"></div>
                 <span class="sidebar-collapsed-hide" style="font-size:0.75rem;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-                      x-text="me && me.username ? me.username : ''"></span>
+                      translate="no" x-text="me && me.username ? me.username : ''"></span>
                 <span class="badge badge-stdio sidebar-collapsed-hide" style="font-size:0.65rem;margin-left:4px"
-                      x-show="me && me.role" x-text="me && me.role" x-cloak></span>
+                      x-show="me && me.role" x-text="me && me.role ? tOr('common.role_' + me.role, me.role) : ''" x-cloak></span>
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
                     <path d="M3 5l3 3 3-3"/>
                 </svg>

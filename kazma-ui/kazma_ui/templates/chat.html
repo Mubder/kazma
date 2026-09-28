@@ -63,7 +63,7 @@
         <kbd>Ctrl+K</kbd> {{ t('chat.search') }}
         <kbd>Ctrl+N</kbd> {{ t('chat.new') }}
       </span>
-      <div id="build-badge" class="build-badge" title="Running server build (commit + start time) — verify your restart picked up the latest pull"></div>
+      <div id="build-badge" class="build-badge" title="{{ t('chat.build_badge_hint') }}"></div>
     </div>
   </aside>
 
@@ -78,9 +78,9 @@
         <div class="welcome-hints">
           <button class="hint-chip" onclick="document.getElementById('chat-input').value='Explain how Kazma swarms work';KazmaChat.sendMessage()"><span class="ki" data-icon="swarm" aria-hidden="true"></span> {{ t('nav.swarm') }}</button>
           <button class="hint-chip" onclick="document.getElementById('chat-input').value='Write a Python script to analyze logs';KazmaChat.sendMessage()"><span class="ki" data-icon="code" aria-hidden="true"></span> Python</button>
-          <button class="hint-chip" onclick="document.getElementById('chat-input').value='/yolo';KazmaChat.sendMessage()" title="Skip danger-tool approvals for this session"><span class="ki" data-icon="rocket" aria-hidden="true"></span> /yolo</button>
-          <button class="hint-chip" onclick="document.getElementById('chat-input').value='/unrestricted';KazmaChat.sendMessage()" title="Mission + YOLO — finish this job without asking"><span class="ki" data-icon="rocket" aria-hidden="true"></span> Unrestricted</button>
-          <button class="hint-chip" onclick="document.getElementById('chat-input').value='/help';KazmaChat.sendMessage()">/? help</button>
+          <button class="hint-chip" onclick="document.getElementById('chat-input').value='/yolo';KazmaChat.sendMessage()" title="{{ t('chat.skip_approvals_session') }}"><span class="ki" data-icon="rocket" aria-hidden="true"></span> <span translate="no">/yolo</span></button>
+          <button class="hint-chip" onclick="document.getElementById('chat-input').value='/unrestricted';KazmaChat.sendMessage()" title="{{ t('chat.cap_unrestricted_hint') }}"><span class="ki" data-icon="rocket" aria-hidden="true"></span> {{ t('chat.cap_unrestricted') }}</button>
+          <button class="hint-chip" onclick="document.getElementById('chat-input').value='/help';KazmaChat.sendMessage()">/? {{ t('chat.help_chip') }}</button>
         </div>
       </div>
     </div>
@@ -110,15 +110,15 @@
           </button>
           <label for="model-selector" class="composer-model-label">{{ t('chat.model') }}</label>
           <select id="model-selector" class="form-select composer-model-select">
-            <option value="">— loading models —</option>
+            <option value="">{{ t('chat.loading_models') }}</option>
           </select>
           <div class="composer-ws-status" x-cloak>
             <template x-if="$store.agent && $store.agent.activeNode">
               <span class="badge badge-subtle composer-node-badge"
-                    x-text="'Node: ' + $store.agent.activeNode"></span>
+                    x-text="t('chat.node_label') + ': ' + $store.agent.activeNode"></span>
             </template>
             <span class="pulse-dot" :class="$store.agent && $store.agent.connectionStatus === 'connected' ? 'dot-online' : 'dot-offline'"
-                  :title="'WS Status: ' + ($store.agent ? $store.agent.connectionStatus : 'disconnected')"></span>
+                  :title="t('chat.ws_status') + ': ' + tOr('chat.ws_' + ($store.agent ? $store.agent.connectionStatus : 'disconnected'), $store.agent ? $store.agent.connectionStatus : '')"></span>
           </div>
         </div>
       </div>
@@ -130,7 +130,7 @@
         </button>
         {# No accept= filter — any file type (docx, pdf, images, …) is selectable without switching to "All Files" #}
         <input type="file" id="file-input" class="composer-file-input" multiple>
-        <button id="voice-btn" class="btn-icon composer-icon-btn composer-voice-btn" title="Record voice (Hold to record)" aria-label="Record voice" type="button" onmousedown="KazmaVoice.startRecording()" onmouseup="KazmaVoice.stopRecording()" onmouseleave="KazmaVoice.stopRecording()" ontouchstart="event.preventDefault(); KazmaVoice.startRecording();" ontouchend="KazmaVoice.stopRecording()">
+        <button id="voice-btn" class="btn-icon composer-icon-btn composer-voice-btn" title="{{ t('chat.record_voice_hint') }}" aria-label="{{ t('chat.record_voice') }}" type="button" onmousedown="KazmaVoice.startRecording()" onmouseup="KazmaVoice.stopRecording()" onmouseleave="KazmaVoice.stopRecording()" ontouchstart="event.preventDefault(); KazmaVoice.startRecording();" ontouchend="KazmaVoice.stopRecording()">
           <svg id="mic-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
             <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
             <path d="M19 10v2a7 7 0 01-14 0v-2"/>
@@ -141,7 +141,7 @@
             <circle cx="12" cy="12" r="10"/>
           </svg>
         </button>
-        <button id="voice-live-btn" class="btn-icon composer-icon-btn composer-voice-btn" title="Live duplex voice (interrupt anytime)" aria-label="Live duplex voice" type="button" onclick="KazmaVoice.toggleLiveVoice()">
+        <button id="voice-live-btn" class="btn-icon composer-icon-btn composer-voice-btn" title="{{ t('chat.live_voice_hint') }}" aria-label="{{ t('chat.live_voice') }}" type="button" onclick="KazmaVoice.toggleLiveVoice()">
           <svg id="live-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
           </svg>
@@ -166,29 +166,29 @@
            field (operator decision 2026-08-27) — budget status, mode pills,
            Reset, and session usage. This reverses the "make chat the
            product" ⋯-popover hiding for the chat page only. #}
-        <div id="capacity-bar" class="capacity-bar" role="toolbar" aria-label="Turn budget and HITL">
-          <span id="capacity-status" class="capacity-status" title="Current turn budget">Chat · 100</span>
-          <div class="capacity-group" role="group" aria-label="Budget">
-            <button type="button" class="capacity-pill" data-cap="/long on" aria-pressed="false" title="Research budget, HITL stays on">Long</button>
-            <button type="button" class="capacity-pill" data-cap="/long mission" aria-pressed="false" title="Run until done (~500 rounds)">Mission</button>
+        <div id="capacity-bar" class="capacity-bar" role="toolbar" aria-label="{{ t('chat.cap_toolbar') }}">
+          <span id="capacity-status" class="capacity-status" title="{{ t('chat.cap_status_hint') }}">{{ t('chat.mode_chat') }} · 100</span>
+          <div class="capacity-group" role="group" aria-label="{{ t('chat.cap_budget') }}">
+            <button type="button" class="capacity-pill" data-cap="/long on" aria-pressed="false" title="{{ t('chat.cap_long_hint') }}">{{ t('chat.mode_long') }}</button>
+            <button type="button" class="capacity-pill" data-cap="/long mission" aria-pressed="false" title="{{ t('chat.cap_mission_hint') }}">{{ t('chat.mode_mission') }}</button>
           </div>
-          <div class="capacity-group" role="group" aria-label="Plan">
-            <button type="button" class="capacity-pill" data-cap="/plan on" aria-pressed="false" title="Inspect and propose — write/exec blocked until /plan go">Plan</button>
+          <div class="capacity-group" role="group" aria-label="{{ t('chat.plan') }}">
+            <button type="button" class="capacity-pill" data-cap="/plan on" aria-pressed="false" title="{{ t('chat.cap_plan_hint') }}">{{ t('chat.plan') }}</button>
           </div>
-          <div class="capacity-group" role="group" aria-label="Approvals">
-            <button type="button" class="capacity-pill" data-cap="/yolo" aria-pressed="false" title="Skip danger-tool approvals">YOLO</button>
-            <button type="button" class="capacity-pill" data-cap="/unrestricted" aria-pressed="false" title="Mission + YOLO — finish this job">Unrestricted</button>
+          <div class="capacity-group" role="group" aria-label="{{ t('chat.cap_approvals') }}">
+            <button type="button" class="capacity-pill" data-cap="/yolo" aria-pressed="false" title="{{ t('chat.cap_yolo_hint') }}">YOLO</button>
+            <button type="button" class="capacity-pill" data-cap="/unrestricted" aria-pressed="false" title="{{ t('chat.cap_unrestricted_short_hint') }}">{{ t('chat.cap_unrestricted') }}</button>
           </div>
-          <button type="button" class="capacity-reset" data-cap="/unrestricted off" title="Restore baseline budget and HITL">Reset</button>
+          <button type="button" class="capacity-reset" data-cap="/unrestricted off" title="{{ t('chat.cap_reset_hint') }}">{{ t('chat.cap_reset') }}</button>
           {# The composer char count joins the session stats instead of
              sitting on a row of its own. The old .input-footer reserved a
              whole line under the composer just to hold it and an "Enter to
              send" hint — a permanent gap for a shortcut everyone already
              knows, and one mobile had been hiding anyway. #}
-          <div class="capacity-group session-metrics" aria-label="Session usage">
+          <div class="capacity-group session-metrics" aria-label="{{ t('chat.session_usage') }}">
             <span id="composer-chars" class="capacity-stat char-badge is-empty" title="{{ t('chat.composer_chars') }}" hidden>0</span>
             <span id="session-cost" class="capacity-stat cost-badge">$0.0000</span>
-            <span id="session-tokens" class="capacity-stat token-badge">0 tok</span>
+            <span id="session-tokens" class="capacity-stat token-badge">0 {{ t('chat.tok_unit') }}</span>
             <span id="context-size" class="capacity-stat context-badge" title="{{ t('chat.context_size_hint') }}">—</span>
           </div>
         </div>
@@ -401,7 +401,102 @@ function setupWall() {
     auto_deny_in: {{ t('chat.auto_deny_in') | tojson }},
     auto_deny_seconds: {{ t('chat.auto_deny_seconds') | tojson }},
     approval_expired: {{ t('chat.approval_expired') | tojson }},
-    approval_expired_short: {{ t('chat.approval_expired_short') | tojson }}
+    approval_expired_short: {{ t('chat.approval_expired_short') | tojson }},
+    /* Composer, capacity bar, build badge and empty session (2026-09-28):
+       chat.js wrote these in English whatever the page language. */
+    placeholder_paused: {{ t('chat.placeholder_paused') | tojson }},
+    send_title: {{ t('chat.send_title') | tojson }},
+    send_steer: {{ t('chat.send_steer') | tojson }},
+    build_badge: {{ t('chat.build_badge') | tojson }},
+    build_since: {{ t('chat.build_since') | tojson }},
+    session_heading: {{ t('chat.session_heading') | tojson }},
+    session_empty: {{ t('chat.session_empty') | tojson }},
+    mode_chat: {{ t('chat.mode_chat') | tojson }},
+    mode_long: {{ t('chat.mode_long') | tojson }},
+    mode_mission: {{ t('chat.mode_mission') | tojson }},
+    yolo_active: {{ t('chat.yolo_active') | tojson }},
+    hitl_on: {{ t('chat.hitl_on') | tojson }},
+    tok_unit: {{ t('chat.tok_unit') | tojson }},
+    ctx_unit: {{ t('chat.ctx_unit') | tojson }},
+    generation_stopped: {{ t('chat.generation_stopped') | tojson }},
+    file_read_failed: {{ t('chat.file_read_failed') | tojson }},
+    file_too_large: {{ t('chat.file_too_large') | tojson }},
+    upload_failed: {{ t('chat.upload_failed') | tojson }},
+    provider_unknown: {{ t('chat.provider_unknown') | tojson }},
+    models_active: {{ t('chat.models_active') | tojson }},
+    model_switch_failed: {{ t('chat.model_switch_failed') | tojson }},
+    aborting_task: {{ t('chat.aborting_task') | tojson }},
+    no_task_to_steer: {{ t('chat.no_task_to_steer') | tojson }},
+    steer_failed: {{ t('chat.steer_failed') | tojson }},
+    no_reply_title: {{ t('chat.no_reply_title') | tojson }},
+    yolo_session_on: {{ t('chat.yolo_session_on') | tojson }},
+    tool_allowed_session: {{ t('chat.tool_allowed_session') | tojson }},
+    edit_resend_hint: {{ t('chat.edit_resend_hint') | tojson }},
+    copied: {{ t('chat.copied') | tojson }},
+    nothing_to_read: {{ t('chat.nothing_to_read') | tojson }},
+    memory_setting_failed: {{ t('chat.memory_setting_failed') | tojson }},
+    pin_failed: {{ t('chat.pin_failed') | tojson }},
+    session_archived: {{ t('chat.session_archived') | tojson }},
+    archive_failed: {{ t('chat.archive_failed') | tojson }},
+    session_restored: {{ t('chat.session_restored') | tojson }},
+    restore_failed: {{ t('chat.restore_failed') | tojson }},
+    copied_session_id: {{ t('chat.copied_session_id') | tojson }},
+    rename_session: {{ t('chat.rename_session') | tojson }},
+    session_title_label: {{ t('chat.session_title_label') | tojson }},
+    session_renamed: {{ t('chat.session_renamed') | tojson }},
+    rename_failed: {{ t('chat.rename_failed') | tojson }},
+    wait_or_abort: {{ t('chat.wait_or_abort') | tojson }},
+    forget_failed: {{ t('chat.forget_failed') | tojson }},
+    context_compacted: {{ t('chat.context_compacted') | tojson }},
+    untitled_chat: {{ t('chat.untitled_chat') | tojson }},
+    queued: {{ t('chat.phase_queued') | tojson }},
+    approval_required: {{ t('chat.phase_approval_required') | tojson }},
+    resuming: {{ t('chat.phase_resuming') | tojson }},
+    stopping: {{ t('chat.phase_stopping') | tojson }},
+    completed: {{ t('chat.phase_completed') | tojson }},
+    failed: {{ t('chat.phase_failed') | tojson }},
+    cancelled: {{ t('chat.phase_cancelled') | tojson }},
+    recovering: {{ t('chat.phase_recovering') | tojson }},
+    interrupted: {{ t('chat.phase_interrupted') | tojson }},
+    hitl_title: {{ t('chat.hitl_title') | tojson }},
+    hitl_tool_label: {{ t('chat.hitl_tool_label') | tojson }},
+    hitl_args_label: {{ t('chat.hitl_args_label') | tojson }},
+    hitl_tip_yolo: {{ t('chat.hitl_tip_yolo') | tojson }},
+    hitl_tip_always: {{ t('chat.hitl_tip_always') | tojson }},
+    hitl_approve_once: {{ t('chat.hitl_approve_once') | tojson }},
+    hitl_approve_once_title: {{ t('chat.hitl_approve_once_title') | tojson }},
+    hitl_allow_n: {{ t('chat.hitl_allow_n') | tojson }},
+    hitl_allow_n_title: {{ t('chat.hitl_allow_n_title') | tojson }},
+    hitl_allow_tool: {{ t('chat.hitl_allow_tool') | tojson }},
+    hitl_allow_tool_title: {{ t('chat.hitl_allow_tool_title') | tojson }},
+    hitl_yolo: {{ t('chat.hitl_yolo') | tojson }},
+    hitl_yolo_title: {{ t('chat.hitl_yolo_title') | tojson }},
+    hitl_deny: {{ t('chat.hitl_deny') | tojson }},
+    hitl_publish: {{ t('chat.hitl_publish') | tojson }},
+    hitl_stored_proposal: {{ t('chat.hitl_stored_proposal') | tojson }},
+    hitl_verified: {{ t('chat.hitl_verified') | tojson }},
+    hitl_already_resolved: {{ t('chat.hitl_already_resolved') | tojson }},
+    hitl_no_longer_pending: {{ t('chat.hitl_no_longer_pending') | tojson }},
+    hitl_status_denied: {{ t('chat.hitl_status_denied') | tojson }},
+    hitl_status_approved: {{ t('chat.hitl_status_approved') | tojson }},
+    hitl_status_running: {{ t('chat.hitl_status_running') | tojson }},
+    welcome_subtitle: {{ t('chat.welcome_subtitle') | tojson }},
+    no_response_md: {{ t('chat.no_response_md') | tojson }},
+    no_response_received: {{ t('chat.no_response_received') | tojson }},
+    you_avatar: {{ t('chat.you_avatar') | tojson }},
+    slash_commands_heading: {{ t('chat.slash_commands_heading') | tojson }},
+    slash_allow_tool_tip: {{ t('chat.slash_allow_tool_tip') | tojson }},
+    msg_edit: {{ t('chat.msg_edit') | tojson }},
+    msg_copy: {{ t('chat.msg_copy') | tojson }},
+    msg_regenerate: {{ t('chat.msg_regenerate') | tojson }},
+    msg_read_aloud: {{ t('chat.msg_read_aloud') | tojson }},
+    msg_read_aloud_aria: {{ t('chat.msg_read_aloud_aria') | tojson }},
+    msg_helpful: {{ t('chat.msg_helpful') | tojson }},
+    msg_not_helpful: {{ t('chat.msg_not_helpful') | tojson }},
+    platform_web: {{ t('dashboard.platform_web') | tojson }},
+    session_msgs: {{ t('chat.session_msgs') | tojson }},
+    hitl_wants_to_run: {{ t('chat.hitl_wants_to_run') | tojson }},
+    hitl_wants_to_run_n: {{ t('chat.hitl_wants_to_run_n') | tojson }}
   };
 </script>
 <script src="/static/js/modules/delivery_cursor.js?v={{ js_version() }}"></script>

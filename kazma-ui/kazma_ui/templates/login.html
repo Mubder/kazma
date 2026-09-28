@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ lang()|default('en') }}" data-theme="{{ theme()|default('light') }}">
+<html lang="{{ lang()|default('en') }}" dir="{{ dir()|default('ltr') }}" data-theme="{{ theme()|default('light') }}">
 <head>
   <meta charset="utf-8">
   {# Same canvas contract as base.html — single color-scheme, theme-color,
@@ -16,7 +16,7 @@
   <style>
     html { background-color: {{ '#0e1626' if theme() == 'dark' else '#f0f4fa' }}; color-scheme: {{ 'only dark' if theme() == 'dark' else 'only light' }}; }
   </style>
-  <title>Kazma — Login</title>
+  <title>{{ t('login.page_title') }}</title>
   <link rel="icon" href="/static/img/favicon.png">
   <link rel="apple-touch-icon" href="/static/img/kazma-icon.png">
   {# Vendored faces, same as every authenticated page. The Google Fonts link
@@ -104,37 +104,37 @@
   <div class="login-card">
     <div class="login-brand">
       <img src="/static/img/kazma-icon.png" alt="Kazma">
-      <div><h1>Sign in</h1></div>
+      <div><h1>{{ t('login.sign_in') }}</h1></div>
     </div>
-    <p id="blurb">Sign in with a platform user, the server secret, or your organization IdP.</p>
+    <p id="blurb">{{ t('login.blurb') }}</p>
     <div id="err" class="login-error" role="alert"></div>
 
     <div class="login-tabs" id="tabs">
-      <button type="button" class="active" data-mode="user">User</button>
-      <button type="button" data-mode="secret">Secret</button>
+      <button type="button" class="active" data-mode="user">{{ t('login.tab_user') }}</button>
+      <button type="button" data-mode="secret">{{ t('login.tab_secret') }}</button>
     </div>
 
     <div id="mode-user" class="mode-panel active">
       <form id="userForm" autocomplete="on">
-        <label for="username">Username</label>
-        <input id="username" name="username" type="text" autocomplete="username" placeholder="alice">
-        <label for="password">Password</label>
+        <label for="username">{{ t('login.username') }}</label>
+        <input id="username" name="username" type="text" autocomplete="username" placeholder="alice" translate="no">
+        <label for="password">{{ t('login.password') }}</label>
         <input id="password" name="password" type="password" autocomplete="current-password" placeholder="••••••••">
-        <button type="submit" id="btnUser">Sign in</button>
+        <button type="submit" id="btnUser">{{ t('login.sign_in') }}</button>
       </form>
     </div>
 
     <div id="mode-secret" class="mode-panel">
       <form id="secretForm" autocomplete="off">
-        <label for="secret">Server secret</label>
-        <input id="secret" name="secret" type="password" placeholder="KAZMA_SECRET value" autocomplete="current-password">
-        <button type="submit" id="btnSecret">Sign in with secret</button>
+        <label for="secret">{{ t('login.server_secret') }}</label>
+        <input id="secret" name="secret" type="password" placeholder="{{ t('login.secret_placeholder') }}" autocomplete="current-password">
+        <button type="submit" id="btnSecret">{{ t('login.with_secret') }}</button>
       </form>
     </div>
 
     <div id="oidcWrap" style="display:none">
-      <div class="login-divider">or</div>
-      <a class="btn-oidc" id="oidcBtn" href="/api/auth/oidc/start">Continue with SSO (OIDC)</a>
+      <div class="login-divider">{{ t('login.or') }}</div>
+      <a class="btn-oidc" id="oidcBtn" href="/api/auth/oidc/start">{{ t('login.sso') }}</a>
     </div>
   </div>
   <script>
@@ -175,14 +175,14 @@
           var data = {};
           try { data = await res.json(); } catch (_) {}
           if (!res.ok) {
-            err.textContent = data.detail || data.message || data.error || 'Login failed';
+            err.textContent = data.detail || data.message || data.error || {{ t('login.failed') | tojson }};
             err.classList.add('show');
             if (btn) btn.disabled = false;
             return;
           }
           window.location.href = next;
         } catch (ex) {
-          err.textContent = 'Network error — try again';
+          err.textContent = {{ t('login.network_error') | tojson }};
           err.classList.add('show');
           if (btn) btn.disabled = false;
         }

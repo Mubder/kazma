@@ -252,4 +252,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "نص المنشور مطلوب.",
         "en": "Post text is required.",
     },
+    "scheduled.ui.load_failed": {
+        "ar": "فشل تحميل المهام المجدولة",
+        "en": "Failed to load scheduled tasks",
+    },
+    "scheduled.ui.load_failed_error": {
+        "ar": "فشل تحميل المهام المجدولة: {error}",
+        "en": "Failed to load scheduled tasks: {error}",
+    },
+    "scheduled.ui.save_failed": {
+        "ar": "فشل الحفظ",
+        "en": "Save failed",
+    },
+    "scheduled.ui.save_failed_error": {
+        "ar": "فشل الحفظ: {error}",
+        "en": "Save failed: {error}",
+    },
+    "scheduled.ui.delete_failed": {
+        "ar": "فشل الحذف",
+        "en": "Delete failed",
+    },
+    "scheduled.ui.delete_failed_error": {
+        "ar": "فشل الحذف: {error}",
+        "en": "Delete failed: {error}",
+    },
 }

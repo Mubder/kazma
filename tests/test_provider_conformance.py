@@ -422,7 +422,10 @@ class TestTheSettingsPageRendersTheStates:
             / "kazma-ui" / "kazma_ui" / "templates" / "settings.html"
         )
         assert path.exists(), "settings.html is gone"
-        return path.read_text(encoding="utf-8")
+        # The page's words live in the catalog since it was translated.
+        from tests._template_english import template_english
+
+        return template_english(path)
 
     def test_the_card_paints_a_state_pill(self):
         html = self._html()
@@ -457,9 +460,12 @@ class TestTheSettingsPageRendersTheStates:
         html = self._html()
         assert "providerChecks(selectedHubProvider())" in html
         # The renderer has exactly two branches, so it cannot display a check
-        # nothing ran.
-        assert "settings.check_model_list" in html
-        assert "settings.check_completion" in html
+        # nothing ran. (Its two labels are catalog keys: the raw source.)
+        from pathlib import Path as _Src
+
+        raw = (_Src(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui" / "templates" / "settings.html").read_text(encoding="utf-8")
+        assert "settings.check_model_list" in raw
+        assert "settings.check_completion" in raw
 
         import json
         import subprocess

@@ -870,7 +870,7 @@ function registerAgentStore() {
             if (window.KazmaChat && typeof window.KazmaChat.showContextCompacted === 'function') {
               window.KazmaChat.showContextCompacted(data || frame || {});
             } else if (window.showToast) {
-              window.showToast('🗜️ ' + ((data && data.detail) || 'Earlier context was compacted'), 'info', 6000);
+              window.showToast('🗜️ ' + ((data && data.detail) || _ti('context_compacted', 'Earlier context was compacted')), 'info', 6000);
             }
           } catch (e) { /* ignore */ }
           break;

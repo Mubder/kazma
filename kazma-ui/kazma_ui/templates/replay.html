@@ -12,7 +12,7 @@
     <select id="replay-thread-select" class="form-select" style="min-width:280px;" onchange="KazmaReplay.loadTimeline(this.value)">
       <option value="">{{ t('replay.select_thread') }}</option>
     </select>
-    <button class="btn btn-secondary" onclick="KazmaReplay.loadThreads()" title="Refresh">
+    <button class="btn btn-secondary" onclick="KazmaReplay.loadThreads()" title="{{ t('common.refresh') }}">
       <span class="ki" data-icon="refresh" aria-hidden="true"></span>
     </button>
     <span id="replay-snapshot-count" style="font-size:0.85rem;color:var(--text-muted);margin-left:auto;"></span>
@@ -29,7 +29,7 @@
   <div class="tab-panel" id="panel-timeline" style="display:block;">
     <div id="replay-timeline-list" style="display:grid;gap:8px;">
       <div style="padding:2rem;text-align:center;color:var(--text-muted);">
-        Select a thread above to see its snapshot timeline.
+        {{ t('replay.pick_thread_hint') }}
       </div>
     </div>
 
@@ -37,7 +37,7 @@
     <div id="replay-snapshot-detail" style="display:none;margin-top:1.5rem;">
       <div class="card" style="padding:1rem;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
-          <h3 style="margin:0;" id="replay-detail-title">Snapshot detail</h3>
+          <h3 style="margin:0;" id="replay-detail-title">{{ t('replay.snapshot_detail') }}</h3>
           <div style="display:flex;gap:8px;">
             <button class="btn btn-primary" onclick="KazmaReplay.restoreCurrent()" title="{{ t('replay.restore') }}">{{ t('replay.restore') }}</button>
             <button class="btn btn-secondary" onclick="KazmaReplay.forkCurrent()" title="{{ t('replay.fork') }}">{{ t('replay.fork') }}</button>

@@ -475,6 +475,15 @@ jobs:
         run: python -m pytest tests/e2e/test_pages_load_clean.py -q --timeout=600
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: Every page reads in Arabic (2026-09-28)
+        # Each nav page and Settings tab, and a chat turn paused at its
+        # approval card and finished, with the Arabic cookie: no English
+        # interface text outside translate="no". The Memory page was
+        # almost entirely English, and the approval card's buttons were
+        # English on every platform language.
+        run: python -m pytest tests/e2e/test_pages_read_in_arabic.py -q --timeout=900
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Remaining e2e suites
         # scripts/fast_test.py excludes everything under tests/e2e, and this
         # job only ever ran test_smoke.py — so test_delivery_v2_e2e.py,

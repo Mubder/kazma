@@ -753,4 +753,492 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "اكتملت مهمتك.",
         "en": "Your task completed.",
     },
+    "chat.placeholder_paused": {
+        "ar": "وافق أعلاه — أو /steer /abort /long /yolo",
+        "en": "Approve above — or /steer /abort /long /yolo",
+    },
+    "chat.send_title": {
+        "ar": "إرسال (Enter / Ctrl+Enter)",
+        "en": "Send (Enter / Ctrl+Enter)",
+    },
+    "chat.send_steer": {
+        "ar": "إرسال توجيه أو أمر",
+        "en": "Send steer or command",
+    },
+    "chat.build_badge": {
+        "ar": "الإصدار {commit}",
+        "en": "build {commit}",
+    },
+    "chat.build_since": {
+        "ar": "يعمل منذ {time}",
+        "en": "up since {time}",
+    },
+    "chat.build_badge_hint": {
+        "ar": "إصدار الخادم العامل (الإيداع ووقت التشغيل) — تحقّق من أن إعادة التشغيل التقطت آخر تحديث",
+        "en": "Running server build (commit + start time) — verify your restart picked up the latest pull",
+    },
+    "chat.session_empty": {
+        "ar": "لا توجد رسائل في هذه الجلسة بعد.",
+        "en": "No messages in this session yet.",
+    },
+    "chat.mode_chat": {
+        "ar": "محادثة",
+        "en": "Chat",
+    },
+    "chat.mode_long": {
+        "ar": "مطوّل",
+        "en": "Long",
+    },
+    "chat.mode_mission": {
+        "ar": "مهمة",
+        "en": "Mission",
+    },
+    "chat.hitl_on": {
+        "ar": "الموافقات مفعّلة",
+        "en": "HITL on",
+    },
+    "chat.tok_unit": {
+        "ar": "رمز",
+        "en": "tok",
+    },
+    "chat.ctx_unit": {
+        "ar": "سياق",
+        "en": "ctx",
+    },
+    "chat.skip_approvals_session": {
+        "ar": "تخطَّ موافقات الأدوات الخطرة في هذه الجلسة",
+        "en": "Skip danger-tool approvals for this session",
+    },
+    "chat.cap_unrestricted": {
+        "ar": "بلا قيود",
+        "en": "Unrestricted",
+    },
+    "chat.cap_unrestricted_hint": {
+        "ar": "مهمة + YOLO — أنجز هذا العمل دون أن تسأل",
+        "en": "Mission + YOLO — finish this job without asking",
+    },
+    "chat.cap_unrestricted_short_hint": {
+        "ar": "مهمة + YOLO — أنجز هذا العمل",
+        "en": "Mission + YOLO — finish this job",
+    },
+    "chat.help_chip": {
+        "ar": "مساعدة",
+        "en": "help",
+    },
+    "chat.loading_models": {
+        "ar": "— جارٍ تحميل النماذج —",
+        "en": "— loading models —",
+    },
+    "chat.ws_status": {
+        "ar": "الاتصال",
+        "en": "Connection",
+    },
+    "chat.ws_connected": {
+        "ar": "متصل",
+        "en": "connected",
+    },
+    "chat.ws_connecting": {
+        "ar": "جارٍ الاتصال",
+        "en": "connecting",
+    },
+    "chat.ws_disconnected": {
+        "ar": "غير متصل",
+        "en": "disconnected",
+    },
+    "chat.record_voice": {
+        "ar": "تسجيل صوتي",
+        "en": "Record voice",
+    },
+    "chat.record_voice_hint": {
+        "ar": "تسجيل صوتي (اضغط مطوّلًا للتسجيل)",
+        "en": "Record voice (Hold to record)",
+    },
+    "chat.live_voice": {
+        "ar": "محادثة صوتية مباشرة",
+        "en": "Live duplex voice",
+    },
+    "chat.live_voice_hint": {
+        "ar": "محادثة صوتية مباشرة (قاطع متى شئت)",
+        "en": "Live duplex voice (interrupt anytime)",
+    },
+    "chat.cap_toolbar": {
+        "ar": "ميزانية الدور والموافقات",
+        "en": "Turn budget and HITL",
+    },
+    "chat.cap_status_hint": {
+        "ar": "ميزانية الدور الحالية",
+        "en": "Current turn budget",
+    },
+    "chat.cap_budget": {
+        "ar": "الميزانية",
+        "en": "Budget",
+    },
+    "chat.cap_long_hint": {
+        "ar": "ميزانية بحث أكبر، وتبقى الموافقات مفعّلة",
+        "en": "Research budget, HITL stays on",
+    },
+    "chat.cap_mission_hint": {
+        "ar": "يعمل حتى ينتهي (نحو 500 جولة)",
+        "en": "Run until done (~500 rounds)",
+    },
+    "chat.cap_plan_hint": {
+        "ar": "افحص واقترح — الكتابة والتنفيذ ممنوعان حتى /plan go",
+        "en": "Inspect and propose — write/exec blocked until /plan go",
+    },
+    "chat.cap_approvals": {
+        "ar": "الموافقات",
+        "en": "Approvals",
+    },
+    "chat.cap_yolo_hint": {
+        "ar": "تخطَّ موافقات الأدوات الخطرة",
+        "en": "Skip danger-tool approvals",
+    },
+    "chat.cap_reset": {
+        "ar": "إعادة الضبط",
+        "en": "Reset",
+    },
+    "chat.cap_reset_hint": {
+        "ar": "استعادة الميزانية الأساسية والموافقات",
+        "en": "Restore baseline budget and HITL",
+    },
+    "chat.session_usage": {
+        "ar": "استهلاك الجلسة",
+        "en": "Session usage",
+    },
+    "chat.session_heading": {
+        "ar": "الجلسة {id}",
+        "en": "Session {id}",
+    },
+    "chat.yolo_active": {
+        "ar": "YOLO مفعّل",
+        "en": "YOLO on",
+    },
+    "chat.generation_stopped": {
+        "ar": "توقف التوليد",
+        "en": "Generation stopped",
+    },
+    "chat.file_read_failed": {
+        "ar": "تعذّرت قراءة {name}",
+        "en": "Failed to read {name}",
+    },
+    "chat.file_too_large": {
+        "ar": "الملف كبير جدًا (الحد 20MB): {name}",
+        "en": "File too large (max 20MB): {name}",
+    },
+    "chat.upload_failed": {
+        "ar": "فشل الرفع: {error}",
+        "en": "Upload failed: {error}",
+    },
+    "chat.provider_unknown": {
+        "ar": "غير معروف",
+        "en": "Unknown",
+    },
+    "chat.models_active": {
+        "ar": "النشط",
+        "en": "Active",
+    },
+    "chat.model_switch_failed": {
+        "ar": "فشل طلب تبديل النموذج",
+        "en": "Model switch request failed",
+    },
+    "chat.aborting_task": {
+        "ar": "⛔ جارٍ إيقاف المهمة…",
+        "en": "⛔ Aborting task…",
+    },
+    "chat.no_task_to_steer": {
+        "ar": "لا مهمة نشطة لتوجيهها.",
+        "en": "No active task to steer.",
+    },
+    "chat.steer_failed": {
+        "ar": "فشل التوجيه: {reason}",
+        "en": "Steer failed: {reason}",
+    },
+    "chat.no_reply_title": {
+        "ar": "انتهى الدور بلا رد — راجع منطقة الرسائل أو window.KazmaChat.diagnostics()",
+        "en": "Turn ended without a reply — see the message area or window.KazmaChat.diagnostics()",
+    },
+    "chat.yolo_session_on": {
+        "ar": "YOLO مفعّل لهذه الجلسة — تُعتمد الأدوات الخطرة تلقائيًا",
+        "en": "YOLO on for this session — danger tools auto-approved",
+    },
+    "chat.tool_allowed_session": {
+        "ar": "سُمح بـ {tool} لهذه الجلسة (~30 دقيقة)",
+        "en": "Allowed {tool} for this session (~30m)",
+    },
+    "chat.edit_resend_hint": {
+        "ar": "عدّل رسالتك واضغط Enter لإعادة الإرسال",
+        "en": "Edit your message and press Enter to resend",
+    },
+    "chat.copied": {
+        "ar": "نُسخ إلى الحافظة",
+        "en": "Copied to clipboard",
+    },
+    "chat.nothing_to_read": {
+        "ar": "لا شيء يُقرأ في هذه الرسالة",
+        "en": "Nothing to read in this message",
+    },
+    "chat.memory_setting_failed": {
+        "ar": "فشل ضبط الذاكرة",
+        "en": "Memory setting failed",
+    },
+    "chat.pin_failed": {
+        "ar": "فشل التثبيت",
+        "en": "Pin failed",
+    },
+    "chat.session_archived": {
+        "ar": "أُرشفت الجلسة",
+        "en": "Session archived",
+    },
+    "chat.archive_failed": {
+        "ar": "فشلت الأرشفة",
+        "en": "Archive failed",
+    },
+    "chat.session_restored": {
+        "ar": "استُرجعت الجلسة",
+        "en": "Session restored",
+    },
+    "chat.restore_failed": {
+        "ar": "فشل الاسترجاع",
+        "en": "Restore failed",
+    },
+    "chat.copied_session_id": {
+        "ar": "نُسخ المعرّف — /session {id} في Telegram/Discord",
+        "en": "Copied ID — /session {id} on Telegram/Discord",
+    },
+    "chat.rename_session": {
+        "ar": "إعادة تسمية الجلسة",
+        "en": "Rename session",
+    },
+    "chat.session_title_label": {
+        "ar": "عنوان الجلسة",
+        "en": "Session title",
+    },
+    "chat.session_renamed": {
+        "ar": "أُعيدت تسمية الجلسة",
+        "en": "Session renamed",
+    },
+    "chat.rename_failed": {
+        "ar": "فشلت إعادة التسمية",
+        "en": "Rename failed",
+    },
+    "chat.wait_or_abort": {
+        "ar": "انتظر حتى ينتهي التوليد أو أوقفه أولًا",
+        "en": "Please wait for generation to finish or abort first",
+    },
+    "chat.forget_failed": {
+        "ar": "فشل النسيان",
+        "en": "Forget failed",
+    },
+    "chat.context_compacted": {
+        "ar": "ضُغط السياق السابق",
+        "en": "Earlier context compacted",
+    },
+    "chat.untitled_chat": {
+        "ar": "محادثة جديدة",
+        "en": "New chat",
+    },
+    "chat.context_was_compacted": {
+        "ar": "ضُغط السياق السابق",
+        "en": "Earlier context was compacted",
+    },
+    "chat.typing_thinking": {
+        "ar": "يفكّر",
+        "en": "Thinking",
+    },
+    "chat.needs_clarification": {
+        "ar": "يحتاج إلى توضيح",
+        "en": "Needs clarification",
+    },
+    "chat.approval_failed": {
+        "ar": "فشلت الموافقة",
+        "en": "Approval failed",
+    },
+    "chat.phase_queued": {
+        "ar": "جارٍ البدء…",
+        "en": "Starting…",
+    },
+    "chat.phase_approval_required": {
+        "ar": "مطلوب موافقة",
+        "en": "Approval required",
+    },
+    "chat.phase_resuming": {
+        "ar": "جارٍ الاستئناف",
+        "en": "Resuming",
+    },
+    "chat.phase_stopping": {
+        "ar": "جارٍ الإيقاف…",
+        "en": "Stopping…",
+    },
+    "chat.phase_completed": {
+        "ar": "اكتمل",
+        "en": "Completed",
+    },
+    "chat.phase_failed": {
+        "ar": "فشل",
+        "en": "Failed",
+    },
+    "chat.phase_cancelled": {
+        "ar": "أُلغي",
+        "en": "Cancelled",
+    },
+    "chat.phase_recovering": {
+        "ar": "جارٍ الاستعادة…",
+        "en": "Recovering…",
+    },
+    "chat.phase_interrupted": {
+        "ar": "انقطع",
+        "en": "Interrupted",
+    },
+    "chat.hitl_title": {
+        "ar": "⚠ مطلوب موافقة",
+        "en": "⚠ Approval Required",
+    },
+    "chat.hitl_tool_label": {
+        "ar": "الأداة:",
+        "en": "Tool:",
+    },
+    "chat.hitl_args_label": {
+        "ar": "المعاملات:",
+        "en": "Args:",
+    },
+    "chat.hitl_tip_yolo": {
+        "ar": "تلميح: <strong>السماح بالأداة</strong> يوقف تكرار الطلب لهذه الأداة فقط. <strong>جلسة YOLO</strong> تتخطى كل أداة خطرة (الأصلية وأدوات MCP) حتى <code>/yolo off</code> أو انتهاء المدة.",
+        "en": "Tip: <strong>Allow tool</strong> stops repeat prompts for this tool only. <strong>YOLO session</strong> skips every danger tool (native + MCP) until you <code>/yolo off</code> or TTL.",
+    },
+    "chat.hitl_tip_always": {
+        "ar": "هذه الأداة <strong>تتطلب الموافقة دائمًا</strong> (حماية أمان) — لا يتخطاها YOLO ولا أذونات الجلسة.",
+        "en": "This tool <strong>always requires approval</strong> (safety fail-safe) — YOLO and session grants cannot skip it.",
+    },
+    "chat.hitl_approve_once": {
+        "ar": "موافقة لمرة واحدة",
+        "en": "Approve once",
+    },
+    "chat.hitl_approve_once_title": {
+        "ar": "هذا الاستدعاء فقط",
+        "en": "This call only",
+    },
+    "chat.hitl_allow_n": {
+        "ar": "السماح بهذه الأدوات ({n}) للجلسة",
+        "en": "Allow these {n} tools (session)",
+    },
+    "chat.hitl_allow_n_title": {
+        "ar": "السماح بهذه الأدوات ({n}) لمدة ~30 دقيقة في هذه الجلسة: {names}",
+        "en": "Allow these {n} tools for ~30m in this session: {names}",
+    },
+    "chat.hitl_allow_tool": {
+        "ar": "السماح بالأداة (للجلسة)",
+        "en": "Allow tool (session)",
+    },
+    "chat.hitl_allow_tool_title": {
+        "ar": "السماح بهذه الأداة لمدة ~30 دقيقة في هذه الجلسة",
+        "en": "Allow this tool for ~30m in this session",
+    },
+    "chat.hitl_yolo": {
+        "ar": "جلسة YOLO",
+        "en": "YOLO session",
+    },
+    "chat.hitl_yolo_title": {
+        "ar": "تخطي كل الأدوات الخطرة لهذه الجلسة",
+        "en": "Skip all danger tools for this session",
+    },
+    "chat.hitl_deny": {
+        "ar": "رفض",
+        "en": "Deny",
+    },
+    "chat.hitl_publish": {
+        "ar": "المحتوى المراد نشره",
+        "en": "Content to publish",
+    },
+    "chat.hitl_stored_proposal": {
+        "ar": "المسودة المحفوظة {pid}",
+        "en": "stored proposal {pid}",
+    },
+    "chat.hitl_verified": {
+        "ar": "(مُطابق لما وافقت عليه):",
+        "en": "(verified against what you approved):",
+    },
+    "chat.hitl_already_resolved": {
+        "ar": "حُسم مسبقًا",
+        "en": "Already resolved",
+    },
+    "chat.hitl_no_longer_pending": {
+        "ar": "لم يعد معلّقًا",
+        "en": "No longer pending",
+    },
+    "chat.hitl_status_denied": {
+        "ar": "رُفض",
+        "en": "Denied",
+    },
+    "chat.hitl_status_approved": {
+        "ar": "تمت الموافقة",
+        "en": "Approved",
+    },
+    "chat.hitl_status_running": {
+        "ar": "تمت الموافقة — جارٍ التنفيذ…",
+        "en": "Approved — running…",
+    },
+    "chat.no_response_md": {
+        "ar": "_لم يصل رد._ راجع سجلات الخادم أو الموافقات المعلّقة.",
+        "en": "_No response received._ Check server logs or Pending Approvals.",
+    },
+    "chat.no_response_received": {
+        "ar": "لم يصل رد.",
+        "en": "No response received.",
+    },
+    "chat.you_avatar": {
+        "ar": "أنت",
+        "en": "You",
+    },
+    "chat.slash_commands_heading": {
+        "ar": "أوامر الشرطة المائلة",
+        "en": "Slash commands",
+    },
+    "chat.slash_allow_tool_tip": {
+        "ar": "مع الأدوات الخطرة يمكنك أيضًا **السماح بالأداة (للجلسة)** لإيقاف تكرار الطلب دون تفعيل YOLO كاملًا.",
+        "en": "On danger tools you can also **Allow tool (session)** to stop repeat prompts without full YOLO.",
+    },
+    "chat.msg_edit": {
+        "ar": "تعديل",
+        "en": "Edit",
+    },
+    "chat.msg_copy": {
+        "ar": "نسخ",
+        "en": "Copy",
+    },
+    "chat.msg_regenerate": {
+        "ar": "إعادة التوليد",
+        "en": "Regenerate",
+    },
+    "chat.msg_read_aloud": {
+        "ar": "قراءة بصوت عالٍ",
+        "en": "Read aloud",
+    },
+    "chat.msg_read_aloud_aria": {
+        "ar": "اقرأ هذه الرسالة بصوت عالٍ",
+        "en": "Read this message aloud",
+    },
+    "chat.msg_helpful": {
+        "ar": "مفيد",
+        "en": "Helpful",
+    },
+    "chat.msg_not_helpful": {
+        "ar": "غير مفيد",
+        "en": "Not helpful",
+    },
+    "chat.session_msgs": {
+        "ar": "الرسائل: {n}",
+        "en": "{n} msgs",
+    },
+    "chat.hitl_wants_to_run": {
+        "ar": "يريد الوكيل تشغيل:",
+        "en": "Agent wants to run:",
+    },
+    "chat.hitl_wants_to_run_n": {
+        "ar": "يريد الوكيل تشغيل {n} أدوات خطرة:",
+        "en": "Agent wants to run {n} danger tools:",
+    },
+    "chat.node_label": {
+        "ar": "العقدة",
+        "en": "Node",
+    },
 }

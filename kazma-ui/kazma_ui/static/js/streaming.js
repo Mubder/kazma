@@ -264,7 +264,7 @@ var KazmaStream = (function() {
               if (window.KazmaChat && typeof window.KazmaChat.showContextCompacted === 'function') {
                 window.KazmaChat.showContextCompacted(data || {});
               } else if (window.showToast) {
-                window.showToast('🗜️ ' + ((data && data.detail) || 'Earlier context was compacted'), 'info', 6000);
+                window.showToast('🗜️ ' + ((data && data.detail) || (window.kazmaT ? window.kazmaT('chat.context_was_compacted', 'Earlier context was compacted') : 'Earlier context was compacted')), 'info', 6000);
               }
             } catch (e) { /* never break the stream */ }
             if (callbacks.onEvent) callbacks.onEvent(type, data);
@@ -846,7 +846,7 @@ var KazmaStream = (function() {
       var row = document.createElement('div');
       row.className = 'kz-typing-row typing-visible';
       row.innerHTML = '<span class="typing-dots"><span></span><span></span><span></span></span> '
-        + (text || 'Thinking') + '...';
+        + (text || (window.kazmaT ? window.kazmaT('chat.typing_thinking', 'Thinking') : 'Thinking')) + '...';
       host.appendChild(row);
       return row;
     }
@@ -855,7 +855,7 @@ var KazmaStream = (function() {
     span.innerHTML = '<span></span><span></span><span></span>';
     el.textContent = '';
     el.appendChild(span);
-    el.appendChild(document.createTextNode(' ' + (text || 'Thinking') + '...'));
+    el.appendChild(document.createTextNode(' ' + (text || (window.kazmaT ? window.kazmaT('chat.typing_thinking', 'Thinking') : 'Thinking')) + '...'));
     el.style.display = 'flex';
     el.classList.add('typing-visible');
     return el;

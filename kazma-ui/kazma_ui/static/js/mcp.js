@@ -17,6 +17,15 @@
  *      No more "saved silently, 0 tools, no idea why".
  */
 
+// Text built here: the catalog's text in the page's language, else the
+// English given; {name} placeholders filled from vars.
+function _mcpT(key, en, vars) {
+    if (typeof window !== 'undefined' && typeof window.kazmaT === 'function') return window.kazmaT(key, en, vars);
+    var s = en;
+    if (vars) for (var v in vars) s = s.split('{' + v + '}').join(String(vars[v]));
+    return s;
+}
+
 function notify(message, type) {
     if (typeof window !== 'undefined' && typeof window.showToast === 'function') {
         window.showToast(message, type);
@@ -31,7 +40,7 @@ function notify(message, type) {
    visible or the button looks dead. */
 function notifyOAuthError(message) {
     if (typeof window !== 'undefined' && typeof window.kazmaAlert === 'function') {
-        window.kazmaAlert({ title: 'OAuth login failed', message: message, variant: 'btn-danger' });
+        window.kazmaAlert({ title: _mcpT('mcp.ui.oauth_failed', 'OAuth login failed'), message: message, variant: 'btn-danger' });
         return;
     }
     notify(message, 'error');
@@ -358,7 +367,7 @@ function mcpApp() {
                     });
                     var testResult = await testResp.json();
                     if (!testResult.success) {
-                        this.addError = 'Connection test failed: ' + (testResult.error || 'no error detail');
+                        this.addError = _mcpT('mcp.ui.test_failed_detail', 'Connection test failed: {error}', { error: testResult.error || _mcpT('mcp.ui.no_error_detail', 'no error detail') });
                         if (testResult.stderr) {
                             this.addError += '\nServer stderr:\n' + testResult.stderr.slice(0, 500);
                         }
@@ -439,7 +448,7 @@ function mcpApp() {
                     notify('Server started with ' + result.tool_count + ' tools', 'success');
                     location.reload();
                 } else {
-                    notify('Failed: ' + (result.error || 'Unable to start server'), 'error');
+                    notify(_mcpT('mcp.ui.start_failed', 'Failed: {error}', { error: result.error || _mcpT('mcp.ui.unable_to_start', 'Unable to start server') }), 'error');
                 }
             } catch (e) {
                 notify('Failed to start server: ' + e.message, 'error');
@@ -460,7 +469,7 @@ function mcpApp() {
                     notify('Server stopped', 'info');
                     location.reload();
                 } else {
-                    notify('Failed: ' + (result.error || 'Unable to stop server'), 'error');
+                    notify(_mcpT('mcp.ui.start_failed', 'Failed: {error}', { error: result.error || _mcpT('mcp.ui.unable_to_stop', 'Unable to stop server') }), 'error');
                 }
             } catch (e) {
                 notify('Failed to stop server: ' + e.message, 'error');
@@ -481,7 +490,7 @@ function mcpApp() {
                 if (result.success) {
                     notify('Connected! ' + result.tool_count + ' tools found', 'success');
                 } else {
-                    var msg = 'Test failed: ' + (result.error || 'no detail');
+                    var msg = _mcpT('mcp.ui.test_failed', 'Test failed: {error}', { error: result.error || _mcpT('mcp.ui.no_detail', 'no detail') });
                     if (result.stderr) msg += '\n' + String(result.stderr).slice(0, 400);
                     notify(msg, 'error');
                 }
@@ -510,7 +519,7 @@ function mcpApp() {
                 } else if (result.status === 'ok') {
                     notify('Browser login opened. Return here after signing in, then press Start.', 'success');
                 } else {
-                    notifyOAuthError(result.error || 'unknown error');
+                    notifyOAuthError(result.error || _mcpT('mcp.ui.unknown_error', 'unknown error'));
                 }
             } catch (e) {
                 notifyOAuthError(e.message || String(e));

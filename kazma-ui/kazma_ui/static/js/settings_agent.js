@@ -1,6 +1,15 @@
 /** Settings mixin: agent — agent, safety, memory backends, embedder, time travel */
 (function (root) {
     "use strict";
+    // Text built here: the catalog's text in the page's language, else the
+    // English given; {name} placeholders filled from vars.
+    function _k(key, en, vars) {
+        var f = root && root.kazmaT;
+        if (typeof f === "function") return f(key, en, vars);
+        var s = en;
+        if (vars) for (var v in vars) s = s.split("{" + v + "}").join(String(vars[v]));
+        return s;
+    }
     root.KazmaSettingsMixins = root.KazmaSettingsMixins || {};
     root.KazmaSettingsMixins.agent = function () {
         return {
@@ -114,13 +123,13 @@
                 });
                 if (!resp.ok) {
                     const err = await resp.json().catch(function() { return {}; });
-                    showToast('Save failed: ' + (err.detail || resp.status), 'error');
+                    showToast(_k('settings.agentjs.save_failed', 'Save failed: ') + (err.detail || resp.status), 'error');
                     this.saving = false;
                     return;
                 }
-                showToast('Non-stop settings saved — applies live', 'success');
+                showToast(_k('settings.agentjs.non_stop_settings_saved_applies', 'Non-stop settings saved — applies live'), 'success');
             } catch (e) {
-                showToast('Save failed', 'error');
+                showToast(_k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
             }
             this.saving = false;
         },
@@ -133,9 +142,9 @@
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify([{ key: 'memory.tenant_mode', value: this.memoryTenantMode, category: 'memory' }]),
                 });
-                showToast('Memory isolation mode saved — takes effect next turn', 'success');
+                showToast(_k('settings.agentjs.memory_isolation_mode_saved_takes', 'Memory isolation mode saved — takes effect next turn'), 'success');
             } catch (e) {
-                showToast('Save failed', 'error');
+                showToast(_k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
             }
             this.saving = false;
         },
@@ -159,7 +168,7 @@
                     method: 'PUT',
                     body: { about: this.aboutMe || '' },
                 });
-                if (!r || !r.ok) throw new Error((r && r.error) || 'Save failed');
+                if (!r || !r.ok) throw new Error((r && r.error) || _k('settings.agentjs.save_failed_2', 'Save failed'));
                 this.aboutMe = this.aboutMeSaved = r.about || '';
                 showToast(this.t ? this.t('settings.about_me_saved') : 'Saved', 'success');
             } catch (e) {
@@ -181,9 +190,9 @@
                         explain_recall: !!this.memoryExplainRecall,
                     }),
                 });
-                showToast('Memory / Knowledge settings saved', 'success');
+                showToast(_k('settings.agentjs.memory_knowledge_settings_saved', 'Memory / Knowledge settings saved'), 'success');
             } catch (e) {
-                showToast('Save failed', 'error');
+                showToast(_k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
             }
         },
 
@@ -206,14 +215,14 @@
                         this.memoryBackends.state = Object.assign({}, this.memoryBackends.state, b.state || {});
                     }
                     this.memoryBackendsStatus = 'Saved. Next: Test Neo4j, then Sync beliefs → Neo4j.';
-                    showToast('Memory backends saved', 'success');
+                    showToast(_k('settings.agentjs.memory_backends_saved', 'Memory backends saved'), 'success');
                 } else {
                     this.memoryBackendsStatus = data.error || 'Save failed';
-                    showToast('Save failed', 'error');
+                    showToast(_k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
                 }
             } catch (e) {
                 this.memoryBackendsStatus = 'Save failed';
-                showToast('Save failed', 'error');
+                showToast(_k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
             }
             this.memoryBackendsSaving = false;
         },
@@ -231,10 +240,10 @@
                 if (data.ok) {
                     this.memoryNeo4jOk = true;
                     this.memoryNeo4jStatus = 'Connected · ' + (data.latency_ms || 0) + 'ms — ' + (data.detail || '');
-                    showToast('Neo4j connected', 'success');
+                    showToast(_k('settings.agentjs.neo4j_connected', 'Neo4j connected'), 'success');
                 } else {
-                    this.memoryNeo4jStatus = (data.error || 'Failed') + (data.hint ? (' — ' + data.hint) : '');
-                    showToast('Neo4j test failed', 'error');
+                    this.memoryNeo4jStatus = (data.error || _k('settings.agentjs.status_failed', 'Failed')) + (data.hint ? (' — ' + data.hint) : '');
+                    showToast(_k('settings.agentjs.neo4j_test_failed', 'Neo4j test failed'), 'error');
                 }
             } catch (e) {
                 this.memoryNeo4jStatus = 'Test error: ' + e;
@@ -253,10 +262,10 @@
                 if (data.ok) {
                     this.memoryNeo4jOk = true;
                     this.memoryNeo4jStatus = data.detail || ('Synced ' + (data.synced || 0) + ' beliefs');
-                    showToast('Synced ' + (data.synced || 0) + ' beliefs to Neo4j', 'success');
+                    showToast(_k('settings.agentjs.synced_neo4j', 'Synced {n} beliefs to Neo4j', { n: data.synced || 0 }), 'success');
                 } else {
                     this.memoryNeo4jStatus = data.error || 'Sync failed';
-                    showToast('Neo4j sync failed', 'error');
+                    showToast(_k('settings.agentjs.neo4j_sync_failed', 'Neo4j sync failed'), 'error');
                 }
             } catch (e) {
                 this.memoryNeo4jStatus = 'Sync error: ' + e;
@@ -278,7 +287,7 @@
                     showToast(data.detail || ('Synced ' + (data.synced || 0) + ' rows to Postgres'), 'success');
                 } else {
                     this.memoryStateSyncStatus = data.error || 'Sync failed';
-                    showToast('Postgres sync failed', 'error');
+                    showToast(_k('settings.agentjs.postgres_sync_failed', 'Postgres sync failed'), 'error');
                 }
             } catch (e) {
                 this.memoryStateSyncStatus = 'Sync error: ' + e;
@@ -345,17 +354,17 @@
                     };
                 }
                 this.memoryBackendsStatus = 'Reset to local defaults';
-                showToast('Memory backends reset to local', 'success');
+                showToast(_k('settings.agentjs.memory_backends_reset_to_local', 'Memory backends reset to local'), 'success');
             } catch (e) {
-                showToast('Reset failed', 'error');
+                showToast(_k('settings.agentjs.reset_failed', 'Reset failed'), 'error');
             }
         },
 
         async rebuildMemoryEmbeddings() {
             const ok = window.kazmaConfirm
                 ? await window.kazmaConfirm({
-                    title: 'Rebuild embeddings?',
-                    message: 'Re-embed episodes/beliefs for the current model. May take minutes.',
+                    title: _k('settings.agentjs.rebuild_embeddings', 'Rebuild embeddings?'),
+                    message: _k('settings.agentjs.re_embed_episodes_beliefs_for', 'Re-embed episodes/beliefs for the current model. May take minutes.'),
                 })
                 : await window.confirm('Rebuild embeddings?');
             if (!ok) return;
@@ -365,10 +374,10 @@
                     headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 });
                 const data = await resp.json();
-                this.memoryBackendsStatus = data.ok ? 'Rebuild started (see status on Embedder page)' : (data.error || 'Failed');
+                this.memoryBackendsStatus = data.ok ? _k('settings.agentjs.rebuild_started_status', 'Rebuild started (see status on Embedder page)') : (data.error || _k('settings.agentjs.status_failed', 'Failed'));
                 showToast(data.ok ? 'Rebuild started' : 'Rebuild failed', data.ok ? 'success' : 'error');
             } catch (e) {
-                showToast('Rebuild failed', 'error');
+                showToast(_k('settings.agentjs.rebuild_failed', 'Rebuild failed'), 'error');
             }
         },
 
@@ -380,9 +389,9 @@
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.logging),
                 });
-                showToast('Logging settings saved (restart for rotation changes)', 'success');
+                showToast(_k('settings.agentjs.logging_settings_saved_restart_for', 'Logging settings saved (restart for rotation changes)'), 'success');
             } catch (e) {
-                showToast('Save failed', 'error');
+                showToast(_k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
             }
             this.saving = false;
         },
@@ -401,7 +410,7 @@
                 });
                 showToast((window.t && window.t('settings.swarm_retention_saved')) || 'Swarm task retention saved', 'success');
             } catch (e) {
-                showToast(e.message || 'Save failed', 'error');
+                showToast(e.message || _k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
             }
             this.swarmRetentionSaving = false;
         },
@@ -420,7 +429,7 @@
                 });
                 showToast((window.t && window.t('settings.checkpoint_retention_saved')) || 'Step history retention saved', 'success');
             } catch (e) {
-                showToast(e.message || 'Save failed', 'error');
+                showToast(e.message || _k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
             }
             this.checkpointRetentionSaving = false;
         },
@@ -472,10 +481,10 @@
                 const refreshed = await this._fetch('/api/settings/documents');
                 if (refreshed && !refreshed.error) Object.assign(this.documents, refreshed);
                 this.documentsStatus = 'Saved';
-                if (window.showToast) window.showToast('Document settings saved', 'success');
+                if (window.showToast) window.showToast(_k('settings.agentjs.document_settings_saved', 'Document settings saved'), 'success');
             } catch (e) {
                 this.documentsStatus = 'Save failed';
-                if (window.showToast) window.showToast('Document settings save failed', 'error');
+                if (window.showToast) window.showToast(_k('settings.agentjs.document_settings_save_failed', 'Document settings save failed'), 'error');
             } finally {
                 this.documentsSaving = false;
             }
@@ -489,9 +498,9 @@
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.proxy),
                 });
-                showToast(I18N?.proxy_saved || 'Proxy settings saved', 'success');
+                showToast(_k('settings.proxy_saved', 'Proxy settings saved'), 'success');
             } catch (e) {
-                showToast('Save failed', 'error');
+                showToast(_k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
             }
             this.saving = false;
         },
@@ -562,7 +571,7 @@
 
         async saveEmbedder() {
             if (!this.embedder.model || !String(this.embedder.model).trim()) {
-                showToast('Model is required', 'error');
+                showToast(_k('settings.agentjs.model_is_required', 'Model is required'), 'error');
                 return;
             }
             this.embedderSaving = true;
@@ -574,21 +583,21 @@
                 });
                 const data = await resp.json();
                 if (data.status === 'error') {
-                    showToast(data.error || 'Save failed', 'error');
+                    showToast(data.error || _k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
                 } else {
-                    showToast('Embedder settings saved. Restart the server to apply.', 'success');
+                    showToast(_k('settings.agentjs.embedder_settings_saved_restart_the', 'Embedder settings saved. Restart the server to apply.'), 'success');
                     this.loadEmbedder();
                 }
             } catch (e) {
-                showToast('Save failed: ' + e.message, 'error');
+                showToast(_k('settings.agentjs.save_failed', 'Save failed: ') + e.message, 'error');
             }
             this.embedderSaving = false;
         },
 
         async rebuildEmbeddings() {
             const ok = await window.kazmaConfirm({
-                title: 'Rebuild embeddings?',
-                message: 'All memory rows not in the current vector space will be re-encoded with the active model. This runs in the background and can take a while for large stores. A backup is created automatically first.',
+                title: _k('settings.agentjs.rebuild_embeddings', 'Rebuild embeddings?'),
+                message: _k('settings.agentjs.all_memory_rows_not_in', 'All memory rows not in the current vector space will be re-encoded with the active model. This runs in the background and can take a while for large stores. A backup is created automatically first.'),
                 danger: true,
             });
             if (!ok) return;
@@ -600,16 +609,16 @@
                 });
                 const data = await resp.json();
                 if (data.status === 'ok') {
-                    showToast('Rebuild started in the background.', 'success');
+                    showToast(_k('settings.agentjs.rebuild_started_in_the_background', 'Rebuild started in the background.'), 'success');
                     this.startEmbedderRebuildPoll();
                 } else if (data.status === 'already') {
-                    showToast('A rebuild is already running.', 'info');
+                    showToast(_k('settings.agentjs.a_rebuild_is_already_running', 'A rebuild is already running.'), 'info');
                     this.startEmbedderRebuildPoll();
                 } else {
-                    showToast(data.detail || 'Failed to start rebuild', 'error');
+                    showToast(data.detail || _k('settings.agentjs.failed_to_start_rebuild', 'Failed to start rebuild'), 'error');
                 }
             } catch (e) {
-                showToast('Rebuild failed to start: ' + e.message, 'error');
+                showToast(_k('settings.agentjs.rebuild_failed_to_start', 'Rebuild failed to start: ') + e.message, 'error');
             }
             this.embedderRebuilding = false;
         },
@@ -625,9 +634,9 @@
                         this._embedderPollTimer = null;
                         this.loadEmbedder(); // refresh DB composition
                         if (status.state === 'done') {
-                            showToast('Embedding rebuild complete.', 'success');
+                            showToast(_k('settings.agentjs.embedding_rebuild_complete', 'Embedding rebuild complete.'), 'success');
                         } else if (status.state === 'error') {
-                            showToast('Embedding rebuild failed: ' + (status.error || 'unknown error'), 'error');
+                            showToast(_k('settings.agentjs.embedding_rebuild_failed', 'Embedding rebuild failed: ') + (status.error || _k('settings.agentjs.unknown_error', 'unknown error')), 'error');
                         }
                     }
                 } catch (e) { /* server still up, keep polling */ }
@@ -698,15 +707,15 @@
                 });
                 const data = await resp.json();
                 if (data.status === 'error') {
-                    showToast(data.error || 'Save failed', 'error');
+                    showToast(data.error || _k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
                 } else {
                     try {
                         localStorage.setItem('kazma.notifyOnComplete', enabled ? '1' : '0');
                     } catch (e) { /* ignore */ }
-                    showToast('Notification preference saved.', 'success');
+                    showToast(_k('settings.agentjs.notification_preference_saved', 'Notification preference saved.'), 'success');
                 }
             } catch (e) {
-                showToast('Save failed: ' + e.message, 'error');
+                showToast(_k('settings.agentjs.save_failed', 'Save failed: ') + e.message, 'error');
             }
             this.turnNotifySaving = false;
         },
@@ -733,12 +742,12 @@
         async saveTimeTravel() {
             const n = Number(this.timeTravel.max_snapshots);
             if (!n || n < 1) {
-                showToast('Snapshots per thread must be at least 1', 'error');
+                showToast(_k('settings.agentjs.snapshots_per_thread_must_be', 'Snapshots per thread must be at least 1'), 'error');
                 return;
             }
             const rd = Number(this.timeTravel.retention_days);
             if (!rd || rd < 1) {
-                showToast('Retention days must be at least 1', 'error');
+                showToast(_k('settings.agentjs.retention_days_must_be_at', 'Retention days must be at least 1'), 'error');
                 return;
             }
             this.timeTravelSaving = true;
@@ -750,12 +759,12 @@
                 });
                 const data = await resp.json();
                 if (data.status === 'error') {
-                    showToast(data.error || 'Save failed', 'error');
+                    showToast(data.error || _k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
                 } else {
-                    showToast('Time travel settings saved. Restart the server to apply.', 'success');
+                    showToast(_k('settings.agentjs.time_travel_settings_saved_restart', 'Time travel settings saved. Restart the server to apply.'), 'success');
                 }
             } catch (e) {
-                showToast('Save failed: ' + e.message, 'error');
+                showToast(_k('settings.agentjs.save_failed', 'Save failed: ') + e.message, 'error');
             }
             this.timeTravelSaving = false;
         },

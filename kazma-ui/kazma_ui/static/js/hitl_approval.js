@@ -164,7 +164,7 @@
       var _kind = item.kind || 'security';
       if (_kind.indexOf('semantic_') === 0) {
         var _si = (item.items && item.items[0]) || {};
-        var _sq = escapeHtml(_si.question || message || 'Needs clarification');
+        var _sq = escapeHtml(_si.question || message || (window.kazmaT ? window.kazmaT('chat.needs_clarification', 'Needs clarification') : 'Needs clarification'));
         var _so = (_si.options || []);
         var _st = escapeHtml(_si.tool_call_id || '');
         var _ob = _so.map(function(o) {
@@ -370,7 +370,7 @@
       if (statusEl) {
         statusEl.innerHTML =
           (window.KazmaIcons ? KazmaIcons.span('alert') : '') + ' ' +
-          escapeHtml(String((err && err.message) || err || 'Approval failed')) +
+          escapeHtml(String((err && err.message) || err || (window.kazmaT ? window.kazmaT('chat.approval_failed', 'Approval failed') : 'Approval failed'))) +
           ' <a href="#" class="hitl-dismiss-link" style="margin-left:8px;color:var(--text-danger);text-decoration:underline;">' +
           t('dashboard.hitl_dismiss', 'Dismiss') + '</a>';
         statusEl.className = 'hitl-approval-status hitl-status-error';

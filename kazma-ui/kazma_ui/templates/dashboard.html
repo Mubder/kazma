@@ -90,8 +90,8 @@
     <div class="metric-card" title="{{ t('dashboard.active_model') }}">
       <div class="metric-icon"><span class="ki" data-icon="cpu" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('dashboard.active_model') }}</div>
-      <div class="metric-value" id="metric-active-model" style="color:var(--text-primary);font-size:0.95rem;word-break:break-all;">{{ active_model or '—' }}</div>
-      <div class="metric-sub" id="metric-active-provider">{{ active_provider or t('dashboard.provider') }}</div>
+      <div class="metric-value" id="metric-active-model" translate="no" style="color:var(--text-primary);font-size:0.95rem;word-break:break-all;">{{ active_model or '—' }}</div>
+      <div class="metric-sub" id="metric-active-provider" translate="no">{{ active_provider or t('dashboard.provider') }}</div>
     </div>
   </div>
 
@@ -128,10 +128,10 @@
             {{ t('memory.hub_blurb') }}
           </p>
           <div id="memory-hub-kpis" class="dash-kpi-row" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:14px;">
-            <div class="dash-kpi-tile"><div class="dash-kpi-label">Beliefs</div><div class="dash-kpi-val" id="hub-beliefs">–</div></div>
-            <div class="dash-kpi-tile"><div class="dash-kpi-label">Entities</div><div class="dash-kpi-val" id="hub-entities">–</div></div>
-            <div class="dash-kpi-tile"><div class="dash-kpi-label">Empty</div><div class="dash-kpi-val" id="hub-empty">–</div></div>
-            <div class="dash-kpi-tile"><div class="dash-kpi-label">Isolated</div><div class="dash-kpi-val" id="hub-isolated">–</div></div>
+            <div class="dash-kpi-tile"><div class="dash-kpi-label">{{ t('dashboard.kpi_beliefs') }}</div><div class="dash-kpi-val" id="hub-beliefs">–</div></div>
+            <div class="dash-kpi-tile"><div class="dash-kpi-label">{{ t('dashboard.kpi_entities') }}</div><div class="dash-kpi-val" id="hub-entities">–</div></div>
+            <div class="dash-kpi-tile"><div class="dash-kpi-label">{{ t('dashboard.kpi_empty') }}</div><div class="dash-kpi-val" id="hub-empty">–</div></div>
+            <div class="dash-kpi-tile"><div class="dash-kpi-label">{{ t('dashboard.kpi_isolated') }}</div><div class="dash-kpi-val" id="hub-isolated">–</div></div>
           </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;min-width:140px;">
@@ -247,7 +247,7 @@
           <span class="badge {{ trace.badge_class }}">{{ trace.status }}</span>
         </div>
         <div class="dash-mobile-card-name">{{ trace.label }}</div>
-        <div class="dash-mobile-card-meta">{{ trace.time }} · {{ trace.duration_ms }}ms · {{ trace.tokens }} tok · {{ trace.cost }}</div>
+        <div class="dash-mobile-card-meta">{{ trace.time }} · {{ trace.duration_ms }}ms · {{ trace.tokens }} {{ t('chat.tok_unit') }} · {{ trace.cost }}</div>
       </article>
       {% endfor %}
     </div>

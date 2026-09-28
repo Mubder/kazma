@@ -41,7 +41,19 @@
   var ARCHIVE_SVG = '<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><rect x="2" y="4" width="20" height="4" rx="1"/><path d="M4 8v10a2 2 0 002 2h12a2 2 0 002-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
   var RESTORE_SVG = '<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M3 12a9 9 0 109-9"/><polyline points="3 4 3 10 9 10"/></svg>';
   var CHECK_SVG = '<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
-  function i18n(key) { return (window.KAZMA_I18N && window.KAZMA_I18N[key]) || key; }
+  // Text for *key* in the page's language: a flat string research.html
+  // merged into KAZMA_I18N (already translated), or a catalog entry
+  // ({en, ar} -- never shown as it is), else *fallback*, with {name}
+  // placeholders filled from *vars*.
+  function i18n(key, fallback, vars) {
+    var v = window.KAZMA_I18N ? window.KAZMA_I18N[key] : null;
+    var text;
+    if (typeof v === 'string' && v) text = v;
+    else if (v && typeof v === 'object') text = v[window.KAZMA_LANG || 'en'] || v.en;
+    if (!text) text = fallback || key;
+    if (vars) for (var k in vars) text = text.split('{' + k + '}').join(String(vars[k]));
+    return text;
+  }
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -163,7 +175,7 @@
 
     cancelDeep: function () {
       if (!liveSessionId) {
-        toast('No running session', 'info');
+        toast(i18n('research.ui.no_running_session', 'No running session'), 'info');
         return;
       }
       var id = liveSessionId;
@@ -177,21 +189,21 @@
             toast(data.error, 'error');
             return;
           }
-          toast(i18n('research_cancelled') || 'Research cancelled', 'info');
+          toast(i18n('research_cancelled', 'Research cancelled'), 'info');
           if (data.session) applyLiveSession(data.session);
           closeLiveStream();
           var cancelBtn = $('research-cancel-btn');
           if (cancelBtn) cancelBtn.style.display = 'none';
           window.KazmaResearch.load();
         })
-        .catch(function () { toast('Cancel failed', 'error'); });
+        .catch(function () { toast(i18n('research.ui.cancel_failed', 'Cancel failed'), 'error'); });
     },
 
     startDeep: function () {
       var topicEl = $('research-topic');
       var topic = topicEl ? (topicEl.value || '').trim() : '';
       if (!topic) {
-        toast('Enter a research topic', 'error');
+        toast(i18n('research.ui.enter_a_research_topic', 'Enter a research topic'), 'error');
         if (topicEl) topicEl.focus();
         return;
       }
@@ -230,7 +242,7 @@
             btn.textContent = startLabel;
           }
           if (!res.ok || !res.data || res.data.error) {
-            toast((res.data && res.data.error) || 'Could not start research', 'error');
+            toast((res.data && res.data.error) || i18n('research.ui.could_not_start_research', 'Could not start research'), 'error');
             hideLivePanel();
             return;
           }
@@ -245,7 +257,7 @@
             btn.disabled = false;
             btn.textContent = startLabel;
           }
-          toast('Could not start research', 'error');
+          toast(i18n('research.ui.could_not_start_research', 'Could not start research'), 'error');
           hideLivePanel();
         });
     },
@@ -319,7 +331,7 @@
         renderList(allTasks);
         populateCompareDropdowns(data.tasks || []);
         if (papersPayload.error) {
-          toast('Papers list: ' + papersPayload.error, 'error');
+          toast(i18n('research.papers_list_error', 'Papers list: {error}', { error: papersPayload.error }), 'error');
         }
       });
     },
@@ -380,11 +392,11 @@
           .then(function (r) { return r.ok ? r.json() : null; })
           .then(function (data) {
             if (!data || !data.session) {
-              toast('Session not found', 'error');
+              toast(i18n('research.ui.session_not_found', 'Session not found'), 'error');
               return;
             }
             var s = data.session;
-            $('research-detail-title').textContent = (s.topic || 'Deep research').slice(0, 100);
+            $('research-detail-title').textContent = (s.topic || i18n('research.ui.deep_research', 'Deep research')).slice(0, 100);
             $('research-detail-meta').innerHTML =
               '<span>Session</span> · <span>' + esc(s.status) + '</span> · ' +
               (s.stage ? '<span>Stage: ' + esc(s.stage) + '</span> · ' : '') +
@@ -437,7 +449,7 @@
               openLiveStream(s.id);
             }
           })
-          .catch(function () { toast('Could not load session', 'error'); });
+          .catch(function () { toast(i18n('research.ui.could_not_load_session', 'Could not load session'), 'error'); });
         return;
       }
 
@@ -448,17 +460,17 @@
           if (allTasks[i].id === id) { paper = allTasks[i]; break; }
         }
         if (!paper || !paper.report_path) {
-          toast('Paper not found', 'error');
+          toast(i18n('research.ui.paper_not_found', 'Paper not found'), 'error');
           return;
         }
-        $('research-detail-title').textContent = (paper.prompt || 'Paper').slice(0, 100);
+        $('research-detail-title').textContent = (paper.prompt || i18n('research.ui.paper', 'Paper')).slice(0, 100);
         $('research-detail-meta').innerHTML =
           '<span>Pipeline paper</span> · ' +
           (paper.sources != null ? '<span>Sources: ' + paper.sources + '</span> · ' : '') +
           '<span dir="ltr">' + esc(paper.report_path) + '</span>';
         var el = $('research-detail-output');
         el.className = 'markdown-body bidi-content';
-        el.textContent = 'Loading…';
+        el.textContent = i18n('research.ui.loading', 'Loading…');
         fetch('/api/research/papers/file?path=' + encodeURIComponent(paper.report_path), {
           credentials: 'same-origin',
         })
@@ -476,8 +488,8 @@
             if (restBtn) restBtn.style.display = 'none';
           })
           .catch(function () {
-            el.textContent = 'Could not load report file.';
-            toast('Could not load paper', 'error');
+            el.textContent = i18n('research.ui.could_not_load_report_file', 'Could not load report file.');
+            toast(i18n('research.ui.could_not_load_paper', 'Could not load paper'), 'error');
           });
         return;
       }
@@ -485,10 +497,10 @@
       fetch(researchDeleteUrl(id), { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (data) {
-          if (!data || data.error) { toast('Could not load', 'error'); return; }
+          if (!data || data.error) { toast(i18n('research.ui.could_not_load', 'Could not load'), 'error'); return; }
           var t = data.task;
           $('research-detail').style.display = 'block';
-          $('research-detail-title').textContent = (t.prompt || 'Research').slice(0, 80);
+          $('research-detail-title').textContent = (t.prompt || i18n('research.ui.research', 'Research')).slice(0, 80);
           if (window.KazmaBidi) KazmaBidi.apply($('research-detail-title'), t.prompt || '');
           $('research-detail-meta').innerHTML =
             '<span>Cost: <strong>$' + (t.cost || 0).toFixed(4) + '</strong></span> · ' +
@@ -515,8 +527,8 @@
     },
 
     exportCurrent: function (fmt) {
-      if (!currentId) { toast('Select a research result first', 'error'); return; }
-      toast('Exporting to ' + fmt + '…', 'info');
+      if (!currentId) { toast(i18n('research.ui.select_a_research_result_first', 'Select a research result first'), 'error'); return; }
+      toast(i18n('research.exporting_to', 'Exporting to {format}…', { format: fmt }), 'info');
       // The panel stores session selections as 'session:<id>' and pipeline
       // papers as 'paper:<id>'. Sessions export via their own endpoint
       // (research_sessions.db, not the swarm TaskStore); papers use the
@@ -552,8 +564,8 @@
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-          if (data.error) { toast('Export failed: ' + data.error, 'error'); return; }
-          toast('Exported: ' + (data.filename || fmt), 'success');
+          if (data.error) { toast(i18n('research.export_failed_error', 'Export failed: {error}', { error: data.error }), 'error'); return; }
+          toast(i18n('research.exported', 'Exported: {name}', { name: data.filename || fmt }), 'success');
           if (data.download_url) {
             window.open(data.download_url, '_blank', 'noopener');
           } else if (data.filename) {
@@ -562,7 +574,7 @@
             window.open('/api/research/download?path=' + encodeURIComponent(data.path), '_blank', 'noopener');
           }
         })
-        .catch(function () { toast('Export request failed', 'error'); });
+        .catch(function () { toast(i18n('research.ui.export_request_failed', 'Export request failed'), 'error'); });
     },
 
     backToList: function () {
@@ -581,14 +593,14 @@
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-          if (data.error) { toast('Delete failed: ' + data.error, 'error'); return; }
-          toast('Deleted', 'success');
+          if (data.error) { toast(i18n('research.ui.delete_failed', 'Delete failed: ') + data.error, 'error'); return; }
+          toast(i18n('research.ui.deleted', 'Deleted'), 'success');
           currentId = null;
           $('research-detail').style.display = 'none';
           $('research-list').style.display = 'flex';
           window.KazmaResearch.load();
         })
-        .catch(function () { toast('Delete failed', 'error'); });
+        .catch(function () { toast(i18n('research.ui.delete_failed_2', 'Delete failed'), 'error'); });
     },
 
     del: async function (id) {
@@ -599,11 +611,11 @@
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-          if (data.error) { toast('Delete failed: ' + data.error, 'error'); return; }
-          toast('Deleted', 'success');
+          if (data.error) { toast(i18n('research.ui.delete_failed', 'Delete failed: ') + data.error, 'error'); return; }
+          toast(i18n('research.ui.deleted', 'Deleted'), 'success');
           window.KazmaResearch.load();
         })
-        .catch(function () { toast('Delete failed', 'error'); });
+        .catch(function () { toast(i18n('research.ui.delete_failed_2', 'Delete failed'), 'error'); });
     },
 
     delArchived: async function (id) {
@@ -614,11 +626,11 @@
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-          if (data.error) { toast('Delete failed: ' + data.error, 'error'); return; }
-          toast('Deleted', 'success');
+          if (data.error) { toast(i18n('research.ui.delete_failed', 'Delete failed: ') + data.error, 'error'); return; }
+          toast(i18n('research.ui.deleted', 'Deleted'), 'success');
           window.KazmaResearch.loadArchived();
         })
-        .catch(function () { toast('Delete failed', 'error'); });
+        .catch(function () { toast(i18n('research.ui.delete_failed_2', 'Delete failed'), 'error'); });
     },
 
     archive: function (id) {
@@ -628,7 +640,7 @@
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-          if (data.error) { toast('Archive failed: ' + data.error, 'error'); return; }
+          if (data.error) { toast(i18n('research.ui.archive_failed', 'Archive failed: ') + data.error, 'error'); return; }
           toast(i18n('research_archived_msg'), 'success');
           window.KazmaResearch.load();
           // If the archived panel is visible, refresh it too.
@@ -636,7 +648,7 @@
             window.KazmaResearch.loadArchived();
           }
         })
-        .catch(function () { toast('Archive failed', 'error'); });
+        .catch(function () { toast(i18n('research.ui.archive_failed_2', 'Archive failed'), 'error'); });
     },
 
     restore: function (id) {
@@ -646,11 +658,11 @@
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-          if (data.error) { toast('Restore failed: ' + data.error, 'error'); return; }
+          if (data.error) { toast(i18n('research.ui.restore_failed', 'Restore failed: ') + data.error, 'error'); return; }
           toast(i18n('research_restored_msg'), 'success');
           window.KazmaResearch.loadArchived();
         })
-        .catch(function () { toast('Restore failed', 'error'); });
+        .catch(function () { toast(i18n('research.ui.restore_failed_2', 'Restore failed'), 'error'); });
     },
 
     archiveCurrent: function () {
@@ -662,12 +674,12 @@
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-          if (data.error) { toast('Archive failed: ' + data.error, 'error'); return; }
+          if (data.error) { toast(i18n('research.ui.archive_failed', 'Archive failed: ') + data.error, 'error'); return; }
           toast(i18n('research_archived_msg'), 'success');
           window.KazmaResearch.backToList();
           window.KazmaResearch.load();
         })
-        .catch(function () { toast('Archive failed', 'error'); });
+        .catch(function () { toast(i18n('research.ui.archive_failed_2', 'Archive failed'), 'error'); });
     },
 
     restoreCurrent: function () {
@@ -679,18 +691,18 @@
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-          if (data.error) { toast('Restore failed: ' + data.error, 'error'); return; }
+          if (data.error) { toast(i18n('research.ui.restore_failed', 'Restore failed: ') + data.error, 'error'); return; }
           toast(i18n('research_restored_msg'), 'success');
           window.KazmaResearch.backToList();
           window.KazmaResearch.load();
         })
-        .catch(function () { toast('Restore failed', 'error'); });
+        .catch(function () { toast(i18n('research.ui.restore_failed_2', 'Restore failed'), 'error'); });
     },
 
     compare: function () {
       var a = $('research-cmp-a').value;
       var b = $('research-cmp-b').value;
-      if (!a || !b) { toast('Pick two runs', 'error'); return; }
+      if (!a || !b) { toast(i18n('research.ui.pick_two_runs', 'Pick two runs'), 'error'); return; }
       $('research-cmp-result').innerHTML = '<div style="padding:1rem;color:var(--text-muted);">' + esc(i18n('research.comparing')) + '</div>';
       fetch('/api/research/compare', {
         method: 'POST',
@@ -727,7 +739,7 @@
           if (d.identical) html += '<p style="color:var(--success);display:flex;align-items:center;gap:4px;">' + CHECK_SVG + ' ' + esc(i18n('research.identical')) + '</p>';
           $('research-cmp-result').innerHTML = html;
         })
-        .catch(function () { toast('Compare failed', 'error'); });
+        .catch(function () { toast(i18n('research.ui.compare_failed', 'Compare failed'), 'error'); });
     },
   };
 
@@ -790,21 +802,21 @@
         if (s.report_path) {
           html += '<a class="btn btn-primary btn-sm" href="/api/research/papers/file?path=' +
             encodeURIComponent(s.report_path) + '" target="_blank">' +
-            esc(i18n('research_view_report') || 'View report') + '</a>';
+            esc(i18n('research_view_report', 'View report')) + '</a>';
           html += '<button class="btn btn-secondary btn-sm" data-act="view-detail" data-task-id="' +
-            esc('session:' + (s.id || liveSessionId || '')) + '">' + esc(i18n('research_open_md') || 'Open') + '</button>';
+            esc('session:' + (s.id || liveSessionId || '')) + '">' + esc(i18n('research_open_md', 'Open')) + '</button>';
         }
         actions.innerHTML = html;
       }
       if (s.status === 'done') toast(i18n('research_start_done'), 'success');
       if (s.status === 'error') {
         toast(
-          (i18n('research_start_error') || 'Research failed') +
+          i18n('research_start_error', 'Research failed') +
             (s.error ? ': ' + String(s.error).slice(0, 120) : ''),
           'error',
         );
       }
-      if (s.status === 'cancelled') toast(i18n('research_cancelled') || 'Cancelled', 'info');
+      if (s.status === 'cancelled') toast(i18n('research_cancelled', 'Cancelled'), 'info');
     }
   }
 
@@ -922,7 +934,7 @@
       var actions;
       if (isPaper || (isSession && t.report_path)) {
         actions = (t.report_path
-          ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.report_path) + '" onclick="event.stopPropagation();" target="_blank" title="' + esc(i18n('research.open_md') || 'Open report') + '">MD</a>'
+          ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.report_path) + '" onclick="event.stopPropagation();" target="_blank" title="' + esc(i18n('research.open_md', 'Open report')) + '">MD</a>'
           : '') +
           (t.docx_path
             ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.docx_path) + '" onclick="event.stopPropagation();" target="_blank" title="DOCX">DOCX</a>'
@@ -936,7 +948,7 @@
       return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;" data-act="view-detail" data-task-id="' + esc(t.id) + '">' +
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
           '<div style="flex:1;min-width:0;overflow:hidden;">' +
-            '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(t.prompt || '(no prompt)') + '</div>' +
+            '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(t.prompt || i18n('research.ui.no_prompt', '(no prompt)')) + '</div>' +
             '<div style="font-size:0.85rem;color:var(--text-muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
               meta +
             '</div>' +
@@ -959,7 +971,7 @@
       return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;opacity:0.7;" data-act="view-detail" data-task-id="' + esc(t.id) + '">' +
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
           '<div style="flex:1;min-width:0;overflow:hidden;">' +
-            '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(t.prompt || '(no prompt)') + '</div>' +
+            '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(t.prompt || i18n('research.ui.no_prompt', '(no prompt)')) + '</div>' +
             '<div style="font-size:0.85rem;color:var(--text-muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
               '<span>' + esc((t.workers || []).join(', ')) + '</span> · ' +
               '<span>$' + (t.cost || 0).toFixed(4) + '</span> · ' +

@@ -1150,9 +1150,9 @@
 
   async function removeWorker(name) {
     if (!(await window.kazmaConfirm({
-      title: 'Remove worker',
+      title: t('swarm.ui.remove_worker_title'),
       message: t('swarm.remove_worker_confirm', {name: name}),
-      confirmText: 'Remove',
+      confirmText: t('swarm.ui.remove'),
       danger: true,
     }))) return;
     fetch('/api/swarm/workers/' + encodeURIComponent(name), { method: 'DELETE' })
@@ -2976,9 +2976,9 @@
   }
 
   async function deleteTemplate(name) {
-    var msg = 'Delete template "' + name + '"?';
+    var msg = t('swarm.ui.delete_template_message', { name: name });
     var ok = window.kazmaConfirm
-      ? await window.kazmaConfirm({ message: msg, danger: true, confirmText: 'Delete' })
+      ? await window.kazmaConfirm({ message: msg, danger: true, confirmText: t('swarm.ui.delete') })
       : await window.confirm(msg);
     if (!ok) return;
     try {
@@ -2987,7 +2987,7 @@
       if (window.showToast) showToast((window.t ? t('swarm.template_deleted') : 'Template deleted'), 'success');
       loadTemplates();
     } catch (e) {
-      if (window.showToast) showToast('Delete failed: ' + e.message, 'error');
+      if (window.showToast) showToast(t('swarm.ui.delete_failed', { error: e.message }), 'error');
     }
   }
 
@@ -3000,7 +3000,7 @@
         loadTemplates();
       })
       .catch(function() {
-        if (window.showToast) showToast('Reap failed', 'error');
+        if (window.showToast) showToast(t('swarm.ui.reap_failed'), 'error');
       });
   }
 

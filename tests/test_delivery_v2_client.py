@@ -11,14 +11,14 @@ unit-test gap/dupe semantics without a browser.
 
 from __future__ import annotations
 
-from tests._js_source import js_function_body
-from tests._module_source import module_source
-
 import json
+import re
 import shutil
 import subprocess
-import re
 from pathlib import Path
+
+from tests._js_source import js_function_body
+from tests._module_source import module_source
 
 _ROOT = Path(__file__).resolve().parent.parent
 _UI = _ROOT / "kazma-ui" / "kazma_ui"
@@ -509,8 +509,10 @@ class TestUIAuditP0Fixes:
         (composer-chrome) owns the markup — and carries the Plan pill for
         parity. The row is a visible toolbar (the ⋯ popover was removed
         2026-08-27 at operator request)."""
+        from tests._template_english import template_english
+
         js = _CHAT_JS.read_text(encoding="utf-8")
-        html = self._CHAT_HTML.read_text(encoding="utf-8")
+        html = template_english(self._CHAT_HTML)
         assert "insertBefore(bar, footer)" not in js
         assert "bar.innerHTML =" not in js.split("function bindCapacityBar")[1][:2000]
         assert 'data-cap="/plan on"' in html

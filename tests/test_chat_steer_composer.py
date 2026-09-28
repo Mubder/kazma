@@ -6,8 +6,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from tests._js_source import js_function_body
 from tests._module_source import module_source
 
@@ -28,6 +26,16 @@ _TURN_DOC_JS = _MODULES / "turn_document.js"
 
 def _js() -> str:
     return _CHAT_JS.read_text(encoding="utf-8")
+
+
+def _settings_page_english() -> str:
+    """settings.html as an English reader gets it (tests/_template_english.py)."""
+    from tests._template_english import template_english
+
+    return template_english(
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "templates" / "settings.html"
+    )
 
 
 def _view_js() -> str:
@@ -348,8 +356,6 @@ def test_chat_client_boots_under_node() -> None:
     on load, and the chat page is blank while every suite here stays green —
     because the rest of these tests assert on source TEXT.
     """
-    import shutil
-    import subprocess
 
     if shutil.which("node") is None:
         import pytest
@@ -376,8 +382,6 @@ def test_turn_view_dom_harness_under_node() -> None:
     below replays real frame sequences (including the 2026-09-19 sequential
     approve) and asserts the resulting DOM.
     """
-    import shutil
-    import subprocess
 
     if shutil.which("node") is None:
         import pytest
@@ -1487,10 +1491,7 @@ def test_ops_alert_channel_routing_and_adapter_page() -> None:
     # Telegram-direct fallback honors the choice.
     assert '"telegram" not in channels' in src
 
-    settings_html = (
-        Path(__file__).resolve().parent.parent
-        / "kazma-ui" / "kazma_ui" / "templates" / "settings.html"
-    ).read_text(encoding="utf-8")
+    settings_html = _settings_page_english()
     assert "toggleRoutingList" in settings_html  # v2 selector helper
     assert "notifications.ops.channels" in (
         Path(__file__).resolve().parent.parent
@@ -1597,10 +1598,7 @@ def test_four_delivery_routes_complete_fields() -> None:
     /api/connectors and saves via POST /api/connectors, the exact flow the
     old dialogs used (token normalization, mask preservation, live
     allowlist apply, adapter refresh)."""
-    settings_html = (
-        Path(__file__).resolve().parent.parent
-        / "kazma-ui" / "kazma_ui" / "templates" / "settings.html"
-    ).read_text(encoding="utf-8")
+    settings_html = _settings_page_english()
     # Route sections: credential + destination + old-dialog platform fields.
     for needle in (
         "Telegram — Main bot",
@@ -1668,10 +1666,7 @@ def test_platform_adapters_is_the_single_token_ui() -> None:
     The save is also diff-driven: only changed values are written and the
     slow adapter restart runs only when platform credentials changed — in
     the background, so the Save button never grays out for seconds."""
-    settings_html = (
-        Path(__file__).resolve().parent.parent
-        / "kazma-ui" / "kazma_ui" / "templates" / "settings.html"
-    ).read_text(encoding="utf-8")
+    settings_html = _settings_page_english()
     assert "Platform Adapters" in settings_html
     assert "Delivery routing" in settings_html
     assert "Other integrations" in settings_html
