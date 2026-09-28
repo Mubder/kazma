@@ -198,7 +198,7 @@
 
         async saveMemoryBackends() {
             this.memoryBackendsSaving = true;
-            this.memoryBackendsStatus = 'Saving…';
+            this.memoryBackendsStatus = _k('settings.agentjs.st_saving', 'Saving…');
             try {
                 const resp = await fetch('/api/settings/memory/backends', {
                     method: 'PUT',
@@ -214,21 +214,21 @@
                         this.memoryBackends.graph = Object.assign({}, this.memoryBackends.graph, b.graph || {});
                         this.memoryBackends.state = Object.assign({}, this.memoryBackends.state, b.state || {});
                     }
-                    this.memoryBackendsStatus = 'Saved. Next: Test Neo4j, then Sync beliefs → Neo4j.';
+                    this.memoryBackendsStatus = _k('settings.agentjs.st_saved_next', 'Saved. Next: Test Neo4j, then Sync beliefs → Neo4j.');
                     showToast(_k('settings.agentjs.memory_backends_saved', 'Memory backends saved'), 'success');
                 } else {
-                    this.memoryBackendsStatus = data.error || 'Save failed';
+                    this.memoryBackendsStatus = data.error || _k('settings.agentjs.st_save_failed', 'Save failed');
                     showToast(_k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
                 }
             } catch (e) {
-                this.memoryBackendsStatus = 'Save failed';
+                this.memoryBackendsStatus = _k('settings.agentjs.st_save_failed', 'Save failed');
                 showToast(_k('settings.agentjs.save_failed_2', 'Save failed'), 'error');
             }
             this.memoryBackendsSaving = false;
         },
 
         async testMemoryNeo4j() {
-            this.memoryNeo4jStatus = 'Testing Neo4j…';
+            this.memoryNeo4jStatus = _k('settings.agentjs.st_testing_neo4j', 'Testing Neo4j…');
             this.memoryNeo4jOk = false;
             try {
                 const resp = await fetch('/api/settings/memory/backends/test-neo4j', {
@@ -239,19 +239,19 @@
                 const data = await resp.json();
                 if (data.ok) {
                     this.memoryNeo4jOk = true;
-                    this.memoryNeo4jStatus = 'Connected · ' + (data.latency_ms || 0) + 'ms — ' + (data.detail || '');
+                    this.memoryNeo4jStatus = _k('settings.agentjs.st_neo4j_connected', 'Connected · {ms}ms — {detail}', { ms: data.latency_ms || 0, detail: data.detail || '' });
                     showToast(_k('settings.agentjs.neo4j_connected', 'Neo4j connected'), 'success');
                 } else {
                     this.memoryNeo4jStatus = (data.error || _k('settings.agentjs.status_failed', 'Failed')) + (data.hint ? (' — ' + data.hint) : '');
                     showToast(_k('settings.agentjs.neo4j_test_failed', 'Neo4j test failed'), 'error');
                 }
             } catch (e) {
-                this.memoryNeo4jStatus = 'Test error: ' + e;
+                this.memoryNeo4jStatus = _k('settings.agentjs.st_test_error', 'Test error: {error}', { error: e });
             }
         },
 
         async syncMemoryNeo4j() {
-            this.memoryNeo4jStatus = 'Syncing beliefs to Neo4j…';
+            this.memoryNeo4jStatus = _k('settings.agentjs.st_syncing_neo4j', 'Syncing beliefs to Neo4j…');
             this.memoryNeo4jOk = false;
             try {
                 const resp = await fetch('/api/settings/memory/backends/sync-neo4j', {
@@ -261,19 +261,19 @@
                 const data = await resp.json();
                 if (data.ok) {
                     this.memoryNeo4jOk = true;
-                    this.memoryNeo4jStatus = data.detail || ('Synced ' + (data.synced || 0) + ' beliefs');
+                    this.memoryNeo4jStatus = data.detail || _k('settings.agentjs.st_synced_beliefs', 'Synced {n} beliefs', { n: data.synced || 0 });
                     showToast(_k('settings.agentjs.synced_neo4j', 'Synced {n} beliefs to Neo4j', { n: data.synced || 0 }), 'success');
                 } else {
-                    this.memoryNeo4jStatus = data.error || 'Sync failed';
+                    this.memoryNeo4jStatus = data.error || _k('settings.agentjs.st_sync_failed', 'Sync failed');
                     showToast(_k('settings.agentjs.neo4j_sync_failed', 'Neo4j sync failed'), 'error');
                 }
             } catch (e) {
-                this.memoryNeo4jStatus = 'Sync error: ' + e;
+                this.memoryNeo4jStatus = _k('settings.agentjs.st_sync_error', 'Sync error: {error}', { error: e });
             }
         },
 
         async syncMemoryState() {
-            this.memoryStateSyncStatus = 'Syncing beliefs + episodes to Postgres…';
+            this.memoryStateSyncStatus = _k('settings.agentjs.st_syncing_postgres', 'Syncing beliefs + episodes to Postgres…');
             this.memoryStateSyncOk = false;
             try {
                 const resp = await fetch('/api/settings/memory/backends/sync-postgres', {
@@ -283,19 +283,19 @@
                 const data = await resp.json();
                 if (data.ok) {
                     this.memoryStateSyncOk = true;
-                    this.memoryStateSyncStatus = data.detail || ('Synced ' + (data.synced || 0) + ' rows');
+                    this.memoryStateSyncStatus = data.detail || _k('settings.agentjs.st_synced_rows', 'Synced {n} rows', { n: data.synced || 0 });
                     showToast(data.detail || ('Synced ' + (data.synced || 0) + ' rows to Postgres'), 'success');
                 } else {
-                    this.memoryStateSyncStatus = data.error || 'Sync failed';
+                    this.memoryStateSyncStatus = data.error || _k('settings.agentjs.st_sync_failed', 'Sync failed');
                     showToast(_k('settings.agentjs.postgres_sync_failed', 'Postgres sync failed'), 'error');
                 }
             } catch (e) {
-                this.memoryStateSyncStatus = 'Sync error: ' + e;
+                this.memoryStateSyncStatus = _k('settings.agentjs.st_sync_error', 'Sync error: {error}', { error: e });
             }
         },
 
         async testMemoryEmbed() {
-            this.memoryBackendsStatus = 'Testing embedder…';
+            this.memoryBackendsStatus = _k('settings.agentjs.st_testing_embedder', 'Testing embedder…');
             try {
                 const resp = await fetch('/api/settings/memory/backends/test-embed', {
                     method: 'POST',
@@ -303,15 +303,15 @@
                 });
                 const data = await resp.json();
                 this.memoryBackendsStatus = data.ok
-                    ? ('Embed OK · ' + (data.latency_ms || 0) + 'ms · dim ' + (data.dim || '?'))
-                    : ('Embed failed: ' + (data.error || 'unknown'));
+                    ? _k('settings.agentjs.st_embed_ok', 'Embed OK · {ms}ms · dim {dim}', { ms: data.latency_ms || 0, dim: data.dim || '?' })
+                    : _k('settings.agentjs.st_embed_failed', 'Embed failed: {error}', { error: data.error || _k('settings.agentjs.st_unknown', 'unknown') });
             } catch (e) {
-                this.memoryBackendsStatus = 'Embed test error';
+                this.memoryBackendsStatus = _k('settings.agentjs.st_embed_test_error', 'Embed test error');
             }
         },
 
         async testMemoryVector() {
-            this.memoryBackendsStatus = 'Testing vector backend…';
+            this.memoryBackendsStatus = _k('settings.agentjs.st_testing_vector', 'Testing vector backend…');
             try {
                 const resp = await fetch('/api/settings/memory/backends/test-vector', {
                     method: 'POST',
@@ -321,9 +321,9 @@
                 // A note rides on an OK: the store that serves memory passed,
                 // and the one Kazma picked automatically is not in use.
                 this.memoryBackendsStatus = data.ok
-                    ? ('Vector OK · ' + (data.provider || '') + ' · ' + (data.latency_ms || 0) + 'ms'
+                    ? (_k('settings.agentjs.st_vector_ok', 'Vector OK · {provider} · {ms}ms', { provider: data.provider || '', ms: data.latency_ms || 0 })
                         + (data.note ? ' — ' + data.note : ''))
-                    : ('Vector failed: ' + (data.error || 'unknown'));
+                    : _k('settings.agentjs.st_vector_failed', 'Vector failed: {error}', { error: data.error || _k('settings.agentjs.st_unknown', 'unknown') });
                 // A remote test re-probes the store; the banner reads that probe.
                 if (data.capability) {
                     this.memoryBackendsCapability = Object.assign(
@@ -331,7 +331,7 @@
                     );
                 }
             } catch (e) {
-                this.memoryBackendsStatus = 'Vector test error';
+                this.memoryBackendsStatus = _k('settings.agentjs.st_vector_test_error', 'Vector test error');
             }
         },
 
@@ -353,7 +353,7 @@
                         failover: Object.assign({}, this.memoryBackends.failover, b.failover || {}),
                     };
                 }
-                this.memoryBackendsStatus = 'Reset to local defaults';
+                this.memoryBackendsStatus = _k('settings.agentjs.st_reset_local', 'Reset to local defaults');
                 showToast(_k('settings.agentjs.memory_backends_reset_to_local', 'Memory backends reset to local'), 'success');
             } catch (e) {
                 showToast(_k('settings.agentjs.reset_failed', 'Reset failed'), 'error');
@@ -480,10 +480,10 @@
                 if (!resp.ok) throw new Error('save failed');
                 const refreshed = await this._fetch('/api/settings/documents');
                 if (refreshed && !refreshed.error) Object.assign(this.documents, refreshed);
-                this.documentsStatus = 'Saved';
+                this.documentsStatus = _k('settings.agentjs.st_saved', 'Saved');
                 if (window.showToast) window.showToast(_k('settings.agentjs.document_settings_saved', 'Document settings saved'), 'success');
             } catch (e) {
-                this.documentsStatus = 'Save failed';
+                this.documentsStatus = _k('settings.agentjs.st_save_failed', 'Save failed');
                 if (window.showToast) window.showToast(_k('settings.agentjs.document_settings_save_failed', 'Document settings save failed'), 'error');
             } finally {
                 this.documentsSaving = false;

@@ -1021,13 +1021,22 @@ def document_storage_readiness(
 
     Job claiming is multi-replica-safe on Postgres. Metadata is multi-replica
     when a Postgres-backed repository is active (see
-    ``resolve_document_repository``); otherwise it remains SQLite single-replica.
-    Never lies about it.
+    ``resolve_document_repository``); otherwise it remains SQLite single-replica,
+    and ``metadata_multi_replica`` says so. Never lies about it.
+
+    ``status`` is ``degraded`` only when a backend the operator configured is
+    not the one serving -- Postgres asked for, SQLite answering
+    (``*_fell_back_to_sqlite``). A backend chosen in ``.env``
+    (``KAZMA_DOCUMENTS_METADATA_BACKEND=sqlite`` beside Postgres jobs) is
+    ``ready``, single-replica: the live install ran that way by design and
+    its Documents page said "Storage: degraded" in red over a store that was
+    doing exactly what it was told (2026-09-28).
     """
     backend = document_jobs_backend()
     jobs_multi = backend == "postgres" and isinstance(
         jobs_repo, PostgresDocumentJobRepository
     )
+    configured_meta = document_metadata_backend()
     meta_backend = "sqlite"
     meta_multi = False
     if metadata_repo is not None:
@@ -1037,24 +1046,19 @@ def document_storage_readiness(
         )
         meta_multi = bool(getattr(metadata_repo, "multi_replica", False))
     else:
-        meta_backend = document_metadata_backend()
+        meta_backend = configured_meta
         meta_multi = meta_backend == "postgres"
     reasons: list[str] = []
     if backend == "postgres" and not jobs_multi:
         reasons.append("jobs_postgres_unavailable_fell_back_to_sqlite")
-    if not meta_multi:
-        reasons.append("metadata_single_replica")
-    if jobs_multi and meta_multi:
-        status = "ready"
-    elif backend == "postgres" or meta_backend == "postgres":
-        status = "degraded"
-    else:
-        status = "ready"
+    if configured_meta == "postgres" and not meta_multi:
+        reasons.append("metadata_postgres_unavailable_fell_back_to_sqlite")
     return {
-        "status": status,
+        "status": "degraded" if reasons else "ready",
         "jobs_backend": backend,
         "jobs_multi_replica": jobs_multi,
         "metadata_backend": meta_backend,
         "metadata_multi_replica": meta_multi,
+        "multi_replica": jobs_multi and meta_multi,
         "degraded_reasons": reasons,
     }

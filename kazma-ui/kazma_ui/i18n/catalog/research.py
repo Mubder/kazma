@@ -304,4 +304,140 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "(بلا طلب)",
         "en": "(no prompt)",
     },
+    "research.ui.kind_session": {
+        "ar": "جلسة",
+        "en": "session",
+    },
+    "research.ui.kind_pipeline": {
+        "ar": "خط المعالجة",
+        "en": "pipeline",
+    },
+    "research.ui.sources_n": {
+        "ar": "المصادر: {n}",
+        "en": "{n} sources",
+    },
+    "research.ui.rubric": {
+        "ar": "التقييم {n}",
+        "en": "rubric {n}",
+    },
+    "research.ui.rubric_passed": {
+        "ar": "التقييم {n} ناجح",
+        "en": "rubric {n} passed",
+    },
+    "research.ui.rubric_failed": {
+        "ar": "التقييم {n} راسب",
+        "en": "rubric {n} failed",
+    },
+    "research.ui.paper_tag": {
+        "ar": "ورقة",
+        "en": "Paper",
+    },
+    "research.ui.state_done": {
+        "ar": "تم",
+        "en": "done",
+    },
+    "research.ui.state_complete": {
+        "ar": "اكتمل",
+        "en": "complete",
+    },
+    "research.ui.state_running": {
+        "ar": "قيد التشغيل",
+        "en": "running",
+    },
+    "research.ui.state_pending": {
+        "ar": "قيد الانتظار",
+        "en": "pending",
+    },
+    "research.ui.state_error": {
+        "ar": "خطأ",
+        "en": "error",
+    },
+    "research.ui.state_failed": {
+        "ar": "فشل",
+        "en": "failed",
+    },
+    "research.ui.state_cancelled": {
+        "ar": "أُلغي",
+        "en": "cancelled",
+    },
+    "research.ui.state_paper": {
+        "ar": "ورقة",
+        "en": "paper",
+    },
+    "research.ui.state_queued": {
+        "ar": "في الطابور",
+        "en": "queued",
+    },
+    "research.ui.state_start": {
+        "ar": "البدء",
+        "en": "start",
+    },
+    "research.ui.state_preflight": {
+        "ar": "فحص مسبق",
+        "en": "preflight",
+    },
+    "research.ui.state_plan": {
+        "ar": "التخطيط",
+        "en": "plan",
+    },
+    "research.ui.state_discover": {
+        "ar": "الاستكشاف",
+        "en": "discover",
+    },
+    "research.ui.state_acquire": {
+        "ar": "جلب الصفحات",
+        "en": "acquire",
+    },
+    "research.ui.state_map": {
+        "ar": "تلخيص المصادر",
+        "en": "map",
+    },
+    "research.ui.state_reduce": {
+        "ar": "التوليف",
+        "en": "reduce",
+    },
+    "research.ui.state_verify": {
+        "ar": "التحقق",
+        "en": "verify",
+    },
+    "research.ui.state_assemble": {
+        "ar": "كتابة التقرير",
+        "en": "assemble",
+    },
+    "research.ui.state_export": {
+        "ar": "التصدير",
+        "en": "export",
+    },
+    "research.ui.detail_session": {
+        "ar": "جلسة",
+        "en": "Session",
+    },
+    "research.ui.detail_stage": {
+        "ar": "المرحلة: {stage}",
+        "en": "Stage: {stage}",
+    },
+    "research.ui.detail_sources": {
+        "ar": "المصادر: {n}",
+        "en": "Sources: {n}",
+    },
+    "research.ui.detail_paper": {
+        "ar": "ورقة من خط المعالجة",
+        "en": "Pipeline paper",
+    },
+    "research.ui.no_output_yet": {
+        "ar": "(لا مخرجات بعد)",
+        "en": "(no output yet)",
+    },
+    "research.ui.archive": {
+        "ar": "أرشفة",
+        "en": "Archive",
+    },
+    "research.ui.restore": {
+        "ar": "استعادة",
+        "en": "Restore",
+    },
+    "research.ui.delete": {
+        "ar": "حذف",
+        "en": "Delete",
+    },
 }

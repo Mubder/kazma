@@ -252,13 +252,14 @@
                 :data-belief-id="b.id"
                 :class="selectedBeliefId === b.id ? 'mem-row-selected' : ''"
                 @click="focusBelief(b)"
-                :title="'Show on graph: ' + b.subject + ' → ' + b.object"
+                :title="t('memory.pg.show_on_graph') + ': ' + b.subject + ' → ' + b.object"
               >
                 <td @click.stop><input type="checkbox" :value="b.id" x-model="selectedBeliefs"></td>
                 <td><code x-text="b.subject"></code></td>
                 <td><code x-text="b.predicate"></code></td>
-                <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="b.object" x-text="b.object"></td>
-                <td x-text="b.predicate_type || ''"></td>
+                <td translate="no" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="b.object" x-text="b.object"></td>
+                <td :translate="tOr('memory.console.ptype_' + (b.predicate_type || ''), '') ? null : 'no'"
+                    x-text="tOr('memory.console.ptype_' + (b.predicate_type || ''), b.predicate_type || '')"></td>
                 <td @click.stop>
                   <div class="mem-actions">
                     <button class="btn btn-sm btn-secondary" @click="focusBelief(b)" title="{{ t('memory.pg.focus_on_graph') }}">{{ t('memory.pg.graph_2') }}</button>
@@ -320,11 +321,12 @@
                 :class="selectedEntityId === e.id ? 'mem-row-selected' : ''"
                 :style="selectedEntityId === e.id ? '' : (e.isolated ? 'background:rgba(245,158,11,0.08)' : (e.empty ? 'background:rgba(148,163,184,0.08)' : ''))"
                 @click="focusEntity(e.id, { entity: e })"
-                :title="(e.is_self ? 'Memory hub on graph' : 'Show on graph') + ': ' + (e.graph_id || e.id) + (e.name ? ' (' + e.name + ')' : '')"
+                :title="(e.is_self ? t('memory.pg.memory_hub_on_graph') : t('memory.pg.show_on_graph')) + ': ' + (e.graph_id || e.id) + (e.name ? ' (' + e.name + ')' : '')"
               >
                 <td><code x-text="e.id"></code></td>
-                <td x-text="e.type"></td>
-                <td x-text="e.name"></td>
+                <td :translate="tOr('memory.console.etype_' + (e.type || ''), '') ? null : 'no'"
+                    x-text="tOr('memory.console.etype_' + (e.type || ''), e.type || '')"></td>
+                <td translate="no" x-text="e.name"></td>
                 <td x-text="e.belief_count"></td>
                 <td x-text="e.linked_others"></td>
                 <td style="font-size:0.72rem;">
@@ -368,9 +370,9 @@
             <template x-for="m in merges" :key="m.id">
               <tr>
                 <td><code x-text="(m.id || '').slice(0,14)"></code></td>
-                <td x-text="m.source_entity_id || m.source_id"></td>
-                <td x-text="m.target_entity_id || m.target_id"></td>
-                <td x-text="m.merge_tier || ''"></td>
+                <td translate="no" x-text="m.source_entity_id || m.source_id"></td>
+                <td translate="no" x-text="m.target_entity_id || m.target_id"></td>
+                <td translate="no" x-text="m.merge_tier || ''"></td>
                 <td x-text="m.confidence != null ? Number(m.confidence).toFixed(2) : ''"></td>
                 <td>
                   <button class="btn btn-sm btn-primary" @click="decideMerge(m.id, true)">{{ t('common.approve') }}</button>
@@ -418,7 +420,7 @@
           <template x-for="e in (hygienePreview.isolated_entities || []).slice(0,40)" :key="e.id">
             <li>
               <code x-text="e.id"></code>
-              <span x-text="' · ' + (e.belief_count || 0) + ' beliefs'"></span>
+              <span x-text="' · ' + t('memory.console.beliefs_n', { n: e.belief_count || 0 })"></span>
               <button class="btn btn-sm btn-secondary" style="margin-left:6px;" @click="tab='entities'; mergeSource=e.id; loadEntities()">{{ t('common.open') }}</button>
             </li>
           </template>

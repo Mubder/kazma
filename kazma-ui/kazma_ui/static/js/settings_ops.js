@@ -974,7 +974,7 @@
         async runBackup() {
             this.backupRunning = true;
             this.backupResult = null;
-            this.backupProgressText = 'Starting…';
+            this.backupProgressText = _t('settings.ops.backup_starting', 'Starting…');
             this.backupProgressPhase = 'starting';
             try {
                 const resp = await fetch('/api/backup/now', { method: 'POST' });

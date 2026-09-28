@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "chats_by_thread",
     "owned_threads",
     "owned_threads_async",
     "require_thread_owned",
@@ -40,6 +41,27 @@ def _store(store: Any = None) -> Any:
     from kazma_ui.session_manager import get_session_manager
 
     return get_session_manager()
+
+
+def chats_by_thread(*, store: Any = None) -> dict[str, dict[str, Any]]:
+    """Every chat of the current tenant -- archived and empty ones included --
+    as its summary, keyed by its thread.
+
+    Blocking store reads: callers run it in a thread. A store that only
+    answers thread lookups (no chat list) yields nothing, so a page falls
+    back to the bare thread id. The Dashboard's session table and the
+    Replay page's chat picker both name a thread by this: the picker used
+    to list 131 raw ids on the live install (2026-09-28).
+    """
+    sessions = _store(store)
+    list_all = getattr(sessions, "list_all", None)
+    if list_all is None:
+        return {}
+    chats: dict[str, dict[str, Any]] = {}
+    for session in list_all(include_archived=True, include_empty=True, prune_empty=False):
+        summary = session.to_summary()
+        chats.setdefault(str(summary.get("thread_id") or ""), summary)
+    return chats
 
 
 def owned_threads(thread_ids: Iterable[str], *, store: Any = None) -> list[str] | None:

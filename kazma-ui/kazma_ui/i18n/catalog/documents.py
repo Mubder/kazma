@@ -519,4 +519,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشل الحذف (HTTP {status})",
         "en": "Delete failed (HTTP {status})",
     },
+    "documents.cap_disabled": {
+        "ar": "معطّل",
+        "en": "Disabled",
+    },
 }

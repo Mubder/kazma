@@ -333,15 +333,9 @@ async def dashboard_status() -> JSONResponse:
 def _chats_by_thread() -> dict[str, dict[str, Any]]:
     """Every chat of the caller's tenant, archived and empty ones included,
     keyed by its thread. Blocking store reads: callers run it in a thread."""
-    from kazma_ui.session_manager import get_session_manager
+    from kazma_ui.thread_ownership import chats_by_thread
 
-    chats: dict[str, dict[str, Any]] = {}
-    for session in get_session_manager().list_all(
-        include_archived=True, include_empty=True, prune_empty=False
-    ):
-        summary = session.to_summary()
-        chats.setdefault(str(summary.get("thread_id") or ""), summary)
-    return chats
+    return chats_by_thread()
 
 
 def _delete_chats_of_thread(thread_id: str) -> None:

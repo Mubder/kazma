@@ -337,11 +337,11 @@ function mcpApp() {
 
                 // Basic client-side validation.
                 if (!server.name) {
-                    this.addError = 'Server name is required.';
+                    this.addError = _mcpT('mcp.ui.name_required', 'Server name is required.');
                     return;
                 }
                 if (server.transport === 'stdio' && server.command.length === 0) {
-                    this.addError = 'Command is required for stdio transport.';
+                    this.addError = _mcpT('mcp.ui.command_required', 'Command is required for stdio transport.');
                     return;
                 }
                 if ((server.transport === 'sse' || server.transport === 'streamable_http') && !server.url) {
@@ -375,14 +375,14 @@ function mcpApp() {
                         return;
                     }
                     if (testResult.tool_count === 0) {
-                        this.addError = 'Server connected but exposed 0 tools. This usually means the package name is wrong or the server failed to initialise. Not saving.';
-                        notify('0 tools — server not saved', 'warning');
+                        this.addError = _mcpT('mcp.ui.zero_tools', 'Server connected but exposed 0 tools. This usually means the package name is wrong or the server failed to initialise. Not saving.');
+                        notify(_mcpT('mcp.ui.zero_tools_toast', '0 tools — server not saved'), 'warning');
                         return;
                     }
                 } catch (testErr) {
                     // Test endpoint shouldn't fail (it returns 200 with
                     // {success: false}), but be defensive.
-                    this.addError = 'Could not validate server: ' + testErr.message;
+                    this.addError = _mcpT('mcp.ui.validate_failed', 'Could not validate server: {error}', { error: testErr.message });
                     return;
                 }
 
@@ -400,10 +400,10 @@ function mcpApp() {
                         this.resetNewServer();
                         location.reload();
                     } else {
-                        this.addError = result.error || 'Save failed (unknown reason)';
+                        this.addError = result.error || _mcpT('mcp.ui.save_failed_unknown', 'Save failed (unknown reason)');
                     }
                 } catch (saveErr) {
-                    this.addError = 'Save failed: ' + saveErr.message;
+                    this.addError = _mcpT('mcp.ui.save_failed', 'Save failed: {error}', { error: saveErr.message });
                 }
             } finally {
                 this.adding = false;

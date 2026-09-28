@@ -29,6 +29,9 @@ function ideApp() {
     swarmInstruction: '',
     result: '',
     resultTitle: '',
+    // true when the title is a command line ("$ ls", "git status -s"),
+    // not a catalog string: the template marks it translate="no".
+    resultRaw: false,
     cmReady: false,
     lspReady: false,
     skills: [],
@@ -944,7 +947,7 @@ function ideApp() {
       this.busy = true;
       try {
         var data = await this._post('/api/ide/run', { command: cmd });
-        this.showResult('$ ' + cmd, data.ok ? data.output : (data.error || data.output));
+        this.showResult('$ ' + cmd, data.ok ? data.output : (data.error || data.output), true);
       } catch (err) {
         this.toast(this._tx('ide.toast_command_failed', 'Command failed'), false);
       } finally {
@@ -957,7 +960,7 @@ function ideApp() {
       this.busy = true;
       try {
         var data = await this._post('/api/ide/git', { subcommand: sub });
-        this.showResult('git ' + sub, data.ok ? (data.output || this._tx('ide.clean', '(clean)')) : (data.error || data.output));
+        this.showResult('git ' + sub, data.ok ? (data.output || this._tx('ide.clean', '(clean)')) : (data.error || data.output), true);
       } catch (err) {
         this.toast(this._tx('ide.toast_git_failed', 'Git failed'), false);
       } finally {
@@ -1032,8 +1035,9 @@ function ideApp() {
     },
 
     // ── Results panel ──
-    showResult(title, text) {
+    showResult(title, text, raw) {
       this.resultTitle = title;
+      this.resultRaw = !!raw;
       this.result = (text === undefined || text === null) ? '' : String(text);
     },
 

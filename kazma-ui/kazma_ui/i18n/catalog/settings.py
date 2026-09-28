@@ -2969,7 +2969,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "postgresql://… or http://qdrant:6333",
     },
     "settings.mem.postgres_dsn": {
-        "ar": "Postgres DSN",
+        "ar": "رابط اتصال Postgres (DSN)",
         "en": "Postgres DSN",
     },
     "settings.mem.mirror_hint": {
@@ -4683,5 +4683,101 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.tts_voice_auto": {
         "ar": "تلقائي — بلغة الرسالة",
         "en": "Auto — match the message language",
+    },
+    "settings.agentjs.st_saving": {
+        "ar": "جارٍ الحفظ…",
+        "en": "Saving…",
+    },
+    "settings.agentjs.st_saved_next": {
+        "ar": "حُفظ. التالي: اختبر Neo4j، ثم زامن المعتقدات ← Neo4j.",
+        "en": "Saved. Next: Test Neo4j, then Sync beliefs → Neo4j.",
+    },
+    "settings.agentjs.st_save_failed": {
+        "ar": "فشل الحفظ",
+        "en": "Save failed",
+    },
+    "settings.agentjs.st_testing_neo4j": {
+        "ar": "جارٍ اختبار Neo4j…",
+        "en": "Testing Neo4j…",
+    },
+    "settings.agentjs.st_neo4j_connected": {
+        "ar": "متصل · {ms}ms — {detail}",
+        "en": "Connected · {ms}ms — {detail}",
+    },
+    "settings.agentjs.st_test_error": {
+        "ar": "خطأ في الاختبار: {error}",
+        "en": "Test error: {error}",
+    },
+    "settings.agentjs.st_syncing_neo4j": {
+        "ar": "جارٍ مزامنة المعتقدات إلى Neo4j…",
+        "en": "Syncing beliefs to Neo4j…",
+    },
+    "settings.agentjs.st_synced_beliefs": {
+        "ar": "زُامنت {n} معتقدات",
+        "en": "Synced {n} beliefs",
+    },
+    "settings.agentjs.st_sync_failed": {
+        "ar": "فشلت المزامنة",
+        "en": "Sync failed",
+    },
+    "settings.agentjs.st_sync_error": {
+        "ar": "خطأ في المزامنة: {error}",
+        "en": "Sync error: {error}",
+    },
+    "settings.agentjs.st_syncing_postgres": {
+        "ar": "جارٍ مزامنة المعتقدات والحلقات إلى Postgres…",
+        "en": "Syncing beliefs + episodes to Postgres…",
+    },
+    "settings.agentjs.st_synced_rows": {
+        "ar": "زُامنت {n} صفوف",
+        "en": "Synced {n} rows",
+    },
+    "settings.agentjs.st_testing_embedder": {
+        "ar": "جارٍ اختبار المُضمِّن…",
+        "en": "Testing embedder…",
+    },
+    "settings.agentjs.st_embed_ok": {
+        "ar": "التضمين يعمل · {ms}ms · البُعد {dim}",
+        "en": "Embed OK · {ms}ms · dim {dim}",
+    },
+    "settings.agentjs.st_embed_failed": {
+        "ar": "فشل التضمين: {error}",
+        "en": "Embed failed: {error}",
+    },
+    "settings.agentjs.st_embed_test_error": {
+        "ar": "خطأ في اختبار التضمين",
+        "en": "Embed test error",
+    },
+    "settings.agentjs.st_testing_vector": {
+        "ar": "جارٍ اختبار خلفية المتجهات…",
+        "en": "Testing vector backend…",
+    },
+    "settings.agentjs.st_vector_ok": {
+        "ar": "المتجهات تعمل · {provider} · {ms}ms",
+        "en": "Vector OK · {provider} · {ms}ms",
+    },
+    "settings.agentjs.st_vector_failed": {
+        "ar": "فشلت المتجهات: {error}",
+        "en": "Vector failed: {error}",
+    },
+    "settings.agentjs.st_vector_test_error": {
+        "ar": "خطأ في اختبار المتجهات",
+        "en": "Vector test error",
+    },
+    "settings.agentjs.st_reset_local": {
+        "ar": "أُعيد الضبط إلى الافتراضيات المحلية",
+        "en": "Reset to local defaults",
+    },
+    "settings.agentjs.st_unknown": {
+        "ar": "غير معروف",
+        "en": "unknown",
+    },
+    "settings.agentjs.st_saved": {
+        "ar": "حُفظ",
+        "en": "Saved",
+    },
+    "settings.ops.backup_starting": {
+        "ar": "جارٍ البدء…",
+        "en": "Starting…",
     },
 }

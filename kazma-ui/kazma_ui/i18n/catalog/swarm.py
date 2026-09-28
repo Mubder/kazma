@@ -1588,4 +1588,64 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الإخفاقات: {n}/{max}",
         "en": "Failures: {n}/{max}",
     },
+    "swarm.st_pending": {
+        "ar": "قيد الانتظار",
+        "en": "Pending",
+    },
+    "swarm.st_running": {
+        "ar": "قيد التشغيل",
+        "en": "Running",
+    },
+    "swarm.st_paused": {
+        "ar": "متوقفة مؤقتًا",
+        "en": "Paused",
+    },
+    "swarm.st_completed": {
+        "ar": "مكتملة",
+        "en": "Completed",
+    },
+    "swarm.st_failed": {
+        "ar": "فشلت",
+        "en": "Failed",
+    },
+    "swarm.st_timeout": {
+        "ar": "انتهت مهلتها",
+        "en": "Timed out",
+    },
+    "swarm.st_cancelled": {
+        "ar": "أُلغيت",
+        "en": "Cancelled",
+    },
+    "swarm.st_success": {
+        "ar": "نجاح",
+        "en": "Success",
+    },
+    "swarm.st_error": {
+        "ar": "خطأ",
+        "en": "Error",
+    },
+    "swarm.st_partial": {
+        "ar": "جزئي",
+        "en": "Partial",
+    },
+    "swarm.st_skipped": {
+        "ar": "تُخطّي",
+        "en": "Skipped",
+    },
+    "swarm.delete_template": {
+        "ar": "حذف القالب",
+        "en": "Delete template",
+    },
+    "swarm.cb_closed": {
+        "ar": "مغلق",
+        "en": "closed",
+    },
+    "swarm.cb_open": {
+        "ar": "مفتوح",
+        "en": "open",
+    },
+    "swarm.cb_half_open": {
+        "ar": "نصف مفتوح",
+        "en": "half-open",
+    },
 }

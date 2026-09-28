@@ -177,6 +177,17 @@ def test_a_chat_turn_reads_in_arabic(harness: Harness) -> None:
             pg.locator("#chat-input").wait_for(state="visible", timeout=20000)
             pg.evaluate("() => window.KazmaChat.newSession()")
             pg.wait_for_timeout(800)
+            # Typing "/" opens the command menu: twenty descriptions that were
+            # English in every language until 2026-09-28.
+            pg.fill("#chat-input", "/")
+            pg.wait_for_function(
+                "() => { const m = document.getElementById('chat-slash-menu');"
+                " return !!m && m.style.display === 'block'"
+                " && m.querySelectorAll('.chat-slash-item').length >= 10; }",
+                timeout=10000,
+            )
+            problems += [f"slash menu: {t}" for t in english_on(pg)]
+            pg.fill("#chat-input", "")
             _send(pg, PROMPT)
             _wait_for_pending_row(pg)
             # One live Approve: the card is on the page, measured as it stands.
@@ -201,6 +212,214 @@ def test_a_chat_turn_reads_in_arabic(harness: Harness) -> None:
             context.close()
             browser.close()
     assert not problems, f"{len(problems)} English strings in an Arabic chat turn:\n  " + "\n  ".join(problems)
+
+
+def test_research_results_read_in_arabic(harness: Harness) -> None:
+    """The Research page with runs on it, in Arabic -- and dated right.
+
+    The tour above sees the harness's pages empty. On the live install
+    (2026-09-28) an Arabic reader's Research list said "session · done ·
+    done · 3 sources · rubric 100 passed · 5h ago" and "[Paper] ...", and a
+    run's detail "Session · done · Stage: done · Sources: 3". A run's topic,
+    report path and progress text are the run's own words and stay as they
+    are. The Archived tab also dated every session 21 January 1970, in every
+    language: the sessions API gives epoch seconds and the card read them as
+    milliseconds.
+    """
+    from playwright.sync_api import sync_playwright
+
+    from kazma_core.tools import research_session as rs
+
+    deep = rs.create_session("What does the AgentDojo prompt-injection benchmark measure?", depth="deep")
+    rs.update_session(
+        deep.id, status="done", stage="done", sources=3, rubric_score=100.0, rubric_ok=True,
+        summary="AgentDojo measures how often an agent follows injected instructions.",
+        report_path="research/reports/agentdojo.md",
+    )
+    failed = rs.create_session("Kuwait AI adoption in 2026", depth="brief")
+    rs.update_session(failed.id, status="error", stage="acquire", sources=2,
+                      message="Search provider unavailable", error="Search provider unavailable")
+    chat = rs.create_session("Latest LangGraph release notes", depth="chat")
+    rs.update_session(chat.id, status="done", stage="complete", sources=4,
+                      rubric_score=62.0, rubric_ok=False, summary="LangGraph adds durable streams.")
+    old = rs.create_session("Vector store choices for a single install", depth="deep")
+    rs.update_session(old.id, status="done", stage="done", sources=5)
+    rs.archive_session(old.id, True)
+
+    host = harness.base.split("//", 1)[1].split(":", 1)[0]
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            context = browser.new_context(viewport={"width": 1280, "height": 900}, locale="en-US")
+            context.add_cookies([{"name": "kazma-lang", "value": "ar", "domain": host, "path": "/"}])
+            pg = context.new_page()
+            pg.goto(f"{harness.base}/research", wait_until="domcontentloaded", timeout=30000)
+            _settle(pg)
+            pg.wait_for_function(
+                "() => document.querySelectorAll('#research-list .card').length >= 3", timeout=30000)
+            problems += [f"list: {t}" for t in english_on(pg)]
+            pg.locator(f'#research-list .card[data-task-id="session:{deep.id}"]').click()
+            pg.wait_for_function(
+                "() => /\\S/.test((document.getElementById('research-detail-meta') || {}).textContent || '')",
+                timeout=30000)
+            pg.wait_for_timeout(500)
+            problems += [f"detail: {t}" for t in english_on(pg)]
+            pg.evaluate("() => window.KazmaResearch.switchTab('archived')")
+            pg.wait_for_function(
+                "() => document.querySelectorAll('#research-archived-list .card').length >= 1", timeout=30000)
+            problems += [f"archived: {t}" for t in english_on(pg)]
+            context.close()
+
+            english = browser.new_context(viewport={"width": 1280, "height": 900}, locale="en-US")
+            english.add_cookies([{"name": "kazma-lang", "value": "en", "domain": host, "path": "/"}])
+            pe = english.new_page()
+            pe.goto(f"{harness.base}/research", wait_until="domcontentloaded", timeout=30000)
+            _settle(pe)
+            pe.evaluate("() => window.KazmaResearch.switchTab('archived')")
+            pe.wait_for_function(
+                "() => document.querySelectorAll('#research-archived-list .card').length >= 1", timeout=30000)
+            archived_text = pe.locator("#research-archived-list").inner_text()
+            english.close()
+        finally:
+            browser.close()
+    assert not problems, f"{len(problems)} English strings on the Arabic Research page:\n  " + "\n  ".join(problems)
+    assert "1970" not in archived_text, archived_text
+
+
+_SWARM_TABS = ("task-history", "results-dashboard", "templates", "worker-registry", "workflow-editor")
+
+
+def test_swarm_and_scheduled_read_in_arabic(harness: Harness) -> None:
+    """The Swarm and Scheduled pages with runs on them, in Arabic.
+
+    On the live install (2026-09-28) the Swarm history said "dispatch ·
+    auto · • success", the results board "success" / "failed", the task
+    detail the same, the templates' Edit / Delete buttons were English, and
+    the Scheduled page's X activity said "success" for every call. A task's
+    prompt, a worker's output, a template's own words and a post's text are
+    content and stay as they are. With the old swarm.js and scheduled.html
+    this found 59 English strings (the templates' expertise tags and
+    prompts among them: content the old markup never marked).
+    """
+    from playwright.sync_api import sync_playwright
+
+    from kazma_core.swarm.task import (
+        SwarmTask,
+        TaskResult,
+        TaskStatus,
+        TaskType,
+        WorkerResult,
+    )
+    from kazma_core.swarm.task_store import TaskStore
+    from kazma_core.x_api.audit import log_x_event, reset_x_audit
+
+    # The X audit log is one object per process, bound to the data dir of
+    # its first use: an earlier harness's, deleted with it. Rebind it to
+    # this harness's; the app reads through the same singleton.
+    reset_x_audit()
+    store = TaskStore()
+    try:
+        done = SwarmTask(prompt="In one sentence: what is idempotency in HTTP APIs?",
+                         workers=["auto"], status=TaskStatus.COMPLETED)
+        done.result = TaskResult(
+            task_id=done.id, status="success", duration_seconds=3.1, total_cost=0.0012,
+            worker_results=[WorkerResult(worker="auto", task_id=done.id, status="success",
+                                         output="Idempotency means repeating a request changes nothing more.")],
+            aggregated_output="Idempotency means repeating a request changes nothing more.",
+        )
+        store.persist_task(done)
+        failed = SwarmTask(prompt="Explain a circuit breaker in two sentences.",
+                           workers=["auto"], type=TaskType.PIPELINE, status=TaskStatus.FAILED)
+        failed.result = TaskResult(
+            task_id=failed.id, status="failed", duration_seconds=1.4, error="worker timed out",
+            worker_results=[WorkerResult(worker="auto", task_id=failed.id, status="error",
+                                         output="", error="worker timed out")],
+        )
+        store.persist_task(failed)
+    finally:
+        store.close()
+    log_x_event(action="read_mentions", method="GET", endpoint="/2/users/1/mentions",
+                status="success", http_status=200, duration_ms=421)
+    log_x_event(action="create_tweet", method="POST", endpoint="/2/tweets", status="error",
+                http_status=429, response_body="Too Many Requests", duration_ms=310)
+
+    # A reminder in the app's own cron store (the web route refuses to book
+    # one without a Telegram delivery address, which the harness has not).
+    import asyncio
+    from pathlib import Path
+
+    from kazma_core.cron.scheduler import ScheduledJob, SQLiteCronStore
+
+    async def _book() -> None:
+        cron = SQLiteCronStore(str(Path(harness.data_dir) / "cron.db"))
+        await cron.init()
+        await cron.insert(ScheduledJob(
+            job_id="cron-e2e-arabic", timing="2036-01-01T09:00:00", prompt="Renew the kazma.ai domain",
+            platform="web", thread_id="", next_run="2036-01-01T09:00:00+00:00"))
+        await cron.close()
+
+    asyncio.run(_book())
+
+    host = harness.base.split("//", 1)[1].split(":", 1)[0]
+    problems: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1280, "height": 900}, locale="en-US")
+        context.add_cookies([{"name": "kazma-lang", "value": "ar", "domain": host, "path": "/"}])
+        try:
+            pg = context.new_page()
+            pg.goto(f"{harness.base}/swarm", wait_until="domcontentloaded", timeout=30000)
+            _settle(pg)
+            for tab in _SWARM_TABS:
+                pg.click(f'.tab[data-tab="{tab}"]')
+                if tab == "task-history":
+                    pg.wait_for_function(
+                        "() => document.querySelectorAll('#history-table-body tr[data-task-id]').length >= 2",
+                        timeout=30000)
+                elif tab == "results-dashboard":
+                    pg.wait_for_function(
+                        "() => document.querySelectorAll('#results-dashboard-list .result-card').length >= 2",
+                        timeout=30000)
+                elif tab == "templates":
+                    pg.wait_for_function(
+                        "() => document.querySelectorAll('#template-cards-container .card').length >= 1",
+                        timeout=30000)
+                else:
+                    pg.wait_for_timeout(600)
+                problems += [f"swarm {tab}: {t}" for t in english_on(pg)]
+            pg.click('.tab[data-tab="task-history"]')
+            pg.locator("#history-table-body tr[data-task-id]").first.click()
+            pg.wait_for_function(
+                "() => { const m = document.getElementById('task-detail-modal');"
+                " return !!m && m.style.display !== 'none' && /\\S/.test(m.textContent); }",
+                timeout=30000)
+            pg.wait_for_timeout(500)
+            problems += [f"swarm task detail: {t}" for t in english_on(pg)]
+            pg.close()
+
+            pg = context.new_page()
+            pg.goto(f"{harness.base}/scheduled", wait_until="domcontentloaded", timeout=30000)
+            _settle(pg)
+            for tab in ("upcoming", "history", "x"):
+                pg.click(f'.tabs [role="tab"]:nth-child({ {"upcoming": 1, "history": 2, "x": 3}[tab] })')
+                if tab == "upcoming":
+                    pg.wait_for_function(
+                        "() => document.querySelectorAll('.sched-table tbody tr').length >= 1", timeout=30000)
+                elif tab == "x":
+                    pg.wait_for_function(
+                        "() => [...document.querySelectorAll('.sched-table tbody tr')]"
+                        ".some(r => /read_mentions/.test(r.textContent))",
+                        timeout=30000)
+                else:
+                    pg.wait_for_timeout(600)
+                problems += [f"scheduled {tab}: {t}" for t in english_on(pg)]
+        finally:
+            context.close()
+            browser.close()
+    assert not problems, (
+        f"{len(problems)} English strings on the Arabic Swarm/Scheduled pages:\n  " + "\n  ".join(problems)
+    )
 
 
 def test_negative_control_the_instrument_tells_interface_from_content() -> None:

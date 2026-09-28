@@ -44,6 +44,36 @@
   function showError(msg) { if (KS && KS.toast) KS.toast(msg, 'error', 5000); }
   function icon(name) { return window.KazmaIcons ? KazmaIcons.span(name) : ''; }
 
+  // A task's or a worker's state in the reader's language; one the catalog
+  // does not know is shown as it is. The history table, the results board
+  // and the live event lines all read raw "completed" / "success" until
+  // 2026-09-28.
+  var _STATES = { pending: 1, running: 1, paused: 1, completed: 1, failed: 1, timeout: 1,
+    cancelled: 1, success: 1, error: 1, partial: 1, skipped: 1 };
+  function stateLabel(s) {
+    var v = String(s == null ? '' : s);
+    if (!v) return '?';
+    var k = v.toLowerCase();
+    if (!_STATES[k] || typeof window.tOr !== 'function') return v;
+    return window.tOr('swarm.st_' + k, v);
+  }
+  var _PATTERN_SHORT = { dispatch: 'swarm.pattern.dispatch_short', broadcast: 'swarm.pattern.broadcast_short',
+    pipeline: 'swarm.pattern.pipeline_short', fan_out: 'swarm.pattern.fan_out_short',
+    consult: 'swarm.pattern.consult_short', conditional: 'swarm.pattern.conditional_short' };
+  function patternLabel(p) {
+    var v = String(p == null ? '' : p);
+    var key = _PATTERN_SHORT[v.toLowerCase()];
+    return key ? t(key) : (v || '?');
+  }
+  // "auto" is the on-demand worker (swarm.auto_worker); a named worker is a name.
+  function workerLabel(name) {
+    var v = String(name == null ? '' : name);
+    return v.toLowerCase() === 'auto' ? t('swarm.auto_worker') : v;
+  }
+  function workerLabels(names) {
+    return (names || []).map(workerLabel).join(', ');
+  }
+
   // i18n helper: looks up window.t (injected by base.html) with safe fallback.
   function t(key, vars) {
     if (typeof window.t === 'function') return window.t(key, vars || {});
@@ -758,7 +788,7 @@
     evtSource.addEventListener('worker_completed', function(e) {
       var data = parseSseData(e); if (!data) return;
       var icon = data.status === 'success' ? '' : '';
-      addEventLine(taskId, icon, esc(data.worker) + ': ' + esc(data.status));
+      addEventLine(taskId, icon, '<span translate="no">' + esc(workerLabel(data.worker)) + '</span>: ' + esc(stateLabel(data.status)));
     });
 
     evtSource.addEventListener('checkpoint', function(e) {
@@ -920,10 +950,10 @@
     card.style.cssText = 'padding:12px;margin-bottom:8px;border:1px solid var(--border-subtle);border-radius:6px;background:rgba(255,255,255,0.02);';
     card.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
-        '<span style="font-weight:600;font-size:0.85rem;color:var(--accent);">' + esc(workerNames.join(', ')) + '</span>' +
+        '<span translate="no" style="font-weight:600;font-size:0.85rem;color:var(--accent);">' + esc(workerLabels(workerNames)) + '</span>' +
         '<span class="badge badge-warning">• ' + esc(t('swarm.pending')) + '</span>' +
       '</div>' +
-      '<div style="font-size:0.8rem;color:var(--text-muted);">' + esc(task.slice(0, 120)) + '</div>' +
+      '<div translate="no" style="font-size:0.8rem;color:var(--text-muted);">' + esc(task.slice(0, 120)) + '</div>' +
       '<div class="task-result-output" style="font-size:0.75rem;color:var(--text-tertiary);margin-top:4px;">' + esc(t('swarm.waiting')) + '</div>';
     listEl.insertBefore(card, listEl.firstChild);
   }
@@ -946,11 +976,11 @@
       card.style.cssText = 'padding:12px;margin-bottom:8px;border:1px solid var(--border-subtle);border-radius:6px;background:rgba(255,255,255,0.02);';
       card.innerHTML =
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
-          '<span style="font-weight:600;font-size:0.85rem;color:var(--accent);">' + esc(r.worker || '?') + '</span>' +
-          '<span class="badge" style="background:' + statusBg + ';color:' + statusColor + ';">• ' + esc(r.status || '?') + '</span>' +
+          '<span translate="no" style="font-weight:600;font-size:0.85rem;color:var(--accent);">' + esc(workerLabel(r.worker || '?')) + '</span>' +
+          '<span class="badge" style="background:' + statusBg + ';color:' + statusColor + ';">• ' + esc(stateLabel(r.status)) + '</span>' +
         '</div>' +
-        (r.output ? '<div style="padding:8px;background:rgba(0,0,0,0.15);border-radius:4px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:150px;overflow-y:auto;">' + esc(r.output.slice(0, 500)) + '</div>' : '') +
-        (r.error ? '<div style="padding:8px;background:var(--danger-subtle);border-radius:4px;font-size:0.75rem;color:var(--danger);margin-top:4px;">[!]  ' + esc(r.error) + '</div>' : '');
+        (r.output ? '<div translate="no" style="padding:8px;background:rgba(0,0,0,0.15);border-radius:4px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:150px;overflow-y:auto;">' + esc(r.output.slice(0, 500)) + '</div>' : '') +
+        (r.error ? '<div translate="no" style="padding:8px;background:var(--danger-subtle);border-radius:4px;font-size:0.75rem;color:var(--danger);margin-top:4px;">[!]  ' + esc(r.error) + '</div>' : '');
       listEl.insertBefore(card, listEl.firstChild);
     });
 
@@ -961,7 +991,7 @@
       synthCard.style.cssText = 'padding:12px;margin-bottom:8px;border:1px solid var(--accent-subtle);border-radius:6px;background:var(--accent-subtle);';
       synthCard.innerHTML =
         '<div style="font-weight:600;font-size:0.85rem;color:var(--accent-light);margin-bottom:6px;">' + icon('brain') + ' ' + esc(t('swarm.synthesized_answer')) + '</div>' +
-        '<div style="font-size:0.8rem;color:var(--text-secondary);white-space:pre-wrap;">' + esc(data.synthesized_output) + '</div>';
+        '<div translate="no" style="font-size:0.8rem;color:var(--text-secondary);white-space:pre-wrap;">' + esc(data.synthesized_output) + '</div>';
       listEl.insertBefore(synthCard, listEl.firstChild);
     }
   }
@@ -1028,7 +1058,7 @@
       html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
       html += '<div style="display:flex;align-items:center;gap:8px;">';
       html += '<span style="font-weight:600;font-size:0.85rem;">' + esc(patternLabel) + '</span>';
-      html += '<span class="badge" style="color:' + statusColor + ';">' + esc(status) + '</span>';
+      html += '<span class="badge" style="color:' + statusColor + ';">' + esc(stateLabel(status)) + '</span>';
       html += '</div>';
       html += '<span style="font-size:0.75rem;color:var(--text-muted);">' + (r.duration_seconds ? r.duration_seconds.toFixed(1) + 's' : '') + '</span>';
       html += '</div>';
@@ -1040,7 +1070,7 @@
         r.worker_results.forEach(function(wr, idx) {
           var stepColor = wr.status === 'success' ? 'var(--success)' : 'var(--danger)';
           html += '<span style="padding:4px 8px;border-radius:var(--radius-xs);background:rgba(255,255,255,0.04);font-size:0.75rem;border:1px solid var(--border-subtle);">';
-          html += '<span style="color:' + stepColor + ';">' + esc(wr.worker) + '</span>';
+          html += '<span translate="no" style="color:' + stepColor + ';">' + esc(workerLabel(wr.worker)) + '</span>';
           html += '</span>';
           if (idx < r.worker_results.length - 1) html += '<span style="color:var(--text-muted);">-></span>';
         });
@@ -1051,7 +1081,7 @@
         r.worker_results.forEach(function(wr) {
           var wColor = wr.status === 'success' ? 'var(--success)' : 'var(--danger)';
           html += '<div style="padding:6px 8px;border-radius:var(--radius-xs);background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);font-size:0.75rem;">';
-          html += '<span style="color:' + wColor + ';">•</span> ' + esc(wr.worker);
+          html += '<span style="color:' + wColor + ';">•</span> <span translate="no">' + esc(workerLabel(wr.worker)) + '</span>';
           html += '</div>';
         });
         html += '</div>';
@@ -1062,25 +1092,25 @@
           html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;margin-bottom:8px;">';
           opinions.forEach(function(op) {
             html += '<div style="padding:6px 8px;border-radius:var(--radius-xs);background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);font-size:0.75rem;max-height:60px;overflow:hidden;">';
-            html += '<div style="font-weight:500;color:var(--accent);margin-bottom:2px;">' + esc(op.worker) + '</div>';
-            html += '<div style="color:var(--text-tertiary);">' + esc((op.output || '').slice(0, 80)) + '</div>';
+            html += '<div translate="no" style="font-weight:500;color:var(--accent);margin-bottom:2px;">' + esc(workerLabel(op.worker)) + '</div>';
+            html += '<div translate="no" style="color:var(--text-tertiary);">' + esc((op.output || '').slice(0, 80)) + '</div>';
             html += '</div>';
           });
           html += '</div>';
         }
         if (r.synthesized_output) {
-          html += '<div style="padding:6px 8px;background:var(--accent-subtle);border-radius:var(--radius-xs);font-size:0.75rem;color:var(--accent-light);">';
+          html += '<div translate="no" style="padding:6px 8px;background:var(--accent-subtle);border-radius:var(--radius-xs);font-size:0.75rem;color:var(--accent-light);">';
           html += ' ' + esc(r.synthesized_output.slice(0, 120));
           html += '</div>';
         }
       } else if (pattern === 'conditional' && r.metadata && r.metadata.route_taken) {
         // VAL-ORCH-034: Conditional routing decision
-        html += '<div style="font-size:0.8rem;color:var(--info);margin-bottom:4px;">' + esc(t('swarm.routed_to')) + '<strong>' + esc(r.metadata.route_taken) + '</strong></div>';
+        html += '<div style="font-size:0.8rem;color:var(--info);margin-bottom:4px;">' + esc(t('swarm.routed_to')) + '<strong translate="no">' + esc(workerLabel(r.metadata.route_taken)) + '</strong></div>';
       }
 
       // Aggregated output
       if (r.aggregated_output && pattern !== 'consult') {
-        html += '<div style="font-size:0.75rem;color:var(--text-tertiary);margin-top:4px;max-height:40px;overflow:hidden;">' + esc(r.aggregated_output.slice(0, 150)) + '</div>';
+        html += '<div translate="no" style="font-size:0.75rem;color:var(--text-tertiary);margin-top:4px;max-height:40px;overflow:hidden;">' + esc(r.aggregated_output.slice(0, 150)) + '</div>';
       }
 
       html += '</div>';
@@ -1346,16 +1376,16 @@
       var icon = patternIcons[t.type] || '';
       var statusColor = t.status === 'completed' ? 'var(--success)' : (t.status === 'failed' || t.status === 'cancelled') ? 'var(--danger)' : 'var(--warning)';
       var prompt = (t.prompt || '').slice(0, 80);
-      var workers = (t.workers || []).join(', ');
+      var workers = workerLabels(t.workers);
       var dur = t.duration_seconds ? t.duration_seconds.toFixed(1) + 's' : '—';
       var cost = t.total_cost ? '$' + t.total_cost.toFixed(4) : '—';
 
       return '<tr data-task-id="' + esc(t.id) + '" style="cursor:pointer;border-bottom:1px solid var(--border-subtle);">' +
         '<td style="padding:8px 12px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-tertiary);">' + esc((t.id || '').slice(0, 16)) + '</td>' +
-        '<td style="padding:8px 12px;">' + icon + ' ' + esc(t.type || '?') + '</td>' +
-        '<td style="padding:8px 12px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(prompt) + '</td>' +
-        '<td style="padding:8px 12px;font-size:0.8rem;">' + esc(workers) + '</td>' +
-        '<td style="padding:8px 12px;"><span style="color:' + statusColor + ';">• ' + esc(t.status || '?') + '</span></td>' +
+        '<td style="padding:8px 12px;">' + icon + ' ' + esc(patternLabel(t.type)) + '</td>' +
+        '<td translate="no" style="padding:8px 12px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(prompt) + '</td>' +
+        '<td translate="no" style="padding:8px 12px;font-size:0.8rem;">' + esc(workers) + '</td>' +
+        '<td style="padding:8px 12px;"><span style="color:' + statusColor + ';">• ' + esc(stateLabel(t.status)) + '</span></td>' +
         '<td style="padding:8px 12px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' + dur + '</td>' +
         '<td style="padding:8px 12px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' + cost + '</td>' +
       '</tr>';
@@ -1415,12 +1445,12 @@
     var html = '';
     // Header info
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">';
-    html += '<div><strong>' + esc(t('swarm.detail_type')) + '</strong> ' + esc(task.type) + '</div>';
-    html += '<div><strong>' + esc(t('swarm.detail_status')) + '</strong> <span class="badge">' + esc(task.status) + '</span></div>';
-    html += '<div><strong>' + esc(t('swarm.detail_workers')) + '</strong> ' + esc((task.workers || []).join(', ')) + '</div>';
+    html += '<div><strong>' + esc(t('swarm.detail_type')) + '</strong> ' + esc(patternLabel(task.type)) + '</div>';
+    html += '<div><strong>' + esc(t('swarm.detail_status')) + '</strong> <span class="badge">' + esc(stateLabel(task.status)) + '</span></div>';
+    html += '<div><strong>' + esc(t('swarm.detail_workers')) + '</strong> <span translate="no">' + esc(workerLabels(task.workers)) + '</span></div>';
     html += '<div><strong>' + esc(t('swarm.detail_duration')) + '</strong> ' + (task.duration_seconds ? task.duration_seconds.toFixed(2) + 's' : '—') + '</div>';
-    html += '<div style="grid-column:1/-1;"><strong>' + esc(t('swarm.detail_prompt')) + '</strong> ' + esc(task.prompt) + '</div>';
-    if (task.context) html += '<div style="grid-column:1/-1;"><strong>' + esc(t('swarm.detail_context')) + '</strong> ' + esc(task.context) + '</div>';
+    html += '<div style="grid-column:1/-1;"><strong>' + esc(t('swarm.detail_prompt')) + '</strong> <span translate="no">' + esc(task.prompt) + '</span></div>';
+    if (task.context) html += '<div style="grid-column:1/-1;"><strong>' + esc(t('swarm.detail_context')) + '</strong> <span translate="no">' + esc(task.context) + '</span></div>';
     html += '</div>';
 
     // Unified Routing Diagnostics UI
@@ -1520,11 +1550,11 @@
         var statusColor = wr.status === 'success' ? 'var(--success)' : 'var(--danger)';
         html += '<div style="padding:10px;border:1px solid var(--border-subtle);border-radius:var(--radius);">';
         html += '<div style="display:flex;justify-content:space-between;margin-bottom:4px;">';
-        html += '<span style="font-weight:500;">' + esc(t('swarm.step_n', {n: (idx + 1)})) + ': ' + esc(wr.worker) + '</span>';
-        html += '<span style="color:' + statusColor + ';">• ' + esc(wr.status) + '</span>';
+        html += '<span style="font-weight:500;">' + esc(t('swarm.step_n', {n: (idx + 1)})) + ': <span translate="no">' + esc(workerLabel(wr.worker)) + '</span></span>';
+        html += '<span style="color:' + statusColor + ';">• ' + esc(stateLabel(wr.status)) + '</span>';
         html += '</div>';
-        if (wr.output) html += '<div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:200px;overflow-y:auto;background:rgba(0,0,0,0.15);padding:8px;border-radius:4px;">' + esc(wr.output) + '</div>';
-        if (wr.error) html += '<div style="color:var(--danger);font-size:0.8rem;margin-top:4px;">[!]  ' + esc(wr.error) + '</div>';
+        if (wr.output) html += '<div translate="no" style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:200px;overflow-y:auto;background:rgba(0,0,0,0.15);padding:8px;border-radius:4px;">' + esc(wr.output) + '</div>';
+        if (wr.error) html += '<div translate="no" style="color:var(--danger);font-size:0.8rem;margin-top:4px;">[!]  ' + esc(wr.error) + '</div>';
         // Handoffs
         if (wr.handoffs && wr.handoffs.length) {
           html += '<div style="margin-top:6px;font-size:0.8rem;color:var(--info);">' + esc(t('swarm.handoff')) + wr.handoffs.map(function(h) { return esc(h.from_worker) + ' -> ' + esc(h.to_worker); }).join(', ') + '</div>';
@@ -1541,8 +1571,8 @@
       html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;margin-bottom:16px;">';
       opinions.forEach(function(op) {
         html += '<div style="padding:10px;border:1px solid var(--border-subtle);border-radius:var(--radius);">';
-        html += '<div style="font-weight:500;color:var(--accent);margin-bottom:4px;">' + esc(op.worker) + '</div>';
-        html += '<div style="font-size:0.8rem;color:var(--text-secondary);white-space:pre-wrap;max-height:200px;overflow-y:auto;">' + esc(op.output || '') + '</div>';
+        html += '<div translate="no" style="font-weight:500;color:var(--accent);margin-bottom:4px;">' + esc(workerLabel(op.worker)) + '</div>';
+        html += '<div translate="no" style="font-size:0.8rem;color:var(--text-secondary);white-space:pre-wrap;max-height:200px;overflow-y:auto;">' + esc(op.output || '') + '</div>';
         html += '</div>';
       });
       html += '</div>';
@@ -1551,19 +1581,19 @@
     // Synthesized output
     if (task.synthesized_output) {
       html += '<h4 style="margin-bottom:8px;">' + icon('brain') + ' ' + esc(t('swarm.synthesized_answer')) + '</h4>';
-      html += '<div style="padding:12px;background:var(--accent-subtle);border:1px solid var(--accent-subtle);border-radius:var(--radius);color:var(--accent-light);white-space:pre-wrap;">' + esc(task.synthesized_output) + '</div>';
+      html += '<div translate="no" style="padding:12px;background:var(--accent-subtle);border:1px solid var(--accent-subtle);border-radius:var(--radius);color:var(--accent-light);white-space:pre-wrap;">' + esc(task.synthesized_output) + '</div>';
     }
 
     // Aggregated output
     if (task.aggregated_output && !task.synthesized_output) {
       html += '<h4 style="margin-bottom:8px;">' + icon('bar-chart') + ' ' + esc(t('swarm.aggregated_output')) + '</h4>';
-      html += '<div style="padding:12px;background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:var(--radius);white-space:pre-wrap;">' + esc(task.aggregated_output) + '</div>';
+      html += '<div translate="no" style="padding:12px;background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:var(--radius);white-space:pre-wrap;">' + esc(task.aggregated_output) + '</div>';
     }
 
     // Metadata
     if (task.metadata && Object.keys(task.metadata).length) {
       html += '<h4 style="margin-top:16px;margin-bottom:8px;">' + icon('clipboard') + ' ' + esc(t('swarm.metadata')) + '</h4>';
-      html += '<pre style="font-family:var(--font-mono);font-size:0.75rem;padding:8px;background:rgba(0,0,0,0.15);border-radius:4px;overflow-x:auto;">' + esc(JSON.stringify(task.metadata, null, 2)) + '</pre>';
+      html += '<pre translate="no" style="font-family:var(--font-mono);font-size:0.75rem;padding:8px;background:rgba(0,0,0,0.15);border-radius:4px;overflow-x:auto;">' + esc(JSON.stringify(task.metadata, null, 2)) + '</pre>';
     }
 
     // Action buttons (cancel for running, retry for failed/timeout/cancelled)
@@ -2016,14 +2046,14 @@
         window.KAZMA_WORKERS.forEach(function(w) {
           var opt = document.createElement('option');
           opt.value = w.name;
-          opt.textContent = w.name;
+          opt.textContent = workerLabel(w.name);
           if (w.name === stage.worker) opt.selected = true;
           workerSelect.appendChild(opt);
         });
       } else {
         var opt = document.createElement('option');
         opt.value = stage.worker;
-        opt.textContent = stage.worker;
+        opt.textContent = workerLabel(stage.worker);
         opt.selected = true;
         workerSelect.appendChild(opt);
       }
@@ -2403,7 +2433,7 @@
       var d = parseSseData(e); if (!d) return;
       var icon = d.status === 'success' ? '' : '';
       var color = d.status === 'success' ? 'var(--success)' : 'var(--danger)';
-      addPipelineTerminalLine(icon, esc(t('swarm.worker_prefix')) + '<strong style="color:' + color + ';">' + esc(d.worker) + '</strong> ' + esc(t('swarm.completed_status')) + esc(d.status));
+      addPipelineTerminalLine(icon, esc(t('swarm.worker_prefix')) + '<strong translate="no" style="color:' + color + ';">' + esc(workerLabel(d.worker)) + '</strong> ' + esc(t('swarm.completed_status')) + esc(stateLabel(d.status)));
     });
 
     source.addEventListener('checkpoint', function(e) {
@@ -2680,7 +2710,7 @@
       var d = parseSseData(e); if (!d) return;
       var icon = d.status === 'success' ? '' : '';
       var color = d.status === 'success' ? 'var(--success)' : 'var(--danger)';
-      addTerminalLine(icon, esc(t('swarm.worker_prefix')) + '<strong style="color:' + color + ';">' + esc(d.worker) + '</strong> ' + esc(t('swarm.completed_status')) + esc(d.status));
+      addTerminalLine(icon, esc(t('swarm.worker_prefix')) + '<strong translate="no" style="color:' + color + ';">' + esc(workerLabel(d.worker)) + '</strong> ' + esc(t('swarm.completed_status')) + esc(stateLabel(d.status)));
     });
 
     source.addEventListener('checkpoint', function(e) {
@@ -2887,18 +2917,18 @@
           '<div style="display:flex;align-items:flex-start;justify-content:space-between;">' +
             '<div style="flex:1;">' +
               '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
-                '<span style="font-weight:600;">' + esc(tmpl.name) + '</span>' +
-                (tmpl.role ? '<span class="badge badge-accent" style="font-size:0.65rem;">' + esc(tmpl.role) + '</span>' : '') +
+                '<span translate="no" style="font-weight:600;">' + esc(tmpl.name) + '</span>' +
+                (tmpl.role ? '<span translate="no" class="badge badge-accent" style="font-size:0.65rem;">' + esc(tmpl.role) + '</span>' : '') +
                 '<span class="badge badge-info" style="font-size:0.65rem;">' + active + '/' + max + ' ' + (window.t ? t('swarm.instances') : 'active') + '</span>' +
                 (tmpl.catch_all ? '<span class="badge badge-success" style="font-size:0.65rem;">' + esc(window.t ? t('swarm.tmpl_catch_all') : 'Takes any task') + '</span>' : '') +
               '</div>' +
               '<div style="font-size:0.8rem;color:var(--text-tertiary);">' + (window.t ? t('swarm.model') : 'Model') + ': <span style="color:var(--text-secondary);font-family:var(--font-mono);">' + esc(modelLabel) + '</span></div>' +
-              (expertise.length ? '<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">' + expertise.map(function(tag){ return '<span class="badge badge-info" style="font-size:0.6rem;">' + esc(tag) + '</span>'; }).join('') + '</div>' : '') +
-              (tmpl.system_prompt ? '<div style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;line-height:1.4;">' + esc(tmpl.system_prompt.slice(0, 140)) + (tmpl.system_prompt.length > 140 ? '…' : '') + '</div>' : '') +
+              (expertise.length ? '<div translate="no" style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">' + expertise.map(function(tag){ return '<span class="badge badge-info" style="font-size:0.6rem;">' + esc(tag) + '</span>'; }).join('') + '</div>' : '') +
+              (tmpl.system_prompt ? '<div translate="no" style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;line-height:1.4;">' + esc(tmpl.system_prompt.slice(0, 140)) + (tmpl.system_prompt.length > 140 ? '…' : '') + '</div>' : '') +
             '</div>' +
             '<div style="display:flex;gap:4px;">' +
-              '<button class="btn btn-sm btn-secondary" data-action="edit-template" data-name="' + esc(tmpl.name) + '" title="Edit"><span class="ki" data-icon="edit" aria-hidden="true"></span></button>' +
-              '<button class="btn btn-sm btn-danger" data-action="delete-template" data-name="' + esc(tmpl.name) + '" title="Delete"><span class="ki" data-icon="x" aria-hidden="true"></span></button>' +
+              '<button class="btn btn-sm btn-secondary" data-action="edit-template" data-name="' + esc(tmpl.name) + '" title="' + esc(t('swarm.edit_template')) + '"><span class="ki" data-icon="edit" aria-hidden="true"></span></button>' +
+              '<button class="btn btn-sm btn-danger" data-action="delete-template" data-name="' + esc(tmpl.name) + '" title="' + esc(t('swarm.delete_template')) + '"><span class="ki" data-icon="x" aria-hidden="true"></span></button>' +
             '</div>' +
           '</div>' +
         '</div>';

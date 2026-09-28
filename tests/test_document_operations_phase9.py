@@ -636,11 +636,69 @@ def test_pg_readiness_is_truthful():
     from kazma_core.documents.jobs_pg import document_storage_readiness
 
     repo, _pool = _pg_repo()
-    # A postgres jobs repo but SQLite metadata → degraded + honest reasons.
+    # A postgres jobs repo but SQLite metadata: the metadata stays single-replica.
     rdy = document_storage_readiness(jobs_repo=repo)
-    # backend detection depends on env; assert the shape + metadata honesty.
     assert rdy["metadata_multi_replica"] is False
-    assert "metadata_single_replica" in rdy["degraded_reasons"] or rdy["jobs_backend"] == "sqlite"
+    assert rdy["multi_replica"] is False
+
+
+class _SqliteMeta:
+    backend_name = "sqlite"
+    multi_replica = False
+
+
+class _PgMeta:
+    backend_name = "postgres"
+    multi_replica = True
+
+
+@pytest.mark.parametrize(
+    ("jobs_cfg", "jobs_repo", "meta_cfg", "meta_repo", "status", "reasons"),
+    [
+        # The live install's shape: Postgres jobs, SQLite metadata chosen in .env.
+        ("postgres", "pg", "sqlite", _SqliteMeta(), "ready", []),
+        # Everything on SQLite, by choice.
+        ("sqlite", None, "sqlite", _SqliteMeta(), "ready", []),
+        # Everything on Postgres and serving.
+        ("postgres", "pg", "postgres", _PgMeta(), "ready", []),
+        # Postgres metadata asked for, SQLite answering: that is degraded.
+        ("postgres", "pg", "postgres", _SqliteMeta(), "degraded",
+         ["metadata_postgres_unavailable_fell_back_to_sqlite"]),
+        # Postgres jobs asked for, the SQLite queue answering.
+        ("postgres", None, "sqlite", _SqliteMeta(), "degraded",
+         ["jobs_postgres_unavailable_fell_back_to_sqlite"]),
+    ],
+)
+def test_readiness_status_means_a_configured_backend_is_serving(
+    monkeypatch, jobs_cfg, jobs_repo, meta_cfg, meta_repo, status, reasons
+):
+    """``degraded`` is a backend that is not what was configured -- never a
+    single-replica store the operator chose (the live Documents page said
+    "Storage: degraded" over exactly that, 2026-09-28)."""
+    from kazma_core.documents import jobs_pg
+
+    monkeypatch.setattr(jobs_pg, "document_jobs_backend", lambda: jobs_cfg)
+    monkeypatch.setattr(jobs_pg, "document_metadata_backend", lambda: meta_cfg)
+    repo = _pg_repo()[0] if jobs_repo == "pg" else None
+    rdy = jobs_pg.document_storage_readiness(jobs_repo=repo, metadata_repo=meta_repo)
+    assert (rdy["status"], rdy["degraded_reasons"]) == (status, reasons)
+    assert rdy["multi_replica"] is (rdy["jobs_multi_replica"] and rdy["metadata_multi_replica"])
+    assert rdy["metadata_multi_replica"] is bool(meta_repo.multi_replica)
+
+
+def test_readiness_negative_control_a_fallback_is_never_ready(monkeypatch):
+    """The rule has teeth: with Postgres configured for both and SQLite
+    answering for both, nothing about the answer is "ready"."""
+    from kazma_core.documents import jobs_pg
+
+    monkeypatch.setattr(jobs_pg, "document_jobs_backend", lambda: "postgres")
+    monkeypatch.setattr(jobs_pg, "document_metadata_backend", lambda: "postgres")
+    rdy = jobs_pg.document_storage_readiness(jobs_repo=None, metadata_repo=_SqliteMeta())
+    assert rdy["status"] == "degraded"
+    assert set(rdy["degraded_reasons"]) == {
+        "jobs_postgres_unavailable_fell_back_to_sqlite",
+        "metadata_postgres_unavailable_fell_back_to_sqlite",
+    }
 
 
 # ── Backup + migration round-trip (DB + blob + manifest) ─────────────────

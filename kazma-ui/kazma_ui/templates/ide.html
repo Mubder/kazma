@@ -390,7 +390,7 @@
       <!-- Results -->
       <div class="card" style="padding:10px 12px;border:1px solid var(--border-subtle);">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-          <span style="font-size:0.8rem;font-weight:600;color:var(--text-primary);" x-text="resultTitle || t('ide.output')"></span>
+          <span style="font-size:0.8rem;font-weight:600;color:var(--text-primary);" :translate="resultRaw ? 'no' : null" x-text="resultTitle || t('ide.output')"></span>
           <button class="btn btn-xs btn-secondary" @click="result=''" x-cloak x-show="result">{{ t('ide.clear') }}</button>
         </div>
         <pre class="ide-results" x-text="result || t('ide.no_output')"></pre>

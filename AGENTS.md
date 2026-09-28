@@ -1230,7 +1230,13 @@ defaults to SQLite and moves to `repository_pg.py` when
 `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres|auto` and the pool is up. Readiness
 must report single-replica for metadata **whenever the SQLite backend is
 active** — never claim multi-replica HA from the availability of the Postgres
-path alone, only from the backend actually in use.
+path alone, only from the backend actually in use. Single-replica is a
+fact, not a degradation: `status` is `degraded` only when a configured
+backend is not the one serving (`*_fell_back_to_sqlite`); a SQLite backend
+chosen in `.env` is `ready` with `metadata_multi_replica: false`
+(`tests/test_document_operations_phase9.py::test_readiness_status_means_a_configured_backend_is_serving`).
+The live Documents page said "Storage: degraded" in red over a deliberate
+SQLite choice (2026-09-28).
 
 **E. Fence + security honesty.**
 LLM-visible document text goes through untrusted fences

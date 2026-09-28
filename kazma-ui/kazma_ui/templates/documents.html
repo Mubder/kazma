@@ -302,7 +302,7 @@
               {{ t('documents.storage_status') }} <span x-text="readiness ? tOr('documents.cap_' + readiness.status, readiness.status) : '—'"></span>
             </span>
             <span class="cap-pill" x-text="t('documents.jobs_backend').replace('{backend}', readiness ? readiness.jobs_backend : '—')"></span>
-            <span class="cap-pill" x-text="(readiness && readiness.jobs_multi_replica) ? t('documents.multi_replica') : t('documents.single_node')"></span>
+            <span class="cap-pill" x-text="(readiness && readiness.jobs_multi_replica && readiness.metadata_multi_replica) ? t('documents.multi_replica') : t('documents.single_node')"></span>
           </div>
         </div>
 
@@ -326,7 +326,7 @@
             <div class="evt-row" style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;">
               <span>
                 <span translate="no" x-text="a.event_type"></span>·<span translate="no" x-text="a.action"></span>
-                <span class="evt-err" x-show="a.outcome !== 'success'" x-cloak x-text="' (' + a.outcome + ')'"></span>
+                <span class="evt-err" translate="no" x-show="a.outcome !== 'success'" x-cloak x-text="' (' + a.outcome + ')'"></span>
               </span>
               <span class="doc-meta" x-text="(a.created_at || '').slice(0,19).replace('T',' ')"></span>
             </div>
