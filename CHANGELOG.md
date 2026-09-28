@@ -37,6 +37,18 @@ The browser check now seeds two swarm runs, a reminder and two X calls,
 and reads the Swarm tabs, a task's details and the Scheduled tabs in
 Arabic (59 English strings with the old code), and types `/` in the chat.
 
+**Red on Linux, green on Windows.** CI failed the previous release twice
+where the dev machine passed: the Dashboard's step counts read the stored
+checkpoint with the plain `msgpack` package — which neither Kazma nor
+LangGraph depends on, and which sits on the dev machine only because
+`locust` pulls it in — so on CI every count was empty. The saver's own
+serializer reads its rows now, with LangGraph's `ormsgpack` as the
+fallback; a test hides `msgpack` and expects the count. And on a machine
+without the local embedder the Memory page's "Needs attention" list holds
+the server's diagnosis ("sentence_transformers not installed — Fix: pip
+install …"), which the Arabic tour rightly flagged as English: it is the
+server's own words and is marked as such.
+
 ## Pages with your data on them read in Arabic too (2026-09-28)
 
 The release below was measured on a test install with nothing in it.

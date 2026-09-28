@@ -378,7 +378,9 @@
           '<div style="font-weight:700;margin-bottom:4px;">' + (I18N.issuesHeading || 'Needs attention') + '</div>' +
           '<ul style="margin:0;padding-left:1.1rem;">' +
           issues.map(function(i) {
-            return '<li style="margin-bottom:3px;">' + String(i).replace(/</g, '&lt;') + '</li>';
+            // The server's own diagnosis ("sentence_transformers not
+            // installed -- Fix: pip install ..."): content, not interface.
+            return '<li translate="no" style="margin-bottom:3px;">' + String(i).replace(/</g, '&lt;') + '</li>';
           }).join('') +
           '</ul>';
       } else {
