@@ -119,3 +119,48 @@ async def test_rows_take_the_chat_title_platform_and_count(monkeypatch) -> None:
         "the chat store is read off the event loop"
     )
 
+
+@pytest.mark.asyncio
+async def test_message_count_needs_no_package_langgraph_does_not_ship(tmp_path) -> None:
+    """The stored checkpoint is read back by the saver's own serializer.
+
+    ``_decode_checkpoint`` used to ``import msgpack``: a package neither
+    Kazma nor LangGraph depends on, present on the dev machine only through
+    ``locust``. On CI every ``message_count`` was ``None`` and two tests
+    were red on Linux while green on Windows (2026-09-28). With ``msgpack``
+    absent the count must still come back; the negative control shows the
+    old decoder gave nothing in that state.
+    """
+    from kazma_gateway.stores.checkpoint import CheckpointManager, create_checkpoint_manager
+    from langgraph.checkpoint.base import CheckpointMetadata
+    from langgraph.checkpoint.base.id import uuid6
+
+    from tests._module_stubs import stub_modules
+
+    manager = await create_checkpoint_manager(str(tmp_path / "checkpoints.db"))
+    try:
+        meta = CheckpointMetadata(source="loop", step=0, writes={}, parents={})
+        config = {"configurable": {"thread_id": "chat-a", "checkpoint_ns": ""}}
+        await manager.aput(config, _checkpoint(str(uuid6()), [{"role": "user", "content": "q"}] * 2), meta, {})
+        with stub_modules({"msgpack": None}):
+            rows = await manager.list_checkpoints()
+            saver = await manager._get_saver()
+            cursor = await saver.conn.execute("SELECT type, checkpoint FROM checkpoints LIMIT 1")
+            type_, blob = await cursor.fetchone()
+            # Negative control: the old decoder, plain msgpack or JSON, reads nothing here.
+            import json
+
+            old = None
+            try:
+                import msgpack  # noqa: F401
+            except ImportError:
+                try:
+                    old = json.loads(blob.decode("utf-8", errors="replace"))
+                except Exception:
+                    old = None
+            assert old is None, "the old decoder would have read this row without msgpack"
+            assert CheckpointManager._decode_checkpoint(blob, type_, saver)["channel_values"]["messages"]
+    finally:
+        await manager.close()
+    assert rows[0]["message_count"] == 2
+

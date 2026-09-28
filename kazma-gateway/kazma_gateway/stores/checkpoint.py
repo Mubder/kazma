@@ -342,13 +342,13 @@ class CheckpointManager(BaseCheckpointSaver):
                 checkpoint: dict[str, Any] | None = None
                 try:
                     blob_cursor = await conn.execute(
-                        "SELECT checkpoint FROM checkpoints "
+                        "SELECT type, checkpoint FROM checkpoints "
                         "WHERE thread_id = ? AND checkpoint_ns = '' AND checkpoint_id = ? LIMIT 1",
                         (thread_id, checkpoint_id),
                     )
                     blob_row = await blob_cursor.fetchone()
-                    if blob_row and blob_row[0]:
-                        checkpoint = self._decode_checkpoint(blob_row[0])
+                    if blob_row and blob_row[1]:
+                        checkpoint = self._decode_checkpoint(blob_row[1], blob_row[0], saver)
                 except Exception as exc:
                     logger.debug("Checkpoint blob decode failed for thread %s: %s", thread_id, exc)
                 results.append(self._thread_row(thread_id, checkpoint_id, steps, checkpoint))
@@ -433,18 +433,33 @@ class CheckpointManager(BaseCheckpointSaver):
         }
 
     @staticmethod
-    def _decode_checkpoint(blob: Any) -> dict[str, Any] | None:
+    def _decode_checkpoint(
+        blob: Any, type_: str | None = None, saver: Any = None
+    ) -> dict[str, Any] | None:
         """A stored checkpoint as a dict, or ``None`` when it cannot be read.
 
-        Postgres JSONB arrives parsed; SQLite stores the serializer's
-        msgpack bytes (JSON in very old files).
+        Postgres JSONB arrives parsed. SQLite stores what the saver's own
+        serializer wrote, tagged by the row's ``type`` column, so the saver's
+        serde reads it back (``loads_typed``); LangGraph's ``ormsgpack`` is
+        the fallback for a row with no type, JSON for very old files. It
+        used to ``import msgpack`` -- a package neither Kazma nor LangGraph
+        depends on, present on the dev machine through ``locust`` only -- so
+        on CI every count was ``None`` (2026-09-28).
         """
         if isinstance(blob, dict):
             return blob
+        serde = getattr(saver, "serde", None)
+        if serde is not None and type_:
+            try:
+                data = serde.loads_typed((str(type_), blob))
+                if isinstance(data, dict):
+                    return data
+            except (ValueError, TypeError, KeyError) as exc:
+                logger.debug("Checkpoint serde decode failed (type=%s): %s", type_, exc)
         try:
-            import msgpack
+            import ormsgpack
 
-            data = msgpack.unpackb(blob, raw=False, strict_map_key=False)
+            data = ormsgpack.unpackb(blob)
         except Exception:
             try:
                 import json

@@ -3317,6 +3317,7 @@ new *guard* (its own code, or other OS-level variables) still needs the
 - `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` — Monorepo system map + remediation crosswalk
 - `docs/docs/reference/tools-catalog.md` — Built-in + native tools
 - `docs/docs/ops/production-checklist.md` — Production go-live checklist
+- `docs/audits/AUDIT_LIVE_TOUR_2026-09-28.md` — Six passes of using the live install like a person (both languages): what was fixed, what was judged and left, and how the checks changed
 - `docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md` — Binding industrial audit (waves 0–8 shipped). Do **not** follow dump `AUDIT_DEEP_2026-09-01.md` Part 6 order.
 - `docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md` — Deep-structure audit (22 findings, change-impact map, CI recovery, Telegram desync §20)
 - `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` — Historical production audit (2026-07-21)
