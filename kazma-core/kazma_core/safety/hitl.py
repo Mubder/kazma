@@ -176,6 +176,7 @@ TOOL_TIERS: dict[str, str] = {
     "browser_eval_js": "danger",
     "computer_use": "danger",
     "request_path_access": "danger",
+    "email_accounts": "safe",
     "email_list": "safe",
     "email_get": "safe",
     "email_analyze": "safe",

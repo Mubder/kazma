@@ -423,6 +423,13 @@
             accounts: [],
         },
         emailAccounts: [],
+        emailAccountsLoaded: false,
+        // "Other accounts": the add-with-a-password form, and a Microsoft
+        // account's sign-in by code.
+        emailAccountForm: { open: false, alias: '', type: 'gmail', address: '', password: '', host: '', smtp_host: '' },
+        accountMsDevice: { user_code: '', verification_uri: '', device_code: '', alias: '' },
+        accountMsPolling: false,
+        accountMsPollTimer: null,
         emailGmailMode: 'oauth',
         emailMsMode: 'oauth',
         emailGmail: { address: '', app_password: '' },

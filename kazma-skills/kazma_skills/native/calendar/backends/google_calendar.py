@@ -23,9 +23,14 @@ class GoogleCalendarBackend:
 
     name = "google"
 
-    def __init__(self, access_token: str, refresh_token: str = "") -> None:
+    def __init__(self, access_token: str, refresh_token: str = "", account_alias: str = "") -> None:
         self._token = access_token
         self._refresh = refresh_token
+        # An extra account's calendar (email_manager.accounts): its refreshes
+        # are kept under its own name, and it never borrows the main grant.
+        self._alias = account_alias or ""
+        if self._alias:
+            self.name = f"google:{self._alias}"
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._token}"}
@@ -37,7 +42,7 @@ class GoogleCalendarBackend:
 
     async def _do_refresh(self) -> bool:
         refresh = self._refresh
-        if not refresh:
+        if not refresh and not self._alias:
             from kazma_skills.native.calendar.credentials import google_refresh_token
 
             refresh = google_refresh_token()
@@ -49,9 +54,15 @@ class GoogleCalendarBackend:
                     refresh_google_calendar_access_token,
                 )
 
-                access, new_refresh = await refresh_google_calendar_access_token(refresh)
+                access, new_refresh = await refresh_google_calendar_access_token(
+                    refresh, persist=not self._alias
+                )
                 self._token = access
                 self._refresh = new_refresh
+                if self._alias:
+                    from kazma_skills.native.email_manager.accounts import persist_account_tokens
+
+                    await asyncio.to_thread(persist_account_tokens, self._alias, access, new_refresh)
                 return True
             except Exception as exc:
                 logger.warning("[calendar.google] token refresh failed: %s", exc)

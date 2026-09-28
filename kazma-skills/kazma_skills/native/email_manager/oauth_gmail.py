@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -138,8 +139,20 @@ def _client_shape_error(client_id: str, client_secret: str) -> str:
     return ""
 
 
-def start_gmail_oauth(request_base: str | None = None) -> dict[str, Any]:
-    """Return Google authorize URL for browser redirect."""
+def start_gmail_oauth(request_base: str | None = None, *, account: str = "") -> dict[str, Any]:
+    """Return Google authorize URL for browser redirect.
+
+    *account* names an extra Gmail account (``email_manager.accounts``): the
+    sign-in then keeps its tokens under that name, never the main account's.
+    """
+    alias = ""
+    if account:
+        from kazma_skills.native.email_manager.accounts import alias_problem, normalize_alias
+
+        alias = normalize_alias(account)
+        problem = alias_problem(alias, kind="gmail")
+        if problem:
+            return {"ok": False, "code": "bad_account_name", "error": problem}
     cid = _client_id()
     if not cid:
         return {
@@ -170,7 +183,7 @@ def start_gmail_oauth(request_base: str | None = None) -> dict[str, Any]:
     if shape:
         return {"ok": False, "code": "malformed_client", "error": shape}
     redirect = gmail_redirect_uri(request_base)
-    state = new_state("gmail", redirect_uri=redirect)
+    state = new_state("gmail", redirect_uri=redirect, account=alias)
     # Persist client for callback process
     os.environ["EMAIL_GMAIL_CLIENT_ID"] = cid
     os.environ["EMAIL_GMAIL_CLIENT_SECRET"] = secret
@@ -185,7 +198,10 @@ def start_gmail_oauth(request_base: str | None = None) -> dict[str, Any]:
             "response_type": "code",
             "scope": GMAIL_SCOPES,
             "access_type": "offline",
-            "prompt": "consent",
+            # select_account: with several Google accounts in the browser,
+            # Google otherwise signs in whichever is active -- the wrong one
+            # for "add another account".
+            "prompt": "select_account consent",
             "state": state,
         },
     )
@@ -204,7 +220,7 @@ async def _fetch_granted_scopes(client: httpx.AsyncClient, access: str) -> str:
         if ti.status_code < 400 and ti.content:
             data = ti.json() or {}
             return str(data.get("scope") or "")
-    except Exception as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         logger.debug("[email.oauth] tokeninfo: %s", exc)
     return ""
 
@@ -220,7 +236,7 @@ async def _probe_gmail_api(client: httpx.AsyncClient, access: str) -> dict[str, 
         if r.status_code < 400:
             return {"ok": True, "status_code": r.status_code, "email": (r.json() or {}).get("emailAddress")}
         return {"ok": False, "status_code": r.status_code, "body": snip}
-    except Exception as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         return {"ok": False, "status_code": 0, "body": str(exc)}
 
 
@@ -297,8 +313,8 @@ async def finish_gmail_oauth(code: str, state: str) -> dict[str, Any]:
             )
             if u.status_code < 400:
                 email_addr = (u.json() or {}).get("email") or ""
-        except Exception:
-            pass
+        except (httpx.HTTPError, ValueError):
+            logger.debug("[email.oauth] userinfo unavailable", exc_info=True)
 
         probe = await _probe_gmail_api(client, access)
         scope_ok = scopes_include_gmail_mail(scope_str) and probe.get("ok")
@@ -324,6 +340,13 @@ async def finish_gmail_oauth(code: str, state: str) -> dict[str, Any]:
 
         if probe.get("email") and not email_addr:
             email_addr = str(probe["email"])
+
+        if meta.get("account"):
+            # An extra account: its own keys only. Drive backups and the
+            # main Google Calendar stay with the main account.
+            return await asyncio.to_thread(
+                _keep_extra_account, meta["account"], email_addr, access, refresh, scope_str
+            )
 
         # Soft-verify the drive.file scope for the offsite backup provider.
         # The Gmail probe above proves mail scopes only; a consent screen that
@@ -392,6 +415,29 @@ async def finish_gmail_oauth(code: str, state: str) -> dict[str, Any]:
     }
 
 
+def _keep_extra_account(alias: str, address: str, access: str, refresh: str, scopes: str) -> dict[str, Any]:
+    """Keep a signed-in extra Gmail account; refused when its address is
+    already connected (as the main account or another one)."""
+    from kazma_skills.native.email_manager.accounts import upsert_oauth_account
+
+    try:
+        row = upsert_oauth_account(alias, "gmail", address, access, refresh, scopes)
+    except (ValueError, RuntimeError) as exc:
+        return {"ok": False, "account": alias, "error": str(exc)}
+    return {
+        "ok": True,
+        "account": row["alias"],
+        "email": row["address"],
+        "scopes": scopes,
+        "calendar_ok": bool(row.get("calendar")),
+        "message": (
+            f"Gmail account “{row['alias']}” connected"
+            f"{f' as {address}' if address else ''}."
+            + ("" if row.get("calendar") else " Its calendar was not granted.")
+        ),
+    }
+
+
 def persist_gmail_tokens(
     access: str,
     refresh: str = "",
@@ -423,43 +469,20 @@ def persist_gmail_tokens(
                     category="email")
 
 
-def clear_gmail_oauth() -> dict[str, Any]:
-    for k in (
-        "EMAIL_GMAIL_ACCESS_TOKEN",
-        "EMAIL_GMAIL_REFRESH_TOKEN",
-        "EMAIL_GMAIL_AUTH",
-        "EMAIL_GMAIL_SCOPES",
-    ):
-        os.environ.pop(k, None)
-    try:
-        from kazma_core.paths import vault_db_path
-        from kazma_core.security.vault import SecretVault, get_vault
-
-        v = get_vault() or SecretVault(db_path=vault_db_path())
-        for name in (
-            "email.gmail.access_token",
-            "email.gmail.refresh_token",
-            "email.gmail.app_password",
-            "email.gmail.scopes",
-            "email.gmail.drive_ok",
-        ):
-            try:
-                v.delete(name)
-            except Exception:
-                pass
-    except Exception as exc:
-        logger.debug("clear gmail oauth vault: %s", exc)
-    os.environ.pop("EMAIL_GMAIL_APP_PASSWORD", None)
-    return {"ok": True, "message": "Gmail OAuth tokens cleared."}
-
-
 async def refresh_gmail_access_token(
     refresh_token: str,
     *,
     client_id: str = "",
     client_secret: str = "",
+    persist: bool = True,
 ) -> tuple[str, str]:
-    """Return (access_token, refresh_token)."""
+    """Return (access_token, refresh_token).
+
+    *persist* keeps them as the MAIN Gmail account's (and its calendar copy).
+    An extra account refreshes with ``persist=False`` and keeps its own
+    (``accounts.persist_account_tokens``): refreshing a second account used
+    to write its tokens over the main account's.
+    """
     cid = client_id or _client_id()
     secret = client_secret or _client_secret()
     async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as client:
@@ -484,6 +507,8 @@ async def refresh_gmail_access_token(
         scope_str = str(payload.get("scope") or "")
         if not access:
             raise RuntimeError("No access_token on Gmail refresh")
+        if not persist:
+            return access, new_refresh
         persist_gmail_tokens(access, new_refresh, scopes=scope_str)
         # Keep the calendar copy of this grant in sync when Calendar is
         # on the same refresh token (Gmail connect with calendar scope).

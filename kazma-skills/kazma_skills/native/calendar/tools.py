@@ -9,6 +9,7 @@ All tools return human-readable ``str`` results.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -43,6 +44,7 @@ async def list_events(
     time_max: str = "",
     max_results: int = 25,
     provider: str = "auto",
+    account: str = "",
 ) -> str:
     """List upcoming calendar events (ISO 8601 bounds; defaults to next 7 days)."""
     from kazma_skills.native.calendar.router import (
@@ -52,7 +54,9 @@ async def list_events(
 
     lo, hi = _default_window(time_min, time_max)
     try:
-        backend = get_backend(provider)
+        # account: a mail account's name or address picks its calendar.
+        # The router reads settings and the vault: off the event loop.
+        backend = await asyncio.to_thread(get_backend, provider, account or None)
         events = await backend.list_events(lo, hi, max_results)
     except CalendarNotConnectedError as exc:
         return f"Error: {exc.hint}"
@@ -75,6 +79,7 @@ async def create_event(
     location: str = "",
     description: str = "",
     provider: str = "auto",
+    account: str = "",
 ) -> str:
     """Create a calendar event (start/end in ISO 8601)."""
     if not summary or not summary.strip():
@@ -87,7 +92,9 @@ async def create_event(
     )
 
     try:
-        backend = get_backend(provider)
+        # account: a mail account's name or address picks its calendar.
+        # The router reads settings and the vault: off the event loop.
+        backend = await asyncio.to_thread(get_backend, provider, account or None)
         ev = await backend.create_event(
             summary.strip(), start, end, location, description
         )
@@ -102,6 +109,7 @@ async def update_event(
     event_id: str,
     fields: dict,
     provider: str = "auto",
+    account: str = "",
 ) -> str:
     """Update an event by id. ``fields`` keys: summary, start, end, location, description."""
     if not event_id or not event_id.strip():
@@ -112,7 +120,9 @@ async def update_event(
     )
 
     try:
-        backend = get_backend(provider)
+        # account: a mail account's name or address picks its calendar.
+        # The router reads settings and the vault: off the event loop.
+        backend = await asyncio.to_thread(get_backend, provider, account or None)
         ev = await backend.update_event(event_id.strip(), fields or {})
     except CalendarNotConnectedError as exc:
         return f"Error: {exc.hint}"
@@ -121,7 +131,7 @@ async def update_event(
     return f"Event updated ({backend.name}):\n{json.dumps(ev, indent=2, default=str)}"
 
 
-async def delete_event(event_id: str, provider: str = "auto") -> str:
+async def delete_event(event_id: str, provider: str = "auto", account: str = "") -> str:
     """Delete a calendar event by id."""
     if not event_id or not event_id.strip():
         return "Error: event_id is required."
@@ -131,7 +141,9 @@ async def delete_event(event_id: str, provider: str = "auto") -> str:
     )
 
     try:
-        backend = get_backend(provider)
+        # account: a mail account's name or address picks its calendar.
+        # The router reads settings and the vault: off the event loop.
+        backend = await asyncio.to_thread(get_backend, provider, account or None)
         ok = await backend.delete_event(event_id.strip())
     except CalendarNotConnectedError as exc:
         return f"Error: {exc.hint}"
@@ -144,6 +156,7 @@ async def find_free_slots(
     date: str,
     duration_minutes: int = 30,
     provider: str = "auto",
+    account: str = "",
 ) -> str:
     """Find free slots of ``duration_minutes`` on ``date`` (YYYY-MM-DD or ISO)."""
     if not date or not date.strip():
@@ -154,7 +167,9 @@ async def find_free_slots(
     )
 
     try:
-        backend = get_backend(provider)
+        # account: a mail account's name or address picks its calendar.
+        # The router reads settings and the vault: off the event loop.
+        backend = await asyncio.to_thread(get_backend, provider, account or None)
         slots = await backend.find_free_slots(date.strip(), duration_minutes)
     except CalendarNotConnectedError as exc:
         return f"Error: {exc.hint}"

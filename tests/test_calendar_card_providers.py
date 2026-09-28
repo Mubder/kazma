@@ -18,7 +18,7 @@ TEMPLATE = REPO / "kazma-ui" / "kazma_ui" / "templates" / "settings.html"
 
 def _card(src: str) -> str:
     start = src.index("<!-- Calendar (Google / Outlook)")
-    end = src.index("<!-- Multi-account list -->", start)
+    end = src.index("<!-- Other accounts -->", start)
     return src[start:end]
 
 
@@ -72,7 +72,7 @@ def test_negative_control_the_old_card_had_one_google_button_for_both() -> None:
     old = (
         '<!-- Calendar (Google / Outlook) -->'
         '<button @click="connectCalendarOAuth()">{{ t(\'settings.calendar_connect_google\') }}</button>'
-        '<!-- Multi-account list -->'
+        '<!-- Other accounts -->'
     )
     assert _rows(_card(old)) == []
     assert "connectMicrosoftOAuth()" not in _card(old)

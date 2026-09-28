@@ -151,6 +151,7 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
                    ("target",)),
     "email_delete": (EffectKind.OUTBOUND, SemanticTier.CRITICAL, "send_outbound", ()),
     "email_categorize": (EffectKind.OUTBOUND, SemanticTier.HIGH, None, ()),
+    "email_accounts": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "email_list": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "email_get": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "email_analyze": (EffectKind.READ, SemanticTier.NONE, None, ()),

@@ -84,15 +84,69 @@ def cred(env_key: str, vault_key: str = "") -> str:
     return ""
 
 
-def list_account_aliases() -> list[str]:
-    """Configured multi-account aliases from EMAIL_ACCOUNTS=a,b,c."""
+def vault_delete(*names: str) -> None:
+    """Delete vault secrets by name (global scope, like :func:`vault_store`).
+    A missing name is not an error; a vault that cannot write is logged."""
+    try:
+        from kazma_core.security.vault import SecretVault, get_vault
+        from kazma_core.paths import vault_db_path
+
+        v = get_vault() or SecretVault(db_path=vault_db_path())
+        token, reset = _force_global_scope()
+        try:
+            for name in names:
+                v.delete(name)
+        finally:
+            reset(token)
+    except Exception:
+        logger.warning("[email.creds] vault delete of %s failed", ", ".join(names), exc_info=True)
+
+
+def env_account_aliases() -> list[str]:
+    """Accounts written in .env: EMAIL_ACCOUNTS=a,b,c."""
     raw = _env("EMAIL_ACCOUNTS")
     if not raw:
         return []
     return [a.strip() for a in raw.split(",") if a.strip()]
 
 
+def list_account_aliases() -> list[str]:
+    """Every extra account chat can name: those in .env, then those added in
+    Settings (``accounts.stored_accounts``)."""
+    from kazma_skills.native.email_manager.accounts import normalize_alias, stored_accounts
+
+    names = env_account_aliases()
+    seen = {normalize_alias(a) for a in names}
+    names += [row["alias"] for row in stored_accounts() if row["alias"] not in seen]
+    return names
+
+
 def account_config(alias: str) -> dict[str, str]:
+    """An extra account's settings: from .env for an account written there,
+    else from Settings (the list plus the account's own vault keys)."""
+    from kazma_skills.native.email_manager.accounts import (
+        account_secret,
+        normalize_alias,
+        stored_account,
+    )
+
+    key = normalize_alias(alias)
+    if key not in {normalize_alias(a) for a in env_account_aliases()}:
+        row = stored_account(key)
+        if row is not None:
+            out = {"alias": key}
+            for field in ("type", "address", "imap_host", "imap_port", "pop_host",
+                          "pop_port", "smtp_host", "smtp_port"):
+                out[field] = str(row.get(field) or "")
+            for field in ("password", "access_token", "refresh_token", "scopes"):
+                out[field] = account_secret(key, field)
+            # The main app registration signs every account in.
+            out.update(client_id="", client_secret="", tenant_id="")
+            return out
+    return _env_account_config(alias)
+
+
+def _env_account_config(alias: str) -> dict[str, str]:
     """Load per-account env map: EMAIL_ACCOUNT_{ALIAS}_{FIELD}.
 
     Fields: TYPE (gmail|microsoft|imap|pop|sandbox), ADDRESS, PASSWORD,

@@ -13,6 +13,7 @@ Security notes (audit H4/H5/H6):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any
@@ -37,6 +38,27 @@ protected_router = APIRouter(prefix="/api/email", tags=["email"])
 
 class DevicePollBody(BaseModel):
     device_code: str = Field(..., min_length=1)
+
+
+class _DeviceStartBody(BaseModel):
+    # An extra account's name: the sign-in keeps its tokens under it.
+    account: str = Field(default="", max_length=64)
+
+
+class _AccountAddBody(BaseModel):
+    """An extra account that signs in with a password (an app password for
+    Gmail). Its login is tried before it is kept."""
+
+    alias: str = Field(..., min_length=1, max_length=64)
+    type: str = Field(..., description="gmail | microsoft | imap | pop")
+    address: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=4)
+    imap_host: str = Field(default="")
+    imap_port: int | None = Field(default=None)
+    pop_host: str = Field(default="")
+    pop_port: int | None = Field(default=None)
+    smtp_host: str = Field(default="")
+    smtp_port: int | None = Field(default=None)
 
 
 class GmailConnectBody(BaseModel):
@@ -328,11 +350,12 @@ async def gmail_set_oauth_client(body: GmailOAuthClientBody) -> JSONResponse:
 
 
 @router.get("/oauth/gmail/start")
-async def gmail_oauth_start(request: Request) -> Any:
-    """Redirect browser to Google consent screen."""
+async def gmail_oauth_start(request: Request, account: str = "") -> Any:
+    """Redirect browser to Google consent screen (*account*: an extra
+    account's name; empty = the main Gmail account)."""
     from kazma_skills.native.email_manager.oauth_gmail import start_gmail_oauth
 
-    result = start_gmail_oauth(_request_base(request))
+    result = await asyncio.to_thread(start_gmail_oauth, _request_base(request), account=account)
     if not result.get("ok"):
         # JSON for API clients; Settings uses fetch then window.location
         return JSONResponse(result, status_code=400)
@@ -340,10 +363,10 @@ async def gmail_oauth_start(request: Request) -> Any:
 
 
 @router.get("/oauth/gmail/start.json")
-async def gmail_oauth_start_json(request: Request) -> JSONResponse:
+async def gmail_oauth_start_json(request: Request, account: str = "") -> JSONResponse:
     from kazma_skills.native.email_manager.oauth_gmail import start_gmail_oauth
 
-    result = start_gmail_oauth(_request_base(request))
+    result = await asyncio.to_thread(start_gmail_oauth, _request_base(request), account=account)
     code = 200 if result.get("ok") else 400
     return JSONResponse(result, status_code=code)
 
@@ -396,8 +419,10 @@ async def gmail_oauth_callback(
         )
     email = quote(str(result.get("email") or ""))
     cal = "1" if result.get("calendar_ok") else "0"
+    # An extra account names itself, so the page can say which one it was.
+    acct = f"&account={quote(str(result['account']))}" if result.get("account") else ""
     return RedirectResponse(
-        f"{settings_url}&email_oauth=ok&provider=gmail&email={email}&calendar={cal}",
+        f"{settings_url}&email_oauth=ok&provider=gmail&email={email}&calendar={cal}{acct}",
         status_code=302,
     )
 
@@ -437,20 +462,20 @@ async def ms_set_client(body: MsClientBody) -> JSONResponse:
 
 
 @router.get("/oauth/microsoft/start")
-async def ms_oauth_start(request: Request) -> Any:
+async def ms_oauth_start(request: Request, account: str = "") -> Any:
     from kazma_skills.native.email_manager.oauth_ms_browser import start_ms_browser_oauth
 
-    result = start_ms_browser_oauth(_request_base(request))
+    result = await asyncio.to_thread(start_ms_browser_oauth, _request_base(request), account=account)
     if not result.get("ok"):
         return JSONResponse(result, status_code=400)
     return RedirectResponse(result["authorize_url"], status_code=302)
 
 
 @router.get("/oauth/microsoft/start.json")
-async def ms_oauth_start_json(request: Request) -> JSONResponse:
+async def ms_oauth_start_json(request: Request, account: str = "") -> JSONResponse:
     from kazma_skills.native.email_manager.oauth_ms_browser import start_ms_browser_oauth
 
-    result = start_ms_browser_oauth(_request_base(request))
+    result = await asyncio.to_thread(start_ms_browser_oauth, _request_base(request), account=account)
     code = 200 if result.get("ok") else 400
     return JSONResponse(result, status_code=code)
 
@@ -491,18 +516,19 @@ async def ms_oauth_callback(
         )
     provider = "outlook" if flag == "calendar_oauth" else "microsoft"
     email = quote(str(result.get("email") or ""))
+    acct = f"&account={quote(str(result['account']))}" if result.get("account") else ""
     return RedirectResponse(
-        f"{settings_url}&{flag}=ok&provider={provider}&email={email}",
+        f"{settings_url}&{flag}=ok&provider={provider}&email={email}{acct}",
         status_code=302,
     )
 
 
 @protected_router.post("/oauth/microsoft/device/start", dependencies=[Depends(_verify_same_origin)])
-async def ms_device_start() -> JSONResponse:
+async def ms_device_start(body: _DeviceStartBody | None = None) -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.oauth_ms import start_device_code_flow
 
-        result = await start_device_code_flow()
+        result = await start_device_code_flow(account=(body.account if body else ""))
         code = 200 if result.get("ok") else 400
         return JSONResponse(result, status_code=code)
     except Exception as exc:
@@ -532,26 +558,84 @@ async def ms_disconnect() -> JSONResponse:
 
 @router.get("/accounts")
 async def email_accounts() -> JSONResponse:
+    """Every mail account: the main ones (``source: main``), those added in
+    Settings (``settings``) and those in .env (``env``). Nothing secret."""
     try:
-        from kazma_skills.native.email_manager.credentials import (
-            account_config,
-            list_account_aliases,
-        )
+        from kazma_skills.native.email_manager.accounts import accounts_overview
 
-        aliases = list_account_aliases()
-        rows = []
-        for a in aliases:
-            cfg = account_config(a)
-            rows.append(
-                {
-                    "alias": a,
-                    "type": cfg.get("type") or "unknown",
-                    "address": cfg.get("address") or "",
-                    "has_password": bool(cfg.get("password")),
-                    "has_token": bool(cfg.get("access_token") or cfg.get("refresh_token")),
-                }
-            )
+        rows = await asyncio.to_thread(accounts_overview)
+        for row in rows:  # the fields the page read before 2026-09-29
+            row["has_password"] = row["auth"] == "password"
+            row["has_token"] = row["auth"] == "oauth"
         return JSONResponse({"accounts": rows, "count": len(rows)})
+    except Exception as exc:
+        return _safe_error(exc)
+
+
+@protected_router.post("/accounts", dependencies=[Depends(_verify_same_origin)])
+async def email_account_add(body: _AccountAddBody) -> JSONResponse:
+    """Add an extra account that signs in with a password. Its login is
+    tried first -- with the same code chat will use -- and a login that does
+    not work is refused with the server's answer, never kept."""
+    from kazma_skills.native.email_manager.accounts import (
+        add_password_account,
+        alias_problem,
+        normalize_alias,
+    )
+    from kazma_skills.native.email_manager.models import ListQuery
+    from kazma_skills.native.email_manager.router import (
+        EmailNotConnectedError,
+        backend_for_account,
+    )
+    from kazma_core.errors import validation_error
+
+    alias = normalize_alias(body.alias)
+    kind = body.type.strip().lower()
+    problem = await asyncio.to_thread(alias_problem, alias, kind=kind)
+    if problem:
+        return JSONResponse({"ok": False, "error": problem}, status_code=400)
+    hosts = {
+        field: value
+        for field in ("imap_host", "imap_port", "pop_host", "pop_port", "smtp_host", "smtp_port")
+        if (value := getattr(body, field)) not in (None, "")
+    }
+    password = body.password.strip().replace(" ", "")
+    cfg = {"alias": alias, "type": kind, "address": body.address.strip(), "password": password}
+    cfg.update({k: str(v) for k, v in hosts.items()})
+    try:
+        backend = backend_for_account(alias, cfg)
+        await asyncio.wait_for(backend.list_messages(ListQuery(limit=1)), timeout=45)
+    except EmailNotConnectedError as exc:
+        return JSONResponse({"ok": False, "error": exc.hint}, status_code=400)
+    except TimeoutError:
+        return JSONResponse(
+            {"ok": False, "error": "The mail server did not answer in 45 seconds; check the host."},
+            status_code=400,
+        )
+    except Exception as exc:  # noqa: BLE001 -- the login's own answer is the reply
+        return JSONResponse(
+            {"ok": False, "error": f"The login did not work: {validation_error(exc)}"},
+            status_code=400,
+        )
+    try:
+        row = await asyncio.to_thread(
+            add_password_account, alias, kind, cfg["address"], password, **hosts
+        )
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
+    except RuntimeError as exc:  # the vault did not keep the password
+        return _safe_error(exc)
+    return JSONResponse({"ok": True, "account": row, "message": f"Account “{alias}” added."})
+
+
+@protected_router.post("/accounts/{alias}/remove", dependencies=[Depends(_verify_same_origin)])
+async def email_account_remove(alias: str) -> JSONResponse:
+    """Forget an extra account added in Settings (its tokens and password)."""
+    try:
+        from kazma_skills.native.email_manager.accounts import remove_account
+
+        result = await asyncio.to_thread(remove_account, alias)
+        return JSONResponse(result, status_code=200 if result.get("ok") else 400)
     except Exception as exc:
         return _safe_error(exc)
 

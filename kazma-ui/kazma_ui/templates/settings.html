@@ -2797,21 +2797,82 @@
                 </details>
             </div>
 
-            <!-- Multi-account list -->
-            <div style="margin-top:24px;" x-show="emailAccounts.length > 0" x-cloak>
-                <h4 style="margin:0 0 8px 0;">{{ t('settings.email_multi_accounts') }}</h4>
-                <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_multi_accounts_hint') }}</p>
-                <div class="account-list-table">
-                    <template x-for="a in emailAccounts" :key="a.alias">
-                        <div style="display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle);font-size:0.85rem;">
-                            <strong translate="no" x-text="a.alias"></strong>
-                            <span translate="no" x-text="a.type"></span>
-                            <code translate="no" x-text="a.address || '—'"></code>
-                            <span x-text="(a.has_password || a.has_token) ? '●' : '○'"
-                                  :title="(a.has_password || a.has_token) ? t('settings.email_account_signed_in') : t('settings.email_account_incomplete')"
-                                  :aria-label="(a.has_password || a.has_token) ? t('settings.email_account_signed_in') : t('settings.email_account_incomplete')"></span>
+            <!-- Other accounts -->
+            {# More mailboxes than the main Gmail and Microsoft ones above
+               (email_manager.accounts, 2026-09-29). Each signs in on its own
+               under a short name chat uses ("check my work inbox"), keeps its
+               tokens under that name only, and brings its calendar with its
+               sign-in. Accounts written in .env are listed, not changed. #}
+            <div class="card" style="padding:16px;border:1px solid var(--border-subtle);margin-top:16px;">
+                <h4 style="margin:0 0 8px 0;">{{ t('settings.email_accounts_title') }}</h4>
+                <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_accounts_hint') }}</p>
+                <template x-for="a in otherEmailAccounts()" :key="a.alias">
+                    <div class="email-account-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--border-subtle);">
+                        <strong translate="no" style="min-width:7rem;" x-text="a.alias"></strong>
+                        <span class="badge" translate="no" style="font-size:0.7rem;" x-text="emailAccountKind(a.type)"></span>
+                        <code translate="no" x-text="a.address || '—'"></code>
+                        <span class="badge" style="font-size:0.7rem;" :class="a.auth === 'incomplete' ? 'badge-basic' : 'badge-stdio'" x-text="emailAccountAuth(a)"></span>
+                        <span class="badge" style="font-size:0.7rem;" x-show="a.calendar" x-cloak>{{ t('settings.email_account_calendar') }}</span>
+                        <span class="badge" translate="no" style="font-size:0.7rem;" x-show="a.source === 'env'" x-cloak title="{{ t('settings.email_account_env_hint') }}">.env</span>
+                        <span style="flex:1;"></span>
+                        <button class="btn btn-secondary btn-sm" x-show="a.removable && a.auth !== 'password' && (a.type === 'gmail' || a.type === 'microsoft')" x-cloak
+                                @click="reconnectEmailAccount(a)" :disabled="emailSaving">{{ t('settings.email_account_reconnect') }}</button>
+                        <button class="btn btn-secondary btn-sm" x-show="a.removable" x-cloak
+                                @click="removeEmailAccount(a)" :disabled="emailSaving">{{ t('settings.email_account_remove') }}</button>
+                    </div>
+                </template>
+                <p x-show="emailAccountsLoaded && otherEmailAccounts().length === 0" x-cloak style="font-size:0.85rem;color:var(--text-tertiary);margin:0 0 8px 0;">{{ t('settings.email_accounts_none') }}</p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+                    <button class="btn btn-primary btn-sm" @click="addGoogleAccount()" :disabled="emailSaving">{{ t('settings.email_account_add_google') }}</button>
+                    <button class="btn btn-primary btn-sm" @click="addMicrosoftAccount()" :disabled="emailSaving">{{ t('settings.email_account_add_microsoft') }}</button>
+                    <button class="btn btn-secondary btn-sm" @click="emailAccountForm.open = !emailAccountForm.open" :disabled="emailSaving">{{ t('settings.email_account_add_password') }}</button>
+                </div>
+                <details style="margin-top:8px;">
+                    <summary style="cursor:pointer;font-size:0.8rem;color:var(--text-tertiary);">{{ t('settings.email_account_code_fallback') }}</summary>
+                    <div style="margin-top:8px;">
+                        <button class="btn btn-secondary btn-sm" @click="addMicrosoftAccountWithCode()" :disabled="accountMsPolling || emailSaving">{{ t('settings.email_account_code_start') }}</button>
+                        <div x-show="accountMsDevice.user_code" x-cloak style="margin-top:8px;padding:10px;border-radius:8px;background:var(--bg-primary);border:1px dashed var(--accent, #5e6ad2);">
+                            <p style="margin:0 0 6px 0;font-size:0.85rem;">{{ t('settings.email_ms_device_hint') }}</p>
+                            <div translate="no" style="font-size:1.3rem;font-weight:700;letter-spacing:0.12em;font-family:var(--font-mono);" x-text="accountMsDevice.user_code"></div>
+                            <p style="margin:6px 0 0 0;font-size:0.85rem;">
+                                <a :href="accountMsDevice.verification_uri" target="_blank" rel="noopener" style="color:var(--accent);" translate="no"
+                                   x-text="accountMsDevice.verification_uri"></a>
+                            </p>
+                            <p x-show="accountMsPolling" x-cloak style="margin:6px 0 0 0;font-size:0.8rem;color:var(--warning);">{{ t('settings.email_ms_polling') }}</p>
                         </div>
-                    </template>
+                    </div>
+                </details>
+                <div x-show="emailAccountForm.open" x-cloak style="margin-top:12px;">
+                    <div style="display:grid;gap:8px;max-width:520px;">
+                        <label style="font-size:0.8rem;">{{ t('settings.email_account_form_name') }}
+                            <input class="form-input" type="text" translate="no" x-model="emailAccountForm.alias" placeholder="work" autocomplete="off">
+                        </label>
+                        <label style="font-size:0.8rem;">{{ t('settings.email_account_form_type') }}
+                            <select class="form-select" x-model="emailAccountForm.type">
+                                <option value="gmail">{{ t('settings.email_account_form_type_gmail') }}</option>
+                                <option value="microsoft">{{ t('settings.email_account_form_type_microsoft') }}</option>
+                                <option value="imap">{{ t('settings.email_account_form_type_imap') }}</option>
+                                <option value="pop">{{ t('settings.email_account_form_type_pop') }}</option>
+                            </select>
+                        </label>
+                        <label style="font-size:0.8rem;">{{ t('settings.email_account_form_address') }}
+                            <input class="form-input" type="email" translate="no" x-model="emailAccountForm.address" autocomplete="off">
+                        </label>
+                        <label style="font-size:0.8rem;">{{ t('settings.email_account_form_password') }}
+                            <input class="form-input" type="password" x-model="emailAccountForm.password" autocomplete="new-password">
+                        </label>
+                        <label style="font-size:0.8rem;" x-show="emailAccountForm.type === 'imap' || emailAccountForm.type === 'pop'" x-cloak>{{ t('settings.email_account_form_host') }}
+                            <input class="form-input" type="text" translate="no" x-model="emailAccountForm.host" placeholder="imap.example.com" autocomplete="off">
+                        </label>
+                        <label style="font-size:0.8rem;" x-show="emailAccountForm.type === 'imap' || emailAccountForm.type === 'pop'" x-cloak>{{ t('settings.email_account_form_smtp_host') }}
+                            <input class="form-input" type="text" translate="no" x-model="emailAccountForm.smtp_host" placeholder="smtp.example.com" autocomplete="off">
+                        </label>
+                        <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0;">{{ t('settings.email_account_form_hint') }}</p>
+                        <div>
+                            <button class="btn btn-primary btn-sm" @click="addPasswordAccount()"
+                                    :disabled="emailSaving || !emailAccountForm.alias.trim() || !emailAccountForm.address.trim() || !emailAccountForm.password">{{ t('settings.email_account_form_submit') }}</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 

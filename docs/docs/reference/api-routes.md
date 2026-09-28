@@ -167,19 +167,21 @@ HTML page: `GET /documents` (session). TUI Documents tab uses the same coordinat
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/email/status` | Session | Active provider, auth modes, presets summary |
-| GET | `/api/email/accounts` | Session | Multi-account aliases (env) |
+| GET | `/api/email/accounts` | Session | Every mail account: `source` `main` / `settings` / `env`, name, type, address, `auth` (`oauth` / `password` / `incomplete`), `calendar`, `removable` |
+| POST | `/api/email/accounts` | Session | Add another account that signs in with a password (`alias`, `type`, `address`, `password`, hosts); the login is tried first and a failing one is refused (400) |
+| POST | `/api/email/accounts/{alias}/remove` | Session | Forget an account added in Settings (its tokens and password) |
 | GET | `/api/email/presets` | Session | Gmail/Microsoft IMAP/POP host presets |
 | POST | `/api/email/protocol/connect` | Session | Save IMAP/POP for gmail\|microsoft\|generic |
 | POST | `/api/email/protocol/disconnect` | Session | Clear protocol + OAuth tokens for provider |
 | POST | `/api/email/gmail/connect` | Session | Gmail app-password → IMAP |
 | POST | `/api/email/gmail/disconnect` | Session | Clear Gmail creds |
 | POST | `/api/email/oauth/gmail/client` | Session | Save Google OAuth client id/secret |
-| GET | `/api/email/oauth/gmail/start` · `start.json` | Session | Browser OAuth redirect / JSON |
+| GET | `/api/email/oauth/gmail/start` · `start.json` | Session | Browser OAuth redirect / JSON; `?account=<name>` signs in another account under that name |
 | GET | `/api/email/oauth/gmail/callback` | Open (OAuth) | Token exchange; redirects to Settings |
 | POST | `/api/email/oauth/microsoft/client` | Session | Save Azure app id/secret |
-| GET | `/api/email/oauth/microsoft/start` · `start.json` | Session | Browser OAuth |
+| GET | `/api/email/oauth/microsoft/start` · `start.json` | Session | Browser OAuth; `?account=<name>` for another account |
 | GET | `/api/email/oauth/microsoft/callback` | Open (OAuth) | Token exchange |
-| POST | `/api/email/oauth/microsoft/device/start` · `…/poll` | Session | Device-code fallback |
+| POST | `/api/email/oauth/microsoft/device/start` · `…/poll` | Session | Device-code fallback; body `{"account": "<name>"}` for another account |
 | POST | `/api/email/oauth/microsoft/disconnect` | Session | Clear Microsoft mail: tokens, the sign-in's address and scopes (Outlook Calendar keeps its own switch) |
 | GET | `/api/calendar/status` | Session | Each calendar's state and address, and the active provider |
 | GET | `/api/calendar/oauth/google/start` · `start.json` | Session | Google Calendar sign-in (callback: the Gmail one) |

@@ -332,11 +332,14 @@
                         const prov = url.searchParams.get('provider') || 'email';
                         const em = url.searchParams.get('email') || '';
                         const cal = url.searchParams.get('calendar');
-                        let msg = prov === 'gmail'
-                            ? _k('settings.int.gmail_connected', 'Gmail connected')
-                            : _k('settings.int.microsoft_connected', 'Microsoft connected');
+                        const acct = url.searchParams.get('account') || '';
+                        let msg = acct
+                            ? _k('settings.int.email_account_connected', 'Account “{name}” connected', { name: acct })
+                            : prov === 'gmail'
+                                ? _k('settings.int.gmail_connected', 'Gmail connected')
+                                : _k('settings.int.microsoft_connected', 'Microsoft connected');
                         if (em) msg += _k('settings.int.as_account', ' as {email}', { email: em });
-                        if (prov === 'gmail' && cal === '0') {
+                        if (prov === 'gmail' && cal === '0' && !acct) {
                             msg += _k('settings.int.calendar_not_granted', ' — Calendar was not granted; use Connect Google Calendar');
                         }
                         showToast(msg, 'success');
@@ -345,6 +348,7 @@
                         url.searchParams.delete('email');
                         url.searchParams.delete('msg');
                         url.searchParams.delete('calendar');
+                        url.searchParams.delete('account');
                         history.replaceState(null, '', url.pathname + url.search + url.hash);
                     } else if (oauth === 'error') {
                         showToast(_k('settings.int.oauth_failed', 'OAuth failed: ') + (url.searchParams.get('msg') || 'unknown'), 'error');
@@ -385,12 +389,212 @@
                     if (mm === 'imap' || mm === 'pop' || mm === 'oauth') this.emailMsMode = mm;
                 }
                 const acc = await this._fetch('/api/email/accounts');
-                if (acc && Array.isArray(acc.accounts)) this.emailAccounts = acc.accounts;
+                if (acc && Array.isArray(acc.accounts)) {
+                    this.emailAccounts = acc.accounts;
+                    this.emailAccountsLoaded = true;
+                }
                 const cal = await this._fetch('/api/calendar/status');
                 if (cal && !cal.error) Object.assign(this.calendarStatus, cal);
             } finally {
                 this.emailLoading = false;
             }
+        },
+
+        // ── Other accounts (more mailboxes than the main two) ──────────
+        // Each signs in on its own, under a short name chat uses ("check my
+        // work inbox"); its tokens are kept under that name only.
+
+        otherEmailAccounts() {
+            return (this.emailAccounts || []).filter((a) => a.source !== 'main');
+        },
+
+        emailAccountKind(type) {
+            const names = { gmail: 'Gmail', microsoft: 'Microsoft', imap: 'IMAP', pop: 'POP' };
+            return names[type] || type || '—';
+        },
+
+        emailAccountAuth(a) {
+            if (a.auth === 'oauth') return _k('settings.email_account_signed_in', 'Signed in');
+            if (a.auth === 'password') return _k('settings.email_account_app_password', 'Password');
+            return _k('settings.email_account_incomplete', 'Sign-in incomplete');
+        },
+
+        /* The name a new account is known by in chat. A free default is
+           offered ("gmail-2"); letters, digits and hyphens only. */
+        async _askAccountName(kind) {
+            const taken = new Set((this.emailAccounts || []).map((a) => a.alias));
+            const stem = kind === 'microsoft' ? 'outlook' : 'gmail';
+            let n = 2;
+            while (taken.has(stem + '-' + n)) n += 1;
+            const name = await window.kazmaPrompt({
+                title: kind === 'microsoft'
+                    ? _k('settings.email_account_name_title_microsoft', 'Add a Microsoft account')
+                    : _k('settings.email_account_name_title_google', 'Add a Google account'),
+                message: _k('settings.email_account_name_prompt', 'A short name for this account, used in chat (for example: work, personal). Letters a–z, digits and hyphens.'),
+                defaultValue: stem + '-' + n,
+                confirmText: _k('settings.email_account_continue', 'Continue to sign in'),
+            });
+            if (name == null) return null;
+            const clean = String(name).trim().toLowerCase().replace(/[\s_]+/g, '-').replace(/[^a-z0-9-]/g, '');
+            if (!clean) {
+                showToast(_k('settings.int.email_account_bad_name', 'Name the account with letters a–z, digits and hyphens.'), 'error');
+                return null;
+            }
+            return clean;
+        },
+
+        async _startAccountSignIn(kind, alias) {
+            const base = kind === 'microsoft'
+                ? '/api/email/oauth/microsoft/start.json'
+                : '/api/email/oauth/gmail/start.json';
+            this.emailSaving = true;
+            try {
+                const resp = await fetch(base + '?account=' + encodeURIComponent(alias), { credentials: 'same-origin' });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok || !data.authorize_url) {
+                    throw new Error(data.error || ('HTTP ' + resp.status));
+                }
+                window.location.href = data.authorize_url;
+            } catch (e) {
+                showToast(_k('settings.int.email_account_failed', 'Could not add the account: {error}', { error: e.message }), 'error');
+                this.emailSaving = false;
+            }
+        },
+
+        async addGoogleAccount() {
+            const alias = await this._askAccountName('gmail');
+            if (alias) await this._startAccountSignIn('gmail', alias);
+        },
+
+        async addMicrosoftAccount() {
+            if ((this.emailMs.client_id || '').trim()) await this.saveMsClient();
+            const alias = await this._askAccountName('microsoft');
+            if (alias) await this._startAccountSignIn('microsoft', alias);
+        },
+
+        async reconnectEmailAccount(a) {
+            if (!a || !a.alias) return;
+            await this._startAccountSignIn(a.type === 'microsoft' ? 'microsoft' : 'gmail', a.alias);
+        },
+
+        /* A Microsoft account by code, for an Azure app registered for the
+           device code only (Microsoft refuses the redirect). */
+        async addMicrosoftAccountWithCode() {
+            const alias = await this._askAccountName('microsoft');
+            if (!alias) return;
+            this._stopAccountMsPoll();
+            try {
+                const resp = await fetch('/api/email/oauth/microsoft/device/start', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ account: alias }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok || !data.device_code) throw new Error(data.error || ('HTTP ' + resp.status));
+                this.accountMsDevice = {
+                    user_code: data.user_code || '',
+                    verification_uri: data.verification_uri_complete || data.verification_uri || 'https://microsoft.com/devicelogin',
+                    device_code: data.device_code,
+                    alias,
+                };
+            } catch (e) {
+                showToast(_k('settings.int.email_account_failed', 'Could not add the account: {error}', { error: e.message }), 'error');
+                return;
+            }
+            this.accountMsPolling = true;
+            const device_code = this.accountMsDevice.device_code;
+            this.accountMsPollTimer = setInterval(async () => {
+                let data = {};
+                try {
+                    const resp = await fetch('/api/email/oauth/microsoft/device/poll', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        body: JSON.stringify({ device_code }),
+                    });
+                    data = await resp.json().catch(() => ({}));
+                } catch (e) {
+                    return;  // network hiccup: keep polling
+                }
+                if (data.ok && data.status === 'authorized') {
+                    this._stopAccountMsPoll();
+                    showToast(_k('settings.int.email_account_connected', 'Account “{name}” connected', { name: data.account || alias })
+                        + (data.email ? _k('settings.int.as_account', ' as {email}', { email: data.email }) : ''), 'success');
+                    await this.loadEmailStatus();
+                } else if (data.status === 'failed' || data.status === 'expired') {
+                    this._stopAccountMsPoll();
+                    showToast(data.error || _k('settings.int.authorization_failed', 'Authorization failed'), 'error');
+                }
+            }, 5000);
+        },
+
+        _stopAccountMsPoll() {
+            if (this.accountMsPollTimer) clearInterval(this.accountMsPollTimer);
+            this.accountMsPollTimer = null;
+            this.accountMsPolling = false;
+            this.accountMsDevice = { user_code: '', verification_uri: '', device_code: '', alias: '' };
+        },
+
+        /* An account that signs in with a password (an app password for
+           Gmail). The server tries the login before keeping it. */
+        async addPasswordAccount() {
+            const f = this.emailAccountForm;
+            const body = {
+                alias: (f.alias || '').trim(),
+                type: f.type,
+                address: (f.address || '').trim(),
+                password: f.password || '',
+            };
+            if (f.type === 'imap' && f.host) body.imap_host = f.host.trim();
+            if (f.type === 'pop' && f.host) body.pop_host = f.host.trim();
+            if ((f.type === 'imap' || f.type === 'pop') && f.smtp_host) body.smtp_host = f.smtp_host.trim();
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/accounts', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify(body),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+                this.emailAccountForm = { open: false, alias: '', type: 'gmail', address: '', password: '', host: '', smtp_host: '' };
+                showToast(_k('settings.int.email_account_added', 'Account “{name}” added', { name: (data.account && data.account.alias) || body.alias }), 'success');
+            } catch (e) {
+                // Never keep the password in the page after a failed try.
+                this.emailAccountForm.password = '';
+                showToast(_k('settings.int.email_account_failed', 'Could not add the account: {error}', { error: e.message }), 'error');
+            } finally {
+                this.emailSaving = false;
+            }
+            await this.loadEmailStatus();
+        },
+
+        async removeEmailAccount(a) {
+            if (!a || !a.removable) return;
+            if (!(await window.kazmaConfirm({
+                title: _k('settings.email_account_remove_title', 'Remove account'),
+                message: _k('settings.email_account_remove_confirm', 'Remove “{name}” ({address})? Kazma forgets its sign-in and stops using it; the mailbox itself is not touched.', { name: a.alias, address: a.address || '—' }),
+                confirmText: _k('settings.email_account_remove', 'Remove'),
+                danger: true,
+            }))) return;
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/accounts/' + encodeURIComponent(a.alias) + '/remove', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+                showToast(_k('settings.int.email_account_removed', 'Account “{name}” removed', { name: a.alias }), 'success');
+            } catch (e) {
+                showToast(_k('settings.int.disconnect_failed', 'Disconnect failed: ') + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
+            }
+            await this.loadEmailStatus();
         },
 
         async saveGmailProtocol(protocol) {

@@ -23,6 +23,7 @@ Without credentials, every response is prefixed with **`[sandbox mode]`**. Data 
 
 | Tool | Purpose | HITL |
 |------|---------|------|
+| `email_accounts` | Every connected mailbox, its name, address and calendar | No |
 | `email_list` | List/search folder | No |
 | `email_get` | Full message body | No |
 | `email_send` | send / reply / forward / draft | **Yes** |
@@ -30,13 +31,13 @@ Without credentials, every response is prefixed with **`[sandbox mode]`**. Data 
 | `email_categorize` | read/star/labels/move | **Yes** |
 | `email_analyze` | summary, actions, phishing | No |
 
-Common args: `provider` (`auto`\|`sandbox`\|`gmail`\|`microsoft`\|`imap`\|`pop`), optional `account` (multi-account alias).
+Common args: `provider` (`auto`\|`sandbox`\|`gmail`\|`microsoft`\|`imap`\|`pop`), optional `account` (which mailbox: an account's name or its address; see [More than one account](#more-than-one-account)).
 
 ## Provider resolution (`auto`)
 
 1. Explicit `provider` / `account` on the tool call  
 2. `EMAIL_DEFAULT_PROVIDER`  
-3. First configured real account (Gmail → Microsoft → generic IMAP/POP → multi-account aliases)  
+3. First configured real account (Gmail → Microsoft → generic IMAP/POP → the other accounts)  
 4. **Sandbox**
 
 A provider or account named in steps 1–2 that is **not connected is refused**
@@ -228,7 +229,44 @@ EMAIL_MS_REDIRECT_URI=http://127.0.0.1:9090/api/email/oauth/microsoft/callback  
 
 Set `KAZMA_PUBLIC_URL=https://your.domain` behind a reverse proxy so redirect URIs resolve correctly.
 
-## Multi-account aliases
+## More than one account
+
+The Gmail and Microsoft cards connect the **main** accounts. Any number of
+other mailboxes -- three Gmail accounts, a second Outlook, a work IMAP server
+-- are added on **Settings → Email → Other accounts**:
+
+- **Add Google account** / **Add Microsoft account**: you give the account a
+  short name used in chat (`work`, `personal`; letters a–z, digits and
+  hyphens), then sign in. The sign-in asks which account to use, so a browser
+  signed into several Google or Microsoft accounts picks the one you choose.
+  The same Google or Microsoft app registration signs every account in, and
+  its redirect URI is the one you already registered. When Microsoft refuses
+  the redirect (an Azure app registered for the device code only), **Add a
+  Microsoft account with a code** does the same by code.
+- **Add with a password**: an app password for Gmail, or an IMAP/POP server
+  with its host. Kazma tries the login before it keeps the account, and
+  refuses one that does not work with the server's answer.
+- **Reconnect** signs an account in again under its name; **Remove** forgets
+  its sign-in (the mailbox itself is not touched). An address that is already
+  connected -- as the main account or another one -- is refused.
+
+In chat, name the account or its address: *"check my work inbox"*, *"send
+this from personal@gmail.com"*, *"what's on the team calendar tomorrow"*. The
+agent's `email_accounts` tool lists every account with its name, address,
+whether it is signed in and whether its calendar is usable, and every email
+and calendar tool takes `account=` (a name, an address, or `gmail` /
+`microsoft` for a main one). With no account named, the main account of the
+provider answers, as before. An approval card for sending shows the account.
+
+A Google or Microsoft account's **calendar comes with its sign-in** when the
+consent screen grants calendar access; a password account has no calendar.
+
+Each account keeps its own tokens (the vault, under `email.account.<name>.*`)
+and every refresh writes that account's keys only. The list itself (names,
+addresses, which have a calendar) is the setting `email.accounts`.
+
+Accounts can still be written into `.env`; they are listed with a `.env`
+badge and changed there, not in Settings:
 
 ```bash
 EMAIL_ACCOUNTS=personal,work
@@ -236,13 +274,7 @@ EMAIL_ACCOUNTS=personal,work
 EMAIL_ACCOUNT_PERSONAL_TYPE=gmail
 EMAIL_ACCOUNT_PERSONAL_ADDRESS=me@gmail.com
 EMAIL_ACCOUNT_PERSONAL_PASSWORD=app-password
-
-EMAIL_ACCOUNT_WORK_TYPE=microsoft
-EMAIL_ACCOUNT_WORK_REFRESH_TOKEN=...
-EMAIL_ACCOUNT_WORK_CLIENT_ID=...
 ```
-
-Use in chat: *List work inbox* → agent should pass `account=work`, or call tools with `account="work"`.
 
 Status:
 

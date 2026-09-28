@@ -38,12 +38,18 @@ class GmailApiBackend:
         client_id: str = "",
         client_secret: str = "",
         email_address: str = "",
+        account_alias: str = "",
     ) -> None:
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.client_id = client_id
         self.client_secret = client_secret
         self.email_address = email_address
+        # An extra account (email_manager.accounts) keeps its refreshed tokens
+        # under its own name; only the main account writes email.gmail.*.
+        self.account_alias = account_alias or ""
+        if self.account_alias:
+            self.name = f"gmail_oauth:{self.account_alias}"
         # Serializes token refresh so N concurrent 401s don't each POST a
         # refresh request (which can invalidate rotated refresh tokens and
         # race on self.access_token). Audit M3.
@@ -106,9 +112,14 @@ class GmailApiBackend:
             self.refresh_token,
             client_id=self.client_id,
             client_secret=self.client_secret,
+            persist=not self.account_alias,
         )
         self.access_token = access
         self.refresh_token = refresh
+        if self.account_alias:
+            from kazma_skills.native.email_manager.accounts import persist_account_tokens
+
+            await asyncio.to_thread(persist_account_tokens, self.account_alias, access, refresh)
 
     def _map(self, meta: dict[str, Any], body: str = "") -> EmailMessage:
         headers = {h["name"].lower(): h["value"] for h in (meta.get("payload") or {}).get("headers") or []}

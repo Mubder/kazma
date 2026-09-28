@@ -17,14 +17,23 @@ _GRAPH = "https://graph.microsoft.com/v1.0/me"
 _refresh_lock = asyncio.Lock()
 
 
-def _keep_refreshed_tokens(access: str, new_refresh: str, used_refresh: str, scope: str) -> None:
+def _keep_refreshed_tokens(
+    access: str, new_refresh: str, used_refresh: str, scope: str, alias: str = ""
+) -> None:
     """Store a refreshed calendar grant (vault I/O: run off the loop).
 
-    Mail gets the new tokens only while it holds this very grant (a mail
-    sign-in copies the same tokens to the calendar). A calendar refresh used
-    to write them unconditionally -- back after the owner disconnected
-    Microsoft mail, and over a mailbox signed in as another account.
+    An extra account's (*alias*) goes to its own keys only -- its mail and
+    calendar share that grant. For the main account, mail gets the new tokens
+    only while it holds this very grant (a mail sign-in copies the same
+    tokens to the calendar). A calendar refresh used to write them
+    unconditionally -- back after the owner disconnected Microsoft mail, and
+    over a mailbox signed in as another account.
     """
+    if alias:
+        from kazma_skills.native.email_manager.accounts import persist_account_tokens
+
+        persist_account_tokens(alias, access, new_refresh)
+        return
     from kazma_skills.native.calendar.credentials import persist_microsoft_tokens
     from kazma_skills.native.email_manager.credentials import vault_retrieve, vault_store
 
@@ -47,12 +56,18 @@ class OutlookCalendarBackend:
         client_id: str = "",
         client_secret: str = "",
         tenant_id: str = "common",
+        account_alias: str = "",
     ) -> None:
         self._token = access_token
         self._refresh = refresh_token
         self._client_id = client_id
         self._client_secret = client_secret
         self._tenant = tenant_id or "common"
+        # An extra account's calendar (email_manager.accounts) keeps its
+        # refreshes under its own name.
+        self._alias = account_alias or ""
+        if self._alias:
+            self.name = f"outlook:{self._alias}"
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._token}"}
@@ -101,6 +116,7 @@ class OutlookCalendarBackend:
                         new_refresh,
                         used_refresh,
                         str(payload.get("scope") or ""),
+                        self._alias,
                     )
                     return True
             except Exception as exc:

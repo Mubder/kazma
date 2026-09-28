@@ -53,7 +53,7 @@ def ms_redirect_uri(request_base: str | None = None) -> str:
 
 
 def start_ms_browser_oauth(
-    request_base: str | None = None, *, purpose: str = "mail"
+    request_base: str | None = None, *, purpose: str = "mail", account: str = ""
 ) -> dict[str, Any]:
     """Authorize URL for a Microsoft sign-in. *purpose* ``"calendar"`` is the
     calendar card's button: the callback then keeps the tokens for Outlook
@@ -61,6 +61,16 @@ def start_ms_browser_oauth(
     redirect URI registered in Azure."""
     if purpose not in ("mail", "calendar"):
         raise ValueError(f"unknown Microsoft sign-in purpose: {purpose!r}")
+    alias = ""
+    if account:
+        # An extra Microsoft account (email_manager.accounts): one grant for
+        # its mail and calendar, kept under its own name.
+        from kazma_skills.native.email_manager.accounts import alias_problem, normalize_alias
+
+        alias = normalize_alias(account)
+        problem = alias_problem(alias, kind="microsoft")
+        if problem:
+            return {"ok": False, "code": "bad_account_name", "error": problem}
     cid = _client_id()
     if not cid:
         return {
@@ -69,7 +79,7 @@ def start_ms_browser_oauth(
         }
     tenant = _tenant()
     redirect = ms_redirect_uri(request_base)
-    state = new_state("microsoft", redirect_uri=redirect, tenant=tenant, purpose=purpose)
+    state = new_state("microsoft", redirect_uri=redirect, tenant=tenant, purpose=purpose, account=alias)
     # confidential clients need secret; public clients can omit
     params = {
         "client_id": cid,
@@ -78,6 +88,9 @@ def start_ms_browser_oauth(
         "response_mode": "query",
         "scope": SCOPES,
         "state": state,
+        # With several Microsoft accounts in the browser, sign in the one the
+        # owner picks, not whichever is active.
+        "prompt": "select_account",
     }
     url = authorize_redirect(
         f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize",
@@ -123,6 +136,22 @@ async def finish_ms_browser_oauth(code: str, state: str) -> dict[str, Any]:
             }
     if not (payload.get("access_token") or ""):
         return {"ok": False, "error": "No access_token from Microsoft"}
+    if meta.get("account"):
+        import asyncio
+
+        from kazma_skills.native.email_manager.oauth_ms import store_microsoft_account_tokens
+
+        try:
+            row = await asyncio.to_thread(store_microsoft_account_tokens, payload, meta["account"])
+        except (ValueError, RuntimeError) as exc:
+            return {"ok": False, "purpose": "mail", "account": meta["account"], "error": str(exc)}
+        return {
+            "ok": True,
+            "purpose": "mail",
+            "account": row["alias"],
+            "email": row.get("address") or "",
+            "message": f"Microsoft account “{row['alias']}” connected.",
+        }
     if meta.get("purpose") == "calendar":
         from kazma_skills.native.email_manager.oauth_ms import store_microsoft_calendar_tokens
 

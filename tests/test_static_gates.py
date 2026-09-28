@@ -1595,6 +1595,9 @@ FENCED_TOOL_FUNCTIONS: dict[str, dict[str, bool]] = {
         "read_url_to_file": False,
     },
     "kazma-skills/kazma_skills/native/email_manager/tools.py": {
+        # The owner's own account list: names they chose, addresses their
+        # sign-ins returned. No sender's text.
+        "email_accounts": False,
         # A mailbox is the one inbound channel anyone on the internet can
         # write to. Anything echoing a sender's text must fence.
         "email_list": True,

@@ -1,24 +1,39 @@
 name: email-manager
 version: 0.1.0
 description: >
-  Full email integration: list/get/send/delete/categorize/analyze.
+  Full email integration: list/get/send/delete/categorize/analyze, across every
+  connected mailbox (the main Gmail and Microsoft accounts and any others added
+  in Settings; email_accounts lists them).
   Providers: sandbox (default without creds), Gmail IMAP/SMTP, Microsoft Graph, generic IMAP.
 author: Kazma Team
 license: MIT
 
 tools:
+  email_accounts:
+    arabic_name: "حسابات البريد"
+    description: >
+      List every mail account Kazma can use: the main Gmail and Microsoft
+      accounts and any others added in Settings, with each one's name,
+      address, whether it is signed in and whether its calendar is usable.
+      Call it when the user names an account ("my work email", an address)
+      or before choosing one; pass the name or address as account= to the
+      email and calendar tools.
+    category: email
+    prompt_chain:
+      - "اعرض حسابات البريد المتصلة"
   email_list:
     arabic_name: "قائمة البريد"
     description: >
       List, search, and page emails in a folder (INBOX default).
-      Args: folder, query, limit, offset, unread_only, provider (auto|sandbox|gmail|microsoft|imap), account (optional multi-account alias).
+      Args: folder, query, limit, offset, unread_only, provider (auto|sandbox|gmail|microsoft|imap), account (which mailbox: an account name or address from email_accounts; empty = the main one).
     category: email
     prompt_chain:
       - "اعرض رسائل البريد في الصندوق"
   email_get:
     arabic_name: "قراءة رسالة"
     description: >
-      Fetch full email by message_id. Args: message_id, include_body, max_body_chars, provider.
+      Fetch full email by message_id. Args: message_id, include_body, max_body_chars, provider,
+      account (which mailbox: an account name or address from email_accounts; empty = the main one) -- the account that listed the message.
     category: email
     prompt_chain:
       - "اقرأ نص الرسالة بالكامل"
@@ -26,7 +41,8 @@ tools:
     arabic_name: "إرسال بريد"
     description: >
       Send, reply, forward, or save draft. HITL required.
-      Args: to, subject, body, action (send|reply|forward|draft), cc, message_id, body_format, provider.
+      Args: to, subject, body, action (send|reply|forward|draft), cc, message_id, body_format, provider,
+      account (which mailbox: an account name or address from email_accounts; empty = the main one) -- the account it is sent from.
     category: email
     prompt_chain:
       - "أرسل أو احفظ مسودة بريد (يتطلب موافقة)"
@@ -34,7 +50,7 @@ tools:
     arabic_name: "حذف بريد"
     description: >
       Move message to trash or permanently delete. HITL required.
-      Args: message_id, permanent, provider.
+      Args: message_id, permanent, provider, account (which mailbox: an account name or address from email_accounts; empty = the main one).
     category: email
     prompt_chain:
       - "احذف الرسالة أو انقلها إلى المهملات (يتطلب موافقة)"
@@ -42,7 +58,8 @@ tools:
     arabic_name: "تصنيف بريد"
     description: >
       Mark read/unread, star/flag, add/remove labels, move folder. HITL required.
-      Args: message_id, mark_read, star, add_labels, remove_labels, move_to_folder, provider.
+      Args: message_id, mark_read, star, add_labels, remove_labels, move_to_folder, provider,
+      account (which mailbox: an account name or address from email_accounts; empty = the main one).
     category: email
     prompt_chain:
       - "صنّف الرسالة أو علّمها كمقروءة (يتطلب موافقة)"
@@ -50,7 +67,7 @@ tools:
     arabic_name: "تحليل بريد"
     description: >
       Summarize email, extract action items/deadlines, sentiment, phishing risk.
-      Args: message_id or raw_text, focus (full|security|actions), provider.
+      Args: message_id or raw_text, focus (full|security|actions), provider, account (which mailbox: an account name or address from email_accounts; empty = the main one).
     category: email
     prompt_chain:
       - "حلّل الرسالة للتلخيص والمخاطر والإجراءات"
