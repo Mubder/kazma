@@ -752,14 +752,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "معرّف المستأجر",
         "en": "Tenant ID",
     },
-    "settings.email_multi_accounts": {
-        "ar": "حسابات متعددة (env)",
-        "en": "Multi-account aliases (env)",
-    },
-    "settings.email_multi_accounts_hint": {
-        "ar": "تُضبط عبر متغيرات EMAIL_ACCOUNTS / EMAIL_ACCOUNT_*.",
-        "en": "Configured via EMAIL_ACCOUNTS / EMAIL_ACCOUNT_* environment variables.",
-    },
     "settings.email_not_connected": {
         "ar": "غير متصل",
         "en": "Not connected",
@@ -4827,5 +4819,149 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.calendar_outlook_code_start": {
         "ar": "احصل على رمز لتقويم Outlook",
         "en": "Get a code for Outlook Calendar",
+    },
+    "settings.email_accounts_title": {
+        "ar": "حسابات أخرى",
+        "en": "Other accounts",
+    },
+    "settings.email_accounts_hint": {
+        "ar": "صناديق بريد أخرى من Google أو Microsoft أو IMAP إلى جانب الحسابين الرئيسيين أعلاه. في المحادثة، اذكر اسم الحساب أو عنوانه («تحقق من بريد العمل»، «أرسل من you@example.com»)؛ وإن لم تذكر حسابًا يستخدم Kazma الحساب الرئيسي. ويأتي تقويم حساب Google أو Microsoft مع تسجيل دخوله.",
+        "en": "More Google, Microsoft or IMAP mailboxes beside the main ones above. In chat, name an account or its address (“check my work inbox”, “send from you@example.com”); with none named, Kazma uses the main account. A Google or Microsoft account's calendar comes with its sign-in.",
+    },
+    "settings.email_accounts_none": {
+        "ar": "لا توجد حسابات أخرى بعد.",
+        "en": "No other accounts yet.",
+    },
+    "settings.email_account_add_google": {
+        "ar": "إضافة حساب Google",
+        "en": "Add Google account",
+    },
+    "settings.email_account_add_microsoft": {
+        "ar": "إضافة حساب Microsoft",
+        "en": "Add Microsoft account",
+    },
+    "settings.email_account_add_password": {
+        "ar": "إضافة بكلمة مرور",
+        "en": "Add with a password",
+    },
+    "settings.email_account_code_fallback": {
+        "ar": "ترفض Microsoft إعادة التوجيه؟ أضف حساب Microsoft برمز",
+        "en": "Microsoft refuses the redirect? Add a Microsoft account with a code",
+    },
+    "settings.email_account_code_start": {
+        "ar": "احصل على رمز لحساب Microsoft جديد",
+        "en": "Get a code for a new Microsoft account",
+    },
+    "settings.email_account_reconnect": {
+        "ar": "إعادة الربط",
+        "en": "Reconnect",
+    },
+    "settings.email_account_remove": {
+        "ar": "إزالة",
+        "en": "Remove",
+    },
+    "settings.email_account_calendar": {
+        "ar": "التقويم",
+        "en": "Calendar",
+    },
+    "settings.email_account_env_hint": {
+        "ar": "مضبوط في ‎.env، ويُغيَّر هناك.",
+        "en": "Set in .env; change it there.",
+    },
+    "settings.email_account_app_password": {
+        "ar": "كلمة مرور",
+        "en": "Password",
+    },
+    "settings.email_account_name_title_google": {
+        "ar": "إضافة حساب Google",
+        "en": "Add a Google account",
+    },
+    "settings.email_account_name_title_microsoft": {
+        "ar": "إضافة حساب Microsoft",
+        "en": "Add a Microsoft account",
+    },
+    "settings.email_account_name_prompt": {
+        "ar": "اسم قصير لهذا الحساب تستخدمه في المحادثة (مثل: work أو personal). بأحرف a–z وأرقام وشرطات.",
+        "en": "A short name for this account, used in chat (for example: work, personal). Letters a–z, digits and hyphens.",
+    },
+    "settings.email_account_continue": {
+        "ar": "متابعة إلى تسجيل الدخول",
+        "en": "Continue to sign in",
+    },
+    "settings.email_account_remove_title": {
+        "ar": "إزالة الحساب",
+        "en": "Remove account",
+    },
+    "settings.email_account_remove_confirm": {
+        "ar": "إزالة «{name}» ({address})؟ ينسى Kazma تسجيل دخوله ويتوقف عن استخدامه، ولا يُمس صندوق البريد نفسه.",
+        "en": "Remove “{name}” ({address})? Kazma forgets its sign-in and stops using it; the mailbox itself is not touched.",
+    },
+    "settings.email_account_form_name": {
+        "ar": "الاسم المستخدم في المحادثة",
+        "en": "Name used in chat",
+    },
+    "settings.email_account_form_type": {
+        "ar": "المزوّد",
+        "en": "Provider",
+    },
+    "settings.email_account_form_type_gmail": {
+        "ar": "Gmail (كلمة مرور تطبيق)",
+        "en": "Gmail (app password)",
+    },
+    "settings.email_account_form_type_microsoft": {
+        "ar": "Microsoft (كلمة مرور)",
+        "en": "Microsoft (password)",
+    },
+    "settings.email_account_form_type_imap": {
+        "ar": "خادم بريد آخر (IMAP)",
+        "en": "Other mail server (IMAP)",
+    },
+    "settings.email_account_form_type_pop": {
+        "ar": "خادم بريد آخر (POP)",
+        "en": "Other mail server (POP)",
+    },
+    "settings.email_account_form_address": {
+        "ar": "عنوان البريد",
+        "en": "Email address",
+    },
+    "settings.email_account_form_password": {
+        "ar": "كلمة المرور (كلمة مرور تطبيق لـ Gmail)",
+        "en": "Password (an app password for Gmail)",
+    },
+    "settings.email_account_form_host": {
+        "ar": "خادم البريد (مضيف IMAP أو POP)",
+        "en": "Mail server (IMAP or POP host)",
+    },
+    "settings.email_account_form_smtp_host": {
+        "ar": "خادم الإرسال (مضيف SMTP)",
+        "en": "Sending server (SMTP host)",
+    },
+    "settings.email_account_form_hint": {
+        "ar": "يجرّب Kazma تسجيل الدخول قبل حفظ الحساب. وليس لحساب كلمة المرور تقويم.",
+        "en": "Kazma tries the login before keeping the account. A password account has no calendar.",
+    },
+    "settings.email_account_form_submit": {
+        "ar": "إضافة الحساب",
+        "en": "Add account",
+    },
+    "settings.int.email_account_connected": {
+        "ar": "تم ربط الحساب «{name}»",
+        "en": "Account “{name}” connected",
+    },
+    "settings.int.email_account_added": {
+        "ar": "أُضيف الحساب «{name}»",
+        "en": "Account “{name}” added",
+    },
+    "settings.int.email_account_removed": {
+        "ar": "أُزيل الحساب «{name}»",
+        "en": "Account “{name}” removed",
+    },
+    "settings.int.email_account_failed": {
+        "ar": "تعذّرت إضافة الحساب: {error}",
+        "en": "Could not add the account: {error}",
+    },
+    "settings.int.email_account_bad_name": {
+        "ar": "سمِّ الحساب بأحرف a–z وأرقام وشرطات.",
+        "en": "Name the account with letters a–z, digits and hyphens.",
     },
 }

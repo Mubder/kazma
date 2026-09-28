@@ -196,8 +196,8 @@ async def finish_google_calendar_oauth(code: str, state: str) -> dict[str, Any]:
             )
             if u.status_code < 400:
                 email_addr = (u.json() or {}).get("email") or ""
-        except Exception:
-            pass
+        except (httpx.HTTPError, ValueError):
+            logger.debug("[calendar.oauth] userinfo unavailable", exc_info=True)
 
         ok, reason = await probe_calendar_api(client, access)
         if not ok:
@@ -243,8 +243,10 @@ async def refresh_google_calendar_access_token(
     *,
     client_id: str = "",
     client_secret: str = "",
+    persist: bool = True,
 ) -> tuple[str, str]:
-    """Return (access_token, refresh_token). Also persists."""
+    """Return (access_token, refresh_token). *persist* keeps them as the MAIN
+    Google Calendar's; an extra account keeps its own (``persist=False``)."""
     cid = client_id or _client_id()
     secret = client_secret or _client_secret()
     async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as client:
@@ -269,5 +271,6 @@ async def refresh_google_calendar_access_token(
         scope_str = str(payload.get("scope") or "")
         if not access:
             raise RuntimeError("No access_token on Calendar refresh")
-        persist_google_tokens(access, new_refresh, scopes=scope_str, probe_ok="ok")
+        if persist:
+            persist_google_tokens(access, new_refresh, scopes=scope_str, probe_ok="ok")
         return access, new_refresh

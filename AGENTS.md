@@ -2600,8 +2600,23 @@ in the vault and does **not** automatically feed Calendar.
 - Connector health (`check_connectors`) probes Gmail **and** Calendar
   independently (Testing-mode 7-day expiry). Do not probe Drive as a
   stand-in for Gmail.
+- **More accounts than the main two** (`email_manager/accounts.py`,
+  2026-09-29): Settings → Email → Other accounts adds Google and Microsoft
+  accounts by sign-in (`?account=<name>` on the start routes; state carries
+  it; `prompt=select_account`) and IMAP/app-password ones after a tried
+  login. The list is the setting `email.accounts`; secrets are
+  `email.account.<name>.*` (install-scoped). Chat names an account by name
+  or address (`accounts.resolve_account`, for mail and calendar;
+  `email_accounts` lists them). **Every token write names its account:** a
+  backend with a refresh takes `account_alias` and an extra account's
+  refresh writes its own keys only (`persist_account_tokens`,
+  `refresh_*_access_token(persist=False)`). Until then the .env-only
+  version's refresh wrote a second account's tokens over the MAIN account's.
+  Gate: `tests/test_email_extra_accounts.py::test_every_refreshing_backend_takes_an_account`
+  plus the per-backend isolation test (old Graph code as the control).
 
 Tests: `tests/test_calendar_connector.py`, `tests/test_connector_health.py`,
+`tests/test_email_extra_accounts.py`,
 `tests/test_calendar_disconnect.py`, `tests/test_calendar_card_providers.py`.
 
 ### 35. Class gates from the 2026-09-22 audit — fix the class, not the instance

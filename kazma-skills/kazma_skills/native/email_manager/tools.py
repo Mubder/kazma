@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -19,9 +20,48 @@ from kazma_skills.native.email_manager.router import (
     resolve_provider,
 )
 
-# account= multi-account alias (EMAIL_ACCOUNTS + EMAIL_ACCOUNT_{ALIAS}_*)
+# account= names a mail account: its name ("work"), its address, or a main
+# account's word ("gmail"); email_accounts lists them (email_manager.accounts).
+# Picking the backend reads settings and the vault, so it runs off the loop.
 
 logger = logging.getLogger(__name__)
+
+
+_KIND_WORDS = {"gmail": "Gmail", "microsoft": "Microsoft", "imap": "IMAP", "pop": "POP"}
+_AUTH_WORDS = {
+    "oauth": "signed in",
+    "password": "password",
+    "incomplete": "NOT signed in (Settings → Email → Other accounts → Reconnect)",
+}
+
+
+async def email_accounts() -> str:
+    """List every mail account Kazma can use and how to name it in account=."""
+    from kazma_skills.native.email_manager.accounts import accounts_overview
+
+    try:
+        rows = await asyncio.to_thread(accounts_overview)
+    except Exception as exc:  # noqa: BLE001
+        return f"Error: could not list mail accounts — {type(exc).__name__}: {exc}"
+    if not rows:
+        return (
+            "No mail account is connected. Settings → Email connects Gmail or "
+            "Microsoft; Other accounts adds more."
+        )
+    lines = [
+        "Mail accounts. Name one in account= by its name or its address; with "
+        "none named, the main account of the provider answers. Calendar tools "
+        "take the same account=."
+    ]
+    for r in rows:
+        kind = _KIND_WORDS.get(r["type"], r["type"] or "unknown type")
+        who = f"main {kind} account" if r["source"] == "main" else f"{kind} account"
+        where = " (set in .env)" if r["source"] == "env" else ""
+        lines.append(
+            f"- {r['name']}{where}: {who}, {r['address'] or 'no address'}, "
+            f"{_AUTH_WORDS.get(r['auth'], r['auth'])}, calendar {'yes' if r['calendar'] else 'no'}"
+        )
+    return "\n".join(lines)
 
 
 def _parse_addr_list(value: Any) -> list[str]:
@@ -46,7 +86,7 @@ async def email_list(
 ) -> str:
     """List/search emails in a folder (sandbox, Gmail, Microsoft Graph, or IMAP)."""
     try:
-        backend = get_backend(provider, account=account or None)
+        backend = await asyncio.to_thread(get_backend, provider, account or None)
         banner = mode_banner(backend)
         msgs = await backend.list_messages(
             ListQuery(
@@ -113,7 +153,7 @@ async def email_get(
     if not message_id or not str(message_id).strip():
         return "Error: message_id is required."
     try:
-        backend = get_backend(provider, account=account or None)
+        backend = await asyncio.to_thread(get_backend, provider, account or None)
         banner = mode_banner(backend)
         msg = await backend.get_message(str(message_id).strip())
         body = msg.body if include_body else ""
@@ -180,7 +220,7 @@ async def email_send(
         if action_n in ("send", "forward") and not to_list and action_n != "draft":
             if action_n == "send" and not to_list:
                 return "Error: `to` is required for send."
-        backend = get_backend(provider, account=account or None)
+        backend = await asyncio.to_thread(get_backend, provider, account or None)
         banner = mode_banner(backend)
         result = await backend.send(
             SendRequest(
@@ -218,7 +258,7 @@ async def email_delete(
     if not message_id or not str(message_id).strip():
         return "Error: message_id is required."
     try:
-        backend = get_backend(provider, account=account or None)
+        backend = await asyncio.to_thread(get_backend, provider, account or None)
         banner = mode_banner(backend)
         await backend.delete(str(message_id).strip(), permanent=bool(permanent))
         action = "Permanently deleted" if permanent else "Moved to Trash"
@@ -246,7 +286,7 @@ async def email_categorize(
     if not message_id or not str(message_id).strip():
         return "Error: message_id is required."
     try:
-        backend = get_backend(provider, account=account or None)
+        backend = await asyncio.to_thread(get_backend, provider, account or None)
         banner = mode_banner(backend)
         await backend.categorize(
             CategorizeRequest(
@@ -281,9 +321,9 @@ async def email_analyze(
         subject = ""
         from_addr = ""
         body = raw_text or ""
-        mode = resolve_provider(provider, account=account or None)
+        mode = await asyncio.to_thread(resolve_provider, provider, account or None)
         if message_id and str(message_id).strip():
-            backend = get_backend(provider, account=account or None)
+            backend = await asyncio.to_thread(get_backend, provider, account or None)
             mode = getattr(backend, "name", mode)
             msg = await backend.get_message(str(message_id).strip())
             subject = msg.subject

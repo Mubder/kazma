@@ -135,33 +135,32 @@ class MicrosoftGraphBackend:
             self.access_token = payload.get("access_token") or self.access_token
             if payload.get("refresh_token"):
                 self.refresh_token = payload["refresh_token"]
-            self._persist_tokens()
+        # Vault writes: off the event loop.
+        await asyncio.to_thread(self._persist_tokens)
 
     def _persist_tokens(self) -> None:
-        """Write refreshed tokens to env + vault (and per-account keys if aliased)."""
+        """Keep refreshed tokens where THIS account's live: an extra account's
+        own keys (``accounts.persist_account_tokens``), else the main
+        Microsoft account's env + vault. An extra account used to write the
+        main keys too, and the main mailbox then read the other one."""
         import os
 
         try:
+            if self.account_alias:
+                from kazma_skills.native.email_manager.accounts import persist_account_tokens
+
+                persist_account_tokens(self.account_alias, self.access_token, self.refresh_token)
+                return
             from kazma_skills.native.email_manager.credentials import vault_store
 
             if self.access_token and self.access_token != "pending_refresh":
                 os.environ["EMAIL_MS_ACCESS_TOKEN"] = self.access_token
                 vault_store("email.microsoft.access_token", self.access_token)
-                if self.account_alias:
-                    vault_store(
-                        f"email.account.{self.account_alias}.access_token",
-                        self.access_token,
-                    )
             if self.refresh_token:
                 os.environ["EMAIL_MS_REFRESH_TOKEN"] = self.refresh_token
                 vault_store("email.microsoft.refresh_token", self.refresh_token)
-                if self.account_alias:
-                    vault_store(
-                        f"email.account.{self.account_alias}.refresh_token",
-                        self.refresh_token,
-                    )
-        except Exception as exc:
-            logger.debug("[graph] token persist skipped: %s", exc)
+        except Exception:
+            logger.warning("[graph] refreshed tokens were not kept", exc_info=True)
 
     def _folder_path(self, folder: str) -> str:
         key = (folder or "INBOX").strip().lower()

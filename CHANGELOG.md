@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## More than one Gmail or Outlook account (2026-09-29)
+
+Asked for three Gmail accounts: Kazma had a hidden version set by hand in
+`.env`, with no sign-in -- and it was dangerous. Refreshing a second Google
+or Microsoft account wrote its tokens over the main account's, so from then
+on "my inbox" quietly read the other mailbox.
+
+**Settings → Email → Other accounts** now adds any number of mailboxes:
+**Add Google account** and **Add Microsoft account** sign one in under a
+short name you choose ("work"), asking which account to use when the browser
+holds several; a Microsoft account can also be added by code; **Add with a
+password** takes an app password or an IMAP/POP server and tries the login
+before keeping it. Each account has Reconnect and Remove, and an address
+already connected is refused.
+
+In chat, name the account or its address -- "check my work inbox", "send it
+from personal@gmail.com", "what's on the team calendar tomorrow". A new
+`email_accounts` tool lists them for the agent, every email and calendar tool
+takes `account=`, and with none named the main account answers as before. A
+Google or Microsoft account's calendar comes with its sign-in.
+
+Each account keeps its own tokens, and every refresh -- mail and calendar,
+Google and Microsoft -- writes only its own account's keys; a test per
+backend watches the main account's keys, and a gate makes any new refreshing
+backend take its account.
+
 ## Every control does what it says, and what the owner decides has one (2026-09-28)
 
 After the calendar button, every route that changes something and that no

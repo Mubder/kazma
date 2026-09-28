@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -41,7 +42,7 @@ def _tenant() -> str:
     return cred("EMAIL_MS_TENANT_ID", "") or "common"
 
 
-async def start_device_code_flow(*, purpose: str = "mail") -> dict[str, Any]:
+async def start_device_code_flow(*, purpose: str = "mail", account: str = "") -> dict[str, Any]:
     """Start OAuth2 device code flow. Returns user_code + verification_uri.
 
     *purpose* ``"calendar"`` is the calendar card's fallback for a redirect
@@ -51,6 +52,16 @@ async def start_device_code_flow(*, purpose: str = "mail") -> dict[str, Any]:
     """
     if purpose not in ("mail", "calendar"):
         raise ValueError(f"unknown Microsoft sign-in purpose: {purpose!r}")
+    alias = ""
+    if account:
+        # An extra Microsoft account (email_manager.accounts): one grant for
+        # its mail and calendar, kept under its own name.
+        from kazma_skills.native.email_manager.accounts import alias_problem, normalize_alias
+
+        alias = normalize_alias(account)
+        problem = alias_problem(alias, kind="microsoft")
+        if problem:
+            return {"ok": False, "code": "bad_account_name", "error": problem}
     client_id = _client_id()
     if not client_id:
         return {
@@ -76,6 +87,7 @@ async def start_device_code_flow(*, purpose: str = "mail") -> dict[str, Any]:
         "client_id": client_id,
         "tenant": tenant,
         "purpose": purpose,
+        "account": alias,
     }
     return {
         "ok": True,
@@ -133,6 +145,18 @@ async def poll_device_code_flow(device_code: str) -> dict[str, Any]:
         return {"ok": False, "status": "failed", "error": "No access_token in token response"}
 
     _pending.pop(device_code, None)
+    if meta.get("account"):
+        try:
+            row = await asyncio.to_thread(store_microsoft_account_tokens, payload, meta["account"])
+        except (ValueError, RuntimeError) as exc:
+            return {"ok": False, "status": "failed", "account": meta["account"], "error": str(exc)}
+        return {
+            "ok": True,
+            "status": "authorized",
+            "account": row["alias"],
+            "email": row.get("address") or "",
+            "message": f"Microsoft account “{row['alias']}” connected.",
+        }
     if meta.get("purpose") == "calendar":
         try:
             address = store_microsoft_calendar_tokens(payload)
@@ -196,6 +220,23 @@ def store_microsoft_tokens(payload: dict[str, Any], client_id: str) -> str:
     except Exception:
         logger.debug("[email.oauth] calendar token copy skipped", exc_info=True)
     return address
+
+
+def store_microsoft_account_tokens(payload: dict[str, Any], alias: str) -> dict[str, Any]:
+    """Keep a Microsoft token response for an EXTRA account (its mail and its
+    calendar share the grant): that account's own keys, never the main
+    account's. Raises ValueError when the address is already connected."""
+    from kazma_skills.native.email_manager.accounts import upsert_oauth_account
+    from kazma_skills.native.email_manager.oauth_common import address_from_id_token
+
+    return upsert_oauth_account(
+        alias,
+        "microsoft",
+        address_from_id_token(payload.get("id_token")),
+        str(payload.get("access_token") or ""),
+        str(payload.get("refresh_token") or ""),
+        str(payload.get("scope") or SCOPES),
+    )
 
 
 def store_microsoft_calendar_tokens(payload: dict[str, Any]) -> str:

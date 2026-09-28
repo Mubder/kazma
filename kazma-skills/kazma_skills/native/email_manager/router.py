@@ -59,8 +59,9 @@ class EmailNotConnectedError(RuntimeError):
 
 def _account_hint(alias: str, detail: str) -> str:
     return (
-        f"Email account '{alias}' {detail}. Configure it in Settings → Email "
-        "(EMAIL_ACCOUNTS + EMAIL_ACCOUNT_<ALIAS>_*), or name another account."
+        f"Email account '{alias}' {detail}. Add or reconnect it in Settings → "
+        "Email → Other accounts (or .env: EMAIL_ACCOUNTS + EMAIL_ACCOUNT_<ALIAS>_*), "
+        "or name another account (the email_accounts tool lists them)."
     )
 
 
@@ -148,7 +149,13 @@ def detect_available_provider() -> str:
 
 def resolve_provider(provider: str | None = None, account: str | None = None) -> str:
     if account and str(account).strip():
-        return f"account:{str(account).strip()}"
+        # A name, an address, or a main account's provider word.
+        from kazma_skills.native.email_manager.accounts import resolve_account
+
+        try:
+            return resolve_account(str(account))
+        except LookupError as exc:
+            raise EmailNotConnectedError(str(account).strip(), str(exc)) from None
     p = (provider or _env("EMAIL_DEFAULT_PROVIDER", "auto") or "auto").strip().lower()
     if p in ("", "auto"):
         return detect_available_provider()
@@ -376,6 +383,149 @@ def _microsoft_backend(explicit: bool = True) -> Any:
     return _unconnected("microsoft", MICROSOFT_NOT_CONNECTED, explicit)
 
 
+def backend_for_account(alias: str, cfg: dict[str, str]) -> Any:
+    """The backend of an extra account from its settings (*cfg*, as
+    ``account_config`` gives them). Also how a new password account is
+    tried before Settings keeps it (``POST /api/email/accounts``)."""
+    t = (cfg.get("type") or "").lower()
+    if not t:
+        # No TYPE: a typo'd alias, or one set up without it. Both used to
+        # default to the sandbox and "send" there.
+        configured = any(v for k, v in cfg.items() if k != "alias")
+        raise EmailNotConnectedError(
+            alias,
+            _account_hint(
+                alias,
+                "has no TYPE (gmail, microsoft, imap, pop or sandbox)"
+                if configured else "is not configured",
+            ),
+        )
+    if t == "sandbox":
+        return SandboxBackend()
+    if t == "gmail":
+        if cfg.get("access_token") or cfg.get("refresh_token"):
+            from kazma_skills.native.email_manager.backends.gmail_api import (
+                GmailApiBackend,
+            )
+
+            return GmailApiBackend(
+                access_token=cfg.get("access_token") or "pending_refresh",
+                refresh_token=cfg.get("refresh_token") or "",
+                client_id=cfg.get("client_id")
+                or cred("EMAIL_GMAIL_CLIENT_ID", "email.gmail.client_id"),
+                client_secret=cfg.get("client_secret")
+                or cred("EMAIL_GMAIL_CLIENT_SECRET", "email.gmail.client_secret"),
+                email_address=cfg.get("address") or "",
+                account_alias=alias,
+            )
+        if not cfg.get("address") or not cfg.get("password"):
+            raise EmailNotConnectedError(
+                alias, _account_hint(alias, "(Gmail) has no token and no address/password")
+            )
+        # Optional: TYPE=gmail with POP_HOST → pop
+        if cfg.get("pop_host") and not cfg.get("imap_host"):
+            return _pop_backend(
+                name=f"gmail_pop:{alias}",
+                address=cfg["address"],
+                password=cfg["password"],
+                pop_host=cfg["pop_host"],
+                pop_port=int(cfg.get("pop_port") or "995"),
+                smtp_host=cfg.get("smtp_host") or "smtp.gmail.com",
+                smtp_port=int(cfg.get("smtp_port") or "587"),
+            )
+        return _imap_backend(
+            name=f"gmail:{alias}",
+            address=cfg["address"],
+            password=cfg["password"],
+            imap_host=cfg.get("imap_host") or "imap.gmail.com",
+            imap_port=int(cfg.get("imap_port") or "993"),
+            smtp_host=cfg.get("smtp_host") or "smtp.gmail.com",
+            smtp_port=int(cfg.get("smtp_port") or "587"),
+        )
+    if t in ("microsoft", "microsoft_graph", "outlook"):
+        token = cfg.get("access_token") or ""
+        refresh = cfg.get("refresh_token") or ""
+        if token or refresh:
+            from kazma_skills.native.email_manager.backends.microsoft_graph import (
+                MicrosoftGraphBackend,
+            )
+
+            return MicrosoftGraphBackend(
+                access_token=token or "pending_refresh",
+                refresh_token=refresh,
+                client_id=cfg.get("client_id")
+                or cred("EMAIL_MS_CLIENT_ID", "email.microsoft.client_id"),
+                client_secret=cfg.get("client_secret")
+                or cred("EMAIL_MS_CLIENT_SECRET", "email.microsoft.client_secret"),
+                tenant_id=cfg.get("tenant_id")
+                or _env("EMAIL_MS_TENANT_ID", "common")
+                or "common",
+                account_alias=alias,
+                address=cfg.get("address") or "",
+            )
+        if cfg.get("address") and cfg.get("password"):
+            if cfg.get("pop_host") and not cfg.get("imap_host"):
+                return _pop_backend(
+                    name=f"microsoft_pop:{alias}",
+                    address=cfg["address"],
+                    password=cfg["password"],
+                    pop_host=cfg["pop_host"],
+                    pop_port=int(cfg.get("pop_port") or "995"),
+                    smtp_host=cfg.get("smtp_host") or "smtp.office365.com",
+                    smtp_port=int(cfg.get("smtp_port") or "587"),
+                )
+            preset = get_preset("microsoft", "imap")
+            return _imap_backend(
+                name=f"microsoft_imap:{alias}",
+                address=cfg["address"],
+                password=cfg["password"],
+                imap_host=cfg.get("imap_host")
+                or preset.get("imap_host")
+                or "outlook.office365.com",
+                imap_port=int(cfg.get("imap_port") or "993"),
+                smtp_host=cfg.get("smtp_host")
+                or preset.get("smtp_host")
+                or "smtp.office365.com",
+                smtp_port=int(cfg.get("smtp_port") or "587"),
+            )
+        raise EmailNotConnectedError(
+            alias, _account_hint(alias, "(Microsoft) has no token and no address/password")
+        )
+    if t == "imap":
+        if not cfg.get("address") or not cfg.get("password") or not cfg.get("imap_host"):
+            raise EmailNotConnectedError(
+                alias, _account_hint(alias, "(IMAP) needs an address, password and IMAP host")
+            )
+        return _imap_backend(
+            name=f"imap:{alias}",
+            address=cfg["address"],
+            password=cfg["password"],
+            imap_host=cfg["imap_host"],
+            imap_port=int(cfg.get("imap_port") or "993"),
+            smtp_host=cfg.get("smtp_host")
+            or cfg["imap_host"].replace("imap", "smtp"),
+            smtp_port=int(cfg.get("smtp_port") or "587"),
+        )
+    if t == "pop":
+        host = cfg.get("pop_host") or cfg.get("imap_host") or ""
+        if not cfg.get("address") or not cfg.get("password") or not host:
+            raise EmailNotConnectedError(
+                alias, _account_hint(alias, "(POP) needs an address, password and POP host")
+            )
+        return _pop_backend(
+            name=f"pop:{alias}",
+            address=cfg["address"],
+            password=cfg["password"],
+            pop_host=host,
+            pop_port=int(cfg.get("pop_port") or "995"),
+            smtp_host=cfg.get("smtp_host") or host.replace("pop", "smtp"),
+            smtp_port=int(cfg.get("smtp_port") or "587"),
+        )
+    raise EmailNotConnectedError(
+        alias, _account_hint(alias, f"has an unknown type '{t}'")
+    )
+
+
 def get_backend(provider: str | None = None, account: str | None = None) -> Any:
     """Return the backend for *provider* / *account*. Explicit choices fail closed.
 
@@ -392,143 +542,7 @@ def get_backend(provider: str | None = None, account: str | None = None) -> Any:
 
     if name.startswith("account:"):
         alias = name.split(":", 1)[1]
-        cfg = account_config(alias)
-        t = (cfg.get("type") or "").lower()
-        if not t:
-            # No TYPE: a typo'd alias, or one set up without it. Both used to
-            # default to the sandbox and "send" there.
-            configured = any(v for k, v in cfg.items() if k != "alias")
-            raise EmailNotConnectedError(
-                alias,
-                _account_hint(
-                    alias,
-                    "has no TYPE (gmail, microsoft, imap, pop or sandbox)"
-                    if configured else "is not configured",
-                ),
-            )
-        if t == "sandbox":
-            return SandboxBackend()
-        if t == "gmail":
-            if cfg.get("access_token") or cfg.get("refresh_token"):
-                from kazma_skills.native.email_manager.backends.gmail_api import (
-                    GmailApiBackend,
-                )
-
-                return GmailApiBackend(
-                    access_token=cfg.get("access_token") or "pending_refresh",
-                    refresh_token=cfg.get("refresh_token") or "",
-                    client_id=cfg.get("client_id")
-                    or cred("EMAIL_GMAIL_CLIENT_ID", "email.gmail.client_id"),
-                    client_secret=cfg.get("client_secret")
-                    or cred("EMAIL_GMAIL_CLIENT_SECRET", "email.gmail.client_secret"),
-                    email_address=cfg.get("address") or "",
-                )
-            if not cfg.get("address") or not cfg.get("password"):
-                raise EmailNotConnectedError(
-                    alias, _account_hint(alias, "(Gmail) has no token and no address/password")
-                )
-            # Optional: TYPE=gmail with POP_HOST → pop
-            if cfg.get("pop_host") and not cfg.get("imap_host"):
-                return _pop_backend(
-                    name=f"gmail_pop:{alias}",
-                    address=cfg["address"],
-                    password=cfg["password"],
-                    pop_host=cfg["pop_host"],
-                    pop_port=int(cfg.get("pop_port") or "995"),
-                    smtp_host=cfg.get("smtp_host") or "smtp.gmail.com",
-                    smtp_port=int(cfg.get("smtp_port") or "587"),
-                )
-            return _imap_backend(
-                name=f"gmail:{alias}",
-                address=cfg["address"],
-                password=cfg["password"],
-                imap_host=cfg.get("imap_host") or "imap.gmail.com",
-                imap_port=int(cfg.get("imap_port") or "993"),
-                smtp_host=cfg.get("smtp_host") or "smtp.gmail.com",
-                smtp_port=int(cfg.get("smtp_port") or "587"),
-            )
-        if t in ("microsoft", "microsoft_graph", "outlook"):
-            token = cfg.get("access_token") or ""
-            refresh = cfg.get("refresh_token") or ""
-            if token or refresh:
-                from kazma_skills.native.email_manager.backends.microsoft_graph import (
-                    MicrosoftGraphBackend,
-                )
-
-                return MicrosoftGraphBackend(
-                    access_token=token or "pending_refresh",
-                    refresh_token=refresh,
-                    client_id=cfg.get("client_id")
-                    or cred("EMAIL_MS_CLIENT_ID", "email.microsoft.client_id"),
-                    client_secret=cfg.get("client_secret")
-                    or cred("EMAIL_MS_CLIENT_SECRET", "email.microsoft.client_secret"),
-                    tenant_id=cfg.get("tenant_id")
-                    or _env("EMAIL_MS_TENANT_ID", "common")
-                    or "common",
-                    account_alias=alias,
-                    address=cfg.get("address") or "",
-                )
-            if cfg.get("address") and cfg.get("password"):
-                if cfg.get("pop_host") and not cfg.get("imap_host"):
-                    return _pop_backend(
-                        name=f"microsoft_pop:{alias}",
-                        address=cfg["address"],
-                        password=cfg["password"],
-                        pop_host=cfg["pop_host"],
-                        pop_port=int(cfg.get("pop_port") or "995"),
-                        smtp_host=cfg.get("smtp_host") or "smtp.office365.com",
-                        smtp_port=int(cfg.get("smtp_port") or "587"),
-                    )
-                preset = get_preset("microsoft", "imap")
-                return _imap_backend(
-                    name=f"microsoft_imap:{alias}",
-                    address=cfg["address"],
-                    password=cfg["password"],
-                    imap_host=cfg.get("imap_host")
-                    or preset.get("imap_host")
-                    or "outlook.office365.com",
-                    imap_port=int(cfg.get("imap_port") or "993"),
-                    smtp_host=cfg.get("smtp_host")
-                    or preset.get("smtp_host")
-                    or "smtp.office365.com",
-                    smtp_port=int(cfg.get("smtp_port") or "587"),
-                )
-            raise EmailNotConnectedError(
-                alias, _account_hint(alias, "(Microsoft) has no token and no address/password")
-            )
-        if t == "imap":
-            if not cfg.get("address") or not cfg.get("password") or not cfg.get("imap_host"):
-                raise EmailNotConnectedError(
-                    alias, _account_hint(alias, "(IMAP) needs an address, password and IMAP host")
-                )
-            return _imap_backend(
-                name=f"imap:{alias}",
-                address=cfg["address"],
-                password=cfg["password"],
-                imap_host=cfg["imap_host"],
-                imap_port=int(cfg.get("imap_port") or "993"),
-                smtp_host=cfg.get("smtp_host")
-                or cfg["imap_host"].replace("imap", "smtp"),
-                smtp_port=int(cfg.get("smtp_port") or "587"),
-            )
-        if t == "pop":
-            host = cfg.get("pop_host") or cfg.get("imap_host") or ""
-            if not cfg.get("address") or not cfg.get("password") or not host:
-                raise EmailNotConnectedError(
-                    alias, _account_hint(alias, "(POP) needs an address, password and POP host")
-                )
-            return _pop_backend(
-                name=f"pop:{alias}",
-                address=cfg["address"],
-                password=cfg["password"],
-                pop_host=host,
-                pop_port=int(cfg.get("pop_port") or "995"),
-                smtp_host=cfg.get("smtp_host") or host.replace("pop", "smtp"),
-                smtp_port=int(cfg.get("smtp_port") or "587"),
-            )
-        raise EmailNotConnectedError(
-            alias, _account_hint(alias, f"has an unknown type '{t}'")
-        )
+        return backend_for_account(alias, account_config(alias))
 
     if name == "gmail":
         return _gmail_backend(explicit)
