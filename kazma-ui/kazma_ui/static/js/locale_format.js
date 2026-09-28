@@ -81,6 +81,29 @@
     return number(n, { notation: 'compact', maximumFractionDigits: 1 });
   }
 
+  /* CLDR plural category, the rule i18n.t_plural uses: six forms in Arabic
+   * (zero, one, two, few 3-10, many 11-99, other), one/other elsewhere. */
+  function pluralCategory(n) {
+    var x = Math.abs(Number(n) || 0);
+    if (lang() !== 'ar') return x === 1 ? 'one' : 'other';
+    if (x === 0) return 'zero';
+    if (x === 1) return 'one';
+    if (x === 2) return 'two';
+    var mod100 = Math.floor(x) % 100;
+    if (mod100 >= 3 && mod100 <= 10) return 'few';
+    if (mod100 >= 11 && mod100 <= 99) return 'many';
+    return 'other';
+  }
+
+  /* A count with its noun from the catalog's forms (plural_forms(key) in a
+   * template): "4539 مقطعاً", "2 chunks". A hand-built "n + ' ' + noun"
+   * read "4539 مقطع" on the Knowledge page (2026-09-28). */
+  function count(forms, n, fallback) {
+    forms = forms || {};
+    var s = forms[pluralCategory(n)] || forms.other || fallback || '{n}';
+    return String(s).replace(/\{n\}/g, String(n));
+  }
+
   root.KazmaFormat = {
     lang: lang,
     locale: locale,
@@ -90,5 +113,7 @@
     relative: relative,
     number: number,
     compact: compact,
+    pluralCategory: pluralCategory,
+    count: count,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -23,6 +23,15 @@ _BLOCKQUOTE_RE = re.compile(r">\s*(.+)$")
 _BATCH_RE = re.compile(r"batch\s+job\s+(\d+\s*/\s*\d+)", re.IGNORECASE)
 _BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
 
+# A quoted fragment is the post only when it could be the whole message:
+# at least this many characters, or most of the text. A reminder that says
+# 'Reply "done" to stop these daily reminders' is not a post whose text is
+# "done" -- the Scheduled page listed both of the owner's CoPilot renewal
+# reminders as "done" (live, 2026-09-28) -- and a tweet quoting a short
+# phrase is the tweet, not the phrase.
+_MIN_BODY_CHARS = 60
+_MIN_BODY_SHARE = 0.5
+
 
 def _collapse(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()
@@ -58,15 +67,25 @@ def extract_post_body(text: str) -> str:
     raw = _collapse(text)
     if not raw:
         return ""
-    candidates: list[str] = []
+    # (fragment, introduced): introduced = the wrapper hands the post over
+    # with a colon and ends with it ('EXACTLY this text: "..."', "...: >
+    # ..."). Anything else is the post only when it is substantial.
+    found: list[tuple[str, bool]] = []
     for match in _CLOSED_QUOTE_RE.finditer(raw):
-        candidates.append(match.group(1).strip())
+        introduced = raw[: match.start()].rstrip().endswith(":") and len(raw[match.end():].strip()) <= 2
+        found.append((match.group(1).strip(), introduced))
     unclosed = _UNCLOSED_QUOTE_RE.search(raw)
     if unclosed:
-        candidates.append(unclosed.group(1).strip())
+        found.append((unclosed.group(1).strip(), True))
     quoted = _BLOCKQUOTE_RE.search(raw)
-    if quoted:
-        candidates.append(quoted.group(1).strip(" \"“”"))
+    # A ">" mid-sentence is an arrow ("researcher -> writer"), not a quote:
+    # a blockquote counts only where it is handed over, whatever its size.
+    if quoted and (raw[: quoted.start()].rstrip().endswith(":") or not raw[: quoted.start()].strip()):
+        found.append((quoted.group(1).strip(" \"“”"), True))
+    candidates = [
+        c for c, introduced in found
+        if introduced or len(c) >= _MIN_BODY_CHARS or len(c) >= _MIN_BODY_SHARE * len(raw)
+    ]
     arabic = [c for c in candidates if _arabic_count(c)]
     pool = arabic or candidates
     if pool:

@@ -71,6 +71,50 @@ def test_outcome_is_the_bold_status_not_the_essay() -> None:
     assert shorten_outcome(_STATUS) == "x_post attempted"
 
 
+# The owner's reminder on the live install (2026-09-28): the Scheduled page
+# listed it as "done", the word it asks for as a reply.
+_REMINDER = (
+    "⏰ CANCELLATION REMINDER — CoPilot Pro+ renews on October 1, 2026. "
+    "If you want to avoid the charge, cancel before the renewal date. "
+    'Reply "done" to stop these daily reminders.'
+)
+
+
+def test_a_quoted_reply_word_is_not_the_reminder() -> None:
+    from kazma_core.text_display import _CLOSED_QUOTE_RE
+
+    # Negative control: the input does carry a quoted candidate -- the path
+    # that used to return it is exercised, not skipped.
+    assert _CLOSED_QUOTE_RE.findall(_REMINDER) == ["done"]
+    assert extract_post_body(_REMINDER) == _REMINDER
+    assert display_kicker(_REMINDER) == ""
+
+
+def test_a_tweet_quoting_a_phrase_is_the_tweet() -> None:
+    tweet = 'Our motto is "ship it" and we mean it: every fix lands with a test.'
+    assert extract_post_body(tweet) == tweet
+    after_colon = 'The rule: "ship it" -- and every fix lands with a test, always.'
+    assert extract_post_body(after_colon) == after_colon, "introduced, but not the end of the text"
+
+
+def test_an_arrow_is_not_a_blockquote() -> None:
+    line = "Pipeline researcher -> writer finished in 12 seconds with no errors at all."
+    assert extract_post_body(line) == line
+
+
+def test_a_short_tweet_the_wrapper_hands_over_is_the_post() -> None:
+    wrapped = (
+        "Rescheduled batch job 2/8 — POST ONE TWEET ONLY. Call x_post with "
+        'EXACTLY this text: "كاظمه لا تجيب فقط — بل تنفّذ وفق جدول."'
+    )
+    assert extract_post_body(wrapped) == "كاظمه لا تجيب فقط — بل تنفّذ وفق جدول."
+
+
+def test_a_short_post_that_is_most_of_the_prompt_is_still_the_post() -> None:
+    prompt = 'Post on X: "Kazma 0.12 is out, faster recall"'
+    assert extract_post_body(prompt) == "Kazma 0.12 is out, faster recall"
+
+
 def test_empty_input() -> None:
     assert extract_post_body("") == ""
     assert extract_post_body("   ") == ""

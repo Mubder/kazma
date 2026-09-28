@@ -240,4 +240,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تعذّر تبديل الشخصية",
         "en": "Failed to switch personality",
     },
+    "agents.trace_count": {
+        "ar": "مدخلات التتبع",
+        "en": "Trace entries",
+    },
+    "agents.since_start": {
+        "ar": "منذ بدء تشغيل الخادم",
+        "en": "since the server started",
+    },
 }

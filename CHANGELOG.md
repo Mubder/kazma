@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## The owner's reminders showed as "done" (2026-09-28)
+
+**The Scheduled page listed both CoPilot Pro+ renewal reminders as
+"done".** The page shows a scheduled X post by pulling the quoted post out
+of its prompt (`… EXACTLY this text: "…"`); a reminder that says *Reply
+"done" to stop these daily reminders* handed it the word "done", and the
+reminder's own text disappeared. A quoted fragment is now the text only
+when the prompt hands it over with a colon and ends with it, or when it is
+most of the message; a tweet quoting a phrase and an arrow ("researcher ->
+writer") are left whole.
+
+Polish on the way: the Knowledge page counts chunks in proper Arabic
+("4539 مقطعاً", not "4539 مقطع") through a plural helper every page can use
+(`KazmaFormat.count`), and the Agents page's third card says what it counts
+— trace entries since the server started — instead of "Sessions"; the
+other two cards say "since the server started" too.
+
 ## The live install, sixth pass: the Swarm's words, the chat's command menu, a Replay picker of uuids (2026-09-28)
 
 Found using the live install in Arabic and in English:

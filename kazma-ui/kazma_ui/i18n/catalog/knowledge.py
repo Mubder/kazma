@@ -329,8 +329,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "score",
     },
     "knowledge.chunks_of": {
-        "ar": "{shown} من {total} مقاطع",
-        "en": "{shown} of {total} chunks",
+        "ar": "{shown} من {total}",
+        "en": "{shown} of {total}",
     },
     "knowledge.untitled": {
         "ar": "(بلا عنوان)",

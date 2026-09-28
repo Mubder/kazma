@@ -52,6 +52,22 @@ ok("the locale says so", ar.locale() === "ar-u-nu-latn" && en.locale() === "en")
 const regional = load("ar-KW");
 ok("a regional tag reads as its language", regional.lang() === "ar");
 
+// Counts take the catalog's plural forms (the Knowledge page read
+// "4539 مقطع"; Arabic needs "4539 مقطعاً"). Same rule as i18n.t_plural.
+const chunksAr = { zero: "لا توجد مقاطع", one: "مقطع واحد", two: "مقطعان",
+  few: "{n} مقاطع", many: "{n} مقطعاً", other: "{n} مقطع" };
+const arF = load("ar");
+const cases = [[0, "لا توجد مقاطع"], [1, "مقطع واحد"], [2, "مقطعان"], [5, "5 مقاطع"],
+  [15, "15 مقطعاً"], [100, "100 مقطع"], [4539, "4539 مقطعاً"], [103, "103 مقاطع"]];
+for (const [n, want] of cases) {
+  ok("Arabic count " + n, arF.count(chunksAr, n) === want, arF.count(chunksAr, n));
+}
+ok("English count", en.count({ one: "1 chunk", other: "{n} chunks" }, 4539) === "4539 chunks");
+ok("English one", en.count({ one: "1 chunk", other: "{n} chunks" }, 1) === "1 chunk");
+ok("missing forms fall back", arF.count(null, 7, "{n} items") === "7 items");
+// Negative control: the old hand-built label is the wrong form for 4539.
+ok("control: noun + number was ungrammatical", "4539 " + "مقطع" !== arF.count(chunksAr, 4539));
+
 // Negative control: the browser's own locale (what pages used) is English
 // whatever the page's language.
 ok("control: toLocaleString ignores the page language",
