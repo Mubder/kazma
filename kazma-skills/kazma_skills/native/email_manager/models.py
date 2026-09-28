@@ -9,13 +9,16 @@ ProviderName = Literal["auto", "sandbox", "gmail", "microsoft", "imap"]
 SendAction = Literal["send", "reply", "forward", "draft"]
 
 
-def _cell(value: str | None, limit: int) -> str:
+def _cell(value: str | None, limit: int | None) -> str:
     """Flatten sender-controlled text into a single safe markdown table cell.
 
     Collapses every newline/carriage-return/tab and escapes the pipe, so no
-    field can end a row, start a new one, or add a column.
+    field can end a row, start a new one, or add a column. ``limit=None``
+    keeps the whole value (an id is a key, not a preview).
     """
-    text = (value or "")[:limit]
+    text = value or ""
+    if limit is not None:
+        text = text[:limit]
     for ch in ("\r", "\n", "\t"):
         text = text.replace(ch, " ")
     return text.replace("|", "\\|").strip()
@@ -56,8 +59,12 @@ class EmailMessage:
         star = "★" if self.starred else "☆"
         snip = _cell(self.snippet or self.body, 80)
         labs = _cell(",".join(self.labels), 40) if self.labels else "—"
+        # The id is what email_get / reply / delete take back: never cut it.
+        # Microsoft Graph ids run to ~150 characters behind a shared mailbox
+        # prefix, so the old 60-character cut gave every row the SAME id and
+        # opening one failed "Id is malformed" (live, 2026-09-28).
         return (
-            f"| `{_cell(self.id, 60)}` | {flag}{star} | {_cell(self.from_addr, 40)} | "
+            f"| `{_cell(self.id, None)}` | {flag}{star} | {_cell(self.from_addr, 40)} | "
             f"{_cell(self.subject, 50)} | {_cell(self.date, 25)} | {labs} | {snip} |"
         )
 

@@ -355,6 +355,7 @@ def _microsoft_backend(explicit: bool = True) -> Any:
             client_secret=cred("EMAIL_MS_CLIENT_SECRET", "email.microsoft.client_secret"),
             tenant_id=_env("EMAIL_MS_TENANT_ID", "common") or "common",
             account_alias="",
+            address=vault_retrieve("email.microsoft.oauth_address"),
         )
 
     if _ms_password_ready():
@@ -465,6 +466,7 @@ def get_backend(provider: str | None = None, account: str | None = None) -> Any:
                     or _env("EMAIL_MS_TENANT_ID", "common")
                     or "common",
                     account_alias=alias,
+                    address=cfg.get("address") or "",
                 )
             if cfg.get("address") and cfg.get("password"):
                 if cfg.get("pop_host") and not cfg.get("imap_host"):
@@ -572,4 +574,15 @@ def get_backend(provider: str | None = None, account: str | None = None) -> Any:
 
 
 def mode_banner(backend: Any) -> str:
-    return f"[{getattr(backend, 'name', 'unknown')} mode]"
+    """The line every email tool result starts with: which backend answered,
+    and the mailbox's own address when it is known -- what "email myself"
+    needs. On 2026-09-28 the agent had to read Sent Items to learn the
+    owner's Microsoft address; nothing it could see named the mailbox."""
+    name = getattr(backend, "name", "unknown")
+    address = (
+        getattr(backend, "address", "")
+        or getattr(backend, "email_address", "")
+        or ""
+    )
+    address = str(address).strip()
+    return f"[{name} mode · mailbox {address}]" if address else f"[{name} mode]"
