@@ -226,6 +226,8 @@
        Classic script, runs before any page/module script so every fetch is
        covered. Must come AFTER window.t injection above (it uses window.t). #}
     <script src="/static/js/auth-guard.js?v={{ js_version() }}"></script>
+    {# Dates, times and numbers in the page's language (window.KazmaFormat). #}
+    <script src="/static/js/locale_format.js?v={{ js_version() }}"></script>
 
     {# No browser WS token meta tag — the WS authenticates via the same-origin
        kazma-session cookie (sent automatically) + loopback trust. The

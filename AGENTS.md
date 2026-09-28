@@ -2610,7 +2610,11 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   `async_tools_never_await` -- and they only go down. DNS is I/O:
   `await asyncio.to_thread(validate_url, …)` — keep the name so test patches
   still apply (`test_no_blocking_dns_in_async_functions`). Route walks with
-  loop-detecting fakes: `tests/test_kb_api_routes.py`. An
+  loop-detecting fakes: `tests/test_kb_api_routes.py`, and for the chat
+  session routes (list, history, rename, archive, pin, status, delete --
+  the store on the loop until 2026-09-28, 150-400 ms a list on the live
+  Postgres) `tests/test_chat_session_routes_off_loop.py`, which wraps the
+  real store and records any call made where a loop runs. An
   `httpx.AsyncClient(...)` built in async code passes
   `verify=shared_ssl_context()` (`kazma_core.http_tls`, one context built in
   a thread at boot) -- the default loads the CA bundle in the constructor,
@@ -3158,6 +3162,23 @@ writes.
   least important region first: the IDE puts its AI chat below the editor
   at 1000px and stacks the file tree only below 560px, capped in height --
   stacking everything at once put the editor 2,400px down the page.
+- **Dates, times and numbers go through `window.KazmaFormat`**
+  (`static/js/locale_format.js`, loaded by `base.html`): `Intl` in the page's
+  language (`<html lang>`), Latin digits in Arabic like every other number
+  the interface shows. Pages used the browser's own locale and wrote "ago"
+  by hand, so Arabic pages showed English dates (`tests/js/test_locale_format.js`).
+  A page-level helper for catalog strings must not be named after an
+  element tag: the Dashboard's `tr()` was shadowed by `var tr =
+  createElement('tr')` in its row loop and rendered no rows (caught by
+  `tests/e2e/test_dashboard_session_table.py`).
+- **The Dashboard's session table reads the chat store** for a thread's
+  title, platform and message count, and the checkpoints for its saved steps
+  and last activity (`list_checkpoints`: newest per thread, time from the
+  uuid6 id via `checkpoint_retention.checkpoint_time`). It read a
+  five-minute gateway cache and the Postgres checkpoint row (which holds no
+  messages), so every live row said "unknown / anonymous / 0". Delete removes
+  the chat; "Clear saved steps" removes every chat's checkpoints and keeps
+  the chats (they carry on from their messages, `fallback_history`).
 - **A control is wired once** (2026-09-28): never an inline `on<event>` in a
   template and a script listener for the same element and event -- Start
   All and Stop All sent every click twice. A handler that only prevents the

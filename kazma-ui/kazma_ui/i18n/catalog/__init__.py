@@ -6,6 +6,7 @@ from kazma_ui.i18n.catalog import agents as _agents
 from kazma_ui.i18n.catalog import chat as _chat
 from kazma_ui.i18n.catalog import common as _common
 from kazma_ui.i18n.catalog import dashboard as _dashboard
+from kazma_ui.i18n.catalog import documents as _documents
 from kazma_ui.i18n.catalog import knowledge as _knowledge
 from kazma_ui.i18n.catalog import memory as _memory
 from kazma_ui.i18n.catalog import packages as _packages
@@ -24,6 +25,7 @@ CATALOG_MODULES = (
     _chat,
     _common,
     _dashboard,
+    _documents,
     _knowledge,
     _memory,
     _packages,

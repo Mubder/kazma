@@ -1332,7 +1332,7 @@ def create_sse_chat_router(
         )
 
     @r.get("/api/chat/sessions")
-    async def list_sessions() -> list[dict[str, Any]]:
+    def list_sessions() -> list[dict[str, Any]]:
         """List all active chat sessions (shared store)."""
         try:
             from kazma_core.sessions.directory import enrich_summary
@@ -1348,7 +1348,7 @@ def create_sse_chat_router(
         Used by the frontend on page load / tab focus to detect that the
         agent is still generating a response after a refresh or tab switch.
         """
-        session = _get_store().get(session_id)
+        session = await asyncio.to_thread(_get_store().get, session_id)
         thread_id = ""
         if session:
             thread_id = session.thread_id or session_id
@@ -1440,9 +1440,10 @@ def create_sse_chat_router(
         """Delete a chat session and its associated checkpoint data."""
         try:
             store = _get_store()
-            session = store.get(session_id)
+            # Store reads and writes: off the event loop.
+            session = await asyncio.to_thread(store.get, session_id)
             thread_id = session.thread_id if session else ""
-            store.delete(session_id)
+            await asyncio.to_thread(store.delete, session_id)
 
             if thread_id:
                 try:
@@ -1458,7 +1459,7 @@ def create_sse_chat_router(
             return {"status": "error", "error": "Internal error"}
 
     @r.patch("/api/chat/sessions/{session_id}")
-    async def rename_session(session_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    def rename_session(session_id: str, body: dict[str, Any]) -> dict[str, Any]:
         """Rename a chat session (set a custom title)."""
         try:
             title = str(body.get("title") or "").strip()
@@ -1473,7 +1474,7 @@ def create_sse_chat_router(
             return {"status": "error", "error": "Internal error"}
 
     @r.post("/api/chat/sessions/{session_id}/archive")
-    async def archive_session(session_id: str) -> dict[str, Any]:
+    def archive_session(session_id: str) -> dict[str, Any]:
         """Archive a chat session (hide from sidebar without deleting)."""
         try:
             session = _get_store().set_archived(session_id, True)
@@ -1485,7 +1486,7 @@ def create_sse_chat_router(
             return {"status": "error", "error": "Internal error"}
 
     @r.post("/api/chat/sessions/{session_id}/unarchive")
-    async def unarchive_session(session_id: str) -> dict[str, Any]:
+    def unarchive_session(session_id: str) -> dict[str, Any]:
         """Restore an archived chat session back to the sidebar."""
         try:
             session = _get_store().set_archived(session_id, False)
@@ -1497,7 +1498,7 @@ def create_sse_chat_router(
             return {"status": "error", "error": "Internal error"}
 
     @r.post("/api/chat/sessions/{session_id}/pin")
-    async def pin_session(session_id: str) -> dict[str, Any]:
+    def pin_session(session_id: str) -> dict[str, Any]:
         """Pin a chat session (stays at the top of the sidebar)."""
         try:
             session = _get_store().set_pinned(session_id, True)
@@ -1509,7 +1510,7 @@ def create_sse_chat_router(
             return {"status": "error", "error": "Internal error"}
 
     @r.post("/api/chat/sessions/{session_id}/unpin")
-    async def unpin_session(session_id: str) -> dict[str, Any]:
+    def unpin_session(session_id: str) -> dict[str, Any]:
         """Unpin a chat session (back to normal updated_at ordering)."""
         try:
             session = _get_store().set_pinned(session_id, False)
@@ -1521,7 +1522,7 @@ def create_sse_chat_router(
             return {"status": "error", "error": "Internal error"}
 
     @r.get("/api/chat/sessions/archived")
-    async def list_archived_sessions() -> list[dict[str, Any]]:
+    def list_archived_sessions() -> list[dict[str, Any]]:
         """List archived chat sessions (for the archive view)."""
         try:
             from kazma_core.sessions.directory import enrich_summary
@@ -1553,10 +1554,13 @@ def create_sse_chat_router(
         """
         from kazma_ui import reply_sink as _reply_sink
 
+        # Store reads and writes in this route go through to_thread: on
+        # Postgres each is a round trip, and this is the chat page's load.
+        store = _get_store()
         if session_id.startswith("gw-"):
-            _get_store()._refresh_from_db(session_id)
+            await asyncio.to_thread(store._refresh_from_db, session_id)
 
-        session = _get_store().get(session_id)
+        session = await asyncio.to_thread(store.get, session_id)
         if not session:
             return []
 
@@ -1586,7 +1590,9 @@ def create_sse_chat_router(
                 # Twin sidebar rows (take-over) must not copy this thread's
                 # transcript onto a different session_id.
                 if tid:
-                    owner = _get_store().get(tid) or _get_store().get_by_thread_id(tid)
+                    owner = await asyncio.to_thread(
+                        lambda: store.get(tid) or store.get_by_thread_id(tid)
+                    )
                     if owner is not None and owner.session_id != session.session_id:
                         tid = ""
                 if live and tid and getattr(live, "checkpointer", None):
@@ -1672,7 +1678,7 @@ def create_sse_chat_router(
                             session.messages = messages
                         if session_id.startswith("gw-"):
                             session.thread_id = session_id
-                        _get_store().put(session)
+                        await asyncio.to_thread(store.put, session)
                         messages = session.messages
             except Exception:
                 logger.debug(
@@ -1838,7 +1844,7 @@ def create_sse_chat_router(
     # ── Provider profile management (continued) ───────────────────
 
     @r.get("/api/provider/active")
-    async def get_active_provider() -> dict[str, Any]:
+    def get_active_provider() -> dict[str, Any]:
         """Return the currently active provider profile.
 
         Returns:

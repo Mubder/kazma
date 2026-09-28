@@ -61,11 +61,33 @@ window.KazmaTurnVisibility = (function() {
       .catch(function() { /* fail open */ });
   } catch (e) { /* ignore */ }
 
+  /* A catalog string (window.t) or its English fallback. */
+  function tr(key, fallback) {
+    var text = typeof window.t === 'function' ? window.t(key) : key;
+    return text && text !== key ? text : fallback;
+  }
+
+  /* The answer as plain text for the tab title and the desktop
+     notification: they showed its markdown ("[Open this chat in Time
+     Travel](/replay?...)", 2026-09-28). A link keeps its words; code
+     fences, emphasis and heading/list marks go. */
+  function plainText(summary) {
+    return String(summary || '')
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/`([^`]*)`/g, '$1')
+      .replace(/(\*\*|__|~~|\*)(\S(?:[\s\S]*?\S)?)\1/g, '$2')
+      .replace(/^[ \t]{0,3}(?:#{1,6}[ \t]+|>[ \t]?|[-*+][ \t]+|\d+[.)][ \t]+)/gm, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   function notifyTerminal(summary) {
     _active = false;
     if (_flashTimer) { clearInterval(_flashTimer); _flashTimer = null; }
     if (!document.hidden) { render(); return; }
-    var text = String(summary || '').replace(/\s+/g, ' ').trim();
+    var text = plainText(summary);
     if (text.length > 120) text = text.slice(0, 117) + '\u2026';
     // Title keeps a subtle done marker until the tab is shown again.
     document.title = '\u2713 ' + (text ? text + ' \u2014 ' : '') + baseTitle();
@@ -84,8 +106,8 @@ window.KazmaTurnVisibility = (function() {
     try {
       if (!enabled() || !('Notification' in window)) return;
       if (Notification.permission !== 'granted') return;
-      var n = new Notification('Kazma \u2014 task finished', {
-        body: text || 'Your task completed.',
+      var n = new Notification(tr('chat.notify_done_title', 'Kazma \u2014 task finished'), {
+        body: text || tr('chat.notify_done_body', 'Your task completed.'),
         tag: 'kazma-turn-complete',
         silent: false,
       });
@@ -119,6 +141,7 @@ window.KazmaTurnVisibility = (function() {
     endTurn: function(summary) {
       notifyTerminal(summary);
     },
+    plainText: plainText,
     /** Tab shown again — restore title immediately. */
     restore: function() {
       if (_flashTimer) { clearInterval(_flashTimer); _flashTimer = null; }

@@ -58,6 +58,7 @@ __all__ = [
     "DEFAULT_RETENTION_DAYS",
     "MAX_RETENTION_DAYS",
     "RETENTION_KEY",
+    "checkpoint_time",
     "parse_retention_days",
     "retention_setting",
     "run_checkpoint_retention",
@@ -131,7 +132,7 @@ def retention_setting(config_store: Any = None) -> dict[str, Any]:
     return {"days": days, "source": "setting"}
 
 
-def _checkpoint_time(checkpoint_id: str | None) -> float | None:
+def checkpoint_time(checkpoint_id: str | None) -> float | None:
     """Unix time a LangGraph checkpoint was created, read from its uuid6 id.
 
     ``None`` for an id that is not a version-6 uuid: the chat's age is then
@@ -149,7 +150,7 @@ def _checkpoint_time(checkpoint_id: str | None) -> float | None:
 
 def _keep_for(newest_id: str | None, *, now: float, days: int) -> int | None:
     """How many checkpoints a chat keeps, or ``None`` to leave it this pass."""
-    born = _checkpoint_time(newest_id)
+    born = checkpoint_time(newest_id)
     if born is None or now - born < ACTIVE_GRACE_S:
         return None
     if days > 0 and now - born > days * 86400:
