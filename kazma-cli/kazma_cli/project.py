@@ -27,8 +27,15 @@ __all__ = [
 # Default templates
 # ---------------------------------------------------------------------------
 
-DEFAULT_RULES = """# Project-specific agent rules
-# These rules are applied to every agent session in this project.
+# Nothing in Kazma reads these files yet: `kazma project init` creates them and
+# `show`/`validate` check them, and that is all. Until 2026-09-28 the templates
+# said the rules were "applied to every agent session". Loading them into agent
+# sessions is https://github.com/Mubder/kazma/issues/20; when that lands, the
+# templates and tests/test_project_init.py change with it.
+
+DEFAULT_RULES = """# Project-specific agent rules (planned)
+# Kazma does not read this file yet: `kazma project init` only creates it.
+# Loading it into agent sessions is https://github.com/Mubder/kazma/issues/20
 language: python
 test_command: python -m pytest tests/ -q
 git_branch: main
@@ -36,9 +43,10 @@ git_branch: main
 
 DEFAULT_CONTEXT = """# Project Context
 
-<!-- Add project-specific context that agents should know.
-     This is like .cursorrules — describe conventions, architecture,
-     key files, and patterns unique to this project. -->
+<!-- Planned: project context for agents, like .cursorrules.
+     Kazma does not read this file yet: `kazma project init` only creates it
+     (https://github.com/Mubder/kazma/issues/20). Describe conventions,
+     architecture, key files and patterns unique to this project. -->
 
 ## Overview
 
@@ -49,21 +57,23 @@ DEFAULT_CONTEXT = """# Project Context
 ## Key Files
 """
 
-DEFAULT_PERSONALITY = """# Project-level personality override
-# Override the default agent personality for this project.
-# Leave empty to use the global default.
+DEFAULT_PERSONALITY = """# Project-level personality override (planned)
+# Kazma does not read this file yet (https://github.com/Mubder/kazma/issues/20).
+# Planned: override the default agent personality for this project; empty
+# would keep the global default.
 #
 # Example:
 #   persona: senior-backend
 #   verbosity: concise
 #   tone: professional
 #
-# Supported keys: persona, verbosity, tone, language, role
+# Planned keys: persona, verbosity, tone, language, role
 """
 
-DEFAULT_TOOLS = """# Enabled/disabled tools per project
-# List tool names to enable or disable for this project.
-# An empty enabled list means "use global defaults".
+DEFAULT_TOOLS = """# Enabled/disabled tools per project (planned)
+# Kazma does not read this file yet (https://github.com/Mubder/kazma/issues/20).
+# Planned: list tool names to enable or disable for this project; an empty
+# enabled list would mean "use global defaults".
 #
 # Example:
 #   enabled:

@@ -187,7 +187,11 @@ Global flags (for completion data): `--model`, `--provider`, `--yolo`, `--verbos
 
 ## 4. `kazma project`
 
-`.kazma/` per-project config (`main.py:289-328`, `project.py`).
+`.kazma/` per-project config (`main.py:289-328`, `project.py`). **Kazma does not
+read these files yet:** `init` creates them and `show` / `validate` check them,
+and no agent session uses them. Loading project rules into the agent is
+[issue #20](https://github.com/Mubder/kazma/issues/20). (Until 2026-09-28 the
+generated `rules.yaml` said its rules were "applied to every agent session".)
 
 | Subcommand | Args | Description |
 |---|---|---|
