@@ -664,4 +664,76 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مسودة",
         "en": "DRAFT",
     },
+    "workspace.extra_roots_title": {
+        "ar": "مجلدات خارج مساحة العمل",
+        "en": "Folders outside the workspace",
+    },
+    "workspace.extra_roots_hint": {
+        "ar": "لا تستخدم أدوات الملفات في Kazma إلا مساحة العمل النشطة. والمجلد المدرج هنا يمكنها استخدامه أيضًا دون استئذان في كل مرة: قراءة فقط، أو قراءة وكتابة. وفي المحادثة يستأذن الوكيل لأي مجلد آخر.",
+        "en": "Kazma's file tools use only the active workspace. A folder listed here they may use too, without asking each time: read only, or read and write. In chat, the agent asks for any other folder.",
+    },
+    "workspace.extra_roots_none": {
+        "ar": "لا توجد مجلدات خارج مساحة العمل.",
+        "en": "No folders outside the workspace.",
+    },
+    "workspace.extra_roots_mode_read": {
+        "ar": "قراءة فقط",
+        "en": "Read only",
+    },
+    "workspace.extra_roots_mode_write": {
+        "ar": "قراءة وكتابة",
+        "en": "Read and write",
+    },
+    "workspace.extra_roots_remove": {
+        "ar": "إزالة",
+        "en": "Remove",
+    },
+    "workspace.extra_roots_add": {
+        "ar": "إضافة مجلد",
+        "en": "Add folder",
+    },
+    "workspace.extra_roots_path": {
+        "ar": "مسار المجلد",
+        "en": "Folder path",
+    },
+    "workspace.extra_roots_path_ph": {
+        "ar": "المسار الكامل للمجلد، مثل D:\\Projects\\notes",
+        "en": "Full folder path, e.g. D:\\Projects\\notes",
+    },
+    "workspace.extra_roots_access": {
+        "ar": "الصلاحية",
+        "en": "Access",
+    },
+    "workspace.extra_roots_label": {
+        "ar": "الاسم (اختياري)",
+        "en": "Name (optional)",
+    },
+    "workspace.extra_roots_label_ph": {
+        "ar": "الاسم (اختياري)",
+        "en": "Name (optional)",
+    },
+    "workspace.extra_roots_added": {
+        "ar": "يمكن لـ Kazma الآن استخدام {path}.",
+        "en": "Kazma may now use {path}.",
+    },
+    "workspace.extra_roots_removed": {
+        "ar": "لم يعد Kazma يستخدم {path} دون استئذان.",
+        "en": "Kazma no longer uses {path} without asking.",
+    },
+    "workspace.extra_roots_save_failed": {
+        "ar": "تعذّر حفظ المجلدات: {error}",
+        "en": "Could not save the folders: {error}",
+    },
+    "workspace.extra_roots_load_failed": {
+        "ar": "تعذّرت قراءة المجلدات خارج مساحة العمل.",
+        "en": "Could not read the folders outside the workspace.",
+    },
+    "workspace.extra_roots_write_title": {
+        "ar": "السماح بالكتابة هناك؟",
+        "en": "Allow writing there?",
+    },
+    "workspace.extra_roots_write_confirm": {
+        "ar": "ستتمكن أدوات Kazma من إنشاء الملفات وتعديلها وحذفها في {path} دون استئذان. هل تريد المتابعة؟",
+        "en": "Kazma's tools will be able to create, change and delete files in {path} without asking. Continue?",
+    },
 }

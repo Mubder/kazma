@@ -1066,6 +1066,7 @@ def _error_for(exc: Exception, op: str, *, not_found_default: bool = False) -> J
             "not_ready": 409,
             "document_access_denied": 404,
             "document_delete_failed": 500,
+            "document_unindex_failed": 500,
             "document_platform_disabled": 503,
         }.get(code, 400)
         return JSONResponse(

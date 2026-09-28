@@ -27,6 +27,9 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Query
+from fastapi.responses import JSONResponse
+
+from kazma_core.errors import safe_error
 
 logger = logging.getLogger(__name__)
 
@@ -262,30 +265,43 @@ def create_workspace_router() -> APIRouter:
     # Extra folders (durable path grants outside the active workspace)
     # ------------------------------------------------------------------
 
+    # Plain ``def``s: FastAPI runs them in its threadpool, and both read or
+    # write the settings store. The Workspace page's "Folders outside the
+    # workspace" card calls them (2026-09-28); before it the docs promised a
+    # Settings control that did not exist.
     @router.get("/extra-roots")
-    async def get_extra_roots() -> dict[str, Any]:
+    def get_extra_roots() -> Any:
         """List durable extra roots the agent may access outside the workspace."""
-        try:
-            from kazma_core.workspace.path_grants import list_durable_roots
+        from kazma_core.workspace.path_grants import list_durable_roots
 
+        try:
             roots = [g.to_dict() for g in list_durable_roots()]
         except Exception as exc:
-            logger.debug("[workspace_api] extra-roots list failed: %s", exc)
-            roots = []
-        return {"extra_roots": roots}
+            # Never an empty list that reads as "no folders granted".
+            logger.warning("[workspace_api] extra-roots list failed: %s", exc)
+            return JSONResponse(status_code=500, content={"ok": False, "error": safe_error(exc)})
+        return {"ok": True, "extra_roots": roots}
 
     @router.put("/extra-roots")
-    async def put_extra_roots(body: dict[str, Any]) -> dict[str, Any]:
+    def put_extra_roots(body: dict[str, Any]) -> Any:
         """Replace durable extra roots.
 
-        Body: ``{"extra_roots": [{"path": "C:\\\\docs", "mode": "read", "label": "Docs"}]}``
+        Body: ``{"extra_roots": [{"path": "C:\\\\docs", "mode": "read", "label": "Docs"}]}``.
+        A new root must be a full path to an existing folder that is not a
+        whole drive and holds none of Kazma's own files; a 400 says why not.
         """
         from kazma_core.workspace.path_grants import set_durable_roots
 
         raw = body.get("extra_roots") if isinstance(body, dict) else None
         if not isinstance(raw, list):
-            return {"ok": False, "error": "extra_roots must be a list", "extra_roots": []}
-        roots = set_durable_roots(raw)
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error": "extra_roots must be a list", "extra_roots": []},
+            )
+        try:
+            roots = set_durable_roots(raw)
+        except ValueError as exc:
+            return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
         return {"ok": True, "extra_roots": [g.to_dict() for g in roots]}
 
     # ------------------------------------------------------------------

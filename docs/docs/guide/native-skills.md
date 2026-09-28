@@ -51,19 +51,22 @@ credentials (the same store Gmail uses). Env vars are an override, not
 the source of truth.
 
 - **Google Calendar** — Settings → Email → **Connect with Google**
-  (Calendar scope is included) or **Connect Calendar**. Tokens live in
-  the vault as `calendar.google.*`. Enable the **Google Calendar API**
-  in the Cloud project. A Gmail-only token is never sent to Calendar.
+  (Calendar scope is included) or **Connect Google Calendar** on the
+  calendar card. Tokens live in the vault as `calendar.google.*`. Enable
+  the **Google Calendar API** in the Cloud project. A Gmail-only token is
+  never sent to Calendar.
 - **Microsoft Outlook** (MS Graph) — Settings → Email → **Connect with
-  Microsoft** (requests `Calendars.ReadWrite`). Reconnect if your grant
-  is mail-only.
+  Microsoft** (requests `Calendars.ReadWrite` with mail), or **Connect
+  Outlook Calendar** on the calendar card for the calendar alone.
+- Each calendar's **Disconnect** on the card turns it off until it is
+  connected there again, even while its mail stays signed in.
 - **Sandbox** — in-memory local calendar when **no** account is
   connected (`provider=auto`). Explicit `provider="google"` / `"outlook"`
   **fails closed** with a connect hint — it does not pretend to be an
   empty real calendar.
 
 ```bash
-# Optional override only — prefer Settings → Email → Connect Calendar
+# Optional override only — prefer Settings → Email → the calendar card
 export GOOGLE_CALENDAR_TOKEN=ya29...
 ```
 

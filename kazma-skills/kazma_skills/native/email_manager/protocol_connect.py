@@ -25,13 +25,12 @@ def _vault_delete(*names: str) -> None:
         from kazma_core.paths import vault_db_path
 
         v = get_vault() or SecretVault(db_path=vault_db_path())
+        # A missing name is not an error (delete returns False); a vault
+        # that cannot write is, and a disconnect must not hide it.
         for n in names:
-            try:
-                v.delete(n)
-            except Exception:
-                pass
-    except Exception as exc:
-        logger.debug("[email.protocol] vault delete: %s", exc)
+            v.delete(n)
+    except Exception:
+        logger.warning("[email.protocol] vault delete of %s failed", ", ".join(names), exc_info=True)
 
 
 def connect_protocol(
@@ -184,16 +183,23 @@ def disconnect_protocol(provider: str) -> dict[str, Any]:
             "EMAIL_GMAIL_AUTH",
         ):
             os.environ.pop(k, None)
+        # The grant's own record goes with it (what it covered, when it was
+        # made, whether Drive answered); Google Calendar keeps its own copy
+        # and is disconnected on the calendar card.
         _vault_delete(
             "email.gmail.address",
             "email.gmail.app_password",
             "email.gmail.auth",
             "email.gmail.access_token",
             "email.gmail.refresh_token",
+            "email.gmail.scopes",
+            "email.gmail.connected_at",
+            "email.gmail.drive_ok",
         )
         for k in (
             "EMAIL_GMAIL_ACCESS_TOKEN",
             "EMAIL_GMAIL_REFRESH_TOKEN",
+            "EMAIL_GMAIL_SCOPES",
         ):
             os.environ.pop(k, None)
         return {"ok": True, "message": "Gmail credentials cleared."}
@@ -213,12 +219,17 @@ def disconnect_protocol(provider: str) -> dict[str, Any]:
             "EMAIL_MS_REFRESH_TOKEN",
         ):
             os.environ.pop(k, None)
+        # The OAuth sign-in's address and scopes too: a later sign-in whose
+        # response names no address must not show the old account's. Outlook
+        # Calendar keeps its own copy and is disconnected on the calendar card.
         _vault_delete(
             "email.microsoft.address",
             "email.microsoft.password",
             "email.microsoft.auth",
             "email.microsoft.access_token",
             "email.microsoft.refresh_token",
+            "email.microsoft.scopes",
+            "email.microsoft.oauth_address",
         )
         return {"ok": True, "message": "Microsoft credentials cleared."}
 

@@ -52,7 +52,15 @@ def ms_redirect_uri(request_base: str | None = None) -> str:
     return f"{public_base_url(request_base)}/api/email/oauth/microsoft/callback"
 
 
-def start_ms_browser_oauth(request_base: str | None = None) -> dict[str, Any]:
+def start_ms_browser_oauth(
+    request_base: str | None = None, *, purpose: str = "mail"
+) -> dict[str, Any]:
+    """Authorize URL for a Microsoft sign-in. *purpose* ``"calendar"`` is the
+    calendar card's button: the callback then keeps the tokens for Outlook
+    Calendar only (``store_microsoft_calendar_tokens``). Both use the one
+    redirect URI registered in Azure."""
+    if purpose not in ("mail", "calendar"):
+        raise ValueError(f"unknown Microsoft sign-in purpose: {purpose!r}")
     cid = _client_id()
     if not cid:
         return {
@@ -61,7 +69,7 @@ def start_ms_browser_oauth(request_base: str | None = None) -> dict[str, Any]:
         }
     tenant = _tenant()
     redirect = ms_redirect_uri(request_base)
-    state = new_state("microsoft", redirect_uri=redirect, tenant=tenant)
+    state = new_state("microsoft", redirect_uri=redirect, tenant=tenant, purpose=purpose)
     # confidential clients need secret; public clients can omit
     params = {
         "client_id": cid,
@@ -115,11 +123,27 @@ async def finish_ms_browser_oauth(code: str, state: str) -> dict[str, Any]:
             }
     if not (payload.get("access_token") or ""):
         return {"ok": False, "error": "No access_token from Microsoft"}
+    if meta.get("purpose") == "calendar":
+        from kazma_skills.native.email_manager.oauth_ms import store_microsoft_calendar_tokens
+
+        try:
+            address = store_microsoft_calendar_tokens(payload)
+        except RuntimeError as exc:
+            return {"ok": False, "purpose": "calendar", "error": str(exc)}
+        logger.info("[calendar.oauth] Outlook Calendar tokens stored")
+        return {
+            "ok": True,
+            "purpose": "calendar",
+            "email": address,
+            "message": "Outlook Calendar connected.",
+        }
     from kazma_skills.native.email_manager.oauth_ms import store_microsoft_tokens
 
-    store_microsoft_tokens(payload, cid)
+    address = store_microsoft_tokens(payload, cid)
     logger.info("[email.oauth] Microsoft Graph browser OAuth tokens stored")
     return {
         "ok": True,
+        "purpose": "mail",
+        "email": address,
         "message": "Microsoft Graph connected via OAuth. Email tools will use [microsoft_graph mode].",
     }

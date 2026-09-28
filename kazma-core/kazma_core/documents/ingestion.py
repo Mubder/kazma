@@ -890,7 +890,28 @@ class DocumentIngestionService:
             "versions": versions,
             "jobs": jobs,
             "artifacts": artifacts,
+            "libraries": self._libraries_holding(tenant, record.id),
         }
+
+    def _libraries_holding(self, tenant: str, doc_id: DocumentId) -> list[dict[str, str]] | None:
+        """The Knowledge libraries a document is searchable in, named, for the
+        Documents page's remove control (the page could add a document to a
+        library and never take it out). None when that is unknown -- no
+        knowledge wiring, or the lookup failed -- never an empty list that
+        would claim the document is in none."""
+        adapter = getattr(self.service, "knowledge_adapter", None)
+        if adapter is None:
+            return None
+        try:
+            held = adapter.libraries_holding(tenant_id=tenant, document_id=doc_id)
+            out: list[dict[str, str]] = []
+            for library_id in held:
+                lib = adapter.store.get_library_for_tenant(library_id, tenant) or {}
+                out.append({"id": library_id, "name": str(lib.get("name") or library_id)})
+            return out
+        except Exception:
+            logger.warning("[documents] libraries of %s could not be read", doc_id, exc_info=True)
+            return None
 
     def jobs_for_document(
         self, *, tenant_id: str, document_id: DocumentId | str

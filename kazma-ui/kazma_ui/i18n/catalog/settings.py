@@ -552,21 +552,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "يستخدم المهارة الأصلية list_events / create_event تقويم Google الحقيقي عند الاتصال. بدون رمز تقويم كانت الأداة تسقط بصمت إلى sandbox وتبدو كتقويم فارغ.",
         "en": "The calendar skill (list_events / create_event) uses your real Google Calendar when connected. Without a calendar token it used to fall back silently to an empty sandbox.",
     },
-    "settings.calendar_disconnect": {
-        "ar": "قطع اتصال التقويم",
-        "en": "Disconnect Calendar",
-    },
     "settings.calendar_disconnect_confirm": {
-        "ar": "مسح رموز تقويم Google؟ يبقى Gmail متصلاً.",
-        "en": "Clear Google Calendar tokens? Gmail stays connected.",
+        "ar": "فصل تقويم Google؟ يتوقف Kazma عن قراءته وتعديله حتى تربطه من هنا مرة أخرى. يبقى Gmail مربوطًا.",
+        "en": "Disconnect Google Calendar? Kazma stops reading and changing it until you connect it again here. Gmail stays connected.",
     },
     "settings.calendar_gmail_oauth_note": {
         "ar": "ربط Google يطلب أيضاً نطاق التقويم. فعّل Google Calendar API في مشروع Cloud.",
         "en": "Connect with Google also requests Calendar scope. Enable the Google Calendar API in the Cloud project.",
     },
     "settings.calendar_outlook_hint": {
-        "ar": "ربط تقويم Outlook يعيد تسجيل الدخول إلى Microsoft ويطلب صلاحية التقويم أيضًا؛ ويبقى بريد Microsoft مربوطًا. إن رفضت Microsoft إعادة التوجيه، فاستخدم خيار رمز الجهاز في قسم بريد Microsoft أعلاه.",
-        "en": "Connecting Outlook Calendar signs in to Microsoft again and asks for calendar access too; your Microsoft mail stays connected. If Microsoft refuses the redirect, use the device-code option in the Microsoft mail section above.",
+        "ar": "زر ربط تقويم Outlook يسجّل الدخول إلى Microsoft للتقويم وحده، ولا يغيّر بريد Microsoft. ويُستخدم معرّف تطبيق Azure (client ID) المحفوظ في بطاقة بريد Microsoft.",
+        "en": "Connect Outlook Calendar signs in to Microsoft for the calendar only; Microsoft mail is not changed. The Azure application (client) ID is the one saved on the Microsoft mail card.",
     },
     "settings.calendar_title": {
         "ar": "التقويم (Google / Outlook)",
@@ -597,12 +593,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Disconnect",
     },
     "settings.email_disconnect_gmail_confirm": {
-        "ar": "مسح عنوان Gmail وكلمة مرور التطبيق المحفوظة؟",
-        "en": "Clear saved Gmail address and app password?",
+        "ar": "فصل Gmail؟ يتوقف Kazma عن قراءة بريده والإرسال منه. ولتقويم Google زر فصل خاص به في بطاقة التقويم أدناه.",
+        "en": "Disconnect Gmail? Kazma stops reading and sending its mail. Google Calendar has its own switch on the calendar card below.",
     },
     "settings.email_disconnect_ms_confirm": {
-        "ar": "مسح رموز Microsoft Graph من هذا الخادم؟",
-        "en": "Clear Microsoft Graph tokens from this server?",
+        "ar": "فصل بريد Microsoft؟ يتوقف Kazma عن قراءة بريده والإرسال منه. ولتقويم Outlook زر فصل خاص به في بطاقة التقويم أدناه.",
+        "en": "Disconnect Microsoft mail? Kazma stops reading and sending its mail. Outlook Calendar has its own switch on the calendar card below.",
     },
     "settings.email_docs_hint": {
         "ar": "تفاصيل الإعداد:",
@@ -4791,5 +4787,45 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.calendar_connect_outlook": {
         "ar": "ربط تقويم Outlook",
         "en": "Connect Outlook Calendar",
+    },
+    "settings.calendar_disconnect_google": {
+        "ar": "فصل تقويم Google",
+        "en": "Disconnect Google Calendar",
+    },
+    "settings.calendar_disconnect_outlook": {
+        "ar": "فصل تقويم Outlook",
+        "en": "Disconnect Outlook Calendar",
+    },
+    "settings.calendar_disconnect_outlook_confirm": {
+        "ar": "فصل تقويم Outlook؟ يتوقف Kazma عن قراءته وتعديله حتى تربطه من هنا مرة أخرى. يبقى بريد Microsoft مربوطًا.",
+        "en": "Disconnect Outlook Calendar? Kazma stops reading and changing it until you connect it again here. Microsoft mail stays connected.",
+    },
+    "settings.email_account_signed_in": {
+        "ar": "تم تسجيل الدخول",
+        "en": "Signed in",
+    },
+    "settings.email_account_incomplete": {
+        "ar": "تسجيل الدخول غير مكتمل",
+        "en": "Sign-in incomplete",
+    },
+    "settings.int.outlook_calendar_connected": {
+        "ar": "تم ربط تقويم Outlook",
+        "en": "Outlook Calendar connected",
+    },
+    "settings.int.outlook_calendar_disconnected": {
+        "ar": "فُصل تقويم Outlook",
+        "en": "Outlook Calendar disconnected",
+    },
+    "settings.int.calendar_not_granted": {
+        "ar": " — لم تُمنح صلاحية التقويم؛ استخدم زر ربط تقويم Google",
+        "en": " — Calendar was not granted; use Connect Google Calendar",
+    },
+    "settings.calendar_outlook_code_fallback": {
+        "ar": "ترفض Microsoft إعادة التوجيه؟ اربط برمز بدلًا من ذلك",
+        "en": "Microsoft refuses the redirect? Connect with a code instead",
+    },
+    "settings.calendar_outlook_code_start": {
+        "ar": "احصل على رمز لتقويم Outlook",
+        "en": "Get a code for Outlook Calendar",
     },
 }

@@ -340,7 +340,13 @@
                     <button class="btn btn-sm btn-secondary" @click="renameEntity(e)" x-text="S.rename || 'Rename'" title="{{ t('memory.pg.change_display_name_id_stays') }}"></button>
                     <button class="btn btn-sm btn-secondary" @click="mergeSource = e.id; selectedEntityId = e.id; pushSlotsToGraph()" title="{{ t('memory.pg.set_as_link_merge_source') }}">{{ t('memory.pg.src_2') }}</button>
                     <button class="btn btn-sm btn-secondary" @click="mergeTarget = e.id; selectedEntityId = e.id; pushSlotsToGraph()" title="{{ t('memory.pg.set_as_link_merge_target') }}">{{ t('memory.pg.tgt_2') }}</button>
-                    <button class="btn btn-sm btn-danger" @click="deleteEntity(e)" :disabled="e.protected" x-text="S.delete || 'Delete'"></button>
+                    <button class="btn btn-sm btn-secondary" x-show="!e.core && !e.protected" x-cloak
+                            @click="toggleProtect(e)" title="{{ t('memory.pg.protect_hint') }}">{{ t('memory.pg.protect') }}</button>
+                    <button class="btn btn-sm btn-secondary" x-show="!e.core && e.protected" x-cloak
+                            @click="toggleProtect(e)" title="{{ t('memory.pg.unprotect_hint') }}">{{ t('memory.pg.unprotect') }}</button>
+                    <button class="btn btn-sm btn-danger" @click="deleteEntity(e)" :disabled="e.protected"
+                            :title="e.protected ? tOr(e.core ? 'memory.pg.core_always_protected' : 'memory.pg.unprotect_first', '') : ''"
+                            x-text="S.delete || 'Delete'"></button>
                   </div>
                 </td>
               </tr>

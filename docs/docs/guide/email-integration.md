@@ -91,7 +91,22 @@ http://127.0.0.1:9090/api/email/oauth/gmail/callback
 https://your.domain/api/email/oauth/gmail/callback
 ```
 
-5. Settings → Email → paste Client ID + secret → **Save OAuth client** → **Connect with Google**. That consent also requests Calendar. If Calendar was skipped or the Calendar API is off, use **Connect Calendar** on the same page (same client, same redirect URI).
+5. Settings → Email → paste Client ID + secret → **Save OAuth client** → **Connect with Google**. That consent also requests Calendar. If Calendar was skipped or the Calendar API is off, use **Connect Google Calendar** on the calendar card of the same page (same client, same redirect URI).
+
+The calendar card has one row per calendar, each with its own state, its own
+**Connect** and its own **Disconnect**:
+
+- **Connect Outlook Calendar** signs in to Microsoft for the calendar only;
+  Microsoft mail is left as it is. It uses the Azure application (client) ID
+  saved on the Microsoft card and the same redirect URI. When Microsoft
+  refuses the redirect (an app registered for the device code only), the
+  card's **Connect with a code instead** does the same with a code.
+- **Disconnect** turns that calendar off until you connect it again from the
+  card. The mail sign-in covers Calendar too, so deleting the calendar's
+  tokens alone would have left it reading through the mail grant; while a
+  calendar is off, nothing reads or keeps its tokens. Mail stays connected.
+- Disconnecting Gmail or Microsoft mail leaves the calendar on its own row
+  connected; disconnect it there.
 
 Gmail-only tokens cannot list Google Calendar events. The calendar skill used to fall back silently to an empty sandbox; it now fails closed with a connect hint when `provider=google` has no calendar grant.
 

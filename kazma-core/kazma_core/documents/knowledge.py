@@ -92,6 +92,24 @@ class DocumentKnowledgeAdapter:
         self.index = knowledge_index or KnowledgeIndex(store=knowledge_store)
         self.config = config
 
+    def libraries_holding(self, *, tenant_id: str, document_id: Any) -> list[str]:
+        """The tenant's libraries a document is searchable in: the document
+        store's chunk record and the library's own, since either may hold it.
+        The one answer for the Documents page and for delete, which removes
+        the document from each."""
+        return sorted(
+            set(
+                self.repository.list_indexed_libraries(
+                    tenant_id=tenant_id, document_id=document_id
+                )
+            )
+            | set(
+                self.store.list_document_libraries(
+                    tenant_id=tenant_id, document_id=str(document_id)
+                )
+            )
+        )
+
     def index_document_ir(
         self,
         document: DocumentIR,

@@ -696,6 +696,9 @@
         async createBackup() {
             try {
                 const resp = await fetch('/api/settings/system/backup');
+                // An error page saved as kazma-backup.yaml looks like a backup
+                // until the day it is needed.
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 const blob = await resp.blob();
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -735,6 +738,7 @@
             try {
                 const url = `/api/settings/export?format=${this.exportFormat}`;
                 const resp = await fetch(url);
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 const blob = await resp.blob();
                 const a = document.createElement('a');
                 a.href = URL.createObjectURL(blob);

@@ -440,8 +440,14 @@
             google_ok: '',
             google_oauth_client_set: false,
             outlook_connected: false,
+            outlook_address: '',
+            outlook_oauth_client_set: false,
             active_provider: 'sandbox',
         },
+        // Outlook Calendar's sign-in by code (a redirect Microsoft refuses)
+        calendarMsDevice: { user_code: '', verification_uri: '', device_code: '' },
+        calendarMsPolling: false,
+        calendarMsPollTimer: null,
 
         // ── X (Twitter) official API ──
         xStatus: {

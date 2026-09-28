@@ -2739,15 +2739,13 @@
 
             <!-- Calendar (Google / Outlook) — same Google OAuth client as Gmail -->
             <div class="card" style="padding:16px;border:1px solid var(--border-subtle);margin-top:16px;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:12px;flex-wrap:wrap;">
-                    <h4 style="margin:0;">{{ t('settings.calendar_title') }}</h4>
-                    <span class="badge" :class="calendarStatus.google_connected || calendarStatus.outlook_connected ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
-                          x-text="(calendarStatus.google_connected || calendarStatus.outlook_connected) ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
-                </div>
+                {# No card-wide badge: it said "Connected" when either calendar
+                   was, beside a row saying Outlook was not. #}
+                <h4 style="margin:0 0 8px 0;">{{ t('settings.calendar_title') }}</h4>
                 <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.calendar_desc') }}</p>
                 <p style="font-size:0.8rem;margin:0 0 12px 0;">
                     <span style="color:var(--text-tertiary);">{{ t('settings.calendar_active') }}:</span>
-                    <code x-text="calendarStatus.active_provider || 'sandbox'"></code>
+                    <code translate="no" x-text="calendarStatus.active_provider || 'sandbox'"></code>
                 </p>
                 {# One row per calendar, each with its own state and its own
                    sign-in. The card had one "Connect Calendar" button that only
@@ -2764,17 +2762,39 @@
                     <button class="btn btn-sm" :class="calendarStatus.google_connected ? 'btn-secondary' : 'btn-primary'"
                             @click="connectCalendarOAuth()" :disabled="emailSaving">{{ t('settings.calendar_connect_google') }}</button>
                     <button class="btn btn-secondary btn-sm" x-show="calendarStatus.google_connected" x-cloak
-                            @click="disconnectGoogleCalendar()" :disabled="emailSaving">{{ t('settings.calendar_disconnect') }}</button>
+                            aria-label="{{ t('settings.calendar_disconnect_google') }}" title="{{ t('settings.calendar_disconnect_google') }}"
+                            @click="disconnectGoogleCalendar()" :disabled="emailSaving">{{ t('settings.email_disconnect') }}</button>
                 </div>
                 <div class="calendar-provider-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--border-subtle);">
                     <strong style="min-width:9rem;">{{ t('settings.calendar_outlook') }}</strong>
                     <span class="badge" :class="calendarStatus.outlook_connected ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
                           x-text="calendarStatus.outlook_connected ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
+                    <code translate="no" x-show="calendarStatus.outlook_address" x-cloak x-text="calendarStatus.outlook_address"></code>
                     <span style="flex:1;"></span>
                     <button class="btn btn-sm" :class="calendarStatus.outlook_connected ? 'btn-secondary' : 'btn-primary'"
-                            @click="connectMicrosoftOAuth()" :disabled="emailSaving">{{ t('settings.calendar_connect_outlook') }}</button>
+                            @click="connectOutlookCalendar()" :disabled="emailSaving">{{ t('settings.calendar_connect_outlook') }}</button>
+                    <button class="btn btn-secondary btn-sm" x-show="calendarStatus.outlook_connected" x-cloak
+                            aria-label="{{ t('settings.calendar_disconnect_outlook') }}" title="{{ t('settings.calendar_disconnect_outlook') }}"
+                            @click="disconnectOutlookCalendar()" :disabled="emailSaving">{{ t('settings.email_disconnect') }}</button>
                 </div>
                 <p style="font-size:0.75rem;color:var(--text-tertiary);margin:8px 0 0 0;">{{ t('settings.calendar_outlook_hint') }}</p>
+                {# A disconnected Outlook Calendar comes back only through this
+                   card; when Microsoft refuses the redirect, a code does it. #}
+                <details style="margin-top:6px;">
+                    <summary style="cursor:pointer;font-size:0.8rem;color:var(--text-tertiary);">{{ t('settings.calendar_outlook_code_fallback') }}</summary>
+                    <div style="margin-top:8px;">
+                        <button class="btn btn-secondary btn-sm" @click="connectOutlookCalendarWithCode()" :disabled="calendarMsPolling || emailSaving">{{ t('settings.calendar_outlook_code_start') }}</button>
+                        <div x-show="calendarMsDevice.user_code" x-cloak style="margin-top:8px;padding:10px;border-radius:8px;background:var(--bg-primary);border:1px dashed var(--accent, #5e6ad2);">
+                            <p style="margin:0 0 6px 0;font-size:0.85rem;">{{ t('settings.email_ms_device_hint') }}</p>
+                            <div translate="no" style="font-size:1.3rem;font-weight:700;letter-spacing:0.12em;font-family:var(--font-mono);" x-text="calendarMsDevice.user_code"></div>
+                            <p style="margin:6px 0 0 0;font-size:0.85rem;">
+                                <a :href="calendarMsDevice.verification_uri" target="_blank" rel="noopener" style="color:var(--accent);" translate="no"
+                                   x-text="calendarMsDevice.verification_uri"></a>
+                            </p>
+                            <p x-show="calendarMsPolling" x-cloak style="margin:6px 0 0 0;font-size:0.8rem;color:var(--warning);">{{ t('settings.email_ms_polling') }}</p>
+                        </div>
+                    </div>
+                </details>
             </div>
 
             <!-- Multi-account list -->
@@ -2784,10 +2804,12 @@
                 <div class="account-list-table">
                     <template x-for="a in emailAccounts" :key="a.alias">
                         <div style="display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle);font-size:0.85rem;">
-                            <strong x-text="a.alias"></strong>
-                            <span x-text="a.type"></span>
-                            <code x-text="a.address || '—'"></code>
-                            <span x-text="(a.has_password || a.has_token) ? '●' : '○'" :title="(a.has_password || a.has_token) ? 'creds' : 'incomplete'"></span>
+                            <strong translate="no" x-text="a.alias"></strong>
+                            <span translate="no" x-text="a.type"></span>
+                            <code translate="no" x-text="a.address || '—'"></code>
+                            <span x-text="(a.has_password || a.has_token) ? '●' : '○'"
+                                  :title="(a.has_password || a.has_token) ? t('settings.email_account_signed_in') : t('settings.email_account_incomplete')"
+                                  :aria-label="(a.has_password || a.has_token) ? t('settings.email_account_signed_in') : t('settings.email_account_incomplete')"></span>
                         </div>
                     </template>
                 </div>

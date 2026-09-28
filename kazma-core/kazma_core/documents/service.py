@@ -699,7 +699,9 @@ class DocumentService:
 
         Soft-delete / archive: the document leaves the library list
         (``deleted_at`` set). Physical content is reclaimed later by GC.
-        Knowledge adapter is best-effort — tombstone still succeeds without it.
+        Without a knowledge adapter there is nothing to unindex and the
+        tombstone proceeds; with one, a library the document cannot be taken
+        out of stops the delete (``document_unindex_failed``).
         """
         if self.repository is None:
             return DocumentResult(
@@ -730,27 +732,30 @@ class DocumentService:
             )
         libraries: list[str] = []
         if self.knowledge_adapter is not None:
+            # A deleted document must not stay searchable: when it cannot be
+            # taken out of a library, nothing is deleted and the owner is told
+            # which library, so a retry can finish the job. This used to carry
+            # on silently and archive a document chat could still quote.
             adapter = self.knowledge_adapter
             try:
-                libraries = list(
-                    sorted(
-                        set(
-                            adapter.repository.list_indexed_libraries(
-                                tenant_id=tenant_id,
-                                document_id=record.id,
-                            )
-                        )
-                        | set(
-                            adapter.store.list_document_libraries(
-                                tenant_id=tenant_id,
-                                document_id=str(record.id),
-                            )
-                        )
-                    )
+                held = adapter.libraries_holding(
+                    tenant_id=tenant_id, document_id=record.id
                 )
             except Exception:
-                libraries = []
-            for library_id in libraries:
+                logger.warning(
+                    "[documents] delete %s: its libraries could not be read",
+                    record.id,
+                    exc_info=True,
+                )
+                return DocumentResult(
+                    ok=False,
+                    code="document_unindex_failed",
+                    message="Could not check which libraries hold this document; "
+                    "nothing was deleted. Try again.",
+                    document_id=record.id,
+                )
+            stuck: list[str] = []
+            for library_id in held:
                 try:
                     result = adapter.unindex_document(
                         tenant_id=tenant_id,
@@ -758,11 +763,34 @@ class DocumentService:
                         library_id=library_id,
                         document_id=record.id,
                     )
-                    if not result.ok:
-                        # Soft-delete should still proceed; log via message.
-                        libraries = [lid for lid in libraries if lid != library_id]
                 except Exception:
+                    logger.warning(
+                        "[documents] delete %s: removal from library %s failed",
+                        record.id,
+                        library_id,
+                        exc_info=True,
+                    )
+                    stuck.append(library_id)
                     continue
+                if result.ok:
+                    libraries.append(library_id)
+                else:
+                    logger.warning(
+                        "[documents] delete %s: removal from library %s refused (%s)",
+                        record.id,
+                        library_id,
+                        result.code,
+                    )
+                    stuck.append(library_id)
+            if stuck:
+                return DocumentResult(
+                    ok=False,
+                    code="document_unindex_failed",
+                    message="Could not remove this document from "
+                    f"{', '.join(stuck)}; nothing was deleted. Try again.",
+                    data={"libraries": stuck},
+                    document_id=record.id,
+                )
         try:
             self.repository.tombstone_document(
                 tenant_id=tenant_id,

@@ -1648,4 +1648,20 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "نصف مفتوح",
         "en": "half-open",
     },
+    "swarm.cb_reset": {
+        "ar": "إعادة ضبط",
+        "en": "Reset",
+    },
+    "swarm.cb_reset_hint": {
+        "ar": "أغلق قاطع الدائرة الآن ليستقبل العامل المهام مجددًا دون انتظار فترة التهدئة",
+        "en": "Close the circuit breaker now, so the worker takes tasks again without waiting out the cool-down",
+    },
+    "swarm.toast_breaker_reset": {
+        "ar": "أُعيد ضبط قاطع الدائرة للعامل {name}: يستقبل المهام مجددًا.",
+        "en": "Circuit breaker for {name} reset: it takes tasks again.",
+    },
+    "swarm.breaker_reset_failed": {
+        "ar": "تعذّرت إعادة ضبط قاطع الدائرة.",
+        "en": "Could not reset the circuit breaker.",
+    },
 }

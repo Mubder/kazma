@@ -135,6 +135,7 @@
       else if (btn.dataset.action === 'logs') viewLogs(workerName);
       else if (btn.dataset.action === 'start') startWorker(workerName);
       else if (btn.dataset.action === 'stop') stopWorker(workerName);
+      else if (btn.dataset.action === 'reset-breaker') resetBreaker(workerName);
       else if (btn.dataset.action === 'approve') approveCheckpoint(btn.dataset.taskId);
       else if (btn.dataset.action === 'reject') rejectCheckpoint(btn.dataset.taskId);
       else if (btn.dataset.action === 'cancel') cancelTask(btn.dataset.taskId);
@@ -433,11 +434,33 @@
     var badge = document.querySelector('[data-cb-worker="' + (worker.name || '') + '"]');
     if (!badge) return;
     var closed = !cb || cb.state === 'closed';
+    var state = closed ? 'closed' : String(cb.state || '');
     badge.className = 'badge cb-badge ' + (closed
       ? 'badge-success cb-badge-closed'
       : (cb.state === 'open' ? 'badge-danger' : 'badge-warning'));
-    badge.textContent = ' ' + (closed ? 'closed' : cb.state);
+    // The label only: writing the badge's text dropped its icon and put the
+    // raw English state ("closed") on an Arabic page at the first refresh.
+    var label = badge.querySelector('.cb-label');
+    if (label) label.textContent = typeof window.tOr === 'function'
+      ? window.tOr('swarm.cb_' + state.replace('-', '_'), state) : state;
     badge.title = t('swarm.circuit_failures', {n: ((cb && cb.consecutive_failures) || 0), threshold: ((cb && cb.failure_threshold) || 5)});
+    var reset = document.querySelector('[data-cb-reset="' + (worker.name || '') + '"]');
+    if (reset) reset.hidden = closed;
+  }
+
+  /* Close a worker's circuit breaker by hand, so it takes tasks again
+     without waiting out the cool-down. */
+  function resetBreaker(name) {
+    if (!name) return;
+    fetch('/api/swarm/workers/' + encodeURIComponent(name) + '/circuit-breaker/reset', { method: 'POST' })
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
+      .then(function(res) {
+        if (res.ok && res.d.status === 'ok') {
+          showToast(t('swarm.toast_breaker_reset', {name: name}), true);
+          updateBreakerBadge({ name: name, circuit_breaker: res.d.circuit_breaker });
+        } else showError(res.d.message || t('swarm.breaker_reset_failed'));
+      })
+      .catch(function() { showError(t('swarm.breaker_reset_failed')); });
   }
 
   function updateBreakerBadges(workerList) {

@@ -33,7 +33,7 @@ into a Knowledge library after it reaches `ready`:
 
 | Path | How |
 |------|-----|
-| Web | Documents page → Index with `library_id` |
+| Web | Documents page → pick a library → **Add to library**; the page lists the libraries a document is in, each with a remove button (`POST /api/documents/{document_id}/unindex`) |
 | API | `POST /api/documents/{document_id}/index` with library id |
 | Agent | tool `document_index(document_id, library_id)` |
 | Search | `document_search` / `POST /api/documents/search` — hits are **fenced** as untrusted data |

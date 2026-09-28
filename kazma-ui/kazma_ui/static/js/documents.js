@@ -24,6 +24,9 @@ function documentsPage() {
     libraryId: "",
     libraries: [],
     _librariesLoaded: false,
+    // The libraries the selected document answers from ([{id, name}]);
+    // null while unknown (the server could not say), never a guessed [].
+    inLibraries: null,
     events: [],
     eventsFor: null,
     convertFormat: "pdf",
@@ -251,6 +254,16 @@ function documentsPage() {
         title: documentId,
       };
       this.eventsFor = null;
+      // Nothing of the previous document stays on screen while this one
+      // loads: its libraries' remove buttons and its actions would act on
+      // the document just opened.
+      this.versions = [];
+      this.jobs = [];
+      this.artifacts = [];
+      this.inLibraries = null;
+      this.preview = "";
+      this.pageCount = 0;
+      this.currentState = "";
       await this.refreshDetail();
       this._startPoll();
     },
@@ -268,6 +281,7 @@ function documentsPage() {
         this.versions = doc.versions || [];
         this.jobs = doc.jobs || [];
         this.artifacts = doc.artifacts || [];
+        this.inLibraries = Array.isArray(doc.libraries) ? doc.libraries : null;
         this.currentState = this.jobs.length ? this.jobs[0].state : "";
         if (this.currentState === "ready") {
           await this.loadContent();
@@ -556,12 +570,49 @@ function documentsPage() {
         if (j.ok) {
           const n = (j.index && (j.index.chunk_count ?? j.index.chunks)) || 0;
           this.toast(this._tr("documents.library_added", "Added {n} passage(s) to “{library}”.", { n, library: shown }), "success");
+          await this.refreshDetail();
         } else {
           this.toast(this._tr("documents.library_failed", "Could not add it to the library: {error}", { error: j.error || "" }), "error");
         }
       } finally {
         this.acting = false;
       }
+    },
+
+    /* Take the selected document out of one Knowledge library: its passages
+       stop answering from there; the document itself stays. The page could
+       add a document to a library and never take it out (2026-09-28). */
+    async removeFromLibrary(lib) {
+      if (!this.selected || this.acting || !lib || !lib.id) return;
+      const title = (this.selected.title || this.selected.document_id || "").toString().slice(0, 80);
+      const ok = await window.kazmaConfirm({
+        title: this._tr("documents.library_remove_title", "Remove from library?"),
+        message: this._tr(
+          "documents.library_remove_confirm",
+          "Remove “{title}” from “{library}”? Its passages stop answering from that library; the document itself stays here.",
+          { title, library: lib.name || lib.id },
+        ),
+        confirmText: this._tr("documents.library_remove", "Remove"),
+        danger: true,
+      });
+      if (!ok) return;
+      this.acting = true;
+      try {
+        const r = await fetch(`/api/documents/${encodeURIComponent(this.selected.document_id)}/unindex`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ library_id: lib.id }),
+        });
+        const j = await r.json().catch(() => ({ ok: false, error: "request failed" }));
+        if (r.ok && j.ok) {
+          this.toast(this._tr("documents.library_removed", "Removed from “{library}”.", { library: lib.name || lib.id }), "success");
+        } else {
+          this.toast(this._tr("documents.library_remove_failed", "Could not remove it from the library: {error}", { error: j.error || "" }), "error");
+        }
+      } finally {
+        this.acting = false;
+      }
+      await this.refreshDetail();
     },
 
     /**
@@ -613,6 +664,7 @@ function documentsPage() {
           this.versions = [];
           this.jobs = [];
           this.artifacts = [];
+          this.inLibraries = null;
           this.preview = "";
           this.pageCount = 0;
           this.currentState = "";

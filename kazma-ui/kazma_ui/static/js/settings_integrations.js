@@ -332,10 +332,12 @@
                         const prov = url.searchParams.get('provider') || 'email';
                         const em = url.searchParams.get('email') || '';
                         const cal = url.searchParams.get('calendar');
-                        let msg = (prov === 'gmail' ? 'Gmail' : 'Microsoft') +
-                            ' connected' + (em ? ' as ' + em : '');
+                        let msg = prov === 'gmail'
+                            ? _k('settings.int.gmail_connected', 'Gmail connected')
+                            : _k('settings.int.microsoft_connected', 'Microsoft connected');
+                        if (em) msg += _k('settings.int.as_account', ' as {email}', { email: em });
                         if (prov === 'gmail' && cal === '0') {
-                            msg += ' — Calendar not granted; use Connect Calendar';
+                            msg += _k('settings.int.calendar_not_granted', ' — Calendar was not granted; use Connect Google Calendar');
                         }
                         showToast(msg, 'success');
                         url.searchParams.delete('email_oauth');
@@ -352,7 +354,10 @@
                     }
                     if (calOauth === 'ok') {
                         const em = url.searchParams.get('email') || '';
-                        showToast(_k('settings.int.gcal_connected', 'Google Calendar connected') + (em ? _k('settings.int.as_account', ' as {email}', { email: em }) : ''), 'success');
+                        const done = url.searchParams.get('provider') === 'outlook'
+                            ? _k('settings.int.outlook_calendar_connected', 'Outlook Calendar connected')
+                            : _k('settings.int.gcal_connected', 'Google Calendar connected');
+                        showToast(done + (em ? _k('settings.int.as_account', ' as {email}', { email: em }) : ''), 'success');
                         url.searchParams.delete('calendar_oauth');
                         url.searchParams.delete('provider');
                         url.searchParams.delete('email');
@@ -591,34 +596,135 @@
         },
 
         async disconnectGoogleCalendar() {
+            await this._disconnectCalendar({
+                url: '/api/calendar/oauth/google/disconnect',
+                title: _k('settings.calendar_disconnect_google', 'Disconnect Google Calendar'),
+                message: _k('settings.calendar_disconnect_confirm', 'Disconnect Google Calendar? Kazma stops reading and changing it until you connect it again here. Gmail stays connected.'),
+                done: _k('settings.int.google_calendar_disconnected', 'Google Calendar disconnected'),
+            });
+        },
+
+        /* The calendar card's own Microsoft sign-in: it keeps the tokens for
+           Outlook Calendar only. The mail card's sign-in (connectMicrosoftOAuth)
+           would also reconnect a mailbox the owner disconnected. */
+        async connectOutlookCalendar() {
+            if ((this.emailMs.client_id || '').trim()) {
+                await this.saveMsClient();
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/calendar/oauth/microsoft/start.json', { credentials: 'same-origin' });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok || !data.authorize_url) {
+                    throw new Error(data.error || _k('settings.int.could_not_start_microsoft_oauth', 'Could not start Microsoft OAuth'));
+                }
+                window.location.href = data.authorize_url;
+            } catch (e) {
+                showToast(_k('settings.int.calendar_oauth_failed', 'Calendar OAuth failed: ') + e.message, 'error');
+                this.emailSaving = false;
+            }
+        },
+
+        /* The same calendar-only sign-in with a code, for when Microsoft
+           refuses the redirect (the Azure app has no web redirect URI). */
+        async connectOutlookCalendarWithCode() {
+            if (this.calendarMsPollTimer) {
+                clearInterval(this.calendarMsPollTimer);
+                this.calendarMsPollTimer = null;
+            }
+            this.calendarMsDevice = { user_code: '', verification_uri: '', device_code: '' };
+            try {
+                const resp = await fetch('/api/calendar/oauth/microsoft/device/start', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok || !data.device_code) {
+                    throw new Error(data.error || ('HTTP ' + resp.status));
+                }
+                this.calendarMsDevice = {
+                    user_code: data.user_code || '',
+                    verification_uri: data.verification_uri_complete || data.verification_uri || 'https://microsoft.com/devicelogin',
+                    device_code: data.device_code,
+                };
+            } catch (e) {
+                showToast(_k('settings.int.calendar_oauth_failed', 'Calendar OAuth failed: ') + e.message, 'error');
+                return;
+            }
+            this.calendarMsPolling = true;
+            const device_code = this.calendarMsDevice.device_code;
+            this.calendarMsPollTimer = setInterval(async () => {
+                let data = {};
+                try {
+                    const resp = await fetch('/api/email/oauth/microsoft/device/poll', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        body: JSON.stringify({ device_code }),
+                    });
+                    data = await resp.json().catch(() => ({}));
+                } catch (e) {
+                    return;  // network hiccup: keep polling
+                }
+                if (data.ok && data.status === 'authorized') {
+                    this._stopCalendarMsPoll();
+                    showToast(_k('settings.int.outlook_calendar_connected', 'Outlook Calendar connected')
+                        + (data.email ? _k('settings.int.as_account', ' as {email}', { email: data.email }) : ''), 'success');
+                    await this.loadEmailStatus();
+                } else if (data.status === 'failed' || data.status === 'expired') {
+                    this._stopCalendarMsPoll();
+                    showToast(data.error || _k('settings.int.authorization_failed', 'Authorization failed'), 'error');
+                }
+                // authorization_pending / slow_down: keep polling
+            }, 5000);
+        },
+
+        _stopCalendarMsPoll() {
+            if (this.calendarMsPollTimer) clearInterval(this.calendarMsPollTimer);
+            this.calendarMsPollTimer = null;
+            this.calendarMsPolling = false;
+            this.calendarMsDevice = { user_code: '', verification_uri: '', device_code: '' };
+        },
+
+        async disconnectOutlookCalendar() {
+            await this._disconnectCalendar({
+                url: '/api/calendar/oauth/microsoft/disconnect',
+                title: _k('settings.calendar_disconnect_outlook', 'Disconnect Outlook Calendar'),
+                message: _k('settings.calendar_disconnect_outlook_confirm', 'Disconnect Outlook Calendar? Kazma stops reading and changing it until you connect it again here. Microsoft mail stays connected.'),
+                done: _k('settings.int.outlook_calendar_disconnected', 'Outlook Calendar disconnected'),
+            });
+        },
+
+        async _disconnectCalendar(opts) {
             if (!(await window.kazmaConfirm({
-                title: window.t ? t('settings.calendar_disconnect') : 'Disconnect Calendar',
-                message: window.t ? t('settings.calendar_disconnect_confirm') : 'Clear Google Calendar tokens? Gmail stays connected.',
-                confirmText: window.t ? t('settings.email_disconnect') : 'Disconnect',
+                title: opts.title,
+                message: opts.message,
+                confirmText: _k('settings.email_disconnect', 'Disconnect'),
                 danger: true,
             }))) return;
             this.emailSaving = true;
             try {
-                const resp = await fetch('/api/calendar/oauth/google/disconnect', {
+                const resp = await fetch(opts.url, {
                     method: 'POST',
                     credentials: 'same-origin',
                     headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 });
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok || data.ok === false) throw new Error(data.error || _k('settings.int.failed', 'Failed'));
-                showToast(data.message || _k('settings.int.google_calendar_disconnected', 'Google Calendar disconnected'), 'success');
-                await this.loadEmailStatus();
+                showToast(opts.done, 'success');
             } catch (e) {
                 showToast(_k('settings.int.disconnect_failed', 'Disconnect failed: ') + e.message, 'error');
             } finally {
                 this.emailSaving = false;
             }
+            await this.loadEmailStatus();
         },
 
         async disconnectGmail() {
             if (!(await window.kazmaConfirm({
                 title: window.t ? t('settings.email_disconnect') : 'Disconnect',
-                message: window.t ? t('settings.email_disconnect_gmail_confirm') : 'Clear Gmail credentials?',
+                message: _k('settings.email_disconnect_gmail_confirm', 'Disconnect Gmail? Kazma stops reading and sending its mail. Google Calendar has its own switch on the calendar card below.'),
                 confirmText: window.t ? t('settings.email_disconnect') : 'Disconnect',
                 danger: true,
             }))) return;
@@ -744,7 +850,7 @@
         async disconnectMicrosoft() {
             if (!(await window.kazmaConfirm({
                 title: window.t ? t('settings.email_disconnect') : 'Disconnect',
-                message: window.t ? t('settings.email_disconnect_ms_confirm') : 'Clear Microsoft Graph tokens?',
+                message: _k('settings.email_disconnect_ms_confirm', 'Disconnect Microsoft mail? Kazma stops reading and sending its mail. Outlook Calendar has its own switch on the calendar card below.'),
                 confirmText: window.t ? t('settings.email_disconnect') : 'Disconnect',
                 danger: true,
             }))) return;

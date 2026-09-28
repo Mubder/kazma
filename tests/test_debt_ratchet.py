@@ -82,12 +82,12 @@ BASELINE = {
     # except Exception / except BaseException / bare except, any body
     "blind_except": 3754,
     # ...whose body is only `pass` (or a docstring): the error vanishes
-    "silent_except": 551,
+    "silent_except": 549,
 }
 
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
 STRUCTURAL_BASELINE = {
-    "async_route_never_awaits": 176,
+    "async_route_never_awaits": 169,
     "module_local_public_symbols": 598,
     "patched_value_imports": 81,
     "sleep_then_assert": 52,

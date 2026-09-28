@@ -1247,6 +1247,14 @@ default. Redaction UI confirm is Web-only; API/tools can redact under ACL.
 `clamscan`/`clamdscan` only — no third-party upload of document bytes.
 Sandbox: scrubbed env + resource limits; not a full network namespace.
 
+**E2. A deleted document is never still searchable** (2026-09-28).
+`DocumentService.delete_document` takes the document out of every library
+that holds it (`DocumentKnowledgeAdapter.libraries_holding`, the one answer,
+also shown on the Documents page) BEFORE the tombstone; a library it cannot
+leave stops the delete (`document_unindex_failed`, naming the library) so a
+retry can finish it. It used to swallow the failure and archive a document
+chat could still quote. `tests/test_document_library_membership.py`.
+
 **F. Multi-replica backends.**
 Jobs: `jobs_pg.py` when Postgres. Metadata: `repository_pg.py` when
 `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres|auto` and pool is up. GC is
@@ -2569,17 +2577,32 @@ in the vault and does **not** automatically feed Calendar.
   its answer (`tests/test_email_fail_closed.py` enumerates the tools).
 - Connect with Google requests Calendar as a **soft** extra (like
   `drive.file`): Gmail connect still succeeds if Calendar API is off.
-  Settings → Email → **Connect Calendar** is the dedicated grant (same
+  Settings → Email → **Connect Google Calendar** is the dedicated grant (same
   OAuth client, same `/api/email/oauth/gmail/callback` — dispatch on
   `state.provider == google_calendar`).
 - Microsoft mail OAuth requests `Calendars.ReadWrite` and copies tokens
   to `calendar.microsoft.*`. Device-flow client id reads vault via `cred()`,
-  not env-only.
+  not env-only. The calendar card's **Connect Outlook Calendar** is its own
+  sign-in (`/api/calendar/oauth/microsoft/start.json`, state
+  `purpose=calendar`, the Microsoft callback): it keeps calendar tokens only
+  (`store_microsoft_calendar_tokens`) -- the mail sign-in would reconnect a
+  mailbox the owner disconnected.
+- **A disconnected calendar is OFF** (`calendar.<provider>.off`, 2026-09-28):
+  the mail grant covers Calendar, so deleting the calendar's copy left it
+  reading through Gmail and the next Gmail refresh wrote the copy back --
+  "Disconnect Calendar" changed nothing, and Outlook had no disconnect at
+  all. While off, the token readers return nothing and `persist_*_tokens`
+  keep nothing; only a sign-in from the calendar card lifts it
+  (`turn_calendar_on`, which fails the sign-in if the mark stays). An
+  Outlook token refresh updates mail only while mail holds the very grant
+  it refreshed; mail and calendar disconnects each clear their own side.
+  `tests/test_calendar_disconnect.py` (live shapes, old code fails 9).
 - Connector health (`check_connectors`) probes Gmail **and** Calendar
   independently (Testing-mode 7-day expiry). Do not probe Drive as a
   stand-in for Gmail.
 
-Tests: `tests/test_calendar_connector.py`, `tests/test_connector_health.py`.
+Tests: `tests/test_calendar_connector.py`, `tests/test_connector_health.py`,
+`tests/test_calendar_disconnect.py`, `tests/test_calendar_card_providers.py`.
 
 ### 35. Class gates from the 2026-09-22 audit — fix the class, not the instance
 
@@ -3179,6 +3202,19 @@ writes.
   server is serving and says how a reply or the server is stopped;
   `POST /api/agents/stop` answers 409 with that text. Built-in skills'
   "Uninstall" and the skill switch were the same shape (§22G).
+- **A button reaches what it names** (2026-09-28). The calendar card
+  ("Google / Outlook") had one "Connect Calendar" that only started Google's
+  sign-in. `tests/test_button_label_matches_action.py` follows every
+  template button's click into the scripts its page loads and fails when
+  the label names a provider its routes never reach, or names none inside a
+  section for several while it serves one (negative control: the old card).
+- **What the owner can change has a control** (2026-09-28): a route that
+  changes something the owner decides gets a control on its page, or a
+  reason it has none. Found with no control at all: removing a document from
+  a Knowledge library, protecting a memory entity, resetting a swarm
+  breaker, Outlook Calendar's disconnect, folders outside the workspace.
+  Every one is now on its page. The route inventory
+  (`/api/*` routes no template or script calls) is the way to look for more.
 - **A panel lays out by its own width** (`@container`), not the window's:
   with the sidebar open a 918px window left the IDE editor ~40px and
   clipped the providers panel. `tests/e2e/test_layout_widths.py` (each with
