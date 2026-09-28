@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## The live install, third pass (2026-09-28)
+
+**The IDE fix of the second pass went too far.** At a 918-pixel window it
+stacked the file tree above the editor, and a long tree pushed the editor
+2,400 pixels down the page. The tree now stays beside the editor at that
+width and only the AI chat moves below it; the panels stack only when the
+IDE is narrower than 560 pixels, with the tree capped to a third of the
+screen.
+
+**The Research page called every session "Deep".** A one-line web search
+asked in the chat and a brief research run were both listed as "[Deep]". Each
+session is now tagged by what it was (Chat, Brief or Deep) in the page's
+language.
+
+**Answers given without the model left their turn "thinking".** `/replay`,
+`/research` with no topic, `/reset`, `/compact` and `/swarm` with no task
+answer at once, but the chat's header kept saying "Kazma is thinking..." for
+six to ten seconds, until the page's next check with the server. The message
+that ends these turns now carries the answer, which is what closes a turn.
+
 ## The live install, second pass: what ran late, and switches that did nothing (2026-09-28)
 
 **The daily digest had not been sent once in a week.** It waited a full day

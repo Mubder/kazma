@@ -2362,6 +2362,15 @@ Load-bearing rules:
   under `'live'` ADOPTS that document (`applyTurnEvent` -> `_retagDoc`) --
   never a fresh one, which would repaint the bubble from one frame.
   `tests/test_frames_name_their_turn.py`.
+- **A `done` frame carries the answer** (2026-09-28). The client closes a
+  turn from `done.content`; the instant replies (`/replay`, `/research`
+  usage, `/reset`, `/compact`, `/swarm` usage) sent their text in a token
+  frame only, and the header said "thinking" until the reconciler's next
+  read, 6-10 s later. Every literal `done` frame in `sse_chat/` carries
+  `content` (`tests/test_instant_reply_frames.py`; browser:
+  `tests/e2e/test_instant_reply_closes.py`). A journaled instant reply also
+  carries `capacity`: it is stored as its own turn, so it is never replayed,
+  and a `done` with content would otherwise push to every device.
 - **A stored row field is named once, beside its writer.** The history
   route's two serializers (the row list and the checkpoint-hydrate merge)
   are whitelists; they pass `reply_sink.CLIENT_ROW_FIELDS`, and a field kept
@@ -3145,7 +3154,10 @@ writes.
 - **A panel lays out by its own width** (`@container`), not the window's:
   with the sidebar open a 918px window left the IDE editor ~40px and
   clipped the providers panel. `tests/e2e/test_layout_widths.py` (each with
-  the container switched off as its control).
+  the container switched off as its control). A narrower panel moves the
+  least important region first: the IDE puts its AI chat below the editor
+  at 1000px and stacks the file tree only below 560px, capped in height --
+  stacking everything at once put the editor 2,400px down the page.
 - **A control is wired once** (2026-09-28): never an inline `on<event>` in a
   template and a script listener for the same element and event -- Start
   All and Stop All sent every click twice. A handler that only prevents the

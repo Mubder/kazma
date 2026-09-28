@@ -15,7 +15,7 @@ const path = require("path");
 const src = fs.readFileSync(path.join(
   __dirname, "..", "..", "kazma-ui", "kazma_ui", "static", "js", "research.js"), "utf8")
   .replace(/\r\n/g, "\n");
-const start = src.indexOf("  function sessionTag(s) {");
+const start = src.indexOf("  var SESSION_TAGS = {");
 const end = src.indexOf("  window.KazmaResearch = {", start);
 
 let fail = 0;
@@ -32,22 +32,26 @@ function load(t) {
 }
 
 const english = load(undefined);
-ok("a deep run is Deep", english({ id: "rs_0123456789abcdef" }) === "[Deep] ");
-ok("a chat search is Chat", english({ id: "rs_chat_0123456789ab" }) === "[Chat] ");
+ok("a brief run is Brief", english({ id: "rs_1", depth: "brief" }) === "[Brief] ");
+ok("a deep run is Deep", english({ id: "rs_2", depth: "deep" }) === "[Deep] ");
+ok("a chat search is Chat", english({ id: "rs_chat_3", depth: "chat" }) === "[Chat] ");
+ok("an old row without depth: chat by its id", english({ id: "rs_chat_0123456789ab" }) === "[Chat] ");
+ok("an old row without depth: otherwise Deep", english({ id: "rs_0123456789abcdef" }) === "[Deep] ");
 ok("no id is not a chat search", english({}) === "[Deep] ");
 
 const arabic = load(function (k) {
-  return { "research.source_chat": "محادثة", "research.depth_deep": "عميق" }[k] || k;
+  return { "research.source_chat": "محادثة", "research.depth_deep": "عميق", "research.depth_brief": "مختصر" }[k] || k;
 });
-ok("the tag follows the page language", arabic({ id: "rs_chat_x" }) === "[محادثة] ");
-ok("...for deep runs too", arabic({ id: "rs_x" }) === "[عميق] ");
+ok("the tag follows the page language", arabic({ id: "rs_chat_x", depth: "chat" }) === "[محادثة] ");
+ok("...for deep runs too", arabic({ id: "rs_x", depth: "deep" }) === "[عميق] ");
+ok("...and brief ones", arabic({ id: "rs_y", depth: "brief" }) === "[مختصر] ");
 
 const untranslated = load(function (k) { return k; });
-ok("a missing translation falls back to English", untranslated({ id: "rs_chat_x" }) === "[Chat] ");
+ok("a missing translation falls back to English", untranslated({ id: "rs_x", depth: "brief" }) === "[Brief] ");
 
 // Negative control: every session was tagged "[Deep] " until 2026-09-28.
 const old = function () { return "[Deep] "; };
-ok("control: the old tag called a chat search Deep", old({ id: "rs_chat_x" }) === "[Deep] ");
+ok("control: the old tag called a Brief run Deep", old({ id: "rs_x", depth: "brief" }) === "[Deep] ");
 
 if (fail) {
   console.log(fail + " failed");
