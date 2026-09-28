@@ -413,8 +413,12 @@ def create_sse_chat_router(
             _persist_instant_turn(session, thread_id, raw_msg, _usage)
 
             async def _research_gen() -> AsyncGenerator[str, None]:
-                yield await _journal_fast_path(thread_id, "token", {"content": _usage})
-                yield await _journal_fast_path(thread_id, "done", {"tokens": 0, "cost": 0.0, "duration_ms": 0})
+                # Persisted as an instant turn: never replayed on reconnect
+                # ("capacity"), and the done frame carries the text -- the
+                # client closes a turn from it (without, the header said
+                # "thinking" until the reconciler's next read).
+                yield await _journal_fast_path(thread_id, "token", {"content": _usage, "capacity": True})
+                yield await _journal_fast_path(thread_id, "done", {"content": _usage, "tokens": 0, "cost": 0.0, "duration_ms": 0, "capacity": True})
 
             return StreamingResponse(
                 _research_gen(),
@@ -439,8 +443,9 @@ def create_sse_chat_router(
             _persist_instant_turn(session, thread_id, raw_msg, _tt)
 
             async def _time_travel_gen() -> AsyncGenerator[str, None]:
-                yield await _journal_fast_path(thread_id, "token", {"content": _tt})
-                yield await _journal_fast_path(thread_id, "done", {"tokens": 0, "cost": 0.0, "duration_ms": 0})
+                # As /research above: not replayed, and done carries the text.
+                yield await _journal_fast_path(thread_id, "token", {"content": _tt, "capacity": True})
+                yield await _journal_fast_path(thread_id, "done", {"content": _tt, "tokens": 0, "cost": 0.0, "duration_ms": 0, "capacity": True})
 
             return StreamingResponse(
                 _time_travel_gen(),
@@ -483,6 +488,7 @@ def create_sse_chat_router(
             async def _reset_generator() -> AsyncGenerator[str, None]:
                 yield _sse_frame("token", {"content": confirmation})
                 yield _sse_frame("done", {
+                    "content": confirmation,
                     "tokens": 1,
                     "cost": 0.0,
                     "duration_ms": 100,
@@ -536,6 +542,7 @@ def create_sse_chat_router(
             async def _compact_generator() -> AsyncGenerator[str, None]:
                 yield _sse_frame("token", {"content": confirmation})
                 yield _sse_frame("done", {
+                    "content": confirmation,
                     "tokens": 1,
                     "cost": 0.0,
                     "duration_ms": 100,
@@ -559,7 +566,7 @@ def create_sse_chat_router(
 
             async def _swarm_usage_gen() -> AsyncGenerator[str, None]:
                 yield _sse_frame("token", {"content": _swarm_usage})
-                yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
+                yield _sse_frame("done", {"content": _swarm_usage, "tokens": 1, "cost": 0.0, "duration_ms": 100})
 
             return StreamingResponse(
                 _swarm_usage_gen(),

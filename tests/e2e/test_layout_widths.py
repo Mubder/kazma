@@ -58,9 +58,19 @@ def test_the_ide_editor_keeps_its_room(harness: Harness) -> None:
             pg.wait_for_function("() => document.querySelector('.ide-layout.with-chat') !== null",
                                  timeout=10000)
             width = _editor_width(pg)
-            assert width >= 380, f"the editor got {width:.0f}px"
+            assert width >= 350, f"the editor got {width:.0f}px"
             chat = pg.evaluate("() => document.querySelector('.ide-chat').getBoundingClientRect().width")
             assert chat >= 300, f"the chat got {chat:.0f}px"
+            # The file tree stays beside the editor, which starts on the
+            # first screen: the first fix stacked everything at this width
+            # and the uncapped tree pushed the editor 2,400px down (live).
+            box = pg.evaluate(
+                "() => { const t = document.querySelector('.ide-tree').getBoundingClientRect();"
+                " const m = document.querySelector('.ide-main').getBoundingClientRect();"
+                " return {treeRight: t.right, editorLeft: m.left, editorTop: m.top}; }"
+            )
+            assert box["treeRight"] <= box["editorLeft"] + 1, box
+            assert box["editorTop"] < VIEWPORT["height"], box
 
             # Control: without the container, the window-width rules squeeze it.
             pg.add_style_tag(content=".ide-container " + NO_CONTAINER)

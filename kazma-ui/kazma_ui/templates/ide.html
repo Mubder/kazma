@@ -198,13 +198,18 @@
        (2026-09-28). These decide on the width the IDE actually has; the
        media queries stay for browsers without container queries. */
     @container (max-width: 1000px) {
-      .ide-layout.with-chat { grid-template-columns: var(--ide-tree-w, 220px) 4px 1fr; height: auto; }
+      .ide-layout { grid-template-columns: var(--ide-tree-w, 200px) 4px 1fr; }
+      .ide-layout.with-chat { grid-template-columns: var(--ide-tree-w, 200px) 4px 1fr; height: auto; }
       .ide-layout.with-chat > .ide-resizer-chat { display: none; }
       .ide-layout.with-chat > .ide-chat { grid-column: 1 / -1; min-height: 320px; }
+      .ide-layout.with-chat > .ide-tree { max-height: 70vh; }
     }
-    @container (max-width: 640px) {
+    /* Stacked, the tree is capped: uncapped it listed a whole checkout
+       (2,472px) above the editor. */
+    @container (max-width: 560px) {
       .ide-layout, .ide-layout.with-chat { grid-template-columns: 1fr; height: auto; }
       .ide-resizer { display: none; }
+      .ide-tree { max-height: 36vh; }
     }
     @media (max-width: 768px) {
       .ide-layout, .ide-layout.with-chat {

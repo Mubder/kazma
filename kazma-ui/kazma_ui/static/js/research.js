@@ -111,14 +111,23 @@
     });
   }
 
-  // A chat tool's web search is recorded as a session too (id rs_chat_...);
-  // only the deep pipeline's sessions are Deep. Every row read "[Deep]", a
-  // one-line search from the chat included (2026-09-28).
+  // The session's own depth: "chat" (a chat tool's web search, recorded as
+  // a session too), "brief" or "deep". Every row read "[Deep]" -- a one-line
+  // search from the chat and a Brief run included (2026-09-28). An old row
+  // with no depth is judged by its id (rs_chat_... is a chat search).
+  var SESSION_TAGS = {
+    chat: ['research.source_chat', 'Chat'],
+    brief: ['research.depth_brief', 'Brief'],
+    deep: ['research.depth_deep', 'Deep'],
+  };
   function sessionTag(s) {
-    var chat = String((s && s.id) || '').indexOf('rs_chat_') === 0;
-    var key = chat ? 'research.source_chat' : 'research.depth_deep';
+    var depth = String((s && s.depth) || '').toLowerCase();
+    if (!SESSION_TAGS[depth]) {
+      depth = String((s && s.id) || '').indexOf('rs_chat_') === 0 ? 'chat' : 'deep';
+    }
+    var key = SESSION_TAGS[depth][0];
     var label = (typeof window.t === 'function') ? window.t(key) : '';
-    return '[' + (label && label !== key ? label : (chat ? 'Chat' : 'Deep')) + '] ';
+    return '[' + (label && label !== key ? label : SESSION_TAGS[depth][1]) + '] ';
   }
 
   window.KazmaResearch = {
