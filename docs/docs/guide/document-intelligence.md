@@ -72,8 +72,13 @@ Outside-workspace paths are **denied by default**. To open a folder with permiss
 1. **Chat (smooth):** when a file tool fails, the agent calls `request_path_access`
    (HITL approval card). On approve, a **session grant** is created for that
    folder and the agent retries the tool.
-2. **Settings / API:** durable list `workspace.extra_roots` via
-   `GET/PUT /api/workspace/extra-roots` (`path`, `mode`: `read`|`write`, `label`).
+2. **Workspace page / API:** Workspace → **Folders outside the workspace**
+   lists, adds (read only, or read and write) and removes the durable list
+   `workspace.extra_roots` (`GET/PUT /api/workspace/extra-roots`: `path`,
+   `mode`: `read`|`write`, `label`). A new folder must be a full path to an
+   existing folder, not a whole drive, and not one holding Kazma's own
+   install or data (its keys, its stores); the page says which rule a
+   refused path broke.
 
 Session grants TTL ~1 hour; durable roots persist until removed. Read grants
 do not allow writes. See `kazma_core.workspace.path_policy`.

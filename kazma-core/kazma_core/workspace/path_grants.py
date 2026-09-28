@@ -141,8 +141,50 @@ def list_durable_roots() -> list[PathGrant]:
     return out
 
 
+def _extra_root_problem(path: str) -> str | None:
+    """Why *path* cannot be a durable extra root, or None when it can.
+
+    An absolute path to an existing folder that is neither a whole drive nor
+    a folder holding Kazma's own install or data (its settings, its keys in
+    ``.env``, its stores): a grant there would hand the agent those files,
+    and a drive root is the global filesystem access this module never
+    grants. A relative path would resolve against the server's working
+    directory, which means nothing to the owner typing it.
+    """
+    raw = (path or "").strip()
+    if not raw:
+        return "Enter a folder path."
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        return f"Use a full path (for example C:\\Users\\you\\Documents), not {raw!r}."
+    try:
+        resolved = candidate.resolve()
+    except OSError as exc:
+        return f"{raw} cannot be read: {exc.strerror or exc}"
+    if not resolved.is_dir():
+        return f"{resolved} is not a folder on this machine."
+    if resolved == Path(resolved.anchor):
+        return f"{resolved} is a whole drive; choose a folder inside it."
+    from kazma_core.paths import data_dir, installed_project_root
+
+    for own in (installed_project_root(), data_dir()):
+        if own is not None and path_under_root(own, resolved):
+            return (
+                f"{resolved} holds Kazma's own files ({own}); "
+                "choose a folder that does not contain them."
+            )
+    return None
+
+
 def set_durable_roots(entries: list[dict[str, Any]]) -> list[PathGrant]:
-    """Replace durable extra roots. Returns normalized list."""
+    """Replace durable extra roots. Returns normalized list.
+
+    A root not already kept must pass :func:`_extra_root_problem`; the first
+    one refused raises ``ValueError`` with the reason, and nothing is written.
+    Roots already kept pass as they are -- removing one entry must not fail
+    because another sits on a drive that is unplugged today.
+    """
+    kept = {g.path for g in list_durable_roots()}
     cleaned: list[dict[str, str]] = []
     for item in entries:
         if not isinstance(item, dict):
@@ -151,9 +193,14 @@ def set_durable_roots(entries: list[dict[str, Any]]) -> list[PathGrant]:
         if not path:
             continue
         try:
-            path = str(Path(path).expanduser().resolve())
+            normalized = str(Path(path).expanduser().resolve())
         except OSError:
-            pass
+            normalized = path
+        if normalized not in kept:
+            problem = _extra_root_problem(path)
+            if problem:
+                raise ValueError(problem)
+        path = normalized
         cleaned.append(
             {
                 "path": path,

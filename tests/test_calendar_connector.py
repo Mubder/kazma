@@ -179,10 +179,21 @@ def test_calendar_disconnect_sends_csrf_header() -> None:
         / "js"
         / "settings_integrations.js"
     ).read_text(encoding="utf-8")
-    assert "/api/calendar/oauth/google/disconnect" in src
-    idx = src.index("/api/calendar/oauth/google/disconnect")
-    window = src[idx : idx + 400]
-    assert "X-Requested-With" in window
+
+    def body(signature: str) -> str:
+        start = src.index(signature)
+        return src[start : src.index("\n        },", start)]
+
+    # Both calendars' disconnects go through one sender, which carries the
+    # header the protected router requires.
+    sender = body("async _disconnectCalendar(")
+    assert "fetch(opts.url" in sender and "X-Requested-With" in sender
+    for fn, url in (
+        ("disconnectGoogleCalendar", "/api/calendar/oauth/google/disconnect"),
+        ("disconnectOutlookCalendar", "/api/calendar/oauth/microsoft/disconnect"),
+    ):
+        own = body(f"async {fn}()")
+        assert url in own and "this._disconnectCalendar(" in own, fn
 
 
 def test_calendar_api_mounted() -> None:

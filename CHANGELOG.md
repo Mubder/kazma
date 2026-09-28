@@ -1,5 +1,57 @@
 # CHANGELOG
 
+## Every control does what it says, and what the owner decides has one (2026-09-28)
+
+After the calendar button, every route that changes something and that no
+page calls was listed (65 of 406) and each was read against its page. What
+was found, fixed:
+
+- **"Disconnect Calendar" disconnected nothing while Gmail was connected.**
+  The Gmail sign-in covers Calendar and the calendar reads through it, so
+  deleting the calendar's own tokens left it connected, and the next Gmail
+  refresh wrote them back. Outlook Calendar had no disconnect at all, and
+  its "Connect" was the mail sign-in, which also reconnects mail. Each
+  calendar now has its own **Disconnect**, which turns it off until it is
+  connected from the card again (nothing reads or keeps its tokens
+  meanwhile), and **Connect Outlook Calendar** signs in for the calendar
+  only -- by code when Microsoft refuses the redirect. Mail stays as it is
+  either way, and the prompts say so.
+- **An Outlook Calendar refresh signed Microsoft mail back in**, after the
+  owner disconnected it, and could write over a mailbox signed in as another
+  account. It now updates mail only while mail holds the very same grant.
+  Disconnecting Microsoft mail now also forgets the account's address.
+- **Switching off "notify when a task finishes" did not stop the pushes**
+  to devices that had subscribed: only the page read the switch. The Web
+  Push sender reads the same switch now.
+- **A document could be added to a Knowledge library and never taken out.**
+  The Documents page lists the libraries a document is in, each with a
+  remove button. And a delete that could not take a document out of a
+  library went ahead silently, archiving a document chat could still quote;
+  it now stops and names the library.
+- **Memory showed "protected" and nothing could set or clear it**; a
+  protected entity could never be deleted from the page. Each entity has
+  Protect / Unprotect (the core ones stay protected).
+- **An open swarm circuit breaker could only be waited out.** The worker
+  card has **Reset** while it is open. Its label also turned to raw English
+  at the first refresh, and a half-open breaker showed a catalog key.
+- **Folders outside the workspace** the agent may use without asking had no
+  page, though the docs pointed at one. The Workspace page lists, adds (read
+  only, or read and write) and removes them; a new folder must be a full
+  path to an existing folder, not a whole drive and not one holding Kazma's
+  own files.
+- **Settings saved an error as a backup.** "Create backup" and "Download
+  config" saved whatever the server answered; a failed answer is an error
+  now, never a file.
+
+New gate: `tests/test_button_label_matches_action.py` follows every page
+button into the routes it calls and fails when its label names another
+provider, or names none inside a section for several while it serves one
+(the old calendar card fails it). Left without a control on purpose, as the
+agent's or the operator's tools: chaos experiments, metrics, telemetry,
+gateway start/stop (the guard's), divisions (a multi-team mode), and the
+document generate / merge / fill-form / search routes the agent calls from
+chat.
+
 ## Settings: connecting Outlook Calendar no longer opens Google (2026-09-28)
 
 The calendar card in Settings → Email was titled "Calendar (Google /

@@ -41,8 +41,16 @@ def _tenant() -> str:
     return cred("EMAIL_MS_TENANT_ID", "") or "common"
 
 
-async def start_device_code_flow() -> dict[str, Any]:
-    """Start OAuth2 device code flow. Returns user_code + verification_uri."""
+async def start_device_code_flow(*, purpose: str = "mail") -> dict[str, Any]:
+    """Start OAuth2 device code flow. Returns user_code + verification_uri.
+
+    *purpose* ``"calendar"`` is the calendar card's fallback for a redirect
+    Microsoft refuses: the poll then keeps the tokens for Outlook Calendar
+    only (``store_microsoft_calendar_tokens``), as the card's browser sign-in
+    does. Without it a disconnected Outlook Calendar had no way back.
+    """
+    if purpose not in ("mail", "calendar"):
+        raise ValueError(f"unknown Microsoft sign-in purpose: {purpose!r}")
     client_id = _client_id()
     if not client_id:
         return {
@@ -67,6 +75,7 @@ async def start_device_code_flow() -> dict[str, Any]:
         "expires_at": time.time() + int(data.get("expires_in") or 900),
         "client_id": client_id,
         "tenant": tenant,
+        "purpose": purpose,
     }
     return {
         "ok": True,
@@ -123,12 +132,27 @@ async def poll_device_code_flow(device_code: str) -> dict[str, Any]:
     if not (payload.get("access_token") or ""):
         return {"ok": False, "status": "failed", "error": "No access_token in token response"}
 
-    store_microsoft_tokens(payload, client_id)
     _pending.pop(device_code, None)
+    if meta.get("purpose") == "calendar":
+        try:
+            address = store_microsoft_calendar_tokens(payload)
+        except RuntimeError as exc:
+            return {"ok": False, "status": "failed", "purpose": "calendar", "error": str(exc)}
+        logger.info("[calendar.oauth] Outlook Calendar tokens stored (device code)")
+        return {
+            "ok": True,
+            "status": "authorized",
+            "purpose": "calendar",
+            "email": address,
+            "message": "Outlook Calendar connected.",
+        }
+    address = store_microsoft_tokens(payload, client_id)
     logger.info("[email.oauth] Microsoft Graph tokens stored (vault + env)")
     return {
         "ok": True,
         "status": "authorized",
+        "purpose": "mail",
+        "email": address,
         "expires_in": payload.get("expires_in"),
         "scope": payload.get("scope"),
         "message": "Microsoft Graph connected. email tools will use [microsoft_graph mode].",
@@ -168,9 +192,32 @@ def store_microsoft_tokens(payload: dict[str, Any], client_id: str) -> str:
     try:
         from kazma_skills.native.calendar.credentials import persist_microsoft_tokens
 
-        persist_microsoft_tokens(access, refresh, scope_str)
+        persist_microsoft_tokens(access, refresh, scope_str, address)
     except Exception:
         logger.debug("[email.oauth] calendar token copy skipped", exc_info=True)
+    return address
+
+
+def store_microsoft_calendar_tokens(payload: dict[str, Any]) -> str:
+    """Keep a Microsoft token response for Outlook Calendar ONLY: the sign-in
+    started from the calendar card. Mail is left as it is -- connecting the
+    calendar must not reconnect a mailbox the owner disconnected -- and an
+    earlier calendar disconnect is lifted first. Returns the address, or "".
+    Raises when the calendar cannot be turned back on."""
+    from kazma_skills.native.calendar.credentials import (
+        persist_microsoft_tokens,
+        turn_calendar_on,
+    )
+    from kazma_skills.native.email_manager.oauth_common import address_from_id_token
+
+    turn_calendar_on("microsoft")
+    address = address_from_id_token(payload.get("id_token"))
+    persist_microsoft_tokens(
+        str(payload.get("access_token") or ""),
+        str(payload.get("refresh_token") or ""),
+        str(payload.get("scope") or SCOPES),
+        address,
+    )
     return address
 
 

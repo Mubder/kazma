@@ -523,4 +523,36 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "معطّل",
         "en": "Disabled",
     },
+    "documents.in_libraries": {
+        "ar": "في المكتبات:",
+        "en": "In libraries:",
+    },
+    "documents.in_no_library": {
+        "ar": "ليس في أي مكتبة",
+        "en": "Not in any library",
+    },
+    "documents.library_remove_from": {
+        "ar": "إزالة من «{library}»",
+        "en": "Remove from “{library}”",
+    },
+    "documents.library_remove_title": {
+        "ar": "إزالة من المكتبة؟",
+        "en": "Remove from library?",
+    },
+    "documents.library_remove_confirm": {
+        "ar": "إزالة «{title}» من «{library}»؟ تتوقف مقاطعه عن الإجابة من تلك المكتبة، ويبقى المستند نفسه هنا.",
+        "en": "Remove “{title}” from “{library}”? Its passages stop answering from that library; the document itself stays here.",
+    },
+    "documents.library_remove": {
+        "ar": "إزالة",
+        "en": "Remove",
+    },
+    "documents.library_removed": {
+        "ar": "أُزيل من «{library}».",
+        "en": "Removed from “{library}”.",
+    },
+    "documents.library_remove_failed": {
+        "ar": "تعذّرت إزالته من المكتبة: {error}",
+        "en": "Could not remove it from the library: {error}",
+    },
 }

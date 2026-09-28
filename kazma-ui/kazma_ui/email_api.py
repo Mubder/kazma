@@ -476,16 +476,23 @@ async def ms_oauth_callback(
             f"{settings_url}&email_oauth=error&msg={quote('missing_code')}",
             status_code=302,
         )
+    from kazma_skills.native.email_manager.oauth_common import peek_state
     from kazma_skills.native.email_manager.oauth_ms_browser import finish_ms_browser_oauth
 
+    # The calendar card's sign-in comes back here too (one redirect URI in
+    # Azure); its answer goes to the calendar's toast, not the mail card's.
+    peeked = peek_state(state or "")
+    flag = "calendar_oauth" if peeked and peeked.get("purpose") == "calendar" else "email_oauth"
     result = await finish_ms_browser_oauth(code, state)
     if not result.get("ok"):
         return RedirectResponse(
-            f"{settings_url}&email_oauth=error&msg={quote(str(result.get('error') or 'failed'))}",
+            f"{settings_url}&{flag}=error&msg={quote(str(result.get('error') or 'failed'))}",
             status_code=302,
         )
+    provider = "outlook" if flag == "calendar_oauth" else "microsoft"
+    email = quote(str(result.get("email") or ""))
     return RedirectResponse(
-        f"{settings_url}&email_oauth=ok&provider=microsoft",
+        f"{settings_url}&{flag}=ok&provider={provider}&email={email}",
         status_code=302,
     )
 

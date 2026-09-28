@@ -15,6 +15,7 @@ import httpx
 from kazma_skills.native.calendar.credentials import (
     persist_google_tokens,
     scopes_include_google_calendar,
+    turn_calendar_on,
 )
 from kazma_skills.native.email_manager.oauth_common import (
     authorize_redirect,
@@ -217,6 +218,12 @@ async def finish_google_calendar_oauth(code: str, state: str) -> dict[str, Any]:
                 "[calendar.oauth] probe OK but scope string unclear: %r", scope_str
             )
 
+    # A sign-in from the calendar card is the owner connecting it again:
+    # lift an earlier disconnect before keeping the tokens.
+    try:
+        turn_calendar_on("google")
+    except RuntimeError as exc:
+        return {"ok": False, "error": str(exc)}
     persist_google_tokens(
         access, refresh, email_addr, scope_str, probe_ok="ok"
     )

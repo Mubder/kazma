@@ -602,10 +602,10 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
                 and int(r.get("linked_others") or 0) == 0
                 and str(r.get("id") or "").lower() not in ("user", "assistant")
             )
-            r["protected"] = (
-                str(r.get("id") or "").lower() in _PROTECTED_ENTITIES
-                or int(r.get("is_protected") or 0) == 1
-            )
+            # ``core``: always protected, never unprotectable (the page shows
+            # no switch for it); ``protected``: core or the owner's flag.
+            r["core"] = str(r.get("id") or "").lower() in _PROTECTED_ENTITIES
+            r["protected"] = r["core"] or int(r.get("is_protected") or 0) == 1
             aliases = parse_aliases(r.get("aliases_json"))
             r["aliases"] = aliases
             r["is_self"] = is_self_entity(

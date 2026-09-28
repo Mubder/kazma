@@ -5,6 +5,7 @@ Extracted from the original god module for single-responsibility.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -463,7 +464,8 @@ def register_workers_routes(
                 {"status": "error", "message": f"Worker '{name}' not found"},
                 status_code=404,
             )
-        breaker = engine.reset_circuit_breaker(name)
+        # A shared breaker is written to the settings store: off the loop.
+        breaker = await asyncio.to_thread(engine.reset_circuit_breaker, name)
         logger.info("[Swarm] Circuit breaker reset for worker '%s'", name)
         return JSONResponse({
             "status": "ok",

@@ -339,15 +339,10 @@ class SettingsRouterBuilder:
             ('1'/'0') and mirrors it into localStorage for instant effect on
             already-open tabs.
             """
-            try:
-                raw = config_store.get("notifications.turn_complete")
-                enabled = True if raw is None else str(raw).strip().lower() not in (
-                    "0", "false", "off", "no",
-                )
-            except Exception:
-                logger.debug("turn-complete config read failed; defaulting on", exc_info=True)
-                enabled = True
-            return {"enabled": bool(enabled)}
+            # One reader for the page and the Web Push sender (kazma_ui.push).
+            from kazma_ui.push import turn_complete_notifications_on
+
+            return {"enabled": turn_complete_notifications_on()}
 
         @router.get("/api/push/vapid-public-key")
         def api_push_vapid_key() -> dict[str, Any]:

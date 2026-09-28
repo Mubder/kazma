@@ -43,6 +43,7 @@ description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway c
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | * | `/api/swarm/*` | Session / RBAC | Workers, dispatch, tasks, metrics |
+| POST | `/api/swarm/workers/{name}/circuit-breaker/reset` | Session | Close a worker's breaker now (the worker card's **Reset**, shown while the breaker is open or half-open) |
 | GET | SSE swarm events | Session | Live task stream (`swarm_sse`) |
 | GET | `/swarm` | Session | Swarm panel page |
 | * | `/api/replay/*` | Session | Time travel: threads, snapshots, restore, fork, compare, clear (`replay_routes.py`) |
@@ -81,7 +82,8 @@ on error (never a bare 500); non-numeric params yield a FastAPI 422.
 | POST | `/api/memory/v2/beliefs/invalidate-batch` | Session | Soft-invalidate many (`{ "ids": [...] }`). |
 | PATCH | `/api/memory/v2/beliefs/{id}` | Session | Operator edit of active triple: optional `subject`, `predicate`, `object`, `predicate_type`. Sets `extraction_method=user_explicit`; clears embedding if object changes. |
 | GET | `/api/memory/v2/graph` | Session | Belief graph `{nodes, links, stats, groups}` for the canvas. Bi-temporal + filter params: `?at=<unix_ts>` (point-in-time scrub; superseded beliefs marked `superseded=true`), `?type=` (`functional`/`set`/`state` predicate_type), `?entity_type=` (person/tool/concept/…), `?limit=` (default 200), `?source=neo4j` (optional probe). `stats.total_links` vs `stats.links` is the slicing delta shown on the truncation banner. **Invariants:** unique node ids; no virtual fact node when object text equals an entity id; no dangling links; hub node `id=user` with display `name` from `entities.user` (self person shells collapsed onto hub); payload-object subjects carry a hub `related_to` anchor. |
-| GET | `/api/memory/v2/entities` | Session | Entity list for `/memory` ops. Flags: `empty`, `isolated`, `protected`, **`is_self`**, **`graph_id`** (self shells → `"user"`). Query: `?q=`, `?empty_only=`, `?isolated_only=`, `?limit=`. |
+| GET | `/api/memory/v2/entities` | Session | Entity list for `/memory` ops. Flags: `empty`, `isolated`, `protected`, **`core`** (always protected, never unprotectable), **`is_self`**, **`graph_id`** (self shells → `"user"`). Query: `?q=`, `?empty_only=`, `?isolated_only=`, `?limit=`. |
+| POST | `/api/memory/v2/entities/{id}/protect` | Session | `{ "protected": true\|false }`: a protected entity cannot be deleted or merged away (the Memory page's **Protect** / **Unprotect**). Core entities refuse `false`. |
 | POST | `/api/memory/v2/entities/{id}/rename` | Session | Display rename only (`{ "name": "…" }`). Id stable; aliases preserved. Self/person User shells also upsert hub `entities.user`. Returns `hub_synced`, `graph_id`. |
 | POST | `/api/memory/v2/entities/merge` | Session | Merge source into target (beliefs rewired, aliases union). |
 | POST | `/api/memory/v2/entities/link` | Session | Create belief edge (`subject`, `predicate`, `object`). |
@@ -104,6 +106,8 @@ Page: `GET /memory` (HTML admin). Guide: [Memory & RAG](../guide/memory-and-rag)
 | * | `/api/settings*`, config export | Admin/operator | ConfigStore-backed settings UI |
 | GET/PUT | `/api/settings/agent/nonstop` | Session / Admin | Non-Stop & Self-Healing watchdog/failover/ledger settings |
 | * | Workspace routes `/api/workspaces*` | Session | WorkspaceStore CRUD |
+| GET/PUT | `/api/workspace/extra-roots` | Session | Folders outside the workspace the agent may use without asking (Workspace page). PUT replaces the list; a new root must be a full path to an existing folder, not a whole drive and not one holding Kazma's own files (400 says why). A failed read is a 500, never an empty list. |
+| GET | `/api/notifications/turn-complete` | Session | The "notify when a task finishes" switch, the one reader the Web Push sender uses too |
 
 ## Documents / Document Intelligence
 
@@ -176,7 +180,12 @@ HTML page: `GET /documents` (session). TUI Documents tab uses the same coordinat
 | GET | `/api/email/oauth/microsoft/start` · `start.json` | Session | Browser OAuth |
 | GET | `/api/email/oauth/microsoft/callback` | Open (OAuth) | Token exchange |
 | POST | `/api/email/oauth/microsoft/device/start` · `…/poll` | Session | Device-code fallback |
-| POST | `/api/email/oauth/microsoft/disconnect` | Session | Clear Microsoft tokens |
+| POST | `/api/email/oauth/microsoft/disconnect` | Session | Clear Microsoft mail: tokens, the sign-in's address and scopes (Outlook Calendar keeps its own switch) |
+| GET | `/api/calendar/status` | Session | Each calendar's state and address, and the active provider |
+| GET | `/api/calendar/oauth/google/start` · `start.json` | Session | Google Calendar sign-in (callback: the Gmail one) |
+| GET | `/api/calendar/oauth/microsoft/start.json` | Session | Outlook Calendar sign-in for the calendar only (callback: the Microsoft one, `purpose=calendar`); mail is left as it is |
+| POST | `/api/calendar/oauth/microsoft/device/start` | Session | The same by device code (poll with `/api/email/oauth/microsoft/device/poll`) |
+| POST | `/api/calendar/oauth/google/disconnect` · `…/microsoft/disconnect` | Session | Turn that calendar off until it is connected from the card again; mail stays connected |
 
 Agent mail ops use tools (`email_list`, …), not these HTTP routes. Guide: [Email integration](../guide/email-integration).
 

@@ -652,6 +652,40 @@
       </div>
     </div>
 
+    <!-- Folders outside the workspace: durable path grants. The agent can
+         use a folder listed here without asking; the API existed and the
+         docs pointed at a Settings control that did not (2026-09-28). -->
+    <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
+      <div class="card-header" style="padding:10px 16px;border-bottom:1px solid var(--border-subtle);">
+        <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:6px;"><span class="ki" data-icon="folder-open" aria-hidden="true"></span> {{ t('workspace.extra_roots_title') }}</h3>
+      </div>
+      <div style="padding:10px 16px;font-size:0.8rem;">
+        <p style="margin:0 0 8px 0;color:var(--text-muted);">{{ t('workspace.extra_roots_hint') }}</p>
+        <template x-for="r in extraRoots" :key="r.path">
+          <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border-subtle);flex-wrap:wrap;">
+            <code translate="no" style="flex:1;min-width:10rem;font-family:var(--font-mono);font-size:0.75rem;overflow-wrap:anywhere;" x-text="r.path"></code>
+            <span class="badge" :class="r.mode === 'write' ? 'badge-warning' : 'badge-info'"
+                  x-text="r.mode === 'write' ? t('workspace.extra_roots_mode_write') : t('workspace.extra_roots_mode_read')"></span>
+            <span translate="no" x-show="r.label" x-cloak style="color:var(--text-secondary);" x-text="r.label"></span>
+            <button class="btn btn-xs btn-secondary" :disabled="extraRootsSaving" @click="removeExtraRoot(r)">{{ t('workspace.extra_roots_remove') }}</button>
+          </div>
+        </template>
+        <p x-show="extraRootsLoaded && extraRoots.length === 0" x-cloak style="margin:4px 0;color:var(--text-muted);">{{ t('workspace.extra_roots_none') }}</p>
+        <p x-show="extraRootsError" x-cloak style="margin:4px 0;color:var(--danger);" x-text="extraRootsError"></p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center;">
+          <input class="form-input" type="text" translate="no" style="flex:2;min-width:12rem;font-family:var(--font-mono);font-size:0.75rem;"
+                 x-model="newExtraRoot.path" placeholder="{{ t('workspace.extra_roots_path_ph') }}" aria-label="{{ t('workspace.extra_roots_path') }}">
+          <select class="form-select" style="width:auto;" x-model="newExtraRoot.mode" aria-label="{{ t('workspace.extra_roots_access') }}">
+            <option value="read">{{ t('workspace.extra_roots_mode_read') }}</option>
+            <option value="write">{{ t('workspace.extra_roots_mode_write') }}</option>
+          </select>
+          <input class="form-input" type="text" style="flex:1;min-width:8rem;" x-model="newExtraRoot.label"
+                 placeholder="{{ t('workspace.extra_roots_label_ph') }}" aria-label="{{ t('workspace.extra_roots_label') }}">
+          <button class="btn btn-sm btn-primary" :disabled="extraRootsSaving || !newExtraRoot.path.trim()" @click="addExtraRoot()">{{ t('workspace.extra_roots_add') }}</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Recent Activity (replaces Recent Files) -->
     <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
       <div class="card-header" style="padding:10px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;">
@@ -782,6 +816,13 @@ function workspaceApp() {
     suggestList: [],
     suggestLoading: false,
 
+    // Folders outside the workspace the agent may use (durable path grants)
+    extraRoots: [],
+    extraRootsLoaded: false,
+    extraRootsSaving: false,
+    extraRootsError: '',
+    newExtraRoot: { path: '', mode: 'read', label: '' },
+
     async init() {
       // OAuth status is a cheap local ConfigStore read — resolve it FIRST
       // (non-blocking) so the GitHub card shows the correct connected /
@@ -792,6 +833,7 @@ function workspaceApp() {
       await this.loadWorkspaces();
       await this.refreshAll();
       await this.loadBookmarks();
+      this.loadExtraRoots();
 
       // Listen for the OAuth callback tab signaling completion.
       window.addEventListener('message', (e) => {
@@ -822,6 +864,69 @@ function workspaceApp() {
       setInterval(() => {
         if (this.ghOAuthConnected) this.loadActivity();
       }, 60000);
+    },
+
+    async loadExtraRoots() {
+      const data = await window.kazmaGetJson('/api/workspace/extra-roots');
+      if (data && Array.isArray(data.extra_roots)) {
+        this.extraRoots = data.extra_roots.map((r) => ({ path: r.path, mode: r.mode, label: r.label || '' }));
+        this.extraRootsError = '';
+      } else {
+        this.extraRootsError = t('workspace.extra_roots_load_failed');
+      }
+      this.extraRootsLoaded = !!(data && Array.isArray(data.extra_roots));
+    },
+
+    /* Send the whole list (the route replaces it); the server refuses a new
+       folder that is not a full path to an existing folder, is a whole
+       drive, or holds Kazma's own files, and says which. */
+    async _saveExtraRoots(list, doneMessage) {
+      this.extraRootsSaving = true;
+      try {
+        const resp = await fetch('/api/workspace/extra-roots', {
+          method: 'PUT',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+          body: JSON.stringify({ extra_roots: list }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) {
+          KazmaStream.toast(t('workspace.extra_roots_save_failed', { error: data.error || ('HTTP ' + resp.status) }), 'error', 6000);
+          return false;
+        }
+        this.extraRoots = (data.extra_roots || []).map((r) => ({ path: r.path, mode: r.mode, label: r.label || '' }));
+        this.extraRootsLoaded = true;
+        this.extraRootsError = '';
+        KazmaStream.toast(doneMessage, 'success', 2500);
+        return true;
+      } catch (e) {
+        KazmaStream.toast(t('workspace.extra_roots_save_failed', { error: e.message }), 'error', 6000);
+        return false;
+      } finally {
+        this.extraRootsSaving = false;
+      }
+    },
+
+    async addExtraRoot() {
+      const path = (this.newExtraRoot.path || '').trim();
+      if (!path) return;
+      const mode = this.newExtraRoot.mode === 'write' ? 'write' : 'read';
+      if (mode === 'write' && !(await window.kazmaConfirm({
+        title: t('workspace.extra_roots_write_title'),
+        message: t('workspace.extra_roots_write_confirm', { path }),
+        confirmText: t('workspace.extra_roots_add'),
+        danger: true,
+      }))) return;
+      const list = this.extraRoots.filter((r) => r.path !== path)
+        .concat([{ path, mode, label: (this.newExtraRoot.label || '').trim() }]);
+      if (await this._saveExtraRoots(list, t('workspace.extra_roots_added', { path }))) {
+        this.newExtraRoot = { path: '', mode: 'read', label: '' };
+      }
+    },
+
+    async removeExtraRoot(root) {
+      const list = this.extraRoots.filter((r) => r.path !== root.path);
+      await this._saveExtraRoots(list, t('workspace.extra_roots_removed', { path: root.path }));
     },
 
     async loadWorkspaces() {

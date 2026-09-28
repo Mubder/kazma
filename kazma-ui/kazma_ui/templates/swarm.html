@@ -504,7 +504,12 @@
                      the "closed" green badge was unreachable — audit P1-4). #}
                   <span class="badge cb-badge {% if cb and cb.state == 'open' %}badge-danger{% elif cb and cb.state != 'closed' %}badge-warning{% else %}badge-success cb-badge-closed{% endif %}"
                         data-cb-worker="{{ w.name }}" style="font-size:0.65rem;"
-                        title="{{ t('swarm.cb_failures', n=(cb.get('consecutive_failures', 0) if cb else 0), max=(cb.get('failure_threshold', 5) if cb else 5)) }}"><span x-html="KazmaIcons.zap()"></span> {{ t('swarm.cb_' ~ (cb.state if cb and cb.state != 'closed' else 'closed')) }}</span>
+                        title="{{ t('swarm.cb_failures', n=(cb.get('consecutive_failures', 0) if cb else 0), max=(cb.get('failure_threshold', 5) if cb else 5)) }}"><span x-html="KazmaIcons.zap()"></span> <span class="cb-label">{{ t('swarm.cb_' ~ ((cb.state if cb and cb.state != 'closed' else 'closed')|replace('-', '_'))) }}</span></span>
+                  {# An open breaker stops sending the worker tasks until it
+                     cools down; the reset route existed and nothing called it. #}
+                  <button type="button" class="btn btn-sm btn-secondary" style="font-size:0.65rem;padding:1px 6px;"
+                          data-action="reset-breaker" data-worker="{{ w.name }}" data-cb-reset="{{ w.name }}"
+                          title="{{ t('swarm.cb_reset_hint') }}"{% if not (cb and cb.state != 'closed') %} hidden{% endif %}>{{ t('swarm.cb_reset') }}</button>
                 </div>
                 <div style="display:flex;gap:16px;font-size:0.8rem;color:var(--text-tertiary);">
                   <span data-model="{{ w.get('model', '?') }}">{{ t('swarm.model') }}: <span translate="no" style="color:var(--text-secondary);font-family:var(--font-mono);">{{ w.get('model', '?') }}</span></span>

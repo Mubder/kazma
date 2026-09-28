@@ -2184,4 +2184,36 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "محور الذاكرة على الرسم",
         "en": "Memory hub on graph",
     },
+    "memory.pg.protect": {
+        "ar": "حماية",
+        "en": "Protect",
+    },
+    "memory.pg.unprotect": {
+        "ar": "إلغاء الحماية",
+        "en": "Unprotect",
+    },
+    "memory.pg.protect_hint": {
+        "ar": "منع حذفه أو دمجه في كيان آخر",
+        "en": "Keep it from being deleted or merged into another entity",
+    },
+    "memory.pg.unprotect_hint": {
+        "ar": "السماح بحذفه ودمجه مرة أخرى",
+        "en": "Allow deleting and merging it again",
+    },
+    "memory.pg.core_always_protected": {
+        "ar": "محمي دائمًا: أحد الكيانات الأساسية (أنت، Kazma)",
+        "en": "Always protected: one of the core entities (you, Kazma)",
+    },
+    "memory.pg.unprotect_first": {
+        "ar": "محمي: ألغِ الحماية لتتمكن من حذفه",
+        "en": "Protected: unprotect it to delete it",
+    },
+    "memory.page.protected_entity": {
+        "ar": "حُمي {id}: لا يمكن حذفه أو دمجه.",
+        "en": "Protected {id}: it cannot be deleted or merged away.",
+    },
+    "memory.page.unprotected_entity": {
+        "ar": "لم يعد {id} محميًا.",
+        "en": "{id} is no longer protected.",
+    },
 }

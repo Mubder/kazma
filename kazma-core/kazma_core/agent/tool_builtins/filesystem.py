@@ -466,7 +466,10 @@ def register_filesystem_tools(registry: Any) -> None:
                     "label": label or Path(root).name,
                 }
             )
-            set_durable_roots(roots)
+            try:
+                set_durable_roots(roots)
+            except ValueError as exc:
+                return f"Error: {exc}"
             return (
                 f"Durable extra root granted: {root} (mode={mode_n}). "
                 "Retry file_read / file_list / file_write as needed."

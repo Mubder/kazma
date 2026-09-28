@@ -623,6 +623,27 @@ function memoryPage() {
       } else toast(d.error || tx("memory.console.failed", "Failed"), "error");
     },
 
+    /* Protect an entity from delete and merge, or lift that. The page
+       showed the flag and disabled Delete on it, and nothing could set or
+       clear it (2026-09-28). Core entities are always protected. */
+    async toggleProtect(e) {
+      if (!e || !e.id || e.core) return;
+      const want = !e.protected;
+      const d = await api("/api/memory/v2/entities/" + encodeURIComponent(e.id) + "/protect", {
+        method: "POST",
+        body: JSON.stringify({ protected: want }),
+      });
+      if (d.ok) {
+        toast(
+          want
+            ? tx("memory.page.protected_entity", "Protected {id}: it cannot be deleted or merged away.", { id: e.id })
+            : tx("memory.page.unprotected_entity", "{id} is no longer protected.", { id: e.id }),
+          "success",
+        );
+        await this.loadEntities();
+      } else toast(d.error || tx("memory.console.failed", "Failed"), "error");
+    },
+
     async renameEntity(e) {
       if (!e || !e.id) return;
       const current = e.name || e.id;

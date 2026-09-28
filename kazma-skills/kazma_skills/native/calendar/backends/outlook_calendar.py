@@ -17,6 +17,24 @@ _GRAPH = "https://graph.microsoft.com/v1.0/me"
 _refresh_lock = asyncio.Lock()
 
 
+def _keep_refreshed_tokens(access: str, new_refresh: str, used_refresh: str, scope: str) -> None:
+    """Store a refreshed calendar grant (vault I/O: run off the loop).
+
+    Mail gets the new tokens only while it holds this very grant (a mail
+    sign-in copies the same tokens to the calendar). A calendar refresh used
+    to write them unconditionally -- back after the owner disconnected
+    Microsoft mail, and over a mailbox signed in as another account.
+    """
+    from kazma_skills.native.calendar.credentials import persist_microsoft_tokens
+    from kazma_skills.native.email_manager.credentials import vault_retrieve, vault_store
+
+    persist_microsoft_tokens(access, new_refresh, scope)
+    if used_refresh and vault_retrieve("email.microsoft.refresh_token") == used_refresh:
+        vault_store("email.microsoft.access_token", access, category="email")
+        if new_refresh:
+            vault_store("email.microsoft.refresh_token", new_refresh, category="email")
+
+
 class OutlookCalendarBackend:
     """Microsoft Outlook calendar via MS Graph."""
 
@@ -49,9 +67,6 @@ class OutlookCalendarBackend:
             return False
         import httpx
 
-        from kazma_skills.native.calendar.credentials import persist_microsoft_tokens
-        from kazma_skills.native.email_manager.credentials import vault_store
-
         async with _refresh_lock:
             token_url = (
                 f"https://login.microsoftonline.com/{self._tenant}/oauth2/v2.0/token"
@@ -76,19 +91,17 @@ class OutlookCalendarBackend:
                     access = payload.get("access_token") or ""
                     if not access:
                         return False
+                    used_refresh = self._refresh
                     new_refresh = payload.get("refresh_token") or self._refresh
                     self._token = access
                     self._refresh = new_refresh
-                    persist_microsoft_tokens(
-                        access, new_refresh, str(payload.get("scope") or "")
+                    await asyncio.to_thread(
+                        _keep_refreshed_tokens,
+                        access,
+                        new_refresh,
+                        used_refresh,
+                        str(payload.get("scope") or ""),
                     )
-                    vault_store("email.microsoft.access_token", access, category="email")
-                    if new_refresh:
-                        vault_store(
-                            "email.microsoft.refresh_token",
-                            new_refresh,
-                            category="email",
-                        )
                     return True
             except Exception as exc:
                 logger.warning("[calendar.outlook] token refresh failed: %s", exc)

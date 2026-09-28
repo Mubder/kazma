@@ -13,7 +13,11 @@ Design (industry standard: RFC 8030 Web Push + VAPID auth):
   single-operator scale; endpoint hash is the identity.
 - :func:`notify_push_turn_complete` fires from the delivery broker's
   terminal-frame path: ONE choke point, both transports, fire-and-forget,
-  never raises into the turn.
+  never raises into the turn. It honours the Settings switch "notify when a
+  task finishes" (:func:`turn_complete_notifications_on`, the one reader of
+  ``notifications.turn_complete``): until 2026-09-28 only the page read it,
+  so a device that had subscribed kept getting pushes after the owner
+  switched them off.
 - Everything lazy-imports ``pywebpush``. Not installed / no keys ⇒ the
   feature is OFF and every entry point is a cheap no-op
   (same graceful-degradation contract as prometheus_client metrics).
@@ -37,11 +41,28 @@ __all__ = [
     "unsubscribe",
     "list_subscriptions",
     "notify_push_turn_complete",
+    "turn_complete_notifications_on",
 ]
 
 _SUBS_KEY = "notifications.push.subscriptions"
 _MAX_SUBSCRIPTIONS = 50
 _PUSH_TTL_SECONDS = 24 * 3600
+
+
+def turn_complete_notifications_on() -> bool:
+    """The Settings switch "notify when a task finishes"
+    (``notifications.turn_complete``: '1'/'0', unset = on). Read live; never
+    raises (an unreadable store keeps the default, on)."""
+    try:
+        from kazma_core.config_store import get_config_store
+
+        raw = get_config_store().get("notifications.turn_complete")
+    except Exception:
+        logger.debug("[Push] turn-complete switch unreadable; defaulting on", exc_info=True)
+        return True
+    if raw is None:
+        return True
+    return str(raw).strip().lower() not in ("0", "false", "off", "no")
 
 
 def push_available() -> bool:
@@ -146,6 +167,21 @@ def list_subscriptions() -> list[dict[str, Any]]:
     return [s for s in _load_subs() if s.get("endpoint")]
 
 
+def _push_plan() -> tuple[tuple[str, str], list[dict[str, Any]]] | None:
+    """The keys and subscriptions a finished turn is pushed to, or None: the
+    owner switched the notifications off, no VAPID keys, or no device.
+    Settings-store reads: run off the event loop."""
+    if not turn_complete_notifications_on():
+        return None
+    keys = ensure_vapid_keys()
+    if not keys:
+        return None
+    subs = list_subscriptions()
+    if not subs:
+        return None
+    return keys, subs
+
+
 async def notify_push_turn_complete(summary: str) -> int:
     """Fire-and-forget push to every subscription. Returns delivered count.
 
@@ -155,13 +191,10 @@ async def notify_push_turn_complete(summary: str) -> int:
         from pywebpush import webpush, WebPushException
     except Exception:
         return 0
-    keys = ensure_vapid_keys()
-    if not keys:
+    plan = await asyncio.to_thread(_push_plan)
+    if plan is None:
         return 0
-    pub, priv = keys
-    subs = list_subscriptions()
-    if not subs:
-        return 0
+    (pub, priv), subs = plan
 
     def _send_one(sub: dict[str, Any]) -> bool:
         try:

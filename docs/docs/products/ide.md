@@ -66,7 +66,7 @@ with permission. Source of truth: `kazma_core/workspace/path_policy.py` +
 | How | Effect |
 |-----|--------|
 | **Chat (smooth)** | When a file tool fails on an outside-workspace path, the agent calls `request_path_access` (a danger-tier HITL card). On approval a **session grant** (~1h TTL) is created and the tool retries. |
-| **Settings / API** | Durable extra roots via `workspace.extra_roots` + `GET/PUT /api/workspace/extra_roots` (`path`, `mode`: `read` \| `write`, `label`). Persist until removed. |
+| **Workspace page / API** | Workspace → **Folders outside the workspace**: durable extra roots (`workspace.extra_roots`, `GET/PUT /api/workspace/extra-roots`: `path`, `mode`: `read` \| `write`, `label`), listed, added and removed there. A new root must be a full path to an existing folder, not a whole drive, and not one holding Kazma's own install or data. Persist until removed. |
 
 Read grants never allow writes. Denial messages tell the agent how to request a
 grant, so the loop is smooth rather than a hard failure.
