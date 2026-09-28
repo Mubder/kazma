@@ -176,14 +176,11 @@ async def text_to_speech(
 
     record_voice_tts(provider, "ok", elapsed)
 
-    content_type = {
-        "mp3": "audio/mpeg",
-        "wav": "audio/wav",
-        "opus": "audio/opus",
-        "flac": "audio/flac",
-        "ogg": "audio/ogg",
-    }.get(output_format, "audio/mpeg")
+    # What the provider produced, not what Settings asked for: edge-tts
+    # returns MP3 whatever the format setting says (kazma_core.voice.audio_format).
+    from kazma_core.voice.audio_format import audio_label
 
+    _ext, content_type = audio_label(audio, output_format)
     return Response(content=audio, media_type=content_type)
 
 
