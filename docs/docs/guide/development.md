@@ -108,7 +108,8 @@ From AGENTS.md:
 # JS syntax check
 node --check "kazma-ui/kazma_ui/static/js/chat.js"
 
-# Run tests — prefer the crash-tolerant chunked runner (full suite ~5 min)
+# Run tests — prefer the crash-tolerant chunked runner (full suite ~10 min;
+# one chunk per CPU, at most 8)
 python scripts/fast_test.py
 python -m pytest tests/test_system_install_allowlist.py -v   # one file
 

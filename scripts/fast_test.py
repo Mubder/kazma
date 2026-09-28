@@ -15,7 +15,7 @@ is reported as POISON (needs a native fix; quarantine it like
 tests/test_sqlite_search_backend.py).
 
 Usage:
-    python scripts/fast_test.py                 # default: cpu-count chunks
+    python scripts/fast_test.py                 # default: cpu-count chunks, at most 8
     python scripts/fast_test.py --chunks 8      # explicit chunk count
     python scripts/fast_test.py --chunk-timeout 900
 
@@ -290,9 +290,23 @@ def is_crash(code: int) -> bool:
     return code < 0 or code in _CRASH_CODES or code == 139
 
 
+#: Most chunks the runner starts unless told otherwise. Each chunk is a full
+#: pytest process that may load the local embedding model (torch): at one
+#: chunk per CPU a 32-thread box started 32 of them, 12 died with an access
+#: violation inside torch's embedding (2026-09-25, a 23-minute run), and an
+#: earlier run hung the whole machine (2026-09-11). Seven chunks were the
+#: fastest measured there (9-11 min against 12-13 at four).
+DEFAULT_MAX_CHUNKS = 8
+
+
+def default_chunk_count(cpus: int | None) -> int:
+    """One chunk per CPU, at least two and at most ``DEFAULT_MAX_CHUNKS``."""
+    return max(2, min(cpus or 4, DEFAULT_MAX_CHUNKS))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--chunks", type=int, default=max(2, (os.cpu_count() or 4)))
+    ap.add_argument("--chunks", type=int, default=default_chunk_count(os.cpu_count()))
     ap.add_argument("--chunk-timeout", type=float, default=900.0)
     ap.add_argument("--file-timeout", type=float, default=180.0,
                     help="per-file timeout during poison-file retry")

@@ -628,9 +628,12 @@ def register_filesystem_tools(registry: Any) -> None:
         return await asyncio.to_thread(_run)
     @registry.register(
         description=(
-            "Send a file from the workspace to the user's chat (Telegram/Discord/Slack). "
+            "Send a file from the workspace to the user's chat (Telegram/Discord/Slack), "
+            "or show it in the web chat. "
             "Use this when the user asks for a file, document, PDF, or download. "
-            "The file is delivered as an attachment alongside the text caption. "
+            "The file is delivered as an attachment alongside the text caption; in "
+            "the web chat the result gives a line to put in your answer, which "
+            "shows the file there. "
             "After calling send_file, ALWAYS output a clear confirmation message "
             "in your final text response in the active chat session."
         ),
@@ -653,6 +656,30 @@ def register_filesystem_tools(registry: Any) -> None:
             return f"Error: not a file: {file_path}"
         if p.stat().st_size > 50 * 1024 * 1024:
             return f"Error: file too large ({p.stat().st_size // 1024 // 1024} MB; max 50 MB)"
+
+        # A web conversation gets the file in the chat itself. Its delivery
+        # target is the operator's Telegram (where reminders booked there
+        # ring), and a file asked for on the web went there while the answer
+        # said "sent to this chat" (2026-09-28).
+        from kazma_core.tools.send_message import get_current_platform
+
+        if get_current_platform() == "web":
+            import asyncio
+
+            from kazma_core.chat_files import share_file, web_chat_thread
+
+            thread = web_chat_thread()
+            if not thread:
+                return "Error: this web chat has no conversation to share the file into."
+            try:
+                shared = await asyncio.to_thread(share_file, p, thread_id=thread)
+            except (OSError, ValueError) as exc:
+                return f"Error sharing file: {exc}"
+            return (
+                f"File shared in this chat: {shared.name} ({max(1, shared.size // 1024)} KB). "
+                "The user sees it only where your answer shows it: include this "
+                f"line exactly as it is: {shared.markdown()}"
+            )
 
         # Resolve the target chat from the gateway ContextVar (set by the
         # agent handler on every turn from the inbound message's sender).

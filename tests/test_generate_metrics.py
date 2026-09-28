@@ -371,31 +371,110 @@ def test_out_dir_leaves_the_repository_alone(tmp_path, monkeypatch):
     assert json.loads((out / "metrics.json").read_text(encoding="utf-8"))["commit"]["short"] == "92b0b15a"
 
 
+#: README's headline row as the sample repository would have it.
+_ROW = (
+    "| **~511K LOC** (405K Python code + 40K JS) | **{tests} tests** "
+    "({files} test files) | **4,035+ commits** across {n} packages |"
+)
+_BADGE = "<img src=\"https://img.shields.io/badge/Tests-{badge}-10B981.svg\">"
+
+
+def _readme(tests: str = "11,376", files: str = "794", n: int = 6, badge: str | None = None) -> str:
+    badge_line = _BADGE.format(badge=(badge or tests).replace(",", "%2C"))
+    return badge_line + "\n" + _ROW.format(tests=tests, files=files, n=n)
+
+
 def test_the_readme_package_count_is_written_and_checked():
     """README said "across 7 packages" of a six-package repository: typed by
     hand, so nothing updated it when kazma-memory was retired."""
     m = _sample()  # six packages
-    readme = (
-        "| **~511K LOC** (405K Python code + 40K JS) | **9,421 test functions** "
-        "(794 test files) | **4,035+ commits** across {n} packages |"
-    )
-    assert "across 6 packages" in gm.sync_readme(m, readme.format(n=7))
-    assert gm.check_readme(m, readme.format(n=6)) == []
+    assert "across 6 packages" in gm.sync_readme(m, _readme(n=7))
+    assert gm.check_readme(m, _readme(n=6)) == []
     # Negative control: the stale count is caught.
-    assert gm.check_readme(m, readme.format(n=7)) == [
+    assert gm.check_readme(m, _readme(n=7)) == [
         "claims 7 packages, the repository has 6 — regenerate"
     ]
 
 
-def test_the_readme_gate_runs_no_pytest(monkeypatch):
-    """--check-readme compares static counts; it skips the collection."""
+def test_the_readme_states_the_collected_test_count():
+    """README showed the static ``def test_*`` count (9,475) beside a website
+    showing the collected 11,360 and a suite that ran 11,279: it read as out
+    of date (2026-09-28). --write turns the old wording into the collected
+    count, badge and table alike."""
+    m = _sample(collected=11_446)
+    old_row = _ROW.format(tests="9,421", files="794", n=6).replace("tests**", "test functions**")
+    old = _BADGE.format(badge="9%2C421") + "\n" + old_row
+    synced = gm.sync_readme(m, old)
+    assert "**11,446 tests** (794 test files)" in synced
+    assert "Tests-11%2C446-10B981" in synced
+    assert "test functions" not in synced
+    assert gm.check_readme(m, synced) == []
+
+
+def test_a_stale_test_count_fails_the_readme_gate():
+    m = _sample(collected=11_446)
+    assert gm.check_readme(m, _readme(tests="11,400")) == []  # inside the slack
+    # Negative control: the static count README used to show is caught.
+    assert gm.check_readme(m, _readme(tests="9,475")) == [
+        "claims 9,475 tests, pytest collects 11,446 here (1,971 out, slack is "
+        "75) — regenerate"
+    ]
+
+
+def test_a_stale_test_file_count_fails_the_readme_gate():
+    m = _sample()  # 794 test files
+    assert gm.check_readme(m, _readme(files="790")) == []
+    assert gm.check_readme(m, _readme(files="760")) == [
+        "claims 760 test files, repository has 794 (slack is 10) — regenerate"
+    ]
+
+
+def test_the_badge_and_the_table_must_agree():
+    m = _sample()
+    assert gm.check_readme(m, _readme(tests="11,376", badge="11,380")) == [
+        "the Tests badge says '11,380' but the table says '11,376' — README "
+        "contradicts itself"
+    ]
+
+
+def test_a_failed_collection_leaves_readmes_test_count_alone():
+    """--write with no collection must not write "0 tests"."""
+    readme = _readme(tests="11,376")
+    synced = gm.sync_readme(_sample(collected=0), readme)
+    assert "**11,376 tests** (794 test files)" in synced
+    assert "Tests-11%2C376-10B981" in synced
+
+
+def test_the_readme_gate_collects_and_fails_when_it_cannot(monkeypatch, tmp_path, capsys):
+    """README states the collected count, so --check-readme collects. A gate
+    that cannot collect says why and fails; it does not pass unchecked."""
     asked: list[bool] = []
 
     def collect(runtime_tests=True):
         asked.append(runtime_tests)
         return _sample(collected=0)
 
+    readme = tmp_path / "README.md"
+    readme.write_text(_readme(), encoding="utf-8")
     monkeypatch.setattr(gm, "collect", collect)
-    monkeypatch.setattr(gm, "check_readme", lambda m, text: [])
-    assert gm.main(["--check-readme"]) == 0
-    assert asked == [False]
+    monkeypatch.setattr(gm, "README_FILE", readme)
+    assert gm.main(["--check-readme"]) == 1
+    assert asked == [True]
+    err = capsys.readouterr().err
+    assert "cannot check README's test count" in err and "exited 4" in err
+
+
+def test_the_collection_leaves_the_browser_tests_out(monkeypatch):
+    """The count is what the main suite runs, measured the same everywhere:
+    CI's test job has no Playwright and cannot collect tests/e2e, so counting
+    them made a development machine's figure 59 higher than CI's."""
+    seen: list[list[str]] = []
+
+    def fake_run(argv, **kw):
+        seen.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "11471 tests collected in 4.2s\n", "")
+
+    monkeypatch.setattr(gm, "subprocess", _fake_subprocess(fake_run))
+    assert gm.count_collected_tests() == (11_471, "")
+    assert f"--ignore={gm.E2E_DIR}" in seen[0]
+    assert (REPO / gm.E2E_DIR).is_dir(), "the excluded folder must exist"

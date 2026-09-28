@@ -697,14 +697,16 @@ async def github_list_issues(repo: str | None = None, state: str = "open") -> st
     else:
         slug = repo
 
+    params = {"state": state, "per_page": _ISSUES_PAGE}
     client = _get_shared_client()
     if client is not None:
         try:
             async with client as gh:
-                issues = await gh.request(
-                    "GET", f"/repos/{slug}/issues", params={"state": state},
-                )
-            return _ok(_format_issues(issues, state))
+                items = await gh.request("GET", f"/repos/{slug}/issues", params=params)
+                # An empty answer is checked against the repository's own
+                # count before it is believed (see _format_issues).
+                meta = None if _issues_of(items) else await gh.request("GET", f"/repos/{slug}")
+            return _ok(_format_issues(items, state, repo_meta=meta))
         except Exception as e:
             return f"Error listing issues: {e}"
 
@@ -716,25 +718,80 @@ async def github_list_issues(repo: str | None = None, state: str = "open") -> st
     try:
         async with httpx.AsyncClient(verify=shared_ssl_context()) as http:
             r = await http.get(
-                f"https://api.github.com/repos/{slug}/issues?state={state}",
-                headers=headers,
+                f"https://api.github.com/repos/{slug}/issues", params=params, headers=headers,
             )
-            if r.status_code == 200:
-                return _ok(_format_issues(r.json(), state))
-            return f"Failed to fetch issues (status {r.status_code}): {r.text}"
+            if r.status_code != 200:
+                return f"Failed to fetch issues (status {r.status_code}): {r.text}"
+            items = r.json()
+            meta = None
+            if not _issues_of(items):
+                m = await http.get(f"https://api.github.com/repos/{slug}", headers=headers)
+                meta = m.json() if m.status_code == 200 else None
+            return _ok(_format_issues(items, state, repo_meta=meta))
     except Exception as e:
         return f"Error listing issues: {e}"
 
 
-def _format_issues(issues: list, state: str) -> str:
-    """Render an issues list as a compact string."""
-    results = []
-    for iss in (issues or [])[:10]:
-        # GitHub's issues endpoint also returns PRs; filter them out.
-        if "pull_request" in iss:
-            continue
-        results.append(f"#{iss.get('number')}: {iss.get('title')} ({iss.get('html_url')})")
-    return "\n".join(results) or f"No {state} issues found."
+#: One page of GitHub's issues endpoint (its maximum), and how many are shown.
+_ISSUES_PAGE = 100
+_ISSUES_SHOWN = 10
+
+
+def _issues_of(items: Any) -> list[dict]:
+    """The issues in an issues-endpoint answer: it returns pull requests too."""
+    if not isinstance(items, list):
+        return []
+    return [i for i in items if isinstance(i, dict) and "pull_request" not in i]
+
+
+def _unlisted_open_count(repo_meta: Any, items: Any) -> int:
+    """Open issues and pull requests the repository counts but the answer lacks.
+
+    ``open_issues_count`` counts both; the answer's own open pull requests
+    are subtracted.
+    """
+    if not isinstance(repo_meta, dict):
+        return 0
+    try:
+        counted = int(repo_meta.get("open_issues_count") or 0)
+    except (TypeError, ValueError):
+        return 0
+    listed_prs = sum(
+        1 for i in (items if isinstance(items, list) else [])
+        if isinstance(i, dict) and "pull_request" in i and i.get("state", "open") == "open"
+    )
+    return max(0, counted - listed_prs)
+
+
+def _format_issues(items: Any, state: str, *, repo_meta: Any = None) -> str:
+    """Render an issues list as a compact string.
+
+    Pull requests are dropped BEFORE the list is cut: cutting the first ten
+    items first meant ten newer pull requests hid every issue. And an empty
+    answer is not taken at its word when the repository counts open issues
+    it did not return: GitHub gives a token that may not read issues (a
+    fine-grained token without "Issues") an empty list, not an error, and
+    this tool said "No open issues found." over an open issue on the live
+    install (2026-09-28).
+    """
+    issues = _issues_of(items)
+    lines = [
+        f"#{i.get('number')}: {i.get('title')} ({i.get('html_url')})"
+        for i in issues[:_ISSUES_SHOWN]
+    ]
+    if len(issues) > _ISSUES_SHOWN:
+        lines.append(f"... and {len(issues) - _ISSUES_SHOWN} more")
+    if lines:
+        return "\n".join(lines)
+    unlisted = _unlisted_open_count(repo_meta, items) if state in ("open", "all") else 0
+    if unlisted:
+        return (
+            f"GitHub returned no {state} issues, but the repository counts {unlisted} "
+            "open issue(s) or pull request(s) that were not returned. The GitHub token "
+            "Kazma uses may not be allowed to read issues (a fine-grained token needs the "
+            "\"Issues: Read\" permission). Do not report that there are no issues."
+        )
+    return f"No {state} issues found."
 
 
 async def _resolve_owner_repo() -> tuple[str, str] | str:

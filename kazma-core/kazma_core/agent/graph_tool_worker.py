@@ -724,13 +724,21 @@ async def tool_worker_node(
         get_current_delivery_target,
         is_valid_delivery_target,
         reset_current_delivery_target,
+        reset_current_platform,
         resolve_delivery_target,
         set_current_delivery_target,
+        set_current_platform,
     )
 
+    _gw = state.get("_gateway") or {}
+    # The conversation's platform, for tools that answer INTO it (send_file
+    # and generate_image share into a web chat rather than the delivery
+    # target, which a web turn points at the operator's Telegram).
+    _platform_token = set_current_platform(
+        str(_gw.get("platform") or "") if isinstance(_gw, dict) else ""
+    )
     _delivery_token = None
     if not is_valid_delivery_target(get_current_delivery_target()):
-        _gw = state.get("_gateway") or {}
         _delivery = _gw.get("delivery_target") if isinstance(_gw, dict) else None
         if not is_valid_delivery_target(_delivery):
             try:
@@ -1598,6 +1606,7 @@ async def tool_worker_node(
         reset_current_tenant_id(_state_tenant_token)
         if _delivery_token is not None:
             reset_current_delivery_target(_delivery_token)
+        reset_current_platform(_platform_token)
         try:
             if _turn_tok_tw is not None:
                 from kazma_core.agent.turn_input import reset_active_turn_context

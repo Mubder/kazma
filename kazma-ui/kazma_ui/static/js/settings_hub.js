@@ -766,7 +766,7 @@
         },
 
         providerStateLabel(p) {
-            return ProvidersManager.STATE_LABELS[this.providerState(p)] || 'Not tested';
+            return ProvidersManager.stateLabel(this.providerState(p));
         },
 
         /** The one line under the pill: what the last test actually found. */
@@ -819,7 +819,9 @@
             const result = p && p._test;
             if (!result) return '';
             if (result.success && result.chat_ms != null) return result.chat_ms + ' ms';
-            if (result.reachable && result.chat_ok === false) return 'models ok · chat failing';
+            if (result.reachable && result.chat_ok === false) {
+                return ProvidersManager.stateLabel('models_ok_chat_failing');
+            }
             return result.latency_ms != null ? result.latency_ms + ' ms' : '';
         },
 

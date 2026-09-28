@@ -31,6 +31,9 @@ This repository's own `METRICS.md` is refreshed with
 `python scripts/generate_metrics.py --write` before a push. It names the
 commit it was made from, so it always describes the parent of the commit that
 carries it. README's headline numbers are gated in CI (`--check-readme`).
+README's test count is the one pytest collects, the figure the site shows as
+"tests", so the gate collects too (seconds); a collection that fails fails the
+gate with pytest's reason.
 
 ## What fails, and how it shows
 

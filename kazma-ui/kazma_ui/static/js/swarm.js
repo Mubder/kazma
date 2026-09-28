@@ -79,6 +79,9 @@
     loadOutputTarget();
     loadActiveTasks();
 
+    bindAutoExclusive('worker-checkboxes', 'selected_workers');
+    bindAutoExclusive('play-worker-checkboxes', 'play_selected_workers');
+
     // Form submissions
     var dispatchForm = $('dispatch-form');
     if (dispatchForm) dispatchForm.addEventListener('submit', function(e) { e.preventDefault(); dispatchTask(); });
@@ -89,11 +92,8 @@
       addProfile.addEventListener('change', function(e) { applySavedProfile('add', e.target.value); });
     }
 
-    // Start/Stop buttons
-    var startBtn = $('swarm-start');
-    var stopBtn = $('swarm-stop');
-    if (startBtn) startBtn.addEventListener('click', function() { swarmAction('start'); });
-    if (stopBtn) stopBtn.addEventListener('click', function() { swarmAction('stop'); });
+    // Start/Stop All are wired in the template (onclick="KazmaSwarm.start()");
+    // a second listener here sent every click twice (2026-09-28).
 
     // Event delegation for worker actions (cards and tables)
     document.addEventListener('click', function(e) {
@@ -331,7 +331,7 @@
       .then(function(data) {
         if (!data) return;
         workers = data.workers || [];
-        updateSwarmControls(data.started, data.count);
+        updateSwarmControls(data.started, data.count, data.templates);
         updateMetrics(data);
         updateBreakerBadges(workers);
         var banner = $('setup-banner');
@@ -347,24 +347,35 @@
       });
   }
 
-  function updateSwarmControls(started, count) {
+  // Nothing running is not "stopped" while templates can spawn a worker for
+  // the next task: the page said "Stopped" over a swarm that answered in
+  // 3 s (2026-09-28).
+  function onDemand(started, count, templates) {
+    return !started && !count && templates > 0;
+  }
+
+  function updateSwarmControls(started, count, templates) {
     var statusEl = $('swarm-status-text');
     var startBtn = $('swarm-start');
     var stopBtn = $('swarm-stop');
     if (statusEl) {
       statusEl.innerHTML = started
         ? '<span style="color:var(--success);">' + esc(t('swarm.status_running', {count: count})) + '</span>'
-        : '<span style="color:var(--text-muted);">' + esc(t('swarm.status_stopped', {count: count})) + '</span>';
+        : onDemand(started, count, templates)
+          ? '<span style="color:var(--text-secondary);">' + esc(t('swarm.status_on_demand')) + '</span>'
+          : '<span style="color:var(--text-muted);">' + esc(t('swarm.status_stopped', {count: count})) + '</span>';
     }
     if (startBtn) startBtn.disabled = started;
     if (stopBtn) stopBtn.disabled = !started;
   }
 
   function updateMetrics(data) {
+    var ready = onDemand(data.started, data.count, data.templates);
     setText('metric-worker-count', String(data.count || 0));
-    setText('metric-swarm-status', data.started ? t('swarm.running') : t('swarm.stopped'));
+    setText('metric-swarm-status', data.started ? t('swarm.running') : (ready ? t('swarm.on_demand') : t('swarm.stopped')));
+    setText('metric-swarm-status-sub', data.started ? t('swarm.swarm_active') : (ready ? t('swarm.on_demand_sub') : t('swarm.swarm_idle')));
     var sc = $('metric-swarm-status');
-    if (sc) sc.style.color = data.started ? 'var(--success)' : 'var(--text-muted)';
+    if (sc) sc.style.color = data.started ? 'var(--success)' : (ready ? 'var(--text-primary)' : 'var(--text-muted)');
     var busy = workers.filter(function(w) { return w.status === 'busy'; }).length;
     setText('metric-busy', String(busy));
     // Fetch aggregated metrics for tasks-today and total-cost
@@ -429,11 +440,37 @@
   // TASK DISPATCH (VAL-UI-003, VAL-UI-004, VAL-UI-005, VAL-ORCH-044)
   // ══════════════════════════════════════════════════════
 
+  // "auto" is the engine's own route (dispatch_inner): the capability router
+  // picks the best registered worker, or the autoscaler spawns one from a
+  // template. It stands alone -- the server honours it only when no named
+  // worker is chosen -- so the pickers keep it exclusive, and a list that
+  // holds it is sent as ["auto"].
+  function selectedWorkers(inputName) {
+    var list = [];
+    document.querySelectorAll('input[name="' + inputName + '"]:checked').forEach(function(cb) {
+      list.push(cb.value);
+    });
+    return list.indexOf('auto') >= 0 ? ['auto'] : list;
+  }
+
+  // Bound on the picker itself, which leaves with the page on a soft
+  // navigation (a document listener would pile up on every visit).
+  function bindAutoExclusive(containerId, inputName) {
+    var box = $(containerId);
+    if (!box || box._autoExclusiveBound) return;
+    box._autoExclusiveBound = true;
+    box.addEventListener('change', function(e) {
+      var picked = e.target;
+      if (!picked || picked.name !== inputName || !picked.checked) return;
+      box.querySelectorAll('input[name="' + inputName + '"]').forEach(function(other) {
+        if (other === picked) return;
+        if (picked.value === 'auto' || other.value === 'auto') other.checked = false;
+      });
+    });
+  }
+
   function dispatchTask() {
-    // Gather selected workers from checkboxes
-    var checkboxes = document.querySelectorAll('input[name="selected_workers"]:checked');
-    var workerList = [];
-    checkboxes.forEach(function(cb) { workerList.push(cb.value); });
+    var workerList = selectedWorkers('selected_workers');
 
     var pattern = ($('pattern-select') || {}).value || 'dispatch';
     var task = ($('dispatch-task') || {}).value || '';
@@ -2496,9 +2533,7 @@
   }
 
   function runPlayground() {
-    var checkboxes = document.querySelectorAll('input[name="play_selected_workers"]:checked');
-    var workerList = [];
-    checkboxes.forEach(function(cb) { workerList.push(cb.value); });
+    var workerList = selectedWorkers('play_selected_workers');
 
     var pattern = ($('play-pattern-select') || {}).value || 'dispatch';
     var task = ($('play-dispatch-task') || {}).value || '';
@@ -2806,7 +2841,10 @@
       .then(function(data) {
         renderTemplates(data.templates || [], data.instances || []);
       })
-      .catch(function() {
+      .catch(function(err) {
+        // A render bug read as a network failure here: the tab said "Failed
+        // to load templates" over three good ones (2026-09-28). Name it.
+        console.error('[swarm] templates:', err);
         var c = $('template-cards-container');
         if (c) c.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);">' + (window.t ? t('swarm.templates_load_failed') : 'Failed to load') + '</div>';
       });
@@ -2849,17 +2887,17 @@
           '<div style="display:flex;align-items:flex-start;justify-content:space-between;">' +
             '<div style="flex:1;">' +
               '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
-                '<span style="font-weight:600;">' + KazmaUtils.esc(tmpl.name) + '</span>' +
-                (tmpl.role ? '<span class="badge badge-accent" style="font-size:0.65rem;">' + KazmaUtils.esc(tmpl.role) + '</span>' : '') +
+                '<span style="font-weight:600;">' + esc(tmpl.name) + '</span>' +
+                (tmpl.role ? '<span class="badge badge-accent" style="font-size:0.65rem;">' + esc(tmpl.role) + '</span>' : '') +
                 '<span class="badge badge-info" style="font-size:0.65rem;">' + active + '/' + max + ' ' + (window.t ? t('swarm.instances') : 'active') + '</span>' +
               '</div>' +
-              '<div style="font-size:0.8rem;color:var(--text-tertiary);">' + (window.t ? t('swarm.model') : 'Model') + ': <span style="color:var(--text-secondary);font-family:var(--font-mono);">' + KazmaUtils.esc(modelLabel) + '</span></div>' +
-              (expertise.length ? '<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">' + expertise.map(function(tag){ return '<span class="badge badge-info" style="font-size:0.6rem;">' + KazmaUtils.esc(tag) + '</span>'; }).join('') + '</div>' : '') +
-              (tmpl.system_prompt ? '<div style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;line-height:1.4;">' + KazmaUtils.esc(tmpl.system_prompt.slice(0, 140)) + (tmpl.system_prompt.length > 140 ? '…' : '') + '</div>' : '') +
+              '<div style="font-size:0.8rem;color:var(--text-tertiary);">' + (window.t ? t('swarm.model') : 'Model') + ': <span style="color:var(--text-secondary);font-family:var(--font-mono);">' + esc(modelLabel) + '</span></div>' +
+              (expertise.length ? '<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">' + expertise.map(function(tag){ return '<span class="badge badge-info" style="font-size:0.6rem;">' + esc(tag) + '</span>'; }).join('') + '</div>' : '') +
+              (tmpl.system_prompt ? '<div style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;line-height:1.4;">' + esc(tmpl.system_prompt.slice(0, 140)) + (tmpl.system_prompt.length > 140 ? '…' : '') + '</div>' : '') +
             '</div>' +
             '<div style="display:flex;gap:4px;">' +
-              '<button class="btn btn-sm btn-secondary" data-action="edit-template" data-name="' + KazmaUtils.esc(tmpl.name) + '" title="Edit"><span class="ki" data-icon="edit" aria-hidden="true"></span></button>' +
-              '<button class="btn btn-sm btn-danger" data-action="delete-template" data-name="' + KazmaUtils.esc(tmpl.name) + '" title="Delete"><span class="ki" data-icon="x" aria-hidden="true"></span></button>' +
+              '<button class="btn btn-sm btn-secondary" data-action="edit-template" data-name="' + esc(tmpl.name) + '" title="Edit"><span class="ki" data-icon="edit" aria-hidden="true"></span></button>' +
+              '<button class="btn btn-sm btn-danger" data-action="delete-template" data-name="' + esc(tmpl.name) + '" title="Delete"><span class="ki" data-icon="x" aria-hidden="true"></span></button>' +
             '</div>' +
           '</div>' +
         '</div>';

@@ -72,6 +72,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "عميق",
         "en": "Deep",
     },
+    "research.source_chat": {
+        "ar": "محادثة",
+        "en": "Chat",
+    },
     "research.depth_label": {
         "ar": "العمق",
         "en": "Depth",

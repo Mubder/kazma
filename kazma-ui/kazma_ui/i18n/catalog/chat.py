@@ -288,6 +288,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "سطر جديد",
         "en": "newline",
     },
+    "chat.no_archived_sessions": {
+        "ar": "لا توجد جلسات مؤرشفة",
+        "en": "No archived sessions",
+    },
     "chat.no_matching_sessions": {
         "ar": "لا توجد جلسات مطابقة",
         "en": "No matching sessions",
@@ -431,6 +435,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "chat.sessions": {
         "ar": "الجلسات",
         "en": "Sessions",
+    },
+    "chat.sessions_load_failed": {
+        "ar": "تعذّر تحميل الجلسات",
+        "en": "Failed to load sessions",
     },
     "chat.show_less": {
         "ar": "عرض أقل ▴",

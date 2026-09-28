@@ -83,3 +83,23 @@ def test_a_clean_run_names_its_last_file() -> None:
 def test_progress_line_shapes(line: str, expected: str) -> None:
     """Both nested package tests and skipped-first files parse."""
     assert _runner().last_file_reached(line + "\n") == expected
+
+
+@pytest.mark.parametrize(
+    ("cpus", "expected"),
+    [(32, 8), (16, 8), (8, 8), (4, 4), (1, 2), (None, 4)],
+)
+def test_the_default_chunk_count_is_capped(cpus, expected) -> None:
+    """One chunk per CPU started 32 torch-loading pytest processes on a
+    32-thread box: 12 died in torch's embedding and the run took 23 minutes
+    (2026-09-25). README's plain `python scripts/fast_test.py` must be safe."""
+    assert _runner().default_chunk_count(cpus) == expected
+
+
+def test_the_uncapped_default_would_start_one_chunk_per_cpu() -> None:
+    """Negative control: the old default on the same box."""
+
+    def old_default(cpus):
+        return max(2, (cpus or 4))
+
+    assert old_default(32) == 32 != _runner().default_chunk_count(32)

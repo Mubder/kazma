@@ -1,9 +1,11 @@
-"""Chat attachment upload endpoint for the Web UI.
+"""Chat attachment endpoints for the Web UI.
 
 Provides:
   POST /api/chat/upload  — accept a media/file upload, persist it under
   ``kazma-data/attachments/``, and return a descriptor the chat client
   attaches to the next ``/api/chat/stream`` turn.
+  GET /api/chat/files/{id} — a file the agent shared into a web chat
+  (``kazma_core.chat_files``), for the owner of that chat only.
 
 The returned descriptor mirrors the :class:`~kazma_gateway.gateway.Attachment`
 shape so the SSE handler and the gateway path both consume the same fields.
@@ -11,10 +13,12 @@ shape so the SSE handler and the gateway path both consume the same fields.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse, Response
 
 from kazma_ui.chat_attachments import MAX_UPLOAD_BYTES, store_uploaded_attachment
 from kazma_ui.rate_limit import rate_limit
@@ -103,3 +107,40 @@ async def upload_attachment(file: UploadFile = File(...)) -> dict[str, Any]:
         "mime": mime,
         "filename": original,
     }
+
+
+#: Served files never run in the page: no script, no plugins, no framing,
+#: and the browser may not second-guess the type.
+_SHARED_FILE_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "default-src 'none'; img-src 'self'; sandbox",
+    "Cache-Control": "private, max-age=86400",
+}
+
+
+@router.get("/files/{file_id}")
+async def shared_file(file_id: str) -> Response:
+    """A file the agent shared into a web chat, for that chat's owner.
+
+    Raster images are shown in the page; anything else is a download. An id
+    that is unknown, malformed, or belongs to another tenant's chat is the
+    same 404.
+    """
+    from kazma_core.chat_files import load_shared
+
+    from kazma_ui.thread_ownership import require_thread_owned
+
+    found = await asyncio.to_thread(load_shared, file_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="not found")
+    shared, path = found
+    denied = await require_thread_owned(shared.thread_id)
+    if denied is not None:
+        return denied
+    return FileResponse(
+        path,
+        media_type=shared.mime if shared.inline else "application/octet-stream",
+        filename=shared.name,
+        content_disposition_type="inline" if shared.inline else "attachment",
+        headers=dict(_SHARED_FILE_HEADERS),
+    )

@@ -57,6 +57,11 @@
   // every fresh sendMessage(); only the recovery path reads it.
   var lastSentUserText = '';
   var sessions = [];
+  // False until /api/chat/sessions first answers. Before that an empty list
+  // means "not read yet": opening the page re-rendered it early and showed
+  // "No sessions yet / Start a new chat" for a second over 128 chats
+  // (2026-09-28). renderSessionList leaves the placeholder until then.
+  var _sessionsLoaded = false;
   var messageReactions = {};
   var searchQuery = '';
   var showArchived = false;
@@ -6110,6 +6115,7 @@
       })
       .then(function(data) {
         sessions = data || [];
+        _sessionsLoaded = true;
         // Preserve optimistic active session if the server hasn't flushed it yet
         // (race: first WS message still writing while we re-list).
         if (chatSessionId) {
@@ -6123,8 +6129,9 @@
       })
       .catch(function(err) {
         console.error('Failed to load sessions:', err);
-        if (sessionListEl) {
-          sessionListEl.innerHTML = '<div class="session-empty">Failed to load sessions</div>';
+        if (sessionListEl && !_sessionsLoaded) {
+          sessionListEl.innerHTML = '<div class="session-empty">' +
+            escapeHtml(ti('sessions_load_failed', 'Failed to load sessions')) + '</div>';
         }
       });
   }
@@ -6332,14 +6339,20 @@
     var countEl = document.getElementById('session-count');
     if (countEl) countEl.textContent = sessions.length ? ' (' + sessions.length + ')' : '';
 
+    if (filtered.length === 0 && !q && !_sessionsLoaded) {
+      return;  // still loading (or the load failed): keep what the list says
+    }
     if (filtered.length === 0) {
       var emptyText = q
         ? ti('no_matching_sessions', 'No matching sessions')
-        : ti('no_sessions_yet', 'No sessions yet');
+        : showArchived
+          ? ti('no_archived_sessions', 'No archived sessions')
+          : ti('no_sessions_yet', 'No sessions yet');
+      var offerNew = !q && !showArchived;
       sessionListEl.innerHTML =
         '<div class="session-empty">' + escapeHtml(emptyText) +
-        (q ? '' : '<button class="btn btn-sm btn-primary session-empty-cta" id="session-empty-new">' +
-          escapeHtml(ti('start_new_chat', 'Start a new chat')) + '</button>') +
+        (offerNew ? '<button class="btn btn-sm btn-primary session-empty-cta" id="session-empty-new">' +
+          escapeHtml(ti('start_new_chat', 'Start a new chat')) + '</button>' : '') +
         '</div>';
       var cta = document.getElementById('session-empty-new');
       if (cta) cta.addEventListener('click', newSession);
@@ -6499,24 +6512,41 @@
 
   function loadArchivedSessions() {
     fetch('/api/chat/sessions/archived')
-      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
       .then(function(data) {
         sessions = data || [];
+        _sessionsLoaded = true;
         renderSessionList();
       })
-      .catch(function() {});
+      .catch(function(err) {
+        console.error('Failed to load archived sessions:', err);
+        if (sessionListEl) {
+          sessionListEl.innerHTML = '<div class="session-empty">' +
+            escapeHtml(ti('sessions_load_failed', 'Failed to load sessions')) + '</div>';
+        }
+      });
   }
 
   function toggleArchivedView() {
     showArchived = !showArchived;
-    var headerTitle = document.querySelector('.chat-sidebar-header h3');
+    // The title has its own element: setting the heading's textContent also
+    // deleted the session count beside it, for good (2026-09-28).
+    var headerTitle = document.getElementById('sessions-title');
     var newBtn = document.getElementById('new-session-btn');
+    _sessionsLoaded = false;  // the other list has not been read yet
+    if (sessionListEl) {
+      sessionListEl.innerHTML = '<div class="session-empty">' +
+        escapeHtml(ti('loading_sessions', 'Loading sessions…')) + '</div>';
+    }
     if (showArchived) {
-      if (headerTitle) headerTitle.textContent = 'Archived';
+      if (headerTitle) headerTitle.textContent = ti('archived', 'Archived');
       if (newBtn) newBtn.style.display = 'none';
       loadArchivedSessions();
     } else {
-      if (headerTitle) headerTitle.textContent = 'Sessions';
+      if (headerTitle) headerTitle.textContent = ti('sessions', 'Sessions');
       if (newBtn) newBtn.style.display = '';
       loadSessions();
     }
@@ -7386,14 +7416,17 @@
   /** mm:ss from a server stamp, ticked forward locally while live.
    *
    *  Plan §3: "A local timer may update elapsed display. It cannot mark a
-   *  gate expired or a turn complete." The tick is display only and is
-   *  frozen the moment the phase is terminal, so a finished turn shows the
-   *  duration the server measured rather than one this tab kept counting.
+   *  gate expired or a turn complete." The tick is display only.
+   *
+   *  A finished turn shows no clock here: its measured duration is on the
+   *  answer's meta line. The header used to freeze at the last heartbeat's
+   *  stamp -- "0:13" over a turn that took 24 s -- and a reload of the same
+   *  turn showed no clock at all (2026-09-28).
    */
   function _headerElapsedText(model) {
-    if (!model) return '';
+    if (!model || model.terminal) return '';
     var secs = model.elapsed.seconds;
-    if (!model.terminal && model.elapsed.stampedAtMs) {
+    if (model.elapsed.stampedAtMs) {
       var drift = (Date.now() - model.elapsed.stampedAtMs) / 1000;
       if (drift > 0 && drift < 3600) secs += drift;
     }

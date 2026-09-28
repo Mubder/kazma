@@ -19,6 +19,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import stat
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -78,32 +81,99 @@ def _file_mtime_str(p: Path) -> str:
         return ""
 
 
-def _scan_recent_files(root: Path, limit: int) -> list[dict[str, Any]]:
-    """Scan workspace for recently modified files."""
-    all_files: list[tuple[float, Path]] = []
-    try:
-        for p in root.rglob("*"):
-            if p.is_file() and not p.name.startswith("."):
-                try:
-                    all_files.append((p.stat().st_mtime, p))
-                except OSError:
-                    continue
-    except PermissionError:
-        return []
+#: Folders the fallback walk never enters, besides hidden ones (``.git``,
+#: ``.venv``...): generated trees and the install's own data folder.
+_SKIP_DIRS = frozenset(
+    {"node_modules", "__pycache__", "venv", "site-packages", "dist", "build", "kazma-data"}
+)
+#: The fallback walk stops after this many files: a workspace that is not a
+#: repository can be any folder.
+_WALK_FILE_CAP = 20_000
 
-    all_files.sort(key=lambda pair: pair[0], reverse=True)
-    recent: list[dict[str, Any]] = []
-    for mtime, p in all_files[:limit]:
-        rel = str(p.relative_to(root)).replace("\\", "/")
-        recent.append(
-            {
-                "name": p.name,
-                "path": rel,
-                "time": _file_mtime_str(p),
-                "size": _human_size(p.stat().st_size) if p.exists() else "",
-            }
+
+def _git_project_files(root: Path) -> list[Path] | None:
+    """The workspace's own files as git sees them -- tracked, plus untracked
+    ones ``.gitignore`` does not exclude -- or None when ``root`` is not the
+    top of a repository, or git is missing.
+
+    Only a repository's own top level: the default sandbox
+    (``<data dir>/workspace``) sits inside the install's checkout, which
+    ignores it, and git would list nothing there.
+
+    No server secrets for git (it runs the repository's configured programs,
+    AGENTS.md §26I), and ``core.fsmonitor`` off so none is started at all.
+    """
+    from kazma_core.security.child_env import tool_child_env
+
+    if not (root / ".git").exists():
+        return None
+    try:
+        res = subprocess.run(
+            ["git", "-c", "core.fsmonitor=false", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            cwd=str(root),
+            env=tool_child_env(),
+            capture_output=True,
+            timeout=15,
+            check=False,
         )
-    return recent
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if res.returncode != 0:
+        return None
+    return [root / name for name in res.stdout.decode("utf-8", "replace").split("\0") if name]
+
+
+def _walk_files(root: Path) -> list[Path]:
+    """Files under ``root``, without hidden folders or generated trees; a
+    folder it cannot read is skipped, never the whole walk."""
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):  # errors skip that folder
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in _SKIP_DIRS]
+        for name in filenames:
+            found.append(Path(dirpath) / name)
+            if len(found) >= _WALK_FILE_CAP:
+                return found
+    return found
+
+
+def _scan_recent_files(root: Path, limit: int) -> list[dict[str, Any]]:
+    """The workspace's most recently changed files, newest first.
+
+    It walked the whole workspace with ``rglob``, hidden and generated
+    folders included, and one unreadable folder anywhere returned nothing:
+    on the live install (the workspace is the install folder, ``.venv`` and
+    ``kazma-data`` included) the Workspace page waited 30 s for an empty list
+    (2026-09-28). A repository's files come from git; any other folder gets
+    a pruned walk.
+    """
+    candidates = _git_project_files(root)
+    if candidates is None:
+        candidates = _walk_files(root)
+    stamped: list[tuple[float, int, Path]] = []
+    for p in candidates:
+        try:
+            rel_parts = p.relative_to(root).parts
+        except ValueError:
+            continue
+        if any(part.startswith(".") for part in rel_parts):
+            continue  # hidden files and anything in a hidden folder
+        try:
+            st = p.stat()
+        except OSError:
+            continue  # listed by git but deleted, or unreadable
+        if stat.S_ISREG(st.st_mode):
+            stamped.append((st.st_mtime, st.st_size, p))
+
+    stamped.sort(key=lambda item: item[0], reverse=True)
+    return [
+        {
+            "name": p.name,
+            "path": p.relative_to(root).as_posix(),
+            "time": datetime.fromtimestamp(mtime, tz=UTC).strftime("%Y-%m-%d %H:%M"),
+            "size": _human_size(size),
+        }
+        for mtime, size, p in stamped[:limit]
+    ]
 
 
 # ── Router factory ─────────────────────────────────────────────────────

@@ -111,6 +111,16 @@
     });
   }
 
+  // A chat tool's web search is recorded as a session too (id rs_chat_...);
+  // only the deep pipeline's sessions are Deep. Every row read "[Deep]", a
+  // one-line search from the chat included (2026-09-28).
+  function sessionTag(s) {
+    var chat = String((s && s.id) || '').indexOf('rs_chat_') === 0;
+    var key = chat ? 'research.source_chat' : 'research.depth_deep';
+    var label = (typeof window.t === 'function') ? window.t(key) : '';
+    return '[' + (label && label !== key ? label : (chat ? 'Chat' : 'Deep')) + '] ';
+  }
+
   window.KazmaResearch = {
     init: function () {
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
@@ -278,7 +288,7 @@
         var sessionTasks = sessions.map(function (s) {
           return {
             id: 'session:' + s.id,
-            prompt: '[Deep] ' + (s.topic || s.id),
+            prompt: sessionTag(s) + (s.topic || s.id),
             status: s.status || 'pending',
             workers: ['research_pipeline'],
             cost: 0,
@@ -319,7 +329,7 @@
           // Render archived sessions through the task-shaped card.
           return {
             id: 'session:' + s.id,
-            prompt: '[Deep] ' + (s.topic || ''),
+            prompt: sessionTag(s) + (s.topic || ''),
             status: s.status || 'done',
             workers: [],
             cost: 0,

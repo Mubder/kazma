@@ -20,7 +20,28 @@ __all__ = [
 ]
 
 _LOCAL_SCHEMES = frozenset({"about", "blob", "data"})
-_installed: set[int] = set()
+#: Marks a context that has the guard. The mark lives ON the context: a set
+#: of ``id(context)`` did not work -- ``read_url`` and the Knowledge crawler
+#: close their context after each fetch, CPython gives the closed context's
+#: id to the next one, and the next context was taken for guarded and left
+#: without the route (2026-09-28).
+_GUARD_MARK = "_kazma_browser_egress"
+
+
+def _already_guarded(context) -> bool:
+    return bool(getattr(context, _GUARD_MARK, False))
+
+
+def _mark_guarded(context) -> None:
+    """Record the guard on *context*, after its route is in place.
+
+    A context that cannot carry the mark gets the route again next time: a
+    second route is only extra work, a missing one is the hole.
+    """
+    try:
+        setattr(context, _GUARD_MARK, True)
+    except (AttributeError, TypeError):
+        logger.debug("[browser-egress] context cannot be marked; it will be guarded again")
 
 
 def browser_request_allowed(url: str) -> tuple[bool, str]:
@@ -70,17 +91,15 @@ async def _guard_async(route) -> None:
 
 def install_sync_browser_egress(context) -> None:
     """Install the guard once on a sync Playwright context or page context."""
-    key = id(context)
-    if key in _installed:
+    if _already_guarded(context):
         return
     context.route("**/*", _guard_sync)
-    _installed.add(key)
+    _mark_guarded(context)
 
 
 async def install_async_browser_egress(context) -> None:
     """Install the guard once on an async Playwright browser context."""
-    key = id(context)
-    if key in _installed:
+    if _already_guarded(context):
         return
     await context.route("**/*", _guard_async)
-    _installed.add(key)
+    _mark_guarded(context)
