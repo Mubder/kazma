@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## Mail, calendar and X, tested end to end on the live install (2026-09-28)
+
+With the owner's approval, Kazma was driven through its chat like a person
+would: a Google Calendar event created, read back and deleted; an email from
+Gmail to the same Gmail account and from the MSN account to itself, each
+found in the inbox afterwards; a post on X, read back from the account's
+timeline and deleted 22 seconds later. Every send stopped at its approval
+card and was checked before it was approved; the test chat kept nothing in
+memory. All of it worked. Outlook Calendar refused honestly — the Microsoft
+login grants mail only; reconnecting Microsoft in Settings adds calendar
+access. What the run found, fixed:
+
+- **No Microsoft message could be opened from a listing.** The mail list cut
+  every message id to 60 characters. Microsoft ids run to ~150 behind a
+  prefix the whole mailbox shares, so every row carried the same id and
+  opening one failed "Id is malformed". Gmail's 16-character ids hid it.
+- **Kazma did not know the Microsoft mailbox's address.** Settings showed
+  none and the agent read it out of Sent Items to email the owner. The
+  sign-in's OpenID token names the account; it is now kept (apart from any
+  IMAP/POP address), shown in Settings, and every email tool says which
+  mailbox answered ("mailbox b.alfaris@msn.com"). The two Microsoft sign-in
+  flows kept two copies of the token-storing code; there is one now.
+  Existing connections learn the address at their next sign-in.
+- **A deleted post gave its slot back.** Kazma's daily and monthly X caps
+  keep it under X's API quota, and X counts every post it created; after
+  the test post and its delete Kazma showed "0/16" where X had spent one.
+  Deleted posts count now; their text may still be posted again.
+
 ## The owner's reminders showed as "done" (2026-09-28)
 
 **The Scheduled page listed both CoPilot Pro+ renewal reminders as

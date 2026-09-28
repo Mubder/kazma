@@ -120,30 +120,10 @@ async def poll_device_code_flow(device_code: str) -> dict[str, Any]:
                 "error": payload.get("error_description") or err,
             }
 
-    access = payload.get("access_token") or ""
-    refresh = payload.get("refresh_token") or ""
-    if not access:
+    if not (payload.get("access_token") or ""):
         return {"ok": False, "status": "failed", "error": "No access_token in token response"}
 
-    # Persist for process + vault
-    os.environ["EMAIL_MS_ACCESS_TOKEN"] = access
-    if refresh:
-        os.environ["EMAIL_MS_REFRESH_TOKEN"] = refresh
-    vault_store("email.microsoft.access_token", access, category="email")
-    if refresh:
-        vault_store("email.microsoft.refresh_token", refresh, category="email")
-    vault_store("email.microsoft.client_id", client_id, category="email")
-    os.environ["EMAIL_MS_AUTH"] = "oauth"
-    vault_store("email.microsoft.auth", "oauth", category="email")
-    scope_str = str(payload.get("scope") or SCOPES)
-    vault_store("email.microsoft.scopes", scope_str, category="email")
-    try:
-        from kazma_skills.native.calendar.credentials import persist_microsoft_tokens
-
-        persist_microsoft_tokens(access, refresh, scope_str)
-    except Exception:
-        logger.debug("[email.oauth] calendar token copy skipped", exc_info=True)
-
+    store_microsoft_tokens(payload, client_id)
     _pending.pop(device_code, None)
     logger.info("[email.oauth] Microsoft Graph tokens stored (vault + env)")
     return {
@@ -153,6 +133,45 @@ async def poll_device_code_flow(device_code: str) -> dict[str, Any]:
         "scope": payload.get("scope"),
         "message": "Microsoft Graph connected. email tools will use [microsoft_graph mode].",
     }
+
+
+def store_microsoft_tokens(payload: dict[str, Any], client_id: str) -> str:
+    """Keep a Microsoft token response: env + vault, the calendar's copy, and
+    the account's own address. Both sign-in flows (device code, browser
+    redirect) end here. Returns the address, or "" when the response named
+    none.
+
+    The address comes from the response's OpenID ``id_token`` (the sign-in
+    asks for ``openid profile``) and is kept apart from an IMAP/POP address
+    (``email.microsoft.oauth_address``), so a leftover protocol login never
+    stands in for the OAuth account. Before 2026-09-28 it was not read at
+    all: Settings showed no Microsoft address, and "email my MSN account"
+    meant digging it out of Sent Items.
+    """
+    from kazma_skills.native.email_manager.oauth_common import address_from_id_token
+
+    access = str(payload.get("access_token") or "")
+    refresh = str(payload.get("refresh_token") or "")
+    os.environ["EMAIL_MS_ACCESS_TOKEN"] = access
+    vault_store("email.microsoft.access_token", access, category="email")
+    if refresh:
+        os.environ["EMAIL_MS_REFRESH_TOKEN"] = refresh
+        vault_store("email.microsoft.refresh_token", refresh, category="email")
+    vault_store("email.microsoft.client_id", client_id, category="email")
+    os.environ["EMAIL_MS_AUTH"] = "oauth"
+    vault_store("email.microsoft.auth", "oauth", category="email")
+    scope_str = str(payload.get("scope") or SCOPES)
+    vault_store("email.microsoft.scopes", scope_str, category="email")
+    address = address_from_id_token(payload.get("id_token"))
+    if address:
+        vault_store("email.microsoft.oauth_address", address, category="email")
+    try:
+        from kazma_skills.native.calendar.credentials import persist_microsoft_tokens
+
+        persist_microsoft_tokens(access, refresh, scope_str)
+    except Exception:
+        logger.debug("[email.oauth] calendar token copy skipped", exc_info=True)
+    return address
 
 
 def clear_microsoft_tokens() -> dict[str, Any]:

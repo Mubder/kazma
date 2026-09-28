@@ -9,7 +9,6 @@ from urllib.parse import urlencode
 
 import httpx
 
-from kazma_skills.native.email_manager.credentials import vault_store
 from kazma_skills.native.email_manager.oauth_common import (
     authorize_redirect,
     new_state,
@@ -114,26 +113,11 @@ async def finish_ms_browser_oauth(code: str, state: str) -> dict[str, Any]:
                 or payload.get("error")
                 or f"Token exchange failed ({r.status_code})",
             }
-    access = payload.get("access_token") or ""
-    refresh = payload.get("refresh_token") or ""
-    if not access:
+    if not (payload.get("access_token") or ""):
         return {"ok": False, "error": "No access_token from Microsoft"}
-    os.environ["EMAIL_MS_ACCESS_TOKEN"] = access
-    vault_store("email.microsoft.access_token", access, category="email")
-    if refresh:
-        os.environ["EMAIL_MS_REFRESH_TOKEN"] = refresh
-        vault_store("email.microsoft.refresh_token", refresh, category="email")
-    vault_store("email.microsoft.client_id", cid, category="email")
-    os.environ["EMAIL_MS_AUTH"] = "oauth"
-    vault_store("email.microsoft.auth", "oauth", category="email")
-    scope_str = str(payload.get("scope") or SCOPES)
-    vault_store("email.microsoft.scopes", scope_str, category="email")
-    try:
-        from kazma_skills.native.calendar.credentials import persist_microsoft_tokens
+    from kazma_skills.native.email_manager.oauth_ms import store_microsoft_tokens
 
-        persist_microsoft_tokens(access, refresh, scope_str)
-    except Exception:
-        logger.debug("[email.oauth] calendar token copy skipped", exc_info=True)
+    store_microsoft_tokens(payload, cid)
     logger.info("[email.oauth] Microsoft Graph browser OAuth tokens stored")
     return {
         "ok": True,

@@ -52,8 +52,12 @@ class MicrosoftGraphBackend:
         client_secret: str = "",
         tenant_id: str = "common",
         account_alias: str = "",
+        address: str = "",
     ) -> None:
         self.access_token = access_token
+        # The mailbox's own address, when its sign-in named it
+        # (oauth_ms.store_microsoft_tokens): shown in the tools' banner.
+        self.address = address or ""
         self.refresh_token = refresh_token
         self.client_id = client_id
         self.client_secret = client_secret

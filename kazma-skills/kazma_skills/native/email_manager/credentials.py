@@ -177,7 +177,13 @@ def status_summary() -> dict[str, Any]:
     gmail_configured = gmail_mode != "none"
 
     ms_mode = microsoft_auth_mode()
-    ms_addr = cred("EMAIL_MS_ADDRESS", "email.microsoft.address")
+    # An OAuth login is named by its own sign-in (oauth_ms.store_microsoft_tokens);
+    # the protocol address belongs to an IMAP/POP login and may be a leftover.
+    ms_addr = (
+        vault_retrieve("email.microsoft.oauth_address")
+        if ms_mode == "oauth"
+        else cred("EMAIL_MS_ADDRESS", "email.microsoft.address")
+    )
     ms_configured = ms_mode != "none"
 
     generic_proto = (_env("EMAIL_PROTOCOL") or vault_retrieve("email.generic.auth") or "").lower()
@@ -208,7 +214,7 @@ def status_summary() -> dict[str, Any]:
         "gmail_imap": gmail_mode == "imap",
         "gmail_pop": gmail_mode == "pop",
         "microsoft_configured": ms_configured,
-        "microsoft_address": ms_addr if ms_configured and ms_mode in ("imap", "pop") else "",
+        "microsoft_address": (ms_addr or "") if ms_configured else "",
         "microsoft_auth_mode": ms_mode,
         "microsoft_oauth": ms_mode == "oauth",
         "microsoft_imap": ms_mode == "imap",

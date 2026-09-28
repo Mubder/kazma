@@ -68,12 +68,20 @@ class XPostLedger:
                 conn.close()
 
     def count_since(self, epoch: float) -> int:
+        """Posts CREATED since *epoch*, deleted ones included.
+
+        The caps this feeds are a fail-safe under X's API quota, and X counts
+        every post it created -- deleting one does not give the request back.
+        This counted only posts still up, so a post-then-delete freed a slot
+        X had not (the live end-to-end test showed "0/16" after one post and
+        its delete, 2026-09-28). The duplicate check still ignores deleted
+        posts: their text may be posted again.
+        """
         with self._lock:
             conn = self._connect()
             try:
                 cur = conn.execute(
-                    "SELECT COUNT(*) FROM x_posts "
-                    "WHERE created_at >= ? AND deleted_at IS NULL",
+                    "SELECT COUNT(*) FROM x_posts WHERE created_at >= ?",
                     (epoch,),
                 )
                 return int(cur.fetchone()[0])
