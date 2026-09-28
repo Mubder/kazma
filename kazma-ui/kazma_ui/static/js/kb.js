@@ -43,11 +43,19 @@ function knowledgePage() {
 
   // Decorate a library row with the per-row UI strings (so Alpine x-text
   // binds can read them without re-fetching translations per row).
+  // "4539 مقطعاً" / "4539 chunks": the catalog's plural forms for the count.
+  function chunkCountLabel(n) {
+    const f = window.KazmaFormat;
+    const forms = S.chunks_count || {};
+    return f && f.count ? f.count(forms, n, "{n} chunks") : String(n) + " " + (S.chunks || "chunks");
+  }
+
   function withStrings(lib) {
     return {
       ...lib,
       _t_meaning: meaningLabel(lib.meaning_search),
       _t_chunks: S.chunks || "chunks",
+      _t_chunk_count: chunkCountLabel(lib.chunk_count),
       _t_auto_inject: S.auto_inject || "auto-inject",
       _t_ai_on: S.auto_inject_on || "Auto-inject ON",
       _t_ai_off: S.auto_inject_off || "Auto-inject OFF",
@@ -90,6 +98,11 @@ function knowledgePage() {
     // defined" on every load and the tab labels fell to nothing (2026-09-26,
     // tests/e2e/test_pages_load_clean.py).
     S,
+    // A chunk count with its noun in the page's language (the browse view's
+    // "100 of 4539 chunks").
+    chunkCount(n) {
+      return chunkCountLabel(n);
+    },
     loading: false,
     creating: false,
     libraries: [],

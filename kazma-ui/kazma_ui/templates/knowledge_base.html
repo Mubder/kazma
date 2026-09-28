@@ -10,6 +10,7 @@
 <script>
   window.__KB_STRINGS = {
     chunks: {{ t('knowledge.chunks') | tojson }},
+    chunks_count: {{ plural_forms('knowledge.chunks_count') | tojson }},
     auto_inject: {{ t('knowledge.auto_inject') | tojson }},
     auto_inject_on: {{ t('knowledge.auto_inject_on') | tojson }},
     auto_inject_off: {{ t('knowledge.auto_inject_off') | tojson }},
@@ -166,7 +167,7 @@
               <code style="font-size:0.78rem;color:var(--text-secondary);" x-text="lib.id"></code>
               <span
                 style="font-size:0.7rem;padding:1px 6px;border-radius:8px;background:var(--bg-accent,#2a2a3a);"
-                x-text="lib.chunk_count + ' ' + lib._t_chunks"
+                x-text="lib._t_chunk_count"
               ></span>
               <span
                 x-show="lib._t_meaning"
@@ -234,7 +235,7 @@
           <template x-if="lib._chunks">
             <div>
               <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:6px;"
-                   x-text="{{ t('knowledge.chunks_of') | tojson | forceescape }}.replace('{shown}', lib._chunks.length).replace('{total}', lib._chunk_total)"></div>
+                   x-text="{{ t('knowledge.chunks_of') | tojson | forceescape }}.replace('{shown}', lib._chunks.length).replace('{total}', chunkCount(lib._chunk_total))"></div>
               <template x-for="c in lib._chunks" :key="c.id">
                 <div style="font-size:0.78rem;margin-bottom:4px;border-bottom:1px solid var(--border);padding-bottom:4px;">
                   <code x-text="'#' + c.chunk_index"></code>

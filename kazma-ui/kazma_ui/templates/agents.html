@@ -89,7 +89,7 @@
       <div class="metric-value" id="metric-tool-calls"
             x-text="(agent.metrics && agent.metrics.total_tool_calls) || 0"
             style="color:var(--text-primary);"></div>
-      <div class="metric-sub">{{ t('agents.executions') }}</div>
+      <div class="metric-sub">{{ t('agents.since_start') }}</div>
     </div>
     <div class="metric-card">
       <div class="metric-icon"><span class="ki" data-icon="hash" aria-hidden="true"></span></div>
@@ -97,15 +97,17 @@
       <div class="metric-value" id="metric-llm-calls"
             x-text="(agent.metrics && agent.metrics.total_llm_calls) || 0"
             style="color:var(--text-primary);"></div>
-      <div class="metric-sub">{{ t('agents.inferences') }}</div>
+      <div class="metric-sub">{{ t('agents.since_start') }}</div>
     </div>
     <div class="metric-card">
       <div class="metric-icon"><span class="ki" data-icon="bar-chart" aria-hidden="true"></span></div>
-      <div class="metric-label">{{ t('agents.sessions') }}</div>
+      {# It counts the trace store's entries since the server started; it was
+         labelled "Sessions" over that number (live, 2026-09-28). #}
+      <div class="metric-label">{{ t('agents.trace_count') }}</div>
       <div class="metric-value" id="metric-sessions"
             x-text="agent.session_count || 0"
             style="color:var(--text-primary);"></div>
-      <div class="metric-sub">{{ t('agents.trace_entries') }}</div>
+      <div class="metric-sub">{{ t('agents.since_start') }}</div>
     </div>
   </div>
 
