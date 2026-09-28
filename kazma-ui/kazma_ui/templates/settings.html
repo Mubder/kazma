@@ -2748,14 +2748,33 @@
                 <p style="font-size:0.8rem;margin:0 0 12px 0;">
                     <span style="color:var(--text-tertiary);">{{ t('settings.calendar_active') }}:</span>
                     <code x-text="calendarStatus.active_provider || 'sandbox'"></code>
-                    <span x-show="calendarStatus.google_address" x-cloak> · <code x-text="calendarStatus.google_address"></code></span>
                 </p>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <button class="btn btn-primary btn-sm" @click="connectCalendarOAuth()" :disabled="emailSaving">{{ t('settings.calendar_connect_google') }}</button>
+                {# One row per calendar, each with its own state and its own
+                   sign-in. The card had one "Connect Calendar" button that only
+                   ever started Google's, and one badge that said "Connected"
+                   when either was -- so Outlook's state never showed and the
+                   owner, asked to connect Outlook, landed on Google
+                   (2026-09-28). #}
+                <div class="calendar-provider-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--border-subtle);">
+                    <strong style="min-width:9rem;">{{ t('settings.calendar_google') }}</strong>
+                    <span class="badge" :class="calendarStatus.google_connected ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
+                          x-text="calendarStatus.google_connected ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
+                    <code translate="no" x-show="calendarStatus.google_address" x-cloak x-text="calendarStatus.google_address"></code>
+                    <span style="flex:1;"></span>
+                    <button class="btn btn-sm" :class="calendarStatus.google_connected ? 'btn-secondary' : 'btn-primary'"
+                            @click="connectCalendarOAuth()" :disabled="emailSaving">{{ t('settings.calendar_connect_google') }}</button>
                     <button class="btn btn-secondary btn-sm" x-show="calendarStatus.google_connected" x-cloak
                             @click="disconnectGoogleCalendar()" :disabled="emailSaving">{{ t('settings.calendar_disconnect') }}</button>
                 </div>
-                <p style="font-size:0.75rem;color:var(--text-tertiary);margin:12px 0 0 0;">{{ t('settings.calendar_outlook_hint') }}</p>
+                <div class="calendar-provider-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--border-subtle);">
+                    <strong style="min-width:9rem;">{{ t('settings.calendar_outlook') }}</strong>
+                    <span class="badge" :class="calendarStatus.outlook_connected ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
+                          x-text="calendarStatus.outlook_connected ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
+                    <span style="flex:1;"></span>
+                    <button class="btn btn-sm" :class="calendarStatus.outlook_connected ? 'btn-secondary' : 'btn-primary'"
+                            @click="connectMicrosoftOAuth()" :disabled="emailSaving">{{ t('settings.calendar_connect_outlook') }}</button>
+                </div>
+                <p style="font-size:0.75rem;color:var(--text-tertiary);margin:8px 0 0 0;">{{ t('settings.calendar_outlook_hint') }}</p>
             </div>
 
             <!-- Multi-account list -->

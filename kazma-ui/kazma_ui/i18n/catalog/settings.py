@@ -546,7 +546,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "settings.calendar_connect_google": {
         "ar": "ربط تقويم Google",
-        "en": "Connect Calendar",
+        "en": "Connect Google Calendar",
     },
     "settings.calendar_desc": {
         "ar": "يستخدم المهارة الأصلية list_events / create_event تقويم Google الحقيقي عند الاتصال. بدون رمز تقويم كانت الأداة تسقط بصمت إلى sandbox وتبدو كتقويم فارغ.",
@@ -565,8 +565,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Connect with Google also requests Calendar scope. Enable the Google Calendar API in the Cloud project.",
     },
     "settings.calendar_outlook_hint": {
-        "ar": "تقويم Outlook يستخدم ربط Microsoft (يُطلب Calendars.ReadWrite). أعد الربط إن كان الرمز للبريد فقط.",
-        "en": "Outlook calendar uses Connect with Microsoft (Calendars.ReadWrite is requested). Reconnect Microsoft if your grant is mail-only.",
+        "ar": "ربط تقويم Outlook يعيد تسجيل الدخول إلى Microsoft ويطلب صلاحية التقويم أيضًا؛ ويبقى بريد Microsoft مربوطًا. إن رفضت Microsoft إعادة التوجيه، فاستخدم خيار رمز الجهاز في قسم بريد Microsoft أعلاه.",
+        "en": "Connecting Outlook Calendar signs in to Microsoft again and asks for calendar access too; your Microsoft mail stays connected. If Microsoft refuses the redirect, use the device-code option in the Microsoft mail section above.",
     },
     "settings.calendar_title": {
         "ar": "التقويم (Google / Outlook)",
@@ -4779,5 +4779,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.ops.backup_starting": {
         "ar": "جارٍ البدء…",
         "en": "Starting…",
+    },
+    "settings.calendar_google": {
+        "ar": "تقويم Google",
+        "en": "Google Calendar",
+    },
+    "settings.calendar_outlook": {
+        "ar": "تقويم Outlook",
+        "en": "Outlook Calendar",
+    },
+    "settings.calendar_connect_outlook": {
+        "ar": "ربط تقويم Outlook",
+        "en": "Connect Outlook Calendar",
     },
 }
