@@ -107,14 +107,14 @@
                 {% for w in workers %}
                 <label style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.85rem;" class="worker-check-label">
                   <input type="checkbox" name="selected_workers" value="{{ w.name }}" style="accent-color:var(--accent);">
-                  <span style="font-weight:500;">{{ w.name }}</span>
-                  {% if w.get('role') %}<span class="badge badge-accent" style="font-size:0.7rem;">{{ w.role }}</span>{% endif %}
+                  <span translate="no" style="font-weight:500;">{{ w.name }}</span>
+                  {% if w.get('role') %}<span translate="no" class="badge badge-accent" style="font-size:0.7rem;">{{ w.role }}</span>{% endif %}
                   {% if w.get('capabilities') and w.capabilities.get('expertise') %}
                     {% for tag in w.capabilities.expertise[:3] %}
-                    <span class="badge badge-info" style="font-size:0.65rem;">{{ tag }}</span>
+                    <span translate="no" class="badge badge-info" style="font-size:0.65rem;">{{ tag }}</span>
                     {% endfor %}
                   {% endif %}
-                  <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto;">{{ w.get('model', '?') }}</span>
+                  <span translate="no" style="font-size:0.7rem;color:var(--text-muted);margin-left:auto;">{{ w.get('model', '?') }}</span>
                 </label>
                 {% endfor %}
                 {% if not workers %}
@@ -232,7 +232,7 @@
             <select id="pipeline-fallback-select" class="form-select" style="height:32px;font-size:0.8rem;padding:4px 8px;background:rgba(0,0,0,0.15);border:1px solid var(--border);border-radius:var(--radius);">
               <option value="">{{ t('swarm.none_fail_closed') }}</option>
               {% for w in workers %}
-              <option value="{{ w.name }}">{{ w.name }}</option>
+              <option translate="no" value="{{ w.name }}">{% if w.name == 'auto' %}{{ t('swarm.auto_worker') }}{% else %}{{ w.name }}{% endif %}</option>
               {% endfor %}
             </select>
           </div>
@@ -325,14 +325,14 @@
                 {% for w in workers %}
                 <label style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.85rem;" class="worker-check-label">
                   <input type="checkbox" name="play_selected_workers" value="{{ w.name }}" style="accent-color:var(--accent);">
-                  <span style="font-weight:500;">{{ w.name }}</span>
-                  {% if w.get('role') %}<span class="badge badge-accent" style="font-size:0.7rem;">{{ w.role }}</span>{% endif %}
+                  <span translate="no" style="font-weight:500;">{{ w.name }}</span>
+                  {% if w.get('role') %}<span translate="no" class="badge badge-accent" style="font-size:0.7rem;">{{ w.role }}</span>{% endif %}
                   {% if w.get('capabilities') and w.capabilities.get('expertise') %}
                     {% for tag in w.capabilities.expertise[:2] %}
-                    <span class="badge badge-info" style="font-size:0.65rem;">{{ tag }}</span>
+                    <span translate="no" class="badge badge-info" style="font-size:0.65rem;">{{ tag }}</span>
                     {% endfor %}
                   {% endif %}
-                  <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto;">{{ w.get('model', '?') }}</span>
+                  <span translate="no" style="font-size:0.7rem;color:var(--text-muted);margin-left:auto;">{{ w.get('model', '?') }}</span>
                 </label>
                 {% endfor %}
                 {% if not workers %}
@@ -497,24 +497,24 @@
               <div>
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
                   <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{% if w.get('status') == 'online' %}var(--success){% elif w.get('status') == 'busy' %}var(--warning){% else %}var(--danger){% endif %};"></span>
-                  <span style="font-weight:600;font-size:0.95rem;">{{ w.name }}</span>
-                  {% if w.get('role') %}<span class="badge badge-accent">{{ w.role }}</span>{% endif %}
+                  <span translate="no" style="font-weight:600;font-size:0.95rem;">{{ w.name }}</span>
+                  {% if w.get('role') %}<span translate="no" class="badge badge-accent">{{ w.role }}</span>{% endif %}
                   {% set cb = w.get('circuit_breaker') %}
                   {# One badge per worker, class-driven (duplicate ids meant
                      the "closed" green badge was unreachable — audit P1-4). #}
                   <span class="badge cb-badge {% if cb and cb.state == 'open' %}badge-danger{% elif cb and cb.state != 'closed' %}badge-warning{% else %}badge-success cb-badge-closed{% endif %}"
                         data-cb-worker="{{ w.name }}" style="font-size:0.65rem;"
-                        title="{{ t('swarm.cb_failures', n=(cb.get('consecutive_failures', 0) if cb else 0), max=(cb.get('failure_threshold', 5) if cb else 5)) }}"><span x-html="KazmaIcons.zap()"></span> {{ (cb.state if cb and cb.state != 'closed' else 'closed') }}</span>
+                        title="{{ t('swarm.cb_failures', n=(cb.get('consecutive_failures', 0) if cb else 0), max=(cb.get('failure_threshold', 5) if cb else 5)) }}"><span x-html="KazmaIcons.zap()"></span> {{ t('swarm.cb_' ~ (cb.state if cb and cb.state != 'closed' else 'closed')) }}</span>
                 </div>
                 <div style="display:flex;gap:16px;font-size:0.8rem;color:var(--text-tertiary);">
-                  <span data-model="{{ w.get('model', '?') }}">{{ t('swarm.model') }}: <span style="color:var(--text-secondary);font-family:var(--font-mono);">{{ w.get('model', '?') }}</span></span>
-                  <span>{{ t('swarm.provider') }}: <span style="color:var(--text-secondary);">{{ w.get('provider', '?') }}</span></span>
-                  <span>{{ t('swarm.type_label') }}: <span style="color:var(--text-secondary);">{{ w.get('type', '?') }}</span></span>
+                  <span data-model="{{ w.get('model', '?') }}">{{ t('swarm.model') }}: <span translate="no" style="color:var(--text-secondary);font-family:var(--font-mono);">{{ w.get('model', '?') }}</span></span>
+                  <span>{{ t('swarm.provider') }}: <span translate="no" style="color:var(--text-secondary);">{{ w.get('provider', '?') }}</span></span>
+                  <span>{{ t('swarm.type_label') }}: <span translate="no" style="color:var(--text-secondary);">{{ w.get('type', '?') }}</span></span>
                 </div>
                 {% if w.get('capabilities') and w.capabilities.get('expertise') %}
                 <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;">
                   {% for tag in w.capabilities.expertise %}
-                  <span class="badge badge-info" style="font-size:0.65rem;">{{ tag }}</span>
+                  <span translate="no" class="badge badge-info" style="font-size:0.65rem;">{{ tag }}</span>
                   {% endfor %}
                 </div>
                 {% endif %}
@@ -587,11 +587,11 @@
             </div>
             <div class="form-group">
               <label class="form-label">{{ t('swarm.expertise_tags') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.expertise_hint') }}</span></label>
-              <input type="text" id="add-expertise" class="form-input" placeholder="{{ t('swarm.expertise_placeholder') }}">
+              <input type="text" id="add-expertise" class="form-input" translate="no" placeholder="{{ t('swarm.expertise_placeholder') }}">
             </div>
             <div class="form-group">
               <label class="form-label">{{ t('swarm.tools_label') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.tools_hint') }}</span></label>
-              <input type="text" id="add-tools" class="form-input" placeholder="{{ t('swarm.tools_placeholder') }}">
+              <input type="text" id="add-tools" class="form-input" translate="no" placeholder="{{ t('swarm.tools_placeholder') }}">
             </div>
             <div class="form-group">
               <label class="form-label">{{ t('settings.system_prompt') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.system_prompt_desc') }}</span></label>

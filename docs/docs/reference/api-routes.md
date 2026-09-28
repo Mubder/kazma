@@ -150,7 +150,7 @@ Security: [Document security](../security/document-security).
 |--------|------|------|-------------|
 | GET | `/api/documents/ops/metrics` | Session | Content-free metrics snapshot |
 | GET | `/api/documents/ops/capacity` | Session | Backpressure snapshot + `degraded_reasons` |
-| GET | `/api/documents/ops/readiness` | Session | Multi-replica honesty (`metadata_single_replica`, jobs backend) |
+| GET | `/api/documents/ops/readiness` | Session | Multi-replica honesty (`jobs_multi_replica`, `metadata_multi_replica`; `degraded` only for a configured backend that fell back) |
 | GET | `/api/documents/ops/retention` | Session | Live retention/GC policy view |
 | GET | `/api/documents/ops/audit` | Session | Keyset-paged operational audit (`?limit=&before_id=`) |
 | POST | `/api/documents/ops/maintenance/dry-run` | Admin | GC dry-run report |

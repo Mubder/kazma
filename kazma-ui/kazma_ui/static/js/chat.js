@@ -6285,9 +6285,11 @@
 
   /** A chat platform as the reader names it: "web" in their language,
    *  Telegram / Discord / Slack as they are. */
+  var _PLATFORM_NAMES = { telegram: 'Telegram', discord: 'Discord', slack: 'Slack', tui: 'TUI', cli: 'CLI' };
   function _platformName(p) {
     var v = String(p || 'web');
-    return v === 'web' ? ti('platform_web', 'web') : v;
+    if (v === 'web') return ti('platform_web', 'web');
+    return _PLATFORM_NAMES[v.toLowerCase()] || v;
   }
 
   // Session id whose kebab menu is open (single open menu at a time)

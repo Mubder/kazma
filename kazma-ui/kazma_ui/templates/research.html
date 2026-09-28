@@ -44,9 +44,9 @@
           </div>
           <span id="research-live-sources" style="font-size:0.8rem;color:var(--text-muted);"></span>
         </div>
-        <div id="research-live-message" style="font-size:0.85rem;color:var(--text-primary);margin-bottom:6px;"></div>
-        <div id="research-live-error" style="display:none;font-size:0.82rem;color:var(--danger,#e53935);margin-bottom:6px;"></div>
-        <div id="research-live-log" style="max-height:140px;overflow-y:auto;font-size:0.78rem;font-family:ui-monospace,monospace;color:var(--text-muted);background:var(--surface-2);padding:8px 10px;border-radius:6px;line-height:1.45;"></div>
+        <div id="research-live-message" translate="no" style="font-size:0.85rem;color:var(--text-primary);margin-bottom:6px;"></div>
+        <div id="research-live-error" translate="no" style="display:none;font-size:0.82rem;color:var(--danger,#e53935);margin-bottom:6px;"></div>
+        <div id="research-live-log" translate="no" style="max-height:140px;overflow-y:auto;font-size:0.78rem;font-family:ui-monospace,monospace;color:var(--text-muted);background:var(--surface-2);padding:8px 10px;border-radius:6px;line-height:1.45;"></div>
         <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
           <button type="button" class="btn btn-secondary btn-sm" id="research-cancel-btn" style="display:none;" onclick="KazmaResearch.cancelDeep()">{{ t('research.cancel') }}</button>
         </div>
@@ -81,7 +81,7 @@
           </div>
         </div>
         <div id="research-detail-meta" style="font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;"></div>
-        <div id="research-detail-output" style="max-height:500px;overflow-y:auto;line-height:1.7;word-break:break-word;overflow-wrap:anywhere;"></div>
+        <div id="research-detail-output" translate="no" style="max-height:500px;overflow-y:auto;line-height:1.7;word-break:break-word;overflow-wrap:anywhere;"></div>
       </div>
     </div>
   </div>
@@ -101,10 +101,10 @@
       <p style="color:var(--text-muted);margin-bottom:1rem;">{{ t('research.compare_desc') }}</p>
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
         <label>{{ t('research.run_a') }}:
-          <select id="research-cmp-a" class="form-select" style="min-width:200px;"></select>
+          <select id="research-cmp-a" translate="no" class="form-select" style="min-width:200px;"></select>
         </label>
         <label>{{ t('research.run_b') }}:
-          <select id="research-cmp-b" class="form-select" style="min-width:200px;"></select>
+          <select id="research-cmp-b" translate="no" class="form-select" style="min-width:200px;"></select>
         </label>
         <button class="btn btn-primary" onclick="KazmaResearch.compare()">{{ t('research.tab_compare') }}</button>
       </div>

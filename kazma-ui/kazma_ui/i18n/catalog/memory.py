@@ -2176,4 +2176,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "بايت",
         "en": "Bytes",
     },
+    "memory.pg.show_on_graph": {
+        "ar": "اعرض على الرسم",
+        "en": "Show on graph",
+    },
+    "memory.pg.memory_hub_on_graph": {
+        "ar": "محور الذاكرة على الرسم",
+        "en": "Memory hub on graph",
+    },
 }

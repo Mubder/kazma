@@ -163,14 +163,15 @@
               <td class="sched-summary">
                 <div class="kicker" x-show="summaryKicker(task)" x-cloak
                      x-text="summaryKicker(task)"></div>
-                <div class="txt" :dir="summaryDir(task)"
+                <div class="txt" translate="no" :dir="summaryDir(task)"
                      x-effect="stampAr($el, cleanSummary(task))"
                      x-text="cleanSummary(task)" :title="cleanSummary(task)"></div>
-                <div class="why" x-show="errorText(task)" x-cloak
+                <div class="why" translate="no" x-show="errorText(task)" x-cloak
                      x-text="errorText(task)" :title="errorText(task)"></div>
-                <div class="outcome" x-show="outcomeText(task)" x-cloak
-                     x-text="t('scheduled.outcome') + ': ' + outcomeText(task)"
-                     :title="outcomeText(task)"></div>
+                <div class="outcome" x-show="outcomeText(task)" x-cloak>
+                  <span x-text="t('scheduled.outcome') + ': '"></span><span translate="no"
+                        x-text="outcomeText(task)" :title="outcomeText(task)"></span>
+                </div>
               </td>
               <td><span class="st-badge" :class="'st-' + (task.status || 'pending')" x-text="statusLabel(task)"></span></td>
               <td>
@@ -220,14 +221,16 @@
             <tr @click="audit.open = (audit.open === i ? null : i)" style="cursor:pointer;"
                 :title="t('settings.x_audit_details')">
               <td class="when-abs mono" x-text="fmtAuditWhen(e)"></td>
-              <td x-text="e.action"></td>
+              <td translate="no" x-text="e.action"></td>
               <td class="audit-text" :class="audit.open === i ? 'audit-open' : ''">
-                <div class="txt" :dir="summaryDir({ summary: e.text })"
+                <div class="txt" translate="no" :dir="summaryDir({ summary: e.text })"
                      x-effect="stampAr($el, cleanSummary({ summary: e.text }))"
                      x-text="cleanSummary({ summary: e.text })"></div>
-                <div class="why" x-show="audit.open === i && e.error" x-cloak x-text="e.error"></div>
+                <div class="why" translate="no" x-show="audit.open === i && e.error" x-cloak x-text="e.error"></div>
               </td>
-              <td><span :class="e.status === 'success' ? 'ok-text' : 'bad-text'" x-text="e.status"></span></td>
+              <td><span :class="e.status === 'success' ? 'ok-text' : 'bad-text'"
+                        :translate="tOr('scheduled.x_st_' + (e.status || ''), '') ? null : 'no'"
+                        x-text="tOr('scheduled.x_st_' + (e.status || ''), e.status)"></span></td>
               <td class="mono" x-text="e.http_status == null ? '—' : e.http_status"></td>
               <td>
                 <a x-show="e.post_url" x-cloak :href="e.post_url" target="_blank" rel="noopener noreferrer"

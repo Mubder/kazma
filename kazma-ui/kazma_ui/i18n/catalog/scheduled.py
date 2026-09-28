@@ -276,4 +276,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشل الحذف: {error}",
         "en": "Delete failed: {error}",
     },
+    "scheduled.x_st_success": {
+        "ar": "نجاح",
+        "en": "Success",
+    },
+    "scheduled.x_st_error": {
+        "ar": "خطأ",
+        "en": "Error",
+    },
 }

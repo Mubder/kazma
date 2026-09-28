@@ -31,6 +31,25 @@ logger = logging.getLogger(__name__)
 __all__ = ["create_replay_router"]
 
 
+def _thread_items(threads: list[str], chats: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per thread, named by its chat, newest activity first."""
+    rows = []
+    for thread_id in threads:
+        chat = chats.get(thread_id) or {}
+        rows.append(
+            {
+                "thread_id": thread_id,
+                "title": str(chat.get("title") or ""),
+                "platform": str(chat.get("platform") or ""),
+                "updated_at": str(chat.get("updated_at") or ""),
+                "archived": bool(chat.get("archived")),
+            }
+        )
+    # ISO timestamps order as text; a thread with no chat has none and goes last.
+    rows.sort(key=lambda r: (r["updated_at"] != "", r["updated_at"]), reverse=True)
+    return rows
+
+
 def create_replay_router(
     recorder: Any,
     engine: Any,
@@ -67,13 +86,23 @@ def create_replay_router(
     # compare and delete as well as restore and fork. Only the last two used to
     # (audit 2026-09-22), and that check failed OPEN on a store error while
     # saying it mirrored the approval gate, which fails closed.
-    from kazma_ui.thread_ownership import owned_threads_async, require_thread_owned
+    from kazma_ui.thread_ownership import (
+        chats_by_thread,
+        owned_threads_async,
+        require_thread_owned,
+    )
 
     _require_thread_owned = require_thread_owned
 
     @router.get("/api/replay/threads")
     async def list_threads() -> JSONResponse:
-        """List distinct thread_ids that have at least one snapshot."""
+        """The caller's threads that have snapshots, each named by its chat.
+
+        ``threads`` is the id list (the picker's value, the ownership test's
+        subject); ``items`` names each: the chat's title and platform from
+        the chat store, newest activity first, threads no chat owns last.
+        The page listed 131 bare uuids on the live install (2026-09-28).
+        """
         if recorder is None:
             return _unavailable()
         try:
@@ -85,7 +114,9 @@ def create_replay_router(
                     {"threads": [], "count": 0, "error": "ownership check failed"},
                     status_code=403,
                 )
-            return JSONResponse({"threads": threads, "count": len(threads)})
+            chats = await asyncio.to_thread(chats_by_thread)
+            items = _thread_items(threads, chats)
+            return JSONResponse({"threads": threads, "items": items, "count": len(threads)})
         except Exception as exc:
             logger.exception("[replay] list threads failed")
             return JSONResponse({"threads": [], "count": 0, "error": safe_error(exc)}, status_code=500)

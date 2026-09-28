@@ -65,7 +65,14 @@
   function timeAgo(iso) {
     if (!iso) return '—';
     try {
-      var d = new Date(iso);
+      // An ISO string, or epoch seconds (the sessions API).
+      var d = typeof iso === 'number' ? new Date(iso < 1e12 ? iso * 1000 : iso) : new Date(iso);
+      if (isNaN(d.getTime())) return String(iso);
+      if (window.KazmaFormat && (window.KAZMA_LANG || 'en') !== 'en') {
+        return (Date.now() - d.getTime()) < 86400000
+          ? window.KazmaFormat.relative(d)
+          : window.KazmaFormat.date(d);
+      }
       var s = Math.floor((Date.now() - d.getTime()) / 1000);
       if (s < 60) return s + 's ago';
       if (s < 3600) return Math.floor(s / 60) + 'm ago';
@@ -291,7 +298,9 @@
           var topic = p.topic || p.report_path || 'report';
           return {
             id: 'paper:' + (p.id || p.report_path),
-            prompt: '[Paper] ' + topic,
+            prompt: '[' + i18n('research.ui.paper_tag', 'Paper') + '] ' + topic,
+            tag: '[' + i18n('research.ui.paper_tag', 'Paper') + '] ',
+            topic: topic,
             status: 'paper',
             workers: ['research_pipeline'],
             cost: 0,
@@ -310,6 +319,8 @@
           return {
             id: 'session:' + s.id,
             prompt: sessionTag(s) + (s.topic || s.id),
+            tag: sessionTag(s),
+            topic: s.topic || s.id,
             status: s.status || 'pending',
             workers: ['research_pipeline'],
             cost: 0,
@@ -351,11 +362,13 @@
           return {
             id: 'session:' + s.id,
             prompt: sessionTag(s) + (s.topic || ''),
+            tag: sessionTag(s),
+            topic: s.topic || '',
             status: s.status || 'done',
             workers: [],
             cost: 0,
-            created_at: s.created_at,
-            completed_at: s.updated_at,
+            created_at: s.created_at ? new Date(s.created_at * 1000).toISOString() : null,
+            completed_at: s.updated_at ? new Date(s.updated_at * 1000).toISOString() : null,
           };
         });
         archivedTasks = tasks.concat(sessions);
@@ -398,13 +411,13 @@
             var s = data.session;
             $('research-detail-title').textContent = (s.topic || i18n('research.ui.deep_research', 'Deep research')).slice(0, 100);
             $('research-detail-meta').innerHTML =
-              '<span>Session</span> · <span>' + esc(s.status) + '</span> · ' +
-              (s.stage ? '<span>Stage: ' + esc(s.stage) + '</span> · ' : '') +
-              (s.sources != null ? '<span>Sources: ' + s.sources + '</span> · ' : '') +
-              (s.report_path ? '<span dir="ltr">' + esc(s.report_path) + '</span>' : '');
+              '<span>' + esc(i18n('research.ui.detail_session', 'Session')) + '</span> · <span>' + esc(stateLabel(s.status)) + '</span> · ' +
+              (s.stage ? '<span>' + esc(i18n('research.ui.detail_stage', 'Stage: {stage}', { stage: stateLabel(s.stage) })) + '</span> · ' : '') +
+              (s.sources != null ? '<span>' + esc(i18n('research.ui.detail_sources', 'Sources: {n}', { n: s.sources })) + '</span> · ' : '') +
+              (s.report_path ? '<span dir="ltr" translate="no">' + esc(s.report_path) + '</span>' : '');
             var el = $('research-detail-output');
             el.className = 'markdown-body bidi-content';
-            var body = s.summary || (s.log || []).join('\n') || s.message || '(no output yet)';
+            var body = s.summary || (s.log || []).join('\n') || s.message || i18n('research.ui.no_output_yet', '(no output yet)');
             if (s.report_path) {
               // Prefer loading the full report when available
               fetch('/api/research/papers/file?path=' + encodeURIComponent(s.report_path), {
@@ -465,9 +478,9 @@
         }
         $('research-detail-title').textContent = (paper.prompt || i18n('research.ui.paper', 'Paper')).slice(0, 100);
         $('research-detail-meta').innerHTML =
-          '<span>Pipeline paper</span> · ' +
-          (paper.sources != null ? '<span>Sources: ' + paper.sources + '</span> · ' : '') +
-          '<span dir="ltr">' + esc(paper.report_path) + '</span>';
+          '<span>' + esc(i18n('research.ui.detail_paper', 'Pipeline paper')) + '</span> · ' +
+          (paper.sources != null ? '<span>' + esc(i18n('research.ui.detail_sources', 'Sources: {n}', { n: paper.sources })) + '</span> · ' : '') +
+          '<span dir="ltr" translate="no">' + esc(paper.report_path) + '</span>';
         var el = $('research-detail-output');
         el.className = 'markdown-body bidi-content';
         el.textContent = i18n('research.ui.loading', 'Loading…');
@@ -769,8 +782,8 @@
     var srcEl = $('research-live-sources');
     var logEl = $('research-live-log');
     var cancelBtn = $('research-cancel-btn');
-    if (statusEl) statusEl.textContent = s.status || '—';
-    if (stageEl) stageEl.textContent = s.stage ? ('· ' + s.stage) : '';
+    if (statusEl) statusEl.textContent = s.status ? stateLabel(s.status) : '—';
+    if (stageEl) stageEl.textContent = s.stage ? ('· ' + stateLabel(s.stage)) : '';
     if (msgEl) msgEl.textContent = s.message || '';
     if (errEl) {
       if (s.status === 'error' && (s.error || s.message)) {
@@ -783,7 +796,7 @@
     }
     if (srcEl) {
       srcEl.textContent = (s.sources != null && s.sources > 0)
-        ? (s.sources + ' sources')
+        ? sourcesText(s.sources)
         : '';
     }
     if (logEl && Array.isArray(s.log)) {
@@ -900,6 +913,31 @@
     };
   }
 
+  /** A run's state in the reader's language; an unknown one as it is. */
+  function stateLabel(s) {
+    var v = String(s || '');
+    return v ? i18n('research.ui.state_' + v.toLowerCase(), v) : '';
+  }
+  /** "3 sources · rubric 100 passed" */
+  function sourcesText(n) {
+    return i18n('research.ui.sources_n', '{n} sources', { n: n });
+  }
+  function rubricText(score, ok) {
+    var n = Math.round(Number(score));
+    if (ok === true) return i18n('research.ui.rubric_passed', 'rubric {n} passed', { n: n });
+    if (ok === false) return i18n('research.ui.rubric_failed', 'rubric {n} failed', { n: n });
+    return i18n('research.ui.rubric', 'rubric {n}', { n: n });
+  }
+  /** The title line: our tag, then the run's own words (content). */
+  function titleHtml(t) {
+    if (t.topic != null) {
+      return esc(t.tag || '') + '<span translate="no">' + esc(t.topic) + '</span>';
+    }
+    return t.prompt
+      ? '<span translate="no">' + esc(t.prompt) + '</span>'
+      : esc(i18n('research.ui.no_prompt', '(no prompt)'));
+  }
+
   function renderList(tasks) {
     var el = $('research-list');
     if (!tasks.length) {
@@ -911,22 +949,22 @@
       var isSession = t.id && String(t.id).indexOf('session:') === 0;
       var meta;
       var rubricBit = (t.rubric_score != null && t.rubric_score !== '')
-        ? (' · rubric ' + Math.round(Number(t.rubric_score)) +
-           (t.rubric_ok === true ? ' passed' : (t.rubric_ok === false ? ' failed' : '')))
+        ? (' · ' + esc(rubricText(t.rubric_score, t.rubric_ok)))
         : '';
       if (isSession) {
-        meta = 'session · ' + esc(t.status || '') +
-          (t.stage ? ' · ' + esc(t.stage) : '') +
-          (t.sources != null && t.sources > 0 ? ' · ' + t.sources + ' sources' : '') +
+        meta = esc(i18n('research.ui.kind_session', 'session')) + ' · ' + esc(stateLabel(t.status)) +
+          (t.stage ? ' · ' + esc(stateLabel(t.stage)) : '') +
+          (t.sources != null && t.sources > 0 ? ' · ' + esc(sourcesText(t.sources)) : '') +
           rubricBit +
-          ' · ' + timeAgo(t.completed_at || t.created_at);
+          ' · ' + esc(timeAgo(t.completed_at || t.created_at));
       } else if (isPaper) {
-        meta = 'pipeline · ' + (t.sources != null ? t.sources + ' sources · ' : '') +
-          (t.report_path ? esc(t.report_path) + ' · ' : '') +
+        meta = esc(i18n('research.ui.kind_pipeline', 'pipeline')) + ' · ' +
+          (t.sources != null ? esc(sourcesText(t.sources)) + ' · ' : '') +
+          (t.report_path ? '<span translate="no">' + esc(t.report_path) + '</span> · ' : '') +
           (rubricBit ? rubricBit.replace(/^ · /, '') + ' · ' : '') +
-          timeAgo(t.created_at);
+          esc(timeAgo(t.created_at));
       } else {
-        meta = '<span>' + esc((t.workers || []).join(', ')) + '</span> · ' +
+        meta = '<span translate="no">' + esc((t.workers || []).join(', ')) + '</span> · ' +
           '<span>$' + (t.cost || 0).toFixed(4) + '</span> · ' +
           '<span>' + (t.duration || 0).toFixed(1) + 's</span> · ' +
           '<span>' + timeAgo(t.completed_at || t.created_at) + '</span>';
@@ -942,18 +980,18 @@
       } else if (isSession) {
         actions = '';
       } else {
-        actions = '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" data-act="archive" data-task-id="' + esc(t.id) + '" title="Archive">' + ARCHIVE_SVG + '</button>' +
-          '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" data-act="del" data-task-id="' + esc(t.id) + '" title="Delete">×</button>';
+        actions = '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" data-act="archive" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.archive', 'Archive')) + '">' + ARCHIVE_SVG + '</button>' +
+          '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" data-act="del" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.delete', 'Delete')) + '">×</button>';
       }
       return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;" data-act="view-detail" data-task-id="' + esc(t.id) + '">' +
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
           '<div style="flex:1;min-width:0;overflow:hidden;">' +
-            '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(t.prompt || i18n('research.ui.no_prompt', '(no prompt)')) + '</div>' +
+            '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + titleHtml(t) + '</div>' +
             '<div style="font-size:0.85rem;color:var(--text-muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
               meta +
             '</div>' +
           '</div>' +
-          '<span style="font-size:0.75rem;color:var(--text-muted);background:var(--surface-2);padding:2px 8px;border-radius:4px;flex-shrink:0;">' + esc(t.status) + '</span>' +
+          '<span style="font-size:0.75rem;color:var(--text-muted);background:var(--surface-2);padding:2px 8px;border-radius:4px;flex-shrink:0;">' + esc(stateLabel(t.status)) + '</span>' +
           actions +
         '</div>' +
       '</div>';
@@ -971,16 +1009,16 @@
       return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;opacity:0.7;" data-act="view-detail" data-task-id="' + esc(t.id) + '">' +
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
           '<div style="flex:1;min-width:0;overflow:hidden;">' +
-            '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(t.prompt || i18n('research.ui.no_prompt', '(no prompt)')) + '</div>' +
+            '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + titleHtml(t) + '</div>' +
             '<div style="font-size:0.85rem;color:var(--text-muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
-              '<span>' + esc((t.workers || []).join(', ')) + '</span> · ' +
+              '<span translate="no">' + esc((t.workers || []).join(', ')) + '</span> · ' +
               '<span>$' + (t.cost || 0).toFixed(4) + '</span> · ' +
               '<span>' + timeAgo(t.completed_at || t.created_at) + '</span>' +
             '</div>' +
           '</div>' +
-          '<span style="font-size:0.75rem;color:var(--text-muted);background:var(--surface-2);padding:2px 8px;border-radius:4px;flex-shrink:0;">' + esc(t.status) + '</span>' +
-          '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" data-act="restore" data-task-id="' + esc(t.id) + '" title="Restore">' + RESTORE_SVG + '</button>' +
-          '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" data-act="del-archived" data-task-id="' + esc(t.id) + '" title="Delete">×</button>' +
+          '<span style="font-size:0.75rem;color:var(--text-muted);background:var(--surface-2);padding:2px 8px;border-radius:4px;flex-shrink:0;">' + esc(stateLabel(t.status)) + '</span>' +
+          '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" data-act="restore" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.restore', 'Restore')) + '">' + RESTORE_SVG + '</button>' +
+          '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" data-act="del-archived" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.delete', 'Delete')) + '">×</button>' +
         '</div>' +
       '</div>';
     }).join('');

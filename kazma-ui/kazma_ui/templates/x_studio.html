@@ -58,7 +58,7 @@
 
   <div class="xs-head">
     <div class="xs-meta">
-      <span x-text="status.handle || 'X'"></span>
+      <span translate="no" x-text="status.handle || 'X'"></span>
       <span class="xs-pill" x-text="((status.caps && status.caps.posts_today) || 0) + '/' + ((status.caps && status.caps.max_posts_per_day) || 8) + ' ' + t('x_studio.quota')"></span>
     </div>
     <a class="btn btn-secondary btn-sm" href="/scheduled">{{ t('x_studio.all_clocks') }}</a>
@@ -113,7 +113,7 @@
         </div>
         <button class="btn btn-secondary" :disabled="busy || !status.can_post" @click="schedule()">{{ t('x_studio.schedule') }}</button>
       </div>
-      <div class="xs-reason" x-show="preview.allow === false && text.trim()" x-cloak x-text="preview.reason"></div>
+      <div class="xs-reason" translate="no" x-show="preview.allow === false && text.trim()" x-cloak x-text="preview.reason"></div>
     </div>
 
     <div class="xs-card">
@@ -129,7 +129,7 @@
       <div class="xs-empty" x-show="!queue.length" x-cloak>{{ t('x_studio.empty_queue') }}</div>
       <template x-for="item in queue" :key="item.id">
         <div class="xs-row" x-effect="stampAr($el, displayBody(item.summary))">
-          <div class="xs-body">
+          <div class="xs-body" translate="no">
             <div class="kicker" x-show="item.kicker || displayKicker(item.summary)" x-cloak
                  x-text="item.kicker || displayKicker(item.summary)"></div>
             <div class="txt" x-text="displayBody(item.summary)"></div>
@@ -162,7 +162,7 @@
       <div class="xs-empty" x-show="!drafts.length && showDismissed" x-cloak>{{ t('x_studio.empty_dismissed') }}</div>
       <template x-for="d in drafts" :key="d.id">
         <div class="xs-row" x-effect="stampAr($el, displayBody(d.text))">
-          <div class="xs-body">
+          <div class="xs-body" translate="no">
             <div class="kicker" x-show="displayKicker(d.text)" x-cloak
                  x-text="displayKicker(d.text)"></div>
             <div class="txt" x-text="displayBody(d.text)"></div>
@@ -191,7 +191,7 @@
       <div class="xs-empty" x-show="!auditRows.length" x-cloak>{{ t('x_studio.empty_audit') }}</div>
       <template x-for="e in auditRows" :key="e.id || (e.ts + e.action)">
         <div class="xs-row" x-effect="stampAr($el, displayBody(auditText(e)))">
-          <div class="xs-body">
+          <div class="xs-body" translate="no">
             <div class="kicker" x-show="displayKicker(auditText(e))" x-cloak
                  x-text="displayKicker(auditText(e))"></div>
             <div class="txt" x-text="displayBody(auditText(e))"></div>
@@ -249,7 +249,7 @@
         </div>
         <div class="xs-turn" x-show="!c.reply && c.reason" x-cloak>
           <span class="who">{{ t('x_studio.kazma_no_reply') }}</span>
-          <span class="what" style="color:var(--text-muted);" x-text="c.reason"></span>
+          <span class="what" translate="no" style="color:var(--text-muted);" x-text="c.reason"></span>
         </div>
         <div class="foot">
           <span class="xs-pill" :class="c.status === 'failed' ? 'bad' : ''" x-text="tOr('x_studio.status_' + c.status, c.status)"></span>

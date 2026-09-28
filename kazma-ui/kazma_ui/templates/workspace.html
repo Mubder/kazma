@@ -265,7 +265,7 @@
             <template x-for="line in gitStaged" :key="line">
               <div style="font-family:var(--font-mono);font-size:0.72rem;padding:3px 0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);border-bottom:1px solid var(--tint);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
                 <span style="color:var(--success);font-weight:bold;font-size:0.65rem;background:var(--success-subtle);padding:1px 3px;border-radius:3px;min-width:16px;text-align:center;">S</span>
-                <span x-text="line.slice(3)" style="word-break:break-all;"></span>
+                <span translate="no" x-text="line.slice(3)" style="word-break:break-all;"></span>
               </div>
             </template>
             <div x-show="gitStaged.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;" x-cloak>
@@ -284,7 +284,7 @@
             <template x-for="line in gitModified" :key="line">
               <div style="font-family:var(--font-mono);font-size:0.72rem;padding:3px 0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);border-bottom:1px solid var(--tint);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
                 <span style="color:var(--warning);font-weight:bold;font-size:0.65rem;background:var(--warning-subtle);padding:1px 3px;border-radius:3px;min-width:16px;text-align:center;">M</span>
-                <span x-text="line.slice(3)" style="word-break:break-all;"></span>
+                <span translate="no" x-text="line.slice(3)" style="word-break:break-all;"></span>
               </div>
             </template>
             <div x-show="gitModified.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;" x-cloak>
@@ -303,7 +303,7 @@
             <template x-for="line in gitUntracked" :key="line">
               <div style="font-family:var(--font-mono);font-size:0.72rem;padding:3px 0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);border-bottom:1px solid var(--tint);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
                 <span style="color:var(--secondary-light);font-weight:bold;font-size:0.65rem;background:var(--secondary-subtle);padding:1px 3px;border-radius:3px;min-width:16px;text-align:center;">U</span>
-                <span x-text="line.slice(3)" style="word-break:break-all;"></span>
+                <span translate="no" x-text="line.slice(3)" style="word-break:break-all;"></span>
               </div>
             </template>
             <div x-show="gitUntracked.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;" x-cloak>
@@ -415,7 +415,7 @@
                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/>
               </svg>
             </a>
-            <p style="margin:2px 0 0 0;font-size:0.75rem;color:var(--text-secondary);line-height:1.4;" x-text="ghDescription || t('workspace.no_description')"></p>
+            <p style="margin:2px 0 0 0;font-size:0.75rem;color:var(--text-secondary);line-height:1.4;" :translate="ghDescription ? 'no' : null" x-text="ghDescription || t('workspace.no_description')"></p>
           </div>
           <span class="badge" :style="{ background: ghPrivate ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)', color: ghPrivate ? '#ef4444' : '#10b981', borderColor: ghPrivate ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)' }" style="font-size:0.65rem;font-weight:600;padding:2px 6px;border-radius:4px;border:1px solid;text-transform:uppercase;" x-text="ghPrivate ? t('workspace.gh_private') : t('workspace.gh_public')"></span>
         </div>

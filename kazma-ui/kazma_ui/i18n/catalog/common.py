@@ -1832,4 +1832,84 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "جارٍ التحقق…",
         "en": "Validating…",
     },
+    "mcp.ui.name_required": {
+        "ar": "اسم الخادم مطلوب.",
+        "en": "Server name is required.",
+    },
+    "mcp.ui.command_required": {
+        "ar": "الأمر مطلوب لنقل stdio.",
+        "en": "Command is required for stdio transport.",
+    },
+    "mcp.ui.zero_tools": {
+        "ar": "اتصل الخادم لكنه لم يعرض أي أداة. يعني هذا عادةً أن اسم الحزمة خاطئ أو أن الخادم فشل في التهيئة. لن يُحفظ.",
+        "en": "Server connected but exposed 0 tools. This usually means the package name is wrong or the server failed to initialise. Not saving.",
+    },
+    "mcp.ui.zero_tools_toast": {
+        "ar": "لا أدوات — لم يُحفظ الخادم",
+        "en": "0 tools — server not saved",
+    },
+    "mcp.ui.validate_failed": {
+        "ar": "تعذّر التحقق من الخادم: {error}",
+        "en": "Could not validate server: {error}",
+    },
+    "mcp.ui.save_failed_unknown": {
+        "ar": "فشل الحفظ (سبب غير معروف)",
+        "en": "Save failed (unknown reason)",
+    },
+    "mcp.ui.save_failed": {
+        "ar": "فشل الحفظ: {error}",
+        "en": "Save failed: {error}",
+    },
+    "mcp.cat_ai": {
+        "ar": "الذكاء الاصطناعي",
+        "en": "AI",
+    },
+    "mcp.cat_arabic": {
+        "ar": "العربية",
+        "en": "Arabic",
+    },
+    "mcp.cat_code": {
+        "ar": "البرمجة",
+        "en": "Code",
+    },
+    "mcp.cat_communication": {
+        "ar": "التواصل",
+        "en": "Communication",
+    },
+    "mcp.cat_data": {
+        "ar": "البيانات",
+        "en": "Data",
+    },
+    "mcp.cat_database": {
+        "ar": "قواعد البيانات",
+        "en": "Databases",
+    },
+    "mcp.cat_devops": {
+        "ar": "التشغيل والنشر",
+        "en": "DevOps",
+    },
+    "mcp.cat_filesystem": {
+        "ar": "الملفات",
+        "en": "Files",
+    },
+    "mcp.cat_finance": {
+        "ar": "المال",
+        "en": "Finance",
+    },
+    "mcp.cat_media": {
+        "ar": "الوسائط",
+        "en": "Media",
+    },
+    "mcp.cat_productivity": {
+        "ar": "الإنتاجية",
+        "en": "Productivity",
+    },
+    "mcp.cat_web": {
+        "ar": "الويب",
+        "en": "Web",
+    },
+    "mcp.cat_general": {
+        "ar": "عام",
+        "en": "General",
+    },
 }

@@ -1,5 +1,69 @@
 # CHANGELOG
 
+## The live install, sixth pass: the Swarm's words, the chat's command menu, a Replay picker of uuids (2026-09-28)
+
+Found using the live install in Arabic and in English:
+
+- **The chat's command menu was English in every language.** Typing `/`
+  opened twenty descriptions ("Skip danger-tool approvals for this
+  session…") that lived in the script, not the catalog. They come from
+  the catalog now, so `/help` and the menu read in Arabic.
+- **The Replay page's chat picker listed 131 raw ids.** Each thread is now
+  named by its chat — title and platform, newest activity first, a thread
+  no chat owns by its id at the end. The Dashboard's session table and the
+  picker read the same answer to "which chat is this thread".
+- **The Documents page said "Storage: degraded" in red** over a healthy
+  install: its metadata store is SQLite by choice (`.env`), its job queue
+  Postgres, and readiness called a single-replica store "degraded". Status
+  is `degraded` only when a backend the operator configured is not the one
+  serving (`*_fell_back_to_sqlite`); a chosen SQLite backend is `ready`,
+  single-replica — which the page says as "single node" from both stores,
+  not from the job queue alone. (The green pill for a ready store never
+  showed either: the page coloured "ready" as "unavailable".)
+- **The Swarm page spoke its own English** — "dispatch · auto · • success",
+  "failed", "completed" in the history, the results board, a task's
+  details and the live event lines; the templates' Edit / Delete buttons;
+  "auto" in the pipeline editor's worker pickers. States, patterns and the
+  on-demand worker read in the page's language; a task's prompt, a
+  worker's output, a template's own words and a worker's name stay as
+  written.
+- The Scheduled page's X activity ("success" on every row), the MCP page's
+  server categories ("ai", "arabic", "code"…), the IDE's command titles,
+  the X Studio's "why Kazma did not reply" lines and the Memory page's
+  predicate chips: translated where they are ours, marked as content where
+  they are the data's.
+
+The browser check now seeds two swarm runs, a reminder and two X calls,
+and reads the Swarm tabs, a task's details and the Scheduled tabs in
+Arabic (59 English strings with the old code), and types `/` in the chat.
+
+## Pages with your data on them read in Arabic too (2026-09-28)
+
+The release below was measured on a test install with nothing in it.
+Touring the live install in Arabic afterwards, with a real history on every
+page, found what an empty install cannot show: the Research list ("session ·
+done · done · 3 sources · rubric 100 passed · 5h ago"), a research run's
+details and live progress, the status lines the memory-backend buttons
+write in Settings ("Saving…", "Connected · 12ms", "Synced 40 beliefs"), the
+MCP page's Add-server errors, and "telegram" in lower case under a Telegram
+chat. All of it now reads in Arabic, and a run's stage names (planning,
+fetching pages, writing the report…) too.
+
+What is yours stays as written, and is now marked as such for the browser's
+translator as well: memory facts' values and entity names, git status
+paths and a repository's description, the X account handle and draft
+bodies, a scheduled task's own summary, error and result, research topics,
+report paths, reports and progress text, tenants, and what the server
+reports while a backup runs or a backend is probed.
+
+Fixed on the way: **the Research page's Archived tab dated every session
+21 January 1970**, in every language — the sessions list gives seconds and
+the card read them as milliseconds.
+
+The browser check now seeds research runs and reads the list, a run's
+details and the Archived tab in Arabic (with the old code: 12 English
+strings), and checks the archived dates.
+
 ## Every page reads in Arabic (2026-09-28)
 
 Kazma promised an English and Arabic interface on every page. Touring the

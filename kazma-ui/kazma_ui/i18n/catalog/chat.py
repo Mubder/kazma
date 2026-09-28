@@ -1241,4 +1241,84 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "العقدة",
         "en": "Node",
     },
+    "chat.slash.yolo": {
+        "ar": "تخطَّ موافقات الأدوات الخطرة في هذه الجلسة (مؤقتًا)",
+        "en": "Skip danger-tool approvals for this session (TTL)",
+    },
+    "chat.slash.yolo_off": {
+        "ar": "أعد الموافقات وامسح أذونات الأدوات",
+        "en": "Restore HITL approvals + clear tool grants",
+    },
+    "chat.slash.yolo_status": {
+        "ar": "اعرض حالة YOLO والأذونات في هذه الجلسة",
+        "en": "Show YOLO / grant status for this session",
+    },
+    "chat.slash.long": {
+        "ar": "اعرض ميزانية الجولات وحالة الموافقات",
+        "en": "Show iteration budget + HITL status",
+    },
+    "chat.slash.long_on": {
+        "ar": "ميزانية بحث (40 جولة) — الموافقات تبقى مفعّلة",
+        "en": "Research budget (40 rounds) — HITL still on",
+    },
+    "chat.slash.long_mission": {
+        "ar": "اعمل حتى الإنجاز (حد أقصى نحو 500 جولة)",
+        "en": "Run until done (hard wall ~500 rounds)",
+    },
+    "chat.slash.long_yolo": {
+        "ar": "ميزانية بحث مع تخطي موافقات الأدوات الخطرة",
+        "en": "Research budget AND skip danger-tool approvals",
+    },
+    "chat.slash.unrestricted": {
+        "ar": "مهمة + YOLO — أنجز هذا العمل دون أن تسأل",
+        "en": "Mission + YOLO — finish this job, don’t ask",
+    },
+    "chat.slash.unrestricted_off": {
+        "ar": "أعد ميزانية الإعدادات والموافقات",
+        "en": "Restore Settings budget + HITL",
+    },
+    "chat.slash.long_off": {
+        "ar": "أوقف الميزانية فقط (الموافقات كما هي)",
+        "en": "Budget only off (HITL unchanged)",
+    },
+    "chat.slash.plan": {
+        "ar": "اعرض حالة وضع التخطيط (افحص ثم اقترح)",
+        "en": "Show plan-mode status (inspect then propose)",
+    },
+    "chat.slash.plan_on": {
+        "ar": "وضع التخطيط — أدوات الكتابة والتنفيذ محجوبة حتى ‎/plan go",
+        "en": "Plan mode — write/exec tools blocked until /plan go",
+    },
+    "chat.slash.plan_go": {
+        "ar": "اعتمد الخطة ونفّذ (الموافقات تبقى مفعّلة)",
+        "en": "Approve the plan and execute (HITL still on)",
+    },
+    "chat.slash.plan_off": {
+        "ar": "اخرج من وضع التخطيط",
+        "en": "Leave plan mode",
+    },
+    "chat.slash.new": {
+        "ar": "ابدأ محادثة جديدة",
+        "en": "Start a new chat session",
+    },
+    "chat.slash.reset": {
+        "ar": "امسح سجل هذه المحادثة",
+        "en": "Clear this conversation history",
+    },
+    "chat.slash.steer": {
+        "ar": "أضف ملاحظة للمهمة الجارية — عدّلها ثم اضغط Enter",
+        "en": "Queue a note for the running task — edit, then Enter",
+    },
+    "chat.slash.steer_bang": {
+        "ar": "أوقف المهمة الجارية مؤقتًا وأدخل متطلبًا",
+        "en": "Pause the running task and inject a requirement",
+    },
+    "chat.slash.abort": {
+        "ar": "أوقف المهمة الجارية وتخلَّ عنها",
+        "en": "Stop and abandon the running task",
+    },
+    "chat.slash.help": {
+        "ar": "اعرض أوامر الشرطة المائلة المتاحة",
+        "en": "List available slash commands",
+    },
 }

@@ -114,7 +114,9 @@ function documentsPage() {
     },
 
     capStatusClass(status) {
-      if (status === "ok") return "cap-ready";
+      // Capacity says "ok", storage readiness says "ready": both are green.
+      // Readiness used to fall through to the "unavailable" colour.
+      if (status === "ok" || status === "ready") return "cap-ready";
       if (status === "degraded") return "cap-degraded";
       return "cap-unavailable";
     },

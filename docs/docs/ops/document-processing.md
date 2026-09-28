@@ -190,10 +190,19 @@ Always read `GET /api/documents/ops/readiness`:
   "jobs_multi_replica": true,
   "metadata_backend": "postgres|sqlite",
   "metadata_multi_replica": true,
+  "multi_replica": true,
   "degraded_reasons": [],
   "malware": { "available": true, "scanner": "clamdscan", "mode": "auto" }
 }
 ```
+
+`status` is `degraded` only when a configured backend is not the one
+serving: `jobs_postgres_unavailable_fell_back_to_sqlite`,
+`metadata_postgres_unavailable_fell_back_to_sqlite` (and the malware or
+rollout reasons the service adds). A backend chosen in `.env` — SQLite
+metadata beside Postgres jobs, the common single-server shape — is `ready`
+with `metadata_multi_replica: false`; `multi_replica` is true only when both
+jobs and metadata are.
 
 ---
 

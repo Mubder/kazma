@@ -1247,7 +1247,7 @@
                    ? 'background:rgba(46,213,115,0.08);border-color:rgba(46,213,115,0.3)'
                    : 'background:rgba(245,158,11,0.08);border-color:rgba(245,158,11,0.35)'" x-cloak>
               <strong x-text="t(({full: 'settings.vector_status_full', remote_ready: 'settings.vector_status_remote_ready', unchecked: 'settings.vector_status_checking', unreachable: 'settings.vector_status_unreachable'})[memoryBackendsCapability.vector_status] || 'settings.vector_status_needs_setup')"></strong>
-              <span style="color:var(--text-muted)" x-text="' — ' + (memoryBackendsCapability.vector_status === 'full' && memoryBackends.vector.provider === 'sqlite_vec' ? t('settings.cap_vector_local') : (memoryBackendsCapability.vector_status_detail || ''))"></span>
+              <span style="color:var(--text-muted)" :translate="(memoryBackendsCapability.vector_status === 'full' && memoryBackends.vector.provider === 'sqlite_vec') ? null : 'no'" x-text="' — ' + (memoryBackendsCapability.vector_status === 'full' && memoryBackends.vector.provider === 'sqlite_vec' ? t('settings.cap_vector_local') : (memoryBackendsCapability.vector_status_detail || ''))"></span>
             </div>
             <div class="form-group">
                 <label>{{ t('settings.memory_mode') }}</label>
@@ -1335,6 +1335,7 @@
                     <input type="password" class="form-input" x-model="memoryBackends.graph.password" placeholder="{{ t('settings.mem.leave_blank') }}">
                 </div>
                 <p style="font-size:0.72rem;color:var(--text-muted);margin:0;"
+                   :translate="memoryBackendsGraphCap.status === 'local' ? null : 'no'"
                    x-text="memoryBackendsGraphCap.status === 'local' ? t('settings.cap_graph_local') : (memoryBackendsGraphCap.detail || '')"></p>
                 <p style="font-size:0.72rem;color:var(--text-muted);margin:8px 0 0;">
                     {{ t('settings.memory_neo4j_driver_hint') }}
@@ -1360,8 +1361,13 @@
                     <option value="raise">{{ t('settings.memory_failover_raise') }}</option>
                 </select>
             </div>
-            <p style="font-size:0.72rem;color:var(--text-muted);margin:4px 0 8px;"
-               x-text="(memoryBackendsStateCap.status === 'local' ? t('settings.cap_state_local') : (memoryBackendsStateCap.detail || '')) + ' · ' + (memoryBackendsGraphCap.status === 'local' ? t('settings.cap_graph_local') : (memoryBackendsGraphCap.detail || ''))"></p>
+            <p style="font-size:0.72rem;color:var(--text-muted);margin:4px 0 8px;">
+                <span :translate="memoryBackendsStateCap.status === 'local' ? null : 'no'"
+                      x-text="memoryBackendsStateCap.status === 'local' ? t('settings.cap_state_local') : (memoryBackendsStateCap.detail || '')"></span>
+                ·
+                <span :translate="memoryBackendsGraphCap.status === 'local' ? null : 'no'"
+                      x-text="memoryBackendsGraphCap.status === 'local' ? t('settings.cap_graph_local') : (memoryBackendsGraphCap.detail || '')"></span>
+            </p>
             <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
                 <button class="btn btn-primary" @click="saveMemoryBackends()" :disabled="memoryBackendsSaving" x-text="memoryBackendsSaving ? '…' : t('settings.memory_save_backends')"></button>
                 <button class="btn" @click="testMemoryEmbed()" x-text="t('settings.memory_test_embed')"></button>
@@ -1933,7 +1939,7 @@
             </div>
             <ul style="margin:0;padding-left:18px;color:var(--text-secondary);font-size:0.85rem;">
               <template x-for="t in tenants" :key="t.id">
-                <li><strong x-text="t.id"></strong> — <span x-text="t.name"></span></li>
+                <li translate="no"><strong x-text="t.id"></strong> — <span x-text="t.name"></span></li>
               </template>
             </ul>
         </div>
@@ -3572,7 +3578,7 @@
             <div x-show="backupRunning" x-cloak style="margin-bottom:1.25rem;padding:14px;background:rgba(79,140,255,0.06);border:1px solid var(--border);border-radius:var(--radius-card)">
                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
                     <div class="spinner" style="width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--primary,#4f8cff);border-radius:50%;animation:spin 0.8s linear infinite"></div>
-                    <strong x-text="backupProgressText || t('settings.bk.working')"></strong>
+                    <strong :translate="backupProgressText ? 'no' : null" x-text="backupProgressText || t('settings.bk.working')"></strong>
                 </div>
                 <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
                     <div :style="'width:' + (backupProgressPhase === 'done' ? '100%' : backupProgressPhase === 'postgres' ? '85%' : backupProgressPhase === 'assets' ? '60%' : backupProgressPhase === 'databases' ? '35%' : '10%') + ';height:100%;background:var(--primary,#4f8cff);transition:width 0.5s ease'"></div>

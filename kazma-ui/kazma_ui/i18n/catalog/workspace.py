@@ -449,7 +449,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Terminal",
     },
     "workspace.title": {
-        "ar": "كاظمه — مساحة العمل",
+        "ar": "Kazma — مساحة العمل",
         "en": "Kazma — Workspace",
     },
     "workspace.toast_bookmark_failed": {

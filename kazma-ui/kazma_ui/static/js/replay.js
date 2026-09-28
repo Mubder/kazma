@@ -118,9 +118,16 @@
           if (!sel) return;
           var prev = sel.value;
           sel.innerHTML = '<option value="">' + esc(tx('replay.select_thread', '— Select a thread —')) + '</option>';
-          (data.threads || []).forEach(function (t) {
+          // Each thread named by its chat (title, newest first); a thread no
+          // chat owns shows its id. The list used to be bare uuids.
+          var items = data.items || (data.threads || []).map(function (id) {
+            return { thread_id: id, title: '' };
+          });
+          items.forEach(function (it) {
             var opt = document.createElement('option');
-            opt.value = t; opt.textContent = t;
+            opt.value = it.thread_id;
+            opt.textContent = it.title || it.thread_id;
+            opt.setAttribute('translate', 'no');
             sel.appendChild(opt);
           });
           if (prev && (data.threads || []).indexOf(prev) !== -1) sel.value = prev;
