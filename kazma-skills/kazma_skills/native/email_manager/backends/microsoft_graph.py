@@ -23,6 +23,17 @@ logger = logging.getLogger(__name__)
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 
+#: What a mail refresh asks for when the grant has no OpenID scopes.
+_REFRESH_SCOPE_BARE = (
+    "https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Mail.Send offline_access"
+)
+#: What it asks for first. Every sign-in asks for ``openid profile`` too
+#: (``oauth_ms.SCOPES``), so its refresh may: the response's id_token names
+#: the mailbox, which is how an account signed in before Kazma read the
+#: address (2026-09-28) learns it. A grant made without them (a token put in
+#: .env by hand) is refused that and refreshed with the bare scopes.
+_REFRESH_SCOPE = _REFRESH_SCOPE_BARE + " openid profile"
+
 
 # Well-known folder display names → Graph well-known names
 _WELL_KNOWN_FOLDERS = {
@@ -118,47 +129,58 @@ class MicrosoftGraphBackend:
             return r.json()
 
     async def _refresh(self) -> None:
+        from kazma_skills.native.email_manager.oauth_common import address_from_id_token
+
         token_url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/token"
-        data = {
-            "client_id": self.client_id,
-            "grant_type": "refresh_token",
-            "refresh_token": self.refresh_token,
-            "scope": "https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Mail.Send offline_access",
-        }
-        if self.client_secret:
-            data["client_secret"] = self.client_secret
+        used_refresh = self.refresh_token
         async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as client:
-            r = await client.post(token_url, data=data)
-            if r.status_code >= 400:
-                raise RuntimeError(f"Token refresh failed: {r.status_code} {r.text[:200]}")
+            for scope in (_REFRESH_SCOPE, _REFRESH_SCOPE_BARE):
+                data = {
+                    "client_id": self.client_id,
+                    "grant_type": "refresh_token",
+                    "refresh_token": used_refresh,
+                    "scope": scope,
+                }
+                if self.client_secret:
+                    data["client_secret"] = self.client_secret
+                r = await client.post(token_url, data=data)
+                if r.status_code < 400:
+                    break
+                if r.status_code != 400 or scope == _REFRESH_SCOPE_BARE:
+                    raise RuntimeError(f"Token refresh failed: {r.status_code} {r.text[:200]}")
+                # A refused token is not spent, so the same one is tried again.
+                logger.info("[graph] refresh with openid refused; refreshing with mail scopes only")
             payload = r.json()
             self.access_token = payload.get("access_token") or self.access_token
             if payload.get("refresh_token"):
                 self.refresh_token = payload["refresh_token"]
+        learned = address_from_id_token(payload.get("id_token"))
+        if learned and not self.account_alias:
+            self.address = learned
         # Vault writes: off the event loop.
-        await asyncio.to_thread(self._persist_tokens)
+        await asyncio.to_thread(self._persist_tokens, used_refresh, learned)
 
-    def _persist_tokens(self) -> None:
-        """Keep refreshed tokens where THIS account's live: an extra account's
-        own keys (``accounts.persist_account_tokens``), else the main
-        Microsoft account's env + vault. An extra account used to write the
-        main keys too, and the main mailbox then read the other one."""
-        import os
-
+    def _persist_tokens(self, used_refresh: str, address: str = "") -> None:
+        """Keep refreshed tokens where THIS account's grant still is: an extra
+        account's own keys (``accounts.persist_account_tokens``), else the
+        main Microsoft mailbox's (``refreshed_grants``, with the address its
+        id_token named) -- and neither when the grant was disconnected or
+        replaced by a new sign-in while the request ran. An extra account
+        used to write the main keys too, and the main mailbox then read the
+        other one."""
         try:
             if self.account_alias:
                 from kazma_skills.native.email_manager.accounts import persist_account_tokens
 
-                persist_account_tokens(self.account_alias, self.access_token, self.refresh_token)
+                persist_account_tokens(
+                    self.account_alias, self.access_token, self.refresh_token, replaces=used_refresh
+                )
                 return
-            from kazma_skills.native.email_manager.credentials import vault_store
+            from kazma_skills.native.email_manager.refreshed_grants import keep_refreshed_microsoft_mail
 
-            if self.access_token and self.access_token != "pending_refresh":
-                os.environ["EMAIL_MS_ACCESS_TOKEN"] = self.access_token
-                vault_store("email.microsoft.access_token", self.access_token)
-            if self.refresh_token:
-                os.environ["EMAIL_MS_REFRESH_TOKEN"] = self.refresh_token
-                vault_store("email.microsoft.refresh_token", self.refresh_token)
+            keep_refreshed_microsoft_mail(
+                used_refresh, self.access_token, self.refresh_token, address=address
+            )
         except Exception:
             logger.warning("[graph] refreshed tokens were not kept", exc_info=True)
 

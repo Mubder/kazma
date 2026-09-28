@@ -478,13 +478,17 @@ async def refresh_gmail_access_token(
 ) -> tuple[str, str]:
     """Return (access_token, refresh_token).
 
-    *persist* keeps them as the MAIN Gmail account's (and its calendar copy).
-    An extra account refreshes with ``persist=False`` and keeps its own
+    *persist* keeps them for the MAIN Google account -- in Gmail and in
+    Google Calendar, each only while it still holds this grant
+    (``refreshed_grants``): a calendar signed in as another Google account
+    used to be switched to the Gmail account by this refresh. An extra
+    account refreshes with ``persist=False`` and keeps its own
     (``accounts.persist_account_tokens``): refreshing a second account used
     to write its tokens over the main account's.
     """
-    cid = client_id or _client_id()
-    secret = client_secret or _client_secret()
+    # The app registration from the vault: off the loop, like the keeping.
+    cid = client_id or await asyncio.to_thread(_client_id)
+    secret = client_secret or await asyncio.to_thread(_client_secret)
     async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as client:
         r = await client.post(
             TOKEN_URL,
@@ -507,20 +511,10 @@ async def refresh_gmail_access_token(
         scope_str = str(payload.get("scope") or "")
         if not access:
             raise RuntimeError("No access_token on Gmail refresh")
-        if not persist:
-            return access, new_refresh
-        persist_gmail_tokens(access, new_refresh, scopes=scope_str)
-        # Keep the calendar copy of this grant in sync when Calendar is
-        # on the same refresh token (Gmail connect with calendar scope).
-        try:
-            from kazma_skills.native.calendar.credentials import (
-                google_connected,
-                persist_google_tokens,
-                scopes_include_google_calendar,
-            )
+    if persist:
+        from kazma_skills.native.email_manager.refreshed_grants import keep_refreshed_google_grant
 
-            if google_connected() or scopes_include_google_calendar(scope_str):
-                persist_google_tokens(access, new_refresh, scopes=scope_str)
-        except Exception:
-            logger.debug("[email.oauth] calendar token sync on refresh failed", exc_info=True)
-        return access, new_refresh
+        await asyncio.to_thread(
+            keep_refreshed_google_grant, refresh_token, access, new_refresh, scope_str
+        )
+    return access, new_refresh

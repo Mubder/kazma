@@ -7,6 +7,7 @@ callback dispatches on OAuth ``state.provider == google_calendar``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -245,10 +246,12 @@ async def refresh_google_calendar_access_token(
     client_secret: str = "",
     persist: bool = True,
 ) -> tuple[str, str]:
-    """Return (access_token, refresh_token). *persist* keeps them as the MAIN
-    Google Calendar's; an extra account keeps its own (``persist=False``)."""
-    cid = client_id or _client_id()
-    secret = client_secret or _client_secret()
+    """Return (access_token, refresh_token). *persist* keeps them for the MAIN
+    Google account: in Google Calendar and in Gmail, each only while it
+    still holds this grant (``refreshed_grants``). An extra account keeps
+    its own (``persist=False``)."""
+    cid = client_id or await asyncio.to_thread(_client_id)
+    secret = client_secret or await asyncio.to_thread(_client_secret)
     async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as client:
         r = await client.post(
             TOKEN_URL,
@@ -271,6 +274,15 @@ async def refresh_google_calendar_access_token(
         scope_str = str(payload.get("scope") or "")
         if not access:
             raise RuntimeError("No access_token on Calendar refresh")
-        if persist:
-            persist_google_tokens(access, new_refresh, scopes=scope_str, probe_ok="ok")
-        return access, new_refresh
+    if persist:
+        await asyncio.to_thread(_keep_calendar_refresh, refresh_token, access, new_refresh, scope_str)
+    return access, new_refresh
+
+
+def _keep_calendar_refresh(used_refresh: str, access: str, new_refresh: str, scopes: str) -> None:
+    """Vault I/O of a main calendar refresh (run off the loop): the grant
+    where it is still held, and the calendar's "answered" mark."""
+    from kazma_skills.native.email_manager.refreshed_grants import keep_refreshed_google_grant
+
+    keep_refreshed_google_grant(used_refresh, access, new_refresh, scopes)
+    persist_google_tokens("", probe_ok="ok")

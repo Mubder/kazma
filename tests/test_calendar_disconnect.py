@@ -231,24 +231,34 @@ def test_disconnecting_gmail_forgets_the_grant(vault: dict[str, str]) -> None:
 
 def test_a_calendar_refresh_updates_mail_only_on_the_same_grant(vault: dict[str, str]) -> None:
     from kazma_skills.native.calendar.backends.outlook_calendar import _keep_refreshed_tokens
+    from kazma_skills.native.calendar.credentials import persist_microsoft_tokens
+    from kazma_skills.native.email_manager.protocol_connect import disconnect_protocol
 
     # Same grant (a mail sign-in copied it): mail follows.
-    vault["email.microsoft.refresh_token"] = "r1"
+    vault.update({"email.microsoft.refresh_token": "r1", "calendar.microsoft.refresh_token": "r1"})
     _keep_refreshed_tokens("a2", "r2", "r1", "Calendars.ReadWrite")
     assert vault["email.microsoft.refresh_token"] == "r2"
     assert vault["email.microsoft.access_token"] == "a2"
     assert vault["calendar.microsoft.refresh_token"] == "r2"
 
     # Mail disconnected: the refresh must not sign it back in.
-    vault.clear()
+    disconnect_protocol("microsoft")
     _keep_refreshed_tokens("a3", "r3", "r2", "Calendars.ReadWrite")
     assert "email.microsoft.refresh_token" not in vault
     assert "email.microsoft.access_token" not in vault
+    assert vault["calendar.microsoft.refresh_token"] == "r3"
 
     # Mail signed in as another account: left alone.
     vault["email.microsoft.refresh_token"] = "other-account"
     _keep_refreshed_tokens("a4", "r4", "r3", "Calendars.ReadWrite")
     assert vault["email.microsoft.refresh_token"] == "other-account"
+    assert vault["calendar.microsoft.refresh_token"] == "r4"
+
+    # A calendar the refresh no longer holds keeps what it has (a new sign-in).
+    persist_microsoft_tokens("newer-a", "newer")
+    _keep_refreshed_tokens("a5", "r5", "r4", "Calendars.ReadWrite")
+    assert vault["calendar.microsoft.refresh_token"] == "newer"
+    assert vault["calendar.microsoft.access_token"] == "newer-a"
 
 
 # ── The sign-in's way back ──────────────────────────────────────────────

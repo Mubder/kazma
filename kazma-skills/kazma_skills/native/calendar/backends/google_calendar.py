@@ -62,7 +62,9 @@ class GoogleCalendarBackend:
                 if self._alias:
                     from kazma_skills.native.email_manager.accounts import persist_account_tokens
 
-                    await asyncio.to_thread(persist_account_tokens, self._alias, access, new_refresh)
+                    await asyncio.to_thread(
+                        persist_account_tokens, self._alias, access, new_refresh, replaces=refresh
+                    )
                 return True
             except Exception as exc:
                 logger.warning("[calendar.google] token refresh failed: %s", exc)

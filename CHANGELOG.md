@@ -26,6 +26,36 @@ Google and Microsoft -- writes only its own account's keys; a test per
 backend watches the main account's keys, and a gate makes any new refreshing
 backend take its account.
 
+### A refreshed sign-in is kept only where it is still held
+
+Checking the same question on the main accounts found three more:
+
+- The main Gmail refresh copied its sign-in into Google Calendar whenever the
+  calendar was connected -- also a calendar signed in as another Google
+  account, which then showed the Gmail account's events under the other
+  account's name. The connector health check runs that refresh on every pass.
+- Every refresh wrote back after a disconnect or a new sign-in that happened
+  while its request ran: the account signed back in, or the old account put
+  over the new one.
+- A Microsoft mailbox signed in before Kazma read the address had none, so
+  "send it from me@msn.com" was refused as not connected.
+
+A refresh now keeps its tokens in each place that still holds the sign-in it
+refreshed, and nowhere else (`email_manager/refreshed_grants.py`; extra
+accounts through `persist_account_tokens(replaces=)`). The Microsoft mail
+refresh also asks for the sign-in's identity and records the address it
+names, falling back to the mail scopes when a sign-in lacks it. Refresh
+writes run off the event loop. `tests/test_refreshed_grants.py` covers every
+backend, main and extra, with nothing, a disconnect, and a new sign-in in
+between; the old code fails 18 of its 30 cases.
+
+**Add with a password** says what failed in words: a mistyped server came
+back as "[Errno 11001] getaddrinfo failed" on the live install; it now reads
+"The mail server imap.example.org could not be found. Check its name.", and
+a refused password names the server and, for Gmail and Outlook, the app
+password they need. IMAP connections now give up after 45 seconds, like POP
+and SMTP.
+
 ## Every control does what it says, and what the owner decides has one (2026-09-28)
 
 After the calendar button, every route that changes something and that no

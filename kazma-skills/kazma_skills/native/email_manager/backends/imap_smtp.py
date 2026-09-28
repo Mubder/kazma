@@ -51,7 +51,9 @@ class ImapSmtpBackend:
         self.smtp_starttls = smtp_starttls
 
     def _imap(self) -> imaplib.IMAP4_SSL:
-        M = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
+        # A bounded wait, like the POP and SMTP connections: a server that
+        # never answers must not hold a worker thread for the OS's default.
+        M = imaplib.IMAP4_SSL(self.imap_host, self.imap_port, timeout=45)
         M.login(self.address, self.password)
         return M
 

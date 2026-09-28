@@ -85,6 +85,9 @@ async def test_graph_refresh_persists(monkeypatch: pytest.MonkeyPatch) -> None:
         "kazma_skills.native.email_manager.credentials.vault_store",
         fake_store,
     )
+    # The main mailbox holds the grant being refreshed: a refresh is kept
+    # only where its grant still is (refreshed_grants).
+    monkeypatch.setenv("EMAIL_MS_REFRESH_TOKEN", "r1")
 
     b = MicrosoftGraphBackend(
         access_token="old",

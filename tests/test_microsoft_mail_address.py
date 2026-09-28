@@ -121,7 +121,9 @@ def test_one_place_keeps_a_microsoft_token_response() -> None:
         src = path.read_text(encoding="utf-8")
         if re.search(r'vault_store\(\s*"email\.microsoft\.access_token"', src):
             writers.append(path.name)
-    # The Graph backend refreshes its own token; the sign-in writes it once.
-    assert sorted(writers) == ["microsoft_graph.py", "oauth_ms.py"], writers
+    # The sign-in writes it once; every refresh of the main grant (the Graph
+    # backend's and Outlook Calendar's) keeps it in one place, only where
+    # that grant is still held (2026-09-29).
+    assert sorted(writers) == ["oauth_ms.py", "refreshed_grants.py"], writers
     for flow in ("oauth_ms.py", "oauth_ms_browser.py"):
         assert "store_microsoft_tokens(" in (EMAIL / flow).read_text(encoding="utf-8"), flow
