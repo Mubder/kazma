@@ -160,3 +160,60 @@ class TestValidateProject:
             is_valid, issues = validate_project(tmp)
             assert is_valid is False
             assert any("language" in i for i in issues)
+
+
+# ── The templates promise nothing Kazma does not do ────────────────────────
+
+_REPO = Path(__file__).resolve().parents[1]
+_MARKER = "Kazma does not read this file yet"
+
+
+def _project_file_readers() -> list[str]:
+    """Product code outside the CLI that reads the .kazma project files."""
+    readers = []
+    for path in _REPO.glob("kazma-*/kazma_*/**/*.py"):
+        rel = path.relative_to(_REPO).as_posix()
+        if rel.endswith(("kazma_cli/project.py", "kazma_cli/main.py")):
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if "load_project(" in text or "kazma_cli.project" in text or "rules.yaml" in text:
+            readers.append(rel)
+    return readers
+
+
+def template_promises(text: str) -> list[str]:
+    """What a template claims that nothing does, while nothing reads it."""
+    problems = []
+    if _MARKER not in text:
+        problems.append("does not say Kazma does not read it yet")
+    for claim in ("applied to every", "agents should know", "Supported keys"):
+        if claim in text:
+            problems.append(f"claims {claim!r}")
+    return problems
+
+
+def test_the_templates_do_not_promise_what_nothing_does() -> None:
+    """The scaffold said its rules were "applied to every agent session" from
+    2026-06 to 2026-09-28 while nothing read them (issue #20)."""
+    from kazma_cli import project
+
+    readers = _project_file_readers()
+    assert readers == [], (
+        f"something reads the project files now ({readers}): update the "
+        "templates and this test with it"
+    )
+    for name in ("DEFAULT_RULES", "DEFAULT_CONTEXT", "DEFAULT_PERSONALITY", "DEFAULT_TOOLS"):
+        assert template_promises(getattr(project, name)) == [], name
+
+
+def test_the_template_check_sees_the_old_promise() -> None:
+    """Negative control: the rules template as it was until 2026-09-28."""
+    old = (
+        "# Project-specific agent rules\n"
+        "# These rules are applied to every agent session in this project.\n"
+        "language: python\n"
+    )
+    assert template_promises(old) == [
+        "does not say Kazma does not read it yet",
+        "claims 'applied to every'",
+    ]

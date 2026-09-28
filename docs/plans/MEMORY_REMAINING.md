@@ -78,7 +78,7 @@ User turn
 
 | Item | Tracking |
 |------|----------|
-| Full Postgres-primary recall | [#76](https://github.com/Mubder/kazma/issues/76) — **Done** (`state.role=primary` / `KAZMA_MEMORY_STATE_ROLE=primary`; ILIKE sparse **+ pgvector dense RRF**; down = fail-closed, no silent SQLite). Industry stack part 6 (2026-08-25). |
+| Full Postgres-primary recall | [#76](https://github.com/Mubder/kazma/issues/76) — **Done** (`state.role=primary` / `KAZMA_MEMORY_STATE_ROLE=primary`; keyword **+ meaning** candidates, ranked by evidence like the local path since 2026-09-26 -- rank fusion (RRF) is gone, AGENTS.md §15G; down = fail-closed, no silent SQLite). Industry stack part 6 (2026-08-25). Not identical across replicas: weekly summaries and the fact graph stay local to each node (§15J). |
 | Multi-region + conflict policy | [#77](https://github.com/Mubder/kazma/issues/77) — **Done** (`state.region` + `state.conflict_policy` = last_write_wins \| origin_wins \| fail_closed) |
 | Hosted embed-only fleet defaults | [#78](https://github.com/Mubder/kazma/issues/78) — **Done** (`KAZMA_EMBED_FLEET=1` + OpenAI/Voyage key, or `provider: openai\|voyage`). Local bge-m3 stays the one-node default (no surprise dim switch). |
 | Huge-corpus reconsolidation partition | **Done** — subject-hash shards + worker chain |

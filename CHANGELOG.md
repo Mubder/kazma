@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## `kazma project init` no longer promises what Kazma does not do (2026-09-28)
+
+The `.kazma/` files it creates (`rules.yaml`, `context.md`, `personality.yaml`,
+`tools.yaml`) said the rules were "applied to every agent session in this
+project". Nothing in Kazma reads them: the command only creates them, and
+`show`/`validate` check them. Each template now says it is not read yet and
+links [issue #20](https://github.com/Mubder/kazma/issues/20), where loading
+them into the agent is tracked. A test keeps the wording honest until a
+loader exists.
+
 ## Who Kazma is for, said plainly (2026-09-28)
 
 **One operator per install.** Kazma is software you run for yourself.
