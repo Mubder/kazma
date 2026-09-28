@@ -156,7 +156,8 @@ def _extra_root_problem(path: str) -> str | None:
         return "Enter a folder path."
     candidate = Path(raw).expanduser()
     if not candidate.is_absolute():
-        return f"Use a full path (for example C:\\Users\\you\\Documents), not {raw!r}."
+        # The path as typed: a repr doubled every backslash on the page.
+        return f"Use a full path (for example C:\\Users\\you\\Documents), not “{raw}”."
     try:
         resolved = candidate.resolve()
     except OSError as exc:

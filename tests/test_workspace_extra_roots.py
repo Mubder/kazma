@@ -32,6 +32,8 @@ def test_what_a_new_root_must_be(tmp_path: Path) -> None:
     good.mkdir()
     assert _extra_root_problem(str(good)) is None
     assert "full path" in _extra_root_problem("notes")
+    # The path as the owner typed it (a repr showed notes\\sub on the page).
+    assert r"“notes\sub”" in _extra_root_problem(r"notes\sub")
     assert "not a folder" in _extra_root_problem(str(tmp_path / "missing"))
     (tmp_path / "file.txt").write_text("x", encoding="utf-8")
     assert "not a folder" in _extra_root_problem(str(tmp_path / "file.txt"))
