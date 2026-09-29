@@ -22,6 +22,12 @@ came from a server outside its list, or came from a bot.
 - **The card's Guild ID works**: it was saved and read by nothing. It now
   limits server messages to those servers (direct messages always pass), at
   boot and live on Save.
+- **Direct messages too**: the owner's server messages were answered and the
+  direct messages never. The Test opens the bot's direct messages with each
+  allowed user (opening sends nothing) and says whether the newest one
+  reached Kazma -- or that there is none to this bot, which is what writing
+  to another bot account looks like. The connection logs the intents it
+  asks Discord for.
 
 `tests/test_discord_receive_and_test.py`: each drop reason logged at its
 level, a message run through the real receive loop is never unaccounted for

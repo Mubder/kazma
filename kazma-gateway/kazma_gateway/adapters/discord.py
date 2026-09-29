@@ -53,6 +53,11 @@ _DISCORD_GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json"
 #: How the adapter closes a socket whose session it will resume: any code but
 #: 1000/1001, which Discord reads as "the bot is done" (see _close_for_resume).
 _RESUME_CLOSE_CODE = 4000
+#: What the connection asks Discord for: servers (GUILDS), server messages
+#: (GUILD_MESSAGES), direct messages (DIRECT_MESSAGES) and message text
+#: (MESSAGE_CONTENT -- privileged: it must ALSO be on in the Developer
+#: Portal, or Discord closes the connection with 4014).
+_INTENTS = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15)
 
 # Rate-limit constants
 _SEND_MAX_RETRIES = 3
@@ -301,6 +306,7 @@ class DiscordAdapter(BaseAdapter):
                         )
                     )
                 else:
+                    logger.info("[discord] Sending op 2 Identify (intents=%d)", _INTENTS)
                     await ws.send(
                         json.dumps(
                             {
@@ -314,7 +320,7 @@ class DiscordAdapter(BaseAdapter):
                                     # Without MESSAGE_CONTENT, guild messages
                                     # arrive with empty content (2023 enforcement)
                                     # and DMs require DIRECT_MESSAGES.
-                                    "intents": (1 << 0) | (1 << 9) | (1 << 15) | (1 << 12),
+                                    "intents": _INTENTS,
                                     "properties": {"os": "linux", "browser": "kazma", "device": "kazma"},
                                 },
                             }

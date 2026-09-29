@@ -4996,4 +4996,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "يفحص رمز البوت وصلاحياته وخوادمه وقناة التسليم، وهل وصلت آخر رسالة كتبتها هناك إلى Kazma",
         "en": "Checks the bot token, its permissions and servers, the delivery channel, and whether your latest message there reached Kazma",
     },
+    "settings.hub.check_direct_message": {
+        "ar": "رسائلك المباشرة",
+        "en": "Your direct messages",
+    },
 }

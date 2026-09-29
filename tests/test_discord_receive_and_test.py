@@ -235,6 +235,10 @@ def _good_routes(**over: tuple[int, Any]) -> dict[str, tuple[int, Any]]:
             {"id": "k", "author": {"id": "bot", "username": "Kazma", "bot": True}, "timestamp": _iso(NOW)},
             {"id": "m9", "author": {"id": "u1", "username": "bader"}, "timestamp": _iso(NOW)},
         ]),
+        "/users/@me/channels": (200, {"id": "dm1", "type": 1}),
+        "/channels/dm1/messages": (200, [
+            {"id": "d7", "author": {"id": "u1", "username": "bader"}, "timestamp": _iso(NOW)},
+        ]),
     }
     routes.update(over)
     return routes
@@ -245,7 +249,7 @@ def _live(**over: Any) -> dict[str, Any]:
         "connected": True, "connected_since": _iso(NOW - timedelta(hours=1)),
         "session_since": _iso(NOW - timedelta(hours=1)), "last_event_at": _iso(NOW),
         "messages": 3, "passed_on": 2, "dropped": {"from_a_bot": 1}, "events": {"MESSAGE_CREATE": 3},
-        "recent": {"m9": "passed_on"}, "allow_all": False,
+        "recent": {"m9": "passed_on", "d7": "passed_on"}, "allow_all": False,
     }
     live.update(over)
     return live
@@ -268,10 +272,11 @@ def test_all_is_well() -> None:
     result = _run(_good_routes(), live=_live())
     assert result["success"] is True and result["bot_name"] == "Kazma", result
     assert [c["key"] for c in result["checks"]] == [
-        "token", "message_text", "servers", "channel", "latest", "allowed", "listening"]
+        "token", "message_text", "servers", "channel", "latest", "direct_message", "allowed", "listening"]
     assert all(c["ok"] is True for c in result["checks"]), result["checks"]
     assert "direct message with bader (user u1)" in _check(result, "channel")["detail"]
     assert "reached Kazma" in _check(result, "latest")["detail"]
+    assert "direct message user u1 wrote to the bot" in _check(result, "direct_message")["detail"]
 
 
 def test_a_refused_token_stops_there() -> None:
@@ -306,13 +311,50 @@ def test_each_problem_is_named_with_its_fix(routes, live, allowed, guild_ids, ke
 
 
 def test_a_message_from_before_the_session_is_not_blamed_on_the_connection() -> None:
-    """A message written while Kazma restarted is worth knowing, not a fault."""
+    """A message older than the current session (it may well have been
+    answered by the run before) is worth knowing, not a fault."""
     old = [{"id": "m1", "author": {"id": "u1", "username": "bader"},
             "timestamp": _iso(NOW - timedelta(hours=3))}]
-    result = _run(_good_routes(**{"/channels/c1/messages": (200, old)}), live=_live(recent={}))
+    result = _run(_good_routes(**{"/channels/c1/messages": (200, old)}), live=_live(recent={"d7": "passed_on"}))
     latest = _check(result, "latest")
-    assert latest["ok"] is None and "before Kazma's current Discord session" in latest["detail"]
+    assert latest["ok"] is None and "older than Kazma's current Discord session" in latest["detail"]
+    assert "cannot say what became of it" in latest["detail"]
     assert result["success"] is True
+
+
+def test_direct_messages_that_never_arrive_are_named() -> None:
+    """The owner's report: answered in the server, silent in direct messages."""
+    result = _run(_good_routes(), live=_live(recent={"m9": "passed_on"}))
+    dm = _check(result, "direct_message")
+    assert dm["ok"] is False and "never reached Kazma" in dm["detail"], dm
+    assert _check(result, "latest")["ok"] is True
+    assert result["success"] is False
+
+
+def test_no_direct_message_to_this_bot_points_at_another_bot() -> None:
+    result = _run(_good_routes(**{"/channels/dm1/messages": (200, [])}), live=_live())
+    dm = _check(result, "direct_message")
+    assert dm["ok"] is None, dm
+    assert "Kazma (bot id bot)" in dm["detail"] and "another bot account" in dm["detail"]
+
+
+def test_opening_the_direct_messages_sends_nothing() -> None:
+    from kazma_gateway.adapters.discord_diagnose import diagnose
+
+    calls: list[tuple[str, str]] = []
+    routes = _good_routes()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path.removeprefix("/api/v10")
+        calls.append((request.method, path))
+        status, body = routes.get(path, (404, {}))
+        return httpx.Response(status, json=body)
+
+    asyncio.run(diagnose("tok", channel_id="c1", allowed_users=["u1"], live=_live(),
+                         transport=httpx.MockTransport(handler)))
+    writes = [c for c in calls if c[0] != "GET"]
+    assert writes == [("POST", "/users/@me/channels")], "the only write opens (or returns) the DM channel"
+    assert not any(p.endswith("/messages") and m == "POST" for m, p in calls)
 
 
 def test_the_test_never_shows_what_was_written() -> None:

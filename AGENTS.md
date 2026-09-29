@@ -3163,7 +3163,10 @@ and Settings' Test said "Connected".
   flags), servers, delivery channel, the newest message a person wrote there
   (who and when, never the text) and whether it reached Kazma (the live
   record, `DiscordAdapter.diagnostics()`, through the service container's
-  gateway), allowed users, connection. The card lists every check.
+  gateway), each allowed user's newest direct message to the bot (the DM
+  channel is opened with `POST /users/@me/channels`, which sends nothing --
+  the Test's only write), allowed users, connection. The card lists every
+  check.
 - **Guild ID** (`connectors.discord.guild_id`) limits server messages
   (`set_allowed_guilds`, boot and `apply_adapter_allowlists`).
 - Gates: `tests/test_discord_receive_and_test.py` (no received message
