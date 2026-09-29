@@ -34,6 +34,10 @@ from kazma_ui.thread_ownership import resolve_caller_thread
 
 logger = logging.getLogger(__name__)
 
+#: The IDE chat's open-file context is a file name and a language; anything
+#: longer than this is not what the IDE sends, and is cut.
+_IDE_CONTEXT_MAX_CHARS = 2000
+
 # Layers extracted from this module when it was split (audit O5).
 from kazma_ui.sse_chat._helpers import (  # noqa: F401
     _convert_messages_to_dicts,
@@ -353,15 +357,16 @@ def create_sse_chat_router(
             except Exception:
                 logger.debug("[SSE] workspace pin skipped", exc_info=True)
 
-        # ── Optional IDE context (Phase: IDE chat box) ───────────────
-        # When the IDE chat sends the currently-open file as context, we
-        # prepend it as a clearly-delimited preamble so the agent knows
-        # what the user is looking at, separate from their question. This
-        # is backward-compatible: the field is absent for the main /chat
-        # page, so behavior there is unchanged.
-        ide_context = (body.get("context") or "").strip()
-        if ide_context:
-            user_message = f"{ide_context}\n\n--- User message ---\n{user_message}"
+        # ── Optional IDE context (the IDE chat box) ──────────────────
+        # The IDE sends the file the user has open. That is context for the
+        # model, not the user's words: it reaches the model as this turn's
+        # note beside the environment block (below), and the question stays
+        # what the user typed -- the chat store, memory, the chat's title,
+        # the language lock and every other tab read that. Prepended to the
+        # message (until 2026-09-29), memory kept "The user has this file
+        # open in the IDE: ..." as the question. Fenced: the field is free
+        # text from the client.
+        ide_context = str(body.get("context") or "").strip()[:_IDE_CONTEXT_MAX_CHARS]
 
         # ── Resolve session and thread_id (shared store) ───────────
         session, thread_id = _resolve_session(session_id)
@@ -806,6 +811,14 @@ def create_sse_chat_router(
                 system_msgs.append({"role": "system", "content": env_block})
         except Exception:
             logger.debug("[sse_chat] per-turn env_context refresh skipped", exc_info=True)
+
+        if ide_context:
+            from kazma_core.safety.prompt_fence import format_untrusted_block
+
+            system_msgs.append({
+                "role": "system",
+                "content": format_untrusted_block(ide_context, source="ide_context"),
+            })
 
         try:
             from kazma_core.language_lock import language_lock_message

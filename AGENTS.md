@@ -317,8 +317,11 @@ workspace. Three new modules; understanding their interaction is essential.
   markdown block.
 - Injected at THREE sites: main agent init (`agent_runner.py` — NOT
   `graph_builder.py`, which has no env_context reference), per-turn in the SSE
-  chat path (`sse_chat/` package, so workspace switches take effect immediately),
-  and into every dispatched worker prompt (`worker.py`).
+  chat path (`sse_chat/` package, so workspace switches take effect immediately
+  -- a turn note since 2026-09-29, §43: before that a chat's first block stayed
+  and every later one was dropped), and into every dispatched worker prompt
+  (`worker.py`). The IDE chat's open file is its own turn note
+  (`source="ide_context"`), never glued to the question.
 - `IdeService.send_to_swarm()` attaches the env block to the task `context` —
   never drop this or workers lose workspace awareness.
 
@@ -1878,7 +1881,10 @@ executing commands after a mission ended Partial) — full diagnosis in
 - The injection header carries an explicit escape clause ("if the user's
   latest message is a NEW task, ignore this directive") as defense in
   depth. Only injection site: gateway `agent_handler/store.py` — keep the
-  `user_text=` argument if a second site is ever added.
+  `user_text=` argument if a second site is ever added. It reaches the model
+  through `agent_handler/graph.py:_rebuild_turn_messages` (§43); until
+  2026-09-29 the history rebuild replaced the state and dropped it whenever
+  the chat had history.
 
 **B. A Partial PAUSES the long task.**
 - The gateway's recursion-Partial handler calls `pause_long_task()`:
@@ -3236,6 +3242,51 @@ Test on every adapter; Telegram and Slack had the same blind spots.
   unaccounted for, with negative controls; each drop reason at its level;
   each check of each Test; a title on the card for every check key).
 
+### 43. A turn's notes are replaced every turn, never stacked (`kazma_core/turn_notes.py`)
+
+A turn's system notes describe THAT turn: the environment block, the
+language lock, the recall block, the task ledger, the "latest message" pin,
+Knowledge Library and IDE context, the working-memory anchor, one-shot notices.
+`SupervisorState.messages` has no reducer, so the checkpoint saves them with
+their turn and the next turn's history holds them again. Measured 2026-09-29
+through the real web route: the fourth turn of a chat sent the model sixteen
+system notes (four "LATEST USER MESSAGE PRIORITY", four task ledgers, three
+recall blocks) and the environment block of the workspace the user had
+switched AWAY from -- `build_turn_messages` deduped notes by their first 80
+characters, which every note of one kind shares, so each later turn's fresh
+block was dropped. Stale notes cost tokens on every call, moved the "stable"
+prompt-cache prefix every turn, and contradicted the current turn (an old
+clarify-only lock, a notice to repeat verbatim).
+
+- **`TURN_NOTE_KINDS` names every kind by how its producer begins the note**
+  -- the only mark a note already in a checkpoint carries.
+  `build_turn_messages` (SSE, WebSocket, voice and the gateway all use it)
+  starts a new turn from the history WITHOUT any turn note; each producer
+  adds this turn's copy, one per kind. The 80-character dedupe remains only
+  for notes that are not turn notes (the base prompt). Not turn notes, never
+  stripped: the base prompt and personality, "About me", `[CONTEXT SUMMARY]`,
+  the abort marker.
+- **A new per-turn note needs a kind.** `tests/test_turn_notes.py` builds
+  every producer's note and checks it is recognised (inline notes by their
+  literal in the producing module), fails on a registered opening nothing
+  writes, and fails on a kind with no producer -- each with a negative
+  control. A note that must persist must not begin with a registered opening.
+- **The IDE chat's open file is a fenced turn note** (`source="ide_context"`,
+  cut at 2,000 characters). It was glued to the question, so memory, the
+  chat store, the chat's title, the language lock and the Knowledge lookup
+  all took "The user has this file open in the IDE: ..." as the user's words.
+- **The gateway rebuilds a turn on its history through
+  `_rebuild_turn_messages`**, which keeps the turn's own notes (the §25
+  continue context was dropped whenever the chat had history) and its
+  message's parts (a photo for a vision model reached it as the printed list,
+  base64 and all).
+- **Prompt cache:** every turn note except the environment block is dynamic
+  (`prompt_cache.is_dynamic_system`), so the cacheable prefix holds only what
+  stays the same from turn to turn.
+- Gates: `tests/test_turn_notes.py`; `tests/e2e/test_turn_notes_route.py`
+  (four turns through the real route, a workspace switch, IDE context; CI
+  lifecycle job).
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser
@@ -3263,6 +3314,13 @@ Test on every adapter; Telegram and Slack had the same blind spots.
   (no English literal in a template), `tests/e2e/test_pages_read_in_arabic.py`
   (every page, and a chat turn, rendered in Arabic). Names that are the same
   in every language live in `tests/_ui_names.py`.
+- **A script's table of labels is catalog keys, not words** (2026-09-29):
+  chat.js named every step's tool in English ("Read file") on Arabic pages.
+  A table read as `ti(pair[0], pair[1])` (`_HEADER_PHASE_LABELS`,
+  `_TOOL_FRIENDLY`) is read by `tests/test_chat_i18n_bridge.py` like any
+  `ti()` key. **Mixed-direction content sits in a `<bdi>`** -- a tool call, an
+  id, a date inside Arabic text is reordered by the bidi algorithm otherwise
+  (`dir="ltr"` for code-like content, automatic for a date).
 - **A save the server accepted never reports failure.** Only the request
   sits in the save's `try`; applying the result to the page is a separate
   step (`tests/js/test_settings_saves_report_truth.js` runs every Settings

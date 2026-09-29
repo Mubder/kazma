@@ -109,7 +109,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Ingest single page",
     },
     "knowledge.intro": {
-        "ar": "أشر إلى موقع توثيق (مثل واجهة Meta WhatsApp) ليقوم كاظمة بابتلاع شجرة الصفحات دفعة واحدة. بعدها يستند الوكيل إلى المحتوى ويستشهد بمصادره عند طرح أسئلتك.",
+        "ar": "أشر إلى موقع توثيق (مثل واجهة Meta WhatsApp) ليقوم كاظمه بابتلاع شجرة الصفحات دفعة واحدة. بعدها يستند الوكيل إلى المحتوى ويستشهد بمصادره عند طرح أسئلتك.",
         "en": "Point Kazma at a documentation site (e.g. the Meta WhatsApp Cloud API) and it ingests the whole tree once. The agent then reasons over the corpus and cites sources when you ask questions.",
     },
     "knowledge.keyword_only": {

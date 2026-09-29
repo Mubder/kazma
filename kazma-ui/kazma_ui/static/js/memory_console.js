@@ -1320,10 +1320,12 @@
       if (!eps.length) { el.textContent = _mt('memory.console.no_memories', 'No memories of conversations yet.'); return; }
       el.innerHTML = eps.map(function(ep) {
         const when = ep.created_at ? _memWhen(ep.created_at) : '';
-        const chat = ep.session_id ? ' · ' + _esc(_mt('memory.console.chat', 'chat')) + ' <span translate="no">' + _esc(String(ep.session_id).slice(0, 12)) + '</span>' : '';
+        // The id is isolated left to right: on an Arabic page its leading
+        // digits joined the date's and the line read "29625 ... 2026/09/c31ba".
+        const chat = ep.session_id ? ' · ' + _esc(_mt('memory.console.chat', 'chat')) + ' <bdi dir="ltr" translate="no">' + _esc(String(ep.session_id).slice(0, 12)) + '</bdi>' : '';
         return '<div style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
           '<span style="min-width:0;overflow-wrap:anywhere;"><span translate="no" style="color:var(--text-primary);">' + _esc(ep.preview || ep.id) + '</span>' +
-          '<span style="display:block;color:var(--text-muted);font-size:0.65rem;">' + _esc(when) + chat + '</span></span>' +
+          '<span style="display:block;color:var(--text-muted);font-size:0.65rem;"><bdi>' + _esc(when) + '</bdi>' + chat + '</span></span>' +
           '<button type="button" class="btn btn-sm v2-memory-forget" data-id="' + _esc(ep.id).replace(/"/g, '&quot;') + '" style="font-size:0.65rem;padding:1px 6px;flex-shrink:0;">' + _esc(_mt('memory.console.forget', 'Forget')) + '</button></div>';
       }).join('');
       el.querySelectorAll('.v2-memory-forget').forEach(function(btn) {

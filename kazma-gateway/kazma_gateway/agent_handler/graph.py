@@ -325,6 +325,58 @@ async def _persist_hitl_pause(
         )
 
 
+async def _rebuild_turn_messages(
+    graph: Any,
+    config: dict[str, Any],
+    turn_messages: list[Any],
+    fallback_text: str,
+) -> list[dict[str, Any]]:
+    """This turn's messages on the chat's history (the checkpoint).
+
+    ``SupervisorState.messages`` has no reducer: the input replaces the
+    checkpoint's list, so the turn is rebuilt on its history. Two things the
+    turn already holds go through the rebuild:
+
+    - its notes (the long-task continue context, §25). Passed as ``None``
+      until 2026-09-29, the rebuilt list replaced the state and dropped the
+      "Proceed" directive whenever the chat had history;
+    - its message's parts. The question used to be ``str(content)``: a photo
+      for a vision model (``build_user_content`` returns text + ``image_url``
+      parts) reached the model as the printed list, base64 and all, and no
+      image. The text parts are the question; the parts go back on it.
+    """
+    from kazma_core.agent.turn_input import build_turn_messages
+
+    content: Any = ""
+    for m in reversed(turn_messages):
+        if isinstance(m, dict) and m.get("role") == "user":
+            content = m.get("content") or ""
+            break
+    if isinstance(content, list):
+        user_text = " ".join(
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        ).strip()
+    else:
+        user_text = str(content or "")
+    if not user_text and not isinstance(content, list):
+        user_text = (fallback_text or "").strip()
+    turn_system = [
+        m for m in turn_messages if isinstance(m, dict) and m.get("role") == "system"
+    ]
+    rebuilt = await build_turn_messages(
+        graph,
+        config,
+        user_text=user_text,
+        system_messages=turn_system or None,
+        fallback_history=None,
+    )
+    if isinstance(content, list) and rebuilt and rebuilt[-1].get("role") == "user":
+        rebuilt[-1] = {**rebuilt[-1], "content": content}
+    return rebuilt
+
+
 def _clean_prior_messages(prior: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Repair incomplete tool-call chains in the loaded checkpoint history.
 
@@ -1472,7 +1524,6 @@ def create_graph_handler(
             # shared helper matches the Web SSE path.
             try:
                 from kazma_core.agent.long_task import consume_long_task_turn
-                from kazma_core.agent.turn_input import build_turn_messages
 
                 # Consume long_task turn-budget at the start of each new
                 # message. A unified /unrestricted record that JUST expired
@@ -1496,19 +1547,8 @@ def create_graph_handler(
                             exc_info=True,
                         )
 
-                user_text = ""
-                for m in reversed(list(state.get("messages") or [])):
-                    if isinstance(m, dict) and m.get("role") == "user":
-                        user_text = str(m.get("content") or "")
-                        break
-                if not user_text:
-                    user_text = (msg.text or "").strip()
-                rebuilt = await build_turn_messages(
-                    graph,
-                    config,
-                    user_text=user_text,
-                    system_messages=None,
-                    fallback_history=None,
+                rebuilt = await _rebuild_turn_messages(
+                    graph, config, list(state.get("messages") or []), msg.text or ""
                 )
                 if rebuilt:
                     state = {**state, "messages": rebuilt}

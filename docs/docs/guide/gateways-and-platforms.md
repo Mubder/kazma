@@ -81,6 +81,22 @@ Telegram is the **most feature-complete** adapter.
 
 **Documents:** all platforms that reach the agent handler support `/documents` (alias `/docs`) for list/status/read/convert/redact/search/health against the shared Document Intelligence service. Chat attachments may auto-parse document types into fenced excerpts. See [Slash commands — Documents](../reference/slash-commands.md) and [Document Intelligence](./document-intelligence.md).
 
+**Tables:** an answer's markdown tables are rewritten as lines before they go to Telegram, Discord or Slack (`kazma_gateway/chat_tables.py`), so they read on a phone. Code blocks are left as they are.
+
+### 2.4 Every message accounted for, and a Test that diagnoses
+
+Each adapter keeps a record of what its connection received (`kazma_gateway/receive_log.py`): the connection's state and its last problem, and what became of each message — handed to Kazma, or left with a reason (the sender is not an allowed user, the message came from a bot, it carried nothing Kazma can read, the queue was full). A message left for a reason you can fix, such as an empty allowed-users list, is a WARNING in the log, at most every ten minutes per reason; a bot's message is logged at DEBUG, the rest at INFO.
+
+**Settings → Providers & Connectors → Platform Connectors → Test** asks the platform and joins its answer with that record:
+
+| Platform | What the Test checks |
+|---|---|
+| Telegram | The bot token; a webhook that would stop polling, and updates waiting; group privacy; the delivery chat (did the person press Start, did they block the bot); the group route; the last message a person sent and what became of it; allowed users; the connection |
+| Discord | The bot token; the Message Content intent; the servers the bot is in; the delivery channel; the newest message a person wrote there; each allowed user's direct messages to the bot, with a link that opens the conversation; allowed users; the connection |
+| Slack | The bot token; the app-level token (Socket Mode); the permissions the token carries; the delivery channel and whether the bot is in it; the newest message there and in each allowed user's direct messages, with a link; allowed users; the connection |
+
+The Test writes nothing, except that on Discord and Slack it opens the direct-message channel with each allowed user, which sends no message.
+
 ---
 
 ## 3. Platform isolation (the core invariant)
