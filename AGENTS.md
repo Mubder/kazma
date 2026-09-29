@@ -3141,11 +3141,35 @@ writes.
   API, and on a real Postgres the in-flight blob (the rule removed as the
   negative control would delete it).
 
-### 42. Discord: sessions resume, every message is accounted for, the Test diagnoses (`kazma_gateway/adapters/discord*.py`)
+### 42. Chat apps: every message accounted for, a Test that diagnoses (`kazma_gateway/receive_log.py`, `connector_test.py`, `adapters/*_diagnose.py`)
 
 Live 2026-09-29: every reconnect Discord asked for ended the session (5 of 5
 in one night), no Discord message had reached Kazma in eight days of logs,
-and Settings' Test said "Connected".
+and Settings' Test said "Connected". The owner then asked for the Discord
+Test on every adapter; Telegram and Slack had the same blind spots.
+
+- **Every adapter keeps a `ReceiveLog`** (`kazma_gateway/receive_log.py`):
+  events by type, connection state and its last problem, and each message's
+  fate by id -- handed on, or dropped with a reason (the adapter's
+  `*_REASONS` = `COMMON_REASONS` + its own). `ReceiveLog.log_drop` is the one
+  rule for saying it (a setting to fix: WARNING, throttled; a bot: DEBUG;
+  else INFO). A new way for an adapter to leave a message needs a reason and
+  a record, or the "unaccounted for" gates fail. Each adapter exposes
+  `diagnostics()`; the Test reads it through the service container's
+  gateway (`providers._live_adapter_diagnostics`).
+- **Each Test is a diagnosis** built from `connector_test` (`Checks`,
+  `judge_message`, `listening`): Discord's below; Telegram's (token, webhook
+  vs polling and waiting updates, group privacy, delivery chat, group route,
+  the last message a person sent -- Telegram lets a bot read no history --,
+  allowed, connection); Slack's (token, app-level token, the token's scopes,
+  delivery channel and membership, latest message there and in each allowed
+  user's DMs, allowed, connection). The card renders every platform's checks
+  from one macro, `connector_checks`, with a title per key
+  (`connectorCheckTitle`) and links only through `connectorLinkOk`
+  (discord.com, slack.com).
+- **Slack's Socket Mode events go through `_accept_event`** (dedupe, channel,
+  allowlist -- the old inline order); the polling path records too; a taken
+  message is logged at INFO ("Enqueued from …"), as on Telegram and Discord.
 
 - **A socket whose session will be resumed closes with 4000**
   (`_close_for_resume`, after op 7 and a resumable op 9). Leaving
@@ -3174,8 +3198,10 @@ and Settings' Test said "Connected".
 - **No chat app shows a markdown table**: `GatewayManager.send` rewrites
   tables outside code fences as lines (`kazma_gateway/chat_tables.py`) for
   Telegram, Discord and Slack alike. `tests/test_chat_tables.py`.
-- Gates: `tests/test_discord_receive_and_test.py` (no received message
-  unaccounted for, with a negative control; each drop reason; each check).
+- Gates: `tests/test_discord_receive_and_test.py`,
+  `tests/test_telegram_slack_receive_and_test.py` (nothing a connection reads
+  unaccounted for, with negative controls; each drop reason at its level;
+  each check of each Test; a title on the card for every check key).
 
 ## UI Conventions (Web)
 

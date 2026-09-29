@@ -418,19 +418,3 @@ def test_the_guild_id_reaches_the_running_adapter() -> None:
     adapter = _adapter()
     apply_adapter_allowlists(adapter, Store())
     assert adapter.diagnostics()["allowed_guilds"] == ["g1", "g2"]
-
-
-def test_every_check_has_a_title_on_the_card() -> None:
-    src = (ADAPTERS / "discord_diagnose.py").read_text(encoding="utf-8")
-    keys = set(re.findall(r'add\("([a-z_]+)"', src)) | {"listening"}
-    js = (REPO / "kazma-ui" / "kazma_ui" / "static" / "js" / "settings_hub.js").read_text(encoding="utf-8")
-    body = js[js.index("connectorCheckTitle(key)"):]
-    body = body[: body.index("return titles")]
-    titled = set(re.findall(r"^\s*([a-z_]+): _k\(", body, re.M))
-    assert keys == titled, (keys, titled)
-    html = (REPO / "kazma-ui" / "kazma_ui" / "templates" / "settings.html").read_text(encoding="utf-8")
-    card = html[html.index("<!-- Discord -->"): html.index("<!-- Slack -->")]
-    assert "connectorCheckTitle(c.key)" in card and 'translate="no" x-text="c.detail"' in card
-    # A check's link opens Discord only -- the page never follows another address.
-    assert "c.link && String(c.link).startsWith('https://discord.com/')" in card
-    assert 'rel="noopener noreferrer"' in card

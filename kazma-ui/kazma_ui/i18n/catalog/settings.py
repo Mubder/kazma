@@ -5004,4 +5004,40 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "افتح هذه المحادثة في Discord",
         "en": "Open this conversation in Discord",
     },
+    "settings.hub.check_receiving": {
+        "ar": "كيف تصل الرسائل",
+        "en": "How messages arrive",
+    },
+    "settings.hub.check_groups": {
+        "ar": "المجموعات",
+        "en": "Groups",
+    },
+    "settings.hub.check_chat": {
+        "ar": "محادثة التسليم",
+        "en": "Delivery chat",
+    },
+    "settings.hub.check_group": {
+        "ar": "مسار المجموعة",
+        "en": "Group route",
+    },
+    "settings.hub.check_app_token": {
+        "ar": "رمز Socket Mode",
+        "en": "Socket Mode token",
+    },
+    "settings.hub.check_scopes": {
+        "ar": "الصلاحيات",
+        "en": "Permissions",
+    },
+    "settings.hub.open_in_slack": {
+        "ar": "افتح هذه المحادثة في Slack",
+        "en": "Open this conversation in Slack",
+    },
+    "settings.hub.telegram_test_title": {
+        "ar": "يفحص رمز البوت وطريقة وصول الرسائل وخصوصية المجموعات ومحادثة التسليم ومسار المجموعة، وما حدث لآخر رسالة أرسلتها",
+        "en": "Checks the bot token, how messages arrive, group privacy, the delivery chat and the group route, and what became of the last message you sent",
+    },
+    "settings.hub.slack_test_title": {
+        "ar": "يفحص رمزي البوت والتطبيق والصلاحيات وقناة التسليم، وهل وصلت آخر رسائلك هناك وفي الرسائل المباشرة إلى Kazma",
+        "en": "Checks the bot and app tokens, the permissions, the delivery channel, and whether your latest messages there and in direct messages reached Kazma",
+    },
 }

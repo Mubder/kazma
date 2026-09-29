@@ -625,10 +625,28 @@
                 channel: _k('settings.hub.check_channel', 'Delivery channel'),
                 latest: _k('settings.hub.check_latest', 'Your latest message'),
                 direct_message: _k('settings.hub.check_direct_message', 'Your direct messages'),
+                receiving: _k('settings.hub.check_receiving', 'How messages arrive'),
+                groups: _k('settings.hub.check_groups', 'Groups'),
+                chat: _k('settings.hub.check_chat', 'Delivery chat'),
+                group: _k('settings.hub.check_group', 'Group route'),
+                app_token: _k('settings.hub.check_app_token', 'Socket Mode token'),
+                scopes: _k('settings.hub.check_scopes', 'Permissions'),
                 allowed: _k('settings.hub.check_allowed', 'Allowed users'),
                 listening: _k('settings.hub.check_listening', 'Kazma is listening'),
             };
             return titles[key] || key;
+        },
+
+        connectorLinkOk(link) {
+            // A check's link opens the platform's own app or site, nothing else.
+            const s = String(link || '');
+            return s.startsWith('https://discord.com/') || s.startsWith('https://slack.com/');
+        },
+
+        connectorLinkLabel(platform) {
+            return platform === 'slack'
+                ? _k('settings.hub.open_in_slack', 'Open this conversation in Slack')
+                : _k('settings.hub.open_in_discord', 'Open this conversation in Discord');
         },
 
         async loadHubProfiles() {

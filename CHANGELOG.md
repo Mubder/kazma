@@ -1,5 +1,48 @@
 # CHANGELOG
 
+## Every chat app's Test diagnoses, and every adapter accounts for each message (2026-09-29)
+
+The owner liked the new Discord Test -- real checks instead of "Connected" --
+and asked for it on the other adapters. Telegram and Slack also had Discord's
+blind spots: Telegram dropped an update it could not read (a sticker, a
+contact) without a word and logged a user outside the allowlist at DEBUG
+only; Slack logged every message it RECEIVED at DEBUG only, and dropped one
+from a channel outside the list, or one it could not read, without a line at
+INFO. So the log could not say whether a message ever arrived.
+
+- **One record for every adapter** (`kazma_gateway/receive_log.py`,
+  generalized from Discord's): events by type, connection state and its last
+  problem (Telegram's "another program is collecting this bot's messages" --
+  its 409 Conflict -- or Slack refusing Socket Mode), and what became of each
+  message by id: handed on, or dropped with a reason. One rule logs a drop
+  (a setting to fix: a WARNING at most every ten minutes; a bot's message:
+  DEBUG; the rest INFO). Slack now logs "Enqueued from …" at INFO like the
+  others. Slack's Socket Mode events go through one gate
+  (`SlackAdapter._accept_event`), same checks in the same order.
+- **The Telegram Test** (`adapters/telegram_diagnose.py`): the bot token; a
+  webhook that would make Telegram refuse Kazma's polling, and updates
+  waiting; group privacy mode; the delivery chat (did the person press
+  Start, did they block the bot); the group route and whether its bot is
+  still in the group; what became of the last message a person sent; the
+  allowed users; the connection.
+- **The Slack Test** (`adapters/slack_diagnose.py`): the bot token; the
+  app-level token opening Socket Mode; the permissions the bot token
+  carries (and what each one is for -- direct messages need im:history);
+  the delivery channel and whether the bot is in it; the newest message a
+  person wrote there and in each allowed user's direct messages, and whether
+  it reached Kazma, with a link that opens the conversation in Slack.
+- **The cards** show every check from one template (`connector_checks`);
+  a check's link opens discord.com or slack.com only.
+- Shared: `kazma_gateway/connector_test.py` (the rows, times, and the two
+  verdicts -- a message's fate and the connection's state).
+
+`tests/test_telegram_slack_receive_and_test.py`: each Telegram and Slack
+drop at its log level; nothing a connection reads goes unaccounted for
+(negative control: a drop that is not recorded fails both); a reaction is no
+message; each problem each Test names; the routes' wiring with the saved
+settings (a masked Slack app token falls back to SLACK_APP_TOKEN, as the
+gateway does); a title on the card for every check of every adapter.
+
 ## Tables read on a phone; the Discord Test opens the right conversation (2026-09-29)
 
 - **The owner's direct messages went to another bot account** with the same

@@ -26,13 +26,12 @@ import asyncio
 import json
 import logging
 import random
-import time
 from typing import Any
 
 import httpx
 
 from kazma_core.background import spawn_background
-from kazma_gateway.adapters.discord_receive import DROP_REASONS, DiscordReceiveLog
+from kazma_gateway.adapters.discord_receive import DiscordReceiveLog
 from kazma_gateway.gateway import (
     Attachment,
     BaseAdapter,
@@ -117,7 +116,6 @@ class DiscordAdapter(BaseAdapter):
         # What the connection received and why each unanswered message was
         # left (discord_receive); the connector Test shows it.
         self._receive = DiscordReceiveLog()
-        self._drop_warned_at: dict[str, float] = {}
 
     def set_allowed_users(self, user_ids: list[str] | set[str]) -> None:
         """Replace the user allowlist at runtime (mirrors Telegram).
@@ -433,7 +431,14 @@ class DiscordAdapter(BaseAdapter):
         nothing, and a week of the owner's messages vanished without a line."""
         from kazma_gateway.adapters.discord_parse import drop_reason
 
-        self._receive.message(data.get("id") if isinstance(data, dict) else None)
+        d = data if isinstance(data, dict) else {}
+        author = d.get("author") or {}
+        self._receive.message(
+            d.get("id"),
+            author_id=author.get("id"),
+            person=not author.get("bot"),
+            where=f"server {d['guild_id']}" if d.get("guild_id") else "a direct message",
+        )
         parsed = self._parse_message(data)
         if parsed is None:
             self._note_drop(drop_reason(data), data)
@@ -455,29 +460,13 @@ class DiscordAdapter(BaseAdapter):
                 return None
         return parsed
 
-    #: Drops that point at a setting to fix: a WARNING, at most every 10 min
-    #: per reason (a busy server must not flood the log); the rest are INFO,
-    #: and a bot's message (Kazma's own posts among them) DEBUG.
+    #: Drops that point at a setting to fix (a WARNING, throttled -- the
+    #: shared rule in ReceiveLog.log_drop).
     _DROP_WARNINGS = frozenset({"no_text", "no_allowlist", "server_not_allowed", "queue_full"})
-    _DROP_WARN_EVERY_S = 600.0
 
     def _note_drop(self, reason: str, data: Any) -> None:
-        record = self._receive.drop(reason, data)
-        if reason == "from_a_bot":
-            logger.debug("[discord] Ignored a message from a bot in channel %s", record["channel_id"])
-            return
-        where = f"server {record['guild_id']}" if record["guild_id"] else "a direct message"
-        level = logging.INFO
-        if reason in self._DROP_WARNINGS:
-            now = time.monotonic()
-            if now - self._drop_warned_at.get(reason, -self._DROP_WARN_EVERY_S) >= self._DROP_WARN_EVERY_S:
-                self._drop_warned_at[reason] = now
-                level = logging.WARNING
-        logger.log(
-            level,
-            "[discord] A message from user %s in %s (channel %s) was not answered: it %s",
-            record["author_id"], where, record["channel_id"], DROP_REASONS.get(reason, reason),
-        )
+        record = self._receive.drop_event(reason, data)
+        self._receive.log_drop(logger, "discord", record, warn=self._DROP_WARNINGS)
 
     async def _process_and_enqueue(
         self, msg: IncomingMessage, queue: asyncio.Queue[IncomingMessage]
@@ -500,7 +489,7 @@ class DiscordAdapter(BaseAdapter):
             except asyncio.QueueFull:
                 self._note_drop("queue_full", raw)
         except Exception:
-            self._receive.drop("processing_failed", raw)
+            self._receive.drop_event("processing_failed", raw)
             logger.exception("[discord] Failed to process message in background")
 
     def _chain_channel_work(self, chain_key: str, coro: Any) -> None:
