@@ -1,6 +1,6 @@
 # What Kazma does — a plain list
 
-Written from the code on **2026-09-27** for the website: every line was
+Written from the code on **2026-09-29** for the website: every line was
 checked against the source, and each names where to look. It says what exists,
 not what is planned.
 
@@ -22,6 +22,8 @@ Every line below describes that setup.
 |---|---|---|
 | Web chat with streaming answers, a step-by-step activity view per answer, and approvals inline | Shipped | `/chat` |
 | Telegram, Discord and Slack: text, photos and documents, voice notes transcribed, approve/deny buttons, per-platform allowed-user lists | Shipped | `kazma-gateway/` |
+| Each chat app's Test diagnoses the connection: the token, the chat or channel Kazma delivers to, direct messages, allowed users, and what became of the last message a person sent | Shipped | Settings → Providers & Connectors → Platform Connectors |
+| Tables in an answer are rewritten as lines for Telegram, Discord and Slack, so they read on a phone | Shipped | `kazma_gateway/chat_tables.py` |
 | Terminal UI, including a file editor | Shipped | `kazma-tui` |
 | Command line: one-shot questions (`kazma ask`), and the Agent Client Protocol for editors (`kazma acp`) | Shipped | `kazma-cli/` |
 | An MCP server: other agents can use Kazma's tools, with the same approval gate (`kazma mcp`) | Shipped | `kazma_core/mcp/server.py` |
@@ -117,6 +119,7 @@ Every line below describes that setup.
 | Feature | Status | Where |
 |---|---|---|
 | A supervisor that restarts on real failure, reloads gracefully and pages you over Telegram | Shipped | `scripts/service/kazma_guard.py` |
+| One status card per restart: how long Kazma was down and whether each chat app connected (start and stop messages are optional) | Shipped | Settings → Adapters & Routes → Server status messages |
 | Backups of everything every 6 hours, snapshotted locally and offsite (restic), checked daily, with a weekly restore rehearsal of the database | Shipped | [Disaster recovery](docs/ops/disaster-recovery.md) |
 | Move an install to another machine or OS in one bundle | Shipped | `kazma migrate` |
 | Health checks that make a real round trip; alerts to Telegram, Discord or Slack; a daily digest and a weekly resilience report | Shipped | `/health/deep` |

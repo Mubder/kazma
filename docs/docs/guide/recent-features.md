@@ -7,6 +7,22 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 # Recent features guide
 
+**New in 2026-09-28/29 — more accounts, and chat apps that account for every
+message.** **Settings → Email → Other accounts** adds more mailboxes — a Google
+or Microsoft sign-in under a short name you choose, or an app password over
+IMAP — each with its own calendar; in chat, name the account or its address
+([Email](./email-integration)). Each chat app's **Test** (Settings → Providers &
+Connectors → Platform Connectors) diagnoses the connection: the token, the chat
+or channel Kazma delivers to, direct messages, allowed users, and what became of
+the last message a person sent. Every message a chat app receives is either
+answered or logged with the reason it was not
+([Gateways](./gateways-and-platforms)). Discord keeps its session through the
+reconnects Discord asks for. Tables in an answer read on a phone on Telegram,
+Discord and Slack. A restart sends one status card — how long Kazma was down
+and whether each chat app connected — instead of three messages (**Settings →
+Adapters & Routes → Server status messages**; [Deployment](./deployment)). Every
+page reads in Arabic, the login page included.
+
 **New in 2026-09-26/27 — memory you can see and steer.** A turn that used
 memory shows a **Memory used** row in its activity: what the model was given,
 in order, stored with the turn (below). **Settings → Memory → About me** is a
