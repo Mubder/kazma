@@ -10,8 +10,15 @@ every one of those reconnects failed (seven of seven on 2026-09-25, each
 request and the new READY was never delivered -- a new session does not
 replay the old one's events.
 
-``_FakeDiscord`` below applies Discord's rule, so the tests are statements
+``_FakeDiscord`` below applies Discord's rules, so the tests are statements
 about what Discord accepts.
+
+It applied only the URL rule until 2026-09-29, and every reconnect on the live
+install still failed (five of five that night): Discord also ends a session
+whose socket was closed with 1000 or 1001, and leaving ``async with
+websockets.connect(...)`` -- how the adapter answered op 7 -- closes with
+1000. The fake now closes a socket the way websockets does and applies that
+rule too.
 """
 
 from __future__ import annotations
@@ -35,6 +42,7 @@ class _Socket:
         self.server = server
         self.url = url
         self.sent: list[dict[str, Any]] = []
+        self.close_code: int | None = None
         self._frames: asyncio.Queue[str | None] = asyncio.Queue()
 
     async def recv(self) -> str:
@@ -46,7 +54,10 @@ class _Socket:
         for frame in self.server.answer(self, msg):
             self._frames.put_nowait(frame)
 
-    async def close(self) -> None:
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        # websockets' default is 1000; a second close changes nothing.
+        if self.close_code is None:
+            self.close_code = code
         self._frames.put_nowait(None)
 
     def push(self, frame: dict[str, Any] | None) -> None:
@@ -70,6 +81,7 @@ class _FakeDiscord:
         self.sessions = 0
         self.seq = 0
         self.after_ready: list[dict[str, Any] | None] = []
+        self.session_socket: dict[str, _Socket] = {}
 
     def connect(self, url: str, **_kw: Any) -> Any:
         sock = _Socket(self, url)
@@ -80,9 +92,19 @@ class _FakeDiscord:
                 return sock
 
             async def __aexit__(self_inner, *exc: object) -> None:
-                return None
+                await sock.close()  # what leaving ``async with`` does: 1000
 
         return _Ctx()
+
+    def _resumable(self, sock: _Socket, session_id: str) -> bool:
+        """Discord's rules: the Resume must come to READY's resume URL, and
+        the session's socket must not have been closed with 1000/1001."""
+        last = self.session_socket.get(session_id)
+        return (
+            sock.url.startswith(RESUME_BASE)
+            and last is not None
+            and last.close_code not in (1000, 1001)
+        )
 
     def _dispatch(self, t: str, d: dict[str, Any]) -> str:
         self.seq += 1
@@ -92,17 +114,21 @@ class _FakeDiscord:
         op = msg.get("op")
         if op == 2:  # Identify -> a new session
             self.sessions += 1
+            session_id = f"s{self.sessions}"
+            self.session_socket[session_id] = sock
             out = [
                 self._dispatch(
                     "READY",
-                    {"session_id": f"s{self.sessions}", "resume_gateway_url": RESUME_BASE},
+                    {"session_id": session_id, "resume_gateway_url": RESUME_BASE},
                 )
             ]
             out += [json.dumps(f) if f is not None else None for f in self.after_ready]
             self.after_ready = []
             return out
-        if op == 6:  # Resume -> only on the URL READY named
-            if sock.url.startswith(RESUME_BASE):
+        if op == 6:  # Resume -> only where Discord still holds the session
+            session_id = str((msg.get("d") or {}).get("session_id"))
+            if self._resumable(sock, session_id):
+                self.session_socket[session_id] = sock
                 return [self._dispatch("RESUMED", {}), None]
             return [json.dumps({"op": 9, "d": False}), None]
         return []
@@ -139,12 +165,63 @@ async def test_a_reconnect_request_resumes_the_same_session(discord):
 
     await _run(adapter)  # the resume
 
+    assert discord.sockets[0].close_code not in (1000, 1001), "closed as done: the session ended"
     resume = discord.sockets[1]
     assert resume.url == f"{RESUME_BASE}/?v=10&encoding=json"
     assert resume.sent[0]["op"] == 6
     assert resume.sent[0]["d"]["session_id"] == "s1"
     assert discord.sessions == 1, "the resume must not have ended in a new session"
     assert adapter._session_id == "s1"
+
+
+async def test_a_normal_close_is_what_discord_refuses(discord, monkeypatch):
+    """Negative control: the reconnect as the adapter answered it until
+    2026-09-29. Leaving ``async with`` closed the socket with 1000, and the
+    Resume -- on the right URL -- was refused."""
+    adapter = _adapter()
+
+    async def leave_it_to_the_block(ws: Any) -> None:
+        return None
+
+    monkeypatch.setattr(adapter, "_close_for_resume", leave_it_to_the_block)
+    discord.after_ready = [{"op": 7, "d": None}]
+    await _run(adapter)
+    assert discord.sockets[0].close_code == 1000
+    await _run(adapter)
+    assert discord.sockets[1].url == f"{RESUME_BASE}/?v=10&encoding=json"
+    assert adapter._session_id is None, "Discord answered op 9 and the session is gone"
+
+
+async def test_a_resumable_invalid_session_is_resumed(discord):
+    """op 9 with d=true: Discord says the session may be resumed -- so the
+    socket must not be closed as done either."""
+    adapter = _adapter()
+    discord.after_ready = [{"op": 9, "d": True}]
+    assert await _run(adapter) is None
+    assert discord.sockets[0].close_code not in (1000, 1001)
+    await _run(adapter)
+    assert discord.sockets[1].sent[0]["op"] == 6
+    assert discord.sessions == 1 and adapter._session_id == "s1"
+
+
+async def test_a_shutdown_closes_the_session_as_done(discord):
+    """Shutdown is the one close that ends the session: 1000, and the bot
+    shows offline at once. Only a reconnect keeps it."""
+    adapter = _adapter()
+    shutdown = asyncio.Event()
+    task = asyncio.create_task(adapter._connect_gateway(asyncio.Queue(), shutdown))
+    try:
+        for _ in range(200):
+            if adapter._session_id:
+                break
+            await asyncio.sleep(0)
+        assert adapter._session_id == "s1"
+        shutdown.set()
+        await asyncio.wait_for(task, timeout=2)
+    finally:
+        if adapter._heartbeat_task is not None:
+            adapter._heartbeat_task.cancel()
+    assert discord.sockets[0].close_code == 1000
 
 
 async def test_the_old_url_is_what_discord_refuses(discord):
