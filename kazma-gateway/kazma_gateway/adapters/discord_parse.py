@@ -6,7 +6,20 @@ from typing import Any
 
 from kazma_gateway.gateway import Attachment, IncomingMessage
 
-__all__ = ["parse_message_create"]
+__all__ = ["drop_reason", "parse_message_create"]
+
+
+def drop_reason(data: dict[str, Any] | None) -> str:
+    """Why :func:`parse_message_create` made nothing of *data*: a key of
+    ``discord_receive.DROP_REASONS``. Mirrors its checks in their order, so
+    a message it rejects is never dropped without saying why."""
+    if not data:
+        return "empty_event"
+    if (data.get("author") or {}).get("bot"):
+        return "from_a_bot"
+    if not (data.get("content") or "").strip() and not (data.get("attachments") or []):
+        return "no_text"
+    return "no_channel"
 
 
 def parse_message_create(data: dict[str, Any] | None) -> IncomingMessage | None:

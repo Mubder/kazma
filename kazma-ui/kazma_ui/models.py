@@ -236,6 +236,9 @@ class ConnectorTestResponse(BaseModel):
     success: bool
     bot_name: str | None = None
     error: str | None = None
+    #: Each check a platform's Test made: ``{"key", "ok" (true / false /
+    #: null = worth knowing), "detail"}`` -- Discord's since 2026-09-29.
+    checks: list[dict[str, Any]] | None = None
 
 
 class MaskedSecretResponse(BaseModel):

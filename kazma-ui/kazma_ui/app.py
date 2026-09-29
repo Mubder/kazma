@@ -1047,6 +1047,14 @@ class KazmaAppBuilder:
                     discord_ids = [uid.strip() for uid in discord_allowed.split(",") if uid.strip()]
                     discord_adapter.set_allowed_users(discord_ids)
                     logger.info("[Gateway] Discord allowed users: %d IDs", len(discord_ids))
+                discord_guilds = [
+                    g.strip()
+                    for g in str(self.config_store.get("connectors.discord.guild_id", "") or "").split(",")
+                    if g.strip()
+                ]
+                if discord_guilds:
+                    discord_adapter.set_allowed_guilds(discord_guilds)
+                    logger.info("[Gateway] Discord answers server messages from %d server(s) only", len(discord_guilds))
                 self.gateway.add_adapter(discord_adapter)
                 logger.info("[Gateway] Discord adapter registered")
             else:

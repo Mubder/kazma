@@ -405,12 +405,27 @@
                         </label>
                         <span style="flex:1"></span>
                         <button class="btn btn-secondary btn-sm" @click="testRoute('discord')" :disabled="adapterRoutingTesting === 'discord'"
+                                title="{{ t('settings.hub.discord_test_title') }}"
                                 x-text="adapterRoutingTesting === 'discord' ? t('settings.hub.testing') : t('settings.test')"></button>
-                        <template x-if="adapterRoutingTest && adapterRoutingTest.name === 'discord'">
+                        <template x-if="adapterRoutingTest && adapterRoutingTest.name === 'discord' && !adapterRoutingTest.checks">
                             <span style="font-size:0.75rem" :class="adapterRoutingTest.success ? 'text-success' : 'text-error'"
                                   x-text="adapterRoutingTest.success ? (t('settings.bk.connected') + (adapterRoutingTest.bot_name ? ' (@' + adapterRoutingTest.bot_name + ')' : '')) : ('✗ ' + adapterRoutingTest.error)"></span>
                         </template>
                     </div>
+                    <!-- Each check the Test made (2026-09-29): it used to say
+                         only "Connected" while no message had reached Kazma
+                         for a week. Details are the server's words. -->
+                    <template x-if="adapterRoutingTest && adapterRoutingTest.name === 'discord' && adapterRoutingTest.checks">
+                        <ul class="connector-checks" aria-live="polite">
+                            <template x-for="(c, i) in adapterRoutingTest.checks" :key="c.key + '-' + i">
+                                <li :class="c.ok === true ? 'text-success' : (c.ok === false ? 'text-error' : 'text-muted')">
+                                    <span aria-hidden="true" x-text="c.ok === true ? '✓' : (c.ok === false ? '✗' : '•')"></span>
+                                    <strong x-text="connectorCheckTitle(c.key)"></strong>
+                                    <span translate="no" x-text="c.detail"></span>
+                                </li>
+                            </template>
+                        </ul>
+                    </template>
                     <div class="two-col-grid">
                         <div>
                             <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">{{ t('settings.bot_token') }}</label>

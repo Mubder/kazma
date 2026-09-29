@@ -3141,6 +3141,34 @@ writes.
   API, and on a real Postgres the in-flight blob (the rule removed as the
   negative control would delete it).
 
+### 42. Discord: sessions resume, every message is accounted for, the Test diagnoses (`kazma_gateway/adapters/discord*.py`)
+
+Live 2026-09-29: every reconnect Discord asked for ended the session (5 of 5
+in one night), no Discord message had reached Kazma in eight days of logs,
+and Settings' Test said "Connected".
+
+- **A socket whose session will be resumed closes with 4000**
+  (`_close_for_resume`, after op 7 and a resumable op 9). Leaving
+  `async with websockets.connect(...)` closes with 1000, which Discord reads
+  as the end of the session; Resume goes to READY's `resume_gateway_url`.
+  Shutdown alone closes with 1000. `tests/test_discord_gateway_resume.py`
+  (its fake Discord applies both rules).
+- **Every MESSAGE_CREATE goes through `_accept_message`**: handed on, or
+  dropped with a reason from `discord_receive.DROP_REASONS` -- recorded by
+  message id and logged (a setting problem as a WARNING, throttled; a bot's
+  message at DEBUG). `drop_reason` mirrors every refusal of
+  `parse_message_create`. A new way to leave a message needs a reason.
+- **The Test is a diagnosis** (`discord_diagnose.diagnose`, from
+  `/api/connectors/discord/test`): token, Message Content Intent (app
+  flags), servers, delivery channel, the newest message a person wrote there
+  (who and when, never the text) and whether it reached Kazma (the live
+  record, `DiscordAdapter.diagnostics()`, through the service container's
+  gateway), allowed users, connection. The card lists every check.
+- **Guild ID** (`connectors.discord.guild_id`) limits server messages
+  (`set_allowed_guilds`, boot and `apply_adapter_allowlists`).
+- Gates: `tests/test_discord_receive_and_test.py` (no received message
+  unaccounted for, with a negative control; each drop reason; each check).
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

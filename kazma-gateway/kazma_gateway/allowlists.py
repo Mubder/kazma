@@ -143,6 +143,12 @@ def apply_adapter_allowlists(adapter: Any, config_store: Any) -> None:
         raw = _cs_get(config_store, "connectors.discord.allowed_users", "")
         if hasattr(adapter, "set_allowed_users"):
             adapter.set_allowed_users(split_ids(raw))
+        # The card's Guild ID: server messages from those servers only (direct
+        # messages always). It was saved and read by nothing until 2026-09-29.
+        if hasattr(adapter, "set_allowed_guilds"):
+            adapter.set_allowed_guilds(
+                split_ids(_cs_get(config_store, "connectors.discord.guild_id", ""))
+            )
         return
     if name == "slack":
         users = split_ids(_cs_get(config_store, "connectors.slack.allowed_users", ""))

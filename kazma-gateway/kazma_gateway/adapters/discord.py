@@ -26,11 +26,13 @@ import asyncio
 import json
 import logging
 import random
+import time
 from typing import Any
 
 import httpx
 
 from kazma_core.background import spawn_background
+from kazma_gateway.adapters.discord_receive import DROP_REASONS, DiscordReceiveLog
 from kazma_gateway.gateway import (
     Attachment,
     BaseAdapter,
@@ -107,6 +109,10 @@ class DiscordAdapter(BaseAdapter):
         # can no longer enqueue AFTER a later text message and swap turn
         # order (audit L-28; same pattern as Telegram's _chat_chains).
         self._channel_chains: dict[str, asyncio.Task] = {}
+        # What the connection received and why each unanswered message was
+        # left (discord_receive); the connector Test shows it.
+        self._receive = DiscordReceiveLog()
+        self._drop_warned_at: dict[str, float] = {}
 
     def set_allowed_users(self, user_ids: list[str] | set[str]) -> None:
         """Replace the user allowlist at runtime (mirrors Telegram).
@@ -115,6 +121,21 @@ class DiscordAdapter(BaseAdapter):
         attribute so callers don't reach into internals.
         """
         self._allowed_users = {str(uid) for uid in user_ids}
+
+    def set_allowed_guilds(self, guild_ids: list[str] | set[str]) -> None:
+        """Answer server messages from these servers only (direct messages
+        always); empty = every server. The Settings card's Guild ID, applied
+        live (``allowlists.apply_adapter_allowlists``)."""
+        self._allowed_guilds = {str(g).strip() for g in guild_ids if str(g).strip()}
+
+    def diagnostics(self) -> dict[str, Any]:
+        """The live receive record for the connector Test (plain data)."""
+        return {
+            **self._receive.snapshot(),
+            "allowed_users": len(self._allowed_users),
+            "allow_all": self._allow_all,
+            "allowed_guilds": sorted(self._allowed_guilds),
+        }
 
     def actor_allowed(self, user_id: object) -> bool:
         """Fail-closed allowlist: empty + ``allow_all=False`` rejects everyone."""
@@ -194,6 +215,10 @@ class DiscordAdapter(BaseAdapter):
                     if await self.jitter_sleep(shutdown_event):
                         break
                     continue
+                finally:
+                    # Whatever ended this connection, it is not up until the
+                    # next READY / RESUMED says so.
+                    self._receive.disconnected()
 
         finally:
             if self._heartbeat_task:
@@ -313,6 +338,8 @@ class DiscordAdapter(BaseAdapter):
 
                     if s is not None:
                         self._sequence = s
+                    if op == 0 and t:
+                        self._receive.event(str(t))
 
                     # Dispatch
                     if op == 0 and t == "READY":
@@ -322,32 +349,16 @@ class DiscordAdapter(BaseAdapter):
                             if isinstance(d, dict)
                             else None
                         )
+                        self._receive.ready(d)
                         logger.info("[discord] Gateway READY, session_id=%s", self._session_id)
 
                     elif op == 0 and t == "RESUMED":
+                        self._receive.resumed()
                         logger.info("[discord] Gateway session resumed successfully")
 
                     elif op == 0 and t == "MESSAGE_CREATE":
-                        parsed = self._parse_message(d)
-                        if parsed:
-                            if self._allowed_guilds:
-                                gid = parsed.context_metadata.get("guild_id")
-                                if gid and gid not in self._allowed_guilds:
-                                    continue
-
-                            # User-level allowlist (fail-closed when empty + !allow_all)
-                            if not self._allowed_users and not self._allow_all:
-                                logger.warning("[discord] Rejecting message — no allowed_users and allow_all is false")
-                                continue
-                            if self._allowed_users:
-                                uid = parsed.context_metadata.get("user_id")
-                                if not uid or uid not in self._allowed_users:
-                                    logger.info(
-                                        "[discord] Dropping message from "
-                                        "non-allowed user %s", uid,
-                                    )
-                                    continue
-
+                        parsed = self._accept_message(d)
+                        if parsed is not None:
                             # Voice fetch + transcribe run off the receive loop,
                             # on a per-channel serial chain (audit L-28).
                             self._chain_channel_work(
@@ -409,14 +420,71 @@ class DiscordAdapter(BaseAdapter):
             # Already gone: nothing was closed as "normal", the session stays.
             logger.debug("[discord] close before resume failed", exc_info=True)
 
+    def _accept_message(self, data: Any) -> IncomingMessage | None:
+        """The MESSAGE_CREATE to answer, or None -- with the reason recorded
+        and logged. Every way a message is left passes through here: until
+        2026-09-29 three of them (no text, another server, a bot) said
+        nothing, and a week of the owner's messages vanished without a line."""
+        from kazma_gateway.adapters.discord_parse import drop_reason
+
+        self._receive.message(data.get("id") if isinstance(data, dict) else None)
+        parsed = self._parse_message(data)
+        if parsed is None:
+            self._note_drop(drop_reason(data), data)
+            return None
+        meta = parsed.context_metadata or {}
+        if self._allowed_guilds:
+            gid = meta.get("guild_id")
+            if gid and gid not in self._allowed_guilds:
+                self._note_drop("server_not_allowed", data)
+                return None
+        # User-level allowlist (fail-closed when empty + !allow_all)
+        if not self._allowed_users and not self._allow_all:
+            self._note_drop("no_allowlist", data)
+            return None
+        if self._allowed_users:
+            uid = meta.get("user_id")
+            if not uid or uid not in self._allowed_users:
+                self._note_drop("user_not_allowed", data)
+                return None
+        return parsed
+
+    #: Drops that point at a setting to fix: a WARNING, at most every 10 min
+    #: per reason (a busy server must not flood the log); the rest are INFO,
+    #: and a bot's message (Kazma's own posts among them) DEBUG.
+    _DROP_WARNINGS = frozenset({"no_text", "no_allowlist", "server_not_allowed", "queue_full"})
+    _DROP_WARN_EVERY_S = 600.0
+
+    def _note_drop(self, reason: str, data: Any) -> None:
+        record = self._receive.drop(reason, data)
+        if reason == "from_a_bot":
+            logger.debug("[discord] Ignored a message from a bot in channel %s", record["channel_id"])
+            return
+        where = f"server {record['guild_id']}" if record["guild_id"] else "a direct message"
+        level = logging.INFO
+        if reason in self._DROP_WARNINGS:
+            now = time.monotonic()
+            if now - self._drop_warned_at.get(reason, -self._DROP_WARN_EVERY_S) >= self._DROP_WARN_EVERY_S:
+                self._drop_warned_at[reason] = now
+                level = logging.WARNING
+        logger.log(
+            level,
+            "[discord] A message from user %s in %s (channel %s) was not answered: it %s",
+            record["author_id"], where, record["channel_id"], DROP_REASONS.get(reason, reason),
+        )
+
     async def _process_and_enqueue(
         self, msg: IncomingMessage, queue: asyncio.Queue[IncomingMessage]
     ) -> None:
         """Transcribe voice attachments, then put the message on the bus."""
+        meta = msg.context_metadata or {}
+        raw = {"id": meta.get("message_id"), "author": {"id": meta.get("user_id")},
+               "channel_id": meta.get("channel_id"), "guild_id": meta.get("guild_id")}
         try:
             msg = await self._maybe_transcribe_audio(msg)
             try:
                 queue.put_nowait(msg)
+                self._receive.note_passed_on(meta.get("message_id"))
                 logger.info(
                     "[discord] Enqueued from %s (ch=%s): %.80s",
                     msg.context_metadata.get("username", "?"),
@@ -424,8 +492,9 @@ class DiscordAdapter(BaseAdapter):
                     msg.text,
                 )
             except asyncio.QueueFull:
-                logger.warning("[discord] Queue full — dropping message")
+                self._note_drop("queue_full", raw)
         except Exception:
+            self._receive.drop("processing_failed", raw)
             logger.exception("[discord] Failed to process message in background")
 
     def _chain_channel_work(self, chain_key: str, coro: Any) -> None:

@@ -668,3 +668,19 @@ html[data-theme="light"] { color-scheme: only light; }
    Redefining those selectors here made this file win the cascade for two of
    them, so the card rendered as a mixture of the two stylesheets. */
 .hitl-scope-hint { font-size: 0.72rem; color: var(--text-muted); margin-top: 6px; }
+
+/* A platform Test's checks (Settings -> Platform Connectors, 2026-09-29):
+   one row per check, its title in the check's colour, the server's own
+   words in the normal text colour below it. */
+.connector-checks {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+.connector-checks li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
+.connector-checks li [translate="no"] { flex-basis: 100%; color: var(--text-secondary); line-height: 1.45; }

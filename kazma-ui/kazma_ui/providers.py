@@ -208,6 +208,34 @@ def _load_connector_config(config_store: ConfigStore, name: str) -> dict[str, An
     return config
 
 
+def _discord_test_settings(config_store: ConfigStore) -> dict[str, Any]:
+    """What the Discord Test checks against (store reads: run off the loop):
+    the delivery channel, the Guild ID and the allowed users, as saved."""
+    from kazma_gateway.allowlists import split_ids
+
+    return {
+        "channel_id": str(config_store.get("connectors.discord.swarm_channel_id", "") or "").strip(),
+        "guild_ids": split_ids(config_store.get("connectors.discord.guild_id", "")),
+        "allowed_users": split_ids(config_store.get("connectors.discord.allowed_users", "")),
+    }
+
+
+def _live_adapter_diagnostics(platform: str) -> dict[str, Any] | None:
+    """The running adapter's own record (its ``diagnostics()``), or None when
+    the gateway has no such adapter running. The Test route's handler logs a
+    failure here with the rest of the Test's."""
+    from kazma_core.service_container import get_container
+    from kazma_gateway.gateway import GatewayManager
+
+    container = get_container()
+    if not container.has(GatewayManager):
+        return None
+    for adapter in getattr(container.get(GatewayManager), "adapters", None) or []:
+        if getattr(adapter, "name", "") == platform and hasattr(adapter, "diagnostics"):
+            return adapter.diagnostics()
+    return None
+
+
 def create_providers_router(config_store: ConfigStore) -> APIRouter:
     """Create the unified providers & connectors router."""
     router = APIRouter(tags=["providers"])
@@ -766,8 +794,11 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
     async def test_connector(name: str) -> dict[str, Any]:
         """Run a platform-specific health check for a connector."""
         name = name.strip()
-        # Vault-aware direct read (do not rely on get_all raw values).
-        token = str(config_store.get(f"connectors.{name}.token", "") or "").strip()
+        # Vault-aware direct read (do not rely on get_all raw values); a
+        # store read, so off the event loop.
+        token = str(
+            await asyncio.to_thread(config_store.get, f"connectors.{name}.token", "") or ""
+        ).strip()
         # Match gateway boot: fall back to env when ConfigStore has no token.
         if not token and name == "telegram":
             token = (
@@ -813,18 +844,16 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                 return {"success": False, "error": "Connection test failed"}
 
         if name == "discord":
+            # Not "does the token sign in" alone: that answered "Connected"
+            # while no message from the owner had reached Kazma in eight days
+            # (2026-09-29). See discord_diagnose for each check.
+            from kazma_gateway.adapters.discord_diagnose import diagnose
+
+            settings = await asyncio.to_thread(_discord_test_settings, config_store)
             try:
-                async with httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context()) as client:
-                    resp = await client.get(
-                        "https://discord.com/api/v10/users/@me",
-                        headers={"Authorization": f"Bot {token}"},
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        return {"success": True, "bot_name": data.get("username", "")}
-                    return {"success": False, "error": f"HTTP {resp.status_code}"}
-            except Exception as exc:
-                logger.debug("Discord connector test failed: %s", exc)
+                return await diagnose(token, live=_live_adapter_diagnostics("discord"), **settings)
+            except Exception:
+                logger.warning("[connectors] Discord test failed", exc_info=True)
                 return {"success": False, "error": "Connection test failed"}
 
         if name == "slack":
