@@ -5000,4 +5000,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "رسائلك المباشرة",
         "en": "Your direct messages",
     },
+    "settings.hub.open_in_discord": {
+        "ar": "افتح هذه المحادثة في Discord",
+        "en": "Open this conversation in Discord",
+    },
 }

@@ -422,6 +422,10 @@
                                     <span aria-hidden="true" x-text="c.ok === true ? '✓' : (c.ok === false ? '✗' : '•')"></span>
                                     <strong x-text="connectorCheckTitle(c.key)"></strong>
                                     <span translate="no" x-text="c.detail"></span>
+                                    <template x-if="c.link && String(c.link).startsWith('https://discord.com/')">
+                                        <a class="btn btn-secondary btn-sm" :href="c.link" target="_blank" rel="noopener noreferrer"
+                                           x-text="t('settings.hub.open_in_discord')"></a>
+                                    </template>
                                 </li>
                             </template>
                         </ul>

@@ -38,6 +38,8 @@ logger = logging.getLogger(__name__)
 __all__ = ["diagnose"]
 
 _API = "https://discord.com/api/v10"
+#: Where a link to a conversation opens (the Discord app, or its web client).
+_DISCORD_APP = "https://discord.com"
 #: Application flags GATEWAY_MESSAGE_CONTENT (a verified app, approved) and
 #: GATEWAY_MESSAGE_CONTENT_LIMITED (the Developer Portal switch, unverified).
 _MESSAGE_CONTENT_FLAGS = (1 << 18) | (1 << 19)
@@ -86,6 +88,15 @@ async def _call(client: httpx.AsyncClient, method: str, path: str, **kw: Any) ->
 
 async def _get(client: httpx.AsyncClient, path: str, **params: Any) -> tuple[int, Any]:
     return await _call(client, "GET", path, params=params or None)
+
+
+def _bot_label(me: Any) -> str:
+    """"KazmaAI#1234 (bot id …)": the name and tag Discord shows, so two bots
+    with one name can be told apart."""
+    me = me if isinstance(me, dict) else {}
+    tag = str(me.get("discriminator") or "")
+    name = f"{me.get('username')}#{tag}" if tag and tag != "0" else str(me.get("username"))
+    return f"{name} (bot id {me.get('id')})"
 
 
 def _newest_person(history: Any) -> dict[str, Any] | None:
@@ -141,23 +152,30 @@ async def _judge_direct_messages(
     me: Any,
     live: dict[str, Any] | None,
     allowed: list[str],
-) -> tuple[bool | None, str]:
-    """Whether *user_id*'s newest direct message to the bot reached Kazma."""
-    bot = f"{(me or {}).get('username')} (bot id {(me or {}).get('id')})"
+) -> tuple[bool | None, str, str | None]:
+    """Whether *user_id*'s newest direct message to the bot reached Kazma, and
+    a link that opens that very conversation in Discord (there is exactly one
+    between a user and a bot)."""
+    bot = _bot_label(me)
     status, dm = await _call(client, "POST", "/users/@me/channels", json={"recipient_id": user_id})
     if status != 200 or not isinstance(dm, dict) or not dm.get("id"):
-        return None, f"Could not open the direct messages with user {user_id} (Discord answered {status})."
+        return None, f"Could not open the direct messages with user {user_id} (Discord answered {status}).", None
     status, history = await _get(client, f"/channels/{dm['id']}/messages", limit=_HISTORY)
     if status != 200:
-        return None, f"Could not read the direct messages with user {user_id} (Discord answered {status})."
+        return None, f"Could not read the direct messages with user {user_id} (Discord answered {status}).", None
+    link = f"{_DISCORD_APP}/channels/@me/{dm['id']}"
     person = _newest_person(history)
     if person is None:
         return None, (
             f"User {user_id} has written nothing to this bot, {bot}, in direct messages. "
             "If you wrote to a bot in your direct messages and got no answer, it was another "
-            "bot account: open this one from the server's member list and write there."
-        )
-    return _judge_latest(person, live, allowed, place=f"The latest direct message user {user_id} wrote to the bot")
+            "bot account with a similar name. Open this bot's conversation with the link and "
+            "write there."
+        ), link
+    ok, detail = _judge_latest(
+        person, live, allowed, place=f"The latest direct message user {user_id} wrote to the bot"
+    )
+    return ok, detail, link
 
 
 def _listening(live: dict[str, Any] | None) -> tuple[bool, str]:
@@ -194,8 +212,11 @@ async def diagnose(
     allowed = [str(a) for a in (allowed_users or []) if str(a).strip()]
     guild_ids = [str(g) for g in (guild_ids or []) if str(g).strip()]
 
-    def add(key: str, ok: bool | None, detail: str) -> None:
-        checks.append({"key": key, "ok": ok, "detail": detail})
+    def add(key: str, ok: bool | None, detail: str, link: str | None = None) -> None:
+        check: dict[str, Any] = {"key": key, "ok": ok, "detail": detail}
+        if link:
+            check["link"] = link
+        checks.append(check)
 
     bot_name: str | None = None
     async with httpx.AsyncClient(
@@ -208,7 +229,7 @@ async def diagnose(
         status, me = await _get(client, "/users/@me")
         if status == 200 and isinstance(me, dict):
             bot_name = str(me.get("username") or "") or None
-            add("token", True, f"Signed in as {bot_name} (bot id {me.get('id')}).")
+            add("token", True, f"Signed in as {_bot_label(me)}.")
         elif status == 401:
             add("token", False, (
                 "Discord refused the bot token (401). Copy it again from the Developer "

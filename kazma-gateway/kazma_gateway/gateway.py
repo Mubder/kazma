@@ -38,6 +38,7 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import random
 import time
@@ -677,6 +678,13 @@ class GatewayManager:
             return False
 
         platform = outbound.target_id.split(":", 1)[0]
+        # No chat app shows a markdown table: rows as lines (chat_tables).
+        if outbound.text and "|" in outbound.text:
+            from kazma_gateway.chat_tables import tables_to_lines
+
+            as_lines = tables_to_lines(outbound.text)
+            if as_lines != outbound.text:
+                outbound = dataclasses.replace(outbound, text=as_lines)
 
         for adapter in self.adapters:
             if adapter.name == platform:
