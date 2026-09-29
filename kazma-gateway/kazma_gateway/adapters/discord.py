@@ -48,6 +48,9 @@ __all__ = [
 
 _DISCORD_API = "https://discord.com/api/v10"
 _DISCORD_GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json"
+#: How the adapter closes a socket whose session it will resume: any code but
+#: 1000/1001, which Discord reads as "the bot is done" (see _close_for_resume).
+_RESUME_CLOSE_CODE = 4000
 
 # Rate-limit constants
 _SEND_MAX_RETRIES = 3
@@ -211,7 +214,8 @@ class DiscordAdapter(BaseAdapter):
         it sent in READY with op 9, not resumable. The adapter always used
         the default URL, so every hourly-or-so reconnect request (op 7)
         ended in a new session -- seven of seven on the live install on
-        2026-09-25 -- and messages sent in the gap were never delivered.
+        2026-09-25 -- and messages sent in the gap were never delivered. The
+        other half is how the old socket closes (``_close_for_resume``).
         """
         if self._session_id and self._sequence is not None and self._resume_url:
             return self._resume_url.rstrip("/") + "/?v=10&encoding=json"
@@ -363,6 +367,7 @@ class DiscordAdapter(BaseAdapter):
 
                     elif op == 7:  # Reconnect
                         logger.info("[discord] Gateway requested reconnect")
+                        await self._close_for_resume(ws)
                         return None
 
                     elif op == 9:  # Invalid session
@@ -373,6 +378,7 @@ class DiscordAdapter(BaseAdapter):
                             self._sequence = None
                             self._resume_url = None
                             return random.uniform(1.0, 5.0)
+                        await self._close_for_resume(ws)
                         return None
 
                     elif op == 1:  # Discord asks for a heartbeat now
@@ -384,6 +390,24 @@ class DiscordAdapter(BaseAdapter):
         except ImportError:
             logger.error("[discord] websockets package not installed — run: pip install websockets")
             await asyncio.sleep(10)
+
+    async def _close_for_resume(self, ws: Any) -> None:
+        """Close the socket so that its session can be resumed.
+
+        Discord ends a session whose socket closes with 1000 or 1001 -- the
+        code leaving ``async with websockets.connect(...)`` sends -- and then
+        answers the Resume with op 9, not resumable. After the resume-URL fix
+        of 2026-09-25 every reconnect request still ended that way (five of
+        five on the live install, 2026-09-29), and what was said to the bot
+        in the gap was never delivered. Any other code keeps the session.
+        """
+        from websockets.exceptions import WebSocketException
+
+        try:
+            await ws.close(code=_RESUME_CLOSE_CODE, reason="reconnect")
+        except (OSError, WebSocketException):
+            # Already gone: nothing was closed as "normal", the session stays.
+            logger.debug("[discord] close before resume failed", exc_info=True)
 
     async def _process_and_enqueue(
         self, msg: IncomingMessage, queue: asyncio.Queue[IncomingMessage]

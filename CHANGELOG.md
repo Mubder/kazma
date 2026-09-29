@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Discord keeps its session through a reconnect (2026-09-29)
+
+Discord asks every bot to reconnect every hour or so. Kazma answered by
+leaving its `async with websockets.connect(...)` block, which closes the
+socket with code 1000 -- and Discord reads a 1000 close as "the bot is done":
+it ends the session and refuses the Resume that follows. On the live install
+every reconnect that night (five of five) became a new session, and anything
+said to the bot on Discord in those seconds was never delivered. The fix of
+2026-09-25 (resume at READY's `resume_gateway_url`) was half of it; its
+test's fake Discord knew only the URL rule, so it passed.
+
+The adapter now closes such a socket with 4000, as discord.py does, after
+op 7 and after a resumable op 9 (`_close_for_resume`); shutdown still closes
+with 1000, so the bot shows offline at once. The fake closes a socket the way
+websockets does and applies both of Discord's rules
+(`tests/test_discord_gateway_resume.py`); the old adapter fails its reconnect
+and resumable-session checks.
+
 ## More than one Gmail or Outlook account (2026-09-29)
 
 Asked for three Gmail accounts: Kazma had a hidden version set by hand in
