@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -368,6 +369,20 @@ def test_the_api_refuses_a_message_kazma_does_not_send(client, bad):
     assert resp.status_code == 400
     assert "started, startup_failed, starting, shutting_down" in resp.json()["detail"]
     assert client.kazma_config_store.get(ln.EVENTS_KEY) == ["started"], "a refused save changed nothing"
+
+
+def test_the_log_line_prints_on_a_windows_console(sent, caplog):
+    """The card's emoji stays out of the log: cp1252 cannot encode it, and
+    logging then prints a traceback instead of the line (seen on a Windows
+    console in the browser check, 2026-09-29)."""
+    with caplog.at_level(logging.INFO, logger="kazma_core.lifecycle_notifier"):
+        asyncio.run(ln.announce_started(_connected("Telegram"), build="abc1234"))
+    lines = [r.getMessage() for r in caplog.records if "Start card" in r.getMessage()]
+    assert lines == [
+        "[LifecycleNotifier] Start card (Kazma started, success) sent to telegram; "
+        "adapters: 1, not connected: none"
+    ]
+    lines[0].encode("cp1252")
 
 
 def test_the_card_is_sent_within_the_wait_not_after_it(sent):

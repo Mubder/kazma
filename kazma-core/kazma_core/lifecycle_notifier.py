@@ -415,11 +415,18 @@ async def announce_started(
     delivered = await _deliver(text, level)
     down = [c["name"] for c in (report or []) if c.get("state") not in ("connected", "running")]
     logger.info(
-        "[LifecycleNotifier] Start card (%s) sent to %s; adapters: %d, not connected: %s",
-        text.split("\n", 1)[0], ", ".join(delivered) or "no route",
+        "[LifecycleNotifier] Start card (%s, %s) sent to %s; adapters: %d, not connected: %s",
+        _title(text), level, ", ".join(delivered) or "no route",
         len(report or []), ", ".join(down) or "none",
     )
     return bool(delivered)
+
+
+def _title(text: str) -> str:
+    """A card's title without its icon and source tag, for the log: an emoji
+    is more than a Windows console can print (cp1252), and logging then
+    prints a traceback instead of the line."""
+    return text.split("\n", 1)[0].split("] ", 1)[-1]
 
 
 # ── delivery ─────────────────────────────────────────────────────────────
@@ -452,7 +459,7 @@ async def _deliver(text: str, level: str) -> list[str]:
             timeout=_SEND_TIMEOUT_SECONDS,
         )
     except Exception as exc:  # noqa: BLE001 — never break boot/shutdown
-        logger.warning("[LifecycleNotifier] could not send %r: %s", text.split("\n", 1)[0], exc)
+        logger.warning("[LifecycleNotifier] could not send %r: %s", _title(text), exc)
         return []
     delivered = []
     for name, result in zip(names, results, strict=True):
