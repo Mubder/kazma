@@ -3462,37 +3462,38 @@
   // Unique-id sequence for aria-controls on workbench panel bodies.
   var _panelSeq = 0;
 
+  // A step's tool, named in the reader's language: [catalog key, English].
+  // These were English literals, so an Arabic page read "Read file".
   var _TOOL_FRIENDLY = {
-    web_search: 'Search',
-    read_url: 'Read page',
-    read_url_to_file: 'Save page',
-    crawl_site: 'Crawl site',
-    crawl_page: 'Crawl page',
-    knowledge_ingest_url: 'KB ingest',
-    knowledge_ingest_site: 'KB crawl',
-    knowledge_search: 'KB search',
-    knowledge_create_library: 'KB create',
-    knowledge_list_libraries: 'KB list',
-    file_read: 'Read file',
-    file_write: 'Write file',
-    file_delete: 'Delete file',
-    file_list: 'List files',
-    file_search: 'Find files',
-    shell_exec: 'Shell',
-    code_exec: 'Code',
-    python_exec: 'Python',
-    digest_research_file: 'Digest',
-    list_research_chunks: 'Chunks',
-    read_research_chunk: 'Chunk',
-    summarize_research_file: 'Summarize'
+    web_search: ['tool_search', 'Search'],
+    read_url: ['tool_read_page', 'Read page'],
+    read_url_to_file: ['tool_save_page', 'Save page'],
+    crawl_site: ['tool_crawl_site', 'Crawl site'],
+    crawl_page: ['tool_crawl_page', 'Crawl page'],
+    knowledge_ingest_url: ['tool_kb_ingest', 'KB ingest'],
+    knowledge_ingest_site: ['tool_kb_crawl', 'KB crawl'],
+    knowledge_search: ['tool_kb_search', 'KB search'],
+    knowledge_create_library: ['tool_kb_create', 'KB create'],
+    knowledge_list_libraries: ['tool_kb_list', 'KB list'],
+    file_read: ['tool_read_file', 'Read file'],
+    file_write: ['tool_write_file', 'Write file'],
+    file_delete: ['tool_delete_file', 'Delete file'],
+    file_list: ['tool_list_files', 'List files'],
+    file_search: ['tool_find_files', 'Find files'],
+    shell_exec: ['tool_shell', 'Shell'],
+    code_exec: ['tool_code', 'Code'],
+    python_exec: ['tool_python', 'Python'],
+    digest_research_file: ['tool_digest', 'Digest'],
+    list_research_chunks: ['tool_chunks', 'Chunks'],
+    read_research_chunk: ['tool_chunk', 'Chunk'],
+    summarize_research_file: ['tool_summarize', 'Summarize']
   };
 
   function _friendlyToolName(name) {
     var n = String(name || '').trim();
     if (!n) return n;
-    if (_TOOL_FRIENDLY[n]) return _TOOL_FRIENDLY[n];
-    var low = n.toLowerCase();
-    if (_TOOL_FRIENDLY[low]) return _TOOL_FRIENDLY[low];
+    var entry = _TOOL_FRIENDLY[n] || _TOOL_FRIENDLY[n.toLowerCase()];
+    if (entry) return ti(entry[0], entry[1]);
     return n.replace(/_/g, ' ');
   }
 
@@ -4027,6 +4028,9 @@
     // Already Arabic-heavy — leave alone
     if (/[\u0600-\u06FF]/.test(s) && !/^[A-Za-z]/.test(s)) return s;
     var m;
+    // The reasoning row's title comes from the shared turn projection
+    // (turn_document.js), in English.
+    if (s === 'Thoughts') return ti('thoughts', s);
     if (/^processing approval/i.test(s)) return ti('processing_approval', s);
     if (/^resuming graph execution/i.test(s)) return ti('resuming_graph', s);
     if (/^resuming execution/i.test(s)) return ti('resuming_execution', s);
@@ -4056,21 +4060,23 @@
 
   /** The server's approval summary ("Agent wants to run: tool(args)") in
    *  the reader's language: the prefix translated, the call shown as it is
-   *  (translate="no" -- a tool name and its arguments are content). Any
-   *  other message is the server's words, also shown as they are. */
+   *  (translate="no" -- a tool name and its arguments are content) and
+   *  isolated left to right: inside an Arabic sentence the bidi algorithm
+   *  reordered "email_send(to=..., subject=...)" into nonsense. Any other
+   *  message is the server's words, also shown as they are. */
   function _hitlMessageHtml(msg) {
     var s = String(msg || '');
     var m = /^Agent wants to run: ([\s\S]*)$/.exec(s);
     if (m) {
       return escapeHtml(ti('hitl_wants_to_run', 'Agent wants to run:')) +
-        ' <span translate="no">' + escapeHtml(m[1]) + '</span>';
+        ' <bdi dir="ltr" translate="no">' + escapeHtml(m[1]) + '</bdi>';
     }
     m = /^Agent wants to run (\d+) danger tools: ([\s\S]*)$/.exec(s);
     if (m) {
       return escapeHtml(tiFmt('hitl_wants_to_run_n', 'Agent wants to run {n} danger tools:', { n: m[1] })) +
-        ' <span translate="no">' + escapeHtml(m[2]) + '</span>';
+        ' <bdi dir="ltr" translate="no">' + escapeHtml(m[2]) + '</bdi>';
     }
-    return s ? '<span translate="no">' + escapeHtml(s) + '</span>' : '';
+    return s ? '<bdi translate="no">' + escapeHtml(s) + '</bdi>' : '';
   }
 
   /** Localized state label for tool rows (Done / Failed / Running…). */

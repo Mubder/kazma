@@ -405,6 +405,12 @@ jobs:
         run: python -m pytest tests/e2e/test_unified_turn_recovery.py -q --timeout=900
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: Turn notes (each turn's notes once, workspace switch, IDE context)
+        # Four turns through the real route: the fourth used to carry
+        # sixteen system notes and the old workspace (2026-09-29).
+        run: python -m pytest tests/e2e/test_turn_notes_route.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Upload browser evidence
         # always(): the run that FAILED is the run whose trace is worth
         # having. On a green run this carries the four-gate recording,

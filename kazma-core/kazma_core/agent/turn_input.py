@@ -22,6 +22,8 @@ import re
 from contextvars import ContextVar, Token
 from typing import Any
 
+from kazma_core.turn_notes import note_kind, strip_turn_notes
+
 __all__ = [
     "build_turn_messages",
     "load_checkpoint_messages",
@@ -1526,7 +1528,8 @@ async def build_turn_messages(
     Priority:
       1. Checkpoint history when it is the richest source (tool-aware)
       2. Session/UI fallback when checkpoint is empty OR thinner (restart gap)
-      3. Optional system_messages prepended only when not already present
+      3. Earlier turns' notes dropped, this turn's system_messages prepended
+         (``turn_notes``; the base prompt only when not already present)
       4. The new user message always last
 
     SessionManager is the UI projection; after restart it often has more
@@ -1560,18 +1563,31 @@ async def build_turn_messages(
     else:
         prior = ckpt
 
-    out: list[dict[str, Any]] = list(prior)
+    # A new turn starts without the earlier turns' notes (turn_notes): the
+    # checkpoint saved them with their turn, and kept they stacked one copy a
+    # turn while the stale ones contradicted this one.
+    out: list[dict[str, Any]] = strip_turn_notes(list(prior))
 
-    # Prepend system messages that are not already at the head (env refresh etc.)
+    # This turn's notes: a turn note of each kind once; anything else (the
+    # base prompt) only when the history does not already hold it. The first
+    # 80 characters of every note of one kind are the same, so that dedupe
+    # threw away each later turn's fresh environment block.
     if system_messages:
         existing_sys = {
             (m.get("content") or "")[:80]
             for m in out
             if isinstance(m, dict) and m.get("role") == "system"
         }
+        kinds_added: set[str] = set()
         to_prepend: list[dict[str, Any]] = []
         for sm in system_messages:
             if not isinstance(sm, dict) or sm.get("role") != "system":
+                continue
+            kind = note_kind(sm)
+            if kind is not None:
+                if kind not in kinds_added:
+                    kinds_added.add(kind)
+                    to_prepend.append(sm)
                 continue
             key = (sm.get("content") or "")[:80]
             if key and key not in existing_sys:

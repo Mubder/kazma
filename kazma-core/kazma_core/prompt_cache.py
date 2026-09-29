@@ -25,6 +25,8 @@ import logging
 import os
 from typing import Any
 
+from kazma_core.turn_notes import note_kind
+
 __all__ = [
     "build_anthropic_system",
     "pack_system_messages",
@@ -76,7 +78,14 @@ def is_dynamic_system(msg: dict[str, Any]) -> bool:
     if msg.get("role") not in ("system", "developer"):
         return False
     blob = _text_of(msg)
-    return any(m in blob for m in _DYNAMIC_MARKERS)
+    if any(m in blob for m in _DYNAMIC_MARKERS):
+        return True
+    # Every note of one turn (turn_notes) -- the ledger, the "latest message"
+    # pin, procedural hints... -- sits at the head; as "stable" it moved the
+    # cache prefix every turn. The environment block is the same turn after
+    # turn unless the workspace changes, so it stays in the prefix.
+    kind = note_kind(msg)
+    return kind is not None and kind != "environment"
 
 
 def pack_system_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

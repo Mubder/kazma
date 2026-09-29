@@ -1,5 +1,53 @@
 # CHANGELOG
 
+## Arabic pages: chat steps named in Arabic, approval and memory lines in order (2026-09-29)
+
+Found while taking the website's Arabic screenshots.
+
+- **A chat step's tool is named in the reader's language.** The step list
+  used English literals ("Read file", "Search", "Shell"...) on every page,
+  and the reasoning row read "Thoughts". The names are catalog keys now
+  (`chat.tool_*`), and the bridge test holds the table like any `ti()` key.
+- **Mixed-direction text is isolated.** An approval card's call line
+  ("email_send(to=..., subject=...)") and the memory console's date and chat
+  id were reordered by the bidirectional algorithm inside Arabic text; each
+  sits in a `<bdi>` now.
+- The Knowledge page's one "كاظمة" reads "كاظمه", the product's Arabic name.
+
+## A turn's notes are replaced every turn; the IDE's open file is context, not the question (2026-09-29)
+
+Found while taking screenshots for the website: a memory made from an IDE
+chat turn read "The user has this file open in the IDE: File: ... --- User
+message --- What does add_task do?". Following it through the real web
+route showed the class underneath. A turn's system notes (the environment
+block, the language lock, the recall block, the task ledger, the "latest
+message" pin, Knowledge and IDE context) are saved with the turn and came
+back in every later turn's history: the fourth turn of a chat sent the model
+sixteen of them -- four "LATEST USER MESSAGE PRIORITY", four task ledgers,
+three recall blocks -- and a dedupe on their first 80 characters, which every
+note of one kind shares, dropped each later turn's fresh ones. So a
+workspace switch never reached an ongoing chat: the model kept the old
+workspace while its tools used the new one.
+
+- **One registry of turn notes** (`kazma_core/turn_notes.py`, AGENTS §43),
+  each kind named by how its producer begins the note. A new turn starts
+  from the history without them (`build_turn_messages`, which the web,
+  WebSocket, voice and chat-app paths all use) and each producer adds this
+  turn's copy. The fourth turn now carries eight notes, one of each kind,
+  and the environment block of the workspace in use.
+- **The IDE chat's open file is a fenced note for the model**, never part of
+  the question: the chat store, memory, the chat's title, the language lock
+  and the Knowledge lookup all read what the user typed.
+- **Chat apps:** "Proceed" after a partial answer reaches the model with its
+  continue context again (the history rebuild dropped it whenever the chat
+  had history), and a photo reaches a vision model as an image, not as the
+  printed list of its parts.
+- **Prompt cache:** a turn's notes no longer sit in the cacheable prefix
+  (the environment block, the same turn after turn, stays in it).
+- Gates: `tests/test_turn_notes.py` (every producer's note recognised, with
+  negative controls) and `tests/e2e/test_turn_notes_route.py` (four turns
+  through the real route, in the CI lifecycle job).
+
 ## One start card per restart, with each chat app's connection; changed defaults reach installs (2026-09-29)
 
 The owner asked for fewer start/stop messages and a restart card that says

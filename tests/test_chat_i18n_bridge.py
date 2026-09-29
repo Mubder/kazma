@@ -29,10 +29,12 @@ _COUNT = re.compile(r"\btiCount\(\s*'([a-z0-9_]+)'")
 _LINE = re.compile(r"^\s*([a-z0-9_]+):\s*\{\{\s*(t|plural_forms)\('([a-z0-9_.]+)'\)", re.M)
 
 
-# chat.js's turn header reads its phase label as ti(pair[0], pair[1]) from
-# this table; each name is a bridge line like any literal ti() key. Until
-# 2026-09-28 they were not, and an Arabic turn ended under "Completed".
-_PHASE_TABLE = re.compile(r"var _HEADER_PHASE_LABELS = \{(.*?)\};", re.S)
+# chat.js reads two tables as ti(pair[0], pair[1]): the turn header's phase
+# labels and the steps' tool names. Each name is a bridge line like any
+# literal ti() key. Until 2026-09-28 the phase names were not, and an Arabic
+# turn ended under "Completed"; the tool names were English literals until
+# 2026-09-29 ("Read file" on an Arabic page).
+_PHASE_TABLE = re.compile(r"var (?:_HEADER_PHASE_LABELS|_TOOL_FRIENDLY) = \{(.*?)\};", re.S)
 _PHASE_NAME = re.compile(r"\[\s*'([a-z0-9_]+)'\s*,")
 
 
