@@ -225,6 +225,23 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   `api_key` fields inside `providers.list` must not share
   `cfg:providers.list.api_key` — that ping-ponged `vault.store` on every
   registry read and stalled SSE (2026-09-08 `_No response received._`).
+- **A changed shipped default declares whether installs follow**
+  (`kazma_core/config_defaults.py`, 2026-09-29). The first boot copies every
+  `kazma.yaml` value into the database (`reconcile_from_yaml`, through
+  `shipped_settings`) and a stored value wins, so a default changed later
+  never reached an install that had booted before it -- the live install
+  still held four lifecycle events after the fix, and ten older shipped
+  values (a read-only audit that day; most no longer read). A
+  `RetiredDefault` (key, every old value, date, why) makes installs follow:
+  at boot a stored value equal to an old one becomes today's, ONCE per entry
+  (`system.config.retired_defaults`), so an owner who picks it again keeps
+  it. `NEW_INSTALLS_ONLY` keeps the old value, with the reason. Never
+  "follow" by equality with no declaration: the live `agent.language: ar`
+  equals an old default and is read. Gate:
+  `tests/test_shipped_config_defaults.py` (kazma.yaml against
+  `tests/fixtures/shipped_config_defaults.json`; `python
+  scripts/shipped_defaults.py --write` refreshes it and refuses an
+  undeclared changed value).
 
 ### 9. SwarmEngine Module Structure (P2-1 refactor — 3 extractions)
 
@@ -1057,10 +1074,12 @@ not per-tenant.
 
 ### 17. Lifecycle Status Notifier (`kazma-core/kazma_core/lifecycle_notifier.py`)
 
-Server lifecycle status notifications — pushes a status update when the
-server starts, restarts, shuts down, or fails to boot, so an operator can
-tell from chat when something went wrong (hung boot, a crash emitting no
-shutdown message, a bad bot token, etc.). Three invariants must hold:
+Server lifecycle status notifications — ONE card per boot (2026-09-29, the
+owner's request: a reload sent three messages, and the restart card named the
+adapters without saying whether any had connected), plus a card when startup
+fails. The start card waits for the chat apps and says how long Kazma was
+down (or that the last run did not shut down cleanly), each adapter ✅ or ❌
+with the connection's reason, the build and the model. Four invariants:
 
 **A. Notifications route through the SwarmMessageBus — no parallel path.**
 `notify_lifecycle(event)` sends a `BusMessage` through the adapters
@@ -1076,30 +1095,44 @@ The bus adapters are standalone `httpx` clients independent of
 (before the inbound poller is up) and late shutdown (after `gateway.stop()`,
 which tears down inbound adapters, not the bus).
 
-**B. `notify_lifecycle()` is the single entry point — called from 4 sites in `app.py`.**
-- `_on_startup()` top (before MCP connect) → `starting`
-- `_on_startup()` end (after the cron block) → `started`, with a `detail`
-  of `Adapters: …` + `Model: <registry.active_model>`
-- the gateway-start failure `except` (`[Gateway] Failed to start`) →
-  `startup_failed`, with the gateway error as `detail` (highest-signal boot
-  failure — bad token, network)
-- `_on_shutdown()` top (before `signal_shutdown()`, before any teardown) →
-  `shutting_down`
-Each call site is wrapped in its own try/except (debug-level on failure) —
-a notification must NEVER break boot or shutdown.
+**B. Four sites in `app.py`, each in its own try/except — a notification
+must NEVER break boot or shutdown.**
+- `_on_startup()` top → `notify_lifecycle("starting")`: RECORDS the boot
+  (`_record_boot`: reads how the last run ended, then stamps
+  `system.lifecycle.last_boot_epoch`); announced only when switched on.
+- `_on_startup()` end → `spawn_background(announce_started(
+  gateway.connection_report, model=, build=get_build_info()["commit"]))`.
+  In the background because it waits (up to `CONNECT_WAIT_S`, 45 s; live
+  the adapters connect ~4 s after the gateway starts) for every adapter to
+  connect or fail; it gives up when Kazma begins shutting down.
+- the gateway-start failure `except` → `startup_failed` (the error as
+  `detail`).
+- `_on_shutdown()` top → `notify_lifecycle("shutting_down")`: RECORDS the
+  stop (`system.lifecycle.last_shutdown_epoch`); announced only when on.
+A shutdown stamp at or after the previous boot's = the last run stopped
+cleanly ("Down for 34.8 s"; "restarted" within `restart_window_seconds`,
+default 60, `0` = no detection); one before it = it did not ("The last run
+did not shut down cleanly"). The markers are written whether or not the
+event is announced — never gate a stamp on the events list.
 
-**C. Config is live-re-read; restart detection uses a ConfigStore marker.**
-`get_lifecycle_config()` mirrors `get_hitl_config`/`get_proxy_provider`:
-imports `get_config_store` locally inside a try, reads flat dotted keys
-(`notifications.lifecycle.enabled` / `.events` /
-`.restart_window_seconds`), falls back to YAML/env on any error, never
-raises. Toggling via `PUT /api/settings/single` takes effect on the next
-boot/shutdown. On `shutting_down`, the notifier stamps the internal key
-`system.lifecycle.last_shutdown_epoch`; on `started`, if that epoch is
-within `restart_window_seconds` (default 60; `0` disables detection) it
-upgrades to "🔄 Restarted" instead of "🟢 Started". A hard crash leaves no
-marker, so the next boot shows a plain "Started" — distinguishing
-intentional restart from crash-recovery.
+**C. An adapter's connection is what its connection said.**
+`BaseAdapter.connection_state()` reads the adapter's `ReceiveLog` (§42):
+`connected`, `connecting` (with the last problem), `down` (task never
+started or ended), `running` (no record). `GatewayManager.connection_report()`
+is what the card polls, and `get_status()` (the Gateway Monitor, `kazma
+gateway status`) maps the same states -- it used to say "connected" for any
+running task.
+
+**D. Config is live-re-read and has a control.**
+`get_lifecycle_config()` mirrors `get_hitl_config`/`get_proxy_provider`,
+never raises, and is blocking (async callers use `to_thread`). Events
+default to `[started, startup_failed]`; an EMPTY list means every message
+off; unknown names are logged and ignored (all-unknown = the defaults).
+Settings → Adapters & Routes → Server status messages writes
+`notifications.lifecycle.events`; `PUT /api/settings/single` refuses a name
+Kazma does not send (`parse_lifecycle_events`). The old four-event default
+pinned in every install's database is retired through §8's
+`RETIRED_DEFAULTS`. Tests: `tests/test_lifecycle_start_card.py`.
 
 ### 18. Migration System (`kazma-core/kazma_core/migration/`)
 
@@ -2518,7 +2551,7 @@ was skipped (2026-09-28). `tests/test_browser_egress_every_context.py`
 |------|-----|------|---------|
 | Guard `Notifier` | Supervisor process, stdlib urllib | Child dead / unhealthy / crash-loop / pause | Telegram-direct — must work when the app cannot |
 | `observability/ops_alerts.alert()` | Inside Kazma | Backup/offsite/restic/MCP/persist/turn-fail | Fan-out bus + Telegram-direct fallback |
-| `lifecycle_notifier` | App boot/shutdown | starting / started / restarted / shutting_down | Same bus, filtered by `notifications.ops.channels` |
+| `lifecycle_notifier` | App boot/shutdown | one start card (started / restarted, with each adapter's connection) + startup_failed; starting / shutting_down only when switched on | Same bus, filtered by `notifications.ops.channels` |
 
 Model fallbacks (§38) ride the second row plus the web banner
 (`AlertDispatcher.post_banner`, banner only) — not a fourth notifier.

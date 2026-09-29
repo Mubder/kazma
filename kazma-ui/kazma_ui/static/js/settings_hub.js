@@ -328,6 +328,12 @@
                 if (typeof swarmRoutes === 'string') {
                     swarmRoutes = swarmRoutes.split(',').map(x => x.trim()).filter(Boolean);
                 }
+                // Server status messages: unset means Kazma's default (one
+                // start card, and a failed start); [] means all off.
+                let lifecycle = grouped(notif, 'notifications', 'notifications.lifecycle.events');
+                if (typeof lifecycle === 'string') {
+                    lifecycle = lifecycle.split(',').map(x => x.trim()).filter(Boolean);
+                }
                 const r = this.adapterRouting;
                 const ex = (name, key) => String(((byName[name] || {}).extras || {})[key] || '');
                 r.tgToken = String((byName.telegram || {}).token || '');
@@ -347,6 +353,9 @@
                 r.slackChannel = String(grouped(conn, 'connectors', 'connectors.slack.swarm_channel_id') || '');
                 r.alertRoutes = Array.isArray(alerts) ? alerts : [];
                 r.swarmRoutes = Array.isArray(swarmRoutes) ? swarmRoutes : [];
+                r.lifecycleEvents = Array.isArray(lifecycle)
+                    ? lifecycle.filter(ev => this.lifecycleEventNames.includes(ev))
+                    : ['started', 'startup_failed'];
                 // Group route lives in swarm.output_target (masked token).
                 r.tgGroupChat = '';
                 r.tgGroupToken = '';
@@ -392,6 +401,7 @@
                 slackChannel: String(r.slackChannel || '').trim(),
                 alertRoutes: [...(r.alertRoutes || [])].sort(),
                 swarmRoutes: [...(r.swarmRoutes || [])].sort(),
+                lifecycleEvents: this.lifecycleEventNames.filter(ev => (r.lifecycleEvents || []).includes(ev)),
             };
         },
 
@@ -524,6 +534,7 @@
                 if (changed('slackChannel')) single('connectors.slack.swarm_channel_id', curr.slackChannel, 'connectors');
                 if (changed('alertRoutes')) single('notifications.ops.channels', (r.alertRoutes || []).join(','), 'notifications');
                 if (changed('swarmRoutes')) single('notifications.swarm.routes', (r.swarmRoutes || []).join(','), 'notifications');
+                if (changed('lifecycleEvents')) single('notifications.lifecycle.events', curr.lifecycleEvents, 'notifications');
 
                 // Group route (swarm.output_target) — only when it changed.
                 if (changed('tgGroupEnabled') || changed('tgGroupChat') || changed('tgGroupToken')) {

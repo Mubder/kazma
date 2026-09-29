@@ -1757,9 +1757,9 @@ class Guard:
                             self.log("info", "guard.notifier",
                                      target=self.notify.describe())
                         # NO notification on a healthy start. Kazma's own
-                        # lifecycle_notifier already sends "server starting
-                        # up", "server started" and "server restarted (was
-                        # down ~Ns)" from inside the app. The guard exists to
+                        # lifecycle_notifier sends one start card from inside
+                        # the app ("Kazma restarted", the downtime, each chat
+                        # app's connection). The guard exists to
                         # say the things the app CANNOT say -- because when
                         # they are true, the app is dead. Announcing a
                         # successful start here just doubles every message in

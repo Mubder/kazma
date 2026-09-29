@@ -204,9 +204,7 @@ notifications:
   lifecycle:
     enabled: true
     events:
-    - starting
     - started
-    - shutting_down
     - startup_failed
     restart_window_seconds: 60
 ui:

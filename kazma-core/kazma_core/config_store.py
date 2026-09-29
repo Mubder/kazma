@@ -517,6 +517,33 @@ def _is_hitl_timeout_fossil(flat_key: str, value: Any) -> bool:
         return False
 
 
+def shipped_settings(data: dict[str, Any]) -> list[tuple[str, Any, str]]:
+    """``kazma.yaml``'s values as the settings they seed: ``(key, value,
+    category)``, nested keys dotted, lists and scalars as leaves. The one
+    reading of kazma.yaml for the database: ``reconcile_from_yaml`` seeds
+    from it, and ``tests/test_shipped_config_defaults.py`` snapshots it."""
+    items: list[tuple[str, Any, str]] = []
+
+    def _flatten(d: dict[str, Any], prefix: str = "") -> None:
+        for k, v in d.items():
+            full_key = f"{prefix}.{k}" if prefix else str(k)
+            if isinstance(v, dict):
+                _flatten(v, full_key)
+                continue
+            dest = _HITL_NESTED_TO_FLAT.get(full_key, full_key)
+            if _is_hitl_timeout_fossil(dest, v):
+                continue
+            cat = (
+                "safety" if dest.startswith("safety.")
+                else (prefix.split(".")[0] if prefix else "general")
+            )
+            items.append((dest, v, cat))
+
+    if isinstance(data, dict):
+        _flatten(data)
+    return items
+
+
 # ─── Migration Framework ────────────────────────────────────────────────
 
 class Migration:
@@ -2190,25 +2217,8 @@ class ConfigStore:
         if not isinstance(data, dict):
             return 0
 
-        # Collect all YAML leaf values as (key, value, category).
-        yaml_items: list[tuple[str, Any, str]] = []
-
-        def _flatten(d: dict, prefix: str = "") -> None:
-            for k, v in d.items():
-                full_key = f"{prefix}.{k}" if prefix else k
-                if isinstance(v, dict):
-                    _flatten(v, full_key)
-                    continue
-                dest = _HITL_NESTED_TO_FLAT.get(full_key, full_key)
-                if _is_hitl_timeout_fossil(dest, v):
-                    continue
-                cat = (
-                    "safety" if dest.startswith("safety.")
-                    else (prefix.split(".")[0] if prefix else "general")
-                )
-                yaml_items.append((dest, v, cat))
-
-        _flatten(data)
+        # All YAML leaf values as (key, value, category).
+        yaml_items = shipped_settings(data)
 
         # Find which keys are NOT already in the active backend.
         with self._lock:
@@ -2240,7 +2250,49 @@ class ConfigStore:
             )
             seeded = self.batch_set(new_items)
         self.scrub_nested_hitl_fossils()
+        self.apply_retired_defaults({key: value for key, value, _cat in yaml_items})
         return seeded
+
+    def apply_retired_defaults(self, shipped: dict[str, Any]) -> list[str]:
+        """Replace a stored copy of a retired shipped default with today's
+        (``kazma_core.config_defaults``), once per entry. *shipped* is
+        kazma.yaml's settings (key -> value); a key it no longer has is
+        deleted, so the code's default applies. Returns the keys changed.
+
+        A stored value wins over kazma.yaml, and the first boot stores every
+        value, so without this a changed default never reached an install
+        that had booted before it (2026-09-29, the restart messages).
+        """
+        from kazma_core.config_defaults import (
+            RETIRED_APPLIED_KEY,
+            RETIRED_DEFAULTS,
+            entry_id,
+            same_value,
+        )
+
+        raw = self._db_get_raw(RETIRED_APPLIED_KEY)
+        applied = {str(x) for x in raw} if isinstance(raw, list) else set()
+        pending = [e for e in RETIRED_DEFAULTS if entry_id(e) not in applied]
+        if not pending:
+            return []
+        writes: list[tuple[str, Any, str]] = []
+        changed: list[str] = []
+        for entry in pending:
+            stored = self._db_get_raw(entry.key)
+            if stored is _MISSING or not any(same_value(stored, old) for old in entry.old):
+                continue  # never stored, or the owner's own value
+            if entry.key in shipped:
+                writes.append((entry.key, shipped[entry.key], entry.key.split(".")[0]))
+            else:
+                self.delete(entry.key)
+            changed.append(entry.key)
+            logger.info(
+                "[ConfigStore] %s held the default retired on %s; it follows today's (%s)",
+                entry.key, entry.since, entry.why,
+            )
+        marker = sorted(applied | {entry_id(e) for e in pending})
+        self.batch_set([*writes, (RETIRED_APPLIED_KEY, marker, "internal")])
+        return changed
 
     def _db_get_raw(self, key: str) -> Any:
         """Value stored in the DB only — no YAML fallback. ``_MISSING`` if absent."""
