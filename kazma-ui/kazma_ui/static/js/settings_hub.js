@@ -624,6 +624,7 @@
                 servers: _k('settings.hub.check_servers', 'Servers'),
                 channel: _k('settings.hub.check_channel', 'Delivery channel'),
                 latest: _k('settings.hub.check_latest', 'Your latest message'),
+                direct_message: _k('settings.hub.check_direct_message', 'Your direct messages'),
                 allowed: _k('settings.hub.check_allowed', 'Allowed users'),
                 listening: _k('settings.hub.check_listening', 'Kazma is listening'),
             };

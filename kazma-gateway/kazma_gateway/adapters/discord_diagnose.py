@@ -13,6 +13,9 @@ fixes it:
 - ``channel``: can the bot see the delivery channel, and what is it?
 - ``latest``: the newest message a person wrote in that channel -- did it
   reach Kazma, and what became of it? (Who and when; never the text.)
+- ``direct_message``: for each allowed user, their newest direct message to
+  the bot -- did it reach Kazma? (Answered in a server, silent in DMs, was
+  the owner's report; writing to another bot account looks the same.)
 - ``allowed``: who may talk to the bot?
 - ``listening``: is Kazma's connection up, and what has it received?
 
@@ -51,6 +54,8 @@ _CHANNEL_KINDS = {
 }
 #: How many of the channel's newest messages the Test looks through.
 _HISTORY = 20
+#: How many allowed users' direct messages it opens.
+_DM_USERS = 3
 
 
 def _when(value: Any) -> datetime | None:
@@ -65,12 +70,12 @@ def _show(stamp: datetime | None) -> str:
     return stamp.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if stamp else "an unknown time"
 
 
-async def _get(client: httpx.AsyncClient, path: str, **params: Any) -> tuple[int, Any]:
+async def _call(client: httpx.AsyncClient, method: str, path: str, **kw: Any) -> tuple[int, Any]:
     """(status, JSON body); status 0 when Discord could not be reached."""
     try:
-        r = await client.get(path, params=params or None)
+        r = await client.request(method, path, **kw)
     except httpx.HTTPError as exc:
-        logger.debug("[discord.test] GET %s failed", path, exc_info=True)
+        logger.debug("[discord.test] %s %s failed", method, path, exc_info=True)
         return 0, type(exc).__name__
     try:
         body = r.json() if r.content else None
@@ -79,12 +84,28 @@ async def _get(client: httpx.AsyncClient, path: str, **params: Any) -> tuple[int
     return r.status_code, body
 
 
-def _judge_latest(msg: dict[str, Any], live: dict[str, Any] | None, allowed: list[str]) -> tuple[bool | None, str]:
+async def _get(client: httpx.AsyncClient, path: str, **params: Any) -> tuple[int, Any]:
+    return await _call(client, "GET", path, params=params or None)
+
+
+def _newest_person(history: Any) -> dict[str, Any] | None:
+    if not isinstance(history, list):
+        return None
+    return next((m for m in history if not (m.get("author") or {}).get("bot")), None)
+
+
+def _judge_latest(
+    msg: dict[str, Any],
+    live: dict[str, Any] | None,
+    allowed: list[str],
+    *,
+    place: str = "The latest message a person wrote there",
+) -> tuple[bool | None, str]:
     author = msg.get("author") or {}
     author_id = str(author.get("id") or "")
     who = f"{author.get('username') or 'someone'} (user {author_id})"
     stamp = _when(msg.get("timestamp"))
-    lead = f"The latest message a person wrote there ({_show(stamp)}, from {who})"
+    lead = f"{place} ({_show(stamp)}, from {who})"
     if allowed and author_id not in allowed:
         return False, (
             f"{lead} is from someone not in Allowed User IDs ({', '.join(allowed)}), so Kazma "
@@ -102,9 +123,9 @@ def _judge_latest(msg: dict[str, Any], live: dict[str, Any] | None, allowed: lis
     session_since = _when(live.get("session_since"))
     if session_since and stamp and stamp < session_since:
         return None, (
-            f"{lead} was written before Kazma's current Discord session began "
-            f"({_show(session_since)}), while it was restarting or away; Discord does not "
-            "deliver such a message again. Send a new one to test."
+            f"{lead} is older than Kazma's current Discord session ({_show(session_since)}, "
+            "a restart or reconnect), so this connection cannot say what became of it. "
+            "Send a new one, then Test again."
         )
     return False, (
         f"{lead} never reached Kazma's connection, though the connection was up "
@@ -112,6 +133,31 @@ def _judge_latest(msg: dict[str, Any], live: dict[str, Any] | None, allowed: lis
         "it to the bot. Restarting Kazma opens a new connection; if messages still do not "
         "arrive, the log's [discord] lines say what the connection is doing."
     )
+
+
+async def _judge_direct_messages(
+    client: httpx.AsyncClient,
+    user_id: str,
+    me: Any,
+    live: dict[str, Any] | None,
+    allowed: list[str],
+) -> tuple[bool | None, str]:
+    """Whether *user_id*'s newest direct message to the bot reached Kazma."""
+    bot = f"{(me or {}).get('username')} (bot id {(me or {}).get('id')})"
+    status, dm = await _call(client, "POST", "/users/@me/channels", json={"recipient_id": user_id})
+    if status != 200 or not isinstance(dm, dict) or not dm.get("id"):
+        return None, f"Could not open the direct messages with user {user_id} (Discord answered {status})."
+    status, history = await _get(client, f"/channels/{dm['id']}/messages", limit=_HISTORY)
+    if status != 200:
+        return None, f"Could not read the direct messages with user {user_id} (Discord answered {status})."
+    person = _newest_person(history)
+    if person is None:
+        return None, (
+            f"User {user_id} has written nothing to this bot, {bot}, in direct messages. "
+            "If you wrote to a bot in your direct messages and got no answer, it was another "
+            "bot account: open this one from the server's member list and write there."
+        )
+    return _judge_latest(person, live, allowed, place=f"The latest direct message user {user_id} wrote to the bot")
 
 
 def _listening(live: dict[str, Any] | None) -> tuple[bool, str]:
@@ -225,9 +271,7 @@ async def diagnose(
                         ))
                     status, history = await _get(client, f"/channels/{channel_id}/messages", limit=_HISTORY)
                     if status == 200 and isinstance(history, list):
-                        person = next(
-                            (m for m in history if not (m.get("author") or {}).get("bot")), None
-                        )
+                        person = _newest_person(history)
                         if person is None:
                             add("latest", None, f"No message from a person among the latest {_HISTORY} there.")
                         else:
@@ -248,6 +292,12 @@ async def diagnose(
                     add("channel", None, f"Could not look at channel {channel_id} (Discord answered {status}).")
             else:
                 add("channel", None, "No delivery channel is set, so alerts and reports have nowhere to go on Discord.")
+
+            # The direct messages with each allowed user (2026-09-29: the owner's
+            # server messages were answered, the DMs never). Opening the DM
+            # channel sends nothing; an existing one is returned as it is.
+            for user_id in allowed[:_DM_USERS]:
+                add("direct_message", *await _judge_direct_messages(client, user_id, me, live, allowed))
 
     if allowed:
         add("allowed", True, f"{len(allowed)} allowed user(s): {', '.join(allowed)}.")
