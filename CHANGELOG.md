@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## The website's screenshots are taken by a tool (2026-09-29)
+
+kazma.ai shows real captures of Kazma -- the chat with its steps, an approval,
+the IDE, memory, the chat apps -- in English and Arabic, each in a dark and a
+light version that follows the site's theme.
+`python scripts/site_screenshots.py --site <KazmaAI checkout>` retakes all
+twenty on the test harness (a private data directory, demo data, a scripted
+model; never a live install) and writes the site's files only when every
+capture succeeded. The capture itself is `tests/site/test_site_screenshots.py`,
+skipped unless the tool runs it; every step must land, so a missed click fails
+the run instead of putting the wrong page on the website.
+
 ## Arabic pages: chat steps named in Arabic, approval and memory lines in order (2026-09-29)
 
 Found while taking the website's Arabic screenshots.

@@ -41,7 +41,7 @@ added here first, then copied.
 | Record of the last sync | `src/data/docs-sync.json`, written only by the plan script |
 | Numbers | `src/data/metrics.json` (read by `src/data/metrics.ts`) and `src/data/METRICS.md` |
 | Claims outside the docs | The home page sections (`src/components/home/`), the Features, Security, FAQ and About pages (`src/components/pages/`; a page file under `src/pages/` and `src/pages/ar/` only names its component and language), `src/data/features.ts` (every line of `docs/FEATURES.md` with its status, English and Arabic), `src/data/faq.ts`, the legal pages in `src/pages/`, `public/llms.txt`, `public/llms-full.txt` and their `public/ar/` copies, and any component that prints a number or a feature |
-| Screenshots | `public/screenshots/` (WebP, English and Arabic): captures of Kazma on this repository's test harness with demo data, never of a live install. Retake them when the interface they show changes |
+| Screenshots | `public/screenshots/` (WebP, English and Arabic, a dark and a `-light` capture of each view; the site shows the one matching its theme): captures of Kazma on this repository's test harness with demo data, never of a live install. When the interface they show changes, retake them with `python scripts/site_screenshots.py --site <KazmaAI checkout>` (it runs `tests/site/test_site_screenshots.py` per language and theme, and changes the site's files only when every capture succeeded) |
 
 ## The procedure
 
