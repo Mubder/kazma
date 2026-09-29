@@ -1709,11 +1709,11 @@ class KazmaAppBuilder:
         except Exception as e:  # noqa: BLE001
             logger.debug("[app] shutdown signal hooks not installed: %s", e)
 
-        # ── Lifecycle status notification: "starting" ────────────────
-        # Emitted before any subsystem comes up. Pairs with the "started"
-        # message at the end of this method — if you see "starting" but no
-        # "started" in chat, the boot hung or crashed mid-way. Best-effort:
-        # a failure here (or no platform bus configured) never blocks boot.
+        # ── Lifecycle: the boot is recorded ("starting") ─────────────
+        # Before any subsystem comes up: reads how the last run ended (the
+        # start card says it) and stamps this boot. Announced only when
+        # "starting" is switched on (off by default since 2026-09-29: one
+        # card per boot). Best-effort: never blocks boot.
         try:
             from kazma_core.lifecycle_notifier import notify_lifecycle
 
@@ -2266,39 +2266,40 @@ class KazmaAppBuilder:
         except Exception as e:  # noqa: BLE001
             logger.warning("[X] Failed to start mentions poller: %s", e)
 
-        # ── Lifecycle status notification: "started" (or "restarted") ─
-        # Emitted once all subsystems are up. The notifier upgrades this to
-        # "🔄 Restarted" when a recent graceful-shutdown marker exists, so
-        # an operator can tell an intentional restart from crash-recovery.
-        # Best-effort: never blocks boot. NullBusAdapter (no platform
-        # configured / pytest) drops it silently.
+        # ── Lifecycle: the start card ("started" / "restarted") ──────
+        # One card per boot: how long Kazma was down (or that the last run
+        # did not shut down cleanly), each chat app's connection, the build
+        # and the model. It waits for the adapters to connect or fail, so
+        # it runs in the background -- boot never waits for it.
+        # NullBusAdapter (no platform configured / pytest) drops it.
         try:
-            from kazma_core.lifecycle_notifier import notify_lifecycle
+            from kazma_core.background import spawn_background
+            from kazma_core.lifecycle_notifier import announce_started
+            from kazma_ui.health import get_build_info
 
-            _adapter_names = (
-                ", ".join(a.name for a in self.gateway.adapters)
-                if self.gateway is not None
-                else "none"
-            )
-            _model = self.config_store.get("registry.active_model") or "unknown"
-            await notify_lifecycle(
-                "started",
-                detail=f"Adapters: {_adapter_names}\nModel: {_model}",
+            _gateway = self.gateway
+            _model = await asyncio.to_thread(self.config_store.get, "registry.active_model")
+            spawn_background(
+                announce_started(
+                    _gateway.connection_report if _gateway is not None else list,
+                    model=str(_model or ""),
+                    build=str(get_build_info().get("commit") or ""),
+                ),
+                name="lifecycle-start-card",
             )
         except Exception as e:  # noqa: BLE001
-            logger.debug("[App] lifecycle 'started' notification failed: %s", e)
+            logger.warning("[App] the start card was not scheduled: %s", e)
 
         # (VectorMemory degradation-alert flush removed with the V1 stack.)
 
     async def _on_shutdown(self) -> None:
         """Application shutdown: flag, cron, swarm, agent, stores, gateway."""
-        # ── Lifecycle status notification: "shutting down" ───────────
-        # Emitted FIRST, before any teardown, while subsystems are still up
-        # and the bus adapter is still reachable (the inbound gateway
-        # adapters are torn down LAST at the bottom of this method). Its
-        # absence in chat means a crash / kill -9 rather than graceful stop.
-        # Also stamps the restart-detection marker consumed on next startup.
-        # Best-effort: never blocks teardown.
+        # ── Lifecycle: the stop is recorded ("shutting down") ────────
+        # FIRST, before any teardown: stamps the marker the next start card
+        # reads ("Down for 34.8 s"; without it, "the last run did not shut
+        # down cleanly"). Announced only when "shutting_down" is switched on
+        # (off by default since 2026-09-29), while the bus adapter is still
+        # reachable. Best-effort: never blocks teardown.
         try:
             from kazma_core.lifecycle_notifier import notify_lifecycle
 

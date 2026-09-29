@@ -751,8 +751,9 @@ def test_notifier_constructor_touches_only_env(monkeypatch, tmp_path):
 
 
 def test_guard_does_not_announce_a_healthy_start():
-    """kazma_core.lifecycle_notifier already sends "server starting up",
-    "server started" and "server restarted" from inside the app.
+    """kazma_core.lifecycle_notifier already sends the start card ("Kazma
+    started" / "Kazma restarted", with each chat app's connection) from
+    inside the app.
 
     The guard must only report what the app CANNOT -- because when those
     things are true, the app is dead. Announcing healthy starts doubled

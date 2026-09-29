@@ -5040,4 +5040,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "يفحص رمزي البوت والتطبيق والصلاحيات وقناة التسليم، وهل وصلت آخر رسائلك هناك وفي الرسائل المباشرة إلى Kazma",
         "en": "Checks the bot and app tokens, the permissions, the delivery channel, and whether your latest messages there and in direct messages reached Kazma",
     },
+    "settings.hub.status_messages": {
+        "ar": "رسائل حالة الخادم",
+        "en": "Server status messages",
+    },
+    "settings.hub.status_messages_hint": {
+        "ar": "تُرسل حيث تذهب التنبيهات. تكفي في الغالب بطاقة واحدة عند عودة Kazma: تذكر مدة التوقف وهل اتصل كل تطبيق محادثة.",
+        "en": "Sent where alerts go. One card when Kazma is back up is enough for most: it says how long Kazma was down and whether each chat app connected.",
+    },
+    "settings.hub.status_started": {
+        "ar": "عاد Kazma للعمل (مع حالة اتصال كل تطبيق محادثة)",
+        "en": "Kazma is back up (with each chat app's connection)",
+    },
+    "settings.hub.status_startup_failed": {
+        "ar": "تعذّر تشغيل Kazma",
+        "en": "Kazma failed to start",
+    },
+    "settings.hub.status_starting": {
+        "ar": "Kazma قيد التشغيل",
+        "en": "Kazma is starting",
+    },
+    "settings.hub.status_shutting_down": {
+        "ar": "Kazma يتوقف عن العمل",
+        "en": "Kazma is shutting down",
+    },
 }

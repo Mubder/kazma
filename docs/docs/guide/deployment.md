@@ -232,21 +232,38 @@ The repo's notes mention "resource constraints on 24 GB VRAM setups." Practical 
 
 ## 10. Lifecycle status notifications
 
-Kazma pushes a status update to every configured platform (Telegram/Discord/Slack) when the server starts, restarts, shuts down, or fails to boot — so you can tell from chat when something went wrong (a hung boot, a crash that emits no shutdown message, a bad bot token).
+Kazma sends one card to your alert routes (Telegram/Discord/Slack, as chosen under **Alerts go to**) each time it is back up, and one when startup fails -- so you can tell from chat that a restart finished, how long it took, and whether every chat app came back:
 
-### Events
+```
+🟢 [System] Kazma restarted
+Down for 34.8 s · build 3b7422d
 
-| Event | Icon | When | What it tells you |
+Adapters
+✅ Telegram
+✅ Discord
+❌ Slack: Slack refused the app-level token (invalid_auth)
+
+Model: deepseek-flash
+```
+
+The card waits until every chat app has connected or failed (up to 45 s; they usually connect within a few seconds) and marks each one with what its connection said. It is green when everything connected and the last run stopped cleanly, yellow otherwise.
+
+### Messages
+
+| Message | On by default | When | What it tells you |
 |-------|------|------|-------------------|
-| `starting` | 🔵 | Top of startup (before MCP) | Boot began. If you see this with no `started`, the boot hung or crashed. |
-| `started` | 🟢 | End of startup (all subsystems up) | Server is healthy. Includes `Adapters:` + `Model:` detail. |
-| `restarted` | 🔄 | Auto-upgraded from `started` | Shutdown→start within the restart window — intentional restart, not crash-recovery. |
-| `shutting_down` | 🟡 | Top of graceful shutdown | Clean stop. Its **absence** means a crash / `kill -9`. |
-| `startup_failed` | 🔴 | Gateway-start failure guard | Boot error (bad token, network) — the error is in the message body. |
+| `started` | yes | Once the chat apps have connected (or failed to) | Kazma is up: **restarted** after a clean stop within the restart window, otherwise **started**, with how long it was down -- or "The last run did not shut down cleanly" after a crash, a forced stop or a power cut. |
+| `startup_failed` | yes | Gateway-start failure | Boot error (bad token, network) -- the error is in the message. |
+| `starting` | no | Top of startup | Boot began. |
+| `shutting_down` | no | Top of a graceful shutdown | Kazma is stopping. |
+
+The start and the stop are recorded whether or not their messages are on: that is how the next card knows the downtime, and whether the last run ended cleanly. Until 2026-09-29 all four were on, three messages per restart; an install still holding that stored default is moved to the new one once, at boot.
+
+Switch them in **Settings → Providers & Connectors → Platform Connectors → Adapters & Routes → Server status messages**.
 
 ### How it works
 
-Notifications route through the **SwarmMessageBus** — the same bus that delivers swarm worker output. No separate notification path is constructed. The bus is wired during `KazmaAppBuilder.build()` (before the lifespan), and `FanOutBusAdapter` fans out to every configured platform. When no platform bus is configured (`NullBusAdapter`), the feature self-disables silently.
+Notifications route through the **SwarmMessageBus** — the same bus that delivers swarm worker output. No separate notification path is constructed. The bus is wired during `KazmaAppBuilder.build()` (before the lifespan), and `FanOutBusAdapter` fans out to the selected platforms. When no platform bus is configured (`NullBusAdapter`), the feature self-disables silently.
 
 ### Configuration
 
@@ -254,11 +271,11 @@ Notifications route through the **SwarmMessageBus** — the same bus that delive
 notifications:
   lifecycle:
     enabled: true
-    events: [starting, started, shutting_down, startup_failed]
-    restart_window_seconds: 60  # 0 disables restart detection
+    events: [started, startup_failed]   # also: starting, shutting_down; [] sends none
+    restart_window_seconds: 60          # 0 turns restart detection off
 ```
 
-Config is **live-re-read** on every boot/shutdown — toggle it via the Settings API or `kazma.yaml` without a restart for the *next* boot.
+Config is **live-re-read** on every boot/shutdown — change it in Settings (or `kazma.yaml`) without a restart for the *next* boot.
 
 ### Enabling notifications
 

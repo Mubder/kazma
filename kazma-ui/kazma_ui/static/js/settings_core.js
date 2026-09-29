@@ -249,7 +249,12 @@
             discordToken: '', discordEnabled: true, discordGuild: '', discordAllowed: '', discordChannel: '',
             slackToken: '', slackAppToken: '', slackWorkspace: '', slackAllowed: '', slackEnabled: true, slackChannel: '',
             alertRoutes: [], swarmRoutes: [],
+            // Server status messages (notifications.lifecycle.events).
+            lifecycleEvents: ['started', 'startup_failed'],
         },
+        // Every server status message, in the order the card lists them
+        // (kazma_core.lifecycle_notifier.EVENT_NAMES).
+        lifecycleEventNames: ['started', 'startup_failed', 'starting', 'shutting_down'],
         adapterRoutingSaving: false,
         adapterRoutingApplying: false,
         adapterRoutingSnapshot: '',

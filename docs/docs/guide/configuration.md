@@ -242,13 +242,13 @@ safety:
 
 ### `notifications.lifecycle` (lines 143-157)
 
-Server lifecycle status notifications — pushes a status update to every configured platform when the server starts, restarts, shuts down, or fails to boot. See [Deployment → Lifecycle notifications](deployment#10-lifecycle-status-notifications).
+Server status messages — one card each time Kazma is back up (how long it was down, whether each chat app connected, the build and the model) and one when startup fails. Sent where alerts go. Settings → Providers & Connectors → Platform Connectors → Adapters & Routes → **Server status messages**. See [Deployment → Lifecycle notifications](deployment#10-lifecycle-status-notifications).
 
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `notifications.lifecycle.enabled` | bool | `true` | Master switch. |
-| `notifications.lifecycle.events` | list | `[starting, started, shutting_down, startup_failed]` | Which events trigger a notification. Remove entries to silence specific events. |
-| `notifications.lifecycle.restart_window_seconds` | int | `60` | If a shutdown→start happens within this window, reports "🔄 Restarted" instead of "🟢 Started". `0` disables restart detection. |
+| `notifications.lifecycle.events` | list | `[started, startup_failed]` | Which messages are sent: `started` (the card when Kazma is back up), `startup_failed`, `starting`, `shutting_down`. An empty list sends none. Until 2026-09-29 the default was all four -- three messages per restart -- and an install still holding that stored default is moved to the new one once at boot. |
+| `notifications.lifecycle.restart_window_seconds` | int | `60` | A clean stop followed by a start within this window reads "Kazma restarted" instead of "Kazma started". `0` turns restart detection off (no downtime line either). |
 
 Default:
 
@@ -257,9 +257,7 @@ notifications:
   lifecycle:
     enabled: true
     events:
-      - starting
       - started
-      - shutting_down
       - startup_failed
     restart_window_seconds: 60
 ```

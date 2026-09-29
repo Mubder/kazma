@@ -1,5 +1,51 @@
 # CHANGELOG
 
+## One start card per restart, with each chat app's connection; changed defaults reach installs (2026-09-29)
+
+The owner asked for fewer start/stop messages and a restart card that says
+which adapters came back ("Telegram ✅ / Discord ✅ / Slack ❌"). A reload
+sent three messages -- "shutting down gracefully", "starting up" and
+"restarted" -- and the last listed the adapters by name whether or not any
+had connected.
+
+- **One card per boot** (`lifecycle_notifier.announce_started`, run in the
+  background at the end of startup): it waits until every chat app has
+  connected or failed (up to 45 s; live they connect ~4 s after the gateway
+  starts), then says "Kazma restarted" or "Kazma started", how long Kazma
+  was down -- or that the last run did not shut down cleanly (a crash, a
+  forced stop, a power cut) --, the build, each adapter ✅ or ❌ with what
+  its connection said, and the model. Green when everything connected and
+  the last run stopped cleanly, yellow otherwise. "starting" and
+  "shutting_down" are off by default; both are still RECORDED (the boot and
+  stop markers the card reads), whether announced or not.
+- **An adapter's connection is what its connection said**
+  (`BaseAdapter.connection_state`, from each adapter's receive record). The
+  Gateway Monitor and `kazma gateway status` said "connected" for any
+  running task -- including one still connecting, or retrying a refused
+  token; they now say connected / connecting / offline.
+- **Settings → Adapters & Routes → Server status messages**: a switch for
+  each message (there was no control). `PUT /api/settings/single` refuses a
+  message name Kazma does not send.
+- **A changed shipped default reaches installs** (`config_defaults.py`). The
+  first boot copies every kazma.yaml value into the settings database, and a
+  stored value wins -- so this change would never have reached the live
+  install, which held the four-event list its first boot stored. A declared
+  `RetiredDefault` moves a stored copy of an old default to today's, once
+  (an owner who picks it again keeps it); `NEW_INSTALLS_ONLY` keeps it, with
+  the reason. A read-only audit of the live settings found ten more keys on
+  older shipped values; the only one still read, `agent.language`, is left
+  alone (it may be the owner's choice). The gate: kazma.yaml against
+  `tests/fixtures/shipped_config_defaults.json`; `scripts/shipped_defaults.py
+  --write` refreshes it and refuses an undeclared changed value.
+
+`tests/test_lifecycle_start_card.py`: a reload sends one card (negative
+control: the old default sends three); the stop is recorded when it is not
+announced; an unclean last run is said; the card waits for the adapters and
+marks one that failed or never connected; no card once shutdown begins; the
+Settings API. `tests/test_shipped_config_defaults.py`: the snapshot gate with
+its negative controls; a stored old default follows once and an owner's value
+is kept (negative control: without the declaration it stays).
+
 ## Every chat app's Test diagnoses, and every adapter accounts for each message (2026-09-29)
 
 The owner liked the new Discord Test -- real checks instead of "Connected" --

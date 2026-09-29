@@ -568,6 +568,17 @@
                             </template>
                         </div>
                     </div>
+                    <div style="margin-top:12px">
+                        <label class="form-label" style="font-size:0.75rem;margin-bottom:4px">{{ t('settings.hub.status_messages') }}</label>
+                        <p class="text-muted" style="font-size:0.68rem;margin:0 0 6px">{{ t('settings.hub.status_messages_hint') }}</p>
+                        <template x-for="ev in lifecycleEventNames" :key="'l' + ev">
+                            <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;padding:2px 0;cursor:pointer">
+                                <input type="checkbox" :checked="(adapterRouting.lifecycleEvents || []).includes(ev)"
+                                       @change="toggleRoutingList(adapterRouting.lifecycleEvents, ev, $event.target.checked)">
+                                <span x-text="t('settings.hub.status_' + ev)"></span>
+                            </label>
+                        </template>
+                    </div>
                 </div>
 
                 <!-- Gateway runtime refresh -->

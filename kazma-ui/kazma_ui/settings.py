@@ -29,6 +29,11 @@ from kazma_core.checkpoint_retention import (
     retention_setting as checkpoint_retention_setting,
 )
 from kazma_core.errors import safe_error, validation_error
+from kazma_core.lifecycle_notifier import (
+    EVENT_NAMES as LIFECYCLE_EVENT_NAMES,
+    EVENTS_KEY as LIFECYCLE_EVENTS_KEY,
+    parse_lifecycle_events,
+)
 from kazma_core.swarm.task_store import (
     DEFAULT_TASK_RETENTION_DAYS,
     MAX_TASK_RETENTION_DAYS,
@@ -474,6 +479,22 @@ class SettingsRouterBuilder:
                     )
                 setting.value = days
                 setting.category = "system"
+            # Server status messages: only events Kazma sends. A name it
+            # does not know would switch that message off at the next boot
+            # without a word, so it is refused here.
+            if setting.key == LIFECYCLE_EVENTS_KEY:
+                known, unknown = parse_lifecycle_events(setting.value)
+                if unknown or not isinstance(setting.value, (list, str)):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Server status messages are a list of: "
+                            f"{', '.join(LIFECYCLE_EVENT_NAMES)}"
+                            + (f" (not {', '.join(unknown)})." if unknown else ".")
+                        ),
+                    )
+                setting.value = known
+                setting.category = "notifications"
             config_store.set(setting.key, setting.value, category=setting.category)
             return {"status": "ok"}
 

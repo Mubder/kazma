@@ -47,7 +47,10 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from kazma_gateway.receive_log import ReceiveLog
 
 logger = logging.getLogger(__name__)
 
@@ -352,6 +355,9 @@ class BaseAdapter(ABC):
     """
 
     name: str = "unknown"
+    #: What the connection received (``kazma_gateway.receive_log``); every
+    #: platform adapter keeps one. None: running is all that is known.
+    _receive: ReceiveLog | None = None
 
     def __init__(self) -> None:
         self._task: asyncio.Task[None] | None = None
@@ -424,6 +430,31 @@ class BaseAdapter(ABC):
         """Whether the adapter is currently running (public accessor)."""
         return self._running
 
+    def connection_state(self) -> tuple[str, str]:
+        """Where the connection stands now: ``(state, why)``.
+
+        ``connected``: the receive record says so. ``connecting``: running,
+        not connected yet (*why* is the last problem, when there was one).
+        ``down``: the listen task never started or has ended. ``running``:
+        no receive record, so running is all that is known. Running used to
+        be reported as connected (the Gateway Monitor, the restart card),
+        whatever the platform had said (2026-09-29).
+        """
+        receive = self._receive
+        problem = ""
+        if receive is not None and receive.last_problem:
+            problem = str(receive.last_problem.get("what") or "")
+        task = self._task
+        if task is None:
+            return "down", problem or "not started"
+        if task.done() or not self._running:
+            return "down", problem or "its connection has stopped"
+        if receive is None:
+            return "running", ""
+        if receive.connected:
+            return "connected", ""
+        return "connecting", problem
+
     @staticmethod
     async def jitter_sleep(shutdown_event: asyncio.Event) -> bool:
         """Randomized 1-3 second delay between poll cycles.
@@ -489,6 +520,12 @@ class BaseAdapter(ABC):
 
 # Type alias for the handler the Brain registers
 MessageHandler = Callable[[IncomingMessage], Awaitable[None]]
+
+#: A platform's name as people write it (the start card).
+_PLATFORM_LABELS = {"telegram": "Telegram", "discord": "Discord", "slack": "Slack", "whatsapp": "WhatsApp"}
+#: ``BaseAdapter.connection_state`` in the Gateway Monitor's words (it has
+#: said "connected" / "offline" since it existed).
+_MONITOR_STATUS = {"connected": "connected", "running": "connected", "connecting": "connecting", "down": "offline"}
 
 
 class GatewayManager:
@@ -556,6 +593,21 @@ class GatewayManager:
         """Register a platform adapter."""
         self.adapters.append(adapter)
         logger.info("Registered adapter: %s", adapter.name)
+
+    def connection_report(self) -> list[dict[str, str]]:
+        """Each adapter's connection now, for the start card:
+        ``{"name", "state", "detail"}`` (``BaseAdapter.connection_state``).
+        Attribute reads only: the card polls it while the adapters connect."""
+        report = []
+        for adapter in self.adapters:
+            state, why = adapter.connection_state()
+            raw = str(adapter.name or "")
+            report.append({
+                "name": _PLATFORM_LABELS.get(raw, raw.title() or "Adapter"),
+                "state": state,
+                "detail": why,
+            })
+        return report
 
     def set_rate_feedback(self, rate_feedback: Any) -> None:
         """Register a RateFeedbackManager for inbound rate limiting."""
@@ -850,13 +902,17 @@ class GatewayManager:
 
         now = _time.time()
 
-        # Adapter status
+        # Adapter status: what the connection says, not whether its task
+        # runs (a running adapter still connecting, or retrying a refused
+        # token, used to read "connected").
         adapter_status = []
         for a in self.adapters:
+            state, why = a.connection_state()
             adapter_status.append(
                 {
                     "platform": a.name,
-                    "status": "connected" if a._running else "offline",
+                    "status": _MONITOR_STATUS.get(state, state),
+                    "detail": why,
                     "uptime_seconds": round(a.uptime, 1),
                 }
             )
