@@ -45,6 +45,8 @@ from kazma_gateway.gateway import (
     OutboundMessage,
     RateLimiter,
 )
+from kazma_gateway.adapters.telegram_receive import TELEGRAM_REASONS, message_of, update_kind, where_of
+from kazma_gateway.receive_log import ReceiveLog
 from kazma_gateway.slash_commands import BOT_MENU_COMMANDS
 from kazma_core.http_tls import shared_ssl_context
 
@@ -175,6 +177,34 @@ class TelegramAdapter(BaseAdapter):
         self._pending_updates: set[int] = set()   # dispatched, chain not finished
         self._unacked_updates: set[int] = set()   # dispatched, not yet committed
         self._max_seen_update_id: int = 0
+        # What the connection received and why each unanswered message was
+        # left (receive_log); the connector Test shows it.
+        self._receive = ReceiveLog(TELEGRAM_REASONS)
+
+    def diagnostics(self) -> dict[str, Any]:
+        """The live receive record for the connector Test (plain data)."""
+        return {
+            **self._receive.snapshot(),
+            "allowed_users": len(self._allowed_users),
+            "allow_all": self._allow_all,
+        }
+
+    #: Drops that point at a setting to fix (a WARNING, throttled).
+    _DROP_WARNINGS = frozenset({"no_allowlist", "queue_full", "voice_failed"})
+
+    def _note_drop(self, reason: str, message: dict[str, Any] | None) -> None:
+        """Record and say why a Telegram message was left."""
+        m = message or {}
+        chat = m.get("chat") or {}
+        record = self._receive.drop(
+            reason,
+            message_id=f"{chat.get('id')}:{m.get('message_id')}" if m else None,
+            author_id=(m.get("from") or {}).get("id"),
+            channel_id=chat.get("id"),
+            where=where_of(m) if m else None,
+            person=not (m.get("from") or {}).get("is_bot"),
+        )
+        self._receive.log_drop(logger, "telegram", record, warn=self._DROP_WARNINGS)
 
     def set_allowed_users(self, user_ids: list[int] | set[int]) -> None:
         """Set the whitelist of allowed Telegram user IDs (public setter).
@@ -268,10 +298,16 @@ class TelegramAdapter(BaseAdapter):
                         "[telegram] Bot token validation failed: %s",
                         me_data.get("description", "unknown error"),
                     )
+                    self._receive.disconnected(
+                        f"Telegram refused the bot token: {me_data.get('description', 'unknown error')}"
+                    )
                     self._running = False
                     return
                 bot_info = me_resp.json().get("result", {})
                 self._bot_username = str(bot_info.get("username") or "")
+                self._receive.extra.update(
+                    bot_username=self._bot_username or None, bot_user_id=bot_info.get("id")
+                )
                 self._group_announced: set[str] = set()
                 logger.info(
                     "[telegram] Connected as @%s (%s)",
@@ -280,6 +316,7 @@ class TelegramAdapter(BaseAdapter):
                 )
             except Exception:
                 logger.exception("[telegram] getMe failed — cannot validate bot token")
+                self._receive.disconnected("Could not reach Telegram to check the bot token")
                 self._running = False
                 return
 
@@ -287,11 +324,13 @@ class TelegramAdapter(BaseAdapter):
             await self._register_bot_commands()
 
             logger.info("[telegram] Starting getUpdates polling loop")
+            self._receive.connected_now(new_session=True)
 
             while not shutdown_event.is_set():
                 # ── Poll ────────────────────────────────────────────
                 try:
                     updates = await self._poll()
+                    self._receive.alive()
                 except asyncio.CancelledError:
                     raise
                 except httpx.TimeoutException:
@@ -301,6 +340,7 @@ class TelegramAdapter(BaseAdapter):
                     continue
                 except httpx.ConnectError:
                     logger.warning("[telegram] Connection failed — retrying after jitter")
+                    self._receive.problem("Could not reach Telegram (connection failed); retrying")
                     if await self.jitter_sleep(shutdown_event):
                         break
                     continue
@@ -311,6 +351,11 @@ class TelegramAdapter(BaseAdapter):
                             "[telegram] 409 Conflict — another process is polling this bot. "
                             "Stopping adapter. Stop the other process or use a different bot token.",
                         )
+                        self._receive.disconnected(
+                            "Another program is collecting this bot's messages (Telegram answered "
+                            "409 Conflict), so Kazma stopped. Stop that program -- or give it its "
+                            "own bot -- then restart Kazma."
+                        )
                         self._running = False
                         break
                     # Log status + response text without the full exception
@@ -320,6 +365,7 @@ class TelegramAdapter(BaseAdapter):
                     except Exception:
                         err_body = "<unreadable>"
                     logger.error("[telegram] HTTP %d polling error: %s", exc.response.status_code, err_body)
+                    self._receive.problem(f"Telegram answered HTTP {exc.response.status_code} while Kazma polled")
 
                     # 429: respect Telegram's retry_after parameter instead
                     # of the default 1-3s jitter (which causes double-429s).
@@ -402,6 +448,7 @@ class TelegramAdapter(BaseAdapter):
                 await self._http.aclose()
                 self._http = None
             self._running = False
+            self._receive.disconnected()
             logger.info("[telegram] Polling stopped")
 
     def _dispatch_update_to_chain(
@@ -534,6 +581,16 @@ class TelegramAdapter(BaseAdapter):
         Extracted from the poll loop (deep-audit 2026-08-19, #15c) so it can
         run on a per-chat chain task instead of blocking getUpdates.
         """
+        self._receive.event(update_kind(update))
+        message = message_of(update)
+        if message is not None:
+            sender = message.get("from") or {}
+            self._receive.message(
+                f"{(message.get('chat') or {}).get('id')}:{message.get('message_id')}",
+                author_id=sender.get("id"),
+                person=not sender.get("is_bot"),
+                where=where_of(message),
+            )
         try:
             # Group discovery (2026-09-03): when the bot is added to a
             # group (or a group is created with it), announce the group's
@@ -558,6 +615,7 @@ class TelegramAdapter(BaseAdapter):
                 if message and self.detect_voice_message(message):
                     voice_result = await self._handle_voice_message(message)
                     if voice_result is None:
+                        self._note_drop("voice_failed", message)
                         return
                     from_user = message.get("from", {})
                     user_id = from_user.get("id", 0)
@@ -587,33 +645,44 @@ class TelegramAdapter(BaseAdapter):
                     # download and attach instead of dropping.
                     msg = await self._handle_media_message(message)
                     if msg is None:
+                        self._note_drop("media_failed", message)
                         return
                 else:
+                    if message is not None:
+                        # A sticker, a poll, a contact: nothing Kazma reads.
+                        self._note_drop("unsupported", message)
                     return
 
             # User whitelist (fail-closed: empty list + allow_all=false = reject all)
             if not self._allowed_users and not self._allow_all:
-                logger.warning("[telegram] Rejecting message — no allowed_users and allow_all is false")
+                self._note_drop("no_allowlist", message)
                 return
             if self._allowed_users:
                 user_id = msg.context_metadata.get("user_id", 0)
                 if user_id not in self._allowed_users:
-                    logger.debug(
-                        "[telegram] Ignoring user %d (not whitelisted)",
-                        user_id,
-                    )
+                    # INFO, not DEBUG: "why did Kazma not answer me" must be
+                    # in the log (2026-09-29).
+                    self._note_drop("user_not_allowed", message)
                     return
 
+            msg_key = f"{msg.context_metadata.get('chat_id')}:{msg.context_metadata.get('message_id')}"
             if self._already_seen_message(msg):
                 logger.info(
                     "[telegram] Skipping duplicate/edit of message_id=%s chat=%s",
                     msg.context_metadata.get("message_id"),
                     msg.context_metadata.get("chat_id"),
                 )
+                self._receive.drop(
+                    "duplicate",
+                    message_id=msg_key,
+                    author_id=msg.context_metadata.get("user_id"),
+                    channel_id=msg.context_metadata.get("chat_id"),
+                )
                 return
 
             try:
                 queue.put_nowait(msg)
+                self._receive.note_passed_on(msg_key)
                 logger.info(
                     "[telegram] Enqueued from %s (chat=%d): %.80s",
                     msg.context_metadata.get("username", "?"),
@@ -634,6 +703,12 @@ class TelegramAdapter(BaseAdapter):
                 logger.warning(
                     "[telegram] Queue full — dropping message from chat=%d",
                     chat_id,
+                )
+                self._receive.drop(
+                    "queue_full",
+                    message_id=msg_key,
+                    author_id=msg.context_metadata.get("user_id"),
+                    channel_id=chat_id,
                 )
                 # The user saw their message "delivered" — tell them it was
                 # dropped instead of leaving them staring at silence. Direct
@@ -660,6 +735,12 @@ class TelegramAdapter(BaseAdapter):
                 "[telegram] Error processing update %s",
                 update.get("update_id", "?"),
             )
+            if message is not None:
+                self._receive.drop(
+                    "processing_failed",
+                    message_id=f"{(message.get('chat') or {}).get('id')}:{message.get('message_id')}",
+                    author_id=(message.get("from") or {}).get("id"),
+                )
 
     def _already_seen_message(self, msg: IncomingMessage) -> bool:
         """True if this (chat_id, message_id) was already enqueued recently."""

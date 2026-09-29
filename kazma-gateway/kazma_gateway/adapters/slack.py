@@ -33,6 +33,7 @@ from typing import Any
 import httpx
 
 from kazma_core.background import spawn_background
+from kazma_gateway.adapters.slack_receive import SLACK_REASONS, drop_reason, event_key, where_of
 from kazma_gateway.gateway import (
     Attachment,
     BaseAdapter,
@@ -40,6 +41,7 @@ from kazma_gateway.gateway import (
     OutboundMessage,
 )
 from kazma_core.http_tls import shared_ssl_context
+from kazma_gateway.receive_log import ReceiveLog
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +110,84 @@ class SlackAdapter(BaseAdapter):
         self._known_channels: list[dict[str, Any]] = []
         self._last_ts: dict[str, str] = {}  # channel_id → last seen ts
         self._seen_events: dict[tuple[str, str], None] = {}  # (channel_id, ts) — insertion-ordered dedup of app_mention+message
+        # What the connection received and why each unanswered message was
+        # left (receive_log); the connector Test shows it.
+        self._receive = ReceiveLog(SLACK_REASONS)
+
+    def diagnostics(self) -> dict[str, Any]:
+        """The live receive record for the connector Test (plain data)."""
+        return {
+            **self._receive.snapshot(),
+            "allowed_users": len(self._allowed_users),
+            "allow_all": self._allow_all,
+            "socket_mode": bool(self._app_token),
+        }
+
+    #: Drops that point at a setting to fix (a WARNING, throttled).
+    _DROP_WARNINGS = frozenset({"no_allowlist", "queue_full", "team_not_allowed", "channel_not_allowed"})
+
+    def _note_drop(self, reason: str, event: dict[str, Any], *, counted: bool = True) -> None:
+        """Record and say why a Slack message was left. *counted* False: the
+        message was not counted as received yet (a drop before the gate)."""
+        key = event_key(event)
+        if not counted:
+            self._receive.message(key, author_id=event.get("user"), person=reason != "from_a_bot",
+                                  where=where_of(event.get("channel")))
+        record = self._receive.drop(
+            reason,
+            message_id=key,
+            author_id=event.get("user"),
+            channel_id=event.get("channel"),
+            where=where_of(event.get("channel")),
+            person=reason != "from_a_bot",
+        )
+        self._receive.log_drop(logger, "slack", record, warn=self._DROP_WARNINGS)
+
+    def _accept_event(self, event: dict[str, Any]) -> IncomingMessage | None:
+        """The Socket Mode event to answer, or None -- a message left for a
+        reason is recorded and logged (until 2026-09-29 an unreadable event
+        or another channel's said nothing at INFO, and even a message Kazma
+        took was logged at DEBUG only)."""
+        self._receive.event(str(event.get("type") or "unknown"))
+        incoming = self._parse_event(event)
+        if incoming is None:
+            reason = drop_reason(event)
+            key = event_key(event)
+            if reason is not None and (key is None or tuple(key.split(":", 1)) not in self._seen_events):
+                self._note_drop(reason, event, counted=False)
+            return None
+        # Deduplicate: Slack sends both app_mention AND message events for
+        # the same mention. The underlying message shares the same ts, so we
+        # skip duplicates.
+        cid = incoming.context_metadata.get("channel_id", "")
+        msg_ts = incoming.context_metadata.get("message_ts", "")
+        if msg_ts:
+            seen = (cid, msg_ts)
+            if seen in self._seen_events:
+                return None
+            self._seen_events[seen] = None
+            # Prune oldest entries when over capacity. A dict IS insertion-
+            # ordered, so pop the oldest (a set kept an ARBITRARY subset and
+            # could re-process a Slack-retried event -- audit finding).
+            if len(self._seen_events) > 500:
+                for _ in range(len(self._seen_events) - 250):
+                    del self._seen_events[next(iter(self._seen_events))]
+        uid = incoming.context_metadata.get("user_id", "")
+        self._receive.message(event_key(event), author_id=uid, where=where_of(cid))
+        # Enforce channel whitelist if configured
+        if self._allowed_channels and cid not in self._allowed_channels:
+            self._note_drop("channel_not_allowed", event)
+            return None
+        # Enforce user allowlist -- fail-CLOSED (mirror Telegram/Discord): an
+        # empty allowlist with allow_all=False rejects everyone, rather than
+        # accepting the whole workspace (audit finding).
+        if not self._allowed_users and not self._allow_all:
+            self._note_drop("no_allowlist", event)
+            return None
+        if self._allowed_users and (not uid or uid not in self._allowed_users):
+            self._note_drop("user_not_allowed", event)
+            return None
+        return incoming
 
     def set_allowed_users(self, user_ids: list[str] | set[str]) -> None:
         """Replace the per-user allowlist at runtime (Settings live apply)."""
@@ -316,15 +396,20 @@ class SlackAdapter(BaseAdapter):
             msg = await self._maybe_transcribe_audio(msg)
             try:
                 self._queue.put_nowait(msg)
-                logger.debug(
-                    "[Slack] ← event: type=%s user=%s text=%.80s",
-                    event.get("type", "?"),
+                self._receive.note_passed_on(event_key(event))
+                # INFO like Telegram's and Discord's: a Slack message Kazma
+                # took was logged at DEBUG only until 2026-09-29.
+                logger.info(
+                    "[Slack] Enqueued from %s (ch=%s): %.80s",
                     event.get("user", "?"),
-                    event.get("text", ""),
+                    event.get("channel", "?"),
+                    msg.text,
                 )
             except asyncio.QueueFull:
                 logger.warning("[Slack] Queue full — dropping event")
+                self._receive.drop("queue_full", message_id=event_key(event), author_id=event.get("user"))
         except Exception:
+            self._receive.drop("processing_failed", message_id=event_key(event), author_id=event.get("user"))
             logger.exception("[Slack] Event finalize failed")
 
     async def _prefetch_private_files(self, msg: IncomingMessage) -> IncomingMessage:
@@ -549,6 +634,9 @@ class SlackAdapter(BaseAdapter):
                 data = resp.json()
                 if not data.get("ok"):
                     logger.error("[Slack] Socket Mode connection failed: %s", data.get("error", "unknown"))
+                    self._receive.disconnected(
+                        f"Slack refused the Socket Mode connection ({data.get('error', 'unknown')})"
+                    )
                     await asyncio.sleep(reconnect_delay)
                     reconnect_delay = min(reconnect_delay * 2, _SOCKET_MAX_RECONNECT_DELAY)
                     continue
@@ -605,6 +693,9 @@ class SlackAdapter(BaseAdapter):
                                     "[Slack] Dropping %s from non-allowed team %s",
                                     msg_type, _env_team,
                                 )
+                                _team_event = (msg.get("payload") or {}).get("event") or {}
+                                if msg_type == "events_api" and drop_reason(_team_event) is not None:
+                                    self._note_drop("team_not_allowed", _team_event, counted=False)
                                 # Still ACK envelopes so Slack stops retrying.
                                 _env_ack = msg.get("envelope_id", "")
                                 if _env_ack:
@@ -616,10 +707,12 @@ class SlackAdapter(BaseAdapter):
 
                         if msg_type == "hello":
                             logger.info("[Slack] Socket Mode handshake confirmed")
+                            self._receive.connected_now(new_session=True)
                             continue
 
                         if msg_type == "disconnect":
                             logger.info("[Slack] Socket Mode disconnect received — reconnecting")
+                            self._receive.disconnected()
                             break
 
                         if msg_type == "interactive":
@@ -821,48 +914,13 @@ class SlackAdapter(BaseAdapter):
                                 except Exception:
                                     logger.debug("[Slack] Failed to ACK envelope")
 
-                            # Parse the Slack event
+                            # Parse the Slack event: accepted, or left for a
+                            # reason that is recorded and logged (_accept_event).
                             payload = msg.get("payload", {})
                             event = payload.get("event", {})
-                            incoming = self._parse_event(event)
+                            incoming = self._accept_event(event)
                             if incoming is not None:
-                                # Deduplicate: Slack sends both app_mention AND message
-                                # events for the same mention. The underlying message
-                                # shares the same ts (timestamp), so we skip duplicates.
                                 cid = incoming.context_metadata.get("channel_id", "")
-                                msg_ts = incoming.context_metadata.get("message_ts", "")
-                                if msg_ts:
-                                    key = (cid, msg_ts)
-                                    if key in self._seen_events:
-                                        continue
-                                    self._seen_events[key] = None
-                                    # Prune oldest entries when over capacity.
-                                    # Previously this was a set and
-                                    # list(set)[-250:] kept an ARBITRARY subset
-                                    # (set order is not insertion-ordered) —
-                                    # could drop a fresh key and re-process a
-                                    # Slack-retried event (duplicate agent
-                                    # turn). dict IS insertion-ordered, so
-                                    # pop the oldest (audit finding).
-                                    if len(self._seen_events) > 500:
-                                        for _ in range(len(self._seen_events) - 250):
-                                            del self._seen_events[next(iter(self._seen_events))]
-                                # Enforce channel whitelist if configured
-                                if self._allowed_channels and cid not in self._allowed_channels:
-                                    logger.debug("[Slack] Event from non-whitelisted channel %s — skipping", cid)
-                                    continue
-                                # Enforce user allowlist — fail-CLOSED (mirror
-                                # Telegram/Discord): an empty allowlist with
-                                # allow_all=False rejects everyone, rather than
-                                # accepting the whole workspace (audit finding).
-                                if not self._allowed_users and not self._allow_all:
-                                    logger.warning("[Slack] Dropping event — no allowed_users and allow_all is false")
-                                    continue
-                                if self._allowed_users:
-                                    _uid = incoming.context_metadata.get("user_id", "")
-                                    if not _uid or _uid not in self._allowed_users:
-                                        logger.info("[Slack] Dropping event from non-allowed user %s — skipping", _uid)
-                                        continue
                                 # Heavy per-event work (private file download up
                                 # to 20MB + STT) runs OFF the Socket-Mode reader
                                 # loop via a per-channel serial chain — inline it
@@ -879,6 +937,7 @@ class SlackAdapter(BaseAdapter):
             except asyncio.CancelledError:
                 break
             except Exception as exc:
+                self._receive.disconnected(f"The Socket Mode connection failed: {type(exc).__name__}: {exc}")
                 if not self._shutdown.is_set():
                     # The type as well: several websockets errors have an empty str(), and
                     # the log read "Socket Mode error:  — reconnecting" (2026-09-23).
@@ -895,6 +954,7 @@ class SlackAdapter(BaseAdapter):
         """Poll Slack for new messages (fallback when no app_token)."""
         # Fetch channel list on first poll
         await self._refresh_channels()
+        self._receive.connected_now(new_session=True)
 
         while not self._shutdown.is_set():
             try:
@@ -924,6 +984,7 @@ class SlackAdapter(BaseAdapter):
                 logger.info("[Slack] Found %d channels", len(self._known_channels))
             else:
                 error = data.get("error", "unknown")
+                self._receive.problem(f"Slack refused to list the bot's channels ({error})")
                 if error == "missing_scope":
                     needed = data.get("needed", "")
                     logger.error(
@@ -981,19 +1042,22 @@ class SlackAdapter(BaseAdapter):
 
     async def _handle_message(self, channel_id: str, msg: dict[str, Any]) -> None:
         """Normalize a Slack message into an IncomingMessage and enqueue it."""
+        event = {**msg, "channel": channel_id}
+        user_id = msg.get("user", "")
+        self._receive.event("message")
+        self._receive.message(event_key(event), author_id=user_id, where=where_of(channel_id))
         # Enforce channel whitelist if configured
         if self._allowed_channels and channel_id not in self._allowed_channels:
-            logger.debug("[Slack] Message from non-whitelisted channel %s — skipping", channel_id)
+            self._note_drop("channel_not_allowed", event)
             return
         # Enforce the USER allowlist on the polling path too (audit H-2):
         # the socket-mode path checks actor_allowed(), but this path only
         # checked channels — any workspace member posting in a polled
         # channel had full agent access. Fail closed: no allowlist and no
         # allow_all means reject everyone (same rule as the socket path).
-        user_id = msg.get("user", "")
         if not self.actor_allowed(user_id):
-            logger.debug(
-                "[Slack] Polling message from non-whitelisted user %r — skipping", user_id
+            self._note_drop(
+                "user_not_allowed" if self._allowed_users or self._allow_all else "no_allowlist", event
             )
             return
 
@@ -1002,6 +1066,7 @@ class SlackAdapter(BaseAdapter):
         # Polling (conversations.history) rarely includes files inline; Socket
         # Mode is the primary media path. Still honor any that are present.
         if not text and not raw_files:
+            self._note_drop("no_text", event)
             return
 
         username = f"slack_{user_id}" if user_id else "slack_unknown"
@@ -1053,8 +1118,10 @@ class SlackAdapter(BaseAdapter):
             self._queue.put_nowait(incoming)
         except asyncio.QueueFull:
             logger.warning("[Slack] Queue full — dropping message from %s", user_id)
+            self._receive.drop("queue_full", message_id=event_key(event), author_id=user_id)
             return
-        logger.debug("[Slack] ← from %s: %.80s", user_id, incoming.text)
+        self._receive.note_passed_on(event_key(event))
+        logger.info("[Slack] Enqueued from %s (ch=%s): %.80s", user_id, channel_id, incoming.text)
 
     # ── Interactive builders (Telegram-parity static API) ───────────
 

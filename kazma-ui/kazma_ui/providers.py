@@ -220,6 +220,35 @@ def _discord_test_settings(config_store: ConfigStore) -> dict[str, Any]:
     }
 
 
+def _telegram_test_settings(config_store: ConfigStore) -> dict[str, Any]:
+    """What the Telegram Test checks against (store reads: off the loop):
+    the delivery chat, the group route and the allowed users, as saved."""
+    from kazma_gateway.allowlists import split_ids
+
+    group = config_store.get("swarm.output_target", None)
+    return {
+        "chat_id": str(config_store.get("connectors.telegram.swarm_chat_id", "") or "").strip(),
+        "group": group if isinstance(group, dict) else None,
+        "allowed_users": split_ids(config_store.get("connectors.telegram.allowed_users", "")),
+    }
+
+
+def _slack_test_settings(config_store: ConfigStore) -> dict[str, Any]:
+    """What the Slack Test checks against (store reads: off the loop). The app
+    token resolves like the gateway's: a stored mask or nothing falls back
+    to SLACK_APP_TOKEN."""
+    from kazma_gateway.allowlists import split_ids
+
+    app_token = str(config_store.get("connectors.slack.app_token", "") or "").strip()
+    if not app_token or _is_masked_placeholder(app_token) or is_vault_ref(app_token):
+        app_token = os.environ.get("SLACK_APP_TOKEN", "").strip()
+    return {
+        "app_token": app_token,
+        "channel_id": str(config_store.get("connectors.slack.swarm_channel_id", "") or "").strip(),
+        "allowed_users": split_ids(config_store.get("connectors.slack.allowed_users", "")),
+    }
+
+
 def _live_adapter_diagnostics(platform: str) -> dict[str, Any] | None:
     """The running adapter's own record (its ``diagnostics()``), or None when
     the gateway has no such adapter running. The Test route's handler logs a
@@ -819,28 +848,16 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             }
 
         if name == "telegram":
+            # Every chat app's Test diagnoses since 2026-09-29 (the owner
+            # asked for Discord's on every adapter): see telegram_diagnose.
+            from kazma_gateway.adapters.telegram_diagnose import diagnose as diagnose_telegram
+
             token = _normalize_telegram_bot_token(token)
+            settings = await asyncio.to_thread(_telegram_test_settings, config_store)
             try:
-                async with httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context()) as client:
-                    resp = await client.get(f"https://api.telegram.org/bot{token}/getMe")
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        return {
-                            "success": True,
-                            "bot_name": data.get("result", {}).get("username", ""),
-                        }
-                    detail = ""
-                    try:
-                        detail = str(resp.json().get("description", "") or "")
-                    except Exception:
-                        detail = (resp.text or "")[:120]
-                    # Keep Telegram's status but include description — no local format gate.
-                    return {
-                        "success": False,
-                        "error": f"HTTP {resp.status_code}" + (f": {detail}" if detail else ""),
-                    }
-            except Exception as exc:
-                logger.debug("Telegram connector test failed: %s", exc)
+                return await diagnose_telegram(token, live=_live_adapter_diagnostics("telegram"), **settings)
+            except Exception:
+                logger.warning("[connectors] Telegram test failed", exc_info=True)
                 return {"success": False, "error": "Connection test failed"}
 
         if name == "discord":
@@ -857,20 +874,13 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                 return {"success": False, "error": "Connection test failed"}
 
         if name == "slack":
+            from kazma_gateway.adapters.slack_diagnose import diagnose as diagnose_slack
+
+            settings = await asyncio.to_thread(_slack_test_settings, config_store)
             try:
-                async with httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context()) as client:
-                    resp = await client.post(
-                        "https://slack.com/api/auth.test",
-                        headers={"Authorization": f"Bearer {token}"},
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if data.get("ok"):
-                            return {"success": True, "bot_name": data.get("user", "")}
-                        return {"success": False, "error": data.get("error", "Slack auth.test failed")}
-                    return {"success": False, "error": f"HTTP {resp.status_code}"}
-            except Exception as exc:
-                logger.debug("Slack connector test failed: %s", exc)
+                return await diagnose_slack(token, live=_live_adapter_diagnostics("slack"), **settings)
+            except Exception:
+                logger.warning("[connectors] Slack test failed", exc_info=True)
                 return {"success": False, "error": "Connection test failed"}
 
         # Generic connectors cannot be tested remotely; report token presence.

@@ -4,7 +4,7 @@ what Kazma's connection received (2026-09-29).
 The Test used to ask one question -- does the token sign in -- and answered
 "Connected" while no message from the owner had reached Kazma in eight days.
 Each check here answers a question a person would ask, with the step that
-fixes it:
+fixes it (the shared pieces are ``kazma_gateway.connector_test``):
 
 - ``token``: does Discord accept the bot token?
 - ``message_text``: may the bot read what people write in server channels
@@ -18,20 +18,18 @@ fixes it:
   the owner's report; writing to another bot account looks the same.)
 - ``allowed``: who may talk to the bot?
 - ``listening``: is Kazma's connection up, and what has it received?
-
-``ok`` is True, False (something to fix) or None (worth knowing, not wrong).
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
 from kazma_core.http_tls import shared_ssl_context
 from kazma_gateway.adapters.discord_receive import DROP_REASONS
+from kazma_gateway.connector_test import Checks, judge_message, listening, when
 
 logger = logging.getLogger(__name__)
 
@@ -58,18 +56,11 @@ _CHANNEL_KINDS = {
 _HISTORY = 20
 #: How many allowed users' direct messages it opens.
 _DM_USERS = 3
-
-
-def _when(value: Any) -> datetime | None:
-    try:
-        stamp = datetime.fromisoformat(str(value))
-    except (TypeError, ValueError):
-        return None
-    return stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)
-
-
-def _show(stamp: datetime | None) -> str:
-    return stamp.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if stamp else "an unknown time"
+_NEVER = (
+    "Discord did not deliver it to the bot. Restarting Kazma opens a new connection; "
+    "if messages still do not arrive, the log's [discord] lines say what the "
+    "connection is doing."
+)
 
 
 async def _call(client: httpx.AsyncClient, method: str, path: str, **kw: Any) -> tuple[int, Any]:
@@ -105,7 +96,7 @@ def _newest_person(history: Any) -> dict[str, Any] | None:
     return next((m for m in history if not (m.get("author") or {}).get("bot")), None)
 
 
-def _judge_latest(
+def _judge(
     msg: dict[str, Any],
     live: dict[str, Any] | None,
     allowed: list[str],
@@ -113,36 +104,17 @@ def _judge_latest(
     place: str = "The latest message a person wrote there",
 ) -> tuple[bool | None, str]:
     author = msg.get("author") or {}
-    author_id = str(author.get("id") or "")
-    who = f"{author.get('username') or 'someone'} (user {author_id})"
-    stamp = _when(msg.get("timestamp"))
-    lead = f"{place} ({_show(stamp)}, from {who})"
-    if allowed and author_id not in allowed:
-        return False, (
-            f"{lead} is from someone not in Allowed User IDs ({', '.join(allowed)}), so Kazma "
-            f"does not answer it. If that is you, put {author_id} in Allowed User IDs and Save."
-        )
-    if live is None:
-        return None, f"{lead}: Kazma's Discord connection is not running, so it cannot have received it."
-    outcome = (live.get("recent") or {}).get(str(msg.get("id") or ""))
-    if outcome == "passed_on":
-        return True, f"{lead} reached Kazma and was handed on to be answered."
-    if outcome == "accepted":
-        return True, f"{lead} reached Kazma and is being prepared (a voice note is transcribed first)."
-    if outcome:
-        return False, f"{lead} reached Kazma but was not answered: it {DROP_REASONS.get(outcome, outcome)}."
-    session_since = _when(live.get("session_since"))
-    if session_since and stamp and stamp < session_since:
-        return None, (
-            f"{lead} is older than Kazma's current Discord session ({_show(session_since)}, "
-            "a restart or reconnect), so this connection cannot say what became of it. "
-            "Send a new one, then Test again."
-        )
-    return False, (
-        f"{lead} never reached Kazma's connection, though the connection was up "
-        f"(its last event: {_show(_when(live.get('last_event_at')))}). Discord did not deliver "
-        "it to the bot. Restarting Kazma opens a new connection; if messages still do not "
-        "arrive, the log's [discord] lines say what the connection is doing."
+    return judge_message(
+        message_id=msg.get("id"),
+        author_id=author.get("id"),
+        who=f"{author.get('username') or 'someone'} (user {author.get('id')})",
+        stamp=when(msg.get("timestamp")),
+        live=live,
+        allowed=allowed,
+        place=place,
+        platform="Discord",
+        never_hint=_NEVER,
+        reasons=DROP_REASONS,
     )
 
 
@@ -172,30 +144,8 @@ async def _judge_direct_messages(
             "bot account with a similar name. Open this bot's conversation with the link and "
             "write there."
         ), link
-    ok, detail = _judge_latest(
-        person, live, allowed, place=f"The latest direct message user {user_id} wrote to the bot"
-    )
+    ok, detail = _judge(person, live, allowed, place=f"The latest direct message user {user_id} wrote to the bot")
     return ok, detail, link
-
-
-def _listening(live: dict[str, Any] | None) -> tuple[bool, str]:
-    if live is None:
-        return False, (
-            "Kazma's Discord connection is not running: turn Discord on above and Save, "
-            "or check the bot token."
-        )
-    if not live.get("connected"):
-        return False, (
-            "Kazma's Discord connection is down right now; it reconnects by itself. "
-            "If this stays, the log's [discord] lines say why."
-        )
-    dropped = sum((live.get("dropped") or {}).values())
-    return True, (
-        f"Connected since {_show(_when(live.get('connected_since')))}: "
-        f"{live.get('messages', 0)} message(s) received, {live.get('passed_on', 0)} handed on "
-        f"to be answered, {dropped} not answered; {sum((live.get('events') or {}).values())} "
-        f"event(s) in all since Kazma started."
-    )
 
 
 async def diagnose(
@@ -208,15 +158,10 @@ async def diagnose(
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, Any]:
     """Run every check; ``{"success", "bot_name", "error", "checks"}``."""
-    checks: list[dict[str, Any]] = []
+    checks = Checks()
+    add = checks.add
     allowed = [str(a) for a in (allowed_users or []) if str(a).strip()]
     guild_ids = [str(g) for g in (guild_ids or []) if str(g).strip()]
-
-    def add(key: str, ok: bool | None, detail: str, link: str | None = None) -> None:
-        check: dict[str, Any] = {"key": key, "ok": ok, "detail": detail}
-        if link:
-            check["link"] = link
-        checks.append(check)
 
     bot_name: str | None = None
     async with httpx.AsyncClient(
@@ -240,7 +185,7 @@ async def diagnose(
         else:
             add("token", False, f"Discord answered {status} to the sign-in check.")
 
-        if checks[0]["ok"]:
+        if checks.ok("token"):
             status, app = await _get(client, "/applications/@me")
             if status == 200 and isinstance(app, dict):
                 if int(app.get("flags") or 0) & _MESSAGE_CONTENT_FLAGS:
@@ -296,7 +241,7 @@ async def diagnose(
                         if person is None:
                             add("latest", None, f"No message from a person among the latest {_HISTORY} there.")
                         else:
-                            add("latest", *_judge_latest(person, live, allowed))
+                            add("latest", *_judge(person, live, allowed))
                     else:
                         add("latest", None, (
                             "The bot cannot read that channel's history (Read Message History), so "
@@ -330,12 +275,8 @@ async def diagnose(
             "(Discord → Settings → Advanced → Developer Mode, then right-click your name → Copy User ID)."
         ))
 
-    add("listening", *_listening(live))
-
-    failed = next((c for c in checks if c["ok"] is False), None)
-    return {
-        "success": failed is None,
-        "bot_name": bot_name,
-        "error": failed["detail"] if failed else None,
-        "checks": checks,
-    }
+    add("listening", *listening(live, "Discord", not_running=(
+        "Kazma's Discord connection is not running: turn Discord on above and Save, "
+        "or check the bot token."
+    )))
+    return checks.result(bot_name)
