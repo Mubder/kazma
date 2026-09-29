@@ -277,6 +277,8 @@ def test_all_is_well() -> None:
     assert "direct message with bader (user u1)" in _check(result, "channel")["detail"]
     assert "reached Kazma" in _check(result, "latest")["detail"]
     assert "direct message user u1 wrote to the bot" in _check(result, "direct_message")["detail"]
+    assert _check(result, "direct_message")["link"] == "https://discord.com/channels/@me/dm1"
+    assert "link" not in _check(result, "token")
 
 
 def test_a_refused_token_stops_there() -> None:
@@ -332,10 +334,19 @@ def test_direct_messages_that_never_arrive_are_named() -> None:
 
 
 def test_no_direct_message_to_this_bot_points_at_another_bot() -> None:
-    result = _run(_good_routes(**{"/channels/dm1/messages": (200, [])}), live=_live())
+    """Live 2026-09-29: the owner's DMs went to another bot account with the
+    same name. The Test says so, names this bot by name and tag, and links
+    to the one conversation between the user and THIS bot."""
+    routes = _good_routes(**{
+        "/channels/dm1/messages": (200, []),
+        "/users/@me": (200, {"id": "bot", "username": "KazmaAI", "discriminator": "6245"}),
+    })
+    result = _run(routes, live=_live())
     dm = _check(result, "direct_message")
     assert dm["ok"] is None, dm
-    assert "Kazma (bot id bot)" in dm["detail"] and "another bot account" in dm["detail"]
+    assert "KazmaAI#6245 (bot id bot)" in dm["detail"] and "another bot account" in dm["detail"]
+    assert dm["link"] == "https://discord.com/channels/@me/dm1"
+    assert "KazmaAI#6245" in _check(result, "token")["detail"]
 
 
 def test_opening_the_direct_messages_sends_nothing() -> None:
@@ -420,3 +431,6 @@ def test_every_check_has_a_title_on_the_card() -> None:
     html = (REPO / "kazma-ui" / "kazma_ui" / "templates" / "settings.html").read_text(encoding="utf-8")
     card = html[html.index("<!-- Discord -->"): html.index("<!-- Slack -->")]
     assert "connectorCheckTitle(c.key)" in card and 'translate="no" x-text="c.detail"' in card
+    # A check's link opens Discord only -- the page never follows another address.
+    assert "c.link && String(c.link).startsWith('https://discord.com/')" in card
+    assert 'rel="noopener noreferrer"' in card

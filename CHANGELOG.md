@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Tables read on a phone; the Discord Test opens the right conversation (2026-09-29)
+
+- **The owner's direct messages went to another bot account** with the same
+  name: the Test found no direct message from them to Kazma's bot, while
+  their server messages were answered. The Test now names the bot by name
+  and tag and links to the one conversation between the user and this bot
+  ("Open this conversation in Discord", `discord.com/channels/@me/<id>`);
+  the card follows only discord.com links.
+- **A reply with a markdown table arrived in Discord as raw pipes** ("| Check
+  | Status |", "|---|---|"). No chat app shows tables. `GatewayManager.send`
+  -- the one way a reply reaches Telegram, Discord or Slack -- rewrites every
+  table outside a code block as lines: the header, then "• a — b" per row
+  (`kazma_gateway/chat_tables.py`, `tests/test_chat_tables.py`; the old send
+  fails its check). The web chat renders tables and is unchanged.
+
 ## Discord says what it received, and its Test says why a message went unanswered (2026-09-29)
 
 The owner sent Kazma a message on Discord and got no reply. The live log held

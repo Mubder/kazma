@@ -3169,6 +3169,11 @@ and Settings' Test said "Connected".
   check.
 - **Guild ID** (`connectors.discord.guild_id`) limits server messages
   (`set_allowed_guilds`, boot and `apply_adapter_allowlists`).
+- **A check may carry a `link`** (the DM check: the one conversation between
+  the user and this bot); the card renders only `https://discord.com/` links.
+- **No chat app shows a markdown table**: `GatewayManager.send` rewrites
+  tables outside code fences as lines (`kazma_gateway/chat_tables.py`) for
+  Telegram, Discord and Slack alike. `tests/test_chat_tables.py`.
 - Gates: `tests/test_discord_receive_and_test.py` (no received message
   unaccounted for, with a negative control; each drop reason; each check).
 
