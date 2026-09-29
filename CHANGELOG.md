@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## Discord says what it received, and its Test says why a message went unanswered (2026-09-29)
+
+The owner sent Kazma a message on Discord and got no reply. The live log held
+no line about it -- nor about any Discord message in eight days of logs --
+and Settings' Test said "Connected", because it only checked that the token
+signs in. The adapter left a message without a word when it had no text,
+came from a server outside its list, or came from a bot.
+
+- **Every message the connection reads is accounted for**
+  (`kazma_gateway/adapters/discord_receive.py`): handed on to be answered, or
+  dropped with a reason that is logged (a reason that points at a setting --
+  no text, no allowed users, another server, a full queue -- as a WARNING at
+  most every ten minutes) and recorded with the message's id.
+- **The Discord Test diagnoses** (`discord_diagnose.py`): the token, the
+  Message Content Intent (read from the app's flags), the servers the bot is
+  in, the delivery channel, and the newest message a person wrote there --
+  who and when, never the text -- and whether that message reached Kazma and
+  what became of it; then the allowed users and whether the connection is up
+  and what it has received. The card lists each check with its fix.
+- **The card's Guild ID works**: it was saved and read by nothing. It now
+  limits server messages to those servers (direct messages always pass), at
+  boot and live on Save.
+
+`tests/test_discord_receive_and_test.py`: each drop reason logged at its
+level, a message run through the real receive loop is never unaccounted for
+(negative control: a path that forgets to record fails it), every parser
+refusal has its reason, each problem the Test names with its fix, the route's
+wiring, the Guild ID, and a title for every check on the card.
+
 ## Discord keeps its session through a reconnect (2026-09-29)
 
 Discord asks every bot to reconnect every hour or so. Kazma answered by

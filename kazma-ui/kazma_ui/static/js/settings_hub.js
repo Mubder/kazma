@@ -604,12 +604,30 @@
                 const resp = await fetch('/api/connectors/' + encodeURIComponent(name) + '/test', { method: 'POST' });
                 const result = await resp.json();
                 this.adapterRoutingTest = { name, ...result };
-                showToast(result.success ? 'Connection test succeeded' : 'Test failed: ' + (result.error || 'unknown'), result.success ? 'success' : 'error');
+                showToast(result.success
+                    ? _k('settings.hub.connection_test_ok', 'Connection test succeeded')
+                    : _k('settings.hub.test_failed_error', 'Test failed: {error}', { error: result.error || '?' }),
+                result.success ? 'success' : 'error');
             } catch (e) {
                 this.adapterRoutingTest = { name, success: false, error: e.message };
                 showToast(_k('settings.hub.test_failed', 'Test failed: ') + e.message, 'error');
             }
             this.adapterRoutingTesting = '';
+        },
+
+        connectorCheckTitle(key) {
+            // The title of one check a platform Test made (its detail is the
+            // server's own words, shown as written).
+            const titles = {
+                token: _k('settings.hub.check_token', 'Bot token'),
+                message_text: _k('settings.hub.check_message_text', 'Message text'),
+                servers: _k('settings.hub.check_servers', 'Servers'),
+                channel: _k('settings.hub.check_channel', 'Delivery channel'),
+                latest: _k('settings.hub.check_latest', 'Your latest message'),
+                allowed: _k('settings.hub.check_allowed', 'Allowed users'),
+                listening: _k('settings.hub.check_listening', 'Kazma is listening'),
+            };
+            return titles[key] || key;
         },
 
         async loadHubProfiles() {

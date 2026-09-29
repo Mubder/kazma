@@ -4964,4 +4964,36 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "سمِّ الحساب بأحرف a–z وأرقام وشرطات.",
         "en": "Name the account with letters a–z, digits and hyphens.",
     },
+    "settings.hub.check_token": {
+        "ar": "رمز البوت",
+        "en": "Bot token",
+    },
+    "settings.hub.check_message_text": {
+        "ar": "نص الرسائل",
+        "en": "Message text",
+    },
+    "settings.hub.check_servers": {
+        "ar": "الخوادم",
+        "en": "Servers",
+    },
+    "settings.hub.check_channel": {
+        "ar": "قناة التسليم",
+        "en": "Delivery channel",
+    },
+    "settings.hub.check_latest": {
+        "ar": "آخر رسالة كتبتها",
+        "en": "Your latest message",
+    },
+    "settings.hub.check_allowed": {
+        "ar": "المستخدمون المسموح لهم",
+        "en": "Allowed users",
+    },
+    "settings.hub.check_listening": {
+        "ar": "Kazma يستمع",
+        "en": "Kazma is listening",
+    },
+    "settings.hub.discord_test_title": {
+        "ar": "يفحص رمز البوت وصلاحياته وخوادمه وقناة التسليم، وهل وصلت آخر رسالة كتبتها هناك إلى Kazma",
+        "en": "Checks the bot token, its permissions and servers, the delivery channel, and whether your latest message there reached Kazma",
+    },
 }
