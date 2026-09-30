@@ -387,11 +387,19 @@ async def announce_started(
     ``connections`` returns one ``{"name", "state", "detail"}`` per adapter
     (``GatewayManager.connection_report``); the card waits up to *wait_s*
     for every "connecting" one to connect or fail. The app runs this in the
-    background: boot never waits for it. Not sent when ``started`` is off,
-    or when Kazma begins shutting down during the wait.
+    background at the end of startup: boot never waits for it, and the
+    downtime on the card runs from the last stop to that moment -- the wait
+    is not downtime. Not sent when ``started`` is off, or when Kazma begins
+    shutting down during the wait.
     """
     from kazma_core.shutdown import is_shutting_down
 
+    # Kazma is serving again from here (the app starts this at the end of
+    # startup), so the downtime runs to now -- never to the send, which
+    # waits for the chat apps first. Measured at the send, Slack's 30 s of
+    # reconnects turned a 35 s reload into "Kazma started" (66 s, past the
+    # 60 s restart window; live 2026-09-30).
+    up_at = time.time()
     previous = _boot if _boot is not None else await asyncio.to_thread(_read_previous_run)
     cfg = await asyncio.to_thread(get_lifecycle_config)
     if not cfg["enabled"] or "started" not in cfg["events"]:
@@ -404,7 +412,7 @@ async def announce_started(
         return False
     level, text = _compose_start_card(
         previous,
-        now=time.time(),
+        now=up_at,
         restart_window_s=cfg["restart_window_seconds"],
         connections=report,
         waited_s=time.monotonic() - began,

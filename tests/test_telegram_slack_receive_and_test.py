@@ -370,6 +370,110 @@ def test_each_slack_problem_is_named(routes, live, kw, key, ok, words) -> None:
     assert found and found[0]["ok"] is ok and words in found[0]["detail"], result["checks"]
 
 
+def test_the_slack_test_says_when_another_program_shares_the_app() -> None:
+    at = NOW.isoformat()
+    shared = _check(_run_slack(_slack_routes(), live=_slack_live(
+        slack_open_connections=2, slack_open_connections_at=at)), "listening")
+    assert shared["ok"] is None, shared
+    assert "Slack counted 2 open connections" in shared["detail"]
+    alone = _check(_run_slack(_slack_routes(), live=_slack_live(
+        slack_open_connections=1, slack_open_connections_at=at)), "listening")
+    assert alone["ok"] is True and "counted" not in alone["detail"], alone
+
+
+# ── Slack Socket Mode: why a connection ended ───────────────────────────
+
+
+def _slack_adapter():
+    from kazma_gateway.adapters.slack import SlackAdapter
+
+    return SlackAdapter(bot_token="xoxb-t", app_token="xapp-t", allow_all=True)
+
+
+def test_slack_says_why_it_reconnects(caplog) -> None:
+    """Live 2026-09-30: one boot reconnected ten times in 30 s, and the log
+    said only "disconnect received". A fake Slack (a real websocket server)
+    asks for a refresh on the first connection and shakes hands on the
+    second; the loop reconnects at once and says why."""
+    import contextlib
+
+    websockets = pytest.importorskip("websockets")
+    caplog.set_level(logging.INFO, logger="kazma_gateway.adapters.slack")
+    adapter = _slack_adapter()
+
+    async def run() -> int:
+        seen = {"n": 0}
+        shutdown = asyncio.Event()
+
+        async def slack(ws) -> None:
+            seen["n"] += 1
+            if seen["n"] == 1:
+                await ws.send(json.dumps({"type": "disconnect", "reason": "refresh_requested",
+                                          "debug_info": {"host": "applink-1"}}))
+            else:
+                await ws.send(json.dumps({"type": "hello", "num_connections": 1,
+                                          "debug_info": {"host": "applink-2"}}))
+                await asyncio.sleep(0.2)
+                shutdown.set()
+            with contextlib.suppress(websockets.ConnectionClosed):
+                await ws.wait_closed()
+
+        server = await websockets.serve(slack, "127.0.0.1", 0)
+        url = f"ws://127.0.0.1:{next(iter(server.sockets)).getsockname()[1]}"
+        adapter._http = httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"ok": True, "url": url})))
+        adapter._queue = asyncio.Queue()
+        adapter._shutdown = shutdown
+        try:
+            await asyncio.wait_for(adapter._listen_socket_mode(), timeout=20)
+        finally:
+            await adapter._http.aclose()
+            server.close()
+            await server.wait_closed()
+        return seen["n"]
+
+    assert asyncio.run(run()) == 2
+    said = [r.getMessage() for r in caplog.records if r.name == "kazma_gateway.adapters.slack"]
+    assert "[Slack] Slack asked for a new connection (refresh_requested, host applink-1) — reconnecting" in said
+    assert "[Slack] Socket Mode handshake confirmed (host applink-2; connections open for this app: 1)" in said
+    assert adapter._receive.connected is True
+    assert adapter._receive.last_problem is None, "a refresh Slack asked for is not a problem"
+
+
+def test_socket_mode_switched_off_is_a_problem_with_its_fix(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="kazma_gateway.adapters.slack")
+    adapter = _slack_adapter()
+    adapter._on_hello({"type": "hello", "num_connections": 1})
+    adapter._on_disconnect({"type": "disconnect", "reason": "link_disabled"})
+
+    assert adapter._receive.connected is False
+    assert "api.slack.com/apps" in adapter._receive.last_problem["what"]
+    warned = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warned) == 1 and "link_disabled" in warned[0].getMessage()
+
+
+def test_a_second_program_on_the_app_token_is_warned_once_the_count_is_settled(caplog) -> None:
+    """Slack hands each event to ONE of the app's connections. A count taken
+    right after Kazma's own reconnect may still include Kazma's old
+    connection, so it is neither kept nor warned about."""
+    import time
+
+    caplog.set_level(logging.INFO, logger="kazma_gateway.adapters.slack")
+    adapter = _slack_adapter()
+
+    adapter._socket_ended_at = time.monotonic()           # Kazma just reconnected
+    adapter._on_hello({"type": "hello", "num_connections": 2})
+    assert "slack_open_connections" not in adapter.diagnostics()
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+
+    adapter._socket_ended_at = None                       # the process's first connection
+    adapter._on_hello({"type": "hello", "num_connections": 2})
+    live = adapter.diagnostics()
+    assert live["slack_open_connections"] == 2 and live["slack_open_connections_at"]
+    warned = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warned) == 1 and "2 open Socket Mode connections" in warned[0]
+
+
 # ── the route and the card, for every adapter ───────────────────────────
 
 

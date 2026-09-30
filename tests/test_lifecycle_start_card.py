@@ -159,6 +159,54 @@ def test_the_card_waits_for_the_adapters_to_connect(sent):
     assert sent[0].startswith("🟢")
 
 
+class _Clock:
+    """The notifier's clock: ``time()`` and ``monotonic()`` advance only
+    when told."""
+
+    def __init__(self, now: float) -> None:
+        self.now = now
+
+    def time(self) -> float:
+        return self.now
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+def test_the_wait_for_the_adapters_is_not_downtime(sent, monkeypatch):
+    """Live 2026-09-30: a reload down 35 s, then Slack took 30 s of
+    reconnects to connect. The card measured the downtime at its send
+    (66 s, past the 60 s window) and said "Kazma started"."""
+    from kazma_core.config_store import get_config_store
+
+    clock = _Clock(1_000_000.0)
+    monkeypatch.setattr(ln, "time", clock)
+    cs = get_config_store()
+    cs.set(ln._LAST_BOOT_KEY, clock.now - 3_600, category="internal")
+    cs.set(ln._LAST_SHUTDOWN_KEY, clock.now - 35, category="internal")
+    previous = ln._record_boot()
+
+    polls = {"n": 0}
+
+    def slack_reconnecting():
+        polls["n"] += 1
+        clock.now += 15                  # each poll finds Slack still at it
+        state = "connected" if polls["n"] > 2 else "connecting"
+        return [{"name": "Slack", "state": state, "detail": ""}]
+
+    asyncio.run(ln.announce_started(slack_reconnecting, wait_s=45))
+
+    lines = sent[0].split("\n")
+    assert polls["n"] == 3, "the card waited for Slack"
+    assert lines[0] == "🟢 [System] Kazma restarted"
+    assert lines[1] == "Down for 35.0 s"
+    assert "✅ Slack" in lines
+    # Negative control: measured at the send (45 s later), the same stop
+    # reads as a start 80 s ago.
+    old = _compose_start_card(previous, now=clock.time(), restart_window_s=60, connections=[])
+    assert old[1].split("\n")[:2] == ["🟢 [System] Kazma started", "Down for 1 min 20 s"]
+
+
 def test_an_adapter_that_failed_or_never_connected_is_marked(sent):
     def report():
         return [

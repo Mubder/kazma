@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -41,7 +42,7 @@ from kazma_gateway.gateway import (
     OutboundMessage,
 )
 from kazma_core.http_tls import shared_ssl_context
-from kazma_gateway.receive_log import ReceiveLog
+from kazma_gateway.receive_log import ReceiveLog, iso
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,9 @@ _MAX_TIMEOUT = 15.0
 _MAX_RETRIES = 3
 _SOCKET_RECONNECT_DELAY = 2.0
 _SOCKET_MAX_RECONNECT_DELAY = 30.0
+#: A connection count Slack's hello gives this soon after Kazma's previous
+#: connection ended may still include that one.
+_SETTLED_AFTER_S = 15.0
 
 
 class SlackAdapter(BaseAdapter):
@@ -113,6 +117,8 @@ class SlackAdapter(BaseAdapter):
         # What the connection received and why each unanswered message was
         # left (receive_log); the connector Test shows it.
         self._receive = ReceiveLog(SLACK_REASONS)
+        #: When Kazma's last Socket Mode connection ended (monotonic).
+        self._socket_ended_at: float | None = None
 
     def diagnostics(self) -> dict[str, Any]:
         """The live receive record for the connector Test (plain data)."""
@@ -122,6 +128,66 @@ class SlackAdapter(BaseAdapter):
             "allow_all": self._allow_all,
             "socket_mode": bool(self._app_token),
         }
+
+    # ── Socket Mode control messages ────────────────────────────────
+
+    def _socket_ended(self, problem: str | None = None) -> None:
+        """Kazma's Socket Mode connection ended: not connected until the
+        next hello. *problem* is shown by the Test (none for a refresh
+        Slack asked for)."""
+        self._socket_ended_at = time.monotonic()
+        self._receive.disconnected(problem)
+
+    def _on_hello(self, msg: dict[str, Any]) -> None:
+        """Slack's handshake: the connection is up.
+
+        ``num_connections`` counts the app's open connections, this one
+        included, and Slack hands each event to ONE of them: with another
+        program on the same app-level token (a second Kazma, an old test
+        bot), that program silently takes some of Kazma's messages. Only a
+        count taken at least ``_SETTLED_AFTER_S`` after Kazma's previous
+        connection ended is kept -- sooner, that one may still be counted.
+        """
+        self._receive.connected_now(new_session=True)
+        host = str((msg.get("debug_info") or {}).get("host") or "?")
+        count = msg.get("num_connections")
+        if not isinstance(count, int) or isinstance(count, bool):
+            count = None
+        logger.info(
+            "[Slack] Socket Mode handshake confirmed (host %s; connections open for this app: %s)",
+            host, "?" if count is None else count,
+        )
+        ended = self._socket_ended_at
+        if count is None or (ended is not None and time.monotonic() - ended < _SETTLED_AFTER_S):
+            return
+        self._receive.extra["slack_open_connections"] = count
+        self._receive.extra["slack_open_connections_at"] = iso(time.time())
+        if count > 1:
+            logger.warning(
+                "[Slack] Slack counts %d open Socket Mode connections for this app and hands each "
+                "event to one of them: another program using this app-level token (a second "
+                "Kazma?) takes some of Kazma's messages. Stop it, or give it its own Slack app.",
+                count,
+            )
+
+    def _on_disconnect(self, msg: dict[str, Any]) -> None:
+        """Slack asked for a new connection: ``warning`` (this one closes in
+        about 10 s), ``refresh_requested`` (routine, every few hours) or
+        ``link_disabled`` (Socket Mode was switched off in the app's
+        settings). The reason was not logged until 2026-09-30, when one
+        boot reconnected ten times in 30 s and the log could not say why."""
+        reason = str(msg.get("reason") or "no reason given")
+        host = str((msg.get("debug_info") or {}).get("host") or "?")
+        if reason == "link_disabled":
+            problem = (
+                "Socket Mode was turned off for this Slack app (link_disabled): turn it on "
+                "again at api.slack.com/apps → the app → Socket Mode"
+            )
+            logger.warning("[Slack] %s", problem)
+            self._socket_ended(problem)
+            return
+        logger.info("[Slack] Slack asked for a new connection (%s, host %s) — reconnecting", reason, host)
+        self._socket_ended()
 
     #: Drops that point at a setting to fix (a WARNING, throttled).
     _DROP_WARNINGS = frozenset({"no_allowlist", "queue_full", "team_not_allowed", "channel_not_allowed"})
@@ -664,8 +730,9 @@ class SlackAdapter(BaseAdapter):
                             # No event in 30s — send ping to keep alive
                             try:
                                 await ws.ping()
-                            except Exception:
-                                logger.debug("[Slack] Ping failed, connection may be stale")
+                            except Exception as exc:
+                                logger.info("[Slack] Ping failed (%s) — reconnecting", type(exc).__name__)
+                                self._socket_ended(f"A keep-alive ping failed ({type(exc).__name__})")
                                 break
                             continue
 
@@ -706,13 +773,11 @@ class SlackAdapter(BaseAdapter):
                                 continue
 
                         if msg_type == "hello":
-                            logger.info("[Slack] Socket Mode handshake confirmed")
-                            self._receive.connected_now(new_session=True)
+                            self._on_hello(msg)
                             continue
 
                         if msg_type == "disconnect":
-                            logger.info("[Slack] Socket Mode disconnect received — reconnecting")
-                            self._receive.disconnected()
+                            self._on_disconnect(msg)
                             break
 
                         if msg_type == "interactive":
@@ -937,7 +1002,7 @@ class SlackAdapter(BaseAdapter):
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                self._receive.disconnected(f"The Socket Mode connection failed: {type(exc).__name__}: {exc}")
+                self._socket_ended(f"The Socket Mode connection failed: {type(exc).__name__}: {exc}")
                 if not self._shutdown.is_set():
                     # The type as well: several websockets errors have an empty str(), and
                     # the log read "Socket Mode error:  — reconnecting" (2026-09-23).

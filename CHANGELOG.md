@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## Kazma runs at normal priority; the restart card counts only downtime; Slack says why it reconnects (2026-09-30)
+
+Found while checking the deploy below on the live install.
+
+- **Kazma ran below every normal program on its own machine.** The KazmaAgent
+  task was registered without a priority, and Task Scheduler's default, 7,
+  is for background tasks: the guard started below normal, and the server
+  inherited it (base priority 6, measured) with 60 MB of its 4.7 GB in
+  memory. Whenever something heavy ran beside it, it froze for 15-27 s. The
+  server and the guard now raise themselves to an interactive program's
+  priority as they start -- CPU, memory and disk, never lower -- and the log
+  says what they started with. New installs register the task at priority 4.
+  `KAZMA_PROCESS_PRIORITY=keep` opts out.
+- **"Kazma started" after a 35-second reload.** The card counted downtime up
+  to its own send, which waits for the chat apps to connect, and Slack took
+  30 s that boot. The downtime now ends when Kazma is serving again.
+- **Slack reconnected ten times in 30 s, and the log could not say why.** Each
+  `disconnect` Slack sends is now logged with its reason and Slack's server.
+  `link_disabled` (Socket Mode switched off in the app's settings) is a
+  WARNING with the fix, and the Test shows it. The handshake's connection
+  count is logged too: Slack hands each event to only one of the app's
+  connections, so a second program using the same app-level token quietly
+  takes some of Kazma's messages. When Slack counts more than one, the log
+  gets a WARNING and the Slack Test says so.
+- **The test suite froze the live server for 18.5 s.** The week's stall
+  dumps froze the whole server at arbitrary cheap frames (a regex compile, a
+  socket write, a TLS read); the one on 2026-09-29 came two minutes into a
+  4-chunk run of the full suite on the same machine. `scripts/fast_test.py`
+  now starts every pytest process below a normal program (CPU below normal,
+  memory priority low; `nice` elsewhere; `--foreground` opts out) with its
+  share of math-library threads. The disk priority is left alone: measured,
+  low I/O priority took 476 SQLite-heavy tests from 80 s to 147-199 s, and
+  Windows' background mode made `import torch` take 244 s instead of 4.4 s.
+- **CI:** a guard test read the fake server's generations as soon as the
+  guard logged the reload, before it spawned the next server. It now waits
+  for the second generation (Linux lost that race; Windows had not).
+
 ## A database outage is not a restart; the weekly report says everything (2026-09-30)
 
 From the weekly resilience report of 2026-09-29, read against the live logs.

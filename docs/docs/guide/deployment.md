@@ -177,6 +177,20 @@ stays until the task restarts. Other variables set in System Properties
 still need that restart; Kazma's own settings belong in `.env`, which every
 boot re-reads.
 
+**Priority.** A Scheduled Task registered without a priority runs at Task
+Scheduler's default, 7, which Microsoft reserves for background tasks. The
+guard started below every normal program on the machine, and the server it
+starts inherited that, along with lower memory and disk priority. Whenever
+something heavy ran beside Kazma (a test suite, a benchmark), it froze for
+15–27 seconds. The server and the guard now raise themselves to an
+interactive program's priority as they start — CPU, memory and disk,
+never lower — and the server's log says what it started with
+(`[startup] Raised the process to interactive priority …`).
+`install_service.py` registers the task at priority 4; to change an existing
+task, run `python scripts/service/install_service.py --install` again from an
+elevated PowerShell. `KAZMA_PROCESS_PRIORITY=keep` leaves both where they
+were started.
+
 On Windows, start via `kazma serve` or the guard — not `python -m uvicorn`.
 Uvicorn 0.36+ hardcodes `ProactorEventLoop`, and psycopg-async then cannot
 open the Postgres checkpointer.
@@ -271,7 +285,7 @@ Adapters
 Model: deepseek-flash
 ```
 
-The card waits until every chat app has connected or failed (up to 45 s; they usually connect within a few seconds) and marks each one with what its connection said. It is green when everything connected and the last run stopped cleanly, yellow otherwise.
+The card waits until every chat app has connected or failed (up to 45 s; they usually connect within a few seconds) and marks each one with what its connection said. It is green when everything connected and the last run stopped cleanly, yellow otherwise. "Down for" runs from the stop to the moment Kazma was serving again; the wait for the chat apps is not counted. Until 2026-09-30 it ran to the card's send, so one slow chat app turned a 35-second reload into "started".
 
 ### Messages
 

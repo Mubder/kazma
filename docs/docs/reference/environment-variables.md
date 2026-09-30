@@ -577,6 +577,7 @@ Which remotes `kazma update` trusts at all is `KAZMA_UPDATE_REMOTE_ALLOWLIST`, i
 | `KAZMA_GUARD_LOG` / `KAZMA_GUARD_STATE` | `<install>/.kazma/` | Guard log, and the state file: child PID, the guard's heartbeat, reload acknowledgements. |
 | `KAZMA_GUARD_RELOAD_FILE` / `KAZMA_GUARD_PAUSE_FILE` | `<install>/.kazma/` | The `--reload` request and the `--pause` flag. |
 | `KAZMA_GUARD_STATE_FILE` | set by the guard | Given to the server the guard spawns: the path of the guard's state file. The server's supervisor watch reads the guard's heartbeat there and pages when it stops. |
+| `KAZMA_PROCESS_PRIORITY` | `normal` | Windows: the server and the guard raise themselves, never lower, to an interactive program's priority as they start (CPU class, memory priority, I/O priority). A Scheduled Task registered without a priority starts them below every normal program. `keep` leaves both as they were started; `scripts/fast_test.py` sets it for the test processes it deliberately lowers. |
 | `KAZMA_GUARD_TELEGRAM_TOKEN` / `KAZMA_GUARD_TELEGRAM_CHAT` | vault / `SWARM_*` | Direct Telegram paging, independent of the app. |
 
 ## Cost, chaos, tests

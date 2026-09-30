@@ -62,17 +62,35 @@ RESTART_REQUIRED = os.environ.get("FAKE_NOT_READY_RESTART_REQUIRED", "").lower()
 _state = {"hung": False, "not_ready": False, "degraded": False}
 
 
-def _note(event: str) -> None:
+def _note(event: str, **extra: object) -> None:
     if not MARKER:
         return
     try:
         with open(MARKER, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({
                 "event": event, "pid": os.getpid(),
-                "started_at": STARTED_AT, "ts": time.time(),
+                "started_at": STARTED_AT, "ts": time.time(), **extra,
             }) + "\n")
     except Exception:
         pass
+
+
+def _priority() -> dict[str, object] | None:
+    """The CPU priority class and memory priority this process started with
+    (Windows): what the guard handed down to the server it spawned."""
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    k = ctypes.WinDLL("kernel32")
+    k.GetCurrentProcess.restype = wintypes.HANDLE
+    k.GetPriorityClass.argtypes = [wintypes.HANDLE]
+    k.GetProcessInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    me = k.GetCurrentProcess()
+    memory = wintypes.ULONG(0)
+    k.GetProcessInformation(me, 0, ctypes.byref(memory), 4)
+    return {"class": hex(k.GetPriorityClass(me)), "memory": memory.value}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -167,7 +185,7 @@ def _install_stop_handler() -> None:
 
 def main() -> int:
     _install_stop_handler()
-    _note("spawned")
+    _note("spawned", priority=_priority())
 
     if NEVER_READY:
         # Started, alive, binds nothing. The guard must detect this by

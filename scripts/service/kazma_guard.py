@@ -1561,6 +1561,42 @@ class Guard:
         detail = f"{reason} recovered."
         return self._page("success", title, detail, fingerprint=f"recovered:{reason}")
 
+    def _raise_own_priority(self) -> None:
+        """Run at the priority of an interactive program (2026-09-30).
+
+        The KazmaAgent task starts the guard at Task Scheduler's default
+        priority, 7 (background tasks): BELOW_NORMAL, and a child inherits a
+        below-normal class and its parent's memory and I/O priority. The
+        server ran below every normal program on the machine and froze
+        whenever something heavy ran beside it. The server raises itself at
+        boot; the guard does the same, so what it spawns starts at normal
+        priority -- with the same file, loaded by path, because the guard
+        never imports the app (kazma_core/process_priority.py is standard
+        library only; a test holds it to that).
+        """
+        import importlib.util
+
+        path = REPO_ROOT / "kazma-core" / "kazma_core" / "process_priority.py"
+        name = "kazma_guard_process_priority"
+        try:
+            spec = importlib.util.spec_from_file_location(name, path)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"cannot load {path}")
+            module = importlib.util.module_from_spec(spec)
+            # Registered before it runs (importlib's recipe for a source file):
+            # @dataclass looks its module up in sys.modules.
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+            report = module.ensure_interactive_priority()
+        except (OSError, ImportError, SyntaxError, AttributeError) as exc:
+            self.log("warn", "guard.priority_unavailable", error=f"{type(exc).__name__}: {exc}")
+            return
+        if report.raised or report.errors or report.kept:
+            self.log("warn" if report.errors else "info", "guard.priority",
+                     raised=report.raised, before=report.describe(report.before),
+                     after=report.describe(report.after), kept=report.kept,
+                     errors=report.errors)
+
     def _install_signals(self) -> None:
         def handler(signum, _frame):
             self.log("info", "guard.signal", signal=int(signum))
@@ -1759,6 +1795,7 @@ class Guard:
             "info", "guard.start",
             cmd=" ".join(self.cmd), cwd=str(self.cwd), health=self.health_url,
         )
+        self._raise_own_priority()
         # NOT resolved here. describe() reaches into the vault, which means
         # importing kazma_core -- measured at tens of seconds on a cold
         # cache. Doing it before spawning delays the server by exactly that

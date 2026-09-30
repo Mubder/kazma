@@ -305,6 +305,17 @@ def test_windows_task_restarts_and_runs_without_a_session():
     assert "MultipleInstances IgnoreNew" in ps1, "never run two Kazmas"
 
 
+@pytest.mark.parametrize("elevated", [True, False])
+def test_the_windows_task_runs_at_an_interactive_programs_priority(elevated):
+    """A task registered without a priority runs at Task Scheduler's default,
+    7 -- background: the live guard and its server ran below every normal
+    program and froze whenever something heavy ran beside them
+    (2026-09-30). ``-Priority 4`` is an interactive program's."""
+    ps1 = installer.windows_task_ps1(elevated=elevated)
+    settings = ps1[ps1.index("New-ScheduledTaskSettingsSet"):ps1.index("Register-ScheduledTask")]
+    assert "-Priority 4" in settings, settings
+
+
 def test_every_platform_runs_the_same_guard():
     """One health contract, five supervisors. If a platform launches the
     server directly it loses health-gated restart and silently drifts."""

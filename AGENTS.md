@@ -1116,7 +1116,11 @@ A shutdown stamp at or after the previous boot's = the last run stopped
 cleanly ("Down for 34.8 s"; "restarted" within `restart_window_seconds`,
 default 60, `0` = no detection); one before it = it did not ("The last run
 did not shut down cleanly"). The markers are written whether or not the
-event is announced — never gate a stamp on the events list.
+event is announced — never gate a stamp on the events list. The downtime
+runs to the END OF STARTUP (`announce_started` takes the time before it
+waits), never to the send: Slack's 30 s of reconnects turned a 35 s reload
+into "started" (live 2026-09-30,
+`test_the_wait_for_the_adapters_is_not_downtime`).
 
 **C. An adapter's connection is what its connection said.**
 `BaseAdapter.connection_state()` reads the adapter's `ReceiveLog` (§42):
@@ -3169,6 +3173,25 @@ code) and Kazma ran with nobody supervising it.
 - **The OS brings a dead guard back:** `install_service.py` registers a
   5-minute repeating trigger with `MultipleInstances IgnoreNew`. An existing
   task gets it only when re-registered from an elevated shell (owner action).
+- **Kazma runs at an interactive program's priority**
+  (`kazma_core/process_priority.py`, 2026-09-30). The live task had no
+  `<Priority>`, so Task Scheduler's default (7, background) started the
+  guard BELOW_NORMAL, and a child inherits a below-normal class AND its
+  parent's memory and I/O priority (measured; even a child created at
+  NORMAL keeps them): the server ran at base priority 6 with 60 MB of its
+  4.7 GB resident and froze 15-27 s whenever something heavy ran beside it.
+  The server raises itself -- never lowers -- in
+  `KazmaAppBuilder._adopt_process_environment` (CPU class, memory priority,
+  I/O priority; one INFO line naming what the launcher gave it), and the
+  guard does the same at `guard.start` (`guard.priority` event) with the
+  same file LOADED BY PATH, registered in `sys.modules` first (`@dataclass`
+  needs it) -- the module must stay standard-library only.
+  `install_service.py` registers `-Priority 4`; an existing task changes
+  only when re-registered (owner action). `KAZMA_PROCESS_PRIORITY=keep`
+  opts out; `fast_test.py` sets it for the processes it lowers. Tests:
+  `tests/test_process_priority.py`, the guard's in
+  `tests/test_guard_integration.py` (a guard started below normal; `keep`
+  as the negative control).
 
 - **A probe that got an answer is not a probe that got none** (2026-09-30).
   `probe()` returns `ProbeResult` (unpacks as `(healthy, detail)`, plus
@@ -3287,6 +3310,15 @@ Test on every adapter; Telegram and Slack had the same blind spots.
 - **Slack's Socket Mode events go through `_accept_event`** (dedupe, channel,
   allowlist -- the old inline order); the polling path records too; a taken
   message is logged at INFO ("Enqueued from …"), as on Telegram and Discord.
+- **Slack's control messages say why** (`_on_hello`, `_on_disconnect`,
+  2026-09-30): a `disconnect` is logged with its reason and Slack's host
+  (one boot reconnected ten times in 30 s with no reason in the log);
+  `link_disabled` (Socket Mode switched off) is a WARNING and the Test's
+  problem, with the fix. `hello`'s `num_connections` is logged, and kept
+  for the Test when taken 15 s or more after Kazma's previous connection
+  ended (`_SETTLED_AFTER_S`): Slack hands each event to ONE connection, so
+  a second program on the app-level token silently takes some of Kazma's
+  messages -- a WARNING, and the Test's `listening` check turns yellow.
 
 - **A socket whose session will be resumed closes with 4000**
   (`_close_for_resume`, after op 7 and a resumable op 9). Leaving
@@ -3616,7 +3648,16 @@ new *guard* (its own code, or other OS-level variables) still needs the
   processes; crashed/empty chunks are retried per-file; poison files are
   reported. One chunk per CPU, at most 8 (`DEFAULT_MAX_CHUNKS`: 32 chunks
   each loading torch crashed 12 of them, 2026-09-25); CI passes
-  `--chunks 4`. It PRINTS the per-chunk FAILURES tracebacks (deep-audit
+  `--chunks 4`. Every pytest process it starts first lowers itself below a
+  normal program (`pytest_command`: Windows CPU class below normal and
+  memory priority low; `nice` elsewhere; `--foreground` opts out), and gets
+  its share of math-library threads (CPUs / chunks, `OMP_NUM_THREADS` & co.
+  unless already set): the live install runs on the machine the suite runs
+  on, and two minutes into a 4-chunk run its event loop froze for 18.5 s
+  (2026-09-29). The DISK priority is left alone, measured: low I/O priority
+  took 476 SQLite-heavy tests from 80 s to 147-199 s, and a full run with
+  it timed out every chunk; Windows' background mode made `import torch`
+  take 244 s instead of 4.4 (`tests/test_fast_test_runner.py`). It PRINTS the per-chunk FAILURES tracebacks (deep-audit
   2026-08-19 — they used to be captured and discarded, leaving CI-only
   failures undiagnosable) and treats pytest exit 5 ("no tests collected",
   i.e. module-level importorskip like the Playwright e2e suite on a
