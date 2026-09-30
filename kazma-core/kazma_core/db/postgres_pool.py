@@ -287,13 +287,13 @@ def _ensure_core_schema(pool: PostgresPool) -> None:
         with conn.cursor() as cur:
             cur.execute(ddl)
             # Idempotent column migrations for pre-existing databases
-            # (CREATE TABLE IF NOT EXISTS only helps fresh installs).
-            try:
-                cur.execute(
-                    "ALTER TABLE kazma_chat_sessions ADD COLUMN IF NOT EXISTS "
-                    "pinned BOOLEAN DEFAULT FALSE"
-                )
-            except Exception:
-                pass
+            # (CREATE TABLE IF NOT EXISTS only helps fresh installs). IF NOT
+            # EXISTS makes a present column a no-op, so an error here is real
+            # -- and it aborts this transaction, the tables above included --
+            # so it goes to the caller's retry loop, never swallowed.
+            cur.execute(
+                "ALTER TABLE kazma_chat_sessions ADD COLUMN IF NOT EXISTS "
+                "pinned BOOLEAN DEFAULT FALSE"
+            )
         conn.commit()
     logger.info("[PostgresPool] core schema ensured")

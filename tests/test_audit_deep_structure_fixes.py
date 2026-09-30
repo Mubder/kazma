@@ -224,7 +224,7 @@ def test_cron_store_default_db_path_is_absolute():
 def test_retrieved_memories_dropped_when_fence_unavailable(monkeypatch):
     import sys
 
-    from kazma_core.agent.graph_builder import _format_retrieved_memories
+    from kazma_core.agent.graph_helpers import _format_retrieved_memories
 
     monkeypatch.setitem(sys.modules, "kazma_core.safety.prompt_fence", None)
     result = _format_retrieved_memories(
@@ -253,7 +253,7 @@ def test_compaction_memories_dropped_when_fence_unavailable(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_commitment_gate_blocks_when_authorize_raises(monkeypatch):
-    from kazma_core.agent.graph_builder import _commitment_resolve_gate
+    from kazma_core.agent.graph_tool_worker import _commitment_resolve_gate
     from kazma_core.agent.state import PendingToolCall
 
     def _boom(*args, **kwargs):

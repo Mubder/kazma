@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 
 from kazma_gateway.adapters.platform_callbacks import CallbackAction, parse_callback_data
 

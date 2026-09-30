@@ -277,7 +277,9 @@ def test_memory_q_filter_underscore_insensitive():
     """memory_list_beliefs(q=…) used a literal LIKE — 'memory system'
     returned 0 while FTS memory_search matched user_memory_system. The
     filter now normalizes _/- to spaces on both sides."""
-    from kazma_core.agent.tool_builtins import _qnorm
+    # The copy memory_list_beliefs runs (the package re-exported a dead copy
+    # from external.py until 2026-09-30).
+    from kazma_core.agent.tool_builtins.memory import _qnorm
 
     assert _qnorm("memory system") == "memory system"
     assert _qnorm("Memory_System") == "memory system"

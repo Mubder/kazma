@@ -129,7 +129,7 @@ async def _loop(poll_interval: float | None) -> None:
             errors = 0
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001
+        except Exception:
             errors += 1
             logger.exception("[x-mentions] poll error (%d consecutive)", errors)
             if errors >= _MAX_CONSECUTIVE_ERRORS:

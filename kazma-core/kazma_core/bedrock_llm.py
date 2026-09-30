@@ -182,7 +182,7 @@ class BedrockProvider(LLMProvider):
             )
             try:
                 resp = client.converse(**request)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.error("[Bedrock] converse failed: %s", exc)
                 # Classify boto3 ClientError via duck typing (avoid hard-importing
                 # botocore, which is optional). 429 / 5xx / ThrottlingException

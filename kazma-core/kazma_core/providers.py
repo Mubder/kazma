@@ -288,10 +288,6 @@ def capabilities(provider: str) -> dict[str, object]:
     return merged
 
 
-def system_role_for(provider: str) -> str:
-    """The role name to use for the system turn. Read this instead of assuming."""
-    return str(capabilities(provider)["system_role"])
-
 #: The model to use for a provider when NOTHING else has said which.
 #:
 #: This is data about a vendor -- "openai's small chat model is called

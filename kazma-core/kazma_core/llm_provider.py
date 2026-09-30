@@ -1202,7 +1202,7 @@ class LLMProvider:
                         f"LLM call failed (network) after event-loop recovery: {exc}",
                         transient=True,
                     ) from exc
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     raise LLMError(
                         f"LLM call failed after event-loop recovery: {exc}",
                         transient=False,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, List
+from typing import List
 from pydantic import BaseModel, Field, model_validator
 
 __all__ = ["PipelineDAG", "PipelineNode"]

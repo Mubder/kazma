@@ -12,10 +12,6 @@ import logging
 from typing import Any
 
 from kazma_core.agent.tool_builtins.external import register_external_tools
-# Module-level helpers that lived beside the old god module's registrar.
-# Re-exported so `from kazma_core.agent.tool_builtins import _qnorm` keeps
-# working after the audit-O5 package split.
-from kazma_core.agent.tool_builtins.external import _qnorm  # noqa: F401
 from kazma_core.agent.tool_builtins.filesystem import register_filesystem_tools
 from kazma_core.agent.tool_builtins.knowledge import register_knowledge_tools
 from kazma_core.agent.tool_builtins.mcp import register_mcp_tools
@@ -27,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "register_builtin_tools",
-    "_qnorm",
     "register_external_tools",
     "register_filesystem_tools",
     "register_memory_tools",

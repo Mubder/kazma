@@ -1,5 +1,54 @@
 # CHANGELOG
 
+## Errors that were swallowed now say so (2026-09-30)
+
+- **Switching the model now really forgets the old failover connections.**
+  Since August 25 the cleanup looked in the wrong place, failed, and hid the
+  failure, so a provider you reconfigured or removed kept being tried as a
+  fallback until a restart. It works again, and a test now fails whenever
+  Kazma's code reaches for something a module no longer has.
+- **Adding a column to an existing database is done one way.** Eleven stores
+  each did it by hand; most ignored every error, so a locked or read-only
+  database left a column missing and the real cause never reached the log.
+  They share one helper now, and a failure is reported where it happens.
+- **Deleting your last workspace** now points the tools at Kazma's own
+  default sandbox, not a folder that depended on where Kazma was started.
+- **Quiet failures now leave a trace:** a rebuild of the memory search index
+  no longer reports success when it could not save, a stale "continue"
+  instruction that could not be cleared is logged, and a failed cleanup of
+  finished reminders or old backups is logged instead of piling up unseen.
+
+## Dead code out, and what it was hiding (2026-09-30)
+
+- **The capability labels on the Providers page were defined twice** in the
+  Arabic catalog, with different words; only the second copy could ever show.
+  The dead copy is gone, and a test now fails the build whenever any table in
+  Kazma repeats a key, because Python quietly keeps just one of them.
+- **A memory tool's test checked the wrong copy of its code.** The helper
+  that lets "memory system" find `user_memory_system` existed seven times
+  after an old file split; the test read a copy nothing runs. One copy is
+  left, the one the tool uses, and the test reads it.
+- **106 unused imports and four functions nobody called are gone**, each
+  first checked for anything that reaches it by name (other modules, tests,
+  skill manifests). 26 lint suppressions that suppressed nothing are gone too.
+- **Written down and tested:** each step of a chat keeps its own settings
+  (like "this turn is read-only") to itself. It relies on how the agent
+  library runs steps, and a test now fails if an upgrade changes that.
+
+## Every API route has a caller or a reason (2026-09-30)
+
+- **A test now lists every `/api` route nothing in Kazma calls, with why.**
+  The audit found 55: OAuth sign-ins land on some, others are the documented
+  Document API or reports for operators — each is written down with its
+  reason, and the list fails the day one gains a caller or disappears, so a
+  forgotten route cannot pile up unseen again.
+- **Three dead routes are gone:** two typing-indicator stubs nothing used,
+  and a "flush" endpoint that reset Kazma's model, worker and tool registries
+  while running code still held the old ones.
+- **Settings backups restore correctly** — now proven by tests through the
+  real route (the path had none). A Restore button comes next, once a restore
+  is made to leave live state such as each chat's active thread alone.
+
 ## A chat app keeps its new token after a restart (2026-09-30)
 
 - **Slack (and Discord, Telegram) no longer lose a token you saved.** A token

@@ -24,6 +24,7 @@ from kazma_core.swarm.task import (
 )
 
 from kazma_core.config_store import apply_sqlite_pragmas
+from kazma_core.db.sqlite_columns import add_missing_columns
 
 __all__ = [
     "DEFAULT_TASK_RETENTION_DAYS",
@@ -175,39 +176,38 @@ class TaskStore:
                     with conn.cursor() as cur:
                         cur.execute(ddl_extra)
                     conn.commit()
-            except Exception as exc:
-                logger.debug("[TaskStore] pg schema ensure: %s", exc)
+            except Exception:
+                # A column missing here fails every task write that names it.
+                logger.warning(
+                    "[TaskStore] Postgres schema update failed; swarm task writes "
+                    "may fail until it succeeds (retried on the next start)",
+                    exc_info=True,
+                )
             logger.info("[TaskStore] using Postgres backend")
             return
         with self._lock:
             conn = self._get_conn()
             conn.executescript(_SCHEMA)
-            existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(swarm_tasks)").fetchall()}
-            migrations = [
-                ("context", "TEXT DEFAULT ''"),
-                ("dependencies", "TEXT DEFAULT '[]'"),
-                ("fallback_chain", "TEXT DEFAULT '[]'"),
-                ("validation_schema", "TEXT DEFAULT ''"),
-                ("aggregation", "TEXT DEFAULT ''"),
-                ("timeout", "REAL"),
-                ("workspace_id", "TEXT"),
-                ("sort_at", "TEXT"),
-            ]
-            for col_name, col_def in migrations:
-                if col_name not in existing_cols:
-                    try:
-                        conn.execute(f"ALTER TABLE swarm_tasks ADD COLUMN {col_name} {col_def}")
-                    except Exception:
-                        pass
-            if "sort_at" not in existing_cols:
-                try:
-                    conn.execute("UPDATE swarm_tasks SET sort_at = COALESCE(completed_at, created_at) WHERE sort_at IS NULL")
-                except Exception:
-                    pass
-            try:
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_swarm_tasks_sort_at ON swarm_tasks(sort_at DESC)")
-            except Exception:
-                pass
+            added = add_missing_columns(
+                conn,
+                "swarm_tasks",
+                (
+                    ("context", "TEXT DEFAULT ''"),
+                    ("dependencies", "TEXT DEFAULT '[]'"),
+                    ("fallback_chain", "TEXT DEFAULT '[]'"),
+                    ("validation_schema", "TEXT DEFAULT ''"),
+                    ("aggregation", "TEXT DEFAULT ''"),
+                    ("timeout", "REAL"),
+                    ("workspace_id", "TEXT"),
+                    ("sort_at", "TEXT"),
+                ),
+            )
+            if "sort_at" in added:
+                # Rows from before the column sort by when they finished (or began).
+                conn.execute(
+                    "UPDATE swarm_tasks SET sort_at = COALESCE(completed_at, created_at) WHERE sort_at IS NULL"
+                )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_swarm_tasks_sort_at ON swarm_tasks(sort_at DESC)")
 
     def close(self) -> None:
         """Close the database connection."""

@@ -81,7 +81,7 @@ async def _loop(poll_interval: float) -> None:
                 await _fire_due_posts()
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("[x-schedule] poll error (loop continues)")
         await asyncio.sleep(poll_interval)
 
@@ -96,7 +96,7 @@ async def _fire_due_posts() -> None:
             await _fire_post(post)
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("[x-schedule] unexpected error firing post %s", post.id)
             await asyncio.to_thread(store.mark_failed, post.id, "internal error")
 
@@ -224,7 +224,7 @@ async def _deliver(post: ScheduledXPost, text: str) -> None:
             platform = target.split(":", 1)[0]
             await send_message(target, text, backend=platform)
             return
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.critical(
                 "[x-schedule] could not deliver notification to %s",
                 target, exc_info=True,
@@ -251,7 +251,7 @@ async def _deliver(post: ScheduledXPost, text: str) -> None:
             ),
             timeout=15.0,
         )
-    except Exception:  # noqa: BLE001 — a notification must never fail the fire
+    except Exception:  # a notification must never fail the fire
         logger.critical(
             "[x-schedule] notification fan-out failed for post %s",
             post.id, exc_info=True,

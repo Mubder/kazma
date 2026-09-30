@@ -35,7 +35,7 @@ from kazma_core.documents.arabic import (
     shape_spans,
     shape_text,
 )
-from kazma_core.documents.profile import (  # noqa: F401 (re-exported)
+from kazma_core.documents.profile import (  # re-exported
     arabic_ratio,
     is_arabic_dominant,
 )

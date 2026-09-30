@@ -97,7 +97,7 @@ except Exception:  # noqa: BLE001 - semconv is optional; literals already set
 class _NoopSpan:
     """Stand-in when OpenTelemetry is absent. Absorbs everything."""
 
-    def set_attribute(self, key: str, value: Any) -> None:  # noqa: D401
+    def set_attribute(self, key: str, value: Any) -> None:
         return None
 
     def set_attributes(self, attrs: dict[str, Any]) -> None:

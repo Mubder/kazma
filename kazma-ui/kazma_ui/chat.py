@@ -8,7 +8,7 @@ bus — it does not run the graph unless ``KAZMA_WS_GRAPH=1``.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse

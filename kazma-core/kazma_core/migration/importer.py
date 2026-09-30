@@ -31,7 +31,7 @@ from typing import Any, Callable
 
 from kazma_core.migration.bundle import KazmaBundle, parse_meta_env
 from kazma_core.migration.exporter import _DATA_DIR_DBS as _EXPORTED_DATA_DIR_DBS
-from kazma_core.migration.path_rewrite import PathMap, build_path_map, rewrite_paths_in_sqlite
+from kazma_core.migration.path_rewrite import build_path_map, rewrite_paths_in_sqlite
 from kazma_core.migration.vault_pairing import VaultKeyStatus, check_vault_key, sync_vault_key
 
 logger = logging.getLogger(__name__)
@@ -848,7 +848,13 @@ def _merge_kb_into_settings(settings_db: str, source_settings_db: str) -> int:
                     conn.commit()
                     logger.debug("[migrate:import] rebuilt knowledge_chunks_fts index")
             except Exception:
-                pass  # FTS rebuild is best-effort
+                # The chunks are imported; only keyword search misses them
+                # until the index is rebuilt.
+                logger.warning(
+                    "[migrate:import] knowledge_chunks_fts rebuild failed; keyword "
+                    "search may miss imported chunks until it is rebuilt",
+                    exc_info=True,
+                )
 
             merged_libs = conn.execute("SELECT COUNT(*) FROM knowledge_libraries").fetchone()[0]
             logger.info("[migrate:import] KB merge: %d libraries, %d chunks", merged_libs, src_chunks)

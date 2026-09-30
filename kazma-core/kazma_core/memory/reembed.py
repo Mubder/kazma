@@ -87,7 +87,7 @@ def get_rebuild_status() -> dict[str, Any]:
             if isinstance(val, dict):
                 return {**_IDLE_STATUS, **val}
     except Exception:
-        pass
+        logger.debug("[reembed] status read failed", exc_info=True)
     return dict(_IDLE_STATUS)
 
 
@@ -98,7 +98,7 @@ def reset_rebuild_status() -> None:
         if store is not None:
             store.delete(REBUILD_STATUS_KEY)
     except Exception:
-        pass
+        logger.debug("[reembed] status reset failed", exc_info=True)
 
 
 def embedding_version_counts() -> dict[str, dict[str, int]]:

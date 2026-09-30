@@ -299,36 +299,35 @@ class KnowledgeStore:
     @staticmethod
     def _migrate_library_columns(conn: sqlite3.Connection) -> None:
         """Idempotent ALTER TABLE for knowledge_libraries columns."""
-        existing = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_libraries)")}
-        if "archived" not in existing:
-            conn.execute(
-                "ALTER TABLE knowledge_libraries ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
-            )
-            logger.debug("[KnowledgeStore] Migrated column: archived")
-        if "tenant_id" not in existing:
-            conn.execute(
-                "ALTER TABLE knowledge_libraries ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_kl_tenant ON knowledge_libraries(tenant_id)"
-            )
-            logger.debug("[KnowledgeStore] Migrated column: tenant_id")
+        from kazma_core.db.sqlite_columns import add_missing_columns
+
+        add_missing_columns(
+            conn,
+            "knowledge_libraries",
+            (
+                ("archived", "INTEGER NOT NULL DEFAULT 0"),
+                ("tenant_id", "TEXT NOT NULL DEFAULT 'default'"),
+            ),
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_kl_tenant ON knowledge_libraries(tenant_id)")
 
     @staticmethod
     def _migrate_chunk_columns(conn: sqlite3.Connection) -> None:
         """Add citation/version columns without rebuilding existing KB data."""
-        existing = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_chunks)")}
-        additions = {
-            "metadata_json": "TEXT NOT NULL DEFAULT '{}'",
-            "document_id": "TEXT",
-            "version_id": "TEXT",
-            "source_sha256": "TEXT",
-            "active": "INTEGER NOT NULL DEFAULT 1",
-            "tombstoned": "INTEGER NOT NULL DEFAULT 0",
-        }
-        for column, definition in additions.items():
-            if column not in existing:
-                conn.execute(f"ALTER TABLE knowledge_chunks ADD COLUMN {column} {definition}")
+        from kazma_core.db.sqlite_columns import add_missing_columns
+
+        add_missing_columns(
+            conn,
+            "knowledge_chunks",
+            (
+                ("metadata_json", "TEXT NOT NULL DEFAULT '{}'"),
+                ("document_id", "TEXT"),
+                ("version_id", "TEXT"),
+                ("source_sha256", "TEXT"),
+                ("active", "INTEGER NOT NULL DEFAULT 1"),
+                ("tombstoned", "INTEGER NOT NULL DEFAULT 0"),
+            ),
+        )
         conn.execute(
             """CREATE INDEX IF NOT EXISTS idx_kc_document
                ON knowledge_chunks(library_id, document_id, version_id, active)"""

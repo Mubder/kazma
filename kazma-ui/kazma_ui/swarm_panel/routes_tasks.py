@@ -13,7 +13,6 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, Response
 from kazma_gateway.telegram_format import (
     tg_escape,
-    md_to_tg_html,
     tg_quote,
     tg_heading,
     HEADING_RULE,

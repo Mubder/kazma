@@ -11,7 +11,6 @@ from kazma_core.agent.intent.registry import get_registry
 from kazma_core.agent.intent.types import (
     TIER2_HIGH,
     ActKind,
-    EntitySet,
     IntentAct,
     RouteKind,
     TurnDecision,

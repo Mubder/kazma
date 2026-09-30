@@ -312,7 +312,7 @@ def list_session_grants(thread_id: str | None) -> list[PathGrant]:
                 if str(k).startswith(prefix):
                     ids.append(str(k).rsplit(".", 1)[-1])
         except Exception:
-            pass
+            logger.debug("[path_grants] grant index fallback scan failed", exc_info=True)
 
     alive_ids: list[str] = []
     for gid in ids:
@@ -327,7 +327,7 @@ def list_session_grants(thread_id: str | None) -> list[PathGrant]:
                     try:
                         cs.delete(key)
                     except Exception:
-                        pass
+                        logger.debug("[path_grants] could not remove expired grant %s", key, exc_info=True)
                     continue
             except (TypeError, ValueError):
                 pass
@@ -347,7 +347,7 @@ def list_session_grants(thread_id: str | None) -> list[PathGrant]:
         try:
             cs.set(f"path_grant_index.{thread_id}", alive_ids, category="safety")
         except Exception:
-            pass
+            logger.debug("[path_grants] could not prune the grant index for %s", thread_id, exc_info=True)
     return [g for g in out if g.path]
 
 

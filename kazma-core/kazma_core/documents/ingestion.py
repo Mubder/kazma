@@ -695,7 +695,7 @@ class DocumentIngestionService:
         expected = manifest.get("ir_sha256")
         try:
             ir = DocumentIR.from_dict(ir_value)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise PermanentDocumentError(
                 "ir_invalid", f"Document IR failed verification ({type(exc).__name__})"
             ) from exc
@@ -1557,7 +1557,7 @@ class DocumentIngestionService:
             record = self.repository.get_artifact(
                 tenant_id=tenant, artifact_id=identifier, actor_id=actor
             )
-        except Exception as exc:  # noqa: BLE001 - ACL/lookup failures are denials
+        except Exception as exc:  # ACL/lookup failures are denials
             raise DocumentIngestionError(
                 "artifact_access_denied", "Artifact is unavailable"
             ) from exc

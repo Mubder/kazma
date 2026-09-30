@@ -8,7 +8,6 @@ second LLM loop.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable
 from typing import Any
 from kazma_core.http_tls import shared_ssl_context
 
@@ -85,11 +84,6 @@ def auth_headers() -> dict[str, str]:
     if not secret:
         return {}
     return {"X-Kazma-Secret": secret}
-
-
-def first_reachable(bases: Iterable[str] | None = None) -> list[str]:
-    """Return candidate list (reachability is checked by the caller)."""
-    return list(bases) if bases is not None else candidate_api_bases()
 
 
 def _json_url(base: str, path: str) -> str:

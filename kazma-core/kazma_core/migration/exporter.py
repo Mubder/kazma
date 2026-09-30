@@ -32,7 +32,6 @@ the detected source backend.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import platform
@@ -41,7 +40,7 @@ import sqlite3
 import time
 import zipfile
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 from kazma_core.migration.bundle import (
     BUNDLE_VERSION,
@@ -125,7 +124,7 @@ def export_bundle(
 
     from kazma_core import paths
     from kazma_core.config_store import get_config_store
-    from kazma_core.db.backend import get_backend, is_postgres
+    from kazma_core.db.backend import is_postgres
 
     data_dir = paths.data_dir()
     source_backend = "postgres" if is_postgres() else "sqlite"
@@ -477,7 +476,7 @@ def _export_document_store(
             "manifests": manifest_count,
         }
         _log(f"  document store: {blob_count} blob(s), {manifest_count} manifest(s)")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("[migrate:export] document content copy failed: %s", exc)
         raise
 

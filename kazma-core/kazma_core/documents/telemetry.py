@@ -363,7 +363,7 @@ def correlation_extra(**fields: Any) -> dict[str, Any]:
 class _NoopSpan:
     """A span handle that does nothing (OpenTelemetry not installed)."""
 
-    def set_attribute(self, key: str, value: Any) -> None:  # noqa: D401 - trivial
+    def set_attribute(self, key: str, value: Any) -> None:
         return None
 
     def set_status(self, *args: Any, **kwargs: Any) -> None:

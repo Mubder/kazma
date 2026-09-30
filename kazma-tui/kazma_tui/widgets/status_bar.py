@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Optional
 
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal

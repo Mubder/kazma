@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 from typing import Any
 
@@ -50,6 +49,20 @@ _LOOP_BREAK_MIN_ITERATION = 6
 # provider time to recover before it is tried again.
 _failover_clients: dict[str, Any] = {}
 _failover_cooldowns: dict[str, float] = {}
+
+
+def reset_failover_cache() -> None:
+    """Forget cached failover clients and cooldowns (a model or provider changed).
+
+    A cached client keeps the base URL and credentials it was built with, so
+    a reconfigured or removed provider would go on being used for failover
+    until a restart. Callers import this by name: reaching for the dicts
+    through a module alias broke silently when the graph was split
+    (2026-08-25 to 2026-09-30, ``tests/test_failover_cache_reset.py``).
+    """
+    _failover_clients.clear()
+    _failover_cooldowns.clear()
+
 
 def _last_tool_tests_failed(messages: list[Any]) -> bool:
     """True when the most recent tool result is a failed nearby-pytest verify."""
@@ -732,9 +745,7 @@ async def supervisor_node(
         should_suppress_memory_recall,
         should_quarantine_documents_search,
         set_active_turn_context,
-        reset_active_turn_context,
         bind_scratchpad_thread,
-        reset_scratchpad_thread,
         drain_scratchpad_writes,
     )
 
@@ -850,7 +861,9 @@ async def supervisor_node(
     )
 
     # Bind tool-side ContextVars for this supervisor hop (file_search quarantine, etc.)
-    _turn_tok = set_active_turn_context(
+    # No reset: LangGraph runs each node in a copy of the caller's context, so
+    # these bindings end with the hop (tests/test_node_context_scope.py).
+    set_active_turn_context(
         active_goal=str(intent_patch.get("active_goal") or ""),
         active_attachments=list(intent_patch.get("active_attachments") or []),
         hard_constraints=list(intent_patch.get("hard_constraints") or []),
@@ -858,7 +871,7 @@ async def supervisor_node(
         suppress_memory_recall=_suppress_recall,
         quarantine_documents_search=_quarantine_docs,
     )
-    _sp_tok = bind_scratchpad_thread(str(state.get("thread_id") or ""))
+    bind_scratchpad_thread(str(state.get("thread_id") or ""))
 
     _wm_block = format_working_memory_anchor(
         active_goal=str(intent_patch.get("active_goal") or ""),

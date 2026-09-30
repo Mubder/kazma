@@ -173,7 +173,7 @@ def run_global_reconsolidation(
             category="memory",
         )
     except Exception:
-        pass
+        logger.debug("[reconsolidation] could not record the last run for the Dashboard", exc_info=True)
     return stats
 
 

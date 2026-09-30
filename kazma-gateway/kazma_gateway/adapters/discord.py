@@ -727,7 +727,8 @@ class DiscordAdapter(BaseAdapter):
                 return
             await self._http.post(f"/channels/{cid}/typing")
         except Exception:
-            pass  # fire-and-forget
+            # fire-and-forget
+            logger.debug("[Discord] typing indicator failed", exc_info=True)
 
     async def send(self, outbound: OutboundMessage) -> bool:
         """Send a message to a Discord channel via REST API.

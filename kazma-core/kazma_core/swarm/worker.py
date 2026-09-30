@@ -508,7 +508,7 @@ class InProcessWorker(SwarmWorker):
                                     # workers previously awaited tools with
                                     # no bound — a hung tool stalled the whole
                                     # swarm task until the engine reaper).
-                                    from kazma_core.agent.graph_builder import _resolve_tool_timeout
+                                    from kazma_core.agent.graph_helpers import _resolve_tool_timeout
 
                                     import asyncio as _aio
 

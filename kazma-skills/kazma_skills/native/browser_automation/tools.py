@@ -28,7 +28,6 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)

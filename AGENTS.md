@@ -124,6 +124,14 @@ V2 memory lives in `kazma_core.memory`).
 ### 6. TaskStore WAL Mode (`kazma-core/kazma_core/swarm/task_store.py`)
 - SQLite uses WAL + `busy_timeout=5000` for concurrent read/write
 - Schema auto-migrates on init (ALTER TABLE for new columns on existing DBs)
+  through `kazma_core.db.sqlite_columns.add_missing_columns` -- every SQLite
+  store does (2026-09-30): read `PRAGMA table_info`, add what is missing, let a
+  real failure raise; only another process adding the column first is
+  tolerated. The old `try: ALTER ... except Exception: pass` hid a locked or
+  read-only database until every later query failed with "no such column".
+  Gate: `tests/test_sqlite_column_migrations.py` (no SQLite `ADD COLUMN`
+  outside the helper; Postgres `ADD COLUMN IF NOT EXISTS` is idempotent and
+  exempt -- and never swallowed: it aborts the transaction it runs in).
 - Worker filter uses `json_each()` not `LIKE` for exact matching
 
 ### 7. HITL Approval Gates (3 execution paths + 1 registry — all must stay wired)
@@ -1767,7 +1775,8 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   Requests (`tests/test_csrf.py`) — MagicMock auto-attributes and hides
   exactly that bug class.
 - `rate_limit.py`: per-principal sliding window (cookie > Authorization > IP)
-  on chat stream / voice / research sessions / swarm dispatch / system flush.
+  on chat stream / voice / research sessions / swarm dispatch (the system
+  flush route it also covered was removed 2026-09-30, AUD-015).
   Active ONLY when auth is enabled (never demo mode); live ConfigStore
   `api.rate_limit.<bucket>_per_minute`; env `KAZMA_RATE_LIMIT_ENABLED=0`.
 
@@ -3529,6 +3538,28 @@ and the sibling suites):**
   call against the built app's route table and every body against the keys the
   route reads — without dispatching anything (negative controls: the old paths
   and the old body).
+- **No dict literal repeats a key** (`tests/test_no_repeated_dict_keys.py`,
+  every tracked `.py`): Python keeps the last value silently, and the Settings
+  catalog held four labels twice (AUD-017). **A private helper is imported
+  from the module that defines it**, never through a re-export: patching a
+  re-export changes nothing, and `tool_builtins` re-exported one of seven
+  `_qnorm` copies — the dead one its test then checked. A module-level
+  ContextVar a graph node binds needs no reset: LangGraph runs each node in a
+  copy of the caller's context (`tests/test_node_context_scope.py`).
+- **A read through a module alias names something the module defines**
+  (`tests/test_module_attribute_refs.py`, AUD-027): `KazmaAgent.sync_active_model`
+  cleared `graph_builder._failover_clients` inside `try/except: pass` after the
+  caches moved to `graph_supervisor` -- AttributeError on every model switch,
+  swallowed, from 2026-08-25 to 2026-09-30, so a reconfigured provider stayed
+  in failover until a restart. It calls `graph_supervisor.reset_failover_cache()`
+  now. **No path joins the process CWD with `kazma-data`**, in or out of an
+  `except` (gate 9 in `tests/test_store_registry.py`): the workspace router's
+  "no workspaces left" branch pinned the tools to `Path.cwd()/kazma-data/workspace`
+  instead of `default_sandbox_root()`. **A silent handler around a write is a
+  bug** (`tests/test_swallowed_errors_reported.py`): the belief FTS rebuild
+  reported "rebuilt" over a failed commit, and the §25 continue-directive clear
+  failed without a word; a write that can fail says so (WARNING when data or a
+  feature is affected, DEBUG with the traceback for best-effort side writes).
 
 ## UI Conventions (Web)
 
@@ -3638,8 +3669,18 @@ and the sibling suites):**
   reason it has none. Found with no control at all: removing a document from
   a Knowledge library, protecting a memory entity, resetting a swarm
   breaker, Outlook Calendar's disconnect, folders outside the workspace.
-  Every one is now on its page. The route inventory
-  (`/api/*` routes no template or script calls) is the way to look for more.
+  Every one is now on its page. **The route inventory is a gate**
+  (`tests/test_api_route_callers.py`, 2026-09-30): every `/api` route the
+  built app serves has a caller -- a string in a page script, a template, the
+  TUI, the CLI or a script (server-side Python is not a caller: an error text
+  once made a dead route look called) -- or is declared in
+  `NOT_CALLED_BY_A_PAGE` with its reason (OAuth redirects, the documented
+  Document API, operator reports...). A declaration fails the day its route
+  gains a caller or disappears. The first pass removed three dead routes
+  (the typing-telemetry stubs and `/api/system/flush`, which reset live
+  registry singletons) and found the Settings backup had no restore control;
+  the restore itself is now tested (`tests/test_settings_restore.py`) and a
+  control waits on keeping runtime state out of a restore.
 - **A panel lays out by its own width** (`@container`), not the window's:
   with the sidebar open a 918px window left the IDE editor ~40px and
   clipped the providers panel. `tests/e2e/test_layout_widths.py` (each with

@@ -62,12 +62,6 @@ async def cancel_pending_hitl(
         return False
 
     try:
-        from langgraph.types import Command
-    except ImportError:
-        logger.warning("[hitl_supersede] langgraph Command unavailable")
-        return False
-
-    try:
         logger.info(
             "[hitl_supersede] auto-denying pending HITL for thread=%s reason=%s",
             (config.get("configurable") or {}).get("thread_id"),

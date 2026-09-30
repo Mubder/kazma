@@ -186,7 +186,7 @@ async def x_schedule_post(
         else:
             payload = {"ok": False, "scheduled": False, "error": payload.get("error", "")}
         return _json(payload)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("x_schedule_post failed")
         return _json({"ok": False, "scheduled": False, "error": str(exc)})
 
@@ -216,7 +216,7 @@ async def x_list_scheduled() -> str:
                 "error": p.error,
             })
         return _json({"ok": True, "count": len(out), "posts": out})
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("x_list_scheduled failed")
         return _json({"ok": False, "error": str(exc)})
 
@@ -246,6 +246,6 @@ async def x_cancel_scheduled_post(post_id: int) -> str:
             "ok": False, "cancelled": False,
             "error": f"Post {pid} is already '{existing.status}' and cannot be cancelled.",
         })
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("x_cancel_scheduled_post failed")
         return _json({"ok": False, "cancelled": False, "error": str(exc)})

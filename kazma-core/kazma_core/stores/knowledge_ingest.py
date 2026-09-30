@@ -606,7 +606,7 @@ async def _firecrawl_map_site(
     base = (os.environ.get("KAZMA_FIRECRAWL_URL") or "https://api.firecrawl.dev").rstrip("/")
     try:
         import httpx
-        from kazma_core.security.ssrf import SSRFError, validate_url
+        from kazma_core.security.ssrf import validate_url
 
         await asyncio.to_thread(validate_url, seed_url, block_unresolved=True)
         # ``search`` ranks URLs by relevance; omit it for section-root maps

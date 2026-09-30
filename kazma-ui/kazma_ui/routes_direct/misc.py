@@ -197,15 +197,10 @@ def _approve_lock_for(thread_id: str) -> asyncio.Lock:
 
 def register_misc_routes(self: Any) -> None:
     """Register the misc routes onto ``self.app``."""
-    @self.app.get("/api/telemetry/typing")
-    async def _typing_signal():
-        return {"status": "processing", "timestamp": __import__("time").time()}
-    @self.app.post("/api/telemetry/typing/stream_start")
-    async def _stream_start(req: dict):
-        worker_name = req.get("worker_name", "unknown")
-        task_id = req.get("task_id", "")
-        logger.info("[Stream] Typing started — worker=%s task=%s", worker_name, task_id)
-        return {"status": "stream_started", "worker_name": worker_name, "task_id": task_id}
+    # /api/telemetry/typing and /api/telemetry/typing/stream_start were
+    # removed (audit AUD-015, 2026-09-30): stubs no page or client called --
+    # one answered a constant, the other only logged
+    # (tests/test_api_route_callers.py).
     # /api/session/history and /api/session/replay were removed (audit
     # 2026-09-22): duplicates of /api/replay/* with no caller, no test, and no
     # ownership check — history returned any thread's full state_json, and

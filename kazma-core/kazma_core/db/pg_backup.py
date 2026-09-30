@@ -244,7 +244,7 @@ def perform_pg_backup(*, retention: int | None = None) -> Path | None:
             if "tmp" in locals():
                 Path(tmp).unlink(missing_ok=True)
         except Exception:
-            pass
+            logger.debug("[pg_backup] could not remove the partial dump", exc_info=True)
         return None
 
 

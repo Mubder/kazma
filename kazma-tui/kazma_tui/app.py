@@ -9,10 +9,8 @@ Visual system lives in ``theme.py`` (design tokens + global TCSS).
 
 from __future__ import annotations
 
-import os
 import logging
 import sys
-from datetime import datetime
 from typing import Any, Optional
 
 from textual.app import App, ComposeResult
@@ -226,8 +224,7 @@ class KazmaTUI(App[None]):
         """
         # ── ConfigStore ─────────────────────────────────────────────
         try:
-            from kazma_core.config_store import ConfigStore, get_config_store, set_config_store
-            import kazma_core.config_store as _cs_mod
+            from kazma_core.config_store import get_config_store
 
             # get_config_store() lazily creates a singleton and never raises.
             # Check if the singleton is already set; if not, create one

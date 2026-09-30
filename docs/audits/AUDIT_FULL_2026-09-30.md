@@ -104,7 +104,72 @@ gaps, now closed with their own gates:
   serial per-file runs). The runner now kills whole process trees, bounds the
   drain, scales the budget with chunk size, and splits a timed-out chunk.
 
-Deliberately deferred (not bugs): AUD-015 (annotate the ~18 API-only routes —
+**AUD-015 done (third change set):** the route inventory is a gate
+(`tests/test_api_route_callers.py`). With a caller detector that reads whole
+string literals (balanced `${…}`, concatenation prefixes) and counts only
+client code, 55 routes had no caller: each is now declared with a verified
+reason, three dead ones were removed (the typing-telemetry stubs; and
+`/api/system/flush`, which reset the model/worker/tool registry singletons
+under live holders), and the Settings backup — which the page can create but
+not restore — has a tested restore (`tests/test_settings_restore.py`).
+Follow-up: a Restore control, once a restore keeps runtime state (active chat
+threads, boot stamps) out.
+
+**AUD-017 done (fourth change set):** 106 unused imports in product code → 0.
+Each was first checked for a reader elsewhere (imports from the module, patch
+strings, attribute access, skill manifests, which the native loader reads by
+name): five were private helpers re-exported by `graph_builder` and imported
+through it by `swarm/worker.py` and four tests — those now import from the
+module that defines them. Four unused ones were more than clutter:
+- `tool_builtins` defined `_qnorm` seven times after the package split and
+  only `memory.py` calls it; the package re-exported the copy from
+  `external.py`, so its one test exercised a dead copy. Six copies deleted,
+  the test reads the live one.
+- `graph_supervisor` imported the resets for the two ContextVars it binds and
+  never called them. Correct, because LangGraph runs each node in a copy of
+  the caller's context — now said at the site and held by
+  `tests/test_node_context_scope.py` (with the leak as its negative control).
+- `sse_chat` imported `is_shutting_down` unused: the check lives in
+  `_streaming.py` (checked in history, nothing was lost).
+- `hitl_supersede` had a dead `langgraph` availability check.
+ERA001's 38 "commented-out code" hits are all comments that look like code
+(sample payloads, section headers) — none removed. RUF100: 26 `noqa` markers
+that suppressed nothing → 0 (their explanations kept as plain comments). Of
+the 583 module-local public symbols, four were dead everywhere and are gone
+(579; the rest are used in their own module or by tests — renaming them is the
+sweep the ratchet's docstring declines, because skills reach code by name).
+Found beside it: the Settings catalog defined the four provider capability
+labels twice (2026-09-13 and 2026-09-28, different Arabic); Python kept the
+second. The dead first set is gone and `tests/test_no_repeated_dict_keys.py`
+makes a repeated literal key fail the build (ruff's F601 is only advisory in
+CI).
+
+**AUD-027 first pass (fifth change set):** silent handlers 538 → 476, blind
+handlers 3,730 → 3,693. Triaged by consequence, not swept: every silent
+handler around a WRITE was read. Found behind them:
+- `KazmaAgent.sync_active_model` cleared `graph_builder._failover_clients`,
+  which moved to `graph_supervisor` in the 2026-08-25 split — AttributeError on
+  every model switch, swallowed, so a reconfigured provider stayed in failover
+  until a restart. Now `graph_supervisor.reset_failover_cache()`, and
+  `tests/test_module_attribute_refs.py` holds every `module_alias.attr` read to
+  a name the module defines (it finds the old line; nothing else today).
+- Eleven SQLite stores added columns by hand, most with `except Exception:
+  pass` (a locked or read-only database left the column missing). One helper,
+  `kazma_core.db.sqlite_columns`, and a gate that allows no other SQLite
+  `ADD COLUMN`. The Postgres `pinned` migration's swallow could abort the
+  schema transaction behind a "core schema ensured" line; it now reaches the
+  pool's retry loop.
+- The workspace router pinned the tools to `Path.cwd()/kazma-data/workspace`
+  when the last workspace was deleted (a sibling of the bug
+  `default_sandbox_root()` documents as removed); gate 9 of
+  `tests/test_store_registry.py` now covers CWD + data-dir paths anywhere.
+- The belief FTS rebuild reported success over a failed commit; the §25
+  continue-directive clear, the cron purge, and backup pruning failed without
+  a word (`tests/test_swallowed_errors_reported.py`).
+The remaining silent handlers are best-effort cleanup (closing, cancelling,
+UI refresh) and stay on the ratchet.
+
+Previously deferred: AUD-015 (annotate the ~18 API-only routes —
 docs hygiene), AUD-017 (73-file unused-import sweep — its own batch), AUD-026
 (split the two 270-complexity chat transports — touches the gated §31
 delivery path, needs its own effort + full delivery matrix), AUD-027 (keep

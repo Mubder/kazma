@@ -65,7 +65,7 @@ def _backup_one(src_path: Path, dest_path: Path) -> bool:
         try:
             dest_path.unlink(missing_ok=True)
         except Exception:
-            pass
+            logger.debug("[backup] could not remove the half-written %s", dest_path, exc_info=True)
         return False
 
 
@@ -140,5 +140,7 @@ def prune_old_backups(*, retention: int = _DEFAULT_RETENTION) -> int:
                 deleted += 1
                 logger.debug("[backup] pruned old backup %s", stale.name)
             except Exception:
-                pass
+                logger.warning(
+                    "[backup] could not prune old backup %s; old backups will pile up", stale, exc_info=True,
+                )
     return deleted

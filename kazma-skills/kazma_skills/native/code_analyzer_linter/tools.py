@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
-from pathlib import Path
 
 from kazma_core.agent.tool_registry import _workspace_scope_error
 from kazma_core.tools.file_write import _get_workspace

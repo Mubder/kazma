@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kazma_core.swarm.aggregator import ResultAggregator
-from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
+from kazma_core.swarm.blackboard import BlackboardStore
 from kazma_core.swarm.dispatch_helpers import pattern_dispatch_context, wait_timeout
 from kazma_core.swarm.reliability import BoundedConcurrency
 from kazma_core.swarm.task import SwarmTask, WorkerResult

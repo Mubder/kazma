@@ -42,7 +42,6 @@ import json
 import logging
 import os
 import shlex
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -289,7 +288,6 @@ def _tool_write_file(root: Path, args: dict[str, Any]) -> str:
     resolved against the process CWD and the documented root confinement
     (including the ../../ traversal block) never fired (2026-08-15 audit).
     """
-    import asyncio
 
     from kazma_core.ide import get_ide_service
 
@@ -307,7 +305,6 @@ def _tool_write_file(root: Path, args: dict[str, Any]) -> str:
 
 def _tool_run_tests(root: Path, args: dict[str, Any]) -> str:
     """Run pytest via IdeService.run (HITL-gated shell_exec)."""
-    import asyncio
 
     from kazma_core.ide import get_ide_service
 
@@ -343,7 +340,6 @@ def _tool_run_tests(root: Path, args: dict[str, Any]) -> str:
 
 def _tool_list_files(root: Path, args: dict[str, Any]) -> str:
     """List files/directories under this server's root via the IdeService."""
-    import asyncio
 
     from kazma_core.ide import get_ide_service
 
@@ -364,7 +360,6 @@ def _tool_list_files(root: Path, args: dict[str, Any]) -> str:
 
 def _tool_run_command(root: Path, args: dict[str, Any]) -> str:
     """Run a shell command in the workspace (HITL-gated via IdeService)."""
-    import asyncio
 
     from kazma_core.ide import get_ide_service
 
@@ -380,7 +375,6 @@ def _tool_run_command(root: Path, args: dict[str, Any]) -> str:
 
 def _tool_git_status(root: Path, args: dict[str, Any]) -> str:
     """Get git status via the IdeService."""
-    import asyncio
 
     from kazma_core.ide import get_ide_service
 

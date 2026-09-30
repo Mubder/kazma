@@ -37,6 +37,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kazma_core.db.sqlite_columns import add_missing_columns
+
 __all__ = [
     "PRIMARY_DDL",
     "OPS_DDL",
@@ -405,30 +407,36 @@ def ensure_primary_schema(conn: Any) -> None:
     # column (NOT metadata_json — bytes are not JSON-serializable and
     # stuffing them there was a latent bug). Added via ALTER so existing
     # DBs upgrade in place, matching the schema.py convention.
-    for col_sql in (
-        "ALTER TABLE episodes ADD COLUMN embedding BLOB",
-        "ALTER TABLE beliefs ADD COLUMN embedding BLOB",
-        # Phase A: access accounting on beliefs (episodes already have these columns)
-        "ALTER TABLE beliefs ADD COLUMN access_count INTEGER DEFAULT 0",
-        "ALTER TABLE beliefs ADD COLUMN last_accessed REAL",
-        # Phase 3: materialized belief_count / graph_degree on entities so the
-        # operator /memory page avoids per-row correlated subqueries. Sentinel
-        # -1 = "not computed yet" (distinct from a genuine 0). Backfilled
-        # below; maintained on write by entity_counts.recompute_entity_counts.
-        "ALTER TABLE entities ADD COLUMN belief_count INTEGER DEFAULT -1",
-        "ALTER TABLE entities ADD COLUMN graph_degree INTEGER DEFAULT -1",
-        # F3: per-entity protection flag — operator-marked undeletable and
-        # unmergeable-as-source. Extends the hardcoded _PROTECTED_ENTITIES set
-        # (user/assistant/kazma/mubder) to any entity the operator chooses.
-        "ALTER TABLE entities ADD COLUMN is_protected INTEGER DEFAULT 0",
-        # Major node flag: operator-marked important nodes (projects, hubs)
-        # that render bigger + distinct color on the canvas.
-        "ALTER TABLE entities ADD COLUMN is_major INTEGER DEFAULT 0",
-    ):
-        try:
-            conn.execute(col_sql)
-        except Exception:
-            pass  # column already exists
+    add_missing_columns(conn, "episodes", (("embedding", "BLOB"),))
+    add_missing_columns(
+        conn,
+        "beliefs",
+        (
+            ("embedding", "BLOB"),
+            # Phase A: access accounting on beliefs (episodes already have these columns)
+            ("access_count", "INTEGER DEFAULT 0"),
+            ("last_accessed", "REAL"),
+        ),
+    )
+    add_missing_columns(
+        conn,
+        "entities",
+        (
+            # Phase 3: materialized belief_count / graph_degree on entities so the
+            # operator /memory page avoids per-row correlated subqueries. Sentinel
+            # -1 = "not computed yet" (distinct from a genuine 0). Backfilled
+            # below; maintained on write by entity_counts.recompute_entity_counts.
+            ("belief_count", "INTEGER DEFAULT -1"),
+            ("graph_degree", "INTEGER DEFAULT -1"),
+            # F3: per-entity protection flag — operator-marked undeletable and
+            # unmergeable-as-source. Extends the hardcoded _PROTECTED_ENTITIES set
+            # (user/assistant/kazma/mubder) to any entity the operator chooses.
+            ("is_protected", "INTEGER DEFAULT 0"),
+            # Major node flag: operator-marked important nodes (projects, hubs)
+            # that render bigger + distinct color on the canvas.
+            ("is_major", "INTEGER DEFAULT 0"),
+        ),
+    )
     # Phase B: real FTS5 indexes (MATCH + bm25) with LIKE fallback in recall.
     _ensure_fts5(conn)
     # Phase 3: one-shot backfill of stale entity counts on first boot after
@@ -655,15 +663,7 @@ def ensure_ops_schema(conn: Any) -> None:
 
     apply_sqlite_pragmas(conn)
     conn.executescript(OPS_DDL)
-    # ── Idempotent column additions ──────────────────────────────────
-    # SQLite lacks ``ADD COLUMN IF NOT EXISTS``; probe ``PRAGMA table_info``
-    # and only ALTER when the column is missing (TaskStore convention).
-    existing_cols = {
-        row[1] for row in conn.execute("PRAGMA table_info(memory_task_queue)")
-    }
-    if "lease_token" not in existing_cols:
-        conn.execute("ALTER TABLE memory_task_queue ADD COLUMN lease_token TEXT")
-        logger.debug("[schema_v2] migrated memory_task_queue.lease_token")
+    add_missing_columns(conn, "memory_task_queue", (("lease_token", "TEXT"),))
     conn.execute("PRAGMA foreign_keys = ON")
     conn.commit()
     logger.debug("[schema_v2] ops schema ensured")

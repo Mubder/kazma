@@ -25,6 +25,20 @@ from kazma_ui.routes_direct._shared import (
 
 logger = logging.getLogger(__name__)
 
+
+async def _json_object(request: Request) -> dict[str, Any]:
+    """The request body as a JSON object; ``{}`` when there is none.
+
+    No body, malformed JSON (``ValueError``) and a body that is not an object
+    all leave the route on its defaults. A dropped connection is not one of
+    them and propagates.
+    """
+    try:
+        body = await request.json()
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
+
 __all__ = ["register_memory_routes"]
 
 
@@ -138,6 +152,8 @@ def register_memory_routes(self: Any) -> None:
                 )
 
 
+        conn = None
+        ops = None
         try:
             conn = open_memory_db()
             now = time.time()
@@ -165,7 +181,9 @@ def register_memory_routes(self: Any) -> None:
                     (tid,),
                 )
             except Exception:
-                pass
+                logger.warning(
+                    "[memory] could not mark entity counts stale after the clear; the graph may show old counts", exc_info=True,
+                )
             conn.commit()
             after = conn.execute(
                 "SELECT COUNT(*) FROM beliefs WHERE tenant_id=? "
@@ -192,6 +210,7 @@ def register_memory_routes(self: Any) -> None:
                 logger.debug("[memory] graph-clear neo4j cleanup skipped", exc_info=True)
             # Audit row (ops DB) so a mass invalidate is as traceable as
             # single-belief hygiene.
+            ops = None
             try:
                 import uuid as _uuid
 
@@ -222,10 +241,8 @@ def register_memory_routes(self: Any) -> None:
             except Exception:
                 logger.debug("[memory] graph-clear audit skipped", exc_info=True)
             finally:
-                try:
+                if ops is not None:
                     ops.close()
-                except Exception:
-                    pass  # already closed / never opened
             conn.close()
             return {
                 "ok": True,
@@ -236,14 +253,10 @@ def register_memory_routes(self: Any) -> None:
         except Exception as exc:
             return {"ok": False, "error": safe_error(exc)}
         finally:
-            try:
+            if conn is not None:
                 conn.close()
-            except Exception:
-                pass  # already closed / never opened
-            try:
+            if ops is not None:
                 ops.close()
-            except Exception:
-                pass  # already closed / never opened
     @self.app.get("/api/memory/graph/export")
     async def _memory_graph_export():
         """Retired — V2 nightly JSONL/GraphML export superseded this."""
@@ -279,12 +292,8 @@ def register_memory_routes(self: Any) -> None:
     @self.app.post("/api/memory/v2/federated-search")
     async def _memory_v2_federated_search(request: Request):
         """Federated search: cognitive memory + Knowledge Library (labeled, not merged)."""
-        body = {}
-        try:
-            body = await request.json()
-        except Exception:
-            pass
-        query = str((body or {}).get("query") or "").strip()
+        body = await _json_object(request)
+        query = str(body.get("query") or "").strip()
         if not query:
             return {
                 "ok": False,
@@ -300,11 +309,11 @@ def register_memory_routes(self: Any) -> None:
                 federated_search,
                 query,
                 tenant_id=require_tenant_id(),
-                session_id=(body or {}).get("session_id") or None,
-                limit_memory=int((body or {}).get("limit_memory") or 5),
-                limit_kb=int((body or {}).get("limit_kb") or 5),
-                include_memory=bool((body or {}).get("include_memory", True)),
-                include_knowledge=bool((body or {}).get("include_knowledge", True)),
+                session_id=body.get("session_id") or None,
+                limit_memory=int(body.get("limit_memory") or 5),
+                limit_kb=int(body.get("limit_kb") or 5),
+                include_memory=bool(body.get("include_memory", True)),
+                include_knowledge=bool(body.get("include_knowledge", True)),
             )
         except Exception as exc:
             return {
@@ -319,12 +328,8 @@ def register_memory_routes(self: Any) -> None:
 
         Body optional: ``{"include_optional": false}``.
         """
-        body = {}
-        try:
-            body = await request.json()
-        except Exception:
-            pass
-        include_optional = bool((body or {}).get("include_optional", False))
+        body = await _json_object(request)
+        include_optional = bool(body.get("include_optional", False))
         try:
             from kazma_core.memory.eval_golden import run_golden_eval
 
@@ -386,14 +391,10 @@ def register_memory_routes(self: Any) -> None:
     @self.app.post("/api/memory/v2/probe")
     async def _memory_v2_probe(request: Request):
         """Live recall dry-run for the dashboard probe panel."""
-        body = {}
-        try:
-            body = await request.json()
-        except Exception:
-            pass
-        query = str((body or {}).get("query") or "").strip()
-        limit = int((body or {}).get("limit") or 5)
-        session_id = (body or {}).get("session_id") or None
+        body = await _json_object(request)
+        query = str(body.get("query") or "").strip()
+        limit = int(body.get("limit") or 5)
+        session_id = body.get("session_id") or None
         if not query:
             return {"ok": False, "error": "query required", "beliefs": [], "episodes": []}
         try:
@@ -473,6 +474,7 @@ def register_memory_routes(self: Any) -> None:
                     toks.append(cleaned)
             return " OR ".join(toks)
 
+        conn = None
         try:
             conn = open_memory_db()
             tid = _mem_tid()
@@ -548,10 +550,8 @@ def register_memory_routes(self: Any) -> None:
         except Exception as exc:
             return {"beliefs": [], "error": safe_error(exc)}
         finally:
-            try:
+            if conn is not None:
                 conn.close()
-            except Exception:
-                pass  # already closed / never opened
     @self.app.get("/api/memory/v2/beliefs/{belief_id}")
     def _memory_v2_belief_detail(belief_id: str):
         """Belief detail + supersede chain.
@@ -582,6 +582,7 @@ def register_memory_routes(self: Any) -> None:
                     d[k] = f"<binary {len(v)} bytes>"
             return d
 
+        conn = None
         try:
             conn = open_memory_db()
             tid = _mem_tid()
@@ -621,10 +622,8 @@ def register_memory_routes(self: Any) -> None:
         except Exception as exc:
             return {"ok": False, "error": safe_error(exc)}
         finally:
-            try:
+            if conn is not None:
                 conn.close()
-            except Exception:
-                pass  # already closed / never opened
     @self.app.get("/api/memory/v2/beliefs/{belief_id}/recall-trail")
     def _memory_v2_belief_recall_trail(belief_id: str):
         """Recall history for a belief — answers "why/how-often was this used?"
@@ -641,6 +640,7 @@ def register_memory_routes(self: Any) -> None:
         bid = (belief_id or "").strip()
         if not bid:
             return {"ok": False, "error": "belief_id required"}
+        conn = None
         try:
             conn = open_memory_db()
             tid = _mem_tid()
@@ -698,10 +698,8 @@ def register_memory_routes(self: Any) -> None:
         except Exception as exc:
             return {"ok": False, "error": safe_error(exc)}
         finally:
-            try:
+            if conn is not None:
                 conn.close()
-            except Exception:
-                pass  # already closed / never opened
     @self.app.post("/api/memory/v2/beliefs/{belief_id}/invalidate")
     def _memory_v2_belief_invalidate(belief_id: str):
         """Soft-invalidate the caller's belief and best-effort remove its Neo4j edge.
@@ -721,6 +719,7 @@ def register_memory_routes(self: Any) -> None:
             list_pending_merges,
         )
 
+        conn = None
         try:
             conn = open_memory_db()
             lim = max(1, min(limit, 200))
@@ -736,10 +735,8 @@ def register_memory_routes(self: Any) -> None:
         except Exception as exc:
             return {"merges": [], "error": safe_error(exc)}
         finally:
-            try:
+            if conn is not None:
                 conn.close()
-            except Exception:
-                pass  # already closed / never opened
     @self.app.post("/api/memory/v2/entity-merges/{merge_id}")
     async def _memory_v2_entity_merge_decide(merge_id: str, request: Request):
         """Approve or reject a pending entity merge. Body: {action: approve|reject}."""
@@ -747,12 +744,8 @@ def register_memory_routes(self: Any) -> None:
         from kazma_core.memory.entity_resolution import decide_entity_merge
         from kazma_ui.memory_api import _row_tenant_ok
 
-        body = {}
-        try:
-            body = await request.json()
-        except Exception:
-            pass
-        action = str((body or {}).get("action") or "approve").strip().lower()
+        body = await _json_object(request)
+        action = str(body.get("action") or "approve").strip().lower()
         approve = action in ("approve", "approved", "yes", "true", "1")
 
         def _decide() -> dict:
@@ -769,10 +762,7 @@ def register_memory_routes(self: Any) -> None:
                 return {"ok": False, "error": safe_error(exc)}
             finally:
                 if conn is not None:
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
+                    conn.close()
 
         return await asyncio.to_thread(_decide)
     @self.app.get("/api/memory/v2/queue")
@@ -783,6 +773,7 @@ def register_memory_routes(self: Any) -> None:
         from kazma_core.memory.schema_v2 import ensure_ops_schema
         from kazma_core.paths import memory_ops_db
 
+        conn = None
         try:
             import os
 
@@ -816,10 +807,8 @@ def register_memory_routes(self: Any) -> None:
         except Exception as exc:
             return {"tasks": [], "error": safe_error(exc)}
         finally:
-            try:
+            if conn is not None:
                 conn.close()
-            except Exception:
-                pass  # already closed / never opened
     @self.app.post("/api/memory/v2/queue/{task_id}/retry")
     def _memory_v2_queue_retry(task_id: str):
         """Re-queue a failed/dead-letter task as pending."""
@@ -829,6 +818,7 @@ def register_memory_routes(self: Any) -> None:
         from kazma_core.memory.schema_v2 import ensure_ops_schema
         from kazma_core.paths import memory_ops_db
 
+        conn = None
         try:
             conn = sqlite3.connect(memory_ops_db(), check_same_thread=False)
             ensure_ops_schema(conn)
@@ -848,10 +838,8 @@ def register_memory_routes(self: Any) -> None:
         except Exception as exc:
             return {"ok": False, "error": safe_error(exc)}
         finally:
-            try:
+            if conn is not None:
                 conn.close()
-            except Exception:
-                pass  # already closed / never opened
     @self.app.post("/api/memory/v2/queue/clear-failed")
     def _memory_v2_queue_clear_failed():
         """Delete dead-letter (failed) tasks from the durable queue."""
@@ -860,6 +848,7 @@ def register_memory_routes(self: Any) -> None:
         from kazma_core.memory.schema_v2 import ensure_ops_schema
         from kazma_core.paths import memory_ops_db
 
+        conn = None
         try:
             import os
 
@@ -875,15 +864,14 @@ def register_memory_routes(self: Any) -> None:
         except Exception as exc:
             return {"ok": False, "error": safe_error(exc)}
         finally:
-            try:
+            if conn is not None:
                 conn.close()
-            except Exception:
-                pass  # already closed / never opened
     @self.app.get("/api/memory/v2/episodes")
     def _memory_v2_episodes(limit: int = 40, tier: str = "", offset: int = 0):
         """Recent episodes for Dashboard overlay (id, tier, preview text)."""
 
 
+        conn = None
         try:
             conn = open_memory_db()
             tsql, tparams = _tenant_clause(_mem_tid())
@@ -932,10 +920,8 @@ def register_memory_routes(self: Any) -> None:
         except Exception as exc:
             return {"ok": False, "episodes": [], "error": safe_error(exc)}
         finally:
-            try:
+            if conn is not None:
                 conn.close()
-            except Exception:
-                pass  # already closed / never opened
     @self.app.post("/api/memory/v2/reconsolidate", dependencies=[Depends(rate_limit("admin_ops", 10))])
     def _memory_v2_reconsolidate():
         """Enqueue a global_reconsolidation task (Dashboard / Settings trigger).
@@ -958,6 +944,7 @@ def register_memory_routes(self: Any) -> None:
 
         from kazma_core.memory.procedural import match_procedural_dags
 
+        conn = None
         try:
             conn = open_memory_db()
             if q and q.strip():
@@ -999,10 +986,8 @@ def register_memory_routes(self: Any) -> None:
         except Exception as exc:
             return {"dags": [], "error": safe_error(exc)}
         finally:
-            try:
+            if conn is not None:
                 conn.close()
-            except Exception:
-                pass  # already closed / never opened
     @self.app.get("/api/memory/v2/quality")
     def _memory_v2_quality(request: Request):
         """Lightweight memory quality score for Dashboard (no LLM).
@@ -1029,6 +1014,7 @@ def register_memory_routes(self: Any) -> None:
                 score += 1
             checks.append({"name": name, "ok": ok, "detail": detail})
 
+        conn = None
         try:
             dbp = primary_memory_db()
             _check("db_exists", os.path.exists(dbp), dbp if install else "")
@@ -1079,10 +1065,8 @@ def register_memory_routes(self: Any) -> None:
         except Exception as exc:
             return {"ok": False, "score": 0, "error": safe_error(exc), "checks": checks}
         finally:
-            try:
+            if conn is not None:
                 conn.close()
-            except Exception:
-                pass  # already closed / never opened
     @self.app.get("/api/memory/v2/graph/export")
     def _memory_v2_graph_export(format: str = "json", limit: int = 500):
         """Export belief graph as JSON or GraphML for download."""
@@ -1091,6 +1075,7 @@ def register_memory_routes(self: Any) -> None:
         from fastapi.responses import Response
 
         fmt = (format or "json").strip().lower()
+        conn = None
         try:
             conn = open_memory_db()
             tid = _mem_tid()
@@ -1169,10 +1154,8 @@ def register_memory_routes(self: Any) -> None:
         except Exception as exc:
             return {"ok": False, "error": safe_error(exc)}
         finally:
-            try:
+            if conn is not None:
                 conn.close()
-            except Exception:
-                pass  # already closed / never opened
     @self.app.get("/api/memory/v2/graph")
     def _memory_v2_graph(
         at: float = 0.0,
@@ -1226,7 +1209,7 @@ def register_memory_routes(self: Any) -> None:
                 else:
                     meta["graph_online"] = True
             except Exception:
-                pass
+                logger.debug("[memory] graph backend status unavailable; reporting sqlite", exc_info=True)
             return meta
 
         # ── Optional Neo4j probe only (not default Dashboard paint) ──
@@ -1248,8 +1231,9 @@ def register_memory_routes(self: Any) -> None:
                             topo["stats"] = stats
                             return topo
             except Exception:
-                pass
+                logger.debug("[memory] Neo4j topology export failed; painting from sqlite", exc_info=True)
 
+        conn = None
         try:
             conn = open_memory_db()
 
@@ -1330,7 +1314,7 @@ def register_memory_routes(self: Any) -> None:
                     self_ids = collect_self_entity_ids(conn)
                     hub_name = resolve_hub_display_name(conn)
             except Exception:
-                pass
+                logger.debug("[memory] user hub heal failed", exc_info=True)
 
             ref_ids: set[str] = set()
             for b in brows:
@@ -1521,7 +1505,5 @@ def register_memory_routes(self: Any) -> None:
                 "error": safe_error(exc),
             }
         finally:
-            try:
+            if conn is not None:
                 conn.close()
-            except Exception:
-                pass  # already closed / never opened

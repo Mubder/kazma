@@ -8,10 +8,8 @@ HITL danger-tool gate the agent/swarm use is enforced here too.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
-from typing import Optional
 
 from textual.app import ComposeResult
 from textual.binding import Binding

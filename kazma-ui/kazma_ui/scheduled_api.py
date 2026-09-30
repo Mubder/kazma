@@ -231,7 +231,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             return JSONResponse({"ok": True, **result})
         except ValueError as exc:
             return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("[scheduled] cron create failed")
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
@@ -252,7 +252,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             )
             status_code = 200 if result.get("status") in ("rescheduled",) else 404
             return JSONResponse({"ok": result.get("status") == "rescheduled", **result}, status_code=status_code)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("[scheduled] cron edit failed")
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
@@ -267,7 +267,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             result = await sched.cancel(job_id)
             ok = result.get("status") == "cancelled"
             return JSONResponse({"ok": ok, **result}, status_code=200 if ok else 404)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("[scheduled] cron delete failed")
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 

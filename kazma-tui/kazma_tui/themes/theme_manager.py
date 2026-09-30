@@ -7,11 +7,14 @@ Alternate themes only override color tokens; structural CSS comes from
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from textual.app import App
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "HIGH_CONTRAST_THEME",
@@ -113,7 +116,7 @@ RTL_CSS_OVERRIDES = """
 def _preferences_paths() -> tuple[Path, Path]:
     """Return (config_dir, preferences_file) under project-local Kazma home."""
     try:
-        from kazma_core.paths import preferences_path, user_home
+        from kazma_core.paths import preferences_path
 
         prefs = preferences_path()
         return prefs.parent, prefs
@@ -177,7 +180,8 @@ class ThemeManager:
                         {k: v for k, v in data.items() if k in self.DEFAULT_PREFERENCES}
                     )
         except Exception:
-            pass
+            # Unreadable preferences: start from the defaults.
+            logger.debug("[theme] could not read %s", self.CONFIG_FILE, exc_info=True)
 
     def save(self) -> None:
         try:
@@ -187,7 +191,7 @@ class ThemeManager:
                 encoding="utf-8",
             )
         except Exception:
-            pass
+            logger.warning("[theme] could not save preferences to %s", self.CONFIG_FILE, exc_info=True)
 
     def set_theme(self, theme_name: str) -> None:
         if theme_name not in THEMES and theme_name != "kazma-dark":

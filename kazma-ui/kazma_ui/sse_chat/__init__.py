@@ -27,7 +27,6 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from kazma_core.exceptions import sanitize_error
-from kazma_core.shutdown import is_shutting_down
 
 from kazma_ui.rate_limit import rate_limit
 from kazma_ui.thread_ownership import resolve_caller_thread

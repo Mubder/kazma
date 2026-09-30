@@ -17,7 +17,6 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from kazma_core.workspace.binding import (
     allow_absolute_paths,

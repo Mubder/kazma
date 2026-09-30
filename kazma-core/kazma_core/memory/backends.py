@@ -1072,7 +1072,9 @@ class HybridVectorBackend:
         try:
             b = self._remote.delete(item_id, tenant_id=tenant_id)
         except Exception:
-            pass
+            # Like the upsert above: a remote outage is reported by the probe;
+            # the local store is the source of truth for recall.
+            logger.debug("[hybrid] remote delete failed", exc_info=True)
         return bool(a or b)
 
 

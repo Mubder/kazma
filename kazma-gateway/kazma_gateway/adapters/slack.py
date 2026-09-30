@@ -769,7 +769,9 @@ class SlackAdapter(BaseAdapter):
                                     try:
                                         await ws.send(json.dumps({"envelope_id": _env_ack}))
                                     except Exception:
-                                        pass
+                                        logger.debug(
+                                            "[Slack] envelope ack failed (Slack will retry; the event is deduplicated)", exc_info=True,
+                                        )
                                 continue
 
                         if msg_type == "hello":

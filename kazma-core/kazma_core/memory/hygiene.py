@@ -116,10 +116,8 @@ def rebuild_beliefs_fts(conn: sqlite3.Connection) -> bool:
     """Best-effort rebuild of ``beliefs_fts``. Returns True on success."""
     try:
         conn.execute("INSERT INTO beliefs_fts(beliefs_fts) VALUES('rebuild')")
-        try:
-            conn.commit()
-        except Exception:
-            pass
+        # A failed commit is a failed rebuild: the path below, never "rebuilt".
+        conn.commit()
         logger.info("[hygiene] rebuilt beliefs_fts after write error")
         return True
     except Exception:
@@ -134,10 +132,7 @@ def rebuild_beliefs_fts(conn: sqlite3.Connection) -> bool:
                 DROP TABLE IF EXISTS beliefs_fts;
                 """
             )
-            try:
-                conn.commit()
-            except Exception:
-                pass
+            conn.commit()
             from kazma_core.memory.schema_v2 import ensure_primary_schema
 
             ensure_primary_schema(conn)

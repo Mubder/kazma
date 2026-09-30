@@ -7,8 +7,6 @@ Designed to be lightweight and not break if prometheus-client is unavailable.
 from __future__ import annotations
 
 import logging
-import time
-from typing import Any
 
 __all__ = [
     "get_metrics_response",
@@ -35,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # Try to import prometheus_client, gracefully degrade if unavailable
 try:
-    from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
+    from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
     _PROMETHEUS_AVAILABLE = True
 except ImportError:
     _PROMETHEUS_AVAILABLE = False
