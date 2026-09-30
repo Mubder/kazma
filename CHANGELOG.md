@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## The documentation's links land where they point (2026-10-01)
+
+- **74 of the 164 section links on kazma.ai landed at the top of their page
+  instead of the section,** and 25 headings showed `{#…}` after their title.
+  The docs give some headings an id the Docusaurus way (`## Title {#id}`),
+  which the site did not understand; an Arabic heading gets an id made of
+  Arabic words, so the English section names in the Arabic pages' links
+  missed; and five links in the docs themselves pointed at sections renamed
+  or removed. One of those sat behind a sentence saying memory recall needs
+  the model to call a tool -- untrue since the V2 memory cutover: recall runs
+  on every turn. The site now honours those ids, the Arabic headings that
+  links point at carry the English id, and the five links point where they
+  should.
+- **Links in the Arabic pages stay in Arabic.** 140 of them led to the
+  English version of a page that has an Arabic one.
+- **Checks keep it so.** The site's build fails on a section a link names
+  that its page does not have, and on an Arabic page's link to an English
+  page that has an Arabic one; the sync plan flags the second too; a test
+  checks every section link in the docs. The sync plan also no longer takes
+  inline code at the start of a line for the start of a code block -- on the
+  Task Ledger page it had skipped checking every link after one.
+- The configuration guide's section headings no longer cite kazma.yaml line
+  numbers; all 17 were wrong.
+
 ## Re-registering the Windows task: a status that checks it, a rerun that cannot make it worse (2026-09-30)
 
 - **`install_service.py --status` now checks the task.** It printed the

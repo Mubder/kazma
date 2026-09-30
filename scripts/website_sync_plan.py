@@ -43,7 +43,7 @@ RECORD_SCHEMA = 1
 
 _LINK = re.compile(r"\]\(([^)\s]+)")
 _SIDEBAR_SLUG = re.compile(r"""slug:\s*['"]([^'"]+)['"]""")
-_FENCE = re.compile(r"^\s*(```|~~~)")
+_FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 
 
 class PlanError(RuntimeError):
@@ -132,17 +132,40 @@ def _body(text: str) -> str:
     return text
 
 
+def _lines(text: str):
+    """``(line, kind)`` for each line of the page body: ``open`` and ``close``
+    for a code fence, ``code`` inside one, ``prose`` otherwise.
+
+    A backtick fence's info string holds no backtick, so a line opening with
+    ```` ```plan ```` is inline code, not a fence; and a fence closes on its
+    own character, at least as long, with nothing after it. Toggling on any
+    line starting with three backticks took that inline code for a fence and
+    checked none of the links after it (task-ledger, 2026-10-01).
+    """
+    fence = None
+    for line in _body(text).splitlines():
+        m = _FENCE.match(line)
+        if fence is None:
+            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+                fence = (m.group(1)[0], len(m.group(1)))
+                yield line, "open"
+            else:
+                yield line, "prose"
+        elif m and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1] \
+                and not m.group(2).strip():
+            fence = None
+            yield line, "close"
+        else:
+            yield line, "code"
+
+
 def structure(text: str) -> dict[str, int]:
     """Headings, code blocks, table rows and asides: a translation keeps them."""
     counts = {"headings": 0, "code blocks": 0, "table rows": 0, "asides": 0}
-    in_code = False
-    for line in _body(text).splitlines():
-        if _FENCE.match(line):
-            if not in_code:
-                counts["code blocks"] += 1
-            in_code = not in_code
-            continue
-        if in_code:
+    for line, kind in _lines(text):
+        if kind == "open":
+            counts["code blocks"] += 1
+        if kind != "prose":
             continue
         stripped = line.strip()
         if re.match(r"#{1,6}\s", stripped):
@@ -161,16 +184,13 @@ def _differs(a: dict[str, int], b: dict[str, int], a_name: str, b_name: str) -> 
 
 def code_blocks(text: str) -> list[str]:
     """The text of each fenced code block, trailing spaces dropped."""
-    blocks, current, inside = [], [], False
-    for line in _body(text).splitlines():
-        if _FENCE.match(line):
-            if inside:
-                blocks.append("\n".join(current))
-                current = []
-            inside = not inside
-            continue
-        if inside:
+    blocks, current = [], []
+    for line, kind in _lines(text):
+        if kind == "code":
             current.append(line.rstrip())
+        elif kind == "close":
+            blocks.append("\n".join(current))
+            current = []
     return blocks
 
 
@@ -199,14 +219,8 @@ def counts_line(slug: str, differs: dict) -> str:
 
 def links(text: str) -> list[str]:
     """Markdown link targets outside code blocks."""
-    out, in_code = [], False
-    for line in _body(text).splitlines():
-        if _FENCE.match(line):
-            in_code = not in_code
-            continue
-        if not in_code:
-            out.extend(_LINK.findall(line))
-    return out
+    return [target for line, kind in _lines(text) if kind == "prose"
+            for target in _LINK.findall(line)]
 
 
 def headings(text: str, level: str = "## ") -> list[str]:
@@ -336,13 +350,17 @@ def make_plan(framework: Path, site: Path, assume_at: str | None = None) -> Plan
         for slug in sorted(site_slugs(site, root, exclude=ar_prefix if lang == "en" else None)):
             page = site_page(site, root, slug)
             for target in links(page.read_text(encoding="utf-8")):
-                problem = _link_problem(framework, site, docs_dir, ar_dir, target)
+                problem = _link_problem(framework, site, docs_dir, ar_dir, target,
+                                        from_arabic=lang == "ar")
                 if problem:
                     plan.links.append({"page": f"{lang}:{slug}", "link": target, "problem": problem})
     return plan
 
 
-def _link_problem(framework: Path, site: Path, docs_dir: str, ar_dir: str, target: str) -> str | None:
+def _link_problem(
+    framework: Path, site: Path, docs_dir: str, ar_dir: str, target: str,
+    *, from_arabic: bool = False,
+) -> str | None:
     url = target.split("#", 1)[0].split("?", 1)[0]
     if url in ("/docs", "/ar/docs") or url.startswith(("/docs/", "/ar/docs/")):
         arabic = url.startswith("/ar/")
@@ -350,6 +368,9 @@ def _link_problem(framework: Path, site: Path, docs_dir: str, ar_dir: str, targe
         rel = rel.strip("/") or "index"
         if site_page(site, ar_dir if arabic else docs_dir, rel) is None:
             return "no such page on the site"
+        # Translations copied the English links: 140 on 2026-10-01.
+        if from_arabic and not arabic and site_page(site, ar_dir, rel) is not None:
+            return f"an Arabic page leads to the English page: link /ar{target}"
         return None
     for kind in ("blob/main/", "tree/main/"):
         prefix = GITHUB_REPO_URL + kind

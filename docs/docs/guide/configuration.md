@@ -42,9 +42,9 @@ flowchart LR
 
 ## 2. `kazma.yaml` — complete reference
 
-The full default file (`kazma.yaml`) with every key, type, and default. Line numbers reference the shipped file.
+The full default file (`kazma.yaml`) with every key, type, and default, section by section.
 
-### `agent` (lines 1-5)
+### `agent`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -87,7 +87,7 @@ Configurable via Settings UI (**Settings → Agent → Non-Stop & Self-Healing**
 | `agent.nonstop.failover.cooldown_seconds` | int | `300` | Cooldown period in seconds before retrying a failed model in chain. |
 | `agent.nonstop.ledger.enabled` | bool | `true` | Enable durable per-call LLM execution logging (`kazma-data/llm_calls.db`). |
 
-### `models` (lines 6-9)
+### `models`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -95,7 +95,7 @@ Configurable via Settings UI (**Settings → Agent → Non-Stop & Self-Healing**
 | `models.router` | string | `kazma` | Label for Kazma's own router. **Not** an `import litellm`. Point `base_url` at a LiteLLM proxy if you run one. |
 | `models.fallback` | string | `gpt-4o-mini` | Model used on retry when the primary HTTP call fails. |
 
-### `llm` (lines 10-18)
+### `llm`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -112,7 +112,7 @@ Configurable via Settings UI (**Settings → Agent → Non-Stop & Self-Healing**
 | `llm.gateway.include_local` | bool | `false` | Also send Ollama/LM Studio through the proxy (`KAZMA_LITELLM_LOCAL=1`). |
 | `llm.gateway.fallback_direct` | bool | `false` | If the proxy is down, retry the original URL once (`KAZMA_LITELLM_FALLBACK_DIRECT=1`). |
 
-### `mcp` (lines 19-32)
+### `mcp`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -141,11 +141,11 @@ mcp:
     max_file_size: 1048576
 ```
 
-### `system_prompt` (lines 33-45)
+### `system_prompt`
 
 Multi-line string. The default is Arabic-aware: "You are Kazma (كاظمه), an autonomous AI agent framework…" and instructs the model to respond in the user's language/dialect.
 
-### `storage` (lines 46-49)
+### `storage`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -153,7 +153,7 @@ Multi-line string. The default is Arabic-aware: "You are Kazma (كاظمه), an 
 | `storage.path` | string | `kazma-data/checkpoints.db` | LangGraph checkpointer DB. |
 | `storage.vector_dim` | int | `1024` | Declared vector dimension (informational — should match `memory.embedding.dim`; default BGE-M3 is **1024**). |
 
-### `memory` (lines 50-54)
+### `memory`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -181,14 +181,14 @@ your memory DB). The ConfigStore override (`embedding.*`) takes precedence
 over `kazma.yaml`; env vars (`KAZMA_EMBED_*`) win over both. After a model
 switch, run the rebuild so every row lives in the same vector space.
 
-### `skills` (lines 55-57)
+### `skills`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `skills.path` | string | `kazma-skills/manifests/` | Skill manifest directory. |
 | `skills.auto_discover` | bool | `true` | Auto-load manifests on startup. |
 
-### `connectors` (lines 58-68)
+### `connectors`
 
 | Key | Type | Default | Token env var |
 |---|---|---|---|
@@ -196,7 +196,7 @@ switch, run the rebuild so every row lives in the same vector space.
 | `connectors.discord.enabled` | bool | `false` | `DISCORD_BOT_TOKEN` |
 | `connectors.slack.enabled` | bool | `false` | `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN` |
 
-### `gateway` (lines 70-79)
+### `gateway`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -210,7 +210,7 @@ switch, run the rebuild so every row lives in the same vector space.
 | `gateway.voice.stt_model` | string | `default` | Whisper / transcribe model id for the chosen STT provider. |
 | `gateway.voice.tts_provider` | string | `edgetts` | Text-to-speech provider: `edgetts` (free, default), `openai`, `nvidia`, `kokoro` (local), `coqui` (local). |
 
-### `safety.hitl` (lines 81-96)
+### `safety.hitl`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -241,7 +241,7 @@ safety:
 
 > The **swarm bus** uses a separate, broader list (`_EXTENDED_DANGER` adds `python_exec`, `code_exec`, `spawn_agent`, `spawn_agents`, `schedule_task`, `cancel_scheduled`, `run_tests`). The **MCP** path classifies dynamically by name pattern. See [Security & Safety → danger-tool lists](security-and-safety#danger-tool-lists-three-of-them).
 
-### `notifications.lifecycle` (lines 143-157)
+### `notifications.lifecycle`
 
 Server status messages — one card each time Kazma is back up (how long it was down, whether each chat app connected, the build and the model) and one when startup fails. Sent where alerts go. Settings → Providers & Connectors → Platform Connectors → Adapters & Routes → **Server status messages**. See [Deployment → Lifecycle notifications](deployment#10-lifecycle-status-notifications).
 
@@ -265,7 +265,7 @@ notifications:
 
 Notifications route through the SwarmMessageBus (no parallel path). Set `connectors.<platform>.swarm_chat_id` to the chat ID where messages should land. Without it, the bus is `NullBusAdapter` and messages are dropped silently.
 
-### `ui` (lines 98-102)
+### `ui`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -274,7 +274,7 @@ Notifications route through the SwarmMessageBus (no parallel path). Set `connect
 | `ui.rtl` | bool | `true` | UI RTL. |
 | `ui.title` | string | `Kazma Dashboard` | Page title. |
 
-### `logging` (lines 103-109)
+### `logging`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -284,7 +284,7 @@ Notifications route through the SwarmMessageBus (no parallel path). Set `connect
 | `logging.langfuse.public_key` | string | `''` | |
 | `logging.langfuse.secret_key` | string | `''` | |
 
-### `time_travel` (lines 111-114)
+### `time_travel`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -294,7 +294,7 @@ Notifications route through the SwarmMessageBus (no parallel path). Set `connect
 | `time_travel.auto_maintain` | bool | `true` | Enable the daily snapshot prune + VACUUM loop. ConfigStore override `time_travel.auto_maintain` is read live, same as `retention_days`. |
 | `time_travel.db_path` | string | `kazma-data/snapshots.db` | Snapshot DB. |
 
-### `swarm` (lines 116-127)
+### `swarm`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -309,7 +309,7 @@ Notifications route through the SwarmMessageBus (no parallel path). Set `connect
 | `swarm.workers` | list | `[]` | Populated at runtime via Web UI / `POST /api/swarm/workers`. |
 | `swarm.output_target` | obj | none | `\{bot_token, chat_id, platform, enabled\}` — when set, the token must match the active Telegram bot token. |
 
-### `pipelines` (lines 129-162)
+### `pipelines`
 
 Two predefined pipelines (lists of stages, each with `worker`, `depends_on`, `system_prompt`):
 

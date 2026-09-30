@@ -314,5 +314,5 @@ Restart the server. The Telegram adapter polls via long-polling (or a webhook at
 
 ## Documentation Audit Notes
 
-- The previous README's "4-layer memory pipeline" is **partially wired** — see [Memory & RAG → Honest status](memory-and-rag#honest-status-notes). Quickstart deliberately avoids implying automatic memory retrieval, since RAG in the chat path requires the LLM to voluntarily call `memory_search`.
+- Memory recall is automatic: on every turn Kazma looks up what the question is about in earlier conversations and stored facts, and gives the model nothing when nothing matches; every finished turn is remembered ([Memory & RAG → `recall()`](memory-and-rag#recall)). The old README's "4-layer memory pipeline" was removed in the V2 memory cutover.
 - `tiktoken` is **not** a declared dependency; token counting falls back to a chars/4 heuristic unless you `pip install tiktoken` yourself.

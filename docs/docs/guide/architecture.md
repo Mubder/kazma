@@ -168,7 +168,7 @@ if effective_model:
             self._config_store.set("registry.active_provider", owner_name, ...)
 ```
 
-This is why "never change model without provider" is a hard rule — see [Provider/Model Resolution](#) warnings in [Configuration](configuration).
+This is why "never change model without provider" is a hard rule — see [Troubleshooting → Provider/model mismatch](troubleshooting-and-workarounds#12-providermodel-mismatch-wrong-endpoint) and the provider settings in [Configuration](configuration).
 
 ### 5.2 The NVIDIA NIM tool-fallback workaround
 

@@ -351,7 +351,7 @@ curl -X PUT http://127.0.0.1:9090/api/settings/single \
 
 Without `swarm_chat_id`, the bus stays `NullBusAdapter` and notifications are dropped silently.
 
-See: [Configuration → `notifications`](configuration#notifications) for the full key reference.
+See: [Configuration → `notifications.lifecycle`](configuration#notificationslifecycle) for the full key reference.
 
 ---
 

@@ -22,7 +22,7 @@ These are **independent** layers. The tokenizer does not depend on the i18n syst
 
 ## 2. The Arabic tokenizer
 
-`kazma-core/kazma_core/msa_tokenizer.py` (`MSATokenizer`). The retired `kazma-memory` package is gone. Detailed in [Memory & RAG → Arabic tokenizer](memory-and-rag#5-the-arabic-tokenizer). Normalization pipeline:
+`kazma-core/kazma_core/msa_tokenizer.py` (`MSATokenizer`). The dialect router (`kazma_core/router.py`) uses it through `DualEngineTokenizer` (`tokenizer.py`); memory search folds Arabic on its own ([Memory & RAG → `recall()`](memory-and-rag#recall)). Normalization pipeline:
 
 1. Diacritics removal — regex `[\u064B-\u065F\u0670]`.
 2. Alef normalization — `أ`, `إ`, `آ` → `ا`.
