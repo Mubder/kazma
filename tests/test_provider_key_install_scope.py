@@ -166,7 +166,12 @@ def test_a_resave_rewrites_the_old_tenant_copy(vault, store, production, pages):
 
 
 def test_other_config_secrets_keep_the_saving_tenant(vault, store, production):
-    """Connector credentials are not the install's; their isolation is unchanged."""
+    """X connector credentials are not the install's; their isolation is unchanged.
+
+    (The chat platforms' bot tokens ARE the install's since 2026-09-30 -- one
+    gateway adapter per install, built at boot: see
+    tests/test_chat_connector_secrets_install_scope.py.)
+    """
     other = "cfg:connectors.x.credentials.password"
     with tenant_scope("default"):
         store.set("connectors.x.credentials", {"password": "pw"})
