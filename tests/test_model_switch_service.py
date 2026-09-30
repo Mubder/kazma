@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from tests._module_source import module_source
 
-import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -191,25 +190,28 @@ class TestSourceContracts:
         assert "ensure_active_model" not in src
         assert "turn_complete" in src
 
-    def test_ws_ensure_active_model(self):
+    def test_the_socket_pins_no_model(self):
+        """The socket runs no turn (AUD-026), so it has no model to pin; the
+        SSE route's pin above is the one."""
         src = _WS.read_text(encoding="utf-8")
-        assert "pin_turn_model" in src
+        assert "pin_turn_model" not in src
         assert "ensure_active_model" not in src
-        assert "turn_complete" in src
-        assert 'payload.get("model")' in src or "payload.get('model')" in src
+        assert '"send_prompt": "POST /api/chat/stream"' in src
 
-    def test_ws_approve_emits_turn_complete_not_append_delta(self):
+    def test_approve_resumes_through_the_journal_drive(self):
         """Post-HITL resume must paint via turn_complete (replace), not llm_delta append.
 
         Industry regression: YOLO/approve finished server-side but the client only
-        saw the answer after F5, and full-text llm_delta doubled the bubble.
+        saw the answer after F5, and full-text llm_delta doubled the bubble. The
+        socket's approve path carried its own delivery for this until
+        2026-09-30 (AUD-026); the approve route resumes through the same journal
+        drive every web turn uses, whose replace semantics are held by
+        tests/test_s32_stream_duplication.py.
         """
-        src = _WS.read_text(encoding="utf-8")
-        assert 'source": "hitl_resume"' in src or "source': 'hitl_resume'" in src or 'source": "hitl_resume"' in src
-        assert "emit_delta=False" in src
-        assert "preparePostApprovalTurn" not in src  # client-side only
-        # Approve path must still register turn_complete TelemetryEvent
-        assert "approve turn_complete" in src
+        misc = (_UI / "routes_direct" / "misc.py").read_text(encoding="utf-8")
+        assert "_drive_graph_to_journal" in misc
+        ws = _WS.read_text(encoding="utf-8")
+        assert "hitl_resume" not in ws and "emit_delta" not in ws
 
     def test_app_uses_live_getters(self):
         src = _APP.read_text(encoding="utf-8")

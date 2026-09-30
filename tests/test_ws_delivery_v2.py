@@ -25,7 +25,6 @@ from kazma_ui.delivery import (
     reset_turn_broker,
 )
 from kazma_ui.routes.ws_chat import (
-    _make_ws_sender,
     _ws_resume_handshake,
     create_ws_chat_router,
 )
@@ -51,20 +50,21 @@ def _fresh_broker_and_sessions():
     reset_session_manager()
 
 
-# ── Sender routing ────────────────────────────────────────────────────────
+# ── Broker fan-out (how a turn's frames reach every watching socket) ────
+# The socket's own graph client used to wrap this in a per-turn sender
+# (``_make_ws_sender``); turns run on SSE now (AUD-026) and emit through the
+# broker, which is what these hold.
 
 
-class TestBrokerBackedSender:
+class TestBrokerFanOut:
     @pytest.mark.asyncio
-    async def test_send_fans_out_to_all_bound_tabs(self) -> None:
+    async def test_emit_fans_out_to_all_bound_tabs(self) -> None:
         broker = get_turn_broker()
         tab_a, tab_b = _FakeSocket(), _FakeSocket()
         ca = broker.register_socket("tX", tab_a)
         cb = broker.register_socket("tX", tab_b)
         try:
-            send, is_lost = _make_ws_sender(tab_a, "tX")
-            assert is_lost() is False
-            assert await send({"type": "token", "data": {"content": "hi"}}) is True
+            await broker.emit("tX", {"type": "token", "data": {"content": "hi"}})
             # Both tabs received the SAME seq-stamped frame.
             assert tab_a.frames[0]["seq"] == 1
             assert tab_b.frames[0]["seq"] == 1
@@ -74,27 +74,26 @@ class TestBrokerBackedSender:
             broker.unregister_socket("tX", cb)
 
     @pytest.mark.asyncio
-    async def test_send_with_no_audience_journals_for_later_resume(self) -> None:
-        # THE plan scenario at delivery layer: turn keeps streaming after the
-        # tab died; frames are journaled even though nobody is listening.
-        send, is_lost = _make_ws_sender(object(), "tY")
-        assert is_lost() is True
-        assert await send({"type": "llm_delta", "data": {"content": "chunk"}}) is False
-        frames, gap, head = get_turn_broker().resume("tY", 0)
+    async def test_emit_with_no_audience_journals_for_later_resume(self) -> None:
+        # THE plan scenario at delivery layer: the turn keeps streaming after
+        # the tab died; frames are journaled even though nobody is listening.
+        broker = get_turn_broker()
+        assert broker.socket_count("tY") == 0
+        await broker.emit("tY", {"type": "llm_delta", "data": {"content": "chunk"}})
+        frames, gap, head = broker.resume("tY", 0)
         assert gap is False
         assert head == 1
         assert frames[0]["data"]["content"] == "chunk"
 
     @pytest.mark.asyncio
-    async def test_is_lost_recovers_when_new_tab_registers(self) -> None:
+    async def test_a_tab_that_registers_later_receives_live_frames(self) -> None:
         broker = get_turn_broker()
-        send, is_lost = _make_ws_sender(object(), "tY2")
-        assert is_lost() is True
+        assert broker.socket_count("tY2") == 0
         sock = _FakeSocket()
         conn_id = broker.register_socket("tY2", sock)
         try:
-            assert is_lost() is False
-            assert await send({"type": "turn_complete", "data": {}}) is True
+            assert broker.socket_count("tY2") == 1
+            await broker.emit("tY2", {"type": "turn_complete", "data": {}})
             assert sock.frames[0]["type"] == "turn_complete"
         finally:
             broker.unregister_socket("tY2", conn_id)
@@ -245,14 +244,12 @@ def test_endpoint_multi_tab_both_receive_live_frames():
             assert got2["type"] == "status_update" and got2["seq"] == 1
 
 
-def test_v2_cursor_connection_survives_send_prompt_ack_path(monkeypatch):
-    """Default: WS is telemetry. send_prompt is rejected with prompt_ack
+def test_v2_cursor_connection_survives_send_prompt_ack_path():
+    """WS is telemetry. send_prompt is rejected with prompt_ack
     (accepted=False, reason=sse_only) and the cursor connection stays alive
     (ping still works). Pre-2026-08-24 a function-local import made this
     path UnboundLocalError and killed the socket."""
     from unittest.mock import MagicMock
-
-    monkeypatch.delenv("KAZMA_WS_GRAPH", raising=False)
 
     from fastapi import FastAPI as _FastAPI
 
@@ -282,8 +279,9 @@ def test_v2_cursor_connection_survives_send_prompt_ack_path(monkeypatch):
         assert ws.receive_json() == {"type": "pong"}
 
 
-def test_ws_graph_escape_hatch_accepts_send_prompt(monkeypatch):
-    """KAZMA_WS_GRAPH=1 restores the second graph client (debug only)."""
+def test_the_old_escape_hatch_no_longer_opens_a_graph_client(monkeypatch):
+    """KAZMA_WS_GRAPH=1 restored a second graph client until 2026-09-30
+    (AUD-026). Set now, it changes nothing: the prompt is still refused."""
     from unittest.mock import MagicMock
 
     from fastapi import FastAPI as _FastAPI
@@ -302,13 +300,12 @@ def test_ws_graph_escape_hatch_accepts_send_prompt(monkeypatch):
         })
         ack = ws.receive_json()
         assert ack["type"] == "prompt_ack", ack
-        assert ack["data"]["accepted"] is True
+        assert ack["data"]["accepted"] is False
+        assert ack["data"]["reason"] == "sse_only"
 
 
-def test_ws_approve_tool_rejected_when_graph_off(monkeypatch):
+def test_ws_approve_tool_rejected():
     from unittest.mock import MagicMock
-
-    monkeypatch.delenv("KAZMA_WS_GRAPH", raising=False)
 
     from fastapi import FastAPI as _FastAPI
 

@@ -92,7 +92,7 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 |--------|------------|
 | Browser chat | **SSE graph** (`sse_chat/` package + `static/js/chat.js` projector) + **WS telemetry** (`routes/ws_chat.py`) |
 | Preferred transport | **SSE** for turns and HITL. WS is cursor resume / live frames. |
-| WS graph escape hatch | `KAZMA_WS_GRAPH=1` restores `send_prompt` / `approve_tool` (debug) |
+| Turn control on WS | None: `send_prompt` / `approve_tool` / `stop` / `steer` / `abort` are refused with the HTTP route (`ws_chat._HTTP_ROUTE_FOR`). The `KAZMA_WS_GRAPH` escape hatch was removed 2026-09-30 (AUD-026). |
 | Session store | **One** `SessionManager` / `chat_sessions.db` for both |
 | LangGraph thread | `ChatSession.thread_id` (may **≠** `session_id` for plain web UUIDs) |
 | Platform-linked web sessions | `session_id == thread_id` when `gw-*` |
@@ -102,15 +102,15 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 | Concern | SSE (graph SoT) | WebSocket (telemetry) |
 |---------|-----|-----------|
 | Endpoint | `POST /api/chat/stream` | `/ws/chat/{session_id}` |
-| Graph source | `_graph_holder` (post-recompile) | same holder; **idle unless** `KAZMA_WS_GRAPH=1` |
-| `recursion_limit` | long-task budgets | same helper when graph is enabled |
+| Graph source | `_graph_holder` (post-recompile) | same holder; read only (the HITL card on connect) |
+| `recursion_limit` | long-task budgets | same helper (the connect-time HITL scan) |
 | Turn end | SSE `event: done` | `idle` + `stream_end` (journaled) |
 | HITL emit | SSE `hitl` frame carries `view` | telemetry `hitl_approval` (scan) |
-| HITL resume | `POST /api/approve/{thread_id}` (200/409 carry `view` + `gate_id`) | WS `approve_tool` **off** unless `KAZMA_WS_GRAPH=1` |
-| YOLO | `/yolo` slash in stream | same, only if WS graph is on |
-| Env context | per-turn `build_env_context()` | same when graph is on |
+| HITL resume | `POST /api/approve/{thread_id}` (200/409 carry `view` + `gate_id`) | none — `approve_tool` is refused |
+| YOLO | `/yolo` slash in stream | none (no turns) |
+| Env context | per-turn `build_env_context()` | none (no turns) |
 | Soul inject | fenced self-improvement block | (see gateway for TG path) |
-| Plan fence / final text | `plan_fence.pick_user_facing_text` on `done.content` + session persist | `_persist_final_assistant_message` same pick (checkpoint vs stream) |
+| Plan fence / final text | `plan_fence.pick_user_facing_text` on `done.content` + session persist | none (the socket persists nothing) |
 
 ### Invariants
 
@@ -165,7 +165,7 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 
 | Mechanism | When | Gate location | Resume |
 |-----------|------|---------------|--------|
-| **A. Graph interrupt** | Single-agent chat danger tools | `graph_tool_worker.tool_worker_node` | HTTP approve / gateway slash (WS off unless `KAZMA_WS_GRAPH=1`) |
+| **A. Graph interrupt** | Single-agent chat danger tools | `graph_tool_worker.tool_worker_node` | HTTP approve / gateway slash (never the WebSocket) |
 | **B. Swarm bus** | Swarm tools + **IDE** `LocalToolRegistry.execute` | `tool_registry.execute` → `SafetyMiddleware` | Platform buttons / bus callbacks |
 | **C. Pipeline checkpoint** | Swarm PIPELINE tasks | `checkpoint_manager` (+ `_gate_register_pipeline`) | `approve_checkpoint` + `settle_gate` |
 | **Registry** | All of the above | `hitl_gates.db` CAS | Decision truth; checkpoint is execution truth |

@@ -1491,7 +1491,6 @@ class KazmaAppBuilder:
             ws_router = create_ws_chat_router(
                 graph_holder=self._graph_holder,
                 graph_getter=lambda: self._graph_holder.get("graph"),
-                agent_getter=lambda: self.agent,
             )
             self.app.include_router(ws_router)
             logger.info("WebSocket chat gateway router mounted at /ws/chat/{session_id}")

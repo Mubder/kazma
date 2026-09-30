@@ -177,7 +177,9 @@ class TestSilentFailuresAreWired:
         assert "mcp.servers_unavailable" in src
 
     def test_turn_timeout_alerts(self):
-        src = self._src("kazma-ui/kazma_ui/routes/ws_chat.py")
+        # Beside the budget it reports (it lived in the WebSocket graph client,
+        # which ran no turns, until 2026-09-30; AUD-026).
+        src = self._src("kazma-core/kazma_core/agent/turn.py")
         assert "turn.timed_out" in src
 
     def test_every_alert_call_site_is_exception_guarded(self):
@@ -189,7 +191,7 @@ class TestSilentFailuresAreWired:
             "kazma-ui/kazma_ui/reply_sink.py",
             "kazma-ui/kazma_ui/sse_chat.py",
             "kazma-core/kazma_core/mcp/manager.py",
-            "kazma-ui/kazma_ui/routes/ws_chat.py",
+            "kazma-core/kazma_core/agent/turn.py",
         ):
             src = self._src(rel)
             for m in re.finditer(r"from kazma_core\.observability\.ops_alerts import", src):

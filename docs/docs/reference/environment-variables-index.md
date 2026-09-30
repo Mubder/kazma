@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**264** variables are read by the product code; **264** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**263** variables are read by the product code; **263** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -257,7 +257,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_TURN_DURABLE_INTERVAL_S` | `"2.0"` | `kazma_ui.sse_chat._streaming` | yes |
 | `KAZMA_TURN_LIVENESS_GRACE_S` | (none) | `kazma_ui.turn_liveness` | yes |
 | `KAZMA_TURN_LIVENESS_HEAL` | (none) | `kazma_ui.turn_liveness` | yes |
-| `KAZMA_TURN_TIMEOUT_SECONDS` | (none) | `kazma_core.agent.turn`, `kazma_core.agent_runner`, `kazma_ui.routes.ws_chat` | yes |
+| `KAZMA_TURN_TIMEOUT_SECONDS` | (none) | `kazma_core.agent.turn`, `kazma_core.agent_runner` | yes |
 | `KAZMA_TZ` | `""` | `kazma_core.cron.scheduler` | yes |
 | `KAZMA_UNRESTRICTED_TTL_SECONDS` | (none) | `kazma_core.agent.long_task` | yes |
 | `KAZMA_UPDATE_REMOTE_ALLOWLIST` | `""` | `kazma_cli.update` | yes |
@@ -274,7 +274,6 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_WORKSPACE` | `""` | `kazma_core.tools.research_pipeline`, `kazma_core.workspace.binding`, `kazma_ui.app` | yes |
 | `KAZMA_WORKSPACE_ROOT` | `""` | `kazma_gateway.routers.workspace`, `kazma_gateway.routers.workspaces` | yes |
 | `KAZMA_WS_EXTRA_ORIGINS` | (none) | `kazma_ui.auth` | yes |
-| `KAZMA_WS_GRAPH` | (none) | `kazma_ui.routes.ws_graph` | yes |
 | `KAZMA_WS_ORIGIN_CHECK` | `""` | `kazma_ui.auth` | yes |
 | `KAZMA_X_POST` | (none) | `kazma_core.x_api.config`, `kazma_core.x_api.schedule`, `kazma_core.x_api.stance` | yes |
 | `KAZMA_X_REPLY` | (none) | `kazma_core.x_api.stance` | yes |

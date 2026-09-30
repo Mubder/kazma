@@ -186,20 +186,17 @@ def test_the_route_consults_the_guard_before_resuming() -> None:
         "tell a stale decision from a real failure"
     )
 
-def test_the_websocket_resume_consults_the_same_guard() -> None:
-    """HTTP is not the only mouth, and the rule must reach both.
+def test_the_websocket_has_no_resume_path() -> None:
+    """HTTP is the only mouth that decides a gate.
 
     ``POST /api/approve`` closed this on 2026-09-20. The WebSocket
     ``approve_tool`` handler did not, because the check lived inside the HTTP
     ROUTE MODULE rather than in the bridge both callers share — so the
     identical defect survived one transport over, dormant only because
-    ``KAZMA_WS_GRAPH`` is off by default. "Dormant behind an escape hatch" is
-    not "closed": the hatch exists to be used, and the diagnosis map tells
-    operators how to turn it on.
-
-    Same ordering requirement as the HTTP twin above: the guard must run
-    BEFORE ``read_pending_interrupt``, which picks up whichever question the
-    graph happens to be parked on right now.
+    ``KAZMA_WS_GRAPH`` was off by default. "Dormant behind an escape hatch" is
+    not "closed": the hatch existed to be used. Since 2026-09-30 (AUD-026)
+    there is no hatch and no second mouth: the socket refuses ``approve_tool``
+    and builds no resume, so the one guard is the route's.
     """
     from pathlib import Path
 
@@ -208,25 +205,13 @@ def test_the_websocket_resume_consults_the_same_guard() -> None:
         / "kazma-ui" / "kazma_ui" / "routes" / "ws_chat.py"
     ).read_text(encoding="utf-8")
 
-    guard_at = src.index("_already = await gate_not_pending(")
-    read_at = src.index("_intr_payload = await read_pending_interrupt(")
-    assert guard_at < read_at, (
-        "the WS gate-identity check now runs AFTER the pending interrupt is "
-        "read; a retry or a sequential second pause can reach the resume again"
-    )
-    between = src[guard_at:read_at]
-    assert '"code": "GATE_NOT_PENDING"' in between, (
-        "the WS refusal carries no machine-readable code, so the client "
-        "cannot tell a stale decision from a real failure"
-    )
-    assert '"hitl_state": _client_state' in between, (
-        "the WS refusal must report the server's view so the client can "
-        "reconcile, the same way the HTTP 409 does"
-    )
+    assert "read_pending_interrupt(" not in src
+    assert "build_resume_command(" not in src
+    assert '"approve_tool": "POST /api/approve/{thread_id}"' in src
 
 
-def test_both_mouths_pass_the_same_resume_arguments() -> None:
-    """WS and HTTP must build the resume Command with the SAME inputs.
+def test_the_approve_route_passes_every_resume_argument() -> None:
+    """The approve route must build the resume Command with EVERY input.
 
     `build_resume_command` is the single chokepoint, but a chokepoint only
     helps if every caller hands it everything. The WS handler was omitting
@@ -237,7 +222,8 @@ def test_both_mouths_pass_the_same_resume_arguments() -> None:
 
     Silently widening an approval is the worst direction for a gap like this,
     and it is the same shape as the gate-identity check that was present on
-    HTTP and absent on WS.
+    HTTP and absent on WS. The WS mouth is gone (2026-09-30, AUD-026; the
+    test above): only the route decides.
     """
     from pathlib import Path
 
@@ -245,14 +231,9 @@ def test_both_mouths_pass_the_same_resume_arguments() -> None:
     http_src = (root / "kazma-ui" / "kazma_ui" / "routes_direct" / "misc.py").read_text(
         encoding="utf-8"
     )
-    ws_src = (root / "kazma-ui" / "kazma_ui" / "routes" / "ws_chat.py").read_text(
-        encoding="utf-8"
-    )
-
     for arg in ("approved_ids", "reason", "scope", "choices"):
-        assert f"{arg}=" in http_src, f"HTTP approve no longer passes {arg}"
-        assert f"{arg}=" in ws_src, (
-            f"WS approve_tool does not pass {arg} to build_resume_command. "
+        assert f"{arg}=" in http_src, (
+            f"HTTP approve no longer passes {arg} to build_resume_command. "
             "For approved_ids this fails OPEN — the whole danger batch runs."
         )
 

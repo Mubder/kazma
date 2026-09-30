@@ -96,7 +96,7 @@ Behind a reverse proxy, **peer address is not a credential**. Set `KAZMA_TRUSTED
 
 ### 2.2 Resume
 
-`POST /api/approve/{thread_id}` (`kazma_ui/routes_direct/misc.py` `approve_tool`) — not `app.py`. Claims the registry row, then `graph.ainvoke(Command(resume=…), config)`. Ownership mismatch → **403**. WS `approve_tool` is off unless `KAZMA_WS_GRAPH=1`.
+`POST /api/approve/{thread_id}` (`kazma_ui/routes_direct/misc.py` `approve_tool`) — not `app.py`. Claims the registry row, then `graph.ainvoke(Command(resume=…), config)`. Ownership mismatch → **403**. The WebSocket takes no approvals (it refuses `approve_tool`).
 
 Paused turns persist in the **checkpointer**. Registry `boot_sweep()` orphans stale claimed/resuming rows and **never** touches pending (the card must survive restart).
 

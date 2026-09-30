@@ -6,7 +6,9 @@ Extracted from the former 3,099-line ``kazma_ui/sse_chat.py``
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter
@@ -209,3 +211,72 @@ def _is_cloud_url(base_url: str) -> bool:
     if port in (11434, 1234, 4000):
         return False
     return True
+
+
+def _parse_sse_frame(frame: str) -> tuple[str, dict[str, Any]] | None:
+    """Split an SSE frame into (event_type, data) or None.
+
+    Line-scoped field parsing per the SSE spec: ``id:`` / ``retry:`` lines
+    may legally precede or follow ``event:`` (Turn Delivery V2 prepends
+    ``id: <seq>``), so the first line is not assumed to be the event field.
+    """
+    try:
+        ev_type = ""
+        data: dict[str, Any] = {}
+        for line in frame.split("\n"):
+            if line.startswith("event: "):
+                ev_type = line[len("event: "):].strip()
+            elif line.startswith("data: "):
+                data = json.loads(line[len("data: "):])
+        if not ev_type:
+            return None
+        return ev_type, data
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def _record_frame_activity(
+    activity_log: list[dict[str, Any]], ev_type: str, data: dict[str, Any]
+) -> None:
+    """Append a workbench row for a tool/status frame of a turn's stream.
+
+    The one capturer of the web chat's activity rows (the WebSocket had a
+    twin, ``ws_chat._record_ws_activity``, until 2026-09-30; AUD-026).
+    """
+    try:
+        # Both frames carry tool_call_id; keyed by it, a call's running and
+        # done rows are ONE part. This dropped it, so the stored row keyed on
+        # name + state + text and "Running..." stuck beside "Done"
+        # (2026-09-24).
+        _cid = str(data.get("tool_call_id") or "")
+        if ev_type == "tool_call":
+            activity_log.append({
+                **({"id": "tool#" + _cid} if _cid else {}),
+                "kind": "tool",
+                "title": str(data.get("tool_name") or "tool"),
+                "detail": str(data.get("inputs") or ""),
+                "state": "running",
+                "ts": datetime.now(UTC).isoformat(),
+            })
+        elif ev_type == "tool_result":
+            activity_log.append({
+                **({"id": "tool#" + _cid} if _cid else {}),
+                "kind": "tool",
+                "title": str(data.get("tool_name") or "tool"),
+                "detail": str(data.get("result") or ""),
+                "state": "done",
+                "ts": datetime.now(UTC).isoformat(),
+            })
+        elif ev_type == "status_update":
+            status = str(data.get("status") or "").strip()
+            # Only persist meaningful progress states; skip the synthesizing
+            # heartbeat (cosmetic, noisy on reload).
+            if status and status != "synthesizing":
+                activity_log.append({
+                    "kind": "status",
+                    "title": status,
+                    "state": "running",
+                    "ts": datetime.now(UTC).isoformat(),
+                })
+    except Exception:
+        logger.debug("[SSE] activity capture failed", exc_info=True)

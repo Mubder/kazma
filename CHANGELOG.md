@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## One way to run a chat turn (2026-09-30)
+
+- **The chat's WebSocket no longer carries a second copy of the chat.** Since
+  August, turns have been sent over one connection (SSE) and stop, steer and
+  abort over plain requests, while the socket kept its own copy of all five,
+  switched off and never used by the page. The copies had drifted (its approve
+  skipped the check that an approval names the right question), and every fix
+  had to be made twice. The socket now only shows what happens in a turn,
+  which is all the page ever used it for; the handler went from 2,910 lines to
+  486.
+- **Turn-complete push notifications work.** Push reaches a tab the browser
+  closed to save memory, but the only code that signed a browser up for it
+  sat in that unused copy, so no browser ever signed up. It signs up now when
+  you allow notifications, including on the first "Allow".
+- **A turn that hits its time limit still pages you.** That alert was also in
+  the unused copy; it now lives beside the time limit itself.
+- A test now fails if any function in Kazma grows past a set size, or if the
+  WebSocket starts running turns again.
+
 ## Errors that were swallowed now say so (2026-09-30)
 
 - **Switching the model now really forgets the old failover connections.**

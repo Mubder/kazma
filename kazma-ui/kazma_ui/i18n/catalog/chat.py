@@ -580,6 +580,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "كاظمه تفكر… اكتب لترتيب رسالتك التالية",
         "en": "Kazma is thinking… type to queue your next message",
     },
+    "chat.ws_login_expired": {
+        "ar": "توقفت التحديثات المباشرة: انتهت صلاحية تسجيل الدخول. حدّث الصفحة.",
+        "en": "Live updates stopped: your sign-in expired. Refresh the page.",
+    },
     "chat.approval_expired_short": {
         "ar": "انتهت المهلة",
         "en": "expired",

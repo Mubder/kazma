@@ -66,6 +66,13 @@ riskier than the debt — but which nothing stopped from growing:
   ``await asyncio.to_thread(...)`` around the work (``memory_store`` shows
   it); a plain ``def`` only when nothing in it needs the loop
   (``spawn_background``, ``create_task``, loop-bound state).
+* ``functions_over_complexity_50`` (2026-09-30) -- product functions with
+  more than 50 decision points of their own (``if``/loop/``except``/
+  conditional expression/``case``/comprehension, each extra ``and``/``or``
+  operand; a nested function counts on its own). The full audit found 33 over
+  50 (AUD-026): the two chat transports' routers held the same protocol twice
+  at 277 and 272. Removing the WebSocket's copy took its router to 45; the
+  count only goes down, so a split is locked in and a new god function fails.
 """
 
 from __future__ import annotations
@@ -80,21 +87,22 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 #: Lower these whenever the counts drop. Never raise them casually.
 BASELINE = {
     # except Exception / except BaseException / bare except, any body
-    "blind_except": 3693,
+    "blind_except": 3628,
     # ...whose body is only `pass` (or a docstring): the error vanishes
-    "silent_except": 476,
+    "silent_except": 463,
 }
 
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
 STRUCTURAL_BASELINE = {
     "async_route_never_awaits": 137,
-    "module_local_public_symbols": 579,
+    "module_local_public_symbols": 578,
     "patched_value_imports": 79,
     "sleep_then_assert": 52,
     "bare_module_attr_assignments": 0,
     "shared_temp_names": 0,
     "async_inline_db_calls": 17,
     "async_tools_never_await": 8,
+    "functions_over_complexity_50": 37,
 }
 
 
@@ -512,6 +520,42 @@ def async_tools_never_await(product: dict[str, str]) -> list[str]:
     return sorted(found)
 
 
+#: Decision points the complexity count adds one for each.
+_BRANCH_NODES = (
+    ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler, ast.IfExp,
+    ast.match_case,
+)
+
+
+def _complexity(fn: ast.AST) -> int:
+    """Cyclomatic complexity of *fn*'s own body (nested defs count alone)."""
+    n = 1
+    for node in _own_nodes(fn):
+        if isinstance(node, _BRANCH_NODES):
+            n += 1
+        elif isinstance(node, ast.BoolOp):
+            n += len(node.values) - 1
+        elif isinstance(node, ast.comprehension):
+            n += 1 + len(node.ifs)
+    return n
+
+
+def complex_functions(product: dict[str, str], limit: int = 50) -> list[str]:
+    """Product functions (any depth) whose own complexity exceeds *limit*."""
+    found: list[str] = []
+    for rel, text in product.items():
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                score = _complexity(node)
+                if score > limit:
+                    found.append(f"{rel}:{node.lineno} {node.name} ({score})")
+    return sorted(found)
+
+
 def _tracked(patterns: list[str]) -> dict[str, str]:
     files = subprocess.run(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard", *patterns],
@@ -548,6 +592,7 @@ def structural_debt() -> dict[str, list[str]]:
         "shared_temp_names": shared_temp_names(tests),
         "async_inline_db_calls": async_inline_db_calls(product),
         "async_tools_never_await": async_tools_never_await(product),
+        "functions_over_complexity_50": complex_functions(product),
     }
 
 
@@ -659,3 +704,19 @@ def test_structural_scanners_count_what_they_say():
     assert shared_temp_names(shared) == [
         "tests/test_tmp.py:4", "tests/test_tmp.py:7", "tests/test_tmp.py:9", "tests/test_tmp.py:11",
     ]
+
+
+def test_the_complexity_count_counts_what_it_says():
+    """Negative control: 51 branches of its own count, a nested function
+    counts alone, and 10 branches do not."""
+    big = "def big(x):\n" + "".join(f"    if x == {i}:\n        return {i}\n" for i in range(51))
+    small = "def small(x):\n" + "".join(f"    if x == {i}:\n        return {i}\n" for i in range(10))
+    nested = (
+        "def outer(x):\n"
+        "    def inner(y):\n"
+        + "".join(f"        if y == {i}:\n            return {i}\n" for i in range(51))
+        + "    return inner\n"
+    )
+    found = complex_functions({"a.py": big, "b.py": small, "c.py": nested})
+    assert [f.split(" ")[1] for f in found] == ["big", "inner"], found
+    assert all("(52)" in f for f in found), found

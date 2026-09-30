@@ -3,7 +3,8 @@
    While the user is on another tab during a running turn:
    - document.title carries an activity badge + tool count
    - on terminal, a desktop Notification fires (if permitted)
-   Zero network. Pure UI. Restores title on visibility.
+   Restores title on visibility. Network: the operator gate, read once,
+   and Web Push, armed from the send gesture once permission is granted.
    ═══════════════════════════════════════════════════════ */
 
 window.KazmaTurnVisibility = (function() {
@@ -12,7 +13,6 @@ window.KazmaTurnVisibility = (function() {
   var _baseTitle = null;
   var _active = false;
   var _events = 0;
-  var _lastTool = '';
   var _flashTimer = null;
   var _flashOn = false;
 
@@ -32,12 +32,31 @@ window.KazmaTurnVisibility = (function() {
     document.title = badge + baseTitle();
   }
 
+  function armPush() {
+    // Web Push reaches a tab the browser discarded (plan P5), and it needs the
+    // permission asked for below. Until 2026-09-30 only the chat store's WS
+    // send path armed it, and nothing sent over WS, so no browser subscribed.
+    // ensureSubscribed checks the grant itself and runs once per page.
+    try {
+      if (window.KazmaPushClient && typeof KazmaPushClient.ensureSubscribed === 'function') {
+        Promise.resolve(KazmaPushClient.ensureSubscribed()).catch(function() {});
+      }
+    } catch (e) { /* best-effort */ }
+  }
+
   function ensurePermissionRequested() {
     // Called from a user-gesture path (send). Silently no-ops when denied
     // or unsupported; the localStorage toggle is the opt-out.
     try {
       if (!('Notification' in window)) return;
-      if (Notification.permission === 'default') Notification.requestPermission();
+      if (Notification.permission === 'default') {
+        var asked = Notification.requestPermission();
+        if (asked && typeof asked.then === 'function') {
+          asked.then(function(p) { if (p === 'granted') armPush(); }, function() {});
+        }
+        return;
+      }
+      if (Notification.permission === 'granted') armPush();
     } catch (e) { /* ignore */ }
   }
 
@@ -129,13 +148,6 @@ window.KazmaTurnVisibility = (function() {
         _events = 0;
       }
       _events++;
-      if (kind === 'tool' && name) _lastTool = String(name);
-      render();
-    },
-    beginTurn: function() {
-      _active = true;
-      _events = 0;
-      _lastTool = '';
       render();
     },
     endTurn: function(summary) {

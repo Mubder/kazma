@@ -84,8 +84,9 @@ POLICY: dict[tuple[str, str, str], tuple[str, str]] = {
     ),
     ("WEBSOCKET", "/ws/chat/{session_id}", "kazma-ui/kazma_ui/routes/ws_chat.py"): (
         "session",
-        "the socket's session is the caller's; approve_tool honours a requested "
-        "thread id only when it equals that session's own thread",
+        "the socket's session is the caller's and it watches only that "
+        "session's own thread; it takes no thread id from a frame (turn "
+        "control, approve_tool included, is refused -- AUD-026)",
     ),
 }
 

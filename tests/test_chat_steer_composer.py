@@ -853,16 +853,17 @@ def test_steer_body_strips_placeholder() -> None:
     assert "function steerBody(text)" in js
 
 
-def test_ws_steer_allows_paused_graph() -> None:
-    ws = (
-        Path(__file__).resolve().parent.parent
-        / "kazma-ui"
-        / "kazma_ui"
-        / "routes"
-        / "ws_chat.py"
-    ).read_text(encoding="utf-8")
-    assert "allow steer (same as HTTP)" in ws
-    assert 'getattr(_st_snap0, "next"' in ws
+def test_steer_allows_paused_graph() -> None:
+    """Steer reaches a paused graph (HITL / hard-steer interrupt) as well as a
+    running one. The socket had a twin of this route until 2026-09-30
+    (AUD-026); the route is the one steer now."""
+    from tests._module_source import module_source
+
+    sse = module_source(
+        Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui" / "sse_chat"
+    )
+    assert 'allow steer instead of "no task"' in sse
+    assert '_paused = bool(getattr(_snap, "next", None))' in sse
 
 
 def test_supervisor_steer_tid_falls_back_to_context() -> None:
@@ -1232,9 +1233,10 @@ def test_ws_store_owns_no_status_surface_of_its_own() -> None:
     ).read_text(encoding="utf-8")
     assert "taskCard" not in store
     assert "thinking-indicator" not in store
-    # Content still goes to the one painter.
+    # Content still goes to the one painter. chat.js begins a turn on send;
+    # the store only ends the turns it watches (it sends nothing, AUD-026).
     assert "chat.logProgress(step)" in store
-    assert "typeof chat.beginTurn === 'function'" in store
+    assert "typeof chat.endTurn === 'function'" in store
     # ...and the store touches no transcript DOM itself.
     for forbidden in (".message-content", ".message-text", "agent-progress",
                       "turn-header"):

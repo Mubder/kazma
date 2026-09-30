@@ -1,12 +1,11 @@
 """Shared registry of in-flight agent turns across chat transports.
 
-Both the SSE endpoint (``sse_chat.py``) and the WebSocket bus
-(``routes/ws_chat.py``) execute the same LangGraph supervisor graph per
-``thread_id``.  Before this module existed, each transport kept its own
-private map, so a WebSocket turn was invisible to the SSE duplicate-turn
-guard and to the session status endpoint — a refresh could start a SECOND
-concurrent graph invocation on the same thread/checkpointer, or a new
-prompt could be silently dropped.
+Every transport that runs a turn (the SSE endpoint, voice) registers it
+here per ``thread_id``. Before this module existed, each transport kept its
+own private map, so a turn on one was invisible to the other's
+duplicate-turn guard and to the session status endpoint — a refresh could
+start a SECOND concurrent graph invocation on the same thread/checkpointer,
+or a new prompt could be silently dropped.
 
 This module is the single source of truth for "is a turn still running on
 thread X?".  A turn is registered when the graph starts and unregistered
@@ -24,12 +23,10 @@ from typing import Any
 
 __all__ = [
     "DETACHED_TTL_S",
-    "bind_live_socket",
     "cancel_turn",
     "clear_orphan_stamp",
     "reset_active_turns",
     "get_active_turn",
-    "get_live_socket",
     "get_orphan_stamp",
     "is_turn_running",
     "mark_turn_orphaned",
@@ -37,7 +34,6 @@ __all__ = [
     "reap_stale_turn",
     "register_turn",
     "running_turn_count",
-    "unbind_live_socket",
     "unregister_turn",
     "active_turns",
 ]
@@ -55,11 +51,6 @@ _turns: dict[str, Any] = {}
 # thread_id → monotonic timestamp of the first detected client disconnect.
 # Side dict so ``active_turns`` and every task-based accessor stay untouched.
 _orphaned_at: dict[str, float] = {}
-# thread_id → current live WebSocket (or any object with send_json +
-# client_state). WS turns capture a *sender* that re-reads this map on every
-# emit so a tab-switch reconnect rebinds delivery without restarting the
-# graph. SSE does not use this map.
-_live_sockets: dict[str, Any] = {}
 _lock = threading.RLock()
 
 logger = logging.getLogger(__name__)
@@ -105,43 +96,6 @@ def unregister_turn(thread_id: str, task: Any = None) -> None:
         if task is None or _turns.get(thread_id) is task:
             _turns.pop(thread_id, None)
             _orphaned_at.pop(thread_id, None)
-
-
-def bind_live_socket(thread_id: str, socket: Any) -> None:
-    """Point live telemetry delivery for *thread_id* at *socket*.
-
-    Called on every WS accept/reconnect. An in-flight turn that was bound to
-    a dead socket (tab backgrounded / refresh) resumes emitting on the new
-    connection — without this, ``turn_complete`` is swallowed by ``is_lost``
-    on the old socket and the UI never updates until a full page reload.
-    Also clears any orphan stamp: the client is present again.
-    """
-    if not thread_id or socket is None:
-        return
-    with _lock:
-        _live_sockets[thread_id] = socket
-        _orphaned_at.pop(thread_id, None)
-
-
-def unbind_live_socket(thread_id: str, socket: Any = None) -> None:
-    """Drop the live socket for *thread_id* if it still matches *socket*.
-
-    When *socket* is omitted the entry is always cleared. Matching prevents a
-    superseded connection's disconnect from wiping a newer reconnect's bind.
-    """
-    if not thread_id:
-        return
-    with _lock:
-        if socket is None or _live_sockets.get(thread_id) is socket:
-            _live_sockets.pop(thread_id, None)
-
-
-def get_live_socket(thread_id: str) -> Any | None:
-    """Return the current live delivery socket for *thread_id*, or None."""
-    if not thread_id:
-        return None
-    with _lock:
-        return _live_sockets.get(thread_id)
 
 
 def clear_orphan_stamp(thread_id: str) -> None:
@@ -270,14 +224,13 @@ def reset_active_turns() -> None:
     """Drop every registry entry (tests only).
 
     The registry dicts are process-wide; a test that registers a turn (or
-    binds a live socket) without unwinding leaves stale entries that trip
+    stamps one orphaned) without unwinding leaves stale entries that trip
     later duplicate-turn guards and orphan-TTL reaps. Mirrors the
     ``reset_config_store`` / ``reset_turn_broker`` test-reset pattern.
     """
     with _lock:
         _turns.clear()
         _orphaned_at.clear()
-        _live_sockets.clear()
 
 
 def get_active_turn(thread_id: str) -> Any | None:

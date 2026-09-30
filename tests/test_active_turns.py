@@ -29,12 +29,10 @@ def _clean_registry():
     with at._lock:
         at._turns.clear()
         at._orphaned_at.clear()
-        at._live_sockets.clear()
     yield
     with at._lock:
         at._turns.clear()
         at._orphaned_at.clear()
-        at._live_sockets.clear()
 
 
 def test_register_and_conditional_unregister():
@@ -127,34 +125,21 @@ def test_default_ttl_is_sane():
     assert at.DETACHED_TTL_S == 300
 
 
-def test_live_socket_rebind_and_conditional_unbind():
-    """Tab-switch reconnect rebinds delivery; old disconnect must not wipe it."""
-    sock_a = object()
-    sock_b = object()
+def test_a_returning_client_clears_the_orphan_clock():
+    """A watching tab's socket connect clears the TTL so a watched turn is not
+    reaped as abandoned (the socket did it through a single-slot "live socket"
+    map until 2026-09-30; the map had no reader left -- AUD-026)."""
     at.register_turn("t1", _FakeTask())
     at.mark_turn_orphaned("t1")
     assert at.get_orphan_stamp("t1") is not None
 
-    at.bind_live_socket("t1", sock_a)
-    assert at.get_live_socket("t1") is sock_a
-    # Re-attach clears orphan TTL so the turn is not reaped while watched.
+    at.clear_orphan_stamp("t1")
     assert at.get_orphan_stamp("t1") is None
-
-    at.bind_live_socket("t1", sock_b)
-    assert at.get_live_socket("t1") is sock_b
-
-    # Stale disconnect of sock_a must not clear sock_b.
-    at.unbind_live_socket("t1", sock_a)
-    assert at.get_live_socket("t1") is sock_b
-
-    at.unbind_live_socket("t1", sock_b)
-    assert at.get_live_socket("t1") is None
+    assert at.is_turn_running("t1")  # the turn itself is untouched
 
 
-def test_live_socket_empty_thread_ignored():
-    at.bind_live_socket("", object())
-    assert at.get_live_socket("") is None
-    at.unbind_live_socket("", object())
+def test_clear_orphan_stamp_empty_thread_ignored():
+    at.clear_orphan_stamp("")
 
 
 # ── the detached-pump watchdog decision ───────────────────────────────

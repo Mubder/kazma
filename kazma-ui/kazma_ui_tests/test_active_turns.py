@@ -18,12 +18,10 @@ def _clean_registry():
     with at._lock:
         at._turns.clear()
         at._orphaned_at.clear()
-        at._live_sockets.clear()
     yield
     with at._lock:
         at._turns.clear()
         at._orphaned_at.clear()
-        at._live_sockets.clear()
 
 
 class TestRegisterAndOrphan:
@@ -163,13 +161,11 @@ class TestCancelTurn:
             await replacement
 
 
-class TestLiveSocketRebind:
-    """WS tab-switch rebind: delivery follows the newest socket."""
+class TestReturningClient:
+    """A watching tab's socket connect clears the orphan clock (the socket
+    did it through a single-slot live-socket map until 2026-09-30, AUD-026)."""
 
-    def test_bind_clears_orphan_and_unbind_is_conditional(self):
-        sock_a = object()
-        sock_b = object()
-        task = object()
+    def test_clear_orphan_stamp_keeps_the_turn(self):
         # Fake done() for mark_turn_orphaned
         class T:
             def done(self):
@@ -178,15 +174,9 @@ class TestLiveSocketRebind:
         at.mark_turn_orphaned("t1")
         assert at.get_orphan_stamp("t1") is not None
 
-        at.bind_live_socket("t1", sock_a)
-        assert at.get_live_socket("t1") is sock_a
+        at.clear_orphan_stamp("t1")  # a watching client connected
         assert at.get_orphan_stamp("t1") is None
-
-        at.bind_live_socket("t1", sock_b)
-        at.unbind_live_socket("t1", sock_a)  # stale close
-        assert at.get_live_socket("t1") is sock_b
-        at.unbind_live_socket("t1", sock_b)
-        assert at.get_live_socket("t1") is None
+        assert at.is_turn_running("t1")
 
 
 if __name__ == "__main__":

@@ -86,6 +86,24 @@ async def _ainvoke(graph: Any, state: Any, cfg: dict[str, Any]) -> Any:
     return await graph.ainvoke(state, cfg)
 
 
+def _report_turn_timeout(timeout_s: float, thread_id: str) -> None:
+    """Page the owner: a turn hit its wall-clock budget (usually a runaway
+    tool loop). The alert lived in the WebSocket graph client, which ran no
+    turns; it moved here with that client's removal (2026-09-30, AUD-026),
+    beside the budget itself. Never raises."""
+    try:
+        from kazma_core.observability.ops_alerts import alert
+
+        alert(
+            "turn.timed_out",
+            f"A turn hit the {int(timeout_s)}s wall-clock limit and was cut off.",
+            f"thread={thread_id[:12]}. Usually a runaway tool loop.",
+            severity="warn",
+        )
+    except Exception:
+        logger.debug("[turn] timeout alert failed", exc_info=True)
+
+
 async def _close_if_ui(
     graph: Any,
     cfg: dict[str, Any],
@@ -188,6 +206,9 @@ async def run_agent_turn(
                     turn_timeout=float(timeout or 0),
                     invoke_fn=_ainvoke,
                 )
+            except TimeoutError:
+                _report_turn_timeout(float(timeout or 0), thread_id)
+                raise
             finally:
                 reset_heartbeat(thread_id)
         elif timeout is not None and timeout > 0:
@@ -199,6 +220,7 @@ async def run_agent_turn(
                     timeout,
                     thread_id,
                 )
+                _report_turn_timeout(float(timeout), thread_id)
                 err = (
                     f"⚠️ Turn timed out after {int(timeout)}s. "
                     "Try a shorter request or raise KAZMA_TURN_TIMEOUT_SECONDS."
