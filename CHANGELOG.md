@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## A chat app keeps its new token after a restart (2026-09-30)
+
+- **Slack (and Discord, Telegram) no longer lose a token you saved.** A token
+  saved in Settings was stored for the saving request's user, and the save
+  reconnected the chat app inside that request — so it worked at once. But
+  Kazma builds its chat connections at start-up for the whole install, and
+  there it read the older copy: after every restart Slack answered
+  `invalid_auth` with the revoked token. The chat apps' tokens are now stored
+  for the install, like provider keys and mail, and the next start brings a
+  split pair to your most recent save.
+
 ## Full-repository audit, second batch of fixes (2026-09-30)
 
 Sixteen more findings from `docs/audits/AUDIT_FULL_2026-09-30.md`, plus what a

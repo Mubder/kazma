@@ -3053,7 +3053,13 @@ Read the named test before changing the code it guards.
   (runs the real app factory; order check with a negative control).
 - **Some secrets belong to the install** (`security/vault.py:
   INSTALL_SCOPED_SECRETS`: provider keys, `email.*`, `calendar.*`,
-  `cfg:memory.backends.*` — and a credential URL moves into the vault only
+  `cfg:memory.backends.*`, and since 2026-09-30 the chat platforms' bot
+  credentials `cfg:connectors.slack|discord|telegram.*` — one gateway adapter
+  per install, built at boot with no tenant: a Settings save landed under the
+  request's tenant and reconnected inside that request, then every restart
+  booted from the stale global copy (live: Slack `invalid_auth` after a reload;
+  `tests/test_chat_connector_secrets_install_scope.py` also checks every
+  credential `app.py` reads at boot) — and a credential URL moves into the vault only
   under such a name, or its background readers lose it), and the
   VAULT enforces it: `SecretVault.store` writes those names globally and
   rewrites every tenant copy to match, whatever tenant the caller names

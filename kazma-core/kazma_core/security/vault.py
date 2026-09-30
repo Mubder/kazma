@@ -83,6 +83,16 @@ logger = logging.getLogger(__name__)
 #:   2026-09-25 because no rule knew ``state.url`` held a credential; moving
 #:   it to the vault under a request's tenant would have hidden it from that
 #:   worker. Operator saves, so the NEWEST copy wins.
+#: * Chat-platform bot credentials (``connectors.slack.*`` / ``discord.*`` /
+#:   ``telegram.*``: bot and app-level tokens, the webhook secret): the
+#:   gateway runs ONE adapter per platform for the whole install, built at
+#:   boot with no tenant bound. A token saved in Settings landed under the
+#:   request's tenant; the Settings save then rebuilt the adapter inside that
+#:   request, which read the new copy and connected -- and every restart
+#:   rebuilt it at boot from the stale global copy. Live 2026-09-30: Slack
+#:   answered ``invalid_auth`` on every reconnect after a reload, with the
+#:   boot warning naming ``cfg:connectors.slack.app_token`` as split.
+#:   Operator saves, so the NEWEST copy wins.
 #:
 #: Not here on purpose: X connector credentials (``cfg:connectors.x.*``). The
 #: X code reads them as tenant ``default``, and moving an account the agent
@@ -94,6 +104,9 @@ INSTALL_SCOPED_SECRETS: tuple[tuple[str, str], ...] = (
     ("email.", "global"),  # mail OAuth clients, tokens, scopes, IMAP/POP passwords
     ("calendar.", "global"),  # calendar tokens, written through the mail helper
     ("cfg:memory.backends.", "newest"),  # state DSN, vector/graph secrets, embedder key
+    ("cfg:connectors.slack.", "newest"),  # bot + app-level (Socket Mode) tokens
+    ("cfg:connectors.discord.", "newest"),  # bot token
+    ("cfg:connectors.telegram.", "newest"),  # bot token, webhook secret
 )
 
 
