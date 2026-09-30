@@ -54,6 +54,8 @@ import httpx
 
 from kazma_core.chaos import InjectionTarget, chaos_injection
 from kazma_core.http_tls import shared_ssl_context
+from kazma_core.mcp.child_env import MCP_CHILD_ENV_ALLOWLIST, mcp_child_env
+from kazma_core.mcp.secrets import MCPSecretUnavailable, redacted_argv, redacted_url, resolve, secret_values
 
 __all__ = [
     "AsyncMCPManager",
@@ -1338,69 +1340,31 @@ class AsyncMCPManager:
     # Internal: stdio transport (pure asyncio)
     # ════════════════════════════════════════════════════════════════
 
-    # Minimal environment for stdio MCP children (audit H-4). The old
-    # ``{**os.environ, **cfg env}`` handed EVERY process secret — LLM API
-    # keys, KAZMA_SECRET (the skill-signing HMAC key), vault keys, OAuth
-    # tokens — to any configured server subprocess, so one approved
-    # MCP-server config write was arbitrary-code-execution with all
-    # secrets. Children get the safe basics plus whatever the operator
-    # explicitly put in the server's own ``env``/``auth`` config.
-    # ``KAZMA_MCP_INHERIT_ENV=1`` restores full inheritance for servers
-    # that genuinely need exotic parent variables.
-    _MCP_CHILD_ENV_ALLOWLIST = (
-        "PATH",
-        "PATHEXT",
-        "SYSTEMROOT",
-        "SYSTEMDRIVE",
-        "COMSPEC",
-        "WINDIR",
-        "TEMP",
-        "TMP",
-        "HOME",
-        "USERPROFILE",
-        "APPDATA",
-        "LOCALAPPDATA",
-        "LANG",
-        "LC_ALL",
-        "TERM",
-        "SHELL",
-        "TZ",
-        "XDG_DATA_HOME",
-        "XDG_CONFIG_HOME",
-        "SSL_CERT_FILE",
-        "SSL_CERT_DIR",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "NO_PROXY",
-    )
+    # The environment a stdio MCP server starts with (audit H-4): one rule
+    # for this manager and the Test client, in kazma_core/mcp/child_env.py.
+    _MCP_CHILD_ENV_ALLOWLIST = MCP_CHILD_ENV_ALLOWLIST
 
     @classmethod
     def _build_child_env(cls, name: str, cfg: dict[str, Any]) -> dict[str, str]:
         """Construct the subprocess environment for a stdio MCP server."""
-        if (os.environ.get("KAZMA_MCP_INHERIT_ENV") or "").strip().lower() in (
-            "1", "true", "on", "yes",
-        ):
-            env = dict(os.environ)
-        else:
-            env = {k: v for k, v in os.environ.items() if k.upper() in cls._MCP_CHILD_ENV_ALLOWLIST}
-        # The server's own configured env always wins (operator intent),
-        # then the declared auth env var.
-        for key, value in (cfg.get("env") or {}).items():
-            if isinstance(key, str) and isinstance(value, (str, int, float, bool)):
-                env[key] = str(value)
-        auth = cfg.get("auth") or {}
-        if auth.get("type") == "env" and auth.get("name") and auth.get("value"):
-            env[str(auth["name"])] = str(auth["value"])
-        dropped = len(os.environ) - len(env)
-        if dropped > 0:
-            logger.debug(
-                "[MCP] stdio server '%s': scrubbed %d inherited env vars (allowlist mode)",
-                name, dropped,
-            )
-        return env
+        return mcp_child_env(name, cfg)
+
+    @staticmethod
+    def _with_secrets(name: str, cfg: dict[str, Any]) -> dict[str, Any]:
+        """*cfg* with its vault pointers replaced by the secrets (kazma_core.mcp.secrets).
+
+        Every transport starts here, so a server never receives a pointer
+        as its key, and one whose secret the vault cannot answer fails with
+        the field named.
+        """
+        try:
+            return resolve(cfg)
+        except MCPSecretUnavailable as exc:
+            raise MCPBridgeError(str(exc)) from exc
 
     async def _connect_stdio(self, name: str, cfg: dict[str, Any]) -> int:
         """Spawn an MCP server as a subprocess and perform the handshake."""
+        cfg = self._with_secrets(name, cfg)
         command = cfg.get("command", [])
         if not command:
             raise MCPBridgeError(f"stdio server '{name}' requires a 'command' list")
@@ -1420,7 +1384,9 @@ class AsyncMCPManager:
             # Find insertion point after executable, before other args
             command = [command[0]] + [auth["name"], auth["value"]] + command[1:]
 
-        logger.info("[MCP] Starting stdio server '%s': %s", name, command)
+        logger.info(
+            "[MCP] Starting stdio server '%s': %s", name, redacted_argv(command, secret_values(cfg)),
+        )
 
         # MCP JSON-RPC is newline-delimited. A single tool result (e.g.
         # filesystem directory_tree on a large monorepo) is often one giant
@@ -1598,6 +1564,7 @@ class AsyncMCPManager:
 
     async def _connect_sse(self, name: str, cfg: dict[str, Any]) -> int:
         """Connect to an MCP server over HTTP SSE."""
+        cfg = self._with_secrets(name, cfg)
         url = cfg.get("url", "")
         if not url:
             raise MCPBridgeError(f"SSE server '{name}' requires a 'url'")
@@ -1652,7 +1619,7 @@ class AsyncMCPManager:
             handle.trust = cfg.get("trust", "approval_required")
 
             self._servers[name] = handle
-            logger.info("[MCP] Connected to '%s' (sse, url=%s, tools=%d)", name, url, len(tools))
+            logger.info("[MCP] Connected to '%s' (sse, url=%s, tools=%d)", name, redacted_url(url), len(tools))
             return len(tools)
         except Exception:
             await self._close_handle(handle)
@@ -1926,6 +1893,7 @@ class AsyncMCPManager:
 
     async def _connect_streamable_http(self, name: str, cfg: dict[str, Any]) -> int:
         """Connect to an MCP server over the Streamable HTTP transport."""
+        cfg = self._with_secrets(name, cfg)
         url = cfg.get("url", "")
         if not url:
             raise MCPBridgeError(f"Streamable HTTP server '{name}' requires a 'url'")
@@ -2001,7 +1969,7 @@ class AsyncMCPManager:
             self._servers[name] = handle
             logger.info(
                 "[MCP] Connected to '%s' (streamable_http, url=%s, session=%s, tools=%d)",
-                name, url, handle.session_id or "?", len(tools),
+                name, redacted_url(url), handle.session_id or "?", len(tools),
             )
             return len(tools)
         except Exception:

@@ -279,11 +279,11 @@ The repo root contains many `.pytest_tmp_*` directories (artifacts from test run
 
 ### 6.2 OOM with RAG extras
 
-ChromaDB + sentence-transformers can exceed 512 Mi. The K8s manifest's `512Mi` limit is too small for the main agent with RAG. Use ≥1 Gi for the main agent container.
+ChromaDB + sentence-transformers can exceed 512 Mi. Give the main agent's container at least 1 Gi with RAG (no Kubernetes manifest ships with Kazma).
 
 ### 6.3 Health check path
 
-Use `/api/gateway/status` (as `docker-compose.yml` does) or `/health/live` — **not** `/api/v1/health` (which belongs to the separate Hub API).
+Use `/api/gateway/status` (as `docker-compose.yml` does) or `/health/live` — **not** `/api/v1/health`, which belonged to the Hub API (removed).
 
 ---
 
@@ -322,9 +322,9 @@ They are **not** synced. Don't rely on any single one for "the Kazma version."
 
 `DEEPSEEK_API_KEY` and `ANTHROPIC_API_KEY` appear in `.env.example` but **no code reads them**. Key those providers via the ConfigStore provider list instead. Don't waste time wondering why setting them has no effect.
 
-### 8.4 `mcp.servers[].trust` is a no-op
+### 8.4 `mcp.servers[].trust: trusted` skips approvals
 
-The `trust: trusted` string in `kazma.yaml` MCP config is **not read by any code**. It's documentation-only. "Trust tiers" are not a code feature.
+`trust: trusted` on an MCP server skips the approval card for that server's tools, except tools named like credentials; in production (`KAZMA_PRODUCTION=1`) it is ignored unless `KAZMA_MCP_TRUSTED_IN_PROD=1`. Keep the default, `approval_required`, unless you trust every tool the server exposes. "Trust tiers" beyond this are not a code feature. (This page called the setting a no-op until 2026-09-30.)
 
 ### 8.5 `/undo` and `/edit` are stubs
 

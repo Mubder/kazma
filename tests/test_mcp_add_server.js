@@ -78,6 +78,11 @@ assertEqual(r3.rewritten, true, 'pip install marked rewritten');
 const r4 = autoRewriteCommand('pipx install some-mcp');
 assertEqual(r4.command, ['pipx', 'run', 'some-mcp'], 'pipx install → pipx run');
 
+// The notices come from the catalog (mcp.ui.rewrite_*), placeholders filled.
+assertEqual(r1.notice.includes('"npx -y firecrawl-mcp"') && !r1.notice.includes('{pkg}'), true, 'npm notice names the run command');
+assertEqual(r3.notice.includes('"python -m mcp_server_time"') && !r3.notice.includes('{mod}'), true, 'pip notice names the module');
+assertEqual(r4.notice.includes('"pipx run some-mcp"'), true, 'pipx notice names the run command');
+
 // No rewrite when already a run command
 const r5 = autoRewriteCommand('npx -y firecrawl-mcp');
 assertEqual(r5.command, ['npx', '-y', 'firecrawl-mcp'], 'already-run command unchanged');

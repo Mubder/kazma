@@ -146,7 +146,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_MAX_COST` | (none) | `kazma_core.cost_breaker` | yes |
 | `KAZMA_MCP_ALLOW_UNGATED` | (none) | `kazma_core.mcp.server` | yes |
 | `KAZMA_MCP_IDE_ENABLED` | `"true"` | `kazma_gateway.mcp_server` | yes |
-| `KAZMA_MCP_INHERIT_ENV` | (none) | `kazma_core.mcp.manager` | yes |
+| `KAZMA_MCP_INHERIT_ENV` | (none) | `kazma_core.mcp.child_env` | yes |
 | `KAZMA_MCP_SAFE_ALLOWLIST` | (none) | `kazma_core.mcp.manager` | yes |
 | `KAZMA_MCP_SAMPLING` | `"0"` | `kazma_core.mcp.spec_client` | yes |
 | `KAZMA_MCP_SAMPLING_TIMEOUT` | `"60"` | `kazma_core.mcp.spec_client` | yes |

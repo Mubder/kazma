@@ -14,6 +14,12 @@ Settings list/test/toggle did not.
 This module is the **only** place that reads/writes either store. All
 mutators dual-write both backends so they stay in sync. Readers always
 merge (ConfigStore wins on name conflict — runtime UI edits beat seed).
+
+Every write goes through :func:`_write_everywhere`, which first moves each
+server's secrets into the vault and leaves ``vault://`` pointers
+(:mod:`kazma_core.mcp.secrets`); until 2026-09-30 they were written as typed
+into ``kazma.yaml`` and the settings database. A deleted server's secrets
+leave the vault. The MCP clients resolve the pointers when they connect.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ __all__ = [
     "CONFIG_KEY",
     "delete_mcp_server",
     "list_mcp_servers",
+    "move_plaintext_secrets",
     "persist_mcp_yaml",
     "set_mcp_server_enabled",
     "sync_mcp_servers",
@@ -248,6 +255,33 @@ def _sync_config_raw(
         mcp["servers"] = servers
 
 
+def _write_everywhere(
+    servers: list[dict[str, Any]],
+    *,
+    before: list[dict[str, Any]],
+    config_raw: dict[str, Any] | None,
+    yaml_path: str | Path | None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Write *servers* to ConfigStore, config.raw and kazma.yaml, secrets in the vault.
+
+    The one way this module writes. *before* is the stored list (pointers
+    unresolved): a secret posted back masked (``****``) or empty keeps what
+    it holds. Returns what was written and the YAML error, or ``None``.
+    """
+    from kazma_core.mcp.secrets import externalize
+
+    stored = {str(s.get("name")): s for s in before if isinstance(s, dict)}
+    servers = [externalize(s, stored.get(str(s.get("name")))) for s in servers]
+    _cs_set(servers)
+    _sync_config_raw(config_raw, servers)
+    err = persist_mcp_yaml(
+        servers,
+        yaml_path=yaml_path,
+        mcp_section=config_raw.get("mcp") if config_raw else None,
+    )
+    return servers, err
+
+
 def sync_mcp_servers(
     servers: list[dict[str, Any]],
     *,
@@ -258,14 +292,52 @@ def sync_mcp_servers(
 
     Returns yaml error message or ``None`` when both stores accept the write.
     """
-    normalized = _normalize_list(servers)
-    _cs_set(normalized)
-    _sync_config_raw(config_raw, normalized)
-    return persist_mcp_yaml(
-        normalized,
-        yaml_path=yaml_path,
-        mcp_section=config_raw.get("mcp") if config_raw else None,
+    yaml_in_mem = (config_raw.get("mcp") or {}).get("servers", []) if config_raw else None
+    before = list_mcp_servers(yaml_servers=yaml_in_mem, yaml_path=yaml_path)
+    return _write_everywhere(
+        _normalize_list(servers), before=before, config_raw=config_raw, yaml_path=yaml_path,
+    )[1]
+
+
+def move_plaintext_secrets(
+    *,
+    config_raw: dict[str, Any] | None = None,
+    yaml_path: str | Path | None = None,
+) -> int:
+    """Move MCP secrets still stored as typed into the vault; how many servers held one.
+
+    Stores written before 2026-09-30 hold them in kazma.yaml and the settings
+    database. ``KazmaAgent.connect_mcp_servers`` runs this first. Nothing is
+    written when no secret is left or when there is no vault to put it in.
+    """
+    from kazma_core.config_store import _try_get_vault
+    from kazma_core.mcp.secrets import has_plaintext_secret
+
+    yaml_in_mem = (config_raw.get("mcp") or {}).get("servers", []) if config_raw else None
+    sources = [*_cs_get(), *_read_yaml_servers(yaml_path), *_normalize_list(yaml_in_mem)]
+    holders = sorted({str(s.get("name")) for s in sources if has_plaintext_secret(s)})
+    if not holders:
+        return 0
+    if _try_get_vault() is None:
+        logger.warning(
+            "[mcp_servers_store] %d MCP server(s) keep secrets in kazma.yaml / the "
+            "settings database, and there is no vault to move them to: %s",
+            len(holders), ", ".join(holders),
+        )
+        return 0
+    current = list_mcp_servers(yaml_servers=yaml_in_mem, yaml_path=yaml_path)
+    _written, err = _write_everywhere(current, before=current, config_raw=config_raw, yaml_path=yaml_path)
+    left = sorted({
+        str(s.get("name"))
+        for s in [*_cs_get(), *_read_yaml_servers(yaml_path)]
+        if has_plaintext_secret(s)
+    })
+    logger.info(
+        "[mcp_servers_store] Moved the secrets of %d MCP server(s) into the vault: %s%s",
+        len(holders), ", ".join(holders),
+        f" (still as typed: {', '.join(left)}; yaml: {err})" if left or err else "",
     )
+    return len(holders)
 
 
 def upsert_mcp_server(
@@ -289,6 +361,7 @@ def upsert_mcp_server(
         yaml_in_mem = (config_raw.get("mcp") or {}).get("servers", [])
 
     servers = list_mcp_servers(yaml_servers=yaml_in_mem, yaml_path=yaml_path)
+    before = [dict(s) for s in servers]
     existing_idx = next(
         (i for i, s in enumerate(servers) if s.get("name") == name),
         None,
@@ -325,16 +398,10 @@ def upsert_mcp_server(
     else:
         servers.append(server)
 
-    _cs_set(servers)
-    _sync_config_raw(config_raw, servers)
-    err = persist_mcp_yaml(
-        servers,
-        yaml_path=yaml_path,
-        mcp_section=config_raw.get("mcp") if config_raw else None,
-    )
+    written, err = _write_everywhere(servers, before=before, config_raw=config_raw, yaml_path=yaml_path)
     if err:
         logger.warning("[mcp_servers_store] upsert ConfigStore ok, yaml failed: %s", err)
-    return server
+    return next((s for s in written if s.get("name") == name), server)
 
 
 def delete_mcp_server(
@@ -348,20 +415,15 @@ def delete_mcp_server(
     if config_raw is not None:
         yaml_in_mem = (config_raw.get("mcp") or {}).get("servers", [])
 
-    servers = [
-        s
-        for s in list_mcp_servers(yaml_servers=yaml_in_mem, yaml_path=yaml_path)
-        if s.get("name") != name
-    ]
-    _cs_set(servers)
-    _sync_config_raw(config_raw, servers)
-    err = persist_mcp_yaml(
-        servers,
-        yaml_path=yaml_path,
-        mcp_section=config_raw.get("mcp") if config_raw else None,
-    )
+    current = list_mcp_servers(yaml_servers=yaml_in_mem, yaml_path=yaml_path)
+    servers = [s for s in current if s.get("name") != name]
+    _written, err = _write_everywhere(servers, before=current, config_raw=config_raw, yaml_path=yaml_path)
     if err:
         logger.warning("[mcp_servers_store] delete ConfigStore ok, yaml failed: %s", err)
+    from kazma_core.mcp.secrets import forget
+
+    for gone in (s for s in current if s.get("name") == name):
+        forget(gone)
 
 
 def set_mcp_server_enabled(
@@ -377,6 +439,7 @@ def set_mcp_server_enabled(
         yaml_in_mem = (config_raw.get("mcp") or {}).get("servers", [])
 
     servers = list_mcp_servers(yaml_servers=yaml_in_mem, yaml_path=yaml_path)
+    before = [dict(s) for s in servers]
     found = False
     for s in servers:
         if s.get("name") == name:
@@ -385,12 +448,6 @@ def set_mcp_server_enabled(
             break
     if not found:
         return
-    _cs_set(servers)
-    _sync_config_raw(config_raw, servers)
-    err = persist_mcp_yaml(
-        servers,
-        yaml_path=yaml_path,
-        mcp_section=config_raw.get("mcp") if config_raw else None,
-    )
+    _written, err = _write_everywhere(servers, before=before, config_raw=config_raw, yaml_path=yaml_path)
     if err:
         logger.warning("[mcp_servers_store] toggle ConfigStore ok, yaml failed: %s", err)

@@ -325,7 +325,7 @@ SQLite `kazma-data/disclosure.db` enforces the transition chain `submitted → a
 ## 9. Hardening recommendations
 
 1. **Always set `KAZMA_SECRET`** for non-localhost deployments. Generate with `openssl rand -hex 32`.
-2. **Run stdio MCP servers in a sandbox.** The stdio transport has no auth and inherits the process environment.
+2. **Run stdio MCP servers in a sandbox.** The stdio transport has no auth; a server gets the allowlisted basics plus its own `env` (audit H-4), never Kazma's secrets, and runs with the Kazma process's rights.
 3. **Prefer SSE MCP with bearer auth** for any remote MCP server.
 4. **Sign all skills** (`kazma hub sign`) and keep `KAZMA_SECRET` consistent across load — signature verification fails otherwise.
 5. **Keep all three HITL execution paths + the registry active.** Do not pass `hitl_config=None` on a resumable production graph. Do not mint a second web gate from `execute()`.
@@ -424,6 +424,6 @@ here will ever be 0%.
 - **Do not pin line numbers.** `tool_worker_node` is `graph_tool_worker.py`; SSE SoT is the app.py recompile, not `get_streaming_graph()` (that path is checkpointer-less `auto_deny`).
 - **FanOut, not Telegram-only.** Multiple platforms → `FanOutBusAdapter` tri-state.
 - **`_EXTENDED_DANGER` is CANONICAL**, not a longer private list. MCP `classify_mcp_tool` remains pattern-based (unknown → danger).
-- **"Trust tiers" do not exist** as a product feature — boolean `certified` plus unused `trust: trusted`.
+- **"Trust tiers" do not exist** as a product feature — the hub's boolean `certified` flag, and an MCP server's `trust: trusted`, which skips the approval card for its tools (refused in production unless `KAZMA_MCP_TRUSTED_IN_PROD=1`).
 - **MCP stdio has no auth.** Sandbox accordingly.
 - Binding audit: [`AUDIT_DEEP_2026-09-01_EXEC.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md).

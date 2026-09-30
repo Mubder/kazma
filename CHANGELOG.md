@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## Every JavaScript test runs (2026-09-30)
+
+- **24 of Kazma's 45 JavaScript test files ran nowhere.** CI ran seven by
+  name; the rest -- among them the checks on the chat's stream reader, the
+  login redirect, push notifications and the Settings saves -- ran only when
+  someone started them by hand. All passed when found. Every file now runs
+  in CI and in the local test suite, and a new file is picked up by itself.
+
+## MCP servers: keys in the vault, a Test that leaks nothing, presets that exist (2026-09-30)
+
+- **Testing an MCP server no longer hands it Kazma's secrets.** The Test
+  button (Settings and the MCP page) started the server with Kazma's whole
+  environment -- the vault key, the database password, every API key --
+  though the normal start had used a short, safe list since an earlier
+  audit. Test now uses the same list, and a check covers all the MCP code.
+- **API keys you give an MCP server are kept in the vault.** A key typed for
+  a server -- in its environment, its sign-in settings, or its command line
+  as Stripe's instructions show -- was written as typed into `kazma.yaml`
+  and the settings database, and the MCP pages' data returned it. It now
+  goes to the vault: the files keep a pointer, the pages show `****`, a
+  masked value sent back keeps the key, deleting a server removes its keys,
+  and the server still receives the real value when it starts. Keys saved
+  earlier move to the vault the next time Kazma connects its MCP servers,
+  and a key on a server's command line no longer appears in the log.
+- **The MCP presets are servers that exist.** The "Add Server" list offered
+  81 "certified" servers; 78 named packages that were never published, so
+  adding one always failed, and one pointed a server at Kazma's own settings
+  database. It now offers 13 maintained servers from the MCP project or the
+  service's own vendor (Filesystem, Git, Time, Memory, Sequential Thinking,
+  Playwright, Firecrawl, Brave Search, Context7, Notion, Stripe, Heroku, AWS
+  Documentation), each checked against npm and PyPI. An install made from a
+  release wheel now shows them too; it showed none. The notices about
+  rewritten install commands read in Arabic.
+
 ## Updates come only from Kazma's own releases (2026-09-30)
 
 - **`kazma update` no longer installs whatever is called "kazma" on PyPI.**

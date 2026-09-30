@@ -3595,6 +3595,40 @@ and the sibling suites):**
   Gate: `tests/test_no_pypi_kazma.py` -- every tracked product, script and doc
   file (history, plans and tests excepted), a PyPI URL for a Kazma name, and
   every install argv by AST; negative controls are the 27 old forms.
+- **An MCP server's secrets live in the vault** (`kazma_core/mcp/secrets.py`,
+  AUD-030). An `env` entry named like a credential, `auth.value`/`auth.token`,
+  a credential header, the value of a `--api-key=...`-style command flag and a
+  URL password are stored at install scope (`cfg:mcp.servers.<server>.<field>`,
+  in `INSTALL_SCOPED_SECRETS`: the manager connects at boot with no tenant);
+  kazma.yaml, the settings database and config.raw hold `vault://` pointers.
+  Every write in `mcp_servers_store` goes through `_write_everywhere`
+  (externalize, keeping a masked or empty value's stored secret); a delete
+  forgets the server's secrets; `KazmaAgent.connect_mcp_servers` first moves
+  secrets stored as typed (`move_plaintext_secrets`, no write when none is
+  left or there is no vault). Each transport's first statement resolves
+  (`AsyncMCPManager._with_secrets`; `mcp_client._with_secrets`), and a pointer
+  the vault cannot answer fails naming the field, never handed on. APIs and
+  pages show `masked()`; the start log goes through `redacted_argv`.
+  **Both MCP clients build a child's environment with
+  `kazma_core/mcp/child_env.mcp_child_env`** (audit H-4's allowlist): the
+  Test client used `{**os.environ, **cfg.env}` until 2026-09-30, and
+  `tests/test_child_env.py` now scans `kazma_core/mcp` and `mcp_client.py`.
+  Gate: `tests/test_mcp_secrets.py` (real vault, store, manager and routes;
+  sink and transport gates with negative controls).
+- **Every MCP preset is a published, maintained package** (AUD-031):
+  `kazma_skills/certified_servers.yaml` names each preset's `package`
+  (registry + name) and `source`; `scripts/verify_mcp_catalog.py --write`
+  records what npm and PyPI say (`tests/fixtures/mcp_catalog_registry.json`)
+  and `tests/test_mcp_catalog.py` holds the presets to it offline: exists,
+  not deprecated, from the repository it names, no Kazma store path, keys in
+  `env` (never the command). `kazma_ui/mcp_presets` reads the catalog from the
+  installed `kazma_skills` package (the repo-layout path found nothing in a
+  wheel install). Left out on purpose: a raw URL fetcher (bypasses the §32
+  egress guard) and GitHub (Kazma's own tools).
+- **Every JavaScript test file runs** (AUD-032): `tests/test_js_suites.py`
+  runs each `tests/js/test_*.js` and `tests/test_*.js` (enumerated, so a new
+  file needs no list) and CI's `js-check` job runs the same globs under node
+  20. Until 2026-09-30 CI ran seven by name and 24 ran nowhere.
 
 ## UI Conventions (Web)
 

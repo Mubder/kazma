@@ -163,7 +163,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         return {"status": "ok" if clear_oauth(name) else "error"}
 
     @router.get("/api/mcp/presets")
-    async def api_list_presets() -> dict[str, Any]:
+    def api_list_presets() -> dict[str, Any]:
         """List available MCP server presets for the Add Server dropdown.
 
         Returns presets grouped by category, so the UI can render optgroups:

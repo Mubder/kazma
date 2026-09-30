@@ -132,7 +132,7 @@ function autoRewriteCommand(commandStr) {
             return {
                 command: ['npx', '-y', pkg],
                 rewritten: true,
-                notice: 'Rewrote "npm install ' + pkg + '" to the RUN command "npx -y ' + pkg + '" (npm install only installs the package — it doesn\'t start the MCP server).'
+                notice: _mcpT('mcp.ui.rewrite_npm', 'Rewrote "npm install {pkg}" to the RUN command "npx -y {pkg}" (npm install only installs the package; it does not start the MCP server).', { pkg: pkg })
             };
         }
     }
@@ -155,7 +155,7 @@ function autoRewriteCommand(commandStr) {
             return {
                 command: ['python', '-m', mod],
                 rewritten: true,
-                notice: 'Rewrote "pip install ' + pipPkg + '" to the RUN command "python -m ' + mod + '".'
+                notice: _mcpT('mcp.ui.rewrite_pip', 'Rewrote "pip install {pkg}" to the RUN command "python -m {mod}".', { pkg: pipPkg, mod: mod })
             };
         }
     }
@@ -165,7 +165,7 @@ function autoRewriteCommand(commandStr) {
         return {
             command: ['pipx', 'run', tokens[2]],
             rewritten: true,
-            notice: 'Rewrote "pipx install ' + tokens[2] + '" to "pipx run ' + tokens[2] + '".'
+            notice: _mcpT('mcp.ui.rewrite_pipx', 'Rewrote "pipx install {pkg}" to "pipx run {pkg}".', { pkg: tokens[2] })
         };
     }
 

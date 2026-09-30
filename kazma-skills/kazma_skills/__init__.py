@@ -1,5 +1,3 @@
-"""Kazma Skills — YAML manifests wrapping MCP tools."""
+"""Kazma Skills: the native skills and the MCP server presets (certified_servers.yaml)."""
 
-from kazma_skills.manifest import SkillManifest
-
-__all__ = ["SkillManifest"]
+__all__: list[str] = []

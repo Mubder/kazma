@@ -219,6 +219,11 @@ _SPAWN_DIRS = (
     "kazma-gateway/kazma_gateway/routers",
     "kazma-gateway/kazma_gateway/agent_handler",
     "kazma-ui/kazma_ui",
+    # MCP servers are third-party programs. The manager had the allowlist
+    # since audit H-4; the Test client (mcp_client.py) still started them
+    # with ``{**os.environ, **cfg.env}`` until 2026-09-30. Neither was covered.
+    "kazma-core/kazma_core/mcp",
+    "kazma-core/kazma_core/mcp_client.py",
 )
 _SPAWNERS = {
     "subprocess.run", "subprocess.Popen", "subprocess.check_output",
@@ -226,7 +231,11 @@ _SPAWNERS = {
     "asyncio.create_subprocess_exec", "asyncio.create_subprocess_shell",
 }
 _DEFAULTS_SAFE = {"run_off_loop"}  # fills env= with tool_child_env() itself
-_BUILDERS = {"tool_child_env", "restricted_child_env", "get_commit_env"}
+_BUILDERS = {
+    "tool_child_env", "restricted_child_env", "get_commit_env",
+    # The MCP allowlist (kazma_core/mcp/child_env.py) and the manager's delegate to it.
+    "mcp_child_env", "_build_child_env",
+}
 # Spawns whose env reaches them some other way, each with how.
 _ENV_BY_OTHER_ROUTE = {
     ("kazma-core/kazma_core/tools/code_exec.py", "_run_local_subprocess"):
@@ -330,7 +339,9 @@ def _unsafe_spawns(source: str) -> list[tuple[str, int, str]]:
 def test_every_process_a_tool_starts_gets_a_secret_free_environment():
     offenders = []
     for d in _SPAWN_DIRS:
-        for f in sorted((REPO / d).rglob("*.py")):
+        root = REPO / d
+        assert root.exists(), f"{d} is gone: update _SPAWN_DIRS"
+        for f in [root] if root.is_file() else sorted(root.rglob("*.py")):
             rel = f.relative_to(REPO).as_posix()
             for fn, line, why in _unsafe_spawns(f.read_text(encoding="utf-8")):
                 if (rel, fn) not in _ENV_BY_OTHER_ROUTE:

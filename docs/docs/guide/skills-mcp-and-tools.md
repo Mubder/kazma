@@ -119,18 +119,17 @@ kazma hub validate kazma-skills/manifests/my-skill
 
 The Hub is a Click-based CLI for the skill registry/marketplace (`kazma_core/hub/cli.py:104`). See [CLI Reference → hub](cli-reference#9-kazma-hub--skill-hub-click-group) for the full subcommand list.
 
-### 4.1 Hub API authentication
+### 4.1 The hub
 
-Write endpoints (`kazma_core/hub/api.py:26-47`, `_require_auth`) require an `X-Kazma-Secret` header matched via `hmac.compare_digest`. **Fail-closed:** if `KAZMA_SECRET` is unset, all writes are rejected.
+The hub REST API that once lived in this repository (`kazma_core/hub/api.py`) was removed on 2026-09-30: nothing ran it (audit AUD-013). `kazma hub` talks to a remote hub at `KAZMA_HUB_URL`.
 
 ### 4.2 Certification
 
 - `kazma hub certified` — list certified skills.
 - `kazma hub badge &lt;skill_ref>` — show a certification badge.
 - `kazma hub check-certification &lt;path>` — check a skill against certification criteria.
-- The manifest carries a plain boolean `certified: true` flag (`manifest.py:87-90` `is_certified`).
 
-> **"Trust tiers" do NOT exist as a cryptographic/security feature.** The only "trust" references in the codebase are (a) the plain `certified: bool` flag and (b) the `trust: trusted` string in `kazma.yaml` MCP config, which no code reads. This is explicitly flagged because older docs implied a tiered trust model.
+> **"Trust tiers" do NOT exist as a cryptographic/security feature.** The only "trust" references in the codebase are (a) the hub's plain `certified: bool` flag and (b) an MCP server's `trust` setting: `trusted` skips the approval card for that server's tools (refused in production unless `KAZMA_MCP_TRUSTED_IN_PROD=1`); anything else, the default `approval_required` included, keeps it. This is explicitly flagged because older docs implied a tiered trust model.
 
 ### 4.3 Finding & installing skills (consumer workflow)
 
@@ -170,7 +169,7 @@ kazma wizard
 
 | Transport | Config | Auth |
 |---|---|---|
-| `stdio` | `command: [argv]` — subprocess spawn. | **None.** The subprocess inherits the process environment. |
+| `stdio` | `command: [argv]` — subprocess spawn. | **None.** The subprocess gets the allowlisted basics plus its own `env` (audit H-4), never Kazma's secrets. |
 | `sse` | `url` + optional `auth` field. | **Yes** — `AsyncMCPManager._connect_sse` supports a first-class `auth` config injecting `Authorization: Bearer &lt;token>` or a custom header. |
 | `streamable_http` (alias `http`) | `url` + optional `auth` field. MCP **2025-03-26 spec** — single POST endpoint with SSE response streaming + `Mcp-Session-Id` resumption. | **Yes** — same `auth` field as SSE. |
 
@@ -195,7 +194,7 @@ mcp:
   servers:
     - name: filesystem
       transport: stdio
-      trust: trusted          # informational only — not enforced
+      trust: approval_required  # `trusted` skips the approval card for this server's tools
       command:
         - npx
         - '-y'
@@ -221,7 +220,9 @@ mcp:
 
 The `/mcp` page provides a visual **Add Server** modal that replaces manual YAML editing. It has two modes:
 
-**Quick add (preset)** — a dropdown of 85+ known MCP servers grouped by category (Filesystem, Web, Database, Code, AI, Communication, etc.). Pick one and the form auto-fills the name, transport, command, and env var keys. You just fill in the API key value. Presets are loaded from `certified_servers.yaml` (81 servers) plus 5 extra high-value servers (firecrawl, playwright, sequential-thinking, memory, time).
+**Quick add (preset)** — a dropdown of MCP servers grouped by category, from `kazma_skills/certified_servers.yaml`: 13 servers, each a package published by the MCP project or by the vendor of the service it connects to (Filesystem, Git, Time, Memory, Sequential Thinking, Playwright, Firecrawl, Brave Search, Context7, Notion, Stripe, Heroku, AWS Documentation). Pick one and the form fills the name, transport, command and the environment variables to fill in; you type the API key, and Kazma keeps it in the vault. Every preset's package is checked against npm and PyPI (`python scripts/verify_mcp_catalog.py`, recorded in `tests/fixtures/mcp_catalog_registry.json` and held by `tests/test_mcp_catalog.py`). Until 2026-09-30 the list offered 81 "certified" servers, 78 of which named packages that never existed. Left out on purpose: a raw URL fetcher (it would bypass the egress guard `read_url` enforces) and GitHub (Kazma has its own GitHub tools).
+
+**Secrets stay in the vault.** A key an MCP server needs (an `env` entry named like a credential, an `auth` value or token, a header, a `--api-key=...` flag in the command, a password in a URL) is stored in Kazma's vault; `kazma.yaml` and the settings database keep a `vault://` pointer, the MCP pages and APIs show `****`, and the server receives the real value when it starts. Keys saved before 2026-09-30 move to the vault the next time Kazma connects its MCP servers (`kazma_core/mcp/secrets.py`).
 
 **Custom** — the same raw command form, with three safety nets:
 1. **shlex-style parsing** — quoted args with spaces survive (`npx -y foo "path/with spaces"`).
@@ -351,6 +352,6 @@ Register it during startup (or via a skill's entry point). The supervisor will e
 ## Documentation Audit Notes
 
 - **HMAC skill signing is real and fail-closed** — contrary to what one might assume from the mix of subsystems, the loader genuinely refuses tampered/unsigned-by-required skills.
-- **"Trust tiers" are NOT a code feature.** Documented explicitly to counter any implication of a tiered trust model. Only a boolean `certified` flag and an unused `trust: trusted` string exist.
-- **MCP stdio transport has no auth.** SSE and Streamable HTTP support bearer/custom-header auth; stdio inherits the process environment. This is a meaningful security boundary for production planning.
+- **"Trust tiers" are NOT a code feature.** Documented explicitly to counter any implication of a tiered trust model. Only the hub's boolean `certified` flag and an MCP server's `trust: trusted` (which skips the approval card for its tools) exist.
+- **MCP stdio transport has no auth.** SSE and Streamable HTTP support bearer/custom-header auth. A stdio server starts with the allowlisted basics (PATH, the temp and home folders, the locale, proxy settings) plus its own `env`, never Kazma's secrets (audit H-4; the Test button's client joined it on 2026-09-30; `KAZMA_MCP_INHERIT_ENV=1` passes the whole environment).
 - **`classify_mcp_tool` unknown → danger** is the safe default and should be preserved.

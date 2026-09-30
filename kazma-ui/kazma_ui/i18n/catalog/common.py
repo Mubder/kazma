@@ -1740,6 +1740,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشل اختبار الاتصال: {error}",
         "en": "Connection test failed: {error}",
     },
+    "mcp.ui.rewrite_npm": {
+        "ar": "حُوِّل \"npm install {pkg}\" إلى أمر التشغيل \"npx -y {pkg}\" (يثبّت npm install الحزمة فقط ولا يشغّل خادم MCP).",
+        "en": "Rewrote \"npm install {pkg}\" to the RUN command \"npx -y {pkg}\" (npm install only installs the package; it does not start the MCP server).",
+    },
+    "mcp.ui.rewrite_pip": {
+        "ar": "حُوِّل \"pip install {pkg}\" إلى أمر التشغيل \"python -m {mod}\".",
+        "en": "Rewrote \"pip install {pkg}\" to the RUN command \"python -m {mod}\".",
+    },
+    "mcp.ui.rewrite_pipx": {
+        "ar": "حُوِّل \"pipx install {pkg}\" إلى \"pipx run {pkg}\".",
+        "en": "Rewrote \"pipx install {pkg}\" to \"pipx run {pkg}\".",
+    },
     "mcp.ui.no_error_detail": {
         "ar": "لا تفاصيل للخطأ",
         "en": "no error detail",

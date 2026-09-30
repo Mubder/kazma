@@ -211,6 +211,25 @@ version and says when it could not check; hints go through
 product, script and doc file, and every install argv by AST; it flags all 27
 old sites, and each old form is a negative control).
 
+**AUD-030 to AUD-032, found while replacing the MCP presets (eighth and ninth
+change sets).** AUD-030: the Settings and /mcp "Test" client started an MCP
+server with `{**os.environ, **cfg.env}` -- the vault key, the database
+password, every API key -- while the manager had used audit H-4's allowlist
+for months; and every MCP secret (env keys, `auth` values and tokens, a
+`--api-key=` flag) was stored as typed in kazma.yaml and the settings
+database, returned by `GET /api/settings/mcp` and `/api/mcp/servers`, and an
+argument-style key was logged at INFO. Fixed: one child-env rule
+(`kazma_core/mcp/child_env.py`, now under `tests/test_child_env.py`), secrets
+in the vault with pointers (`kazma_core/mcp/secrets.py`), masked responses, a
+redacted start log, a one-time move of stored secrets. AUD-031: 78 of the 81
+"certified" MCP presets named packages no registry held, one pointed a server
+at Kazma's settings database, the "Time" extra was not on npm, and the loader
+found the catalog through the repository layout (no presets in a wheel
+install); the catalog is 13 published servers held to a registry record.
+AUD-032: 24 of 45 JavaScript test files ran nowhere (CI named seven); all
+now run in CI and the local suite. Gates: `tests/test_mcp_secrets.py`,
+`tests/test_mcp_catalog.py`, `tests/test_js_suites.py`.
+
 Previously deferred: AUD-015 (annotate the ~18 API-only routes —
 docs hygiene), AUD-017 (73-file unused-import sweep — its own batch), AUD-026
 (split the two 270-complexity chat transports — touches the gated §31
@@ -598,6 +617,36 @@ starved the live server.
   environment where Kazma is not installed; the Settings page would show their
   version as an available update.
 - **Remediation (done):** see the seventh change set above.
+
+**[AUD-030] [Severity: High] [Confidence: High — reproduced] [Category: Security] [kazma-core/kazma_core/mcp_client.py:265; kazma-core/kazma_core/mcp_servers_store.py; kazma-core/kazma_core/mcp/manager.py:1423]**
+
+- **Evidence:** `env = {**os.environ, **cfg.env}` in the Test client (the
+  test against the old file finds `KAZMA_VAULT_KEY` in the child's
+  environment); `upsert_mcp_server` wrote `env`/`auth` values as typed to
+  both stores; `api_get_mcp` returned them; `logger.info("[MCP] Starting
+  stdio server '%s': %s", name, command)` after injecting an `auth` argument.
+- **Impact:** a server being tried out -- often an unreviewed npm or PyPI
+  package -- received every secret the Kazma process holds; MCP keys sat in a
+  tracked file and in API responses and logs.
+- **Remediation (done):** see the eighth change set above.
+
+**[AUD-031] [Severity: Medium] [Confidence: High — every package queried] [Category: Functional] [kazma-skills/kazma_skills/certified_servers.yaml; kazma-ui/kazma_ui/mcp_presets.py:28-33]**
+
+- **Evidence:** npm answers 404 for `@anthropic-ai/pypi-mcp` and 74 more
+  `@anthropic-ai/*-mcp` names, `@modelcontextprotocol/server-git`, `-sqlite`,
+  `-mongodb` and `-time`; `sqlite` passed `--db-path kazma-data/kazma.db`;
+  `_CERTIFIED_PATH` climbed three folders to `kazma-skills/`.
+- **Impact:** a preset list of servers that could never start; one would
+  have opened Kazma's own database to an MCP server.
+- **Remediation (done):** see the eighth change set above.
+
+**[AUD-032] [Severity: Medium] [Confidence: High] [Category: Testing] [.github/workflows/ci.yml; tests/js/, tests/test_mcp_*.js]**
+
+- **Evidence:** no CI step or pytest wrapper named 24 of the 45 JavaScript
+  test files (`test_sse_parser.js`, `test_safe_next.js`, `test_push_arming.js`,
+  `test_modal_store.js`, `test_settings_mixins.js`, ...).
+- **Impact:** gates AGENTS.md relies on could break without failing a build.
+- **Remediation (done):** see the ninth change set above.
 
 **Audited and cleared (no finding with high confidence):**
 
