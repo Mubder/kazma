@@ -104,7 +104,18 @@ gaps, now closed with their own gates:
   serial per-file runs). The runner now kills whole process trees, bounds the
   drain, scales the budget with chunk size, and splits a timed-out chunk.
 
-Deliberately deferred (not bugs): AUD-015 (annotate the ~18 API-only routes —
+**AUD-015 done (third change set):** the route inventory is a gate
+(`tests/test_api_route_callers.py`). With a caller detector that reads whole
+string literals (balanced `${…}`, concatenation prefixes) and counts only
+client code, 55 routes had no caller: each is now declared with a verified
+reason, three dead ones were removed (the typing-telemetry stubs; and
+`/api/system/flush`, which reset the model/worker/tool registry singletons
+under live holders), and the Settings backup — which the page can create but
+not restore — has a tested restore (`tests/test_settings_restore.py`).
+Follow-up: a Restore control, once a restore keeps runtime state (active chat
+threads, boot stamps) out.
+
+Previously deferred: AUD-015 (annotate the ~18 API-only routes —
 docs hygiene), AUD-017 (73-file unused-import sweep — its own batch), AUD-026
 (split the two 270-complexity chat transports — touches the gated §31
 delivery path, needs its own effort + full delivery matrix), AUD-027 (keep

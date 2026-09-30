@@ -1,4 +1,4 @@
-"""System status, diagnostics, maintenance, and flush endpoints.
+"""System status, diagnostics and maintenance endpoints.
 
 Extracted from the former ``kazma_ui/routes_direct.py`` god module
 (3,862 lines) — audit O5. Handler bodies are unchanged; only their
@@ -11,10 +11,8 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import Depends, Request
+from fastapi import Request
 from kazma_core.errors import safe_error
-
-from kazma_ui.rate_limit import rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -65,61 +63,11 @@ def register_system_routes(self: Any) -> None:
             "discovered_models": reg.get_discovered_models(),
             "unified_options": reg.list_unified_options(),
         })
-    @self.app.post("/api/system/flush", dependencies=[Depends(rate_limit("system_flush", 6))])
-    async def _system_flush():
-        import glob as _glob_sys
-        import os as _os_sys
-
-        try:
-            from kazma_core.paths import data_dir, settings_db, user_home
-
-            _home = user_home()
-            paths = {
-                "kazma_home": str(_home),
-                "config_db": settings_db(),
-                "config_yaml": next(iter(_glob_sys.glob(str(_home / "*.yaml"))), ""),
-                "pending_evolution": str(_home / "pending_evolution.json"),
-                "knowledge_graph": str(data_dir() / "knowledge_graph.db"),
-            }
-        except Exception:
-            _fallback = _os_sys.path.join(_os_sys.getcwd(), ".kazma")
-            paths = {
-                "kazma_home": _fallback,
-                "config_db": _os_sys.path.join(_fallback, "config.db"),
-                "config_yaml": next(
-                    iter(_glob_sys.glob(_os_sys.path.join(_fallback, "*.yaml"))), ""
-                ),
-                "pending_evolution": _os_sys.path.join(
-                    _fallback, "pending_evolution.json"
-                ),
-                "knowledge_graph": str(
-                    str(_paths_data_dir() / "knowledge_graph.json")
-                ),
-            }
-        # Flush model registry cache
-        try:
-            import kazma_core.model_registry as _mr
-
-            _mr._registry = None
-        except Exception as exc:
-            logger.debug("Model registry cache flush failed: %s", exc)
-        # Flush WorkerRegistry cache
-        try:
-            from kazma_core.swarm.registry import WorkerRegistry
-
-            WorkerRegistry._instance = None
-        except Exception as exc:
-            logger.debug("Worker registry cache flush failed: %s", exc)
-        # Flush tool registry (the real registry is LocalToolRegistry)
-        try:
-
-            # LocalToolRegistry caches the singleton in _builtin_registry.
-            import kazma_core.agent.tool_registry as _tr_mod
-
-            _tr_mod._builtin_registry = None
-        except Exception as exc:
-            logger.debug("Tool registry cache flush failed: %s", exc)
-        return {"status": "flushed", "config_paths": paths}
+    # POST /api/system/flush was removed (audit AUD-015, 2026-09-30): no page
+    # or client called it, and it reset the model, worker and tool registry
+    # singletons while running code still held the old instances -- two live
+    # registries -- with a fallback that derived paths from the process CWD
+    # (AGENTS §38). tests/test_api_route_callers.py.
     @self.app.get("/api/system/config-paths")
     async def _system_config_paths():
         import os as _osp

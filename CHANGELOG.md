@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Every API route has a caller or a reason (2026-09-30)
+
+- **A test now lists every `/api` route nothing in Kazma calls, with why.**
+  The audit found 55: OAuth sign-ins land on some, others are the documented
+  Document API or reports for operators — each is written down with its
+  reason, and the list fails the day one gains a caller or disappears, so a
+  forgotten route cannot pile up unseen again.
+- **Three dead routes are gone:** two typing-indicator stubs nothing used,
+  and a "flush" endpoint that reset Kazma's model, worker and tool registries
+  while running code still held the old ones.
+- **Settings backups restore correctly** — now proven by tests through the
+  real route (the path had none). A Restore button comes next, once a restore
+  is made to leave live state such as each chat's active thread alone.
+
 ## A chat app keeps its new token after a restart (2026-09-30)
 
 - **Slack (and Discord, Telegram) no longer lose a token you saved.** A token

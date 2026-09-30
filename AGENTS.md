@@ -1767,7 +1767,8 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   Requests (`tests/test_csrf.py`) — MagicMock auto-attributes and hides
   exactly that bug class.
 - `rate_limit.py`: per-principal sliding window (cookie > Authorization > IP)
-  on chat stream / voice / research sessions / swarm dispatch / system flush.
+  on chat stream / voice / research sessions / swarm dispatch (the system
+  flush route it also covered was removed 2026-09-30, AUD-015).
   Active ONLY when auth is enabled (never demo mode); live ConfigStore
   `api.rate_limit.<bucket>_per_minute`; env `KAZMA_RATE_LIMIT_ENABLED=0`.
 
@@ -3638,8 +3639,18 @@ and the sibling suites):**
   reason it has none. Found with no control at all: removing a document from
   a Knowledge library, protecting a memory entity, resetting a swarm
   breaker, Outlook Calendar's disconnect, folders outside the workspace.
-  Every one is now on its page. The route inventory
-  (`/api/*` routes no template or script calls) is the way to look for more.
+  Every one is now on its page. **The route inventory is a gate**
+  (`tests/test_api_route_callers.py`, 2026-09-30): every `/api` route the
+  built app serves has a caller -- a string in a page script, a template, the
+  TUI, the CLI or a script (server-side Python is not a caller: an error text
+  once made a dead route look called) -- or is declared in
+  `NOT_CALLED_BY_A_PAGE` with its reason (OAuth redirects, the documented
+  Document API, operator reports...). A declaration fails the day its route
+  gains a caller or disappears. The first pass removed three dead routes
+  (the typing-telemetry stubs and `/api/system/flush`, which reset live
+  registry singletons) and found the Settings backup had no restore control;
+  the restore itself is now tested (`tests/test_settings_restore.py`) and a
+  control waits on keeping runtime state out of a restore.
 - **A panel lays out by its own width** (`@container`), not the window's:
   with the sidebar open a 918px window left the IDE editor ~40px and
   clipped the providers panel. `tests/e2e/test_layout_widths.py` (each with
