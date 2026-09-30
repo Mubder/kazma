@@ -3580,6 +3580,21 @@ and the sibling suites):**
   reported "rebuilt" over a failed commit, and the §25 continue-directive clear
   failed without a word; a write that can fail says so (WARNING when data or a
   feature is affected, DEBUG with the traceback for best-effort side writes).
+- **Nothing installs Kazma, or tells anyone to, by name from PyPI** (AUD-029).
+  No Kazma package is published there, so `kazma`, `kazma-core` and the rest
+  are anyone's to register. `kazma update` on a wheel install reads the newest
+  GitHub release (`get_latest_release`) and `do_pip_update` installs that
+  release's wheel, from the file, only when it matches `SHA256SUMS` and
+  GitHub's asset digest (URL pinned to the repo's releases, streamed, size
+  capped, extras kept); a release it cannot verify is refused with its page.
+  The Settings check reads the same release (`settings_manager._RELEASE_API`,
+  the CLI's own copy because the updater must run while `kazma_core` may not
+  import; a test holds them equal), shows `kazma_core.version`, and reports an
+  unreachable GitHub as `error`, never as "running the latest". A hint names
+  the local install through `kazma_core.install_hint.extra_install_hint`.
+  Gate: `tests/test_no_pypi_kazma.py` -- every tracked product, script and doc
+  file (history, plans and tests excepted), a PyPI URL for a Kazma name, and
+  every install argv by AST; negative controls are the 27 old forms.
 
 ## UI Conventions (Web)
 

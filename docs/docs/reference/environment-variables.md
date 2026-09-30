@@ -271,7 +271,7 @@ See [Web research](../guide/web-research) for playbooks. Tools are used from **c
 | `KAZMA_RESEARCH_PREFLIGHT_LIVE` | unset | `1` makes the research readiness check run a real micro-search, not only a configuration check. |
 | `KAZMA_RESEARCH_SYNTH_MAX_IN` | `48000` | Characters of research files one `research_synthesize` call reads (4000–200000). |
 
-Optional package: Playwright via `pip install 'kazma[web]'` then `playwright install chromium` (bot walls / thin JS shells).
+Optional package: Playwright via `pip install -e ".[web]"` then `playwright install chromium` (bot walls / thin JS shells).
 
 **SearXNG ops:** `docker compose --profile search up -d searxng` → `http://127.0.0.1:8088` (JSON enabled in `deploy/searxng/settings.yml`).
 

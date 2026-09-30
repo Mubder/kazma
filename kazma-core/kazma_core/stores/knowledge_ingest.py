@@ -1357,7 +1357,9 @@ def _check_playwright_available() -> str:
     try:
         from playwright.async_api import async_playwright  # noqa: F401
     except ImportError:
-        return "playwright package not installed (pip install kazma[web])"
+        from kazma_core.install_hint import extra_install_hint
+
+        return f"playwright package not installed (the web extra: {extra_install_hint('web')})"
     # The Python package is present; check whether the Chromium binary is
     # actually installed by looking for the playwright driver cache.  We
     # can't easily run a launch() here (it's async), so probe the known

@@ -1716,6 +1716,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "جارٍ التحديث...",
         "en": "Refreshing...",
     },
+    "settings.release_notes": {
+        "ar": "ملاحظات الإصدار",
+        "en": "Release notes",
+    },
     "settings.remove_model": {
         "ar": "إزالة النموذج من القائمة",
         "en": "Remove model from list",
@@ -2211,6 +2215,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.update_available": {
         "ar": "يتوفر تحديث:",
         "en": "Update available:",
+    },
+    "settings.update_check_failed": {
+        "ar": "تعذّر التحقق من التحديثات:",
+        "en": "Could not check for updates:",
     },
     "settings.upload_file": {
         "ar": "رفع ملف",

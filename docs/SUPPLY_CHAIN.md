@@ -26,6 +26,26 @@ Provenance attestations are not files in the release; GitHub stores them and
 
 ---
 
+## Kazma is not on PyPI
+
+Kazma ships through the GitHub releases of `Mubder/kazma` and the repository
+itself, nowhere else. No Kazma package is published on PyPI, so `kazma`,
+`kazma-core` and the other names are anyone's to register: never install
+`kazma` (or `kazma[...]`) by name from PyPI. Install an extra from your Kazma
+folder (`pip install -e ".[web]"`, or Settings → Packages) and upgrade with
+`kazma update`.
+
+On an install made from a release wheel, `kazma update` reads the newest
+release from the GitHub API, downloads its wheel from that release, and
+installs it only when the file's SHA-256 matches the release's `SHA256SUMS`
+and, where GitHub reports one, GitHub's own digest of the asset; otherwise it
+stops and names the release page. It does not check the Sigstore signature
+itself: run `gh attestation verify` (below) when you want that proof. The
+Settings update check reads the same release. Until 2026-09-30 both asked
+PyPI, and `kazma update` then had pip upgrade `kazma` by name.
+
+---
+
 ## 1. Provenance — was this built from this repo?
 
 This is the check that matters most, and it is one command:

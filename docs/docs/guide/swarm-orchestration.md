@@ -41,7 +41,7 @@ crash can resume the step (`kazma_core/swarm/durable.py`). The Temporal
 worker runs **inside the Kazma process** (app lifespan, fail-open). Default
 is still asyncio. Kill-switch `KAZMA_TEMPORAL=0`. Strict:
 `KAZMA_TEMPORAL_REQUIRED=1` (no in-process fallback). Extra:
-`pip install 'kazma[durable]'`.
+`pip install -e ".[durable]"`.
 
 ### 1.1 Constructor
 

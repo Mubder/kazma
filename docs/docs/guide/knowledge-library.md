@@ -164,7 +164,7 @@ This mirrors the Research panel's archive pattern (a soft `archived` flag, not a
 
 ## Optional dependencies
 
-Indexed retrieval needs the `rag` extra (`pip install kazma[rag]` → `chromadb`, `sentence-transformers`, `sqlite-vec`); JS/tabbed-page fetch needs the `web` extra (`pip install kazma[web]` → `playwright`, then `playwright install chromium`). Without them the system degrades gracefully: no semantic search (FTS5-only), no JS-page rendering.
+Indexed retrieval needs the `rag` extra (`pip install -e ".[rag]"` → `chromadb`, `sentence-transformers`, `sqlite-vec`); JS/tabbed-page fetch needs the `web` extra (`pip install -e ".[web]"` → `playwright`, then `playwright install chromium`). Without them the system degrades gracefully: no semantic search (FTS5-only), no JS-page rendering.
 
 **Every chunk gets its meaning vector.** A chunk is embedded when it is ingested, if the vector store is up at that moment. A 15-minute maintenance pass (`KnowledgeIndex.backfill_vectors`, up to 5 minutes each, last in the maintenance cycle) makes each library's vectors match its chunks: it embeds any chunk the store lacks -- the shortest first, across all libraries -- and removes the vectors of chunks that were retired while it was down, so a library indexed during an outage catches up by itself. Library health shows `vector_chunks` beside `sqlite_chunks`. From 2026-07-31 to 2026-09-26 the store never came up -- its client module had been deleted and the failure was logged as "chromadb not installed" -- so every library was keyword-only; the pass restores them.
 
@@ -177,9 +177,9 @@ Each library on the Knowledge page shows how much of it meaning search reaches: 
 - **Bot-walled sites need a fetch backend.** Sites that block non-browser clients via TLS/header fingerprinting — Meta (`developers.facebook.com`), Cloudflare-protected properties, Instagram, etc. — return a 200-OK `<title>Error</title>` stub to httpx and defeat vanilla Playwright too. For those, set **one** of:
   - `KAZMA_FIRECRAWL_API_KEY=<key>` — paid, best quality, handles JS + bot walls
   - Jina Reader (`r.jina.ai`) — used automatically on hard-page recovery unless `KAZMA_JINA_READER=0`; set `=1` to always try first; optional `JINA_API_KEY`
-  - `pip install kazma[web]` then `playwright install chromium` — local headless browser, works for SPAs that aren't server-side fingerprinting
+  - `pip install -e ".[web]"` then `playwright install chromium` — local headless browser, works for SPAs that aren't server-side fingerprinting
   The job's `errors` list (visible in the progress panel + `/kb status`) names the missing backend when all tiers fail, so you know exactly which to enable.
-- **Chromium binary is separate from the Python package.** `pip install kazma[web]` installs the playwright Python bindings; you still need `playwright install chromium` to download the browser binary itself. The job error names this explicitly: *"Chromium binary not installed (run: playwright install chromium)"*.
+- **Chromium binary is separate from the Python package.** `pip install -e ".[web]"` installs the playwright Python bindings; you still need `playwright install chromium` to download the browser binary itself. The job error names this explicitly: *"Chromium binary not installed (run: playwright install chromium)"*.
 - A small fraction of heavily-obfuscated SPA doc sites can resist all of the above. Pages that fail are reported in the job log so you can add them manually.
 - Local embeddings (`BAAI/bge-m3`) are free but slower on CPU; remote (e.g. NVIDIA NIM `nv-embed-v1`) is faster/better but costs money. See `memory.embedding:` in `kazma.yaml` or the **Settings → Embedder** page.
 - Crawl is bounded by `KAZMA_KB_MAX_PAGES` (hard cap 1000) to prevent runaway.

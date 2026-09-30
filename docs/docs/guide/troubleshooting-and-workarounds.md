@@ -538,7 +538,7 @@ Save is disabled for any provider/connector until **Test Connection** succeeds (
 
 **Cause:** CDN challenge or JS SPA shell.
 
-**Fix:** Install Playwright (`pip install 'kazma[web]'` + `playwright install chromium`). Or enable Jina/Firecrawl backends. Not all sites can be opened automatically.
+**Fix:** Install Playwright (`pip install -e ".[web]"` + `playwright install chromium`). Or enable Jina/Firecrawl backends. Not all sites can be opened automatically.
 
 ### 12.4 Dashboard Total Cost / Tokens show `$0` / `0` after a chat turn
 

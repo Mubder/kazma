@@ -3,7 +3,10 @@
 Detects whether the package was installed via pip or as an editable
 git install, then checks for updates accordingly:
 
-* **pip install**: queries PyPI for the latest version and upgrades via pip.
+* **pip install** (a release wheel): reads the latest GitHub release of the
+  canonical repo and installs its wheel once it matches the release's
+  published SHA-256 -- never the name ``kazma`` from PyPI, where no Kazma
+  package is published and the name is anyone's to register.
 * **git / editable install** (preferred monorepo path): ``git fetch``, then
   hard-reset **main** to ``origin/main`` (after named stash of local edits),
   reinstall extras in a fresh process, and postflight-verify HEAD + CLI.
@@ -19,11 +22,14 @@ Flags:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import subprocess
 import sys
 import os
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from rich.console import Console
@@ -37,7 +43,7 @@ console = Console()
 
 __all__ = [
     "PACKAGE_NAME",
-    "PYPI_URL",
+    "ReleaseInfo",
     "check_git_behind",
     "detect_active_extras",
     "detect_install_type",
@@ -45,7 +51,7 @@ __all__ = [
     "do_pip_update",
     "get_current_version",
     "get_git_commit",
-    "get_latest_pypi_version",
+    "get_latest_release",
     "is_newer",
     "load_persisted_extras",
     "parse_update_flags",
@@ -55,7 +61,6 @@ __all__ = [
     "run",
 ]
 
-PYPI_URL = "https://pypi.org/pypi/kazma/json"
 PACKAGE_NAME = "kazma"
 
 # Timeouts (seconds) for various subprocess operations.
@@ -108,6 +113,12 @@ _UPDATE_BOOL_FLAGS = {
 _TRACKING_BRANCHES = frozenset({"main", "master"})
 _UPDATE_REMOTE_REF = "origin/main"
 _GITHUB_REPO = "Mubder/kazma"
+# Where a pip-installed Kazma learns of, and fetches, a newer version: the
+# canonical repo's newest release (get_latest_release). Never PyPI.
+_RELEASE_API = f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest"
+_RELEASE_DOWNLOAD_PREFIX = f"https://github.com/{_GITHUB_REPO}/releases/download/"
+# A release wheel is a few MB; anything this large is not one.
+_MAX_WHEEL_BYTES = 256 * 1024 * 1024
 _STASH_MSG_PREFIX = "kazma-update-"
 
 # ── Supply-chain safety for the operator upgrade path ────────────────────
@@ -226,7 +237,7 @@ def detect_install_type() -> str:
     root is found (typical developer install), ``"pip"`` for wheel installs
     without a local git tree.  Uses ``pip show`` for the editable marker.
     """
-    # Prefer git when the monorepo is present — Kazma is not always on PyPI.
+    # Prefer git when the monorepo is present (Kazma is not on PyPI at all).
     if _find_git_root() is not None:
         try:
             result = _run_pip(["show", PACKAGE_NAME])
@@ -283,52 +294,113 @@ def get_current_version() -> str:
     return _get_version()
 
 
-def get_latest_pypi_version() -> str | None:
-    """Fetch the latest kazma version from PyPI, then GitHub releases.
+@dataclass(frozen=True)
+class ReleaseInfo:
+    """The newest Kazma release, and the wheel ``kazma update`` may install.
 
-    Returns the version string, or ``None`` on network/parse errors.
+    ``problem`` says why the wheel may not be installed automatically (no
+    wheel, no published hash, hashes that disagree); empty when it may.
+    """
+
+    version: str
+    wheel_name: str = ""
+    wheel_url: str = ""
+    wheel_sha256: str = ""
+    page: str = ""
+    problem: str = ""
+
+
+def _is_sha256(value: str) -> bool:
+    return len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
+def _parse_sha256sums(text: str) -> dict[str, str]:
+    """``SHA256SUMS`` lines (``<hex>  <name>``; ``*name`` = binary) -> {name: hex}."""
+    out: dict[str, str] = {}
+    for line in text.splitlines():
+        parts = line.strip().split()
+        if len(parts) == 2 and _is_sha256(parts[0].lower()):
+            out[parts[1].lstrip("*")] = parts[0].lower()
+    return out
+
+
+def get_latest_release() -> ReleaseInfo | None:
+    """The newest Kazma release on GitHub -- the one channel Kazma ships through.
+
+    Each release carries its wheel, a ``SHA256SUMS`` file and Sigstore
+    signatures (docs/SUPPLY_CHAIN.md), and GitHub reports each asset's own
+    SHA-256 (``digest``). The wheel's hash is taken from ``SHA256SUMS`` and,
+    where GitHub reports one, must equal GitHub's.
+
+    PyPI is never asked. No Kazma package is published there, so ``kazma`` is
+    anyone's name to register: this used to ask PyPI for the newest version
+    and then have pip upgrade ``kazma`` by name, which would have installed
+    whoever registered it first (found 2026-09-30).
+
+    Returns ``None`` when GitHub cannot be read; a release whose wheel may not
+    be installed automatically comes back with ``problem`` set.
     """
     try:
         import httpx
 
         with httpx.Client(timeout=_CHECK_TIMEOUT, follow_redirects=True) as client:
-            try:
-                response = client.get(PYPI_URL)
-                if response.status_code == 200:
-                    data = response.json()
-                    version = data.get("info", {}).get("version")
-                    if version:
-                        return str(version)
-            except Exception as exc:
-                logger.debug("PyPI version fetch failed: %s", exc)
-
-            # Fallback: GitHub Releases (primary distribution for monorepo)
-            for url in (
-                f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest",
-                f"https://api.github.com/repos/{_GITHUB_REPO}/tags?per_page=1",
-            ):
-                try:
-                    response = client.get(
-                        url,
-                        headers={"Accept": "application/vnd.github+json"},
-                    )
-                    if response.status_code != 200:
-                        continue
-                    data = response.json()
-                    if isinstance(data, dict):
-                        tag = data.get("tag_name") or data.get("name") or ""
-                    elif isinstance(data, list) and data:
-                        tag = data[0].get("name") or ""
-                    else:
-                        tag = ""
-                    tag = str(tag).lstrip("v").strip()
-                    if tag:
-                        return tag
-                except Exception as exc:
-                    logger.debug("GitHub version fetch failed: %s", exc)
+            resp = client.get(_RELEASE_API, headers={"Accept": "application/vnd.github+json"})
+            if resp.status_code != 200:
+                logger.warning("GitHub answered %s for the latest Kazma release", resp.status_code)
+                return None
+            data = resp.json()
+            tag = str(data.get("tag_name") or "").strip()
+            version = tag[1:] if tag.startswith("v") else tag
+            if not version:
+                return None
+            page = f"https://github.com/{_GITHUB_REPO}/releases/tag/{tag}"
+            assets = [a for a in (data.get("assets") or []) if isinstance(a, dict)]
+            wheel = next(
+                (
+                    a for a in assets
+                    if str(a.get("name") or "").startswith(f"{PACKAGE_NAME}-")
+                    and str(a.get("name") or "").endswith(".whl")
+                ),
+                None,
+            )
+            if wheel is None:
+                return ReleaseInfo(version=version, page=page, problem="the release has no wheel")
+            # The name becomes a file name below: never a directory.
+            name = Path(str(wheel.get("name") or "")).name
+            url = str(wheel.get("browser_download_url") or "")
+            if not url.startswith(_RELEASE_DOWNLOAD_PREFIX):
+                return ReleaseInfo(
+                    version=version, page=page,
+                    problem=f"the wheel is not served from {_RELEASE_DOWNLOAD_PREFIX}",
+                )
+            listed = ""
+            sums = next((a for a in assets if a.get("name") == "SHA256SUMS"), None)
+            sums_url = str((sums or {}).get("browser_download_url") or "")
+            if sums_url.startswith(_RELEASE_DOWNLOAD_PREFIX):
+                sums_resp = client.get(sums_url)
+                if sums_resp.status_code == 200:
+                    listed = _parse_sha256sums(sums_resp.text).get(name, "")
+            digest = str(wheel.get("digest") or "").lower()
+            github = digest[len("sha256:"):] if digest.startswith("sha256:") else ""
+            if not _is_sha256(github):
+                github = ""
+            if not listed:
+                problem = "SHA256SUMS does not list the wheel"
+            elif github and github != listed:
+                problem = "SHA256SUMS and GitHub disagree about the wheel's SHA-256"
+            else:
+                problem = ""
+            return ReleaseInfo(
+                version=version,
+                wheel_name=name,
+                wheel_url=url,
+                wheel_sha256=listed if not problem else "",
+                page=page,
+                problem=problem,
+            )
     except Exception as exc:
-        logger.warning("Failed to fetch remote version: %s", exc)
-    return None
+        logger.warning("Failed to fetch the latest Kazma release: %s", exc)
+        return None
 
 
 def parse_version(version: str) -> tuple[int, ...]:
@@ -424,14 +496,61 @@ def get_git_commit(ref: str = "HEAD") -> str:
 # Update operations
 # ---------------------------------------------------------------------------
 
-def do_pip_update() -> bool:
-    """Upgrade kazma via pip. Returns ``True`` on success."""
-    console.print("[cyan]Running pip install --upgrade kazma...[/cyan]")
+def do_pip_update(release: ReleaseInfo, extras: list[str] | tuple[str, ...] = ()) -> bool:
+    """Install *release*'s wheel once its SHA-256 matches the release's.
+
+    Never installs ``kazma`` by name (see :func:`get_latest_release`). The
+    wheel is downloaded from the canonical repo's release, hashed as it
+    arrives, and installed from that file with the extras already installed.
+    A release whose wheel may not be installed automatically is refused, with
+    the page to verify and install it by hand (``gh attestation verify``).
+    Returns ``True`` on success.
+    """
+    page = release.page or f"https://github.com/{_GITHUB_REPO}/releases"
+    problem = release.problem
+    if not problem and not (
+        release.wheel_url.startswith(_RELEASE_DOWNLOAD_PREFIX)
+        and _is_sha256(release.wheel_sha256)
+        and release.wheel_name.startswith(f"{PACKAGE_NAME}-")
+        and release.wheel_name.endswith(".whl")
+        and release.wheel_name == Path(release.wheel_name).name
+    ):
+        problem = "the release gives no wheel with a published SHA-256"
+    if problem:
+        console.print(f"[red]Not installing v{release.version} automatically: {problem}.[/red]")
+        console.print(f"Verify and install it by hand: {page}")
+        return False
     try:
-        result = _run_pip(
-            ["install", "--upgrade", PACKAGE_NAME],
-            timeout=_INSTALL_TIMEOUT,
-        )
+        import httpx
+
+        with tempfile.TemporaryDirectory(prefix="kazma-update-") as tmp:
+            wheel = Path(tmp) / release.wheel_name
+            sha = hashlib.sha256()
+            size = 0
+            with httpx.Client(timeout=_INSTALL_TIMEOUT, follow_redirects=True) as client:
+                with client.stream("GET", release.wheel_url) as resp:
+                    resp.raise_for_status()
+                    with wheel.open("wb") as fh:
+                        for chunk in resp.iter_bytes():
+                            size += len(chunk)
+                            if size > _MAX_WHEEL_BYTES:
+                                console.print("[red]The download is larger than any Kazma wheel; not installing.[/red]")
+                                return False
+                            sha.update(chunk)
+                            fh.write(chunk)
+            if sha.hexdigest() != release.wheel_sha256:
+                console.print(
+                    "[red]The downloaded wheel does not match the release's "
+                    "SHA-256; not installing.[/red]"
+                )
+                console.print(f"Release: {page}")
+                return False
+            spec = str(wheel)
+            if extras:
+                spec += f"[{','.join(extras)}]"
+                console.print(f"[cyan]Preserving optional extras:[/cyan] {', '.join(extras)}")
+            console.print(f"[cyan]Installing {release.wheel_name} (SHA-256 verified)...[/cyan]")
+            result = _run_pip(["install", "--upgrade", spec], timeout=_INSTALL_TIMEOUT)
         if result.returncode == 0:
             console.print("[green]pip upgrade completed.[/green]")
             return True
@@ -1550,7 +1669,7 @@ def _print_version_table(
 def _run_pip_check_and_update(
     current_version: str, check_only: bool, force: bool, skip_confirm: bool
 ) -> None:
-    """Check PyPI/GitHub for updates and optionally upgrade via pip."""
+    """Check the latest GitHub release and optionally install its wheel."""
     # If a monorepo is present, prefer git update even when pip-installed
     if _find_git_root() is not None:
         console.print("[dim]Local git repo detected — using git update path.[/dim]")
@@ -1564,16 +1683,17 @@ def _run_pip_check_and_update(
         )
         return
 
-    latest = get_latest_pypi_version()
+    release = get_latest_release()
 
-    if latest is None:
+    if release is None:
         console.print()
-        console.print("[red]Could not fetch version info from PyPI or GitHub.[/red]")
+        console.print("[red]Could not read the latest release from GitHub.[/red]")
         console.print("If you cloned the repo, run from the monorepo: [cyan]git pull[/cyan]")
         console.print(f"Or check network / GitHub releases: https://github.com/{_GITHUB_REPO}")
         sys.exit(1)
 
-    console.print(f"  Latest:       [cyan]v{latest}[/cyan] (PyPI)")
+    latest = release.version
+    console.print(f"  Latest:       [cyan]v{latest}[/cyan] (GitHub release)")
     console.print()
     _print_version_table("pip", current_version, latest_version=latest)
 
@@ -1600,7 +1720,7 @@ def _run_pip_check_and_update(
             console.print("Update cancelled.")
             return
 
-    if do_pip_update():
+    if do_pip_update(release, detect_active_extras()):
         new_version = get_current_version()
         console.print()
         console.print(f"[green]Update complete![/green] Now at v{new_version}")
@@ -1693,7 +1813,7 @@ def _run_git_check_and_update(
         console.print(f"  HEAD:    {new_commit}")
         if new_commit != "unknown" and new_commit not in new_version:
             # Soft note when version embedding lags HEAD (rare)
-            console.print(f"  [dim]Tip: open a new shell if `kazma --version` still looks stale.[/dim]")
+            console.print("  [dim]Tip: open a new shell if `kazma --version` still looks stale.[/dim]")
     else:
         sys.exit(1)
 

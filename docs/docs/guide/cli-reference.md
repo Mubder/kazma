@@ -298,7 +298,13 @@ manual `git pull` on production/git installs. Full guide:
 
 Auto-detects install type:
 
-- **pip install** → PyPI upgrade path.
+- **release wheel** (pip-installed, no git checkout) → reads the newest
+  GitHub release of `Mubder/kazma`, downloads its wheel from the release,
+  and installs it (with the extras you already have) only when its SHA-256
+  matches the release's `SHA256SUMS` and, where GitHub reports one, GitHub's
+  own digest of the file. Kazma is not on PyPI; `kazma update` never
+  installs `kazma` from there. See
+  [SUPPLY_CHAIN.md](https://github.com/Mubder/kazma/blob/main/docs/SUPPLY_CHAIN.md).
 - **git / monorepo** → preflight (main-only) → named stash → hard-reset
   `origin/main` → restore stash → reinstall extras → postflight (HEAD +
   `kazma_cli` import). Never hard-resets a feature branch in place.

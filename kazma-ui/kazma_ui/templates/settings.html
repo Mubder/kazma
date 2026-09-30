@@ -2242,15 +2242,16 @@
                 <template x-if="updateInfo?.update_available">
                     <div>
                         <span class="text-warning">{{ t('settings.update_available') }}</span>
-                        <span x-text="updateInfo?.latest_version"></span>
+                        <span translate="no" x-text="updateInfo?.latest_version"></span>
                         <span style="color:var(--text-muted)" x-text="'{{ t('settings.latest_version') }} ' + updateInfo?.current_version + ')'"></span>
+                        <a x-show="updateInfo?.release_url" x-cloak :href="updateInfo?.release_url" target="_blank" rel="noopener noreferrer">{{ t('settings.release_notes') }}</a>
                     </div>
                 </template>
                 <template x-if="updateInfo && !updateInfo?.update_available && !updateInfo?.error">
                     <span class="text-success" style="display:inline-flex;align-items:center;gap:6px"><span class="ki" data-icon="check-circle" aria-hidden="true"></span> {{ t('settings.running_latest') }}</span>
                 </template>
                 <template x-if="updateInfo?.error">
-                    <span class="text-error" x-text="updateInfo.error"></span>
+                    <span class="text-error">{{ t('settings.update_check_failed') }} <bdi translate="no" x-text="updateInfo.error"></bdi></span>
                 </template>
             </div>
         </div>
