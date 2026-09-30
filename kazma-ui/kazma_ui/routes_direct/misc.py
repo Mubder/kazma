@@ -10,13 +10,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import Depends, Request, WebSocket
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.responses import JSONResponse as _JSONResponse
-from kazma_core.errors import safe_error
 
 from kazma_ui.rate_limit import rate_limit
 
@@ -372,8 +370,19 @@ def register_misc_routes(self: Any) -> None:
 
         self.gateway.adapters.clear()
 
+        def _connector_settings() -> dict[str, Any]:
+            return {key: self.config_store.get(key, "") or "" for key in (
+                "connectors.telegram.token", "connectors.discord.token",
+                "connectors.slack.token", "connectors.slack.app_token",
+                "connectors.slack.allowed_users", "connectors.slack.allowed_teams",
+                "connectors.slack.allowed_channels",
+            )}
+
+        # Settings reads (and the allowlists below) are database round trips:
+        # off the loop that every adapter and chat stream shares.
+        conf = await asyncio.to_thread(_connector_settings)
         telegram_token = (
-            self.config_store.get("connectors.telegram.token", "")
+            conf["connectors.telegram.token"]
             or self.config.raw.get("connectors", {}).get("telegram", {}).get("token", "")
         )
         if not telegram_token:
@@ -395,22 +404,22 @@ def register_misc_routes(self: Any) -> None:
             )
             from kazma_gateway.allowlists import apply_adapter_allowlists
 
-            apply_adapter_allowlists(tg_adapter, self.config_store)
+            await asyncio.to_thread(apply_adapter_allowlists, tg_adapter, self.config_store)
             self.gateway.add_adapter(tg_adapter)
             logger.info("[Gateway] Telegram adapter re-registered via refresh")
 
-        discord_token = self.config_store.get("connectors.discord.token", "") or os.environ.get("DISCORD_BOT_TOKEN", "")
+        discord_token = conf["connectors.discord.token"] or os.environ.get("DISCORD_BOT_TOKEN", "")
         if discord_token:
             from kazma_gateway.adapters.discord import DiscordAdapter
             from kazma_gateway.allowlists import apply_adapter_allowlists
 
             discord_adapter = DiscordAdapter(token=discord_token)
-            apply_adapter_allowlists(discord_adapter, self.config_store)
+            await asyncio.to_thread(apply_adapter_allowlists, discord_adapter, self.config_store)
             self.gateway.add_adapter(discord_adapter)
             logger.info("[Gateway] Discord adapter re-registered via refresh")
 
-        _cs_slack_bot2 = self.config_store.get("connectors.slack.token", "")
-        _cs_slack_app2 = self.config_store.get("connectors.slack.app_token", "")
+        _cs_slack_bot2 = str(conf["connectors.slack.token"])
+        _cs_slack_app2 = str(conf["connectors.slack.app_token"])
         slack_bot_token = (_cs_slack_bot2 if _cs_slack_bot2.startswith("xoxb-") else "") or os.environ.get("SLACK_BOT_TOKEN", "")
         slack_app_token = (_cs_slack_app2 if _cs_slack_app2.startswith("xapp-") else "") or os.environ.get("SLACK_APP_TOKEN", "")
         if slack_bot_token:
@@ -420,17 +429,11 @@ def register_misc_routes(self: Any) -> None:
             slack_adapter = SlackAdapter(
                 bot_token=slack_bot_token,
                 app_token=slack_app_token or None,
-                allowed_users=split_ids(
-                    self.config_store.get("connectors.slack.allowed_users", "")
-                ) or None,
-                allowed_teams=split_ids(
-                    self.config_store.get("connectors.slack.allowed_teams", "")
-                ) or None,
-                allowed_channels=split_ids(
-                    self.config_store.get("connectors.slack.allowed_channels", "")
-                ) or None,
+                allowed_users=split_ids(conf["connectors.slack.allowed_users"]) or None,
+                allowed_teams=split_ids(conf["connectors.slack.allowed_teams"]) or None,
+                allowed_channels=split_ids(conf["connectors.slack.allowed_channels"]) or None,
             )
-            apply_adapter_allowlists(slack_adapter, self.config_store)
+            await asyncio.to_thread(apply_adapter_allowlists, slack_adapter, self.config_store)
             self.gateway.add_adapter(slack_adapter)
             logger.info("[Gateway] Slack adapter re-registered via refresh")
 

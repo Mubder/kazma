@@ -13,12 +13,45 @@ from typing import Any, Generator
 
 from kazma_core.db.backend import get_database_url, is_postgres, require_postgres_driver
 
-__all__ = ["PostgresPool", "get_postgres_pool", "reset_postgres_pool"]
+__all__ = ["PostgresPool", "get_postgres_pool", "pool_connection_kwargs", "reset_postgres_pool"]
 
 logger = logging.getLogger(__name__)
 
 _pool: PostgresPool | None = None
 _lock = threading.Lock()
+
+#: Seconds a new connection may take before psycopg gives up and the pool
+#: retries (with its own backoff). psycopg's default is 130.
+_CONNECT_TIMEOUT_S = 5
+
+
+def _dsn_sets(dsn: str, param: str) -> bool:
+    """Whether the operator's DSN names *param* (URL or key=value form)."""
+    try:
+        from psycopg import Error as PsycopgError
+        from psycopg.conninfo import conninfo_to_dict
+    except ImportError:
+        return param in (dsn or "")
+    try:
+        return param in conninfo_to_dict(dsn)
+    except PsycopgError:  # an odd DSN is the pool's to reject
+        return param in (dsn or "")
+
+
+def pool_connection_kwargs(dsn: str, **base: Any) -> dict[str, Any]:
+    """Connection keywords for every psycopg pool Kazma opens.
+
+    *base* plus a connect timeout (unless the DSN sets one). psycopg waits up
+    to 130 s for a connection that does not answer, and Docker Desktop's port
+    proxy accepts the TCP connection while the database container is down:
+    after the Docker engine restarted on 2026-09-28 the pools' reconnects
+    hung, and they stayed empty for a minute after Postgres was back. Used by
+    the shared pool here and the checkpointer's (``checkpoints_pg``).
+    """
+    kwargs = dict(base)
+    if not _dsn_sets(dsn, "connect_timeout"):
+        kwargs["connect_timeout"] = _CONNECT_TIMEOUT_S
+    return kwargs
 
 
 def _without_nul(params: tuple | list | dict) -> tuple | list | dict:
@@ -57,7 +90,12 @@ class PostgresPool:
             min_size=min_size,
             max_size=max_size,
             timeout=checkout_s,
-            kwargs={"row_factory": dict_row, "autocommit": False},
+            kwargs=pool_connection_kwargs(dsn, row_factory=dict_row, autocommit=False),
+            # A connection the server closed (a restart, an idle kill) is
+            # replaced at checkout, not handed to a caller as an error: on
+            # 2026-09-28 the document worker's claims failed with "the
+            # connection is closed" after the database came back.
+            check=ConnectionPool.check_connection,
             open=True,
         )
         logger.info(

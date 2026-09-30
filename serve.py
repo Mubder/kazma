@@ -3,9 +3,17 @@
 
 from __future__ import annotations
 
+import faulthandler
 import os
 import secrets
 import sys
+import traceback
+
+# A native crash (an access violation in a C extension) ends the process
+# with no Python traceback. faulthandler writes every thread's stack to
+# stderr first -- and the guard keeps this server's stderr
+# (.kazma/server.stderr.log), so an exit is never silent again.
+faulthandler.enable()
 
 # Can override the app factory via environment variable
 app_factory = "kazma_ui.app:create_app"
@@ -36,7 +44,8 @@ def _bootstrap_bind_and_secret() -> str:
     if existing == _KNOWN_BAD_SECRET:
         print(
             "\n  [SECURITY] KAZMA_SECRET is the old hardcoded default — "
-            "refusing to start. Unset it or set a strong random secret.\n"
+            "refusing to start. Unset it or set a strong random secret.\n",
+            file=sys.stderr,
         )
         sys.exit(1)
 
@@ -44,7 +53,8 @@ def _bootstrap_bind_and_secret() -> str:
         if not _is_loopback(host):
             print(
                 "\n  [SECURITY] Non-loopback bind requires KAZMA_SECRET.\n"
-                "  Set a strong secret, or bind loopback: KAZMA_HOST=127.0.0.1\n"
+                "  Set a strong secret, or bind loopback: KAZMA_HOST=127.0.0.1\n",
+                file=sys.stderr,
             )
             sys.exit(1)
         generated = secrets.token_urlsafe(32)
@@ -61,7 +71,7 @@ def _bootstrap_bind_and_secret() -> str:
 
     _ok, _msg = check_exposure_posture(host)
     if _msg:
-        print(_msg)
+        print(_msg, file=sys.stdout if _ok else sys.stderr)
     if not _ok:
         sys.exit(1)
 
@@ -123,9 +133,13 @@ try:
 except KeyboardInterrupt:
     print("\nShutting down server...")
 except ImportError:
-    print("❌ Error: uvicorn not found")
-    print("Install with: pip install uvicorn[standard]")
+    print("❌ Error: uvicorn not found", file=sys.stderr)
+    print("Install with: pip install uvicorn[standard]", file=sys.stderr)
     sys.exit(1)
-except Exception as e:
-    print(f"❌ Error: {e}")
+except Exception:
+    # The whole traceback, on stderr. It printed only the message, to
+    # stdout, which nothing kept: the guard logged "process exited (code 1)"
+    # on 2026-09-25 and there was no way to tell why.
+    print("❌ Kazma stopped on an error:", file=sys.stderr)
+    traceback.print_exc()
     sys.exit(1)

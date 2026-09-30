@@ -25,7 +25,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["STALE_AFTER_S", "STATE_ENV", "check_supervisor"]
+__all__ = ["STALE_AFTER_S", "STATE_ENV", "check_supervisor", "request_guard_reload"]
 
 #: Set by the guard for the server it spawns.
 STATE_ENV = "KAZMA_GUARD_STATE_FILE"
@@ -96,6 +96,42 @@ def check_supervisor() -> None:
         severity="critical",
         cooldown_s=6 * 3600,
     )
+
+
+#: The guard's reload request file (``kazma_guard._reload_path``). A guard
+#: that hands it over sets this; an older one keeps it beside its state file.
+RELOAD_ENV = "KAZMA_GUARD_RELOAD_FILE"
+#: A reload asked of a guard that has not beaten this recently would wait
+#: for a guard that may be gone; the caller restarts itself instead.
+RELOAD_FRESH_S = 60.0
+
+
+def request_guard_reload(reason: str) -> bool:
+    """Ask the guard that started this server to reload it. True when asked.
+
+    A server that restarts itself (spawn a copy, exit) does it behind the
+    guard's back: the guard restarts its own child, finds the copy on its
+    port and kills it as a foreign server, and the hard exit skips every
+    shutdown hook. The guard's reload is the path ``kazma_guard.py --reload``
+    takes -- a graceful stop, then the code on disk. False when no guard
+    started this server, or its heartbeat is stale: the caller restarts
+    itself. Blocking (a file write): async callers use ``to_thread``.
+    """
+    status = _supervisor_status()
+    if status is None:
+        return False
+    age = status["heartbeat_age_s"]
+    if age is None or age > RELOAD_FRESH_S:
+        logger.warning("[supervisor] not asking the guard to reload: no fresh heartbeat (%s)",
+                       "none" if age is None else f"{int(age)}s old")
+        return False
+    target = Path(os.environ.get(RELOAD_ENV) or Path(status["state_file"]).parent / "guard.reload")
+    tmp = target.with_name(f"{target.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps({"ts": time.time(), "pid": os.getpid(), "reason": reason}),
+                   encoding="utf-8")
+    os.replace(tmp, target)
+    logger.info("[supervisor] asked guard pid %s to reload (%s)", status["guard_pid"], reason)
+    return True
 
 
 def _reset_for_tests() -> None:

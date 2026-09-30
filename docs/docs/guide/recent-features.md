@@ -7,6 +7,20 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 # Recent features guide
 
+**New in 2026-09-30 — a database outage is not a restart.** When the
+database went away for two minutes (a Docker Desktop update), Kazma froze
+waiting on it and the guard restarted it. Now nothing waits on the database
+on the server's event loop, the health check answers in seconds whatever its
+checks do, the guard rides out "Kazma is up, its database is not" and pages
+you instead, and the connection pools are back seconds after the database
+is. When the server does exit, its last words are in the page. The **weekly
+resilience report** names every mechanism, leads with what needs a look —
+restarts with their reasons, a scheduled job below its schedule, and what
+blocked the event loop — and counts alerts sent, not repeats held back.
+Backup snapshots and repository maintenance no longer collide, and a missed
+snapshot is reported. **Settings → Restart server** goes through the guard.
+[Deployment §6](./deployment), [Diagnosis map §1](../ops/diagnosis-map).
+
 **New in 2026-09-28/29 — more accounts, and chat apps that account for every
 message.** **Settings → Email → Other accounts** adds more mailboxes — a Google
 or Microsoft sign-in under a short name you choose, or an app password over

@@ -174,6 +174,23 @@ def test_a_crashed_child_is_restarted(tmp_path):
         assert spawned[0]["pid"] != spawned[1]["pid"]
 
 
+def test_a_crashed_childs_last_words_are_kept(tmp_path):
+    """The server's stderr is kept and quoted when it dies (2026-09-30).
+
+    On 2026-09-25 the guard logged "process exited (code 1)" and nothing
+    anywhere said why: serve.py printed the error to stdout, and under the
+    scheduled task the guard's own output goes nowhere.
+    """
+    port = _free_port()
+    with GuardRun(tmp_path, port, FAKE_EXIT_AFTER_S="3") as g:
+        g.wait_for("child.ready", timeout=60)
+        ev = g.wait_for("guard.restarting", timeout=60)
+        assert "process exited" in str(ev.get("reason"))
+        assert "fake_kazma crashed on purpose" in str(ev.get("stderr_tail", "")), ev
+        kept = (tmp_path / "server.stderr.log").read_text(encoding="utf-8", errors="replace")
+        assert "RuntimeError: fake_kazma crashed on purpose" in kept
+
+
 def test_a_wedged_child_is_killed_and_replaced(tmp_path):
     """Alive, port open, answers nothing -- invisible to every OS supervisor.
 
@@ -187,13 +204,49 @@ def test_a_wedged_child_is_killed_and_replaced(tmp_path):
         assert "unhealthy" in str(ev.get("reason", ""))
 
 
-def test_a_not_ready_child_is_restarted(tmp_path):
-    """503 / not_ready means a critical dependency is gone: restart it."""
+def test_a_not_ready_child_is_ridden_out_not_restarted(tmp_path):
+    """503 / not_ready: Kazma answers, its database does not.
+
+    A restart cannot bring a database back. On 2026-09-28 a Docker Desktop
+    update took Postgres away for two minutes and the old rule ("a critical
+    dependency is gone: restart it") restarted Kazma over it. The outage is
+    now paged once and ridden out.
+    """
     port = _free_port()
-    with GuardRun(tmp_path, port, FAKE_NOT_READY_AFTER_S="4", FAILURES="2") as g:
+    with GuardRun(tmp_path, port, FAKE_NOT_READY_AFTER_S="4", FAILURES="2",
+                  INTERVAL="2", KAZMA_GUARD_DEPENDENCY_OUTAGE_S="600") as g:
         g.wait_for("child.ready", timeout=60)
-        g.wait_for("health.failed", timeout=60)
-        g.wait_for("guard.restarting", timeout=90)
+        ev = g.wait_for("health.dependency_down", timeout=60)
+        assert "database" in str(ev.get("detail", ""))
+        time.sleep(8)  # several more probe cycles against a not-ready server
+        assert g.count("guard.restarting") == 0
+        assert g.count("child.spawned") == 1
+
+
+def test_a_not_ready_that_only_a_restart_clears_is_restarted(tmp_path):
+    """The volatile settings store: a boot while the database was away keeps
+    the in-memory fallback for the life of the process. The app says so
+    (``restart_required``), and the guard does not ride it out."""
+    port = _free_port()
+    with GuardRun(tmp_path, port, FAKE_NOT_READY_AFTER_S="4",
+                  FAKE_NOT_READY_RESTART_REQUIRED="1", FAILURES="2", INTERVAL="2",
+                  KAZMA_GUARD_DEPENDENCY_OUTAGE_S="600") as g:
+        g.wait_for("child.ready", timeout=60)
+        ev = g.wait_for("guard.restarting", timeout=60)
+        assert "unhealthy" in str(ev.get("reason", ""))
+        assert "not ready for" not in str(ev.get("reason", ""))
+        assert g.count("health.dependency_down") == 0
+
+
+def test_a_long_dependency_outage_is_restarted_after_the_runway(tmp_path):
+    """Past the runway the guard restarts anyway: the database may be back
+    and Kazma's own connections what is stuck."""
+    port = _free_port()
+    with GuardRun(tmp_path, port, FAKE_NOT_READY_AFTER_S="4", FAILURES="2",
+                  INTERVAL="2", KAZMA_GUARD_DEPENDENCY_OUTAGE_S="8") as g:
+        g.wait_for("child.ready", timeout=60)
+        ev = g.wait_for("guard.restarting", timeout=90)
+        assert "not ready for" in str(ev.get("reason", ""))
 
 
 def test_a_degraded_child_keeps_serving_and_is_not_restarted(tmp_path):
@@ -292,6 +345,31 @@ def _reload_cli(g: GuardRun, timeout: float = 150.0) -> subprocess.CompletedProc
 
 def _probe_count(g: GuardRun) -> int:
     return sum(1 for x in g.generations() if x["event"] == "probe")
+
+
+def test_the_servers_own_restart_request_is_carried_out_by_the_guard(tmp_path, monkeypatch):
+    """Settings' "Restart server" asks the guard (2026-09-30).
+
+    It used to start a detached copy of the server and hard-exit: the guard
+    restarted its own child and killed the copy as a foreign server on its
+    port, and no shutdown hook ran. The server now writes the guard's reload
+    request -- this is that call, from the server's side, against a real
+    guard -- and the guard does a graceful reload.
+    """
+    from kazma_core.observability import supervisor_watch
+
+    port = _free_port()
+    with GuardRun(tmp_path, port) as g:
+        g.wait_for("child.ready", timeout=60)
+        # What the guard hands the server it starts.
+        monkeypatch.setenv("KAZMA_GUARD_STATE_FILE", str(tmp_path / "state.json"))
+        monkeypatch.setenv("KAZMA_GUARD_RELOAD_FILE", g.env["KAZMA_GUARD_RELOAD_FILE"])
+        assert supervisor_watch.request_guard_reload("test") is True
+        ev = g.wait_for("guard.operator_reload", timeout=60)
+        assert ev.get("graceful") is True, g.event_names()
+        gens = [x["event"] for x in g.generations()]
+        assert gens.count("spawned") == 2, gens
+        assert "port.reaping_holder" not in g.event_names()
 
 
 def test_a_reload_is_carried_out_by_the_guard_and_is_graceful(tmp_path):

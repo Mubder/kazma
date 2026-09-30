@@ -903,8 +903,7 @@ def create_graph_handler(
                 # 2. Delete ConfigStore active mapping
                 try:
                     from kazma_core.config_store import get_config_store
-                    cs = get_config_store()
-                    cs.delete(f"active_thread.{sender}")
+                    await asyncio.to_thread(get_config_store().delete, f"active_thread.{sender}")
                 except Exception as exc:
                     logger.debug("[agent-handler] ConfigStore delete active_thread failed: %s", exc)
 

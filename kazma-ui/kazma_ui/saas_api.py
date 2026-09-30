@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -120,7 +121,6 @@ def create_saas_router() -> APIRouter:
         denied = _require_admin(request)
         if denied:
             return denied
-        from kazma_core.config_store import get_config_store
         from kazma_core.security.platform_rbac import _load_users_from_store, _save_users_to_store
 
         users = _load_users_from_store()
@@ -139,8 +139,6 @@ def create_saas_router() -> APIRouter:
             body = await request.json()
         except Exception:
             body = {}
-        import asyncio
-
         # The user store round trip and the password hash stay off the loop.
         return await asyncio.to_thread(_patch_user, username, body)
 
@@ -183,7 +181,7 @@ def create_saas_router() -> APIRouter:
         })
 
     @router.get("/tenants")
-    async def list_tenants(request: Request) -> JSONResponse:
+    def list_tenants(request: Request) -> JSONResponse:
         """List known tenant ids (from config + default)."""
         denied = _require_admin(request)
         if denied:
@@ -218,16 +216,25 @@ def create_saas_router() -> APIRouter:
             return JSONResponse({"error": "valid non-default id required"}, status_code=400)
         from kazma_core.config_store import get_config_store
 
-        cs = get_config_store()
-        raw = cs.get("saas.tenants", [])
-        tenants: list[Any] = list(raw) if isinstance(raw, list) else []
-        for t in tenants:
-            if isinstance(t, dict) and t.get("id") == tid:
-                return JSONResponse({"error": "tenant exists"}, status_code=409)
-            if t == tid:
-                return JSONResponse({"error": "tenant exists"}, status_code=409)
-        tenants.append({"id": tid, "name": name})
-        cs.set("saas.tenants", tenants, category="saas")
+        class _Exists(Exception):
+            pass
+
+        def _add(raw: Any) -> list[Any]:
+            tenants: list[Any] = list(raw) if isinstance(raw, list) else []
+            for t in tenants:
+                if (isinstance(t, dict) and t.get("id") == tid) or t == tid:
+                    raise _Exists
+            tenants.append({"id": tid, "name": name})
+            return tenants
+
+        # One read-modify-write (two admins adding at once both land), off
+        # the event loop: on Postgres it is a locked round trip.
+        try:
+            await asyncio.to_thread(
+                get_config_store().atomic_update, "saas.tenants", _add, category="saas",
+            )
+        except _Exists:
+            return JSONResponse({"error": "tenant exists"}, status_code=409)
         return JSONResponse({"status": "ok", "tenant": {"id": tid, "name": name}})
 
     return router

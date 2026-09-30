@@ -138,6 +138,38 @@ def test_no_passphrase_with_a_repository_is_critical(monkeypatch, tmp_path):
     assert "decrypt" in a["body"]
 
 
+def test_a_missed_restic_snapshot_is_said(monkeypatch, tmp_path):
+    """It was a WARNING line only: the offsite repository missed a snapshot
+    on 2026-09-28 (another restic run held its lock) and nobody was told."""
+    from kazma_core.backup import universal
+
+    ok = rr.ResticResult(ok=True, action="backup", repo="L", detail={"snapshot_id": "abc"})
+    bad = rr.ResticResult(ok=False, action="backup", repo="R",
+                          error="unable to create lock in backend: repository is already locked")
+    monkeypatch.setattr(rr, "restic_available", lambda: True)
+    monkeypatch.setattr(rr, "ensure_password", lambda **_: ("pw", False))
+    monkeypatch.setattr(rr, "repo_paths", lambda: {"local": "L", "remote": "R"})
+    monkeypatch.setattr(rr, "backup", lambda repo, pw, paths, **kw: ok if repo == "L" else bad)
+    sent: list[dict] = []
+    import kazma_core.observability.ops_alerts as ops
+    monkeypatch.setattr(ops, "alert",
+                        lambda key, title, body, **kw: sent.append(
+                            {"key": key, "title": title, "body": body, **kw}))
+
+    out = universal._snapshot_to_restic(tmp_path)
+    assert out["remote"]["ok"] is False
+    assert [a["key"] for a in sent] == ["backup.restic_snapshot_failed"]
+    assert "remote" in sent[0]["title"]
+    assert "already locked" in sent[0]["body"]
+    assert sent[0]["severity"] == "warn"
+
+    # A clean run says nothing.
+    sent.clear()
+    monkeypatch.setattr(rr, "backup", lambda repo, pw, paths, **kw: ok)
+    universal._snapshot_to_restic(tmp_path)
+    assert sent == []
+
+
 # -- a ledger that reads one file and reports on many --------------------
 
 def test_ledger_counts_events_from_the_guard_log(tmp_path, monkeypatch):
@@ -414,9 +446,10 @@ def test_ledger_does_not_call_a_watched_mechanism_blind():
     it with a space. A raw substring test called that mechanism
     unobservable while it was being counted two lines above."""
     report = fl.build_report(hours=0.001)
-    blind = [e for e in report.entries if e.mechanism == "(no firing signature)"]
-    if blind:
-        assert "foreign-server detection" not in blind[0].note
+    assert "foreign-server detection" not in report.blind
+    # Unwatched mechanisms are listed apart, never counted as silent ones.
+    assert all(e.mechanism != "(no firing signature)" for e in report.entries)
+    assert len(report.entries) == len(fl.FIRING_SIGNATURES)
 
 
 # -- a report nobody runs ------------------------------------------------

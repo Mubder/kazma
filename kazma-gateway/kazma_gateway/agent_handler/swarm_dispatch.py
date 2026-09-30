@@ -9,7 +9,6 @@ from typing import Any
 
 from kazma_core.constants import (
     SWARM_DISPATCH_TIMEOUT_SECONDS,
-    SWARM_TASK_PREVIEW_MAX_CHARS,
     TELEGRAM_MIN_CHAT_ID,
     TELEGRAM_MAX_CHAT_ID,
     VALID_OUTPUT_PLATFORMS,

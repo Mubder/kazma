@@ -7,6 +7,7 @@ import logging
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 from kazma_core.config_store import get_config_store
 from kazma_core.background import spawn_background
@@ -61,6 +62,16 @@ def _repo_root() -> Path:
     return Path.cwd()
 
 
+def _record_status(*pairs: tuple[str, Any]) -> None:
+    """Persist install-status keys in one write.
+
+    Blocking -- a settings write is a database round trip, and on Postgres it
+    waits for a pool connection -- so the async installer runs it with
+    ``asyncio.to_thread``, never on the event loop.
+    """
+    get_config_store().batch_set([(key, value, "system") for key, value in pairs])
+
+
 async def asynchronous_install_package(package_name: str) -> None:
     """Install a package in the background using uv or pip, hot-reload, and update status.
 
@@ -90,10 +101,12 @@ async def asynchronous_install_package(package_name: str) -> None:
 
     # Set status to INSTALLING immediately to persist status across reloads
     try:
-        store = get_config_store()
-        store.set("system.memory.status", "INSTALLING", category="system")
-        store.set("system.install.last_target", package_name, category="system")
-        store.set("system.install.last_status", "INSTALLING", category="system")
+        await asyncio.to_thread(
+            _record_status,
+            ("system.memory.status", "INSTALLING"),
+            ("system.install.last_target", package_name),
+            ("system.install.last_status", "INSTALLING"),
+        )
     except Exception as e:
         logger.error("[Installer] Failed to set status to INSTALLING: %s", e)
 
@@ -116,11 +129,13 @@ async def asynchronous_install_extra(extra_name: str) -> None:
 
     _active_installations.add(key)
     try:
-        store = get_config_store()
-        store.set("system.install.last_target", f"extra:{extra}", category="system")
-        store.set("system.install.last_status", "INSTALLING", category="system")
+        status: list[tuple[str, Any]] = [
+            ("system.install.last_target", f"extra:{extra}"),
+            ("system.install.last_status", "INSTALLING"),
+        ]
         if extra in ("rag", "all"):
-            store.set("system.memory.status", "INSTALLING", category="system")
+            status.append(("system.memory.status", "INSTALLING"))
+        await asyncio.to_thread(_record_status, *status)
     except Exception as e:
         logger.error("[Installer] Failed to set install status: %s", e)
 
@@ -176,17 +191,16 @@ async def _run_install_task(
 
         if result.returncode == 0:
             logger.info("[Installer] Installed successfully: %s", target_label)
-            store = get_config_store()
-            store.set("system.install.last_status", "OK", category="system")
+            await asyncio.to_thread(_record_status, ("system.install.last_status", "OK"))
             # Remember extras so ``kazma update`` reinstalls them (never bare uv sync).
             try:
-                _record_installed_extra(extra, package_name)
+                await asyncio.to_thread(_record_installed_extra, extra, package_name)
             except Exception as rec_exc:
                 logger.debug("[Installer] Could not persist extras list: %s", rec_exc)
             if extra in ("rag", "all") or package_name in (
                 "sentence-transformers", "chromadb", "sentence_transformers",
             ):
-                store.set("system.memory.status", "ACTIVE", category="system")
+                await asyncio.to_thread(_record_status, ("system.memory.status", "ACTIVE"))
                 await _hot_reload_memory()
         else:
             err_msg = stderr.decode(errors="replace")
@@ -195,25 +209,29 @@ async def _run_install_task(
                 result.returncode, target_label, err_msg[:500],
             )
             try:
-                store = get_config_store()
-                store.set("system.install.last_status", "FAILED", category="system")
-                store.set("system.install.last_error", err_msg[:1000], category="system")
+                failed: list[tuple[str, Any]] = [
+                    ("system.install.last_status", "FAILED"),
+                    ("system.install.last_error", err_msg[:1000]),
+                ]
                 if extra in ("rag", "all") or package_name in (
                     "sentence-transformers", "chromadb",
                 ):
-                    store.set("system.memory.status", "DEGRADED", category="system")
+                    failed.append(("system.memory.status", "DEGRADED"))
+                await asyncio.to_thread(_record_status, *failed)
             except Exception:
-                pass
+                logger.warning("[Installer] could not record the failed install", exc_info=True)
 
     except Exception as e:
         logger.error("[Installer] Unexpected error in background installer: %s", e, exc_info=True)
         try:
-            store = get_config_store()
-            store.set("system.install.last_status", "FAILED", category="system")
-            store.set("system.install.last_error", str(e)[:1000], category="system")
-            store.set("system.memory.status", "DEGRADED", category="system")
+            await asyncio.to_thread(
+                _record_status,
+                ("system.install.last_status", "FAILED"),
+                ("system.install.last_error", str(e)[:1000]),
+                ("system.memory.status", "DEGRADED"),
+            )
         except Exception:
-            pass
+            logger.warning("[Installer] could not record the failed install", exc_info=True)
     finally:
         _active_installations.discard(track_key)
 

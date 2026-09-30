@@ -233,7 +233,7 @@ def _live_reason(cfg: Any, xcfg: Any) -> str:
 
 
 @router.get("")
-async def x_reply_status() -> JSONResponse:
+def x_reply_status() -> JSONResponse:
     try:
         return JSONResponse(_payload())
     except Exception as exc:  # noqa: BLE001
@@ -241,7 +241,7 @@ async def x_reply_status() -> JSONResponse:
 
 
 @router.get("/recent")
-async def x_reply_recent(limit: int = 20) -> JSONResponse:
+def x_reply_recent(limit: int = 20) -> JSONResponse:
     """Recent summons — including the skipped ones, which are the useful half.
 
     "Why didn't it reply?" is the question this panel exists to answer, and a
@@ -257,7 +257,7 @@ async def x_reply_recent(limit: int = 20) -> JSONResponse:
 
 
 @router.get("/conversations")
-async def x_reply_conversations(limit: int = 30) -> JSONResponse:
+def x_reply_conversations(limit: int = 30) -> JSONResponse:
     """Whole exchanges, newest first — who summoned, what was said, what Kazma said.
 
     Distinct from ``/recent``, which is a state list for the settings panel.
@@ -469,7 +469,7 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
             ),
             ("connectors.x.reply.subjects", subjects, _CATEGORY),
         ]
-        get_config_store().batch_set(items)
+        await asyncio.to_thread(get_config_store().batch_set, items)
 
         # Start/stop the poller now so Save is the action, not a restart.
         try:
@@ -479,7 +479,7 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
         except Exception:
             logger.exception("[x_reply_api] ensure_mentions_loop failed")
 
-        payload = _payload()
+        payload = await asyncio.to_thread(_payload)
         payload["saved"] = True
         payload["warnings"] = warnings
         payload["restart_required_for_poller"] = bool(

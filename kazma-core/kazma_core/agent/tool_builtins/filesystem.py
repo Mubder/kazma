@@ -189,6 +189,30 @@ def _searchable_text(path: Path, root: Path) -> str | None:
 
 
 
+def _fallback_telegram_target() -> str:
+    """``telegram:<id>`` for a send with no bound chat, else ``""``.
+
+    The configured Telegram swarm chat, else the first allowed user.
+    Blocking (settings reads): ``send_file`` runs it with ``to_thread``.
+    """
+    from kazma_core.config_store import get_config_store
+
+    store = get_config_store()
+    tg_id = store.get("connectors.telegram.swarm_chat_id")
+    if not tg_id:
+        allowed = store.get("connectors.telegram.allowed_users")
+        # ConfigStore may return a string ("1804015016" or "123,456") or a
+        # list -- normalize. The old code did allowed[0] on a string, taking
+        # the FIRST CHARACTER ("1") -> chat_id 1 -> "chat not found" 400.
+        if isinstance(allowed, str):
+            allowed = [u.strip() for u in allowed.replace(",", " ").split() if u.strip()]
+        elif not isinstance(allowed, list):
+            allowed = []
+        if allowed:
+            tg_id = str(allowed[0])
+    return f"telegram:{tg_id}" if tg_id else ""
+
+
 def register_filesystem_tools(registry: Any) -> None:
     """Register the filesystem tools onto *registry*."""
 
@@ -331,7 +355,7 @@ def register_filesystem_tools(registry: Any) -> None:
         # one file operation, whatever an approval card says.
         from kazma_core.workspace.binding import resolve_active_root
 
-        root = resolve_active_root()
+        root = await asyncio.to_thread(resolve_active_root)
         if p == root or root.is_relative_to(p):
             return (
                 f"Error: refusing to delete {path}: it is the workspace root"
@@ -702,26 +726,10 @@ def register_filesystem_tools(registry: Any) -> None:
             backend = str(target_id).split(":", 1)[0].strip().lower() or "telegram"
         else:
             # No bound target (e.g. cron/CLI context) — fall back to the
-            # configured Telegram swarm chat / first allowed user.
+            # configured Telegram swarm chat / first allowed user. Settings
+            # reads are database round trips: off the loop.
             try:
-                from kazma_core.config_store import get_config_store
-
-                store = get_config_store()
-                tg_id = store.get("connectors.telegram.swarm_chat_id")
-                if not tg_id:
-                    allowed = store.get("connectors.telegram.allowed_users")
-                    # ConfigStore may return a string ("1804015016" or
-                    # "123,456") or a list — normalize. The old code did
-                    # allowed[0] on a string, taking the FIRST CHARACTER
-                    # ("1") → chat_id 1 → "chat not found" 400.
-                    if isinstance(allowed, str):
-                        allowed = [u.strip() for u in allowed.replace(",", " ").split() if u.strip()]
-                    elif not isinstance(allowed, list):
-                        allowed = []
-                    if allowed:
-                        tg_id = str(allowed[0])
-                if tg_id:
-                    target_id = f"telegram:{tg_id}"
+                target_id = await asyncio.to_thread(_fallback_telegram_target)
             except Exception as exc:
                 logger.debug("[ToolRegistry] Telegram chat target fallback failed: %s", exc)
 

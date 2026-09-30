@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -33,7 +34,7 @@ async def _stale_approval_message(
     try:
         from kazma_core.config_store import get_config_store
 
-        last = get_config_store().get(f"hitl.last_resume.{thread_id}")
+        last = await asyncio.to_thread(get_config_store().get, f"hitl.last_resume.{thread_id}")
         if isinstance(last, dict):
             at = float(last.get("at") or 0)
             if at and (time.time() - at) < 90:
@@ -61,12 +62,17 @@ async def _stale_approval_message(
 
                 from kazma_core.config_store import get_config_store
 
-                cs = get_config_store()
-                notice_key = f"hitl.last_stale_notice.{thread_id}"
-                prev = cs.get(notice_key)
-                if isinstance(prev, dict) and (_t.time() - float(prev.get("at") or 0)) < 90:
+                def _first_notice() -> bool:
+                    cs = get_config_store()
+                    notice_key = f"hitl.last_stale_notice.{thread_id}"
+                    prev = cs.get(notice_key)
+                    if isinstance(prev, dict) and (_t.time() - float(prev.get("at") or 0)) < 90:
+                        return False
+                    cs.set(notice_key, {"at": _t.time()}, category="safety")
+                    return True
+
+                if not await asyncio.to_thread(_first_notice):
                     return None
-                cs.set(notice_key, {"at": _t.time()}, category="safety")
             except Exception:
                 pass
             return (
@@ -906,7 +912,8 @@ async def _handle_hitl_resume(
 
                 from kazma_core.config_store import get_config_store
 
-                get_config_store().set(
+                await asyncio.to_thread(
+                    get_config_store().set,
                     f"hitl.last_resume.{target_thread}",
                     {
                         "at": _time.time(),

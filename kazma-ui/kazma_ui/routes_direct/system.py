@@ -348,7 +348,7 @@ def register_system_routes(self: Any) -> None:
         await asynchronous_install_package(package_name)
         return {"status": "started", "package": package_name}
     @self.app.get("/api/system/install/status")
-    async def _get_install_status() -> dict[str, Any]:
+    def _get_install_status() -> dict[str, Any]:
         """Last background install status (for Settings → Packages UI)."""
         from kazma_core.config_store import get_config_store
 

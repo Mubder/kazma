@@ -20,6 +20,7 @@ Does not require a heavy SDK — uses discovery + authorization code + PKCE.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import logging
@@ -124,12 +125,14 @@ async def build_authorize_url() -> dict[str, str]:
     verifier, challenge = make_pkce()
     from kazma_core.config_store import get_config_store
 
-    get_config_store().batch_set(
+    # Off the loop: a settings write is a database round trip.
+    await asyncio.to_thread(
+        get_config_store().batch_set,
         [
             ("auth.oidc.state", state, "auth"),
             ("auth.oidc.pkce_verifier", verifier, "auth"),
             ("auth.oidc.state_exp", time.time() + 600, "auth"),
-        ]
+        ],
     )
 
     params = {
@@ -153,10 +156,22 @@ async def exchange_code(code: str, state: str) -> dict[str, Any]:
     cfg = OidcConfig()
     from kazma_core.config_store import get_config_store
 
-    cs = get_config_store()
-    expected = cs.get("auth.oidc.state")
-    exp = cs.get("auth.oidc.state_exp") or 0
-    verifier = cs.get("auth.oidc.pkce_verifier") or ""
+    def _pending() -> tuple[Any, Any, Any]:
+        cs = get_config_store()
+        return (
+            cs.get("auth.oidc.state"),
+            cs.get("auth.oidc.state_exp") or 0,
+            cs.get("auth.oidc.pkce_verifier") or "",
+        )
+
+    def _clear_pending() -> None:
+        cs = get_config_store()
+        cs.delete("auth.oidc.state")
+        cs.delete("auth.oidc.pkce_verifier")
+        cs.delete("auth.oidc.state_exp")
+
+    # Settings reads and deletes are database round trips: off the loop.
+    expected, exp, verifier = await asyncio.to_thread(_pending)
     if not expected or state != expected:
         raise PermissionError("Invalid OIDC state")
     try:
@@ -207,9 +222,7 @@ async def exchange_code(code: str, state: str) -> dict[str, Any]:
     role = oidc_role_from_claims(claims, cfg)
     # Clear one-time state
     try:
-        cs.delete("auth.oidc.state")
-        cs.delete("auth.oidc.pkce_verifier")
-        cs.delete("auth.oidc.state_exp")
+        await asyncio.to_thread(_clear_pending)
     except Exception:
         # NOT safe to ignore silently (audit O3): these are one-time values.
         # If they survive, the same state + PKCE verifier stay valid and the

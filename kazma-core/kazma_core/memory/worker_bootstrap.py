@@ -1350,13 +1350,18 @@ async def _handle_restic_maintenance(payload: dict[str, Any]) -> bool:
             restic_available,
         )
 
-        if not restic_available():
+        # Each of these reads settings or the vault (a Postgres round trip)
+        # and may run restic itself: off the loop. A read here on the loop,
+        # waiting for a pool connection while Postgres was away (a Docker
+        # Desktop update), was one of the stalls that restarted Kazma on
+        # 2026-09-28.
+        if not await asyncio.to_thread(restic_available):
             return True
-        password, _ = ensure_password()
+        password, _ = await asyncio.to_thread(ensure_password)
         if not password:
             return True
 
-        for name, repo in repo_paths().items():
+        for name, repo in (await asyncio.to_thread(repo_paths)).items():
             if not repo:
                 continue
             # Clear locks whose owner is gone BEFORE anything else. A killed

@@ -306,7 +306,7 @@ async def _call_command_hook(entry: dict[str, Any], event: ToolHookEvent) -> Too
     try:
         from kazma_core.workspace.binding import resolve_active_root
 
-        cwd = str(resolve_active_root())
+        cwd = str(await asyncio.to_thread(resolve_active_root))
     except Exception:
         cwd = None
     payload = {

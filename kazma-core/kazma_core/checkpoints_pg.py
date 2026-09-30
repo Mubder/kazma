@@ -40,12 +40,19 @@ async def open_postgres_checkpointer(dsn: str, *, max_size: int = 8) -> Any:
     from psycopg_pool import AsyncConnectionPool  # type: ignore
 
     from kazma_core.checkpoint_serde import kazma_checkpoint_serde
+    from kazma_core.db.postgres_pool import pool_connection_kwargs
 
+    conninfo = _conninfo(dsn)
     pool = AsyncConnectionPool(
-        conninfo=_conninfo(dsn),
+        conninfo=conninfo,
         min_size=1,
         max_size=max_size,
-        kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
+        kwargs=pool_connection_kwargs(
+            conninfo, autocommit=True, prepare_threshold=0, row_factory=dict_row,
+        ),
+        # A connection the server closed (a database restart) is replaced
+        # at checkout instead of failing the turn that drew it.
+        check=AsyncConnectionPool.check_connection,
         open=False,
     )
     await pool.open()

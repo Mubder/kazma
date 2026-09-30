@@ -2040,6 +2040,16 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
 - Gate: `tests/test_child_env.py` finds every process started under the
   tool, IDE and skill folders and checks where its env came from (closures
   included); behavioural half runs real pytest and a real git hook.
+- **The gateway routers, chat commands and web UI too** (2026-09-30):
+  `/api/git/status` ran `git status` -- which starts a repository's own
+  `core.fsmonitor` -- with the server's environment, and the web and `/ide`
+  clones passed `{**os.environ}`, which the gate took for a minimal dict
+  literal. Git in a workspace now runs with `tool_child_env()` and
+  `-c core.fsmonitor=false`; a clone's token rides
+  `github_client.clone_auth_env` (a git config header, never argv). The gate
+  covers those folders, sees `asyncio.to_thread(subprocess.run, ...)`, and a
+  dict that unpacks another is not minimal. Settings' server restart is the
+  one exemption (it starts the server itself).
 
 
 
@@ -2074,6 +2084,31 @@ matched only the failure line). A health-gated restart is a
 `guard.restarting` whose reason is `unhealthy (...)`, not a failed probe. The
 sweep runs in a thread (it reads ~4M lines) and must stay scheduled (it
 shipped unscheduled once).
+
+**The report says everything, problems first (2026-09-30).** The week to
+2026-09-29 read "15 of 29 mechanisms fired" and named eight: six health-gated
+restarts and thirty loop stalls were among the seven it cut, "29" counted a
+placeholder row, and 141 of its "149 alerts" were one alert held back 140
+times by its cooldown. Now `firing_ledger.render` names every mechanism; each
+signature has a kind (symptom / recovery / routine / alerting) and routine
+ones a schedule (`per_week`: a job below 75 % of it "needs a look" -- the
+daily digest ran 2 of 7); alerts count as SENT (a `(throttled)` line is a
+repeat held back, counted apart); restart reasons and alert keys are tallied
+(`group`); the stall dumps of the week are read for what blocked the loop
+(the first Kazma frame above the storage layer, and its caller -- old dumps
+by the thread in `_run_once`); manifest mechanisms with no signature are
+"not watched", never a mechanism. Tests: `tests/test_firing_ledger_report.py`.
+
+**D. One restic run per repository** (`restic_repo._run`, 2026-09-30). The
+universal backup's snapshot and the maintenance task's `forget --prune` /
+`check` are separate queue tasks and overlapped; `forget` and `check` lock a
+repository exclusively, so the second failed "already locked" (a skipped
+offsite snapshot 09-28 04:07, a skipped remote forget 09-29 22:21). A lock
+per repository orders Kazma's own runs; `--retry-lock 10m` waits out a
+restic started elsewhere (the restore listing too). A missed snapshot alerts
+(`backup.restic_snapshot_failed`, warn, 12 h) -- it was a WARNING line only.
+Tests: `tests/test_restic_one_run_per_repo.py` (negative control: a lock per
+call overlaps).
 
 **Chaos injection is only real where it lands.** `InjectionTarget.LLM_PROVIDER`
 is injected INSIDE `resilient_chat`'s attempt loop. `ChaosInjectionError`
@@ -2555,7 +2590,7 @@ was skipped (2026-09-28). `tests/test_browser_egress_every_context.py`
 
 | Path | Who | When | Channel |
 |------|-----|------|---------|
-| Guard `Notifier` | Supervisor process, stdlib urllib | Child dead / unhealthy / crash-loop / pause | Telegram-direct — must work when the app cannot |
+| Guard `Notifier` | Supervisor process, stdlib urllib | Child dead (with its last stderr lines) / unhealthy / up but not ready (a dependency down, §44) / crash-loop / pause | Telegram-direct — must work when the app cannot |
 | `observability/ops_alerts.alert()` | Inside Kazma | Backup/offsite/restic/MCP/persist/turn-fail | Fan-out bus + Telegram-direct fallback |
 | `lifecycle_notifier` | App boot/shutdown | one start card (started / restarted, with each adapter's connection) + startup_failed; starting / shutting_down only when switched on | Same bus, filtered by `notifications.ops.channels` |
 
@@ -2765,7 +2800,21 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   ABOVE the storage layer (the caller that ran it on the loop is the news,
   not `postgres_pool.execute`). Every dump now leads with the loop thread's
   stack: faulthandler stops at 100 threads, and the eleven dumps of the
-  2026-09-25 database hang (one a 318 s stall) had none.
+  2026-09-25 database hang (one a 318 s stall) had none. The weekly report
+  names the blockers of the week's dumps itself (§27C). Third pass
+  (2026-09-30): the restic maintenance handler's repo/password reads, the
+  workspace ladder (`resolve_active_root`, six async tools) and the GitHub
+  token helpers (a token lookup can mint a GitHub App token over the network).
+- **The settings store is never used on the loop** (2026-09-30,
+  `test_the_settings_store_is_not_used_on_the_loop`, negative control beside
+  it). On Postgres a settings read that misses the cache, and every write, is a
+  round trip made with the store's lock held -- up to the pool timeout (5 s)
+  per call while the database is away. The heartbeat's `atomic_update` and
+  the restic handler's read sat on the loop during a two-minute Postgres
+  outage and the guard restarted Kazma (§44). 93 direct calls in async code
+  were converted: `await asyncio.to_thread(store.get, key)`, or a plain `def`
+  (a route or tool that never awaited). The gate sees `get_config_store().x()`,
+  a name bound from it, and any `*.config_store.x()` receiver.
 
 ### 36. A chat save the database refuses is spooled, never held only in memory
 
@@ -3121,10 +3170,39 @@ code) and Kazma ran with nobody supervising it.
   5-minute repeating trigger with `MultipleInstances IgnoreNew`. An existing
   task gets it only when re-registered from an elevated shell (owner action).
 
+- **A probe that got an answer is not a probe that got none** (2026-09-30).
+  `probe()` returns `ProbeResult` (unpacks as `(healthy, detail)`, plus
+  `answered`). Three unanswered probes in a row (a timeout, a refused
+  connection) restart Kazma as before. An answered "not ready" (a 503 naming
+  the database) is ridden out: `health.dependency_down`, one page, and a
+  restart only after `KAZMA_GUARD_DEPENDENCY_OUTAGE_S` (600) -- a restart
+  cannot bring a database back (§44). An answer carrying `restart_required`
+  (readiness sets it for the volatile settings store: a boot while the
+  database was away keeps the in-memory fallback for the life of the
+  process) is restarted like no answer. A result without the flags gets the
+  old rule. `tests/test_guard_probe_answers.py` (real HTTP).
+- **The server's last words are kept.** The guard sends the server's stderr to
+  `.kazma/server.stderr.log` (beside `guard.log`, rotated at 2 MB) and quotes
+  the lines the server wrote before it went in `guard.restarting`
+  (`stderr_tail`) and the page. `serve.py` enables `faulthandler` and prints
+  a failure's whole traceback there: on 2026-09-25 "process exited (code 1)"
+  left no trace anywhere (the message went to stdout, nothing kept it).
+- **Settings' "Restart server" asks the guard.** A server the guard started
+  writes the guard's reload request (`supervisor_watch.request_guard_reload`;
+  the guard hands the path over in `KAZMA_GUARD_RELOAD_FILE`, an older guard
+  keeps it beside its state file) when the heartbeat is under a minute old,
+  and the guard does its graceful reload. It used to spawn a detached copy and
+  `os._exit`: the guard restarted its own child and killed the copy as a
+  foreign server, and no shutdown hook ran. The page reloads when a
+  different process answers (`/health/live` `build.started_at`).
+
 Gates: `tests/test_guard_owns_reload.py` (each with a negative control),
 `tests/test_guard_integration.py` (the real guard against a fake server:
-graceful reload, an ignored stop, a leftover request, the heartbeat),
-`tests/test_idle_reload.py`.
+graceful reload, an ignored stop, a leftover request, the heartbeat, a
+dependency outage ridden out and one past its runway, a crash's stderr kept,
+the server's own reload request), `tests/test_idle_reload.py`,
+`tests/test_settings_restart_via_guard.py`,
+`tests/js/test_settings_restart_reload.js`.
 
 ### 40. One checkpoint serializer, strict (`kazma_core/checkpoint_serde.py`)
 
@@ -3286,6 +3364,36 @@ clarify-only lock, a notice to repeat verbatim).
 - Gates: `tests/test_turn_notes.py`; `tests/e2e/test_turn_notes_route.py`
   (four turns through the real route, a workspace switch, IDE context; CI
   lifecycle job).
+
+### 44. A database outage is ridden out, not a restart (2026-09-30)
+
+On 2026-09-28 at 22:15 UTC a Docker Desktop update restarted the Docker
+engine; Postgres was gone for two minutes. Kazma turned that into a restart:
+the heartbeat's `atomic_update` and the restic handler's settings read sat on
+the event loop waiting for a pool connection, `/health/ready` ran its checks
+one after another (one of them on the loop) past the guard's 10 s probe, the
+pools' reconnects hung on psycopg's 130 s connect timeout, and the guard --
+which restarted on any three failed probes -- killed a server whose only
+problem was its database. Each layer now holds on its own:
+
+- **Nothing waits on the database on the loop** (§35: the settings-store
+  gate, and the loop-stall helpers of the third pass).
+- **`/health/ready` answers in seconds** (`kazma_ui/health.py`): every check
+  off the loop, capped, all at once (`asyncio.gather`, a check that raises
+  fails itself). A database that is away is a quick 503 naming it.
+  `tests/test_readiness_answers_in_time.py` (negative control: the same
+  checks one after another).
+- **The pools come back with the database** (`db/postgres_pool.py`
+  `pool_connection_kwargs`, used by the shared pool and the checkpointer's):
+  a 5 s connect timeout unless the DSN names one, and `check=` so a
+  connection the server closed is replaced at checkout, not handed to a
+  caller. `tests/test_pg_pool_recovery.py` (a gate over every pool Kazma
+  builds; on a real Postgres a terminated backend is replaced; negative
+  control: a plain pool hands it out).
+- **The guard rides out an answered "not ready"** (§39) and pages; it
+  restarts only a server that does not answer, one that says only a restart
+  clears its failure (`restart_required`: the volatile settings store), or
+  one not ready for `KAZMA_GUARD_DEPENDENCY_OUTAGE_S`.
 
 ## UI Conventions (Web)
 

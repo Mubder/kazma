@@ -79,6 +79,10 @@ def check_config_store() -> dict[str, Any]:
                     "saves do not persist (check kazma-data/settings.db "
                     "locks/permissions)"
                 ),
+                # The fallback is for the life of the process: a boot while
+                # the database was away stays volatile after it is back. The
+                # guard rides out a dependency outage but must restart this.
+                "restart_required": True,
             }
         return {"status": "ok", "component": "config_store"}
     except Exception as e:
@@ -423,37 +427,41 @@ async def _readiness():
     Returns 200 if ready, 503 if critical dependency failed
     (so LB / multi-replica can stop routing traffic).
     """
+    # Every check off the loop, capped, and all at once. Off the loop: live
+    # stall-20260831-181156.txt shows the Postgres ping blocking the loop in
+    # ``psycopg_pool.getconn`` until the guard killed the child, and the
+    # ConfigStore and model-registry checks are database reads on a
+    # Postgres install too (stall-20260915-064232; on 2026-09-28 "ModelRegistry
+    # health check failed: couldn't get a connection after 5.00 sec", on the
+    # loop). All at once: one after another they could take 16 s while
+    # Postgres was away -- past the guard's 10 s probe -- and a probe that
+    # times out reads as a dead Kazma. Together they answer within the
+    # longest cap. The mcp / cron / schedulers checks are the components that
+    # failed in production invisibly (audit 2026-08-28); resolving the active
+    # provider can read settings and probe the machine for a GCP project
+    # (stall-20260922-231218: 15 s on the loop).
+    plan = (
+        ("config_store", check_config_store, 3.0),
+        ("database", check_database, 3.0),
+        ("swarm_engine", check_swarm_engine, 3.0),
+        ("model_registry", check_model_registry, 3.0),
+        ("agent_runner", check_agent_runner, 3.0),
+        ("mcp", check_mcp, 3.0),
+        ("cron", check_cron, 3.0),
+        ("schedulers", check_schedulers, 3.0),
+        ("llm_provider", check_llm_provider, 5.0),
+    )
+    results = await asyncio.gather(
+        *(_offloaded_check(check, name, cap) for name, check, cap in plan),
+        # One check that raises fails itself, never the whole probe.
+        return_exceptions=True,
+    )
     checks = {}
-    
-    # Cheap in-memory / SQLite-WAL checks. The Postgres ping is NOT one of
-    # them: live stall-20260831-181156.txt shows ``async def readiness``
-    # blocked in ``pool.execute_one`` → ``psycopg_pool.getconn`` on the
-    # event loop, so SSE / Telegram acks / the stall heartbeat all froze
-    # and the guard killed the child. Offload + 3s cap. The ConfigStore
-    # check is a database read on a Postgres install too, and
-    # stall-20260915-064232 caught it here on the loop: same treatment.
-    checks["config_store"] = await _offloaded_check(check_config_store, "config_store", 3.0)
-    try:
-        checks["database"] = await asyncio.wait_for(
-            asyncio.to_thread(check_database), timeout=3.0
-        )
-    except TimeoutError:
-        checks["database"] = {
-            "status": "failed",
-            "component": "database",
-            "error": "ping timed out (3s)",
-        }
-    checks["swarm_engine"] = check_swarm_engine()
-    checks["model_registry"] = check_model_registry()
-    checks["agent_runner"] = check_agent_runner()
-    # The three components that actually failed in production and were
-    # invisible to every health endpoint (audit 2026-08-28).
-    checks["mcp"] = check_mcp()
-    checks["cron"] = check_cron()
-    checks["schedulers"] = check_schedulers()
-    # Resolving the active provider can read settings and probe the machine
-    # for a GCP project (stall-20260922-231218: 15s on the loop).
-    checks["llm_provider"] = await _offloaded_check(check_llm_provider, "llm_provider", 5.0)
+    for (name, _check, _cap), result in zip(plan, results):
+        if isinstance(result, BaseException):
+            logger.error("%s health check raised", name, exc_info=result)
+            result = {"status": "failed", "component": name, "error": "check failed"}
+        checks[name] = result
     
     # Determine overall status — database + config_store are critical
     critical_failed = [
@@ -482,7 +490,11 @@ async def _readiness():
         "timestamp": time.time(),
         "checks": checks,
     }
-    
+    # A failure that only a restart can clear (the volatile settings store):
+    # the guard restarts on it instead of riding it out as an outage.
+    if any(c.get("restart_required") for c in checks.values() if isinstance(c, dict)):
+        response["restart_required"] = True
+
     return JSONResponse(content=response, status_code=http_status)
 
 

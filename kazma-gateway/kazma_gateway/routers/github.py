@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from kazma_core.errors import safe_error, validation_error
 from kazma_core.http_tls import shared_ssl_context
+from kazma_core.security.child_env import tool_child_env
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,9 @@ async def save_token(body: TokenSaveRequest) -> JSONResponse:
     # Save to SQLite ConfigStore
     try:
         from kazma_core.config_store import get_config_store
-        get_config_store().set("connectors.github.token", token, category="connectors")
+        await asyncio.to_thread(
+            get_config_store().set, "connectors.github.token", token, category="connectors",
+        )
     except Exception as exc:
         logger.error("[github/token] Failed to write to ConfigStore: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to save token to database.") from exc
@@ -162,8 +165,7 @@ async def save_app_config(body: AppConfigSaveRequest) -> JSONResponse:
 
     try:
         from kazma_core.config_store import get_config_store
-        store = get_config_store()
-        store.batch_set([
+        await asyncio.to_thread(get_config_store().batch_set, [
             ("connectors.github.app_id", app_id, "connectors"),
             ("connectors.github.app_installation_id", app_inst, "connectors"),
             ("connectors.github.app_slug", body.app_slug.strip(), "connectors"),
@@ -188,18 +190,12 @@ _status_inflight: dict[tuple[str, str, str], asyncio.Future] = {}
 
 
 def _workspace_cwd() -> str:
-    """The active workspace's root. Store reads: call it via to_thread."""
-    try:
-        from kazma_core.stores import get_workspace_store
+    """The active workspace's root -- the folder the agent's tools work in
+    (``resolve_active_root``, AGENTS.md §10A), never the server's CWD. Store
+    reads: call it via to_thread."""
+    from kazma_core.workspace.binding import resolve_active_root
 
-        active_ws = get_workspace_store().get_active_workspace()
-        if active_ws:
-            return active_ws["root_path"]
-        from kazma_core.config_store import get_config_store
-
-        return get_config_store().get("workspace.selected_path") or os.getcwd()
-    except Exception:
-        return os.getcwd()
+    return str(resolve_active_root())
 
 
 def _token_state() -> tuple[str, bool]:
@@ -270,6 +266,7 @@ async def github_status() -> JSONResponse:
                 capture_output=True,
                 text=True,
                 timeout=5,
+                env=tool_child_env(),
             )
         )
         remote_url = res.stdout.strip() if res.returncode == 0 else ""
@@ -469,7 +466,7 @@ def _oauth_redirect_uri(request: Request) -> str:
 
 
 @router.get("/oauth/status")
-async def oauth_status() -> JSONResponse:
+def oauth_status() -> JSONResponse:
     """Report whether the OAuth App is configured and any usable token exists.
 
     ``connected`` remains OAuth-specific (Disconnect button). ``has_token`` is
@@ -524,8 +521,7 @@ async def oauth_start(request: Request) -> RedirectResponse | JSONResponse:
     try:
         from kazma_core.config_store import get_config_store
 
-        store = get_config_store()
-        store.batch_set([
+        await asyncio.to_thread(get_config_store().batch_set, [
             ("connectors.github.oauth_state", state, "connectors"),
             ("connectors.github.oauth_redirect_uri", redirect_uri, "connectors"),
         ])
@@ -558,9 +554,14 @@ async def oauth_callback(request: Request) -> RedirectResponse | JSONResponse:
     try:
         from kazma_core.config_store import get_config_store
 
-        store = get_config_store()
-        expected_state = store.get("connectors.github.oauth_state", "")
-        redirect_uri = store.get("connectors.github.oauth_redirect_uri", "")
+        def _pending() -> tuple[str, str]:
+            store = get_config_store()
+            return (
+                store.get("connectors.github.oauth_state", ""),
+                store.get("connectors.github.oauth_redirect_uri", ""),
+            )
+
+        expected_state, redirect_uri = await asyncio.to_thread(_pending)
     except Exception:
         expected_state, redirect_uri = "", ""
 
@@ -583,14 +584,16 @@ async def oauth_callback(request: Request) -> RedirectResponse | JSONResponse:
         logger.exception("[github/oauth] unexpected error during token exchange")
         return _oauth_result_page(False, f"Unexpected error: {exc}")
 
-    store_oauth_token(token_data)
+    await asyncio.to_thread(store_oauth_token, token_data)
     # Clear the one-time state so it can't be replayed.
     try:
         from kazma_core.config_store import get_config_store
 
-        get_config_store().set("connectors.github.oauth_state", "", category="connectors")
+        await asyncio.to_thread(
+            get_config_store().set, "connectors.github.oauth_state", "", category="connectors",
+        )
     except Exception:
-        pass
+        logger.warning("[github/oauth] one-time state not cleared", exc_info=True)
     logger.info("[github/oauth] successfully connected (scope=%s)", token_data.get("scope", ""))
     return _oauth_result_page(True, "GitHub connected successfully.")
 
@@ -600,12 +603,12 @@ async def oauth_revoke() -> JSONResponse:
     """Disconnect: clear all stored GitHub credentials (OAuth, PAT, App credentials)."""
     from kazma_gateway.routers.github_client import clear_oauth_token
 
-    clear_oauth_token()
+    await asyncio.to_thread(clear_oauth_token)
 
     try:
         from kazma_core.config_store import get_config_store
 
-        get_config_store().batch_set([
+        await asyncio.to_thread(get_config_store().batch_set, [
             ("connectors.github.token", "", "connectors"),
             ("connectors.github.app_id", "", "connectors"),
             ("connectors.github.app_installation_id", "", "connectors"),
@@ -749,7 +752,8 @@ async def _resolve_owner_repo() -> tuple[str, str] | JSONResponse:
     """Resolve (owner, repo) for the active workspace, or an error response."""
     from kazma_gateway.routers.github_client import resolve_repo
 
-    slug = resolve_repo()
+    # A workspace-store read and a git subprocess: off the loop.
+    slug = await asyncio.to_thread(resolve_repo)
     if not slug:
         return JSONResponse({"error": "Workspace is not a GitHub repository (no GitHub remote found)."}, status_code=200)
     return slug
@@ -1112,6 +1116,31 @@ class CloneRepoRequest(BaseModel):
     ssh_url: str = ""
 
 
+def _register_clone(store: Any, repo_name: str, repo_dir: Path, url: str, full_name: str) -> dict[str, Any]:
+    """Register a fresh clone as the active workspace. Blocking; via to_thread."""
+    from kazma_core.config_store import get_config_store
+
+    record = store.create_workspace(repo_name, str(repo_dir))
+    store.set_active_workspace(record["id"])
+    cs = get_config_store()
+    cs.set("workspace.selected_path", str(repo_dir), category="workspace")
+    try:
+        cs.reload_from_root(str(repo_dir))
+    except Exception:
+        logger.debug("[github/repos/clone] reload_from_root failed", exc_info=True)
+    # Persist the repo identity so it doesn't have to be re-derived from
+    # `git remote` on every call (Phase 2). full_name is "owner/repo".
+    try:
+        owner, repo = full_name.split("/", 1)
+        store.set_repo_identity(
+            str(repo_dir), repo_url=url, owner=owner, repo=repo,
+            default_branch="main", is_github=True,
+        )
+    except Exception:
+        logger.debug("[github/repos/clone] repo identity cache failed", exc_info=True)
+    return record
+
+
 @router.post("/repos/clone", status_code=201)
 async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
     """Clone a GitHub repo and activate it as the workspace.
@@ -1120,11 +1149,8 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
     remote), just activates that workspace. Otherwise clones into
     ``$KAZMA_CLONE_DIR`` (default ``~/kazma-repos``) and registers it.
     """
-    import asyncio
-    import base64
-    import subprocess
     from kazma_gateway.agent_handler.commands import safe_repo_dir_name
-    from kazma_gateway.routers.github_client import GitHubClient
+    from kazma_gateway.routers.github_client import GitHubClient, clone_auth_env
 
     full_name = body.full_name.strip()
     if not full_name or "/" not in full_name:
@@ -1164,7 +1190,7 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
 
     store = get_workspace_store()
     try:
-        for ws in store.list_workspaces():
+        for ws in await asyncio.to_thread(store.list_workspaces):
             root = str(ws.get("root_path", ""))
             if not Path(root).joinpath(".git").exists():
                 continue
@@ -1172,9 +1198,10 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
                 subprocess.run,
                 ["git", "config", "--get", "remote.origin.url"],
                 cwd=root, capture_output=True, text=True, timeout=5,
+                env=tool_child_env(),
             )
             if res.returncode == 0 and full_name in res.stdout:
-                store.set_active_workspace(ws["id"])
+                await asyncio.to_thread(store.set_active_workspace, ws["id"])
                 return JSONResponse({"status": "ok", "message": "Already open locally.", "path": root, "workspace_id": ws["id"]}, status_code=200)
     except Exception as exc:
         logger.debug("[github/repos/clone] local-check failed: %s", exc)
@@ -1192,24 +1219,17 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
 
     gh_token: str | None = None
     try:
-        # Authenticate private clones via git config env vars — the token
-        # never enters argv (clone URL or -c flag), so it cannot leak through
-        # process listings or a failed clone's echoed stderr (H14/H15).
-        clone_env = {**os.environ}
+        # Private clones: the token rides a git config header, never argv
+        # (H14/H15, clone_auth_env). The lookup may mint a GitHub App token
+        # over the network: off the loop.
         if not body.use_ssh:
             try:
                 from kazma_gateway.routers.github_client import get_github_token
 
-                gh_token = get_github_token()
-                if gh_token:
-                    basic = base64.b64encode(f"x-access-token:{gh_token}".encode()).decode()
-                    clone_env.update({
-                        "GIT_CONFIG_COUNT": "1",
-                        "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
-                        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: Basic {basic}",
-                    })
+                gh_token = await asyncio.to_thread(get_github_token) or None
             except Exception:
-                logger.debug("[github/repos/clone] token injection failed, cloning anonymously", exc_info=True)
+                logger.debug("[github/repos/clone] token lookup failed, cloning anonymously", exc_info=True)
+        clone_env = tool_child_env(clone_auth_env(gh_token))
 
         # to_thread: a sync clone would freeze the shared event loop for up
         # to the 120s timeout (mirrors agent_handler/commands.py).
@@ -1232,32 +1252,9 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
             status_code=502,
         )
 
-    # Register + activate the cloned repo as a workspace.
-    from kazma_core.config_store import get_config_store
-
-    record = store.create_workspace(repo_name, str(repo_dir))
-    store.set_active_workspace(record["id"])
-    cs = get_config_store()
-    cs.set("workspace.selected_path", str(repo_dir), category="workspace")
-    try:
-        cs.reload_from_root(str(repo_dir))
-    except Exception:
-        pass
-
-    # Persist the repo identity so it doesn't have to be re-derived from
-    # `git remote` on every call (Phase 2). full_name is "owner/repo".
-    try:
-        _owner, _repo = full_name.split("/", 1)
-        store.set_repo_identity(
-            str(repo_dir),
-            repo_url=url,
-            owner=_owner,
-            repo=_repo,
-            default_branch="main",
-            is_github=True,
-        )
-    except Exception:
-        logger.debug("[github/repos/clone] repo identity cache failed", exc_info=True)
+    # Register + activate the cloned repo as a workspace -- store writes
+    # and the binding bus they notify: off the loop.
+    record = await asyncio.to_thread(_register_clone, store, repo_name, repo_dir, url, full_name)
 
     logger.info("[github/repos/clone] cloned %s → %s", full_name, repo_dir)
     return JSONResponse({"status": "ok", "path": str(repo_dir), "workspace_id": record["id"]}, status_code=201)

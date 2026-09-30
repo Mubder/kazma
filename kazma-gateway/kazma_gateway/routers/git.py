@@ -28,7 +28,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import subprocess
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter
@@ -50,6 +49,13 @@ def _run_git(args: list[str], cwd: str) -> tuple[bool, str]:
         ``(success, stdout_stripped)`` — *success* is False on non-zero
         exit, timeout, or if ``git`` is not found on PATH.
     """
+    from kazma_core.security.child_env import tool_child_env
+
+    # Read-only queries in a workspace that may be a stranger's clone: no
+    # server secrets in git's environment, and core.fsmonitor off so the
+    # repository's own config cannot start a program (AGENTS.md §26I).
+    if args[:1] == ["git"]:
+        args = ["git", "-c", "core.fsmonitor=false", *args[1:]]
     try:
         result = subprocess.run(  # noqa: S603 — args are strictly controlled
             args,
@@ -57,6 +63,7 @@ def _run_git(args: list[str], cwd: str) -> tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT,
+            env=tool_child_env(),
         )
         if result.returncode == 0:
             return True, result.stdout.strip()
@@ -105,31 +112,13 @@ def create_git_router() -> APIRouter:
     async def git_status() -> JSONResponse:
         """Return live git status for the active workspace folder.
 
-        The workspace root is fetched from ``ConfigStore`` key
-        ``workspace.selected_path``.  If none is configured the CWD is
-        used as a best-effort fallback.
+        The workspace is the one the agent's tools work in
+        (``resolve_active_root``, AGENTS.md §10A) -- never the server's CWD.
 
         The response never raises a 5xx for non-git directories — instead
         it returns ``{"is_git": false, ...}`` so the UI degrades
         gracefully.
         """
-        # Resolve the active workspace root
-        try:
-            from kazma_core.stores import get_workspace_store
-            active_ws = get_workspace_store().get_active_workspace()
-            if active_ws:
-                raw_root = active_ws["root_path"]
-            else:
-                from kazma_core.config_store import get_config_store
-                raw_root = get_config_store().get("workspace.selected_path")
-        except Exception:
-            raw_root = None
-
-        if raw_root:
-            cwd = str(Path(str(raw_root)).resolve())
-        else:
-            cwd = str(Path.cwd())
-
         empty: dict[str, Any] = {
             "is_git": False,
             "branch": "",
@@ -139,6 +128,15 @@ def create_git_router() -> APIRouter:
             "untracked": [],
             "raw_status": "",
         }
+
+        # The one workspace ladder; off the loop, it reads the workspace store.
+        try:
+            from kazma_core.workspace.binding import resolve_active_root
+
+            cwd = str(await asyncio.to_thread(resolve_active_root))
+        except Exception:
+            logger.debug("[git/status] no workspace to report on", exc_info=True)
+            return JSONResponse(empty)
 
         # Check whether this is actually a git repo
         # to_thread: sync git subprocess (up to 4 sequential calls) must not

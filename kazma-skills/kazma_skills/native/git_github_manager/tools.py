@@ -127,7 +127,8 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         try:
             from kazma_gateway.routers.github_client import get_github_token
 
-            token = get_github_token()
+            # Settings and vault reads, maybe a GitHub App token mint: off the loop.
+            token = await asyncio.to_thread(get_github_token)
         except Exception:
             token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_PAT") or ""
 
@@ -803,7 +804,7 @@ async def _resolve_owner_repo() -> tuple[str, str] | str:
     try:
         from kazma_gateway.routers.github_client import resolve_repo, get_active_cwd  # type: ignore
 
-        slug = resolve_repo(get_active_cwd())
+        slug = await asyncio.to_thread(lambda: resolve_repo(get_active_cwd()))
         if slug:
             return slug
     except Exception:

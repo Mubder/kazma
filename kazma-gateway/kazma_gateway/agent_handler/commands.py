@@ -295,7 +295,7 @@ async def _handle_swarm_config_command(
                 f"⚠️ Invalid chat_id: `{arg}`. It must be an integer "
                 "(group IDs are negative, e.g. -1001234567890).")
             return True
-        cs.set(key, {
+        await asyncio.to_thread(cs.set, key, {
             "platform": "telegram",
             "chat_id": chat_id,
             "enabled": True,
@@ -308,23 +308,23 @@ async def _handle_swarm_config_command(
 
     # ── /swarm config disable ─────────────────────────────────────
     if action == "disable":
-        existing = cs.get(key, None)
+        existing = await asyncio.to_thread(cs.get, key, None)
         if isinstance(existing, dict):
             existing["enabled"] = False
-            cs.set(key, existing, category="swarm")
+            await asyncio.to_thread(cs.set, key, existing, category="swarm")
         await _send_swarm_reply(msg, store, manager, thread_id,
             "✅ Output routing disabled (config retained).")
         return True
 
     # ── /swarm config clear ───────────────────────────────────────
     if action == "clear":
-        cs.delete(key)
+        await asyncio.to_thread(cs.delete, key)
         await _send_swarm_reply(msg, store, manager, thread_id,
             "✅ Output routing cleared.")
         return True
 
     # ── /swarm config (show current) ──────────────────────────────
-    current = cs.get(key, None)
+    current = await asyncio.to_thread(cs.get, key, None)
     if not isinstance(current, dict) or not current.get("chat_id"):
         await _send_swarm_reply(msg, store, manager, thread_id,
             "🐝 **Output Routing**\n\n"
@@ -366,6 +366,41 @@ def _get_visible_providers() -> list[dict[str, Any]]:
     except Exception as exc:
         logger.warning("[agent-handler] Failed to get providers: %s", exc)
         return []
+
+
+def _activate_workspace(ws_id: str) -> bool:
+    """Make a workspace the active one and point the IDE at it.
+
+    Blocking -- a workspace-store write, the binding bus it notifies (the
+    MCP rebind) and the IDE root refresh -- so the chat commands run it with
+    ``asyncio.to_thread``, never on the event loop every platform shares.
+    """
+    from kazma_core.ide.service import get_ide_service
+    from kazma_core.stores import get_workspace_store
+
+    ok = get_workspace_store().set_active_workspace(ws_id)
+    if ok:
+        get_ide_service().refresh_root()
+    return bool(ok)
+
+
+def _register_clone(dir_name: str, repo_dir: Path, url: str, slug: str) -> None:
+    """Record a fresh clone as a workspace and activate it. Blocking."""
+    from kazma_core.config_store import get_config_store
+    from kazma_core.stores import get_workspace_store
+
+    store_ws = get_workspace_store()
+    record = store_ws.create_workspace(dir_name, str(repo_dir))
+    try:
+        owner, repo = slug.split("/", 1)
+        store_ws.set_repo_identity(
+            str(repo_dir), repo_url=url, owner=owner, repo=repo,
+            default_branch="main", is_github=True,
+        )
+    except Exception:  # noqa: BLE001 -- identity is a cache; the clone stands
+        logger.debug("[ide] repo identity for %s not recorded", slug, exc_info=True)
+    get_config_store().set("workspace.selected_path", str(repo_dir), category="workspace")
+    _activate_workspace(record["id"])
 
 
 async def _try_ide_command(
@@ -630,7 +665,7 @@ async def _try_ide_command(
             try:
                 from kazma_core.stores import get_workspace_store
 
-                wsl = get_workspace_store().list_workspaces()
+                wsl = await asyncio.to_thread(get_workspace_store().list_workspaces)
             except Exception as exc:
                 await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {exc}")
                 return True
@@ -654,16 +689,11 @@ async def _try_ide_command(
         if action == "switch" and len(sp) > 1:
             ws_id = sp[1].strip()
             try:
-                from kazma_core.stores import get_workspace_store
-
-                ok = get_workspace_store().set_active_workspace(ws_id)
+                ok = await asyncio.to_thread(_activate_workspace, ws_id)
             except Exception as exc:
                 await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {exc}")
                 return True
             if ok:
-                from kazma_core.ide.service import get_ide_service
-
-                get_ide_service().refresh_root()
                 await _send_model_reply(msg, store, manager, thread_id, f"✅ Activated workspace `{ws_id}`.")
             else:
                 await _send_model_reply(msg, store, manager, thread_id, f"⚠️ Workspace `{ws_id}` not found.")
@@ -678,25 +708,18 @@ async def _try_ide_command(
                     "⚠️ Usage: /ide repo clone <owner/repo>",
                 )
                 return True
-            import asyncio
-            import base64
             import os
             import subprocess
             from kazma_core.stores import get_workspace_store
-            from kazma_core.config_store import get_config_store
 
-            store_ws = get_workspace_store()
             # Reuse an existing workspace if one already matches.
             existing = next(
-                (w for w in store_ws.list_workspaces()
+                (w for w in await asyncio.to_thread(get_workspace_store().list_workspaces)
                  if w.get("owner") and f"{w['owner']}/{w['repo']}" == slug),
                 None,
             )
             if existing:
-                store_ws.set_active_workspace(existing["id"])
-                from kazma_core.ide.service import get_ide_service
-
-                get_ide_service().refresh_root()
+                await asyncio.to_thread(_activate_workspace, existing["id"])
                 await _send_model_reply(
                     msg, store, manager, thread_id,
                     f"✅ `{slug}` already cloned — activated workspace `{existing['name']}`.",
@@ -721,24 +744,18 @@ async def _try_ide_command(
                     i += 1
                 repo_dir = Path(f"{repo_dir}-{i}")
             url = f"https://github.com/{slug}.git"
-            # Inject token for private repo access (PAT/OAuth/App installation)
-            # via git config env vars — the token never enters argv (clone URL
-            # or -c flag), so it cannot leak through process listings, and a
-            # failed clone's stderr can no longer echo it back to chat.
-            clone_env = {**os.environ}
-            try:
-                from kazma_gateway.routers.github_client import get_github_token
+            # Private repos: the token rides a git config header, never argv
+            # (clone_auth_env); the lookup may reach the vault or mint a
+            # GitHub App token over the network -- off the loop.
+            from kazma_core.security.child_env import tool_child_env
+            from kazma_gateway.routers.github_client import clone_auth_env, get_github_token
 
-                token = get_github_token()
-                if token:
-                    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-                    clone_env.update({
-                        "GIT_CONFIG_COUNT": "1",
-                        "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
-                        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: Basic {basic}",
-                    })
-            except Exception:
-                pass
+            try:
+                token = await asyncio.to_thread(get_github_token)
+            except Exception:  # noqa: BLE001 -- a public repo clones without it
+                logger.debug("[ide] no GitHub token for the clone", exc_info=True)
+                token = ""
+            clone_env = tool_child_env(clone_auth_env(token))
             await _send_model_reply(
                 msg, store, manager, thread_id, f"⏳ Cloning `{slug}`…",
             )
@@ -760,20 +777,7 @@ async def _try_ide_command(
             except subprocess.TimeoutExpired:
                 await _send_model_reply(msg, store, manager, thread_id, "⚠️ Clone timed out.")
                 return True
-            record = store_ws.create_workspace(dir_name, str(repo_dir))
-            store_ws.set_active_workspace(record["id"])
-            try:
-                _o, _r = slug.split("/", 1)
-                store_ws.set_repo_identity(
-                    str(repo_dir), repo_url=url, owner=_o, repo=_r,
-                    default_branch="main", is_github=True,
-                )
-            except Exception:
-                pass
-            get_config_store().set("workspace.selected_path", str(repo_dir), category="workspace")
-            from kazma_core.ide.service import get_ide_service
-
-            get_ide_service().refresh_root()
+            await asyncio.to_thread(_register_clone, dir_name, repo_dir, url, slug)
             await _send_model_reply(
                 msg, store, manager, thread_id,
                 f"✅ Cloned `{slug}` and activated it.\nPath: `{repo_dir}`",
@@ -785,7 +789,7 @@ async def _try_ide_command(
         try:
             from kazma_core.stores import get_workspace_store
 
-            wsl = get_workspace_store().list_workspaces()
+            wsl = await asyncio.to_thread(get_workspace_store().list_workspaces)
         except Exception as exc:
             await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {exc}")
             return True
@@ -794,10 +798,7 @@ async def _try_ide_command(
             None,
         )
         if match:
-            get_workspace_store().set_active_workspace(match["id"])
-            from kazma_core.ide.service import get_ide_service
-
-            get_ide_service().refresh_root()
+            await asyncio.to_thread(_activate_workspace, match["id"])
             await _send_model_reply(
                 msg, store, manager, thread_id,
                 f"✅ Activated `{slug}` (workspace `{match['name']}`).",

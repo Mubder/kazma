@@ -7,6 +7,7 @@ module changed. Registration order within this group is preserved.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -25,7 +26,7 @@ def register_settings_routes(self: Any) -> None:
     """Register the settings routes onto ``self.app``."""
     # ── Phase D: Memory backends Settings API ─────────────────────────
     @self.app.get("/api/settings/memory/merge-kb")
-    async def _settings_memory_merge_kb_get():
+    def _settings_memory_merge_kb_get():
         from kazma_core.config_store import get_config_store
         from kazma_core.memory.config import read_memory_cfg
 
@@ -86,11 +87,15 @@ def register_settings_routes(self: Any) -> None:
                         "knowledge",
                     )
                 )
-            if items and hasattr(store, "batch_set"):
-                store.batch_set(items)
-            else:
-                for k, v, c in items:
-                    store.set(k, v, category=c)
+            def _save() -> None:
+                if items and hasattr(store, "batch_set"):
+                    store.batch_set(items)
+                else:
+                    for k, v, c in items:
+                        store.set(k, v, category=c)
+
+            # Off the loop: a settings write is a database round trip.
+            await asyncio.to_thread(_save)
             return {"ok": True}
         except Exception as exc:
             return {"ok": False, "error": safe_error(exc)}

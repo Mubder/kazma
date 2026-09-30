@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## A database outage is not a restart; the weekly report says everything (2026-09-30)
+
+From the weekly resilience report of 2026-09-29, read against the live logs.
+
+- **The report named 8 of the 15 mechanisms that fired.** It cut both lists
+  at eight in declaration order: six health-gated restarts and thirty
+  event-loop stalls were among what it left out. "29 mechanisms" counted a
+  placeholder row, and 141 of its "149 alerts" were one alert held back 140
+  times by its cooldown. It now names every mechanism and leads with what
+  needs a look -- restarts with their reasons, a scheduled job below its
+  schedule (the daily digest: 2 of 7), and what blocked the event loop, read
+  from the week's stall dumps -- and counts alerts sent.
+- **A Docker Desktop update restarted Kazma.** On 2026-09-28 the update
+  restarted the Docker engine and Postgres was gone for two minutes. The
+  heartbeat and the restic maintenance task waited on the database ON the
+  event loop, `/health/ready` ran its checks one after another past the
+  guard's probe, and the guard restarted Kazma. Now: 93 settings calls in
+  async code run off the loop (a gate keeps it so), readiness runs its checks
+  at once and answers in seconds, the Postgres pools connect with a 5 s
+  timeout and replace a connection the server closed, and the guard rides out
+  "Kazma answers, its database does not" (a page, and a restart only after
+  ten minutes).
+- **A crash leaves its last words.** On 2026-09-25 the guard logged "process
+  exited (code 1)" and nothing said why. The server's stderr is kept
+  (`.kazma/server.stderr.log`), `serve.py` prints a failure's whole traceback
+  there and enables `faulthandler`, and the restart page quotes it.
+- **Backups:** the snapshot and the repository maintenance no longer run at
+  once on one repository (each failed the other on "already locked": a
+  skipped offsite snapshot, a skipped remote prune); a missed snapshot is
+  reported.
+- **Settings → Restart server** asks the guard for its graceful reload; it
+  used to start a second server and hard-exit behind the guard's back.
+- **Git in a workspace gets no server secrets:** `/api/git/status` and the
+  web and `/ide` clones passed the server's whole environment, and `git
+  status` could start a cloned repository's `core.fsmonitor`. The
+  child-environment gate now covers the gateway and web folders.
+
 ## The website's screenshots are taken by a tool (2026-09-29)
 
 kazma.ai shows real captures of Kazma -- the chat with its steps, an approval,
