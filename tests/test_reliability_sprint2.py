@@ -6,8 +6,6 @@ from tests._module_source import module_source
 
 from pathlib import Path
 
-import pytest
-from fastapi.testclient import TestClient
 
 _UI = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui"
 _WS = _UI / "routes" / "ws_chat.py"
@@ -27,16 +25,19 @@ _GRAPH = (
 
 
 class TestSourceContractsSprint2:
-    def test_ws_has_long_turn_heartbeat(self):
-        src = _WS.read_text(encoding="utf-8")
-        assert "_long_turn_heartbeat" in src
-        assert "Still working" in src
-        assert "15.0" in src or "15" in src
+    def test_a_long_turn_journals_heartbeats(self):
+        """A long turn says it is alive to every watching tab: the SSE stream
+        journals turn_heartbeat frames and the broker fans them out to the
+        sockets (the WebSocket graph client's own heartbeat left with it,
+        2026-09-30, AUD-026)."""
+        streaming = (_UI / "sse_chat" / "_streaming.py").read_text(encoding="utf-8")
+        assert 'emit_j("turn_heartbeat"' in streaming
 
-    def test_ws_persist_stamps_model(self):
+    def test_the_socket_persists_no_reply(self):
+        """Replies are written by the SSE route (stamped with the model, the
+        next test); the socket runs no turn and writes none (AUD-026)."""
         src = _WS.read_text(encoding="utf-8")
-        assert 'sess.messages[-1]["model"]' in src or "model_id" in src
-        assert "model=" in src  # _ws_project_reply(..., model=)
+        assert "persist_reply" not in src and "add_message" not in src
 
     def test_sse_stamps_model_on_assistant(self):
         src = module_source(_SSE)

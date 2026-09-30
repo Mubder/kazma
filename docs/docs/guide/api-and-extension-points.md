@@ -45,7 +45,7 @@ Plus direct routes in `routes_direct.py` and a conditional Telegram webhook at `
 | `DELETE` | `/api/chat/sessions/\{session_id\}` | Delete session. (line 555) |
 | `GET` | `/api/chat/sessions/\{session_id\}/messages` | Session history. (line 561) |
 
-> **Graph transport:** `POST /api/chat/stream`. `/ws/chat/{session_id}` is telemetry / cursor resume only unless `KAZMA_WS_GRAPH=1`.
+> **Graph transport:** `POST /api/chat/stream`. `/ws/chat/{session_id}` is the telemetry / cursor bus: it runs no turn and takes no turn control (send, approve, stop, steer and abort are HTTP/SSE; the socket refuses them, naming the route).
 
 ### 2.2 Providers
 
@@ -340,7 +340,7 @@ See [Memory & RAG](memory-and-rag).
 
 ## Documentation Audit Notes
 
-- **Graph transport is SSE** (`POST /api/chat/stream`). `/ws/chat/{session_id}` is telemetry / cursor resume only unless `KAZMA_WS_GRAPH=1`.
+- **Graph transport is SSE** (`POST /api/chat/stream`). `/ws/chat/{session_id}` is the telemetry / cursor bus: it runs no turn and takes no turn control (send, approve, stop, steer and abort are HTTP/SSE; the socket refuses them, naming the route).
 - **The SSE `approval_required` event** is the canonical way for frontends to surface HITL pauses; pair it with `POST /api/approve/\{thread_id\}`.
 - **`/api/approve` ownership enforcement** (403 on cross-user) means approval tokens are per-user — an admin can't approve another user's task without matching identity fields.
 - **V2 is the single memory stack** — per-turn recall, tools, auto-store, and compaction all use `recall()` from `memory/recall.py`. The V1 4-layer adapter (`get_adapter()`) was removed in the V1→V2 cutover.

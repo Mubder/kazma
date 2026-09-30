@@ -169,11 +169,41 @@ handler around a WRITE was read. Found behind them:
 The remaining silent handlers are best-effort cleanup (closing, cancelling,
 UI refresh) and stay on the ratchet.
 
+**AUD-026 done (sixth change set), differently than the finding proposed.**
+Sharing per-message functions between the two routers presumed both
+transports ran turns. They did not: the WebSocket's `send_prompt` /
+`approve_tool` answered "sse_only" unless `KAZMA_WS_GRAPH=1`, and the chat
+store's `sendPrompt` / `submitApproval` — the only code that sent them — had no
+caller; stop / steer / abort were HTTP on the page and twins on the socket.
+The "escape hatch" could not work even switched on. So the duplicate went
+instead of being shared: the socket refuses the five actions naming their
+routes (`_HTTP_ROUTE_FOR`) and keeps what the page uses (frames for watching
+tabs, the cursor resume, the HITL card on connect, the orphan-clock clear).
+`ws_chat.py` 2,910 → 486 lines; `create_ws_chat_router` 277 → 45 (ruff C901),
+`chat_websocket` 187 → 22. The SSE router is the one transport (272 → 260;
+two pure closures lifted out); it stays on a new ratchet,
+`functions_over_complexity_50` (37 today, only down). Found on the way:
+- Web Push never subscribed a browser: its only arming call was in the dead
+  send path, and the push client spent its one try before the permission
+  check (`tests/js/test_push_arming.js`, the old modules fail it).
+- The `turn.timed_out` alert lived only in the dead path; it moved to
+  `agent/turn.py`, beside the wall-clock budget. The web chat has no
+  wall-clock budget — its turns are bounded by the step budget and tool
+  timeouts, and `/long` missions run long on purpose — and that stays the
+  owner's call.
+- A socket frame that parsed as JSON but was not an object (`123`) ended the
+  connection with a traceback.
+Gate: `tests/test_ws_chat_is_telemetry_only.py`. Fifteen source locks that
+described the removed copy were re-pointed, not deleted: each kept its SSE /
+HTTP half, and its WebSocket half became "the socket runs no turn".
+
 Previously deferred: AUD-015 (annotate the ~18 API-only routes —
 docs hygiene), AUD-017 (73-file unused-import sweep — its own batch), AUD-026
 (split the two 270-complexity chat transports — touches the gated §31
 delivery path, needs its own effort + full delivery matrix), AUD-027 (keep
-lowering the exception ratchet, module by module).
+lowering the exception ratchet, module by module). All four were taken the
+same day (the change sets above); AUD-027 had its first pass and stays a
+ratchet that only goes down, as does the new complexity count.
 
 Resolved during the audit window (already deployed, `b06fece5`): the live
 server ran below every normal program (Task Scheduler priority 7 — it started

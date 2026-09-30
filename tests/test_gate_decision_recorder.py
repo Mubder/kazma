@@ -301,7 +301,10 @@ def test_every_decision_site_records_through_the_recorder():
                 seen_sites += 1
             if missing:
                 offenders[rel] = missing
-    assert seen_sites >= 4, "the scan found fewer decision sites than exist"
+    # Three since 2026-09-30: the approve route, the approval-timeout
+    # watchdog and the chat apps' buttons (the WebSocket approve path left
+    # with the socket's graph client, AUD-026).
+    assert seen_sites >= 3, "the scan found fewer decision sites than exist"
     assert offenders == {}, (
         "these decide a gate without kazma_ui.hitl_decision.record_gate_decision: "
         f"{offenders}"

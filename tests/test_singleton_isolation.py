@@ -182,22 +182,22 @@ class TestModelFallbackReset:
 
 class TestActiveTurnsRegistryReset:
     def test_polluter_registers_running_turn(self):
-        from kazma_ui.active_turns import bind_live_socket, is_turn_running, register_turn
+        from kazma_ui.active_turns import is_turn_running, mark_turn_orphaned, register_turn
 
         register_turn("gw-discord-bleed", _NeverFinishingTask())
-        bind_live_socket("gw-discord-bleed", object())
+        mark_turn_orphaned("gw-discord-bleed")
         assert is_turn_running("gw-discord-bleed")
 
     def test_victim_registry_is_empty(self):
         from kazma_ui.active_turns import (
-            get_live_socket,
+            get_orphan_stamp,
             is_turn_running,
             reset_active_turns,
         )
 
         reset_active_turns()  # direct idempotent use also exercised below
         assert not is_turn_running("gw-discord-bleed")
-        assert get_live_socket("gw-discord-bleed") is None
+        assert get_orphan_stamp("gw-discord-bleed") is None
 
 
 # ── Helper idempotency (the new tiny prod-module reset fns) ───────────────

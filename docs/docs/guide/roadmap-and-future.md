@@ -106,7 +106,7 @@ Items are marked:
 | Discord adapter | ✅ | Gateway WebSocket. |
 | Slack adapter | ✅ | Socket Mode / polling. |
 | Web UI (SSE) | ✅ | `/api/chat/stream`. |
-| WebSocket chat | ✅ | `/ws/chat/{session_id}` is telemetry / cursor resume; SSE `/api/chat/stream` is the graph transport (`KAZMA_WS_GRAPH=1` restores WS graph). |
+| WebSocket chat | ✅ | `/ws/chat/{session_id}` is telemetry / cursor resume; SSE `/api/chat/stream` is the graph transport (the WS second graph client was removed 2026-09-30). |
 | TUI | ✅ | Textual, read-mostly. |
 | EN/AR i18n + RTL | ✅ | Catalog-merged dict, IBM Plex Sans / IBM Plex Sans Arabic, shared 14px root. |
 | X Studio (`/x`) | ✅ | Composer + X-only planner (Post now, Schedule, reschedule, threads, delete). Chat `x_post` stays always-HITL. Official API only. |

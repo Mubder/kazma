@@ -1,8 +1,8 @@
 """Chat routes for the Kazma WebUI.
 
-Primary (and default) graph transport is SSE at ``/api/chat/stream``.
-``/ws/chat/{session_id}`` remains the Turn Delivery V2 telemetry / cursor
-bus — it does not run the graph unless ``KAZMA_WS_GRAPH=1``.
+The graph transport is SSE at ``/api/chat/stream``.
+``/ws/chat/{session_id}`` is the Turn Delivery V2 telemetry / cursor bus: it
+runs no turn and takes no turn control (AUD-026).
 """
 
 from __future__ import annotations

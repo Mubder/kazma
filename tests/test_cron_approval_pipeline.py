@@ -151,10 +151,11 @@ def test_web_gateway_block_stamps_operator_telegram(monkeypatch):
     assert set(gw) <= {"thread_id", "display_name", "platform", "delivery_target"}
 
 
-def test_sse_and_ws_stamp_web_gateway():
-    """The documented _gateway fallback is dead unless Web writes it."""
+def test_the_web_turn_stamps_the_gateway_block():
+    """The documented _gateway fallback is dead unless Web writes it. Web
+    turns run on SSE alone; the socket's twin left with its graph client
+    (2026-09-30, AUD-026) and it builds no graph input."""
     from tests._module_source import module_source
-    from pathlib import Path
 
     root = Path(__file__).resolve().parent.parent
     sse = module_source(root / "kazma-ui" / "kazma_ui" / "sse_chat" / "__init__.py")
@@ -163,8 +164,7 @@ def test_sse_and_ws_stamp_web_gateway():
     )
     assert "web_gateway_block" in sse
     assert 'input_state["_gateway"]' in sse
-    assert "web_gateway_block" in ws
-    assert 'input_state["_gateway"]' in ws
+    assert "input_state" not in ws
 
 
 # ── Item 2: _deliver repair chain ─────────────────────────────────────

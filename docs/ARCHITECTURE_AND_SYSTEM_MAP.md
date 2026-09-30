@@ -375,7 +375,7 @@ kazma/
 |---------|------|
 | App factory | FastAPI + lifespan shutdown drain |
 | Auth | Secret / opaque session / API token / OIDC |
-| Chat | SSE primary (`/api/chat/stream`); WS graph off unless `KAZMA_WS_GRAPH=1`; client **projects** TurnDocument |
+| Chat | SSE is the only turn transport (`/api/chat/stream`); WS is telemetry / cursor only; client **projects** TurnDocument |
 | IDE | `/ide` page + `/api/ide/*` + CodeMirror `ide.js` |
 | Swarm panel | `/swarm` + `/api/swarm/*` |
 | Settings | Alpine + `mask_deep` + `kazmaConfirm`/`kazmaPrompt` |
@@ -480,7 +480,6 @@ Auth scope: **Open** = always open; **Secret** = KAZMA_SECRET / session / token 
 | `KAZMA_ALLOW_PRIVATE_LLM` | unset | No | Private URL discovery opt-in |
 | `KAZMA_MULTI_USER` | unset | SaaS | Force multi-user mode |
 | `KAZMA_OIDC_*` | unset | SaaS SSO | OIDC issuer/client/secret/redirect/role claim (id_token verified; no unverified fallback) |
-| `KAZMA_WS_GRAPH` | unset | No | `1` restores WS as a second graph client; default SSE-only |
 | `KAZMA_PGVECTOR` | auto on Postgres DSN | No | `0` keeps sqlite-vec; unset auto-selects pgvector for dense recall |
 | `KAZMA_E2B_API_KEY` / `E2B_API_KEY` | unset | Untrusted code | Firecracker `python_exec`; `KAZMA_E2B=0` kill-switch |
 | `KAZMA_TEMPORAL_HOST` | unset | Multi-hour swarm | Temporal wrap of swarm dispatch; `KAZMA_TEMPORAL=0` kill-switch |

@@ -95,11 +95,13 @@ async def test_mcp_non_bound_server_skips_scope_guard(monkeypatch, tmp_path):
     assert "different workspace" not in out["content"]
 
 
-def test_ws_graph_flag_lives_in_quarantine_module():
-    from kazma_ui.routes.ws_graph import ws_graph_enabled
-    from kazma_ui.routes.ws_chat import ws_graph_enabled as reexport
+def test_ws_graph_escape_hatch_is_gone():
+    """The quarantine module held KAZMA_WS_GRAPH, the switch for a second
+    graph client no shipped client sent to. Removed 2026-09-30 (AUD-026);
+    tests/test_ws_chat_is_telemetry_only.py keeps it from coming back."""
+    import importlib.util
 
-    assert ws_graph_enabled is reexport
+    assert importlib.util.find_spec("kazma_ui.routes.ws_graph") is None
 
 
 def test_ci_ruff_syntax_is_a_gate():

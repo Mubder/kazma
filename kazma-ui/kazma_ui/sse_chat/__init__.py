@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import logging
 import time
 import uuid
@@ -47,6 +46,8 @@ from kazma_ui.sse_chat._helpers import (  # noqa: F401
     _module_graph,
     _module_graph_holder,
     _module_store,
+    _parse_sse_frame,
+    _record_frame_activity,
     _user_facing_reply,
 )
 from kazma_core.runtime.live_llm import key_is_usable as _key_is_usable
@@ -1037,68 +1038,6 @@ def create_sse_chat_router(
             # workbench panel instead of showing a blank transcript.
             activity_log: list[dict[str, Any]] = []
 
-            def _parse_frame(frame: str) -> tuple[str, dict[str, Any]] | None:
-                """Split an SSE frame into (event_type, data) or None.
-
-                Line-scoped field parsing per the SSE spec: ``id:`` /
-                ``retry:`` lines may legally precede or follow ``event:``
-                (Turn Delivery V2 prepends ``id: <seq>``), so the first
-                line is not assumed to be the event field.
-                """
-                try:
-                    ev_type = ""
-                    data: dict[str, Any] = {}
-                    for line in frame.split("\n"):
-                        if line.startswith("event: "):
-                            ev_type = line[len("event: "):].strip()
-                        elif line.startswith("data: "):
-                            data = json.loads(line[len("data: "):])
-                    if not ev_type:
-                        return None
-                    return ev_type, data
-                except (json.JSONDecodeError, ValueError):
-                    return None
-
-            def _record_activity(ev_type: str, data: dict[str, Any]) -> None:
-                """Append a workbench row for a tool/status frame (deduped)."""
-                try:
-                    # Both frames carry tool_call_id; keyed by it, a call's
-                    # running and done rows are ONE part. This dropped it,
-                    # so the stored row keyed on name + state + text and
-                    # "Running..." stuck beside "Done" (2026-09-24).
-                    _cid = str(data.get("tool_call_id") or "")
-                    if ev_type == "tool_call":
-                        activity_log.append({
-                            **({"id": "tool#" + _cid} if _cid else {}),
-                            "kind": "tool",
-                            "title": str(data.get("tool_name") or "tool"),
-                            "detail": str(data.get("inputs") or ""),
-                            "state": "running",
-                            "ts": _dt.now(UTC).isoformat(),
-                        })
-                    elif ev_type == "tool_result":
-                        activity_log.append({
-                            **({"id": "tool#" + _cid} if _cid else {}),
-                            "kind": "tool",
-                            "title": str(data.get("tool_name") or "tool"),
-                            "detail": str(data.get("result") or ""),
-                            "state": "done",
-                            "ts": _dt.now(UTC).isoformat(),
-                        })
-                    elif ev_type == "status_update":
-                        status = str(data.get("status") or "").strip()
-                        # Only persist meaningful progress states; skip the
-                        # synthesizing heartbeat (cosmetic, noisy on reload).
-                        if status and status != "synthesizing":
-                            activity_log.append({
-                                "kind": "status",
-                                "title": status,
-                                "state": "running",
-                                "ts": _dt.now(UTC).isoformat(),
-                            })
-                except Exception:
-                    logger.debug("[SSE] activity capture failed", exc_info=True)
-
             def _persist_now(*, final: str | None = None, open_turn: bool = True) -> None:
                 """Flush in-progress text into this turn's reply row.
 
@@ -1201,7 +1140,7 @@ def create_sse_chat_router(
                 async for frame in _sse_attach_stream(
                     thread_id, session_id, _journal_head, replay_is_history=False,
                 ):
-                    parsed = _parse_frame(frame)
+                    parsed = _parse_sse_frame(frame)
                     if parsed is None:
                         yield frame
                         continue
@@ -1227,7 +1166,7 @@ def create_sse_chat_router(
                             _flushed_at[0] = len(content_acc)
                             _persist_now()
                     elif ev_type in ("tool_call", "tool_result", "status_update"):
-                        _record_activity(ev_type, data)
+                        _record_frame_activity(activity_log, ev_type, data)
                     elif ev_type in ("approval_required", "hitl"):
                         if isinstance(data, dict):
                             _hitl_frame_payload = data

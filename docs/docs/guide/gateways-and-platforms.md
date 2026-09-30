@@ -171,7 +171,7 @@ The `IncomingMessage` docstring (`gateway.py:62-66`) states it plainly: *"The Br
 The Web UI uses **Server-Sent Events** as the graph transport.
 
 - **Endpoint:** `POST /api/chat/stream` (`sse_chat.py`) — accepts `{message, session_id, model}`, returns a `StreamingResponse` (`text/event-stream`).
-- **Telemetry WebSocket:** `/ws/chat/{session_id}` is the Turn Delivery V2 cursor / live-frame bus. It does **not** run the graph unless `KAZMA_WS_GRAPH=1`.
+- **Telemetry WebSocket:** `/ws/chat/{session_id}` is the Turn Delivery V2 cursor / live-frame bus. It does **not** run the graph and takes no turn control.
 - **Client wiring:** `chat.js` always calls `KS.sse('/api/chat/stream', …)` for turns and `POST /api/approve/{thread_id}` for HITL.
 
 The full SSE event contract (`token`, `tool_call`, `tool_result`, `approval_required`, `done`, `error`) is documented in [API & Extension Points](api-and-extension-points#sse-event-contract).
@@ -233,6 +233,6 @@ A read-mostly observability dashboard over the same core singletons.
 ## Documentation Audit Notes
 
 - **`agent_handler.py` no longer exists** as a single file — it is the `agent_handler/` package. Older docs referencing the file are stale.
-- **Graph transport is SSE.** `/ws/chat/{session_id}` is live as a telemetry / cursor bus; it does not run the graph unless `KAZMA_WS_GRAPH=1`.
+- **Graph transport is SSE.** `/ws/chat/{session_id}` is live as a telemetry / cursor bus; it does not run the graph.
 - **`/undo` and `/edit` slash commands are stubs** and should not be advertised as functional.
 - **`/help` omits `/hitl` and `/swarm`** even though both work. This is a documentation gap in the in-app help text, not a missing feature.

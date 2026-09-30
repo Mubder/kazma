@@ -17,25 +17,35 @@ _SSE = _ROOT / "kazma-ui" / "kazma_ui" / "sse_chat.py"
 _CHAT_JS = _ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
 
 
-def test_reset_is_real_on_both_transports():
-    """`/reset` must delete checkpoints server-side on SSE AND WS.
+def _ws_refuses_prompts() -> None:
+    """The socket runs no turn since 2026-09-30 (AUD-026): a prompt sent there
+    is refused, so a slash command can neither ride to the model nor be a
+    cosmetic client-side clear on it. tests/test_ws_chat_is_telemetry_only.py
+    drives the refusal; this pins the table it comes from."""
+    ws = _WS.read_text(encoding="utf-8")
+    assert '"send_prompt": "POST /api/chat/stream"' in ws
+    assert "adelete_thread" not in ws and "needs_compaction" not in ws
+
+
+def test_reset_is_real_where_turns_run():
+    """`/reset` must delete checkpoints server-side.
 
     Before the 2026-08-19 fix, WS had no intercept: the client's local UI
     clear was the only effect and "/reset" rode to the LLM as a prompt —
-    a cosmetic-only command on the default (WS) transport.
+    a cosmetic-only command on the (then default) WS transport. Turns run
+    on SSE alone now, and the socket refuses prompts.
     """
     sse = module_source(_SSE)
-    ws = _WS.read_text(encoding="utf-8")
     assert '"/reset"' in sse and "adelete_thread" in sse
-    assert '"/reset"' in ws and "adelete_thread" in ws
+    _ws_refuses_prompts()
 
 
-def test_compact_is_real_on_both_transports():
-    """`/compact` must run the compaction cycle on SSE AND WS (was SSE-only)."""
+def test_compact_is_real_where_turns_run():
+    """`/compact` must run the compaction cycle (it was once SSE-only while
+    WS ran turns too; turns are SSE-only now)."""
     sse = module_source(_SSE)
-    ws = _WS.read_text(encoding="utf-8")
     assert '"/compact"' in sse and "needs_compaction" in sse
-    assert '"/compact"' in ws and "needs_compaction" in ws
+    _ws_refuses_prompts()
 
 
 def test_abort_is_visible_in_the_transcript():
@@ -52,13 +62,12 @@ def test_unknown_slash_gets_a_hint():
     assert "Unknown command" in js
 
 
-def test_capacity_and_yolo_intercepts_exist_on_both_transports():
+def test_capacity_and_yolo_intercepts_exist_where_turns_run():
     """The genuinely-wired commands stay wired: /yolo + capacity commands
-    are intercepted server-side on both SSE and WS."""
+    are intercepted server-side on SSE, the one transport that runs turns."""
     sse = module_source(_SSE)
-    ws = _WS.read_text(encoding="utf-8")
     assert '"/yolo"' in sse and "is_capacity_command" in sse
-    assert '"/yolo"' in ws and "is_capacity_command" in ws
+    _ws_refuses_prompts()
 
 
 def test_stale_socket_watchdog_exists():
@@ -75,6 +84,10 @@ def test_stale_socket_watchdog_exists():
     )
     assert "_livenessCheck" in js and "_lastFrameAt" in js
     assert "new Worker(" in js
-    # The server side must log heartbeat sends for diagnosability.
-    ws = _WS.read_text(encoding="utf-8")
-    assert "approve heartbeat n=" in ws
+    # The server side journals heartbeats for a long turn, and the broker fans
+    # them out to every watching socket (the WS graph client's own heartbeat
+    # log left with it, 2026-09-30).
+    streaming = (_ROOT / "kazma-ui" / "kazma_ui" / "sse_chat" / "_streaming.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'emit_j("turn_heartbeat"' in streaming

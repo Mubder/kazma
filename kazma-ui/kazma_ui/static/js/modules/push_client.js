@@ -21,15 +21,18 @@ window.KazmaPushClient = (function() {
   }
 
   /**
-   * Register SW + subscribe. Called after Notification permission is
-   * granted (user-gesture path from the send button). Idempotent per page.
+   * Register SW + subscribe. Called when Notification permission is granted
+   * (turn_visibility.armPermission, from the send gesture). Runs once per
+   * page -- counted from the first call that CAN subscribe: marking it tried
+   * before the permission check left a page that asked on its first send
+   * unsubscribed after the user said yes.
    */
   async function ensureSubscribed() {
     if (_tried) return;
-    _tried = true;
     try {
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
       if (!window.Notification || Notification.permission !== 'granted') return;
+      _tried = true;
 
       // Operator gate — same key the in-page notifications honor.
       const gate = await fetch('/api/notifications/turn-complete')

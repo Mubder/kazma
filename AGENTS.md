@@ -150,8 +150,8 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   and `app.py` startup recompile into `_graph_holder`. Omitting HITL on any site =
   dormant gate on that path.
 - Resume: `graph.ainvoke(Command(resume=…), config)` via `POST /api/approve/{thread_id}`
-  (SSE — the Web SoT), or gateway `/hitl approve|deny {thread_id}`. WS
-  `approve_tool` is off unless `KAZMA_WS_GRAPH=1`.
+  (SSE — the Web SoT), or gateway `/hitl approve|deny {thread_id}`. The
+  WebSocket takes no approvals: it refuses `approve_tool` (§31 D).
 - State persists in the checkpointer — paused turns survive restarts
 - Double-gating prevention: graph sets ContextVars (`_graph_hitl_gate_ctx` /
   `_hitl_approved_ctx`) so `LocalToolRegistry.execute` does **not** re-prompt the bus
@@ -2305,8 +2305,8 @@ pending: a second live question keeps the turn open), gateway pause/resume
 -- transcript part stamp, registry CAS, THEN the journal `hitl` frame (the
 broker stamps the frame's view from the registry; emit-before-CAS painted "No
 longer pending", 2026-09-20). The web approve route, the approval-timeout
-watchdog (`decision="timeout"`), platform buttons and the WS approve path all
-call it. Each used to write its own subset: the watchdog never stamped the
+watchdog (`decision="timeout"`) and platform buttons all call it (the WS
+approve path did too, until the socket's graph client was removed, §31 D). Each used to write its own subset: the watchdog never stamped the
 transcript, so an auto-denied card stayed `pending` in the chat forever and
 the turn reloaded broken (2026-09-26); platform buttons never told the journal,
 so a browser watching the thread never saw the decision. It stamps only a turn
@@ -2371,9 +2371,21 @@ has replace semantics (§29F duplicated-prefix invariant). Do not restore
 the journal + gate status. Do not re-stream content the bubble already
 appended.
 
-**D. Transports are mouths.** SSE (`sse_chat/`), WS (`ws_chat.py`), gateway
-graph (`agent_handler/graph.py`) all close through the same completion
+**D. Transports are mouths.** SSE (`sse_chat/`) and the gateway graph
+(`agent_handler/graph.py`) run turns and close through the same completion
 contract. A new mouth that invents its own “Done” is a delivery bug.
+**The WebSocket (`ws_chat.py`) runs no turn and takes no turn control**
+(2026-09-30, AUD-026): send and approve are SSE, stop / steer / abort are
+HTTP, and the socket answers those five actions with a refusal naming the
+route (`_HTTP_ROUTE_FOR`). It carried a second copy of each -- a graph client
+behind `KAZMA_WS_GRAPH` and stop/steer/abort twins -- that no shipped client
+sent to, and the copies drifted (its approve lacked the gate-identity check
+and dropped `approved_ids`, which fails open). What it still does: the
+pending HITL card on connect, the cursor resume, `ping`, and clearing a
+watched turn's orphan clock. The chat store sends nothing on it. Gate:
+`tests/test_ws_chat_is_telemetry_only.py` (behaviour through the router with
+a graph double; no graph-running call in the module; nothing reads the old
+switch; the store sends no frame).
 
 **Both browser mouths paint every journal frame.** The turn broker stamps
 one frame and fans it to the SSE stream AND the WebSocket, and a tab that
@@ -3546,6 +3558,14 @@ and the sibling suites):**
   `_qnorm` copies — the dead one its test then checked. A module-level
   ContextVar a graph node binds needs no reset: LangGraph runs each node in a
   copy of the caller's context (`tests/test_node_context_scope.py`).
+- **Web Push is armed from the send gesture** (`turn_visibility.armPermission`
+  -> `KazmaPushClient.ensureSubscribed`, once permission is granted; the push
+  client counts its one try only once it can subscribe). Its only arming call
+  sat in the chat store's WebSocket send path, which nothing called since
+  turns moved to SSE (2026-08-25), so no browser subscribed until 2026-09-30
+  (`tests/js/test_push_arming.js`, the old modules as its control). The
+  `turn.timed_out` alert moved from the socket to `agent/turn.py`, beside the
+  wall-clock budget it reports.
 - **A read through a module alias names something the module defines**
   (`tests/test_module_attribute_refs.py`, AUD-027): `KazmaAgent.sync_active_model`
   cleared `graph_builder._failover_clients` inside `try/except: pass` after the
