@@ -15,6 +15,8 @@ each of the specific ways that broke the guard in production:
     FAKE_EXIT_CODE        exit code to use
     FAKE_NOT_READY_AFTER_S  report not_ready + 503: a CRITICAL dependency is
                           gone and the app says stop routing traffic
+    FAKE_NOT_READY_RESTART_REQUIRED  ...and says only a restart clears it
+                          (the volatile settings store)
     FAKE_DEGRADED_AFTER_S   report degraded + 200: a partial failure that is
                           explicitly still serving and must NOT be restarted
     FAKE_HANG_AFTER_S     stop answering entirely without exiting
@@ -55,6 +57,7 @@ PORT = int(os.environ.get("FAKE_PORT", "9099"))
 MARKER = os.environ.get("FAKE_MARKER", "")
 COUNT_PROBES = os.environ.get("FAKE_COUNT_PROBES", "").lower() in ("1", "true", "yes")
 IGNORE_STOP = os.environ.get("FAKE_IGNORE_STOP", "").lower() in ("1", "true", "yes")
+RESTART_REQUIRED = os.environ.get("FAKE_NOT_READY_RESTART_REQUIRED", "").lower() in ("1", "true", "yes")
 
 _state = {"hung": False, "not_ready": False, "degraded": False}
 
@@ -93,12 +96,18 @@ class Handler(BaseHTTPRequestHandler):
                 _note("probe")
             if _state["not_ready"]:
                 # Critical dependency gone: the app itself says stop
-                # routing traffic. This is the only shape that should
-                # cause a restart.
-                raw = json.dumps({
+                # routing traffic. The guard rides a dependency outage out
+                # -- unless the app says only a restart clears it.
+                body: dict = {
                     "status": "not_ready",
                     "checks": {"database": {"status": "failed"}},
-                }).encode()
+                }
+                if RESTART_REQUIRED:
+                    body["restart_required"] = True
+                    body["checks"]["config_store"] = {
+                        "status": "failed", "error": "VOLATILE", "restart_required": True,
+                    }
+                raw = json.dumps(body).encode()
                 self.send_response(503)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(raw)))
@@ -174,6 +183,11 @@ def main() -> int:
 
     def _die():
         _note("exiting")
+        # What a crashing server leaves on stderr (a traceback); the guard
+        # keeps it (server.stderr.log) and quotes it in its restart event.
+        sys.stderr.write("Traceback (most recent call last):\n"
+                         "RuntimeError: fake_kazma crashed on purpose\n")
+        sys.stderr.flush()
         os._exit(EXIT_CODE)
 
     def _hang():

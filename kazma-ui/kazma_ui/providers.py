@@ -730,7 +730,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
     # ── Platform Connectors ───────────────────────────────────────────
 
     @router.get("/api/connectors")
-    async def list_connectors() -> list[dict[str, Any]]:
+    def list_connectors() -> list[dict[str, Any]]:
         """List all platform connectors with masked tokens."""
         entries: list[dict[str, Any]] = []
         for platform in _CONNECTOR_PLATFORMS:
@@ -739,7 +739,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         return entries
 
     @router.post("/api/connectors")
-    async def upsert_connector(req: ConnectorUpdateRequest) -> dict[str, Any]:
+    def upsert_connector(req: ConnectorUpdateRequest) -> dict[str, Any]:
         """Add or update a platform connector token.
 
         If the request contains a masked token placeholder, the existing token is
@@ -887,7 +887,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         return {"success": True, "message": f"Token configured for {name}"}
 
     @router.post("/api/connectors/{name}/toggle")
-    async def toggle_connector(name: str, req: ProviderToggleRequest) -> dict[str, str]:
+    def toggle_connector(name: str, req: ProviderToggleRequest) -> dict[str, str]:
         """Enable or disable a connector."""
         name = name.strip()
         config_store.set(f"connectors.{name}.enabled", req.enabled, category="connectors")

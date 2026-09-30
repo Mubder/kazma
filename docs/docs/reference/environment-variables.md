@@ -571,6 +571,7 @@ Which remotes `kazma update` trusts at all is `KAZMA_UPDATE_REMOTE_ALLOWLIST`, i
 | `KAZMA_GUARD_INTERVAL` | `30` | Seconds between probes. |
 | `KAZMA_GUARD_PROBE_TIMEOUT` | — | Per-probe timeout. |
 | `KAZMA_GUARD_FAILURES` | `3` | Consecutive failed probes before a restart. Probes that cannot get a local port (`WinError 10048/10055`) never count — see [Deployment §6](../guide/deployment). |
+| `KAZMA_GUARD_DEPENDENCY_OUTAGE_S` | `600` | Seconds Kazma may answer "not ready" (a 503 naming a failing dependency, such as the database) before the guard restarts it. A restart cannot bring a database back, so such an outage is paged once and ridden out; `KAZMA_GUARD_FAILURES` counts only probes that get no answer. |
 | `KAZMA_GUARD_PAGE_COOLDOWN_S` | — | Minimum gap between identical pages. |
 | `KAZMA_GUARD_GRACEFUL_STOP_S` | `60` | Seconds a deliberate stop (reload, maintenance pause, guard shutdown) waits for the server to shut itself down before it is killed. |
 | `KAZMA_GUARD_LOG` / `KAZMA_GUARD_STATE` | `<install>/.kazma/` | Guard log, and the state file: child PID, the guard's heartbeat, reload acknowledgements. |

@@ -19,6 +19,12 @@ logger = logging.getLogger(__name__)
 _active_promotions: Set[str] = set()
 
 
+def _set_memory_status(status: str) -> None:
+    """Persist ``system.memory.status``. Blocking (a settings write is a
+    database round trip): the async promotion path runs it with to_thread."""
+    get_config_store().set("system.memory.status", status, category="system")
+
+
 async def trigger_package_promotion(package_name: str) -> None:
     """Trigger a safe package promotion (installation) in a fully detached background task.
 
@@ -52,9 +58,7 @@ async def trigger_package_promotion(package_name: str) -> None:
             package_name,
         )
         try:
-            get_config_store().set(
-                "system.memory.status", "INSTALL_REFUSED", category="system"
-            )
+            await asyncio.to_thread(_set_memory_status, "INSTALL_REFUSED")
         except Exception:  # pragma: no cover - status is best-effort
             logger.debug("[RuntimeManager] status write failed", exc_info=True)
         return
@@ -67,8 +71,7 @@ async def trigger_package_promotion(package_name: str) -> None:
 
     # Set status to INSTALLING immediately to persist status across reloads
     try:
-        store = get_config_store()
-        store.set("system.memory.status", "INSTALLING", category="system")
+        await asyncio.to_thread(_set_memory_status, "INSTALLING")
     except Exception as e:
         logger.error("[RuntimeManager] Failed to set status to INSTALLING: %s", e)
 
@@ -138,8 +141,7 @@ async def _run_promotion_task(package_name: str) -> None:
 
         if success:
             # Update ConfigStore status to ACTIVE
-            store = get_config_store()
-            store.set("system.memory.status", "ACTIVE", category="system")
+            await asyncio.to_thread(_set_memory_status, "ACTIVE")
 
             # Hot-reload memory: trigger re-indexing
             try:
@@ -160,14 +162,12 @@ async def _run_promotion_task(package_name: str) -> None:
                 logger.error("[RuntimeManager] Failed to broadcast celebration: %s", e)
         else:
             # Mark back to DEGRADED
-            store = get_config_store()
-            store.set("system.memory.status", "DEGRADED", category="system")
+            await asyncio.to_thread(_set_memory_status, "DEGRADED")
 
     except Exception as e:
         logger.error("[RuntimeManager] Unexpected error in background promotion: %s", e, exc_info=True)
         try:
-            store = get_config_store()
-            store.set("system.memory.status", "DEGRADED", category="system")
+            await asyncio.to_thread(_set_memory_status, "DEGRADED")
         except Exception:
             pass
     finally:

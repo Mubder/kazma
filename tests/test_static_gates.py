@@ -940,6 +940,15 @@ _LOOP_STALL_HELPERS = frozenset({
     # Checkpoint retention (2026-09-27): SQLite files and Postgres deletes,
     # one transaction per chat; the task store's single-task delete.
     "run_checkpoint_retention", "retention_setting", "delete_task",
+    # Third pass (2026-09-30). The restic maintenance handler read its repos
+    # on the loop while Postgres was away (a Docker Desktop update) and the
+    # guard restarted Kazma. Beside it: the workspace ladder (the workspace
+    # store, SQLite with a 5 s busy timeout), which six async tools called
+    # directly, and the GitHub helpers -- a token lookup can mint a GitHub
+    # App token over the network.
+    "restic_available", "ensure_password", "repo_paths",
+    "resolve_active_root", "get_active_cwd", "resolve_repo",
+    "get_github_token", "is_oauth_connected", "store_oauth_token", "clear_oauth_token",
 })
 
 
@@ -1014,6 +1023,119 @@ def test_loop_stall_gate_catches_the_watchdog_shape():
         "    return v2_recall(query)\n"
     )
     assert _loop_stall_helper_calls(ast.parse(aliased)) == [(3, "recall")]
+
+
+# ── 2f'''. The settings store is never used on the event loop (2026-09-30) ──
+#
+# On Postgres a settings read that misses the cache, and every write, is a
+# network round trip made with the store's lock held -- and during a
+# database outage it waits the pool timeout (5 s) per call. On 2026-09-28 a
+# Docker Desktop update took Postgres away for two minutes; the heartbeat's
+# atomic_update and the restic maintenance handler's read sat on the loop,
+# the health probe timed out, and the guard restarted Kazma. 93 direct calls
+# in async code were converted that day. A call in async code goes through
+# `asyncio.to_thread(store.get, ...)`, or the function is a plain `def`
+# (FastAPI threadpools a sync route; the tool registry threads a sync tool).
+
+_SYNC_STORE_METHODS = frozenset({
+    "get", "set", "set_if_absent", "batch_set", "atomic_update", "delete",
+    "get_category", "get_all", "transaction", "export_yaml", "import_yaml",
+    "reconcile_from_yaml", "reset_all", "reload_from_root",
+})
+
+
+def _is_store_receiver(node: ast.expr, bound: set[str]) -> bool:
+    """``get_config_store()``, a name bound from it, or ``*.config_store``."""
+    if isinstance(node, ast.Call):
+        fn = node.func
+        name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+        return name == "get_config_store"
+    if isinstance(node, ast.Name):
+        return node.id in bound or "config_store" in node.id
+    if isinstance(node, ast.Attribute):
+        return "config_store" in node.attr
+    return False
+
+
+def _settings_calls_on_the_loop(tree: ast.AST) -> list[tuple[int, str]]:
+    found: list[tuple[int, str]] = []
+
+    def bound_names(fn: ast.AsyncFunctionDef) -> set[str]:
+        names: set[str] = set()
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                f = node.value.func
+                if (f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")) == "get_config_store":
+                    names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        return names
+
+    def visit(node: ast.AST, bound: set[str] | None) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.AsyncFunctionDef):
+                visit(child, bound_names(child))
+                continue
+            if isinstance(child, (ast.FunctionDef, ast.Lambda)):
+                visit(child, None)  # what to_thread runs
+                continue
+            if (
+                bound is not None
+                and isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Attribute)
+                and child.func.attr in _SYNC_STORE_METHODS
+                and _is_store_receiver(child.func.value, bound)
+            ):
+                found.append((child.lineno, child.func.attr))
+            visit(child, bound)
+
+    visit(tree, None)
+    return found
+
+
+def test_the_settings_store_is_not_used_on_the_loop():
+    offenders: list[str] = []
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        offenders += [f"{_rel(path)}:{line} .{meth}()" for line, meth in _settings_calls_on_the_loop(tree)]
+    assert not offenders, (
+        "A settings-store call runs on the event loop. On Postgres it is a "
+        "round trip under the store's lock -- up to 5 s each while the "
+        "database is away -- and every chat stream and the guard's health "
+        "probe wait on it.\nFix: `await asyncio.to_thread(store.get, key)`, "
+        "or make the function a plain `def`.\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_the_settings_gate_sees_each_shape():
+    """Negative control: the shapes converted on 2026-09-30 are all flagged."""
+    bad = (
+        "async def heartbeat():\n"
+        "    get_config_store().atomic_update('k', lambda v: v)\n"
+        "async def route(self):\n"
+        "    cs = get_config_store()\n"
+        "    cs.get('a')\n"
+        "    self.config_store.set('b', 1)\n"
+        "    ctx.config_store.batch_set([])\n"
+    )
+    good = (
+        "async def heartbeat():\n"
+        "    await asyncio.to_thread(get_config_store().atomic_update, 'k', lambda v: v)\n"
+        "async def route(self):\n"
+        "    cs = get_config_store()\n"
+        "    def _read():\n"
+        "        return cs.get('a')\n"
+        "    await asyncio.to_thread(_read)\n"
+        "def sync_route():\n"
+        "    get_config_store().get('a')\n"
+        "async def not_the_store(d):\n"
+        "    return d.get('a')\n"
+    )
+    assert _settings_calls_on_the_loop(ast.parse(bad)) == [
+        (2, "atomic_update"), (5, "get"), (6, "set"), (7, "batch_set"),
+    ]
+    assert _settings_calls_on_the_loop(ast.parse(good)) == []
 
 
 # ── 2f''''. httpx clients built on the loop share one TLS context (2026-09-23)

@@ -7,6 +7,7 @@ Provides:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -22,6 +23,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 
 
+def _read_settings(*keys: str) -> dict[str, Any]:
+    """The voice settings one request needs, in one pass.
+
+    Blocking (a Postgres round trip on a cache miss): the async routes run
+    it with ``asyncio.to_thread``, never on the event loop.
+    """
+    from kazma_core.config_store import get_config_store
+
+    cs = get_config_store()
+    return {key: cs.get(key) for key in keys}
+
+
 @router.post("/stt", dependencies=[Depends(rate_limit("voice", 30))])
 async def speech_to_text(
     file: UploadFile = File(...),
@@ -35,16 +48,17 @@ async def speech_to_text(
     """
     import time
 
-    from kazma_core.config_store import get_config_store
     from kazma_core.metrics import record_voice_stt, record_voice_utterance
     from kazma_core.voice.stt import sanitize_transcript, transcribe_preferring
 
-    cs = get_config_store()
-    db_provider = cs.get("voice.stt_provider")
+    conf = await asyncio.to_thread(
+        _read_settings, "voice.stt_provider", "voice.stt_language", "voice.stt_api_key",
+    )
+    db_provider = conf["voice.stt_provider"]
     if db_provider and str(db_provider).strip() and str(db_provider).strip().lower() != "none":
         provider = str(db_provider)
 
-    db_language = cs.get("voice.stt_language")
+    db_language = conf["voice.stt_language"]
     if db_language and str(db_language).strip() and str(db_language).strip().lower() != "none":
         language = str(db_language)
 
@@ -61,7 +75,7 @@ async def speech_to_text(
 
     started = time.monotonic()
     try:
-        stt_key = cs.get("voice.stt_api_key")
+        stt_key = conf["voice.stt_api_key"]
         text = await transcribe_preferring(
             audio_bytes,
             provider=provider,
@@ -112,12 +126,14 @@ async def text_to_speech(
     """
     import time
 
-    from kazma_core.config_store import get_config_store
     from kazma_core.metrics import record_voice_tts, record_voice_utterance
     from kazma_core.voice.tts import get_last_error, pick_voice_for_text, synthesize
 
-    cs = get_config_store()
-    db_provider = cs.get("voice.tts_provider")
+    conf = await asyncio.to_thread(
+        _read_settings, "voice.tts_provider", "voice.tts_voice", "voice.tts_voice_en",
+        "voice.tts_voice_ar", "voice.tts_output_format",
+    )
+    db_provider = conf["voice.tts_provider"]
     if db_provider and str(db_provider).strip() and str(db_provider).strip().lower() != "none":
         provider = str(db_provider)
 
@@ -131,18 +147,18 @@ async def text_to_speech(
     #
     # A real voice name still wins: someone who typed one meant it. Only
     # `auto` / `default` / `none` / empty defer to the text's script.
-    db_voice = cs.get("voice.tts_voice")
+    db_voice = conf["voice.tts_voice"]
     voice = pick_voice_for_text(
         text,
         str(db_voice) if db_voice is not None else voice,
         provider,
         {
-            "latin": str(cs.get("voice.tts_voice_en") or ""),
-            "arabic": str(cs.get("voice.tts_voice_ar") or ""),
+            "latin": str(conf["voice.tts_voice_en"] or ""),
+            "arabic": str(conf["voice.tts_voice_ar"] or ""),
         },
     )
 
-    db_output_format = cs.get("voice.tts_output_format")
+    db_output_format = conf["voice.tts_output_format"]
     if db_output_format and str(db_output_format).strip() and str(db_output_format).strip().lower() != "none":
         output_format = str(db_output_format)
 
@@ -197,7 +213,7 @@ async def list_providers() -> dict[str, list[str]]:
 
 
 @router.get("/status")
-async def voice_status() -> dict[str, Any]:
+def voice_status() -> dict[str, Any]:
     """Voice readiness — separate from LLM providers (set-and-forget check).
 
     Returns current STT/TTS settings, whether keys look present, and

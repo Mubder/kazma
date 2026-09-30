@@ -14,7 +14,6 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
@@ -240,7 +239,7 @@ def create_workspaces_router() -> APIRouter:
     # ------------------------------------------------------------------
 
     @router.post("/switch")
-    async def switch_workspace(body: WorkspaceSwitchRequest) -> JSONResponse:
+    def switch_workspace(body: WorkspaceSwitchRequest) -> JSONResponse:
         """Switch active workspace, reload configurations and align contexts."""
         ws_id = body.workspace_id.strip()
         if not ws_id:
@@ -289,7 +288,7 @@ def create_workspaces_router() -> APIRouter:
     # ------------------------------------------------------------------
 
     @router.post("/delete")
-    async def delete_workspace(body: WorkspaceDeleteRequest) -> JSONResponse:
+    def delete_workspace(body: WorkspaceDeleteRequest) -> JSONResponse:
         """Unregister a workspace; optionally delete files under clone dirs.
 
         Body::

@@ -665,6 +665,15 @@
             const ok = await window.kazmaConfirm({ title, message, danger: true });
             if (!ok) return;
             setBusy(true);
+            // Which process answers now: the page reloads when a DIFFERENT
+            // one answers. The old process keeps answering for a moment while
+            // the guard stops it gracefully, and a fixed 3 s wait reloaded the
+            // page onto the server that was about to go away.
+            let before = null;
+            try {
+                const r0 = await fetch('/health/live', { method: 'GET', cache: 'no-store' });
+                if (r0.ok) before = ((await r0.json()).build || {}).started_at || null;
+            } catch (e) { /* unknown: fall back to the time-based wait */ }
             try {
                 const resp = await fetch('/api/settings/system/restart', {
                     method: 'POST',
@@ -682,12 +691,20 @@
                 const poll = async () => {
                     try {
                         const r = await fetch('/health/live', { method: 'GET', cache: 'no-store' });
-                        if (r.ok && Date.now() - start > 3000) {
-                            window.location.reload();
-                            return;
+                        if (r.ok) {
+                            const started = ((await r.json()).build || {}).started_at || null;
+                            const replaced = before !== null
+                                ? (started !== null && started !== before)
+                                : Date.now() - start > 3000;
+                            if (replaced) {
+                                window.location.reload();
+                                return;
+                            }
                         }
                     } catch (e) { /* server down — expected during restart */ }
-                    if (Date.now() - start > 60000) {
+                    // A graceful reload through the guard: up to a minute to
+                    // stop, then the boot.
+                    if (Date.now() - start > 180000) {
                         showToast(_k('settings.core.server_did_not_come_back', 'Server did not come back — check the terminal.'), 'error');
                         setBusy(false);
                         return;

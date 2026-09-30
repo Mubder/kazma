@@ -208,6 +208,13 @@ _SPAWN_DIRS = (
     "kazma-core/kazma_core/agent/tool_builtins",
     "kazma-core/kazma_core/ide",
     "kazma-skills/kazma_skills/native",
+    # Git in the user's workspaces from the web and chat apps (2026-09-30):
+    # /api/git/status ran `git status` -- which starts a repository's own
+    # core.fsmonitor -- and the web and /ide clones passed the server's
+    # whole environment. Neither folder was covered.
+    "kazma-gateway/kazma_gateway/routers",
+    "kazma-gateway/kazma_gateway/agent_handler",
+    "kazma-ui/kazma_ui",
 )
 _SPAWNERS = {
     "subprocess.run", "subprocess.Popen", "subprocess.check_output",
@@ -228,6 +235,10 @@ _ENV_BY_OTHER_ROUTE = {
         "the docker CLI itself; the container gets no environment",
     ("kazma-core/kazma_core/agent/tool_builtins/system.py", "_run_shell_capped"):
         "env is its parameter; shell_exec passes restricted_child_env",
+    ("kazma-ui/kazma_ui/settings.py", "api_restart_server"):
+        "starts the Kazma server itself (no guard): it needs the server's environment",
+    ("kazma-skills/kazma_skills/native/_subprocess.py", "run_off_loop"):
+        "the runner every skill uses: fills env= with tool_child_env() when the caller did not",
 }
 
 
@@ -238,12 +249,24 @@ def _is_builder_call(node: ast.AST) -> bool:
     )
 
 
+def _minimal_dict(node: ast.AST) -> bool:
+    """A dict literal is a minimal environment -- unless it unpacks one.
+
+    ``{**os.environ}`` is a dict literal too, and the web and /ide clones
+    passed exactly that (2026-09-30): the gate took it for a minimal dict.
+    """
+    return isinstance(node, ast.Dict) and all(
+        key is not None or _is_builder_call(value)
+        for key, value in zip(node.keys, node.values)
+    )
+
+
 def _env_ok(expr: ast.AST, assigned: dict[str, list[ast.AST]]) -> bool:
-    if _is_builder_call(expr) or isinstance(expr, ast.Dict):
+    if _is_builder_call(expr) or _minimal_dict(expr):
         return True
     if isinstance(expr, ast.Name):
         values = assigned.get(expr.id, [])
-        return bool(values) and all(_is_builder_call(v) or isinstance(v, ast.Dict) for v in values)
+        return bool(values) and all(_is_builder_call(v) or _minimal_dict(v) for v in values)
     return False
 
 
@@ -277,6 +300,10 @@ def _unsafe_spawns(source: str) -> list[tuple[str, int, str]]:
                 continue
             name = ast.unparse(node.func)
             short = name.split(".")[-1]
+            # `await asyncio.to_thread(subprocess.run, cmd, env=...)`: the
+            # spawn is the first argument and its keywords are the call's.
+            if short == "to_thread" and node.args and ast.unparse(node.args[0]) in _SPAWNERS:
+                name = short = ast.unparse(node.args[0])
             if name not in _SPAWNERS and short not in _DEFAULTS_SAFE:
                 continue
             env = next((k.value for k in node.keywords if k.arg == "env"), None)
@@ -327,7 +354,20 @@ def test_the_gate_sees_an_inherited_environment():
     runner = "async def f(cmd):\n    await run_off_loop(cmd, env=dict(os.environ))\n"
     good = "def f(cmd):\n    env = tool_child_env()\n    subprocess.run(cmd, env=env)\n"
     defaulted = "async def f(cmd):\n    await run_off_loop(cmd, cwd='.')\n"
-    for src in (bare, copied, raw, runner):
+    # The clones' shape: the spawn handed to to_thread.
+    threaded = (
+        "import asyncio, os, subprocess\nasync def f(cmd):\n"
+        "    clone_env = {**os.environ}\n"
+        "    await asyncio.to_thread(subprocess.run, cmd, env=clone_env)\n"
+    )
+    threaded_bare = "async def f(cmd):\n    await asyncio.to_thread(subprocess.run, cmd, cwd='.')\n"
+    threaded_good = (
+        "async def f(cmd, token):\n"
+        "    clone_env = tool_child_env(clone_auth_env(token))\n"
+        "    await asyncio.to_thread(subprocess.run, cmd, env=clone_env)\n"
+    )
+    for src in (bare, copied, raw, runner, threaded, threaded_bare):
         assert _unsafe_spawns(src), src
     assert _unsafe_spawns(good) == []
     assert _unsafe_spawns(defaulted) == []
+    assert _unsafe_spawns(threaded_good) == []

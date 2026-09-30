@@ -120,30 +120,36 @@ def parse_github_slug(url: str) -> tuple[str, str] | None:
 
 
 def get_active_cwd() -> str:
-    """Resolve the workspace directory to run git / read .git from.
+    """The workspace directory to run git / read .git from.
 
-    Order: active workspace ``root_path`` → ConfigStore
-    ``workspace.selected_path`` → ``os.getcwd()``.
+    The one workspace ladder (``resolve_active_root``, AGENTS.md §10A): the
+    folder the agent's tools work in, never the server's own CWD. Blocking
+    (the workspace store): async callers use ``asyncio.to_thread``.
     """
-    try:
-        from kazma_core.stores import get_workspace_store
+    from kazma_core.workspace.binding import resolve_active_root
 
-        active = get_workspace_store().get_active_workspace()
-        if active and active.get("root_path"):
-            return str(Path(str(active["root_path"])).resolve())
-    except Exception:
-        logger.debug("[github] active-workspace lookup failed", exc_info=True)
+    return str(resolve_active_root())
 
-    try:
-        from kazma_core.config_store import get_config_store
 
-        selected = get_config_store().get("workspace.selected_path", "")
-        if selected:
-            return str(Path(str(selected)).resolve())
-    except Exception:
-        logger.debug("[github] workspace.selected_path lookup failed", exc_info=True)
+def clone_auth_env(token: str | None) -> dict[str, str]:
+    """git config variables that authenticate an https clone with *token*.
 
-    return str(Path.cwd())
+    The token travels as a header in git's config environment -- never in
+    argv (the clone URL or a ``-c`` flag) -- so it cannot leak through a
+    process listing or a failed clone's echoed stderr. Callers build the
+    whole environment as ``tool_child_env(clone_auth_env(token))``: no server
+    secrets for git or anything it starts.
+    """
+    if not token:
+        return {}
+    import base64
+
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: Basic {basic}",
+    }
 
 
 def resolve_repo(cwd: str | None = None) -> tuple[str, str] | None:
@@ -155,12 +161,15 @@ def resolve_repo(cwd: str | None = None) -> tuple[str, str] | None:
     if not Path(work_dir, ".git").exists():
         return None
     try:
+        from kazma_core.security.child_env import tool_child_env
+
         res = subprocess.run(
             ["git", "config", "--get", "remote.origin.url"],
             cwd=work_dir,
             capture_output=True,
             text=True,
             timeout=5,
+            env=tool_child_env(),
         )
         if res.returncode != 0:
             return None

@@ -118,7 +118,7 @@ def register_system_tools(registry: Any) -> None:
         ),
         category="system",
     )
-    async def config_save(key: str, value: str) -> str:
+    def config_save(key: str, value: str) -> str:
         from kazma_core.config_store import get_config_store, is_sensitive_config_key
 
         # Block security-critical + any secret-class keys (audit H8)
@@ -155,7 +155,7 @@ def register_system_tools(registry: Any) -> None:
         ),
         category="system",
     )
-    async def config_read(key: str) -> str:
+    def config_read(key: str) -> str:
         import json as _json
 
         from kazma_core.config_store import get_config_store

@@ -885,8 +885,13 @@ class KazmaAppBuilder:
 
                             # atomic_update (not set): set() logs every write
                             # at INFO — once a minute forever is log spam.
-                            get_config_store().atomic_update(
-                                "system.heartbeat.epoch", lambda _v: _time.time()
+                            # Off the loop: on Postgres this waits for a pool
+                            # connection with the store's lock held, and on
+                            # 2026-09-28 a two-minute database outage froze
+                            # the loop here until the guard restarted Kazma.
+                            await asyncio.to_thread(
+                                get_config_store().atomic_update,
+                                "system.heartbeat.epoch", lambda _v: _time.time(),
                             )
                         except Exception:
                             logger.debug("[app] heartbeat stamp failed", exc_info=True)

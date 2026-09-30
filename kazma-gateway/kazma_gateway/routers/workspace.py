@@ -157,7 +157,7 @@ def create_workspace_select_router() -> APIRouter:
     # ------------------------------------------------------------------
 
     @router.post("/select")
-    async def select_workspace(body: WorkspaceSelectRequest) -> dict[str, Any]:
+    def select_workspace(body: WorkspaceSelectRequest) -> dict[str, Any]:
         """Select a project folder as the active workspace.
 
         The path must be an absolute, existing directory. The folder is
@@ -300,7 +300,7 @@ def create_workspace_select_router() -> APIRouter:
     # ------------------------------------------------------------------
 
     @router.get("/tree")
-    async def workspace_tree(max_depth: int = 3) -> JSONResponse:
+    def workspace_tree(max_depth: int = 3) -> JSONResponse:
         """Return a recursive directory tree for the active project folder.
 
         Query params:

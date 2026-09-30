@@ -1043,6 +1043,20 @@ class SettingsRouterBuilder:
             if _restart_in_flight:
                 return {"status": "already", "detail": "Restart already in progress."}
 
+            # Under the guard, the guard restarts us: a graceful stop (every
+            # shutdown hook runs) and the code on disk. Restarting ourselves
+            # -- a detached copy, then a hard exit -- went behind its back:
+            # it restarted its own child and killed the copy as a foreign
+            # server on its port.
+            try:
+                from kazma_core.observability.supervisor_watch import request_guard_reload
+
+                if await asyncio.to_thread(request_guard_reload, "Settings: restart server"):
+                    _restart_in_flight = True
+                    return {"status": "ok", "detail": "Server restarting…", "via": "guard"}
+            except OSError:  # the request file could not be written: restart ourselves
+                logger.warning("[Settings] could not ask the guard to reload", exc_info=True)
+
             try:
                 # Reconstruct the original launch command (works for both
                 # `uvicorn` CLI and `python -m uvicorn` invocations, on all

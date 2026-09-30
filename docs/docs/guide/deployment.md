@@ -182,13 +182,38 @@ Uvicorn 0.36+ hardcodes `ProactorEventLoop`, and psycopg-async then cannot
 open the Postgres checkpointer.
 
 **What the guard counts.** It probes `/health/ready` every 30 s and restarts
-Kazma after **3 consecutive** failed probes (`guard.restarting` with reason
-`unhealthy (…)`). A single miss answered by the next probe is logged as
-`health.recovered` and nothing else. A probe that cannot even get a local
-port (`WinError 10048` / `10055` — the machine is out of ephemeral ports) is
-logged as `health.probe_unrunnable` with a snapshot of who holds the sockets
-(`health.port_exhaustion`), is **not** counted toward a restart, and pages
-once if it lasts ~5 minutes: restarting Kazma cannot free a port.
+Kazma after **3 consecutive** probes that get **no answer** — a timeout or a
+refused connection (`guard.restarting` with reason `unhealthy (…)`). A single
+miss answered by the next probe is logged as `health.recovered` and nothing
+else. A probe that cannot even get a local port (`WinError 10048` / `10055` —
+the machine is out of ephemeral ports) is logged as `health.probe_unrunnable`
+with a snapshot of who holds the sockets (`health.port_exhaustion`), is
+**not** counted toward a restart, and pages once if it lasts ~5 minutes:
+restarting Kazma cannot free a port.
+
+**A database outage is ridden out, not restarted.** When Kazma answers but
+says it is not ready — a 503 naming a failing dependency, such as the
+database — a restart cannot bring the database back. The guard logs
+`health.dependency_down`, pages once ("Kazma is up, but not ready"), and
+restarts only if the outage lasts `KAZMA_GUARD_DEPENDENCY_OUTAGE_S` (default
+10 minutes), in case the database is back and Kazma's own connections are
+what is stuck. One failure is restarted after the usual 3 probes instead:
+when Kazma says only a restart clears it (`restart_required` — the settings
+store fell back to memory at a boot while the database was away, and stays
+there for the life of the process). `/health/ready` runs its checks at once, each capped, so it
+answers within ~5 s whatever its dependencies do; the Postgres pools connect
+with a 5 s timeout and replace a connection the server closed when it is
+handed out, so Kazma is back seconds after the database is.
+
+**When the server itself exits,** its last words are kept: the guard writes
+the server's stderr to `.kazma/server.stderr.log` (an uncaught exception's
+traceback, the stacks of a native crash — `serve.py` enables
+`faulthandler` — or a refusal at boot) and quotes its last lines in the
+`guard.restarting` event and the page.
+
+**Settings → "Restart server"** asks the guard for a reload when a guard
+started the server (the same graceful reload as `kazma_guard.py --reload`);
+without a guard the server restarts itself as before.
 
 ---
 

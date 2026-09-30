@@ -48,6 +48,8 @@ Configuration (all optional, env vars):
     KAZMA_GUARD_START_TIMEOUT   seconds to first ready       (default: 900)
     KAZMA_GUARD_INTERVAL        seconds between probes       (default: 30)
     KAZMA_GUARD_FAILURES        consecutive fails = dead     (default: 3)
+    KAZMA_GUARD_DEPENDENCY_OUTAGE_S  seconds Kazma may answer "not ready"
+                                (a dependency down) before a restart (default: 600)
     KAZMA_GUARD_GRACEFUL_STOP_S seconds a deliberate stop waits (default: 60)
     KAZMA_GUARD_LOG             guard log path
     KAZMA_GUARD_STATE           child-PID state file (orphan reaping)
@@ -91,6 +93,13 @@ START_TIMEOUT_S = float(os.environ.get("KAZMA_GUARD_START_TIMEOUT", "900"))
 PROBE_INTERVAL_S = float(os.environ.get("KAZMA_GUARD_INTERVAL", "30"))
 PROBE_TIMEOUT_S = float(os.environ.get("KAZMA_GUARD_PROBE_TIMEOUT", "10"))
 FAILURES_TO_KILL = int(os.environ.get("KAZMA_GUARD_FAILURES", "3"))
+# Kazma answered, but "not ready": a dependency it cannot serve without (the
+# database) is gone. A restart cannot bring the database back -- on
+# 2026-09-28 a Docker Desktop update took Postgres away for two minutes and
+# the old rule restarted Kazma over it. It is ridden out this long, and
+# paged; past it the guard restarts anyway, for the case where the database
+# is back and Kazma's own connections are what is stuck.
+DEPENDENCY_OUTAGE_S = float(os.environ.get("KAZMA_GUARD_DEPENDENCY_OUTAGE_S", "600"))
 
 # Backoff between restarts: index by consecutive-restart count, capped.
 BACKOFF_LADDER_S = (5, 15, 30, 60, 120, 300)
@@ -713,14 +722,46 @@ def _health_failure_detail(raw: str, *, http_status: int = 0) -> str:
     return "unparsed body"
 
 
-def probe(url: str, timeout: float) -> tuple[bool, str]:
+class ProbeResult(tuple):
+    """``(healthy, detail)`` -- it unpacks as before -- plus whether Kazma
+    answered at all, and whether it says only a restart clears its failure.
+
+    A 503 naming a failing check is an answer: the server is alive and says
+    its database is not. A timeout or a refused connection is not. An answer
+    carrying ``restart_required`` (the volatile settings store: a boot while
+    the database was away stays in memory for the life of the process) is
+    not an outage to ride out.
+    """
+
+    answered: bool
+    restart_required: bool
+
+    def __new__(cls, healthy: bool, detail: str, answered: bool = True,
+                restart_required: bool = False) -> ProbeResult:
+        obj = super().__new__(cls, (healthy, detail))
+        obj.answered = answered
+        obj.restart_required = restart_required
+        return obj
+
+
+def _says_restart_required(raw: str) -> bool:
+    """The readiness body names a failure only a restart clears."""
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return False
+    return isinstance(data, dict) and data.get("restart_required") is True
+
+
+def probe(url: str, timeout: float) -> ProbeResult:
     """Return (healthy, detail). Any non-200 or exception is unhealthy."""
     try:
         req = urllib.request.Request(url, method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read(4096).decode("utf-8", "replace")
             if resp.status != 200:
-                return False, _health_failure_detail(raw, http_status=resp.status)
+                return ProbeResult(False, _health_failure_detail(raw, http_status=resp.status),
+                                   restart_required=_says_restart_required(raw))
         # HTTP 200 IS the contract. /health/ready returns 503 only when a
         # CRITICAL dependency (config store, database) is gone; a partial
         # failure is reported as "degraded" with 200 and the explicit
@@ -733,11 +774,12 @@ def probe(url: str, timeout: float) -> tuple[bool, str]:
         try:
             data = json.loads(raw)
         except Exception:
-            return True, "200 (unparsed body)"
+            return ProbeResult(True, "200 (unparsed body)")
         status = str(data.get("status", "")).lower()
         if status == "not_ready":
             failing = _failing_checks(data)
-            return False, "; ".join(failing[:6]) if failing else "not_ready"
+            return ProbeResult(False, "; ".join(failing[:6]) if failing else "not_ready",
+                               restart_required=data.get("restart_required") is True)
         degraded = [
             k for k, v in (data.get("checks") or {}).items()
             if isinstance(v, dict)
@@ -748,7 +790,7 @@ def probe(url: str, timeout: float) -> tuple[bool, str]:
             # Serving, but say so -- this is how a partial outage becomes
             # visible in the guard log instead of passing silently.
             detail = f"{detail} (degraded: {','.join(sorted(degraded)[:4])})"
-        return True, detail
+        return ProbeResult(True, detail)
     except urllib.error.HTTPError as exc:
         # urlopen raises on 503. The JSON body names the failing check;
         # do not format this as unreachable: Service Unavailable.
@@ -757,11 +799,12 @@ def probe(url: str, timeout: float) -> tuple[bool, str]:
             raw = exc.read(4096).decode("utf-8", "replace")
         except Exception:
             raw = ""
-        return False, _health_failure_detail(raw, http_status=int(exc.code or 0))
+        return ProbeResult(False, _health_failure_detail(raw, http_status=int(exc.code or 0)),
+                           restart_required=_says_restart_required(raw))
     except urllib.error.URLError as exc:
-        return False, f"unreachable: {getattr(exc, 'reason', exc)}"
+        return ProbeResult(False, f"unreachable: {getattr(exc, 'reason', exc)}", answered=False)
     except Exception as exc:  # noqa: BLE001 -- a probe must never raise
-        return False, f"probe error: {exc}"
+        return ProbeResult(False, f"probe error: {exc}", answered=False)
 
 
 # -- child process control --------------------------------------------
@@ -1262,11 +1305,56 @@ def clear_stale_port(url: str, log: GuardLog) -> bool:
     return reap_port_holder(url, log)
 
 
+#: The server's stderr, beside the guard's log. Its application log is a file
+#: of its own; stderr is what is left when that cannot speak -- an uncaught
+#: exception, a native crash (serve.py enables faulthandler), a refusal at
+#: boot. Under the scheduled task the guard's own stderr goes nowhere, so a
+#: server that exited with code 1 on 2026-09-25 left no trace at all.
+SERVER_STDERR_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _server_stderr_path() -> Path:
+    return _default_log_path().with_name("server.stderr.log")
+
+
+def _open_server_stderr(log: GuardLog):
+    """The file the next server's stderr goes to, and where its part starts."""
+    path = _server_stderr_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_file() and path.stat().st_size > SERVER_STDERR_MAX_BYTES:
+            os.replace(path, path.with_name(path.name + ".1"))
+        fh = path.open("ab")
+        return fh, fh.tell()
+    except OSError as exc:
+        log("warn", "child.stderr_unavailable", path=str(path), error=str(exc))
+        return None, 0
+
+
+def server_stderr_tail(proc: subprocess.Popen | None, max_lines: int = 20,
+                       max_chars: int = 1500) -> str:
+    """The last lines this server wrote to stderr, or ""."""
+    path = getattr(proc, "kazma_stderr_path", None)
+    if not path:
+        return ""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(int(getattr(proc, "kazma_stderr_offset", 0)))
+            text = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+    lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+    return "\n".join(lines[-max_lines:])[-max_chars:]
+
+
 def spawn(cmd: list[str], cwd: Path, log: GuardLog) -> subprocess.Popen:
     # The server reads the guard's heartbeat from here to notice when it is
     # left running with no guard (kazma_core.observability.supervisor_watch).
     env = dict(os.environ)
     env["KAZMA_GUARD_STATE_FILE"] = str(_state_path())
+    # ...and where to ask for a reload (Settings' "Restart server" goes
+    # through the guard: supervisor_watch.request_guard_reload).
+    env["KAZMA_GUARD_RELOAD_FILE"] = str(_reload_path())
     kwargs: dict = {"cwd": str(cwd), "env": env}
     if os.name == "nt":
         # Own process group so the child and ITS children (serve.py spawns
@@ -1274,7 +1362,17 @@ def spawn(cmd: list[str], cwd: Path, log: GuardLog) -> subprocess.Popen:
         kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         kwargs["start_new_session"] = True
-    proc = subprocess.Popen(cmd, **kwargs)
+    stderr_fh, offset = _open_server_stderr(log)
+    if stderr_fh is not None:
+        kwargs["stderr"] = stderr_fh
+    try:
+        proc = subprocess.Popen(cmd, **kwargs)
+    finally:
+        if stderr_fh is not None:
+            stderr_fh.close()  # the child holds its own handle
+    if stderr_fh is not None:
+        proc.kazma_stderr_path = str(_server_stderr_path())  # type: ignore[attr-defined]
+        proc.kazma_stderr_offset = offset  # type: ignore[attr-defined]
     _record_child(proc.pid)
     log("info", "child.spawned", pid=proc.pid, cmd=" ".join(cmd))
     return proc
@@ -1442,10 +1540,13 @@ class Guard:
         self.notify.send(format_operator_card("Guard", severity, title, detail))
         return True
 
-    def notify_restart(self, reason: str, delay_s: float) -> bool:
+    def notify_restart(self, reason: str, delay_s: float, *, tail: str = "") -> bool:
         """Page a restart. Collapses identical ``reason`` inside the cooldown."""
         title = f"Kazma stopped: {reason}"
         detail = f"Restarting in {int(delay_s)}s (attempt {self.restarts})."
+        if tail:
+            last = "\n".join(tail.splitlines()[-8:])[-600:]
+            detail += f"\nIts last words (server.stderr.log):\n{last}"
         sent = self._page("warn", title, detail, fingerprint=reason)
         self._awaiting_recovery = reason
         return sent
@@ -1833,9 +1934,13 @@ class Guard:
                     continue
 
                 delay = self._backoff()
+                # What the server said on stderr before it went: a traceback,
+                # a native crash's stacks, a refusal at boot.
+                tail = server_stderr_tail(self.proc)
+                extra = {"stderr_tail": tail} if tail else {}
                 self.log("warn", "guard.restarting", reason=reason, in_s=delay,
-                         restarts=self.restarts)
-                self.notify_restart(reason, delay)
+                         restarts=self.restarts, **extra)
+                self.notify_restart(reason, delay, tail=tail)
                 self._sleep(delay, wake_on_reload=True)
             except Exception as exc:  # noqa: BLE001 -- see the comment above the try
                 self._internal_error(exc)
@@ -1936,8 +2041,19 @@ class Guard:
         return True
 
     def _supervise(self) -> str:
-        """Watch a healthy child. Returns the reason it needs restarting."""
+        """Watch a healthy child. Returns the reason it needs restarting.
+
+        Two kinds of failed probe. No answer (a timeout, a refused
+        connection): the process is wedged or gone, and FAILURES_TO_KILL of
+        them in a row restart it. An answer that says "not ready" (a 503
+        naming the database): the process is alive and its dependency is
+        not -- a restart cannot fix that, so it is ridden out for
+        DEPENDENCY_OUTAGE_S and paged once, then restarted if it persists.
+        """
         consecutive = 0
+        unanswered = 0
+        outage_since: float | None = None
+        outage_paged = False
         unrunnable = 0
         next_probe = time.monotonic() + PROBE_INTERVAL_S
         while not self._stop:
@@ -1972,11 +2088,22 @@ class Guard:
                 continue
             next_probe = time.monotonic() + PROBE_INTERVAL_S
 
-            ok, detail = probe(self.health_url, PROBE_TIMEOUT_S)
+            result = probe(self.health_url, PROBE_TIMEOUT_S)
+            ok, detail = result
             if ok:
                 if consecutive:
                     self.log("info", "health.recovered", after_failures=consecutive)
+                if outage_paged:
+                    self._page(
+                        "success",
+                        "Kazma is ready again",
+                        "The dependency it was waiting for is back; no restart was needed.",
+                        fingerprint="not-ready-recovered",
+                    )
                 consecutive = 0
+                unanswered = 0
+                outage_since = None
+                outage_paged = False
                 unrunnable = 0
                 continue
 
@@ -2004,12 +2131,42 @@ class Guard:
             unrunnable = 0
 
             consecutive += 1
-            self.log("warn", "health.failed", detail=detail,
+            # A result without the flag gets the old rule (restart after
+            # FAILURES_TO_KILL): only probe() says a failure was answered.
+            # An answer that says only a restart clears it is no outage to
+            # ride out either.
+            answered = bool(getattr(result, "answered", False)) and not bool(
+                getattr(result, "restart_required", False))
+            now = time.monotonic()
+            if answered:
+                unanswered = 0
+                if outage_since is None:
+                    outage_since = now
+            else:
+                unanswered += 1
+            self.log("warn", "health.failed", detail=detail, answered=answered,
                      consecutive=consecutive, threshold=FAILURES_TO_KILL)
-            if consecutive >= FAILURES_TO_KILL:
-                # Alive but not healthy -- the case no OS supervisor catches.
+            if unanswered >= FAILURES_TO_KILL:
+                # Alive but not answering -- the case no OS supervisor catches.
                 stop_child(self.proc, self.log, grace_s=UNHEALTHY_STOP_S)
                 return f"unhealthy ({detail})"
+            if outage_since is not None and now - outage_since >= DEPENDENCY_OUTAGE_S:
+                # Ridden out as long as it is worth: the dependency may be
+                # back and Kazma's own connections what is stuck.
+                stop_child(self.proc, self.log, grace_s=UNHEALTHY_STOP_S)
+                return f"unhealthy ({detail}; not ready for {int(now - outage_since)}s)"
+            if answered and consecutive >= FAILURES_TO_KILL and not outage_paged:
+                outage_paged = True
+                self.log("warn", "health.dependency_down", detail=detail,
+                         restart_after_s=int(DEPENDENCY_OUTAGE_S))
+                self._page(
+                    "warn",
+                    "Kazma is up, but not ready",
+                    f"{detail}. Not restarting: Kazma answers, and a restart "
+                    "cannot bring back what it is waiting for. If it lasts "
+                    f"{int(DEPENDENCY_OUTAGE_S // 60)} min the guard restarts Kazma anyway.",
+                    fingerprint="not-ready",
+                )
         return "guard shutting down"
 
 

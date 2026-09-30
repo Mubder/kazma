@@ -736,10 +736,34 @@ def _snapshot_to_restic(dest: Path) -> dict[str, Any] | None:
             else:
                 logger.warning("[universal-backup] restic %s failed: %s",
                                name, res.error[:200])
+                _alert_snapshot_failed(name, res.error)
         return out or None
     except Exception:  # noqa: BLE001 -- must never fail a completed backup
         logger.warning("[universal-backup] restic snapshot failed", exc_info=True)
         return {"ok": False, "error": "restic snapshot raised"}
+
+
+def _alert_snapshot_failed(name: str, error: str) -> None:
+    """Say when a restic repository missed a snapshot.
+
+    It was a WARNING line only: on 2026-09-28 the offsite repository missed a
+    snapshot (another restic run held its lock) and nobody was told. Not
+    critical -- the local generations and the offsite zip still ran -- but a
+    repository that keeps failing is one that stops protecting you.
+    """
+    try:
+        from kazma_core.observability.ops_alerts import alert
+
+        alert(
+            "backup.restic_snapshot_failed",
+            f"The {name} restic repository missed a snapshot.",
+            f"{str(error or 'unknown error')[:300]} The local generations and "
+            "the offsite zip still ran; the next backup (6 h) tries again.",
+            severity="warn",
+            cooldown_s=12 * 3600,
+        )
+    except Exception:  # noqa: BLE001 -- alerting must never fail a backup
+        logger.warning("[universal-backup] restic snapshot alert failed", exc_info=True)
 
 
 def _failed_db_headline(db_fail: int, failed_dbs: list[dict[str, Any]]) -> str:

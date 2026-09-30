@@ -93,8 +93,10 @@ def _snapshots(repo: str, password: str) -> list[dict[str, Any]]:
     env["RESTIC_REPOSITORY"] = repo
     env["RESTIC_PASSWORD"] = password
     try:
+        # --retry-lock: a prune or check holding the repository exclusively
+        # is waited for, never read as "no snapshots" (restic_repo._run).
         out = subprocess.run(
-            ["restic", "snapshots", "--json"], env=env, capture_output=True,
+            ["restic", "--retry-lock", "10m", "snapshots", "--json"], env=env, capture_output=True,
             text=True, encoding="utf-8", errors="replace", timeout=900,
             check=False,
         ).stdout

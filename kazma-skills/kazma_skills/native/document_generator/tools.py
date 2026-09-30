@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from pathlib import Path
 from typing import Any
 
@@ -189,7 +191,7 @@ async def generate_pdf(
         # Resolve within the workspace (same ladder as file_read).
         from kazma_core.workspace.binding import resolve_active_root
 
-        root = resolve_active_root()
+        root = await asyncio.to_thread(resolve_active_root)
         p = _P(markdown_path)
         if not p.is_absolute():
             p = root / p
@@ -267,7 +269,7 @@ async def generate_docx(
     if markdown_path:
         from kazma_core.workspace.binding import resolve_active_root
 
-        root = resolve_active_root()
+        root = await asyncio.to_thread(resolve_active_root)
         p = _P(markdown_path)
         if not p.is_absolute():
             p = root / p

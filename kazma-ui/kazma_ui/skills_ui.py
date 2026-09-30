@@ -394,7 +394,7 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
             return JSONResponse({"status": "error", "error": safe_error(exc)}, status_code=500)
 
     @router.post("/api/skills/toggle")
-    async def api_toggle_skill(req: SkillToggleRequest) -> dict[str, str]:
+    def api_toggle_skill(req: SkillToggleRequest) -> dict[str, str]:
         """Enable or disable a skill."""
         try:
             from kazma_core.config_store import get_config_store

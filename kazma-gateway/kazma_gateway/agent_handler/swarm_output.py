@@ -9,11 +9,12 @@ Each platform adapter implements the SwarmOutputTarget interface.
 from __future__ import annotations
 
 import abc
+import asyncio
 import logging
 from typing import Any
 
 from kazma_gateway.gateway import OutboundMessage
-from kazma_gateway.telegram_format import md_to_tg_html, tg_escape
+from kazma_gateway.telegram_format import md_to_tg_html
 from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
@@ -368,8 +369,9 @@ async def send_swarm_output(
         # Try to get from ConfigStore
         try:
             from kazma_core.config_store import get_config_store
-            cs = get_config_store()
-            target_config = cs.get("swarm.output_target", None)
+            target_config = await asyncio.to_thread(
+                get_config_store().get, "swarm.output_target", None,
+            )
             if not isinstance(target_config, dict):
                 return False
             if not target_config.get("enabled", False):

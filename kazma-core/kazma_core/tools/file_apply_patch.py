@@ -305,7 +305,7 @@ async def file_apply_patch_set(
 
     checkpoint_id = ""
     try:
-        from kazma_core.ide.file_checkpoints import create_checkpoint, restore_checkpoint
+        from kazma_core.ide.file_checkpoints import create_checkpoint
 
         checkpoint_id = create_checkpoint(paths, reason="file_apply_patch_set")
     except Exception as exc:
@@ -344,11 +344,11 @@ async def file_apply_patch_set(
     tests = _nearby_tests(paths)
     if not tests:
         return summary + "\nverify: no test_*.py next to patched files"
-    from kazma_core.workspace.binding import resolve_active_root
-
-    cwd = resolve_active_root()
     import asyncio
 
+    from kazma_core.workspace.binding import resolve_active_root
+
+    cwd = await asyncio.to_thread(resolve_active_root)
     result = await asyncio.to_thread(_run_pytest, tests, cwd)
     return summary + "\n" + result
 

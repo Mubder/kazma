@@ -36,6 +36,7 @@ import logging
 import os
 import shutil
 import subprocess
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -84,6 +85,22 @@ KEEP_POLICY: tuple[str, ...] = (
 
 # restic writes progress to stderr and can run for a while on first ingest.
 _TIMEOUT_S = 3600
+
+# One restic run per repository at a time. The universal backup's snapshot
+# and the maintenance task's `forget --prune` / `check` are separate queue
+# tasks and ran side by side: `forget` and `check` lock the repository
+# exclusively, so whichever came second failed with "repository is already
+# locked" -- a skipped offsite snapshot on 2026-09-28 04:07, a skipped remote
+# forget on 2026-09-29 22:21. Within Kazma the lock orders them; a restic
+# started elsewhere (by hand, another machine) is waited for by restic itself.
+_repo_locks: dict[str, threading.Lock] = {}
+_repo_locks_guard = threading.Lock()
+_RETRY_LOCK = "10m"
+
+
+def _repo_lock(repo: str) -> threading.Lock:
+    with _repo_locks_guard:
+        return _repo_locks.setdefault(repo, threading.Lock())
 
 
 @dataclass
@@ -550,10 +567,12 @@ def _run(args: list[str], repo: str, password: str, *,
     env.setdefault("RCLONE_RETRIES", "2")
     env.setdefault("RCLONE_LOW_LEVEL_RETRIES", "3")
     try:
-        proc = subprocess.run(
-            ["restic", *args], env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=timeout, check=False, input=stdin,
-        )
+        with _repo_lock(repo):
+            proc = subprocess.run(
+                ["restic", "--retry-lock", _RETRY_LOCK, *args], env=env, capture_output=True,
+                text=True, encoding="utf-8", errors="replace",
+                timeout=timeout, check=False, input=stdin,
+            )
     except Exception as exc:  # noqa: BLE001
         res.error = f"{action} would not run: {exc}"
         return res

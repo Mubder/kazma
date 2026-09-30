@@ -9,6 +9,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -95,7 +96,7 @@ async def context_cmd(messages: list[dict[str, Any]], detailed: bool = False) ->
     try:
         from kazma_core.workspace.binding import resolve_active_root
 
-        workspace = str(resolve_active_root())
+        workspace = str(await asyncio.to_thread(resolve_active_root))
     except Exception:
         logger.debug("[context_cmd] workspace root unavailable", exc_info=True)
     lines.append(f"Workspace: {workspace}")
