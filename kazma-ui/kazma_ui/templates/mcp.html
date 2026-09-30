@@ -87,7 +87,7 @@
                     <template x-for="cat in presetCategories" :key="cat.name">
                         <optgroup :label="tOr('mcp.cat_' + cat.name, cat.name)">
                             <template x-for="p in cat.presets" :key="p.id">
-                                <option translate="no" :value="p.id" x-text="p.name + (p.certified ? ' ✓' : '')"></option>
+                                <option translate="no" :value="p.id" x-text="p.name"></option>
                             </template>
                         </optgroup>
                     </template>

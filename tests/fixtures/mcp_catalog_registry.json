@@ -1,0 +1,96 @@
+{
+  "checked": "2026-09-30",
+  "packages": {
+    "npm:@brave/brave-search-mcp-server": {
+      "deprecated": false,
+      "exists": true,
+      "latest": "2.1.4",
+      "published": "2026-09-17",
+      "repository": "git+https://github.com/brave/brave-search-mcp-server.git"
+    },
+    "npm:@heroku/mcp-server": {
+      "deprecated": false,
+      "exists": true,
+      "latest": "1.2.9",
+      "published": "2026-09-24",
+      "repository": "git+https://github.com/heroku/heroku-mcp-server.git"
+    },
+    "npm:@modelcontextprotocol/server-filesystem": {
+      "deprecated": false,
+      "exists": true,
+      "latest": "2026.8.31",
+      "published": "2026-08-31",
+      "repository": "git+https://github.com/modelcontextprotocol/servers.git"
+    },
+    "npm:@modelcontextprotocol/server-memory": {
+      "deprecated": false,
+      "exists": true,
+      "latest": "2026.8.31",
+      "published": "2026-08-31",
+      "repository": "git+https://github.com/modelcontextprotocol/servers.git"
+    },
+    "npm:@modelcontextprotocol/server-sequential-thinking": {
+      "deprecated": false,
+      "exists": true,
+      "latest": "2026.8.31",
+      "published": "2026-08-31",
+      "repository": "git+https://github.com/modelcontextprotocol/servers.git"
+    },
+    "npm:@notionhq/notion-mcp-server": {
+      "deprecated": false,
+      "exists": true,
+      "latest": "2.5.2",
+      "published": "2026-09-20",
+      "repository": "git+ssh://git@github.com/makenotion/notion-mcp-server.git"
+    },
+    "npm:@playwright/mcp": {
+      "deprecated": false,
+      "exists": true,
+      "latest": "0.0.83",
+      "published": "2026-09-28",
+      "repository": "git+https://github.com/microsoft/playwright-mcp.git"
+    },
+    "npm:@stripe/mcp": {
+      "deprecated": false,
+      "exists": true,
+      "latest": "0.3.3",
+      "published": "2026-03-24",
+      "repository": "git+https://github.com/stripe/ai.git"
+    },
+    "npm:@upstash/context7-mcp": {
+      "deprecated": false,
+      "exists": true,
+      "latest": "4.1.1",
+      "published": "2026-09-14",
+      "repository": "git+https://github.com/upstash/context7.git"
+    },
+    "npm:firecrawl-mcp": {
+      "deprecated": false,
+      "exists": true,
+      "latest": "3.27.0",
+      "published": "2026-09-30",
+      "repository": "git+https://github.com/firecrawl/firecrawl-mcp-server.git"
+    },
+    "pypi:awslabs.aws-documentation-mcp-server": {
+      "deprecated": false,
+      "exists": true,
+      "latest": "1.2.2",
+      "published": "2026-09-30",
+      "repository": "https://github.com/awslabs/mcp.git"
+    },
+    "pypi:mcp-server-git": {
+      "deprecated": false,
+      "exists": true,
+      "latest": "2026.8.18",
+      "published": "2026-08-18",
+      "repository": "https://github.com/modelcontextprotocol/servers/tree/main/src/git"
+    },
+    "pypi:mcp-server-time": {
+      "deprecated": false,
+      "exists": true,
+      "latest": "2026.8.18",
+      "published": "2026-08-18",
+      "repository": "https://github.com/modelcontextprotocol/servers/tree/main/src/time"
+    }
+  }
+}

@@ -96,19 +96,20 @@ class MCPSettingsService:
         )
 
     def add_mcp_server(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Add a new MCP server (dual-write ConfigStore + yaml)."""
+        """Add a new MCP server (dual-write ConfigStore + yaml); returns it masked."""
+        from kazma_core.mcp.secrets import masked
         from kazma_core.mcp_servers_store import upsert_mcp_server
 
         name = (data.get("name") or "").strip()
         if not name:
             return {"error": "Server name is required"}
         try:
-            return upsert_mcp_server(
+            return masked(upsert_mcp_server(
                 data,
                 config_raw=_agent_config_raw(),
                 yaml_path=_agent_yaml_path(),
                 replace=True,
-            )
+            ))
         except ValueError as exc:
             return {"error": str(exc)}
         except Exception as exc:

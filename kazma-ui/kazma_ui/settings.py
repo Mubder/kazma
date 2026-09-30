@@ -1837,8 +1837,10 @@ class SettingsRouterBuilder:
 
         @router.get("/api/settings/mcp")
         def api_get_mcp() -> list[dict[str, Any]]:
-            """List all MCP servers."""
-            return _get_sm().get_mcp_servers()
+            """List all MCP servers, every secret masked (kazma_core.mcp.secrets)."""
+            from kazma_core.mcp.secrets import masked
+
+            return [masked(s) for s in _get_sm().get_mcp_servers()]
 
         @router.post("/api/settings/mcp")
         def api_add_mcp(req: MCPServerAddRequest) -> dict[str, Any]:

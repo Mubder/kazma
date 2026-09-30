@@ -132,8 +132,9 @@ mcp:
   servers:
     - name: filesystem
       transport: stdio
-      trust: trusted
-      command: [npx, -y, '@modelcontextprotocol/server-filesystem', 'kazma-data/workspace']
+      workspace_bound: true
+      trust: approval_required
+      command: [npx, -y, '@modelcontextprotocol/server-filesystem', '${KAZMA_ACTIVE_WORKSPACE}']
   ide_server:
     enabled: true
     root: .

@@ -538,6 +538,9 @@ class KazmaAgent:
         Returns:
             Total number of tools registered.
         """
+        # Secrets still stored as typed (before 2026-09-30) move to the vault
+        # first; a no-op once none is left. Store I/O, so off the loop.
+        await asyncio.to_thread(self._move_mcp_secrets_to_vault)
         # A settings read plus a YAML file: off the loop (loop-stall dumps).
         servers = await asyncio.to_thread(self.get_mcp_servers_config)
         total = 0
@@ -604,6 +607,15 @@ class KazmaAgent:
         """Resolve the shipped kazma.yaml path for dual-write persistence."""
         return str(getattr(self.config, "config_path", None) or CONFIG_FILE)
 
+    def _move_mcp_secrets_to_vault(self) -> None:
+        """Move MCP secrets stored as typed into the vault (``move_plaintext_secrets``)."""
+        from kazma_core.mcp_servers_store import move_plaintext_secrets
+
+        try:
+            move_plaintext_secrets(config_raw=self.config.raw, yaml_path=self._mcp_yaml_path())
+        except Exception:  # noqa: BLE001 -- the servers still connect; the next boot retries
+            logger.warning("[MCP] Could not move MCP server secrets into the vault", exc_info=True)
+
     def get_mcp_servers_config(self) -> list[dict[str, Any]]:
         """Return MCP server configs from the unified dual store.
 
@@ -626,6 +638,8 @@ class KazmaAgent:
         and calling ``agent.tools.is_server_connected()`` in UI code.
         Reads from the unified YAML + ConfigStore SoT.
         """
+        from kazma_core.mcp.secrets import masked
+
         servers = self.get_mcp_servers_config()
         result: list[dict[str, Any]] = []
         for s in servers:
@@ -634,13 +648,15 @@ class KazmaAgent:
             tools = []
             if is_connected:
                 tools = self.tools.get_mcp_tools_for_server(name)
+            # What a page shows: every secret "****" (kazma_core.mcp.secrets).
+            shown = masked(s)
             result.append(
                 {
                     "name": name,
-                    "transport": s.get("transport", "stdio"),
-                    "command": s.get("command", []),
-                    "url": s.get("url", ""),
-                    "env": s.get("env", {}),
+                    "transport": shown.get("transport", "stdio"),
+                    "command": shown.get("command", []),
+                    "url": shown.get("url", ""),
+                    "env": shown.get("env", {}),
                     "working_dir": s.get("working_dir"),
                     "status": "running" if is_connected else "stopped",
                     "tool_count": len(tools),

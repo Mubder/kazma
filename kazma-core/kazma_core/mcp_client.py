@@ -22,15 +22,16 @@ import asyncio
 import itertools
 import json
 import logging
-import os
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import httpx
 from kazma_core.http_tls import shared_ssl_context
+from kazma_core.mcp.child_env import mcp_child_env
+from kazma_core.mcp.secrets import MCPSecretUnavailable, redacted_argv, resolve, secret_values
 
 __all__ = ["MCPClient", "MCPConnectionError", "MCPError", "MCPServerConfig"]
 
@@ -107,6 +108,22 @@ class MCPServerConfig:
     trust: str = "approval_required"
 
 
+def _with_secrets(cfg: MCPServerConfig) -> MCPServerConfig:
+    """*cfg* with its vault pointers replaced by the secrets (kazma_core.mcp.secrets).
+
+    Test reads the stored configuration, which holds pointers; the manager's
+    transports resolve the same way (``AsyncMCPManager._with_secrets``).
+    """
+    view = {"name": cfg.name, "env": cfg.env, "headers": cfg.headers, "auth": cfg.auth, "url": cfg.url}
+    try:
+        done = resolve(view)
+    except MCPSecretUnavailable as exc:
+        raise MCPConnectionError(str(exc)) from exc
+    if done is view:
+        return cfg
+    return replace(cfg, env=done["env"], headers=done["headers"], auth=done["auth"], url=done["url"])
+
+
 # ---------------------------------------------------------------------------
 # MCPClient
 # ---------------------------------------------------------------------------
@@ -156,6 +173,7 @@ class MCPClient:
             cfg = server_config
         else:
             cfg = MCPServerConfig(**server_config)
+        cfg = _with_secrets(cfg)
 
         self._config = cfg
 
@@ -262,7 +280,11 @@ class MCPClient:
         if not cfg.command:
             raise MCPConnectionError("stdio transport requires a non-empty command")
 
-        env = {**os.environ, **cfg.env}
+        # The manager's rule (audit H-4): the allowlisted basics plus the
+        # server's own env and auth, never Kazma's whole environment. This
+        # line was ``{**os.environ, **cfg.env}`` until 2026-09-30, so Test
+        # handed a server being tried out the vault key and every API key.
+        env = mcp_child_env(cfg.name, {"env": cfg.env, "auth": cfg.auth})
 
         command = list(cfg.command)
         # Windows fix: subprocess.Popen does NOT resolve .cmd/.bat shim
@@ -276,7 +298,9 @@ class MCPClient:
                 command[0] = resolved
 
         try:
-            self._process = subprocess.Popen(
+            # Off the event loop: starting a process blocks (AGENTS.md §23).
+            self._process = await asyncio.to_thread(
+                subprocess.Popen,
                 command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -289,7 +313,11 @@ class MCPClient:
         except OSError as exc:
             raise MCPConnectionError(f"Failed to start process: {exc}") from exc
 
-        logger.debug("Spawned stdio process: pid=%s cmd=%s", self._process.pid, command)
+        logger.debug(
+            "Spawned stdio process: pid=%s cmd=%s",
+            self._process.pid,
+            redacted_argv(command, secret_values({"env": cfg.env, "auth": cfg.auth})),
+        )
 
     async def _connect_sse(self, cfg: MCPServerConfig) -> None:
         if not cfg.url:

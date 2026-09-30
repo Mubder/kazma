@@ -188,10 +188,6 @@ sqlite_query("SELECT * FROM checkpoints WHERE name = ?", params=["my-agent"])
 
 Both `/ws/chat` and `/ws/dashboard` endpoints validate `X-Kazma-Secret` on connection. Unauthenticated WebSocket connections are rejected.
 
-## Hub API authentication
-
-Write endpoints (`POST /api/v1/skills/submit`) require `X-Kazma-Secret` header with timing-safe HMAC comparison. Read endpoints remain open.
-
 ## API token storage
 
 API tokens are stored as SHA-256 hashes. The raw token is only returned once at creation.

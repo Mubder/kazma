@@ -551,6 +551,25 @@ jobs:
             exit 1
           fi
           echo "All static JS files passed node --check"
+      # Every JavaScript test file (tests/test_js_suites.py runs the same set
+      # in the Python suite). Until 2026-09-30 only the seven the
+      # unified-turn job names ran; 24 others, gates AGENTS.md cites among
+      # them, ran nowhere.
+      - name: Run every JavaScript test file
+        run: |
+          failures=0
+          for f in tests/js/test_*.js tests/test_*.js; do
+            if ! node "$f" > /tmp/js-test.log 2>&1; then
+              echo "FAILED: $f"
+              tail -30 /tmp/js-test.log
+              failures=$((failures+1))
+            fi
+          done
+          if [ "$failures" -ne 0 ]; then
+            echo "$failures JavaScript test file(s) failed"
+            exit 1
+          fi
+          echo "All JavaScript test files passed"
 
   security:
     name: Security Scan
