@@ -11,6 +11,7 @@ Downloads via GitHub zipball (httpx) — no shell, no npx.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -329,35 +330,40 @@ async def _download_github_zip(
 
     extract_dir = tmp / "extract"
     extract_dir.mkdir()
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        members = zf.infolist()
-        if len(members) > _MAX_MEMBERS:
-            shutil.rmtree(tmp, ignore_errors=True)
-            raise RuntimeError(
-                f"Skill bundle has too many members ({len(members)} > {_MAX_MEMBERS})"
-            )
-        total_expanded = 0
-        for info in members:
-            total_expanded += max(0, info.file_size)
-            if total_expanded > _MAX_EXPANDED_BYTES:
-                shutil.rmtree(tmp, ignore_errors=True)
-                raise RuntimeError("Skill bundle expands beyond the size cap")
-            if info.file_size > 0 and info.compress_size > 0:
-                if (info.file_size / info.compress_size) > _MAX_RATIO:
-                    shutil.rmtree(tmp, ignore_errors=True)
-                    raise RuntimeError(
-                        f"Skill bundle member '{info.filename}' has an extreme "
-                        "compression ratio (zip bomb)"
-                    )
-            # Symlink members are never materialized (extraction below only
-            # writes regular members); flag them explicitly.
-            mode = getattr(info, "external_attr", 0) >> 16
-            if (mode & 0o170000) == 0o120000:
+
+    def _validate_and_extract() -> None:
+        """Metadata checks + up-to-500 MB extractall — blocking, off the loop."""
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            members = zf.infolist()
+            if len(members) > _MAX_MEMBERS:
                 shutil.rmtree(tmp, ignore_errors=True)
                 raise RuntimeError(
-                    f"Skill bundle member '{info.filename}' is a symlink — refused"
+                    f"Skill bundle has too many members ({len(members)} > {_MAX_MEMBERS})"
                 )
-        zf.extractall(extract_dir)
+            total_expanded = 0
+            for info in members:
+                total_expanded += max(0, info.file_size)
+                if total_expanded > _MAX_EXPANDED_BYTES:
+                    shutil.rmtree(tmp, ignore_errors=True)
+                    raise RuntimeError("Skill bundle expands beyond the size cap")
+                if info.file_size > 0 and info.compress_size > 0:
+                    if (info.file_size / info.compress_size) > _MAX_RATIO:
+                        shutil.rmtree(tmp, ignore_errors=True)
+                        raise RuntimeError(
+                            f"Skill bundle member '{info.filename}' has an extreme "
+                            "compression ratio (zip bomb)"
+                        )
+                # Symlink members are never materialized (extraction below only
+                # writes regular members); flag them explicitly.
+                mode = getattr(info, "external_attr", 0) >> 16
+                if (mode & 0o170000) == 0o120000:
+                    shutil.rmtree(tmp, ignore_errors=True)
+                    raise RuntimeError(
+                        f"Skill bundle member '{info.filename}' is a symlink — refused"
+                    )
+            zf.extractall(extract_dir)
+
+    await asyncio.to_thread(_validate_and_extract)
 
     # GitHub zipballs have a single top-level folder owner-repo-sha/
     children = [p for p in extract_dir.iterdir() if p.is_dir()]

@@ -59,12 +59,6 @@ const SWARM_TASKS = [
   "Create a security audit checklist for the web application",
 ];
 
-const WORKER_POOLS = [
-  ["researcher", "analyst"],
-  ["coder", "reviewer"],
-  ["planner", "executor"],
-  ["architect", "implementer", "tester"],
-];
 
 function getAuthHeaders() {
   // Add auth if needed
@@ -116,17 +110,15 @@ export default function (data) {
 
 function runSwarmDispatch(data) {
   const task = SWARM_TASKS[randomIntBetween(0, SWARM_TASKS.length - 1)];
-  const workers = WORKER_POOLS[randomIntBetween(0, WORKER_POOLS.length - 1)];
-  
+
+  // The route reads `task` (not `prompt`); `auto` spawns a worker from the
+  // shipped templates; `background` returns the task id without waiting for
+  // the task. Same shape as loadtests/kazma_api.py dispatch_body().
   const payload = {
-    prompt: task,
-    workers: workers,
+    task: task,
+    workers: ["auto"],
     type: "fan_out",
-    metadata: {
-      source_platform: "loadtest",
-      source_chat_id: `loadtest-${__VU}`,
-      source_user: `loadtest-user-${__VU}`,
-    },
+    background: true,
   };
   
   const params = { headers: getAuthHeaders() };
@@ -171,7 +163,7 @@ function pollSwarmTask(baseUrl, taskId, params) {
     sleep(1);
     polls++;
     
-    const resp = get(`${baseUrl}/api/swarm/status/${taskId}`, params);
+    const resp = get(`${baseUrl}/api/swarm/tasks/${taskId}`, params);
     
     check(resp, {
       'swarm status check ok': (r) => r.status === 200,
@@ -197,7 +189,7 @@ function pollSwarmTask(baseUrl, taskId, params) {
 function runSSEStream(data) {
   // Test SSE endpoint for swarm updates
   const threadId = `loadtest-${__VU}-${__ITER}`;
-  const url = `${data.baseUrl}/api/swarm/stream/${threadId}`;
+  const url = `${data.baseUrl}/api/swarm/tasks/${threadId}/stream`;
   
   const params = { 
     headers: { ...getAuthHeaders(), 'Accept': 'text/event-stream' },
@@ -229,15 +221,14 @@ function runSSEStream(data) {
 
 function runHITLApproval(data) {
   // First, trigger a task that requires HITL approval
+  // A benign task: a load test must never ask the real agent to do something
+  // destructive. A swarm task's approval is a pipeline checkpoint (status
+  // "paused"), decided through the swarm's own route below.
   const payload = {
-    prompt: "Execute a dangerous operation: delete all files in /tmp/test",
-    workers: ["executor"],
-    type: "fan_out",
-    metadata: {
-      source_platform: "loadtest",
-      source_chat_id: `hitl-${__VU}`,
-      source_user: `hitl-user-${__VU}`,
-    },
+    task: "Write a two-line summary of what HITL means",
+    workers: ["auto"],
+    type: "dispatch",
+    background: true,
   };
   
   const params = { headers: getAuthHeaders() };
@@ -258,82 +249,59 @@ function runHITLApproval(data) {
     return;
   }
   
-  // Poll until HITL required
-  let hitlRequired = false;
+  // GET /api/swarm/tasks/{id} answers {"task": {..., "status": ...}}.
+  const statusOf = (resp) => {
+    try {
+      return String((JSON.parse(resp.body).task || {}).status || '').toLowerCase();
+    } catch (e) {
+      return '';
+    }
+  };
+  const TERMINAL = ['completed', 'failed', 'timeout', 'cancelled'];
+
+  // Poll until the task pauses at a checkpoint or finishes.
+  let status = '';
   for (let i = 0; i < 20; i++) {
     sleep(1);
-    const statusResp = get(`${data.baseUrl}/api/swarm/status/${taskId}`, params);
-    if (statusResp.status === 200) {
-      try {
-        const body = JSON.parse(statusResp.body);
-        if (body.hitl_required === true) {
-          hitlRequired = true;
-          break;
-        }
-        if (body.status === 'completed' || body.status === 'failed') {
-          break;
-        }
-      } catch (e) {}
-    }
+    const statusResp = get(`${data.baseUrl}/api/swarm/tasks/${taskId}`, params);
+    check(statusResp, { 'task status 200': (r) => r.status === 200 });
+    status = statusOf(statusResp);
+    if (status === 'paused' || TERMINAL.includes(status)) break;
   }
-  
-  if (!hitlRequired) {
-    check(null, { 'HITL was triggered': () => false });
-    return;
-  }
-  
-  // Approve the HITL request
+
+  // Only a task paused at a checkpoint has anything to approve.
+  if (status !== 'paused') return;
+
   const approveResp = post(
-    `${data.baseUrl}/api/approve/${taskId}`,
-    JSON.stringify({ approved: true, reason: "Load test approval" }),
+    `${data.baseUrl}/api/swarm/tasks/${taskId}/approve`,
+    JSON.stringify({ reason: "Load test approval" }),
     params
   );
-  
-  check(approveResp, {
-    'HITL approve status 200': (r) => r.status === 200,
-    'HITL approve success': (r) => {
-      try {
-        return JSON.parse(r.body).approved === true;
-      } catch {
-        return false;
-      }
-    },
-  });
-  
-  // Wait for completion
+  check(approveResp, { 'checkpoint approve status 200': (r) => r.status === 200 });
+
+  // Wait for completion after the approval.
   for (let i = 0; i < 30; i++) {
     sleep(1);
-    const statusResp = get(`${data.baseUrl}/api/swarm/status/${taskId}`, params);
-    if (statusResp.status === 200) {
-      try {
-        const body = JSON.parse(statusResp.body);
-        if (body.status === 'completed') {
-          check(body, { 'HITL task completed after approval': (b) => b.status === 'completed' });
-          break;
-        }
-      } catch (e) {}
+    const done = statusOf(get(`${data.baseUrl}/api/swarm/tasks/${taskId}`, params));
+    if (TERMINAL.includes(done)) {
+      check(done, { 'task completed after approval': (s) => s === 'completed' });
+      break;
     }
   }
 }
 
 // WebSocket test (separate VU type)
 export function wsTest() {
-  const wsUrl = `${WS_URL}/ws/swarm/loadtest-${__VU}`;
+  const wsUrl = `${WS_URL}/ws/dashboard`;  // the app's live feed; task events are SSE
   
   const params = {
-    tags: { name: 'WS_SwarmConnection' },
+    tags: { name: 'WS_DashboardConnection' },
   };
-  
+
   const response = ws.connect(wsUrl, params, function (socket) {
     socket.on('open', function () {
-      // Subscribe to updates
-      socket.send(JSON.stringify({
-        type: 'subscribe',
-        thread_id: `loadtest-${__VU}`,
-        event_types: ['task_started', 'worker_progress', 'task_completed', 'hitl_required'],
-      }));
-      
-      // Send ping periodically
+      // The dashboard feed streams every event to every client; it takes no
+      // subscription. Send a keepalive ping periodically.
       socket.setInterval(function () {
         socket.send(JSON.stringify({ type: 'ping' }));
       }, 10000);

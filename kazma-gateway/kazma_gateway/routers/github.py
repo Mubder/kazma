@@ -566,7 +566,19 @@ async def oauth_callback(request: Request) -> RedirectResponse | JSONResponse:
         expected_state, redirect_uri = "", ""
 
     if not state or state != expected_state:
-        logger.warning("[github/oauth] state mismatch — possible CSRF (got=%s expected=%s)", state, expected_state)
+        # Never log the state values themselves — the pending `expected_state`
+        # is a live anti-CSRF secret, and the log is readable by the agent's
+        # log tool (AUD-024). Short fingerprints keep the diagnostic ("present
+        # but different" vs "one was empty") without exposing either token.
+        import hashlib
+
+        def _fp(v: str) -> str:
+            return hashlib.sha256(v.encode()).hexdigest()[:8] if v else "none"
+
+        logger.warning(
+            "[github/oauth] state mismatch — possible CSRF (got=%s expected=%s)",
+            _fp(state), _fp(expected_state),
+        )
         return _oauth_result_page(False, "Security check failed (invalid state). Please try connecting again.")
 
     if not code:

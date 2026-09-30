@@ -136,6 +136,69 @@ def _sanitize_log_text(text: str) -> str:
     return text
 
 
+def _tail_lines(path: Path, count: int) -> list[str]:
+    """The last ``count`` lines of a file, read from the END.
+
+    Seeks backwards in blocks instead of loading the whole file — the live
+    log is 4.6 MB/day and grows, and this runs for a chat tool.
+    """
+    block = 8192
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        pos = f.tell()
+        data = b""
+        # One extra newline so we never return a truncated first line.
+        while pos > 0 and data.count(b"\n") <= count:
+            step = min(block, pos)
+            pos -= step
+            f.seek(pos)
+            data = f.read(step) + data
+    text = data.decode("utf-8", errors="replace")
+    return text.splitlines()[-count:]
+
+
+def _read_system_logs_sync(lines: int) -> str:
+    """Blocking body of :func:`read_system_logs` — runs in a worker thread."""
+    workspace = _get_workspace()
+
+    # Check standard Kazma log file locations in precedence order
+    candidate_paths = [
+        Path.home() / ".kazma" / "kazma.log",
+        workspace / "kazma.log",
+        workspace / "kazma-data" / "logs" / "kazma.log",
+        workspace / "out.log",
+        workspace / "server.log",
+    ]
+
+    log_path = None
+    for cand in candidate_paths:
+        try:
+            if cand.exists():
+                log_path = cand
+                break
+        except OSError:
+            continue
+
+    if log_path is None:
+        return "Error: System log file not found. Checked ~/.kazma/kazma.log, workspace/kazma.log, kazma-data/logs/kazma.log, out.log."
+
+    try:
+        tail_lines = _tail_lines(log_path, lines)
+        sanitized_lines = [_sanitize_log_text(line) for line in tail_lines]
+
+        report = [
+            f"📋 **REPLAYING RECENT SYSTEM LOGS ({len(sanitized_lines)} lines)**",
+            f"File: `{log_path.name}`",
+            "```text",
+            "\n".join(sanitized_lines).strip(),
+            "```",
+        ]
+        return "\n".join(report)
+    except Exception as e:
+        logger.error("Error reading system logs: %s", e)
+        return f"Error reading system logs: {e}"
+
+
 async def read_system_logs(lines: int = 100) -> str:
     """Safely streams recent lines of the Kazma gateway and server logs, with filters to mask API tokens and secrets.
 
@@ -150,42 +213,7 @@ async def read_system_logs(lines: int = 100) -> str:
     if lines > 200:
         lines = 200
 
-    workspace = _get_workspace()
-    
-    # Check standard Kazma log file locations in precedence order
-    candidate_paths = [
-        Path.home() / ".kazma" / "kazma.log",
-        workspace / "kazma.log",
-        workspace / "kazma-data" / "logs" / "kazma.log",
-        workspace / "out.log",
-        workspace / "server.log",
-    ]
+    # The file open + backward tail + sanitize is blocking I/O — off the loop.
+    import asyncio
 
-    log_path = None
-    for cand in candidate_paths:
-        if cand.exists():
-            log_path = cand
-            break
-
-    if log_path is None:
-        return "Error: System log file not found. Checked ~/.kazma/kazma.log, workspace/kazma.log, kazma-data/logs/kazma.log, out.log."
-
-    try:
-        # Read the file's last lines safely
-        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-            all_lines = f.readlines()
-
-        tail_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
-        sanitized_lines = [_sanitize_log_text(line) for line in tail_lines]
-
-        report = [
-            f"📋 **REPLAYING RECENT SYSTEM LOGS ({len(sanitized_lines)} lines)**",
-            f"File: `{log_path.name}`",
-            "```text",
-            "".join(sanitized_lines).strip(),
-            "```",
-        ]
-        return "\n".join(report)
-    except Exception as e:
-        logger.error("Error reading system logs: %s", e)
-        return f"Error reading system logs: {e}"
+    return await asyncio.to_thread(_read_system_logs_sync, lines)

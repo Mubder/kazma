@@ -1,5 +1,68 @@
 # CHANGELOG
 
+## Full-repository audit, second batch of fixes (2026-09-30)
+
+Sixteen more findings from `docs/audits/AUDIT_FULL_2026-09-30.md`, plus what a
+second review of that work turned up (the tunnel-proof socket check, the Swarm
+page crash, Safari voice, the load tests' request shapes and the test runner),
+each with a gate and a negative control
+(`tests/test_audit_full_backlog_2026_09_30.py`,
+`tests/test_loadtest_routes.py`, `tests/test_fast_test_runner.py` and the
+sibling suites):
+
+- **A public page can no longer ride your session into a WebSocket.** A browser
+  auto-sends the login cookie on a cross-site WebSocket handshake (SameSite=Lax
+  does not stop it), so a valid cookie is now honoured only when the handshake
+  Origin is same-site — the CSWSH hole. Header credentials (which a browser
+  cannot set cross-site) still work from a tunnel, so nothing legitimate is
+  locked out. The unused per-session WS `?token=` path was removed. The check
+  also trusts the install's declared public address (`KAZMA_PUBLIC_URL`, the
+  same one sign-in forms and CORS already trust), so the live chat and
+  dashboard sockets keep working behind a tunnel however it forwards the
+  host name.
+- **The Swarm page no longer breaks on ordinary worker text.** It parsed its
+  worker list out of a JavaScript string, which decoded quotes, newlines and
+  backslashes twice — so any worker whose task or logs contained one stopped
+  the page's script. Reproduced, fixed, and every template is now checked for
+  the pattern.
+- **iPhone and Mac voice recordings transcribe.** Safari records
+  `audio/mp4`, and the page uploaded it named `voice.webm`, so the speech
+  service could not decode it.
+- **Curl and scripts stop minting login sessions.** A header-authenticated
+  non-browser client got a fresh admin session row on every request; now a
+  session is minted only for a client that will actually use the cookie.
+  `0.0.0.0` no longer counts as a loopback host name (browsers route it to
+  loopback, which would have inherited the local auto-login).
+- **The event loop is not blocked on disk.** Reading recent server logs now
+  tails from the end of the file in a worker thread instead of loading the
+  whole day; a skill install validates and extracts its zip off the loop; a
+  Google Drive backup larger than 5 MB uploads through a chunked resumable
+  session (a plain multipart POST is rejected for large files), reading each
+  chunk in a thread; and the voice transcription upload is bounded to 25 MB.
+- **Smaller hardening.** A failed GitHub OAuth logs a short fingerprint of the
+  state, never the raw anti-CSRF secret; the translation catalog embedded in a
+  `<script>` tag is escaped for that context; the voice format is constrained
+  to an audio allowlist; and migration rewrites double-quote every identifier
+  taken from an imported bundle's own schema.
+- **Dead code and dependencies.** The hub REST API and its server-side badge
+  module were deleted (nothing ran them; the CLI `badge` command talks to a
+  remote hub). The unused `aiogram` and `tenacity` packages were dropped, and
+  the two libraries the code imports unconditionally (`pydantic`,
+  `langchain-core`) are now declared.
+- **The load tests measure Kazma, not errors.** They were written against an
+  API that never existed: eight addresses returned "not found", every task
+  dispatch sent the wrong field and was refused, and the approval flows read
+  replies no route gives. They now call the real routes with the real request
+  shapes, built in one place, and a test checks both against the app on every
+  run.
+- **The test suite finishes in minutes again.** A run split four ways took
+  1 h 22 min and was still going: two parts hit their time limit with every
+  test passing, the runner then killed only a launcher process — leaving the
+  real one running — and fell back to re-running about 210 files one at a
+  time; a test's helper process was left behind for an hour. Each part's time
+  limit now follows its size, a time-out ends the whole process tree, and a
+  part that runs out of time is re-run in parallel pieces.
+
 ## Full-repository audit, and its first fixes (2026-09-30)
 
 A file-by-file audit (`docs/audits/AUDIT_FULL_2026-09-30.md`, with a

@@ -164,13 +164,24 @@
 
   // ── STT ───────────────────────────────────────────────
 
+  // The upload's file extension, from the recording's MIME type. STT
+  // providers (Whisper) read the format from the extension, so it must name
+  // the real container: Safari's MediaRecorder records audio/mp4, which was
+  // sent as voice.webm and could not be decoded.
+  function uploadExtFor(mime) {
+    var t = String(mime || '').toLowerCase();
+    if (t.indexOf('ogg') !== -1) return 'ogg';
+    if (t.indexOf('mp4') !== -1) return 'mp4';
+    if (t.indexOf('m4a') !== -1) return 'm4a';
+    if (t.indexOf('mp3') !== -1 || t.indexOf('mpeg') !== -1) return 'mp3';
+    if (t.indexOf('wav') !== -1) return 'wav';
+    return 'webm';
+  }
+
   async function sendForTranscription(blob) {
     var provider = getSttProvider();
     var formData = new FormData();
-    var ext = 'webm';
-    if (blob.type.includes('ogg')) ext = 'ogg';
-    else if (blob.type.includes('mp3')) ext = 'mp3';
-    else if (blob.type.includes('wav')) ext = 'wav';
+    var ext = uploadExtFor(blob.type);
     formData.append('file', blob, 'voice.' + ext);
     formData.append('provider', provider);
     formData.append('language', 'auto');
@@ -847,7 +858,8 @@
     startStreaming: startStreaming,
     stopStreaming: stopStreaming,
     toggleLiveVoice: toggleLiveVoice,
-    isStreaming: function() { return isStreaming; }
+    isStreaming: function() { return isStreaming; },
+    uploadExtFor: uploadExtFor
   };
 
 })();

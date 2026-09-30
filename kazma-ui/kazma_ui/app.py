@@ -49,6 +49,26 @@ _TEMPLATES_DIR = _PACKAGE_DIR / "templates"
 _STATIC_DIR = _PACKAGE_DIR / "static"
 
 
+def json_for_script(obj: object) -> str:
+    """Serialize ``obj`` to JSON safe to embed inside a ``<script>`` block.
+
+    Neutralizes the sequences that could end the element early or start a
+    comment (``</script>``, ``<!--``) and the two Unicode line separators
+    that are valid JSON but break a JS string literal (AUD-025). Every
+    replacement is a ``\\uXXXX`` escape that decodes back to the original
+    character, so the parsed value is unchanged.
+    """
+    import json as _json
+
+    return (
+        _json.dumps(obj, ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace(" ", "\\u2028")
+        .replace(" ", "\\u2029")
+    )
+
+
 class KazmaAppBuilder:
     """Builder class for constructing and configuring the Kazma FastAPI application."""
 
@@ -672,7 +692,9 @@ class KazmaAppBuilder:
 
         # Inject the full translation dict as JSON so Alpine.js expressions
         # can call a client-side t() — server-side t() only covers Jinja2.
-        _translations_json = _json.dumps(TRANSLATIONS, ensure_ascii=False)
+        # It is emitted inside a <script> block (base.html), so it is escaped
+        # for that context (AUD-025).
+        _translations_json = json_for_script(TRANSLATIONS)
         self.templates.env.globals["t"] = _dynamic_translate
         # Every plural form of a count label in the request's language;
         # chat.js tiCount picks one with t_plural's CLDR rule.
