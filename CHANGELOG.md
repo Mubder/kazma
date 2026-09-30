@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Re-registering the Windows task: a status that checks it, a rerun that cannot make it worse (2026-09-30)
+
+- **`install_service.py --status` now checks the task.** It printed the
+  task's name and state. It now reads every setting `--install` registers --
+  whether the task starts at boot with nobody logged on, its triggers
+  (startup, logon, and every 5 minutes to bring back a guard that exited),
+  that a trigger never starts a second guard, the priority, and which
+  folder's guard it starts -- marks each difference `FIX`, and names the
+  command that fixes it. It also explains the last-run code Task Scheduler
+  shows: `0x800710E0` is the 5-minute trigger finding the guard already
+  running, which is expected.
+- **Running `--install` again can no longer make the task worse.** Without
+  admin rights, the installer fell back to registering its user-level task
+  over the existing one: a task that starts at boot would have been swapped
+  for one that starts only after a logon. Run from a second copy of Kazma on
+  the same machine, it moved the task to that copy. Both now refuse, change
+  nothing, and say what to run instead; `--move` moves the task on purpose.
+  After an elevated `--install`, the installer shows the status.
+- The installer's generated PowerShell scripts, which hold this machine's
+  paths, are no longer offered to git.
+
 ## Every JavaScript test runs (2026-09-30)
 
 - **24 of Kazma's 45 JavaScript test files ran nowhere.** CI ran seven by
