@@ -97,6 +97,8 @@ Each adapter keeps a record of what its connection received (`kazma_gateway/rece
 
 The Test writes nothing, except that on Discord and Slack it opens the direct-message channel with each allowed user, which sends no message.
 
+**Slack's Socket Mode connection.** Slack asks for a new connection from time to time: `refresh_requested` every few hours, `warning` about ten seconds before a server goes away, and `link_disabled` when Socket Mode is switched off in the app's settings. Kazma logs each request with its reason and Slack's server, and reconnects at once. `link_disabled` is a WARNING, and the Test shows it with the fix. When the connection opens, Slack says how many connections the app has open. It hands each event to only one of them, so a second program using the same app-level token (a second Kazma, an old test bot) quietly takes some of Kazma's messages. When Slack counts more than one, the log gets a WARNING and the Test's connection check says so. A count taken within 15 seconds of Kazma's own reconnect is ignored, since Kazma's previous connection may still be in it.
+
 ---
 
 ## 3. Platform isolation (the core invariant)

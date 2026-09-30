@@ -18,6 +18,7 @@ Usage:
     python scripts/fast_test.py                 # default: cpu-count chunks, at most 8
     python scripts/fast_test.py --chunks 8      # explicit chunk count
     python scripts/fast_test.py --chunk-timeout 900
+    python scripts/fast_test.py --foreground    # normal priority (default: lowered)
 
 Output: per-chunk summaries, aggregated totals, all FAILED test ids, and a
 POISON list. Exit code: 0 only if zero failures and zero poison files.
@@ -124,13 +125,84 @@ def _parse_summary(log: str) -> dict[str, int]:
     return counts
 
 
+#: Run by each pytest process before pytest imports anything: it lowers the
+#: process below a normal program -- on Windows the CPU class (below normal)
+#: and the memory priority (low: its pages are reused first); ``nice``
+#: elsewhere. The live Kazma install runs on the machine the suite is run on:
+#: two minutes into a 4-chunk run its event loop froze for 18.5 s
+#: (2026-09-29 20:03 UTC, a stall dump at an arbitrary TLS read), and a CPU
+#: benchmark there caused two health-gated restarts (2026-09-26). A test run
+#: must lose that contest, not the server. ``--foreground`` opts out.
+#:
+#: The disk priority is left alone. Measured on 476 SQLite-heavy tests, one
+#: process each (2026-09-30): normal 87 s, CPU + memory lowered 78-80 s, with
+#: low I/O priority as well 147-199 s -- Windows throttles low-priority I/O
+#: even on an idle disk, and every chunk of a full run hit its timeout.
+#: Windows' background mode (``PROCESS_MODE_BACKGROUND_BEGIN``) is worse
+#: still: its very-low I/O priority made ``import torch`` take 244 s, not 4.4.
+_BACKGROUND_BOOTSTRAP = """\
+import os, sys
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.GetCurrentProcess.restype = wintypes.HANDLE
+    k.SetPriorityClass.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    k.SetPriorityClass.restype = wintypes.BOOL
+    k.SetProcessInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    k.SetProcessInformation.restype = wintypes.BOOL
+    me = k.GetCurrentProcess()
+    memory_low = wintypes.ULONG(2)
+    if not (k.SetPriorityClass(me, 0x4000)                                   # BELOW_NORMAL_PRIORITY_CLASS
+            and k.SetProcessInformation(me, 0, ctypes.byref(memory_low), 4)):  # ProcessMemoryPriority
+        print("fast_test: could not lower this process's priority", file=sys.stderr)
+else:
+    os.nice(10)
+# A test that builds the app would raise this process back to normal
+# (kazma_core.process_priority raises a lowered server at boot): keep it low.
+os.environ["KAZMA_PROCESS_PRIORITY"] = "keep"
+import pytest
+sys.exit(pytest.main(sys.argv[1:]))
+"""
+
+#: Whether pytest processes run at lowered priority (``main`` sets it).
+BACKGROUND = True
+
+#: Math-library threads per pytest process (``main`` sets it: the CPUs over
+#: the chunks). torch, MKL and OpenBLAS start one thread per CPU in EVERY
+#: process, so four chunks on a 32-thread machine ask for 128 compute
+#: threads on 32 CPUs -- oversubscription, and CPUs a Kazma server on the
+#: same machine needs. The last green full run had them capped by hand
+#: (2026-09-29). A cap the caller set in the environment wins.
+THREADS_PER_PROCESS: int | None = None
+_THREAD_VARS = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")
+
+
+def pytest_command(args: list[str], *, background: bool | None = None) -> list[str]:
+    """The command line of one serial pytest process."""
+    tail = [*args, "-q", "-p", "no:cacheprovider"]
+    if BACKGROUND if background is None else background:
+        return [sys.executable, "-c", _BACKGROUND_BOOTSTRAP, *tail]
+    return [sys.executable, "-m", "pytest", *tail]
+
+
+def pytest_env() -> dict[str, str]:
+    """The environment of one pytest process: this one's, plus the thread cap."""
+    env = dict(os.environ)
+    if THREADS_PER_PROCESS:
+        for var in _THREAD_VARS:
+            env.setdefault(var, str(THREADS_PER_PROCESS))
+    return env
+
+
 def run_pytest(args: list[str], timeout: float) -> tuple[int, str]:
     """Run pytest serially; return (exit_code, output). Crash-tolerant."""
-    cmd = [sys.executable, "-m", "pytest", *args, "-q", "-p", "no:cacheprovider"]
+    cmd = pytest_command(args)
     try:
         proc = subprocess.run(
             cmd,
             cwd=str(REPO),
+            env=pytest_env(),
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -310,7 +382,13 @@ def main() -> int:
     ap.add_argument("--chunk-timeout", type=float, default=900.0)
     ap.add_argument("--file-timeout", type=float, default=180.0,
                     help="per-file timeout during poison-file retry")
+    ap.add_argument("--foreground", action="store_true",
+                    help="run pytest at normal priority (default: below a normal program, "
+                         "so a run never starves a Kazma server on the same machine)")
     args = ap.parse_args()
+    global BACKGROUND, THREADS_PER_PROCESS
+    BACKGROUND = not args.foreground
+    THREADS_PER_PROCESS = max(1, (os.cpu_count() or 4) // max(1, args.chunks))
 
     files = discover_test_files()
     chunks = chunk_files(files, args.chunks)

@@ -246,6 +246,9 @@ $triggers = {triggers}
 
 $principal = {principal}
 
+# Priority 4, an interactive program's. A task's default, 7, is Task
+# Scheduler's background priority -- below every normal program on the
+# machine -- and the server the guard starts inherits it.
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
@@ -253,7 +256,8 @@ $settings = New-ScheduledTaskSettingsSet `
     -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Minutes 2) `
     -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
-    -MultipleInstances IgnoreNew
+    -MultipleInstances IgnoreNew `
+    -Priority 4
 
 Register-ScheduledTask -TaskName "{TASK_NAME}" `
     -Action $action -Trigger $triggers -Principal $principal -Settings $settings -Force | Out-Null

@@ -19,6 +19,11 @@ restarts with their reasons, a scheduled job below its schedule, and what
 blocked the event loop — and counts alerts sent, not repeats held back.
 Backup snapshots and repository maintenance no longer collide, and a missed
 snapshot is reported. **Settings → Restart server** goes through the guard.
+Kazma also **runs at normal priority**: a Windows Scheduled Task registered
+without one starts it below every normal program on the machine, and it froze
+whenever something heavy ran beside it. The restart card counts only real
+downtime, and a Slack connection says why it reconnects and warns when
+another program shares the app's token.
 [Deployment §6](./deployment), [Diagnosis map §1](../ops/diagnosis-map).
 
 **New in 2026-09-28/29 — more accounts, and chat apps that account for every

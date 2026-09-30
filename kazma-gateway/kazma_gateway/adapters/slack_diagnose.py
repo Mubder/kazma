@@ -28,7 +28,7 @@ import httpx
 
 from kazma_core.http_tls import shared_ssl_context
 from kazma_gateway.adapters.slack_receive import SLACK_REASONS
-from kazma_gateway.connector_test import Checks, judge_message, listening, when
+from kazma_gateway.connector_test import Checks, judge_message, listening, show, when
 
 logger = logging.getLogger(__name__)
 
@@ -243,7 +243,18 @@ async def diagnose(
             "there (your profile → ⋮ → Copy member ID)."
         ))
 
-    add("listening", *listening(live, "Slack", not_running=(
+    ok, said = listening(live, "Slack", not_running=(
         "Kazma's Slack connection is not running: turn Slack on above and Save, or check the tokens."
-    )))
+    ))
+    shared = (live or {}).get("slack_open_connections")
+    if ok and isinstance(shared, int) and shared > 1:
+        # Slack hands each event to ONE of the app's connections: another
+        # program on this app-level token takes some of Kazma's messages.
+        ok, said = None, (
+            f"{said} But when Kazma connected ({show(when(live.get('slack_open_connections_at')))}) "
+            f"Slack counted {shared} open connections for this app, and it hands each event to one "
+            "of them: another program using this app-level token (a second Kazma, an old test bot) "
+            "takes some of Kazma's messages. Stop it, or give it its own Slack app."
+        )
+    add("listening", ok, said)
     return checks.result(bot_name)

@@ -43,9 +43,10 @@ def _free_port() -> int:
 class GuardRun:
     """A real guard subprocess supervising a real fake-server subprocess."""
 
-    def __init__(self, tmp: Path, port: int, **fake_env: str):
+    def __init__(self, tmp: Path, port: int, *, creationflags: int = 0, **fake_env: str):
         self.tmp = tmp
         self.port = port
+        self.creationflags = creationflags
         self.marker = tmp / "marker.jsonl"
         self.log = tmp / "guard.log"
         self.proc: subprocess.Popen | None = None
@@ -77,6 +78,7 @@ class GuardRun:
         self.proc = subprocess.Popen(
             [sys.executable, str(GUARD)], env=self.env, cwd=str(self.tmp),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=self.creationflags,
         )
         return self
 
@@ -123,6 +125,19 @@ class GuardRun:
 
     def generations(self) -> list[dict]:
         return self._json_lines(self.marker)
+
+    def wait_generations(self, event: str, n: int, timeout: float = 60.0) -> list[str]:
+        """The fake server's generation events once *event* appears *n*
+        times (or the timeout passes). The guard logs
+        ``guard.operator_reload`` BEFORE it spawns the next child, so a
+        count read right after that line races the respawn (CI 2026-09-30:
+        ``['spawned', 'ready', 'graceful_exit']``)."""
+        end = time.time() + timeout
+        while True:
+            gens = [x.get("event", "") for x in self.generations()]
+            if gens.count(event) >= n or time.time() >= end:
+                return gens
+            time.sleep(0.2)
 
     def wait_for(self, event: str, timeout: float = 90.0) -> dict:
         end = time.time() + timeout
@@ -367,7 +382,7 @@ def test_the_servers_own_restart_request_is_carried_out_by_the_guard(tmp_path, m
         assert supervisor_watch.request_guard_reload("test") is True
         ev = g.wait_for("guard.operator_reload", timeout=60)
         assert ev.get("graceful") is True, g.event_names()
-        gens = [x["event"] for x in g.generations()]
+        gens = g.wait_generations("spawned", 2)
         assert gens.count("spawned") == 2, gens
         assert "port.reaping_holder" not in g.event_names()
 
@@ -390,7 +405,7 @@ def test_a_reload_is_carried_out_by_the_guard_and_is_graceful(tmp_path):
         # The shell never had to stop anything itself.
         assert "reload.child_stopped" not in names
         assert "port.reaping_holder" not in names
-        gens = [x["event"] for x in g.generations()]
+        gens = g.wait_generations("spawned", 2)
         assert gens.count("graceful_exit") == 1, gens
         assert gens.count("spawned") == 2, gens
         assert not (tmp_path / "guard.reload").exists()
@@ -441,3 +456,31 @@ def test_the_guard_keeps_a_heartbeat_that_status_reads(tmp_path):
             timeout=60, check=False,
         ).stdout
         assert "guard       : running" in out, out
+
+
+# ── priority ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows priority classes")
+@pytest.mark.parametrize(("setting", "server_class"), [
+    ("", "0x20"),         # the default: raised, and the server starts at NORMAL
+    ("keep", "0x4000"),   # negative control: stays where the task put it
+])
+def test_a_guard_started_below_normal_starts_its_server_at_normal_priority(
+        tmp_path, setting, server_class):
+    """The live KazmaAgent task, registered without a priority, starts the
+    guard at Task Scheduler's background priority (7): BELOW_NORMAL, and a
+    child inherits it -- base priority 6 all the way down to the server
+    (2026-09-30). The guard raises itself before it spawns anything."""
+    port = _free_port()
+    with GuardRun(tmp_path, port, creationflags=subprocess.BELOW_NORMAL_PRIORITY_CLASS,
+                  KAZMA_PROCESS_PRIORITY=setting) as g:
+        ev = g.wait_for("guard.priority", timeout=30)
+        g.wait_for("child.ready", timeout=60)
+        if setting == "keep":
+            assert ev["kept"] is True and ev["raised"] == [], ev
+        else:
+            assert "CPU" in ev["raised"] and ev["before"].startswith("CPU below normal"), ev
+            assert ev["after"].startswith("CPU normal"), ev
+        spawned = next(x for x in g.generations() if x["event"] == "spawned")
+        assert spawned["priority"]["class"] == server_class, spawned

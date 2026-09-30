@@ -129,7 +129,8 @@ class KazmaAppBuilder:
         self._env_files_loaded = load_env_files()
 
     def _adopt_process_environment(self) -> None:
-        """Log the ``.env`` files loaded; adopt PATH entries the OS gained.
+        """Log the ``.env`` files loaded; adopt PATH entries the OS gained;
+        raise a priority the launcher lowered (below).
 
         Runs straight after ``setup_logging``. ``_load_env_files`` must run
         before logging exists (logging reads env), so the loader's own
@@ -157,6 +158,26 @@ class KazmaAppBuilder:
         from kazma_core.path_refresh import refresh_path_from_os
 
         refresh_path_from_os()
+
+        # The priority the launcher gave this process: a Scheduled Task
+        # registered without one starts the guard, and so this server, below
+        # every normal program on the machine (kazma_core.process_priority).
+        from kazma_core.process_priority import ENV, ensure_interactive_priority
+
+        report = ensure_interactive_priority()
+        if report.raised:
+            logger.info(
+                "[startup] Raised the process to interactive priority (%s); it started at %s. "
+                "A Windows Scheduled Task registered without a priority runs at Task "
+                "Scheduler's background priority 7: `python scripts/service/install_service.py "
+                "--install`, from an elevated shell, registers it at 4.",
+                ", ".join(report.raised), report.describe(report.before),
+            )
+        elif report.kept and report.before:
+            logger.info("[startup] Process priority kept as started (%s): %s=keep",
+                        report.describe(report.before), ENV)
+        for problem in report.errors:
+            logger.warning("[startup] Could not raise the process priority: %s", problem)
 
     def _bootstrap_services(self) -> None:
         """Logging, config store, agent, registry, secret, workspace, FastAPI app.
