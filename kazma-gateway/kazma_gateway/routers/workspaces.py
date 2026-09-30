@@ -360,11 +360,16 @@ def create_workspaces_router() -> APIRouter:
                             category="workspace",
                         )
                     except Exception:
-                        pass
+                        logger.warning(
+                            "[workspaces] could not record the new active workspace %s",
+                            active["root_path"], exc_info=True,
+                        )
             else:
-                # No workspaces left — pin tools to default data workspace
-                fallback = Path.cwd() / "kazma-data" / "workspace"
-                fallback.mkdir(parents=True, exist_ok=True)
+                # No workspaces left — pin tools to the default sandbox, the
+                # binding ladder's last rung (never a path under the CWD).
+                from kazma_core.workspace.binding import default_sandbox_root
+
+                fallback = default_sandbox_root()
                 try:
                     configure_workspace(workspace=str(fallback))
                     get_config_store().set(
@@ -373,7 +378,10 @@ def create_workspaces_router() -> APIRouter:
                         category="workspace",
                     )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "[workspaces] could not pin the tools to the default sandbox %s",
+                        fallback, exc_info=True,
+                    )
                 active = None
 
         logger.info(

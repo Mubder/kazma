@@ -124,6 +124,14 @@ V2 memory lives in `kazma_core.memory`).
 ### 6. TaskStore WAL Mode (`kazma-core/kazma_core/swarm/task_store.py`)
 - SQLite uses WAL + `busy_timeout=5000` for concurrent read/write
 - Schema auto-migrates on init (ALTER TABLE for new columns on existing DBs)
+  through `kazma_core.db.sqlite_columns.add_missing_columns` -- every SQLite
+  store does (2026-09-30): read `PRAGMA table_info`, add what is missing, let a
+  real failure raise; only another process adding the column first is
+  tolerated. The old `try: ALTER ... except Exception: pass` hid a locked or
+  read-only database until every later query failed with "no such column".
+  Gate: `tests/test_sqlite_column_migrations.py` (no SQLite `ADD COLUMN`
+  outside the helper; Postgres `ADD COLUMN IF NOT EXISTS` is idempotent and
+  exempt -- and never swallowed: it aborts the transaction it runs in).
 - Worker filter uses `json_each()` not `LIKE` for exact matching
 
 ### 7. HITL Approval Gates (3 execution paths + 1 registry — all must stay wired)
@@ -3538,6 +3546,20 @@ and the sibling suites):**
   `_qnorm` copies — the dead one its test then checked. A module-level
   ContextVar a graph node binds needs no reset: LangGraph runs each node in a
   copy of the caller's context (`tests/test_node_context_scope.py`).
+- **A read through a module alias names something the module defines**
+  (`tests/test_module_attribute_refs.py`, AUD-027): `KazmaAgent.sync_active_model`
+  cleared `graph_builder._failover_clients` inside `try/except: pass` after the
+  caches moved to `graph_supervisor` -- AttributeError on every model switch,
+  swallowed, from 2026-08-25 to 2026-09-30, so a reconfigured provider stayed
+  in failover until a restart. It calls `graph_supervisor.reset_failover_cache()`
+  now. **No path joins the process CWD with `kazma-data`**, in or out of an
+  `except` (gate 9 in `tests/test_store_registry.py`): the workspace router's
+  "no workspaces left" branch pinned the tools to `Path.cwd()/kazma-data/workspace`
+  instead of `default_sandbox_root()`. **A silent handler around a write is a
+  bug** (`tests/test_swallowed_errors_reported.py`): the belief FTS rebuild
+  reported "rebuilt" over a failed commit, and the §25 continue-directive clear
+  failed without a word; a write that can fail says so (WARNING when data or a
+  feature is affected, DEBUG with the traceback for best-effort side writes).
 
 ## UI Conventions (Web)
 

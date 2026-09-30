@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.config_store import apply_sqlite_pragmas
+from kazma_core.db.sqlite_columns import add_missing_columns
 
 logger = logging.getLogger(__name__)
 
@@ -80,9 +81,9 @@ CREATE TABLE IF NOT EXISTS task_ledgers (
 CREATE INDEX IF NOT EXISTS idx_task_ledgers_tenant ON task_ledgers(tenant_id, status);
 """
 
-# Migration for pre-clarify_pending databases (CREATE IF NOT EXISTS will
-# not add a column to an existing table).
-_ALTER_CLARIFY = "ALTER TABLE task_ledgers ADD COLUMN clarify_pending INTEGER NOT NULL DEFAULT 0"
+# Columns added after the table first shipped (CREATE IF NOT EXISTS will not
+# add a column to an existing table).
+_ADDED_COLUMNS = (("clarify_pending", "INTEGER NOT NULL DEFAULT 0"),)
 
 
 # ── Model ─────────────────────────────────────────────────────────────
@@ -236,10 +237,7 @@ class TaskLedgerStore:
             conn = self._connect()
             try:
                 conn.executescript(_CREATE)
-                try:
-                    conn.execute(_ALTER_CLARIFY)
-                except sqlite3.OperationalError:
-                    pass  # column already exists
+                add_missing_columns(conn, "task_ledgers", _ADDED_COLUMNS)
                 conn.commit()
             finally:
                 conn.close()

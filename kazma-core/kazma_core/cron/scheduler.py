@@ -381,33 +381,20 @@ class SQLiteCronStore:
 
         await apply_sqlite_pragmas_async(self._db)
         await self._db.execute(_CREATE_TABLE)
-        # Idempotent tenant_id column for multi-tenant UI filtering
-        try:
-            await self._db.execute(
-                "ALTER TABLE cron_jobs ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
-            )
-        except Exception as exc:
-            # "duplicate column name" is the expected idempotency path; anything
-            # else (locked/corrupt DB, permission error) must be visible.
-            if "duplicate column" not in str(exc).lower():
-                logger.warning("[CronStore] tenant_id migration failed: %s", exc)
-        # Idempotent delivery_target column for direct result routing
-        # (the chat a reminder was scheduled from). Empty for legacy rows.
-        try:
-            await self._db.execute(
-                "ALTER TABLE cron_jobs ADD COLUMN delivery_target TEXT NOT NULL DEFAULT ''"
-            )
-        except Exception as exc:
-            if "duplicate column" not in str(exc).lower():
-                logger.warning("[CronStore] delivery_target migration failed: %s", exc)
-        # Idempotent failure_count column for retry budgeting (audit H3)
-        try:
-            await self._db.execute(
-                "ALTER TABLE cron_jobs ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
-            )
-        except Exception as exc:
-            if "duplicate column" not in str(exc).lower():
-                logger.warning("[CronStore] failure_count migration failed: %s", exc)
+        # Columns added after the table first shipped: tenant_id (multi-tenant
+        # UI filtering), delivery_target (the chat a reminder was scheduled
+        # from; empty for legacy rows), failure_count (retry budget, audit H3).
+        from kazma_core.db.sqlite_columns import add_missing_columns_async
+
+        await add_missing_columns_async(
+            self._db,
+            "cron_jobs",
+            (
+                ("tenant_id", "TEXT NOT NULL DEFAULT 'default'"),
+                ("delivery_target", "TEXT NOT NULL DEFAULT ''"),
+                ("failure_count", "INTEGER NOT NULL DEFAULT 0"),
+            ),
+        )
         logger.info("[CronStore] Initialized at %s", self._db_path)
 
     async def insert(self, job: ScheduledJob) -> None:
@@ -794,7 +781,10 @@ class CronScheduler:
                         "Marked failed on scheduler restart (stale RUNNING)",
                     )
                 except Exception:
-                    pass
+                    logger.warning(
+                        "[CronScheduler] could not record why job %s failed",
+                        job.job_id, exc_info=True,
+                    )
                 logger.warning(
                     "[CronScheduler] recovered stale RUNNING job %s → FAILED",
                     job.job_id,
@@ -1000,7 +990,8 @@ class CronScheduler:
                 try:
                     await self._store.purge_terminal_jobs()
                 except Exception:
-                    pass
+                    # A purge that fails every pass lets cron.db grow forever.
+                    logger.warning("[CronScheduler] purge of finished jobs failed", exc_info=True)
 
             await asyncio.sleep(self._poll_interval)
 

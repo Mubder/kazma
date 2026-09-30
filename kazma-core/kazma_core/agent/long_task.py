@@ -788,7 +788,12 @@ def consume_continue_context(
     try:
         cs.delete(key)
     except Exception:
-        pass
+        # Left in place, the stale directive is offered again on a later
+        # "proceed" -- the leak this clear exists to stop (AGENTS.md §25 A).
+        logger.warning(
+            "[long_task] could not clear the continue context for thread %s",
+            thread_id, exc_info=True,
+        )
     if not summary:
         return None
     if user_text is not None and not is_continuation_reply(user_text):

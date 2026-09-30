@@ -1161,13 +1161,9 @@ class KazmaAgent:
         # Drop cached failover clients so a provider reconfigure/removal takes
         # effect immediately — previously the stale client (base_url/creds)
         # was reused for failover until process restart (audit finding).
-        try:
-            from kazma_core.agent import graph_builder as _gb
+        from kazma_core.agent.graph_supervisor import reset_failover_cache
 
-            _gb._failover_clients.clear()
-            _gb._failover_cooldowns.clear()
-        except Exception:
-            pass
+        reset_failover_cache()
         _synced_model = (
             getattr(getattr(self.llm, "config", None), "model", None)
             or getattr(self.llm, "model", None)

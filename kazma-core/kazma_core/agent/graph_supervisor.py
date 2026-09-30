@@ -50,6 +50,20 @@ _LOOP_BREAK_MIN_ITERATION = 6
 _failover_clients: dict[str, Any] = {}
 _failover_cooldowns: dict[str, float] = {}
 
+
+def reset_failover_cache() -> None:
+    """Forget cached failover clients and cooldowns (a model or provider changed).
+
+    A cached client keeps the base URL and credentials it was built with, so
+    a reconfigured or removed provider would go on being used for failover
+    until a restart. Callers import this by name: reaching for the dicts
+    through a module alias broke silently when the graph was split
+    (2026-08-25 to 2026-09-30, ``tests/test_failover_cache_reset.py``).
+    """
+    _failover_clients.clear()
+    _failover_cooldowns.clear()
+
+
 def _last_tool_tests_failed(messages: list[Any]) -> bool:
     """True when the most recent tool result is a failed nearby-pytest verify."""
     for msg in reversed(messages or []):

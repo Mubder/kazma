@@ -173,11 +173,9 @@ class WorkspaceStore:
         call on every init — existing columns are a no-op. This mirrors
         the auto-migrate pattern used by TaskStore (AGENTS.md §6).
         """
-        existing = {row[1] for row in conn.execute("PRAGMA table_info(workspaces)")}
-        for col_name, col_type in _REPO_COLUMNS:
-            if col_name not in existing:
-                conn.execute(f"ALTER TABLE workspaces ADD COLUMN {col_name} {col_type}")
-                logger.debug("[WorkspaceStore] Migrated column %s", col_name)
+        from kazma_core.db.sqlite_columns import add_missing_columns
+
+        add_missing_columns(conn, "workspaces", _REPO_COLUMNS)
 
     # ------------------------------------------------------------------
     # Repo identity (Phase 2)

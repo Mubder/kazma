@@ -87,10 +87,9 @@ class SQLiteSessionStore(SessionStore):
             await apply_sqlite_pragmas_async(self._db)
             await self._db.execute(_CREATE_TABLE)
             # Schema auto-migration: add tenant_id if not present
-            try:
-                await self._db.execute("ALTER TABLE sessions ADD COLUMN tenant_id TEXT")
-            except Exception:
-                pass  # Ignore error if column is already present
+            from kazma_core.db.sqlite_columns import add_missing_columns_async
+
+            await add_missing_columns_async(self._db, "sessions", (("tenant_id", "TEXT"),))
             logger.info("[SQLiteSessionStore] Opened %s and auto-migrated schema if needed", self._db_path)
             return self._db
 

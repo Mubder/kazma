@@ -16,8 +16,6 @@ from __future__ import annotations
 from typing import TypedDict
 
 import pytest
-from langgraph.graph import END, StateGraph
-
 from kazma_core.agent import turn_input
 from kazma_core.agent.turn_input import (
     bind_scratchpad_thread,
@@ -26,6 +24,7 @@ from kazma_core.agent.turn_input import (
     reset_scratchpad_thread,
     set_active_turn_context,
 )
+from langgraph.graph import END, StateGraph
 
 
 class _State(TypedDict, total=False):

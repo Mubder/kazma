@@ -41,7 +41,9 @@ async def _stale_approval_message(
                 # Duplicate within 90s of a successful resume — no spam.
                 return None
     except Exception:
-        pass
+        logger.debug(
+            "[hitl] could not read the last resume time; a duplicate notice may follow", exc_info=True,
+        )
 
     # Graph finished (no next nodes) — likely already approved and completed.
     try:

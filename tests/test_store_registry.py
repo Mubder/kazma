@@ -755,3 +755,84 @@ def test_except_rederivation_is_caught_and_the_allowlist_is_honoured():
         ),
     }
     assert _data_dir_rederived_in_except(planted) == ["a.py:7"]
+
+
+# ── 9. no path joins the process working directory with "kazma-data" ─────
+
+
+def _cwd_joined_with_data_dir(sources: dict[str, str]) -> list[str]:
+    """``Path.cwd() / "kazma-data" / ...`` anywhere -- not only in an except.
+
+    Gate 7 catches such a path when it names a database, gate 8 when it sits
+    in an ``except``. The workspace router's "no workspaces left" branch did
+    neither -- ``Path.cwd() / "kazma-data" / "workspace"`` in plain code --
+    and pinned the agent's tools to a sandbox that depended on where the
+    process started (2026-09-30), the exact bug ``default_sandbox_root()``
+    documents as removed. Any path that joins the CWD with the data dir's
+    name is that bug: use ``kazma_core.paths.data_dir()`` or the binding.
+    """
+
+    def is_cwd_call(n: ast.AST) -> bool:
+        return isinstance(n, ast.Call) and (
+            (isinstance(n.func, ast.Attribute) and n.func.attr in ("cwd", "getcwd"))
+            or (isinstance(n.func, ast.Name) and n.func.id == "getcwd")
+        )
+
+    def is_data_dir_literal(n: ast.AST) -> bool:
+        return (
+            isinstance(n, ast.Constant) and isinstance(n.value, str)
+            and n.value.replace("\\", "/").split("/", 1)[0] == "kazma-data"
+        )
+
+    problems: set[str] = set()
+    for rel, text in sources.items():
+        if rel.replace("\\", "/") in _EXCEPT_FALLBACK_ALLOWED:
+            continue
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.BinOp, ast.Call)):
+                continue
+            inner = list(ast.walk(node))
+            if any(is_cwd_call(n) for n in inner) and any(is_data_dir_literal(n) for n in inner):
+                problems.add(f"{rel}:{node.lineno}")
+    return sorted(problems)
+
+
+def test_no_path_joins_the_working_directory_with_the_data_dir():
+    problems = _cwd_joined_with_data_dir(_product_sources())
+    assert not problems, (
+        "A path joins the process working directory with 'kazma-data'. Started\n"
+        "from another directory, it names a different place than the data dir:\n  "
+        + "\n  ".join(problems)
+    )
+
+
+def test_cwd_joined_with_data_dir_is_caught():
+    """Negative control: the router's old line and its os.path spelling."""
+    planted = {
+        "a.py": textwrap.dedent(
+            """
+            from pathlib import Path
+            def fallback():
+                return Path.cwd() / "kazma-data" / "workspace"
+            """
+        ),
+        "b.py": textwrap.dedent(
+            """
+            import os
+            ROOT = os.path.join(os.getcwd(), "kazma-data")
+            """
+        ),
+        "c.py": textwrap.dedent(
+            """
+            from pathlib import Path
+            from kazma_core.paths import data_dir
+            HERE = Path.cwd()
+            SANDBOX = data_dir() / "workspace"
+            """
+        ),
+    }
+    assert _cwd_joined_with_data_dir(planted) == ["a.py:4", "b.py:3"]

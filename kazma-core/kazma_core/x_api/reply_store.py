@@ -158,17 +158,16 @@ class XReplyStore:
                 # conversation log existed. CREATE TABLE IF NOT EXISTS is
                 # a no-op on an existing table, so new columns need this
                 # or an upgraded install silently keeps the old shape.
-                have = {
-                    str(r[1])
-                    for r in conn.execute('PRAGMA table_info(x_replies)')
-                }
-                for col in ('parent_text', 'summon_text'):
-                    if col not in have:
-                        conn.execute(
-                            f'ALTER TABLE x_replies ADD COLUMN {col} '
-                            "TEXT NOT NULL DEFAULT ''"
-                        )
-                        logger.info('[x-reply] added column %s', col)
+                from kazma_core.db.sqlite_columns import add_missing_columns
+
+                add_missing_columns(
+                    conn,
+                    'x_replies',
+                    (
+                        ('parent_text', "TEXT NOT NULL DEFAULT ''"),
+                        ('summon_text', "TEXT NOT NULL DEFAULT ''"),
+                    ),
+                )
                 conn.commit()
             finally:
                 conn.close()

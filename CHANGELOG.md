@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Errors that were swallowed now say so (2026-09-30)
+
+- **Switching the model now really forgets the old failover connections.**
+  Since August 25 the cleanup looked in the wrong place, failed, and hid the
+  failure, so a provider you reconfigured or removed kept being tried as a
+  fallback until a restart. It works again, and a test now fails whenever
+  Kazma's code reaches for something a module no longer has.
+- **Adding a column to an existing database is done one way.** Eleven stores
+  each did it by hand; most ignored every error, so a locked or read-only
+  database left a column missing and the real cause never reached the log.
+  They share one helper now, and a failure is reported where it happens.
+- **Deleting your last workspace** now points the tools at Kazma's own
+  default sandbox, not a folder that depended on where Kazma was started.
+- **Quiet failures now leave a trace:** a rebuild of the memory search index
+  no longer reports success when it could not save, a stale "continue"
+  instruction that could not be cleared is logged, and a failed cleanup of
+  finished reminders or old backups is logged instead of piling up unseen.
+
 ## Dead code out, and what it was hiding (2026-09-30)
 
 - **The capability labels on the Providers page were defined twice** in the

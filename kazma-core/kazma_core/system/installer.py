@@ -286,7 +286,9 @@ def _record_installed_extra(extra: str | None, package_name: str | None) -> None
             encoding="utf-8",
         )
     except Exception:
-        pass
+        logger.debug(
+            "[installer] could not write %s (the settings store keeps the list)", path, exc_info=True,
+        )
 
 
 async def _hot_reload_memory() -> None:

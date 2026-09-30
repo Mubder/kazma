@@ -290,20 +290,18 @@ class SessionManager:
                 )
             """)
             # ── In-place migrations for existing DBs ──
-            # Each ALTER is wrapped in try/except because SQLite errors if
-            # the column already exists (no IF NOT EXISTS for ADD COLUMN).
-            for col, coltype in [
-                ("updated_at", "TEXT DEFAULT ''"),
-                ("title", "TEXT DEFAULT ''"),
-                ("archived", "INTEGER DEFAULT 0"),
-                ("pinned", "INTEGER DEFAULT 0"),
-            ]:
-                try:
-                    self._conn.execute(
-                        f"ALTER TABLE sessions ADD COLUMN {col} {coltype}"
-                    )
-                except sqlite3.OperationalError:
-                    pass  # Column already exists — expected on subsequent runs
+            from kazma_core.db.sqlite_columns import add_missing_columns
+
+            add_missing_columns(
+                self._conn,
+                "sessions",
+                (
+                    ("updated_at", "TEXT DEFAULT ''"),
+                    ("title", "TEXT DEFAULT ''"),
+                    ("archived", "INTEGER DEFAULT 0"),
+                    ("pinned", "INTEGER DEFAULT 0"),
+                ),
+            )
 
     def _session_from_row(
         self,

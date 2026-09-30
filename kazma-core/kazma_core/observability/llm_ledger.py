@@ -71,9 +71,9 @@ def _get_conn(db_path: str = _DEFAULT_DB) -> sqlite3.Connection:
 
 def _migrate(conn: sqlite3.Connection) -> None:
     """Add ``turn_id`` to a ledger created before it existed (2026-09-26)."""
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(llm_calls)")}
-    if "turn_id" not in cols:
-        conn.execute("ALTER TABLE llm_calls ADD COLUMN turn_id TEXT DEFAULT ''")
+    from kazma_core.db.sqlite_columns import add_missing_columns
+
+    add_missing_columns(conn, "llm_calls", (("turn_id", "TEXT DEFAULT ''"),))
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_turn ON llm_calls(turn_id)")
     conn.commit()
 

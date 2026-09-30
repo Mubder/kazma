@@ -144,6 +144,31 @@ second. The dead first set is gone and `tests/test_no_repeated_dict_keys.py`
 makes a repeated literal key fail the build (ruff's F601 is only advisory in
 CI).
 
+**AUD-027 first pass (fifth change set):** silent handlers 538 → 476, blind
+handlers 3,730 → 3,693. Triaged by consequence, not swept: every silent
+handler around a WRITE was read. Found behind them:
+- `KazmaAgent.sync_active_model` cleared `graph_builder._failover_clients`,
+  which moved to `graph_supervisor` in the 2026-08-25 split — AttributeError on
+  every model switch, swallowed, so a reconfigured provider stayed in failover
+  until a restart. Now `graph_supervisor.reset_failover_cache()`, and
+  `tests/test_module_attribute_refs.py` holds every `module_alias.attr` read to
+  a name the module defines (it finds the old line; nothing else today).
+- Eleven SQLite stores added columns by hand, most with `except Exception:
+  pass` (a locked or read-only database left the column missing). One helper,
+  `kazma_core.db.sqlite_columns`, and a gate that allows no other SQLite
+  `ADD COLUMN`. The Postgres `pinned` migration's swallow could abort the
+  schema transaction behind a "core schema ensured" line; it now reaches the
+  pool's retry loop.
+- The workspace router pinned the tools to `Path.cwd()/kazma-data/workspace`
+  when the last workspace was deleted (a sibling of the bug
+  `default_sandbox_root()` documents as removed); gate 9 of
+  `tests/test_store_registry.py` now covers CWD + data-dir paths anywhere.
+- The belief FTS rebuild reported success over a failed commit; the §25
+  continue-directive clear, the cron purge, and backup pruning failed without
+  a word (`tests/test_swallowed_errors_reported.py`).
+The remaining silent handlers are best-effort cleanup (closing, cancelling,
+UI refresh) and stay on the ratchet.
+
 Previously deferred: AUD-015 (annotate the ~18 API-only routes —
 docs hygiene), AUD-017 (73-file unused-import sweep — its own batch), AUD-026
 (split the two 270-complexity chat transports — touches the gated §31

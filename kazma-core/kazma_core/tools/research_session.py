@@ -122,23 +122,18 @@ def _conn() -> sqlite3.Connection:
         )
         """
     )
-    # Idempotent migrations for pre-R4 DBs
-    cols = {row[1] for row in c.execute("PRAGMA table_info(research_sessions)").fetchall()}
-    if "rubric_score" not in cols:
-        try:
-            c.execute("ALTER TABLE research_sessions ADD COLUMN rubric_score REAL")
-        except Exception:
-            pass
-    if "rubric_ok" not in cols:
-        try:
-            c.execute("ALTER TABLE research_sessions ADD COLUMN rubric_ok INTEGER")
-        except Exception:
-            pass
-    if "archived" not in cols:
-        try:
-            c.execute("ALTER TABLE research_sessions ADD COLUMN archived INTEGER DEFAULT 0")
-        except Exception:
-            pass
+    # Columns added after the table first shipped (pre-R4 databases).
+    from kazma_core.db.sqlite_columns import add_missing_columns
+
+    add_missing_columns(
+        c,
+        "research_sessions",
+        (
+            ("rubric_score", "REAL"),
+            ("rubric_ok", "INTEGER"),
+            ("archived", "INTEGER DEFAULT 0"),
+        ),
+    )
     c.commit()
     return c
 

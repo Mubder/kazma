@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -56,16 +57,15 @@ def _candidate_report_roots() -> list[Path]:
         roots.append(r)
 
     _add(_get_ws_root())
-    try:
-        import os
+    env = (os.environ.get("KAZMA_WORKSPACE") or "").strip()
+    if env:
+        _add(Path(env).expanduser())
+    from kazma_core.workspace.binding import default_sandbox_root
 
-        env = (os.environ.get("KAZMA_WORKSPACE") or "").strip()
-        if env:
-            _add(Path(env).expanduser())
-    except Exception:
-        pass
-    _add(Path.cwd() / "kazma-data" / "workspace")
-    _add(Path.cwd())  # repo-root research/ when tools wrote relative to cwd
+    _add(default_sandbox_root())
+    # Reports from before 2026-09-26, when tools resolved relative paths
+    # against the process CWD (now the active workspace, AGENTS.md §10).
+    _add(Path.cwd())
     # Active WorkspaceStore (may differ from tool pin at list time)
     try:
         from kazma_core.stores import get_workspace_store
@@ -390,7 +390,7 @@ async def run_research_pipeline(
             encoding="utf-8",
         )
     except Exception:
-        pass
+        logger.debug("[research] could not save plan.json", exc_info=True)
     log.append(f"### Plan — method={plan.method} · {len(queries)} search queries")
     for i, q in enumerate(queries, 1):
         log.append(f"{i}. {q}")
@@ -678,7 +678,7 @@ async def run_research_pipeline(
                 encoding="utf-8",
             )
         except Exception:
-            pass
+            logger.debug("[research] could not save the gap-loop record", exc_info=True)
         log.append(
             f"Gap loop {gap_loops}: method={gap.method} needs_more={gap.needs_more} "
             f"followups={len(gap.followup_queries)}"
@@ -736,7 +736,7 @@ async def run_research_pipeline(
                 claims_md = claims_to_markdown(all_claims)
                 (out_dir / "claims.md").write_text(claims_md, encoding="utf-8")
             except Exception:
-                pass
+                logger.warning("[research] could not save the claims files in %s", out_dir, exc_info=True)
             synth_paths = digests + (
                 [_rel(out_dir / "claims.md")] if (out_dir / "claims.md").is_file() else []
             )
