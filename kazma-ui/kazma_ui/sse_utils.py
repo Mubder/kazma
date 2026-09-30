@@ -6,7 +6,6 @@ Used by both ``sse_chat.py`` and ``swarm_sse.py`` to avoid duplication.
 from __future__ import annotations
 
 import json
-import traceback
 from datetime import UTC, datetime
 from typing import Any
 

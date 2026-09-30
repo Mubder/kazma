@@ -278,7 +278,6 @@ async def document_convert(
     opaque ``artifact_id`` (downloadable) plus any warnings.
     """
 
-    import asyncio
 
     if not document_id.strip() or not target_format.strip():
         return "Error: document_id and target_format are required"

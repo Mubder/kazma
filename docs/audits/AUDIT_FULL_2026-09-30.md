@@ -115,6 +115,35 @@ not restore — has a tested restore (`tests/test_settings_restore.py`).
 Follow-up: a Restore control, once a restore keeps runtime state (active chat
 threads, boot stamps) out.
 
+**AUD-017 done (fourth change set):** 106 unused imports in product code → 0.
+Each was first checked for a reader elsewhere (imports from the module, patch
+strings, attribute access, skill manifests, which the native loader reads by
+name): five were private helpers re-exported by `graph_builder` and imported
+through it by `swarm/worker.py` and four tests — those now import from the
+module that defines them. Four unused ones were more than clutter:
+- `tool_builtins` defined `_qnorm` seven times after the package split and
+  only `memory.py` calls it; the package re-exported the copy from
+  `external.py`, so its one test exercised a dead copy. Six copies deleted,
+  the test reads the live one.
+- `graph_supervisor` imported the resets for the two ContextVars it binds and
+  never called them. Correct, because LangGraph runs each node in a copy of
+  the caller's context — now said at the site and held by
+  `tests/test_node_context_scope.py` (with the leak as its negative control).
+- `sse_chat` imported `is_shutting_down` unused: the check lives in
+  `_streaming.py` (checked in history, nothing was lost).
+- `hitl_supersede` had a dead `langgraph` availability check.
+ERA001's 38 "commented-out code" hits are all comments that look like code
+(sample payloads, section headers) — none removed. RUF100: 26 `noqa` markers
+that suppressed nothing → 0 (their explanations kept as plain comments). Of
+the 583 module-local public symbols, four were dead everywhere and are gone
+(579; the rest are used in their own module or by tests — renaming them is the
+sweep the ratchet's docstring declines, because skills reach code by name).
+Found beside it: the Settings catalog defined the four provider capability
+labels twice (2026-09-13 and 2026-09-28, different Arabic); Python kept the
+second. The dead first set is gone and `tests/test_no_repeated_dict_keys.py`
+makes a repeated literal key fail the build (ruff's F601 is only advisory in
+CI).
+
 Previously deferred: AUD-015 (annotate the ~18 API-only routes —
 docs hygiene), AUD-017 (73-file unused-import sweep — its own batch), AUD-026
 (split the two 270-complexity chat transports — touches the gated §31

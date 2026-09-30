@@ -17,7 +17,6 @@ import logging
 import re
 from collections import OrderedDict
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Any
 
 import aiosqlite

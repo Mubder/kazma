@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 

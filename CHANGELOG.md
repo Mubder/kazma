@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Dead code out, and what it was hiding (2026-09-30)
+
+- **The capability labels on the Providers page were defined twice** in the
+  Arabic catalog, with different words; only the second copy could ever show.
+  The dead copy is gone, and a test now fails the build whenever any table in
+  Kazma repeats a key, because Python quietly keeps just one of them.
+- **A memory tool's test checked the wrong copy of its code.** The helper
+  that lets "memory system" find `user_memory_system` existed seven times
+  after an old file split; the test read a copy nothing runs. One copy is
+  left, the one the tool uses, and the test reads it.
+- **106 unused imports and four functions nobody called are gone**, each
+  first checked for anything that reaches it by name (other modules, tests,
+  skill manifests). 26 lint suppressions that suppressed nothing are gone too.
+- **Written down and tested:** each step of a chat keeps its own settings
+  (like "this turn is read-only") to itself. It relies on how the agent
+  library runs steps, and a test now fails if an upgrade changes that.
+
 ## Every API route has a caller or a reason (2026-09-30)
 
 - **A test now lists every `/api` route nothing in Kazma calls, with why.**

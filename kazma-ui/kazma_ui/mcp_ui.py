@@ -151,7 +151,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
             return result
         except MCPOAuthError as exc:
             return {"status": "error", "error": safe_error(exc)}
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("[mcp_api] OAuth start failed for %s", name)
             return {"status": "error", "error": f"OAuth login failed: {exc}"}
 

@@ -286,7 +286,7 @@ def list_sessions(
             ORDER BY created_at DESC
             LIMIT ?
             """,
-            (*params, max(1, min(200, int(limit or 50)))),  # noqa: S608 — static WHERE
+            (*params, max(1, min(200, int(limit or 50)))),  # static WHERE
         ).fetchall()
         return [_row_to_session(r) for r in rows]
     finally:

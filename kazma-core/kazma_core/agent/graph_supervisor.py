@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 from typing import Any
 
@@ -732,9 +731,7 @@ async def supervisor_node(
         should_suppress_memory_recall,
         should_quarantine_documents_search,
         set_active_turn_context,
-        reset_active_turn_context,
         bind_scratchpad_thread,
-        reset_scratchpad_thread,
         drain_scratchpad_writes,
     )
 
@@ -850,7 +847,9 @@ async def supervisor_node(
     )
 
     # Bind tool-side ContextVars for this supervisor hop (file_search quarantine, etc.)
-    _turn_tok = set_active_turn_context(
+    # No reset: LangGraph runs each node in a copy of the caller's context, so
+    # these bindings end with the hop (tests/test_node_context_scope.py).
+    set_active_turn_context(
         active_goal=str(intent_patch.get("active_goal") or ""),
         active_attachments=list(intent_patch.get("active_attachments") or []),
         hard_constraints=list(intent_patch.get("hard_constraints") or []),
@@ -858,7 +857,7 @@ async def supervisor_node(
         suppress_memory_recall=_suppress_recall,
         quarantine_documents_search=_quarantine_docs,
     )
-    _sp_tok = bind_scratchpad_thread(str(state.get("thread_id") or ""))
+    bind_scratchpad_thread(str(state.get("thread_id") or ""))
 
     _wm_block = format_working_memory_anchor(
         active_goal=str(intent_patch.get("active_goal") or ""),

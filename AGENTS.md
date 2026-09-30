@@ -3530,6 +3530,14 @@ and the sibling suites):**
   call against the built app's route table and every body against the keys the
   route reads — without dispatching anything (negative controls: the old paths
   and the old body).
+- **No dict literal repeats a key** (`tests/test_no_repeated_dict_keys.py`,
+  every tracked `.py`): Python keeps the last value silently, and the Settings
+  catalog held four labels twice (AUD-017). **A private helper is imported
+  from the module that defines it**, never through a re-export: patching a
+  re-export changes nothing, and `tool_builtins` re-exported one of seven
+  `_qnorm` copies — the dead one its test then checked. A module-level
+  ContextVar a graph node binds needs no reset: LangGraph runs each node in a
+  copy of the caller's context (`tests/test_node_context_scope.py`).
 
 ## UI Conventions (Web)
 

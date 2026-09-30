@@ -22,7 +22,7 @@ from textual.app import ComposeResult
 from textual.widget import Widget
 from textual.widgets import Static
 
-from kazma_tui.widgets.sparkline import Sparkline  # noqa: F401 — used in MetricCard
+from kazma_tui.widgets.sparkline import Sparkline
 
 __all__ = ["MetricCard", "MetricsDashboard"]
 

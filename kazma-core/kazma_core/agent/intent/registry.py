@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from kazma_core.agent.intent.types import HandlerResult, TurnDecision
+from kazma_core.agent.intent.types import HandlerResult
 
 __all__ = ["IntentHandler", "IntentRegistry", "get_registry"]
 

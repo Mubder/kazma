@@ -13,23 +13,12 @@ import re
 from collections.abc import Iterator
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from kazma_core.agent.tool_scope import _workspace_scope_error
 from kazma_core.workspace.binding import resolve_tool_path
 
 logger = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    pass
-
-def _qnorm(q: str) -> str:
-    """Normalize a memory q-filter: underscores/hyphens -> single spaces,
-    lowercased. Paired with REPLACE(...) in SQL so 'memory system' matches
-    user_memory_system (2026-08-27 report — the literal LIKE filter missed
-    it while FTS memory_search matched fine)."""
-    return re.sub(r"[_\-\s]+", " ", str(q or "").strip().lower()).strip()
-
 
 # ── Walking and matching for file_search / file_list ────────────────────
 #

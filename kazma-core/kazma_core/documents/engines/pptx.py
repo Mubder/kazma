@@ -175,7 +175,7 @@ class PptxEngine:
         internal margins and vertically centres text for full-width bars.
         """
         from pptx.enum.text import MSO_ANCHOR
-        from pptx.util import Inches, Pt
+        from pptx.util import Inches
 
         tf = shape.text_frame
         tf.word_wrap = True

@@ -126,9 +126,3 @@ def memory_db(path: str | None = None) -> Iterator[sqlite3.Connection]:
             conn.close()
         except Exception:
             logger.debug("[memory_db] close failed", exc_info=True)
-
-
-def reset_schema_cache() -> None:
-    """Forget which databases have had their schema ensured (tests)."""
-    with _schema_lock:
-        _schema_ready.clear()

@@ -604,7 +604,6 @@ class KazmaAppBuilder:
 
         # i18n
         import contextvars
-        import json as _json
         from kazma_ui.i18n import make_translator as _make_translator, TRANSLATIONS
         from kazma_ui.i18n import plural_forms as _plural_forms
 

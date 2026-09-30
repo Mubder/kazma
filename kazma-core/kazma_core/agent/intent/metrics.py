@@ -4,7 +4,6 @@ from __future__ import annotations
 import logging
 import threading
 from collections import Counter
-from typing import Any
 
 __all__ = ["record_decision", "get_intent_counters"]
 

@@ -14,34 +14,24 @@ from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.checkpoint import HITLCheckpoint, HITLCheckpointHandler
 from kazma_core.swarm.checkpoint_manager import CheckpointManager
 from kazma_core.swarm.config import SwarmConfig, WorkerConfig
-from kazma_core.swarm.consultation import (
-    ConsultationConfigurationError,
-    execute_consult,
-)
 from kazma_core.swarm.handoff import HandoffRequest
 from kazma_core.swarm.metrics import MetricsCollector
 from kazma_core.swarm.patterns import (
-    ConditionalConfigurationError,
-    FanOutConfigurationError,
     PatternExecution,
     PipelineConfigurationError,
-    execute_conditional,
-    execute_fan_out,
-    execute_pipeline,
     resume_pipeline,
 )
 from kazma_core.swarm.phonebook import WorkerPhonebook
 from kazma_core.swarm.reliability import (
     BoundedConcurrency,
     CircuitBreaker,
-    CircuitBreakerOpenError,
     FallbackChain,
     OutputValidator,
     RetryPolicy,
     TimeoutGuard,
 )
 from kazma_core.swarm.reliability_registry import ReliabilityRegistry
-from kazma_core.routing_engine import UnifiedRouter, NoCapableWorkersError
+from kazma_core.routing_engine import UnifiedRouter
 from kazma_core.swarm.task import (
     HandoffRecord,
     SwarmTask,

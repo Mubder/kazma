@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from textual.app import ComposeResult
-from textual.containers import Container, Vertical
+from textual.containers import Container
 from textual.screen import ModalScreen
 from textual.widgets import Input, ListItem, ListView, Static
 from textual.binding import Binding

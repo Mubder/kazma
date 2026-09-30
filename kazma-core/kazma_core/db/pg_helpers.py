@@ -44,19 +44,6 @@ def get_pool() -> Any:
     return pool
 
 
-def json_loads(val: Any, default: Any = None) -> Any:
-    if val is None:
-        return default
-    if isinstance(val, (dict, list)):
-        return val
-    if isinstance(val, str):
-        try:
-            return json.loads(val)
-        except Exception:
-            return default
-    return default
-
-
 _NUL = "\x00"
 _REPLACEMENT = "�"
 

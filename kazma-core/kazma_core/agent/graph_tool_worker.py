@@ -192,7 +192,7 @@ def _commitment_resolve_gate(
                             tenant_id=_tenant,
                             enforce_unknown=_enforce_unknown,
                         )
-                    except Exception as _exc:  # noqa: BLE001
+                    except Exception as _exc:
                         # Fail-closed per tool (deep-audit 2026-08-19, finding #9)
                         logger.error(
                             "[ToolWorker] semantic authz crashed for %s: %s",

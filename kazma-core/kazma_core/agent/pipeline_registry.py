@@ -13,9 +13,8 @@ compile — removal is a follow-up once callers are confirmed gone.
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Awaitable, Callable
 
 __all__ = ["Pipeline", "PipelineBudget", "PipelineRegistry", "get_registry"]
 

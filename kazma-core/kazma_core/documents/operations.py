@@ -6,7 +6,6 @@ import json
 import os
 import re
 import shutil
-import sys
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace

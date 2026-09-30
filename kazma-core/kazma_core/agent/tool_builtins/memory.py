@@ -10,12 +10,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
-if TYPE_CHECKING:
-    pass
 
 def _qnorm(q: str) -> str:
     """Normalize a memory q-filter: underscores/hyphens -> single spaces,

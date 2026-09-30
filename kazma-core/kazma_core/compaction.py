@@ -9,7 +9,6 @@ Compacts the agent's conversation context by:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 

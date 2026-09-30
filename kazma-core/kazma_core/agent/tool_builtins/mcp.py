@@ -8,23 +8,9 @@ within this group is preserved.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 logger = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    pass
-
-def _qnorm(q: str) -> str:
-    """Normalize a memory q-filter: underscores/hyphens -> single spaces,
-    lowercased. Paired with REPLACE(...) in SQL so 'memory system' matches
-    user_memory_system (2026-08-27 report — the literal LIKE filter missed
-    it while FTS memory_search matched fine)."""
-    import re as _re
-
-    return _re.sub(r"[_\-\s]+", " ", str(q or "").strip().lower()).strip()
-
-
 
 
 def register_mcp_tools(registry: Any) -> None:

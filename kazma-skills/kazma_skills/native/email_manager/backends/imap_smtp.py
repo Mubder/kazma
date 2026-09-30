@@ -10,7 +10,6 @@ import smtplib
 import ssl
 import uuid
 from email.message import EmailMessage as StdEmailMessage
-from typing import Any
 
 from kazma_skills.native.email_manager.models import (
     CategorizeRequest,

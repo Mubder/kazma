@@ -10,7 +10,6 @@ the scan at sub-millisecond. ``is_commitment_enabled`` is the live kill-switch.
 from __future__ import annotations
 
 import logging
-import os
 import sqlite3
 from typing import Any
 

@@ -113,7 +113,7 @@ RTL_CSS_OVERRIDES = """
 def _preferences_paths() -> tuple[Path, Path]:
     """Return (config_dir, preferences_file) under project-local Kazma home."""
     try:
-        from kazma_core.paths import preferences_path, user_home
+        from kazma_core.paths import preferences_path
 
         prefs = preferences_path()
         return prefs.parent, prefs

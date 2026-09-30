@@ -2630,10 +2630,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "declared, not inferred",
     },
     "settings.capabilities": {"ar": "القدرات", "en": "Capabilities"},
-    "settings.cap_tools": {"ar": "استدعاء الأدوات", "en": "Tool calling"},
-    "settings.cap_streaming": {"ar": "البث", "en": "Streaming"},
-    "settings.cap_json_mode": {"ar": "وضع JSON", "en": "JSON mode"},
-    "settings.cap_vision": {"ar": "الرؤية", "en": "Vision"},
     "settings.not_verified": {"ar": "غير مُتحقق منه", "en": "Not verified"},
     "settings.not_verified_hint": {
         "ar": "لم يقس أحد هذه القدرة بعد. شغّل scripts/provider_conformance.py --live لتحويلها إلى قيمة مقيسة.",

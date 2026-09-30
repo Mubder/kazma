@@ -28,7 +28,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 

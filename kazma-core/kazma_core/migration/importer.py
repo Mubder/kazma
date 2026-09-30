@@ -31,7 +31,7 @@ from typing import Any, Callable
 
 from kazma_core.migration.bundle import KazmaBundle, parse_meta_env
 from kazma_core.migration.exporter import _DATA_DIR_DBS as _EXPORTED_DATA_DIR_DBS
-from kazma_core.migration.path_rewrite import PathMap, build_path_map, rewrite_paths_in_sqlite
+from kazma_core.migration.path_rewrite import build_path_map, rewrite_paths_in_sqlite
 from kazma_core.migration.vault_pairing import VaultKeyStatus, check_vault_key, sync_vault_key
 
 logger = logging.getLogger(__name__)

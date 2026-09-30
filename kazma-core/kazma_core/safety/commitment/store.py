@@ -21,7 +21,7 @@ import sqlite3
 import time
 import uuid
 from contextlib import AbstractContextManager
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Any
 
 from kazma_core.db.sqlite_session import committed_and_closed

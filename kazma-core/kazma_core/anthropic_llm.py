@@ -420,7 +420,7 @@ class AnthropicProvider(LLMProvider):
             raise LLMError(
                 f"Anthropic request failed (network): {exc}", transient=True
             ) from exc
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("[Anthropic] request failed: %s", exc)
             raise LLMError(
                 f"Anthropic request failed: {exc}", transient=False

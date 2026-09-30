@@ -8,7 +8,6 @@ import logging
 from pathlib import Path
 import psutil
 
-from kazma_core.agent.tool_registry import _workspace_scope_error
 from kazma_core.tools.file_write import _get_workspace
 
 logger = logging.getLogger(__name__)

@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 import aiosqlite
-import yaml
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from kazma_core.authority import ContextAuthority, create_authority

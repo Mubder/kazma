@@ -37,7 +37,7 @@ from typing import Any
 
 import httpx
 
-from kazma_core.llm_provider import LLMConfig, LLMProvider, LLMResponse
+from kazma_core.llm_provider import LLMConfig, LLMProvider
 from kazma_core.http_tls import shared_ssl_context
 
 __all__ = ["GeminiAPIError", "GeminiProvider", "GoogleGeminiClient"]

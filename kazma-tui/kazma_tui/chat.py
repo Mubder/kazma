@@ -983,7 +983,6 @@ class ChatPanel(Vertical):
             if sub == "export":
                 grouped = await self._api("GET", "/api/settings") or {}
                 from datetime import datetime
-                from pathlib import Path
                 import json
 
                 # exports_dir(), not a CWD-relative literal. It honours
@@ -1156,7 +1155,6 @@ class ChatPanel(Vertical):
             return
         try:
             from datetime import datetime
-            from pathlib import Path
             import json
 
             msgs, tokens, cost = await self._session_message_payload()

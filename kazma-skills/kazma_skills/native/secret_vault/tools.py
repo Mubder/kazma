@@ -18,7 +18,6 @@ a graceful error string in that case.
 from __future__ import annotations
 
 import json
-from typing import Any
 
 # The module, not the function: a name bound at import keeps whatever
 # ``get_vault`` was when this file was first imported, so a replacement

@@ -30,7 +30,7 @@ import logging
 import os
 import re
 from collections.abc import AsyncIterator
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 import httpx
 from kazma_core.http_tls import shared_ssl_context

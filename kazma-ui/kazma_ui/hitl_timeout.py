@@ -29,7 +29,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 
 from kazma_core.shutdown import is_shutting_down
 
@@ -48,7 +48,6 @@ _deny_tasks: set[asyncio.Task] = set()
 
 async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
     """Resume an expired interrupt with a deny decision."""
-    from langgraph.types import Command
 
     config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
 

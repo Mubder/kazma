@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from kazma_core.agent.graph_builder import (
+from kazma_core.agent.graph_helpers import (
     _format_retrieved_memories,
     _rag_top_k,
 )

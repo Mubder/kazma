@@ -6,7 +6,6 @@ import logging
 import os
 import shutil
 import sys
-import subprocess
 from pathlib import Path
 from kazma_core.tools.file_write import _get_workspace
 

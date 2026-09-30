@@ -120,7 +120,7 @@ class TestPersonalitySystemMessageInjection:
 
     def test_personality_injected_as_system_message(self):
         """Personality system_prompt is injected as a system message at position 0..1."""
-        from kazma_core.agent.graph_builder import _ensure_personality
+        from kazma_core.agent.graph_helpers import _ensure_personality
 
         base_prompt = "You are Kazma."
         personality_prompt = "Be concise and direct."
@@ -141,7 +141,7 @@ class TestPersonalitySystemMessageInjection:
 
     def test_personality_replaces_stale_on_switch(self):
         """Switching personality replaces the old personality message, not appends."""
-        from kazma_core.agent.graph_builder import _ensure_personality
+        from kazma_core.agent.graph_helpers import _ensure_personality
 
         base_prompt = "You are Kazma."
         old_personality = "Be concise."

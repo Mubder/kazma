@@ -10,7 +10,6 @@ This is Horizon A1: best product UX without collapsing KB into V2 schema.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
