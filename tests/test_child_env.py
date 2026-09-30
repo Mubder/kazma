@@ -206,6 +206,10 @@ async def test_a_repositorys_git_hook_does_not_see_the_secrets(server_env, tmp_p
 _SPAWN_DIRS = (
     "kazma-core/kazma_core/tools",
     "kazma-core/kazma_core/agent/tool_builtins",
+    # The whole agent folder: tool_hooks.py runs operator hook commands on
+    # every tool call and passed the server's environment (audit 2026-09-30,
+    # AUD-007). The folder was not covered.
+    "kazma-core/kazma_core/agent",
     "kazma-core/kazma_core/ide",
     "kazma-skills/kazma_skills/native",
     # Git in the user's workspaces from the web and chat apps (2026-09-30):

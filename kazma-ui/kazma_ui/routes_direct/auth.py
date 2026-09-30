@@ -7,6 +7,7 @@ module changed. Registration order within this group is preserved.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -76,16 +77,37 @@ def register_auth_routes(self: Any) -> None:
             # logs — the F-01 class otherwise fails silently.
             "proxy": proxy_health(),
         }
-    # Login brute-force throttle (audit M3) — in-process sliding window per IP.
-    # Keyed on the proxy-aware client address (audit F-12): keying on the raw
-    # TCP peer collapsed every client behind a reverse proxy into one bucket,
-    # so 10 deliberate failures locked out every operator.
+    # Login brute-force throttle (audit M3) — in-process sliding windows, one
+    # per client address and one per username. The address is the
+    # proxy-aware client (audit F-12: the raw TCP peer collapsed every client
+    # behind a reverse proxy into one bucket). There is no global lockout
+    # (audit 2026-09-30, AUD-020): 200 failures from ANY addresses refused
+    # every login for five minutes, the owner's included, and behind a proxy
+    # twenty addresses (one IPv6 /64) could renew that forever. Failures
+    # against one username never lock another, and a distributed guess at the
+    # shared secret gains nothing: a generated secret is 128 bits, and a short
+    # one set by hand is flagged at boot (kazma_ui.auth.warn_if_weak_secret).
     _login_failures: dict[str, list[float]] = {}
+    _login_failures_user: dict[str, list[float]] = {}
     _LOGIN_WINDOW_S = 300.0
     _LOGIN_MAX_FAILS = 10
-    # addresses and never trips the per-address limit.
-    _login_failures_global: list[float] = []
-    _LOGIN_MAX_FAILS_GLOBAL = 200
+
+    def _recent_failures(table: dict[str, list[float]], key: str, now: float) -> list[float]:
+        """The failures of *key* inside the window (the table stays bounded:
+        unique attacking keys used to stay forever)."""
+        if len(table) > 1000:
+            for k in list(table):
+                if not any(now - t < _LOGIN_WINDOW_S for t in table[k]):
+                    del table[k]
+        kept = [t for t in table.get(key, []) if now - t < _LOGIN_WINDOW_S]
+        table[key] = kept
+        return kept
+
+    def _too_many() -> Response:
+        return _JSONResponse(
+            {"detail": "Too many failed login attempts — try again later"},
+            status_code=429,
+        )
     @self.app.post("/api/auth/login")
     async def _auth_login(request: Request) -> Response:
         """Exchange KAZMA_SECRET for an HttpOnly session cookie."""
@@ -101,29 +123,10 @@ def register_auth_routes(self: Any) -> None:
 
         client_ip = client_address(request) or "unknown"
         now = _time.time()
-        # Bound the per-IP map: unique attacking IPs used to leave stale
-        # keys forever (pruning only ever ran for the retrying same IP).
-        if len(_login_failures) > 1000:
-            for _ip in list(_login_failures):
-                if not any(now - t < _LOGIN_WINDOW_S for t in _login_failures[_ip]):
-                    del _login_failures[_ip]
-        recent = [
-            t for t in _login_failures.get(client_ip, [])
-            if now - t < _LOGIN_WINDOW_S
-        ]
-        _login_failures[client_ip] = recent
-        _login_failures_global[:] = [
-            t for t in _login_failures_global if now - t < _LOGIN_WINDOW_S
-        ]
-        if (
-            len(recent) >= _LOGIN_MAX_FAILS
-            or len(_login_failures_global) >= _LOGIN_MAX_FAILS_GLOBAL
-        ):
+        recent = _recent_failures(_login_failures, client_ip, now)
+        if len(recent) >= _LOGIN_MAX_FAILS:
             logger.warning("[auth] login rate limit hit for %s", client_ip)
-            return _JSONResponse(
-                {"detail": "Too many failed login attempts — try again later"},
-                status_code=429,
-            )
+            return _too_many()
 
         expected = get_kazma_secret()
         if not expected:
@@ -145,13 +148,20 @@ def register_auth_routes(self: Any) -> None:
         session_uid = None
         session_tenant = None
         authenticated = False
+        user_key = username.lower()[:200]
+        user_recent = _recent_failures(_login_failures_user, user_key, now) if user_key else []
+        if user_key and len(user_recent) >= _LOGIN_MAX_FAILS:
+            logger.warning("[auth] login rate limit hit for a username (from %s)", client_ip)
+            return _too_many()
 
-        # Path A: multi-user local username + password (Phase 4.4)
+        # Path A: multi-user local username + password (Phase 4.4). Off the
+        # event loop: a user-store read and PBKDF2 at 600,000 iterations
+        # (0.2 s) froze every chat stream per attempt (audit AUD-002).
         if username and password:
             try:
                 from kazma_core.security.platform_rbac import authenticate_local_user
 
-                pu = authenticate_local_user(username, password)
+                pu = await asyncio.to_thread(authenticate_local_user, username, password)
                 if pu is not None:
                     authenticated = True
                     session_user = pu.username
@@ -172,8 +182,8 @@ def register_auth_routes(self: Any) -> None:
 
         if not authenticated:
             recent.append(now)
-            _login_failures[client_ip] = recent
-            _login_failures_global.append(now)
+            if user_key:
+                user_recent.append(now)
             # One message for every failure mode (bad secret, unknown user,
             # wrong password) so the response cannot confirm which usernames
             # exist (audit F-12).
@@ -182,8 +192,10 @@ def register_auth_routes(self: Any) -> None:
                 status_code=401,
             )
 
-        # Success — clear failures for this IP
+        # Success — clear failures for this IP and this username
         _login_failures.pop(client_ip, None)
+        if user_key:
+            _login_failures_user.pop(user_key, None)
 
         resp = _JSONResponse({
             "status": "ok",
@@ -310,7 +322,8 @@ def register_auth_routes(self: Any) -> None:
 
             sid = request.cookies.get(SESSION_COOKIE) or ""
             if sid:
-                revoke_session(sid)
+                # A settings-store delete: off the event loop (audit AUD-003).
+                await asyncio.to_thread(revoke_session, sid)
         except Exception:
             pass
         resp = _JSONResponse({"status": "ok", "authenticated": False})

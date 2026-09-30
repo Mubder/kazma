@@ -83,6 +83,13 @@ class KazmaAppBuilder:
         self._setup_gateway_and_bus()
         self._setup_routers()
         self._setup_lifecycle_and_errors()
+        # Security headers on every response (CSP, framing, nosniff,
+        # referrer); scripts and styles keep their real types first, since
+        # nosniff refuses a script the OS labels text/plain.
+        from kazma_ui.security_headers import SecurityHeadersMiddleware, pin_static_types
+
+        pin_static_types()
+        self.app.add_middleware(SecurityHeadersMiddleware)
         # Added last, so it is the OUTERMOST layer: it records the TCP peer and
         # then applies forwarded headers from the declared proxies, which the
         # server used to do before the app could see the peer. Every other
@@ -178,6 +185,15 @@ class KazmaAppBuilder:
                         report.describe(report.before), ENV)
         for problem in report.errors:
             logger.warning("[startup] Could not raise the process priority: %s", problem)
+
+        # Retired switches say so instead of silently doing nothing.
+        if (os.environ.get("KAZMA_SEMANTIC_CACHE") or "").strip().lower() in ("1", "true", "yes", "on"):
+            logger.warning(
+                "[startup] KAZMA_SEMANTIC_CACHE is set, but the semantic LLM response cache "
+                "was removed on 2026-09-30: it replayed one turn's answer and tool calls "
+                "for later, different requests (audit AUD-001). The variable does nothing; "
+                "remove it from .env."
+            )
 
     def _bootstrap_services(self) -> None:
         """Logging, config store, agent, registry, secret, workspace, FastAPI app.
@@ -465,12 +481,16 @@ class KazmaAppBuilder:
             assert_proxy_configuration,
             create_auth_middleware,
             create_tenant_middleware,
+            warn_if_weak_secret,
         )
         from kazma_ui.csrf import create_csrf_middleware
         from kazma_ui.replica_affinity import create_replica_affinity_middleware
 
         # Peer-address trust is only sound when the app owns its socket (F-01).
         assert_proxy_configuration()
+        # The login throttle is per address and per username, not global
+        # (AUD-020), so a guessable secret set by hand is said at boot.
+        warn_if_weak_secret()
 
         self.app.middleware("http")(create_auth_middleware())
         self.app.middleware("http")(create_tenant_middleware())
@@ -2558,17 +2578,6 @@ class KazmaAppBuilder:
                 logger.info("[app] Swarm TaskStore closed")
         except Exception as e:
             logger.debug("[app] TaskStore close: %s", e)
-
-        try:
-            from kazma_core import llm_provider as _llm_mod
-
-            cache = getattr(_llm_mod, "_semantic_cache_singleton", None)
-            if cache is not None and hasattr(cache, "close"):
-                cache.close()
-                _llm_mod._semantic_cache_singleton = None
-                logger.info("[app] Semantic cache closed")
-        except Exception as e:
-            logger.debug("[app] Semantic cache close: %s", e)
 
         try:
             from kazma_core.swarm.memory.pipeline_logger import close_pipeline_logger

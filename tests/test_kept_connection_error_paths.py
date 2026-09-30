@@ -74,21 +74,6 @@ def test_the_memory_writer_releases_the_lock_when_a_write_fails(tmp_path, monkey
         mirror.close()
 
 
-def test_the_semantic_cache_releases_the_lock_when_a_store_fails(tmp_path, monkeypatch):
-    from kazma_core.swarm import semantic_cache
-
-    monkeypatch.setattr(semantic_cache, "get_encoder", lambda: None)
-    path = tmp_path / "semantic_cache.db"
-    cache = semantic_cache.SemanticCache(db_path=str(path))
-    try:
-        cache.store("warm", {"ok": 1})
-        _fail_inserts(path, "semantic_cache")
-        cache.store("hello", {"answer": 42})  # logged, not raised
-        assert _write_lock_free(path)
-    finally:
-        cache.close()
-
-
 def test_the_llm_ledger_releases_the_lock_when_a_record_fails(tmp_path, monkeypatch):
     from kazma_core.observability import llm_ledger
 

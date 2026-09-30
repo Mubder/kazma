@@ -140,6 +140,10 @@ def test_every_page_loads_clean(harness: Harness) -> None:
                 pg = context.new_page()
                 errors: list[str] = []
                 pg.on("pageerror", lambda exc, sink=errors: sink.append(str(exc)))
+                # A resource the page policy refuses (kazma_ui.security_headers)
+                # is a console line, not an uncaught error: count it too.
+                pg.on("console", lambda msg, sink=errors: sink.append(f"CSP refused: {msg.text[:200]}")
+                      if "Content Security Policy" in msg.text else None)
                 pg.goto(f"{harness.base}{path}", wait_until="domcontentloaded", timeout=30000)
                 _settle(pg)
                 problems += page_problems(pg, path, errors)
@@ -181,6 +185,29 @@ def test_negative_control_the_instrument_sees_both_kinds() -> None:
     assert any("x-text" in f and "does not compile" in f for f in found), found
     assert len(found) == 2, found  # the template's own binding compiles fine
     assert "rust" in bundled_modes() and "lua" in bundled_modes()
+
+
+def test_negative_control_the_tour_sees_a_policy_refusal() -> None:
+    """The tour's console listener reports what the page policy refuses: an
+    image from another host under ``img-src 'self'`` (the policy
+    ``kazma_ui.security_headers`` sends, audit AUD-018)."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            pg = browser.new_page()
+            errors: list[str] = []
+            pg.on("console", lambda msg: errors.append(f"CSP refused: {msg.text[:200]}")
+                  if "Content Security Policy" in msg.text else None)
+            pg.set_content(
+                """<meta http-equiv="Content-Security-Policy" content="img-src 'self' data: blob:">"""
+                """<img src="https://example.com/c?d=secret">"""
+            )
+            pg.wait_for_timeout(500)
+        finally:
+            browser.close()
+    assert any("CSP refused" in e and "img-src" in e for e in errors), errors
 
 
 #: What Cloudflare serves for every request while the server restarts.

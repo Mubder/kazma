@@ -915,6 +915,10 @@ _LOOP_STALL_HELPERS = frozenset({
     "validate_session", "is_authenticated", "extract_provided_credential",
     "get_request_principal", "_should_auto_issue_cookie", "_mint_auth_cookie",
     "verify_api_token", "create_session",
+    # Full audit 2026-09-30 (AUD-002/003): the login route ran the user-store
+    # read + PBKDF2 at 600,000 iterations (0.2 s) inline, and logout the
+    # session delete.
+    "authenticate_local_user", "revoke_session",
     "get_mcp_servers_config", "list_mcp_servers",
     "check_config_store", "check_llm_provider",
     "get_appearance", "mint_soul_commitment", "apply_agent_mutation",
@@ -1802,7 +1806,7 @@ SECURITY_ENV_MARKERS = (
 SECURITY_ENV_NAMES = (
     "KAZMA_WS_ORIGIN_CHECK", "KAZMA_WS_EXTRA_ORIGINS", "KAZMA_OPAQUE_SESSIONS",
     "KAZMA_RATE_LIMIT_ENABLED", "KAZMA_TENANT_FILTER", "KAZMA_SESSION_OPEN_TAKEOVER",
-    "KAZMA_SEMANTIC_CACHE", "KAZMA_MCP_INHERIT_ENV", "KAZMA_ALLOW_PRIVATE_LLM",
+    "KAZMA_MCP_INHERIT_ENV", "KAZMA_ALLOW_PRIVATE_LLM",
     "KAZMA_DB_CLIENT_ALLOWED_HOSTS", "KAZMA_CLONE_HOSTS", "KAZMA_UPDATE_REMOTE_ALLOWLIST",
     "KAZMA_HITL_GRANT_TTL_SECONDS", "KAZMA_UNRESTRICTED_TTL_SECONDS", "KAZMA_SHELL_STRICT",
     "KAZMA_SHELL_ALLOW_ARCHIVE", "KAZMA_GATE_REGISTRY", "KAZMA_COMMITMENT_ENABLED",

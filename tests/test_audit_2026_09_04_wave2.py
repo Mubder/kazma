@@ -76,27 +76,24 @@ class TestWave2H1WorkspaceScan:
 
 
 class TestWave2M6SemanticCache:
-    def test_prompt_serialization_guarded(self):
-        """Verify prompt serialization in LLMProvider.chat is guarded by cache_enabled."""
+    def test_chat_serializes_no_whole_conversation(self):
+        """M6 kept every call from paying for ``json.dumps(messages)`` when the
+        semantic cache was off. The cache is gone (audit 2026-09-30, AUD-001:
+        it replayed one turn's answer and tool calls for later requests), so
+        no call serializes the conversation for it at all."""
         import kazma_core.llm_provider as mod
 
-        src = Path(mod.__file__).read_text(encoding="utf-8")
-        parsed = ast.parse(src)
-
-        # Ensure json.dumps(messages, sort_keys=True) appears inside an If node checking cache_enabled
-        found_inside_if = False
-        for node in ast.walk(parsed):
-            if isinstance(node, ast.If):
-                # Check test condition mentions cache_enabled
-                test_str = ast.unparse(node.test) if hasattr(ast, "unparse") else ""
-                if "cache_enabled" in test_str:
-                    for child in ast.walk(node):
-                        if isinstance(child, ast.Call):
-                            call_str = ast.unparse(child) if hasattr(ast, "unparse") else ""
-                            if "json.dumps" in call_str and "messages" in call_str:
-                                found_inside_if = True
-                                break
-        assert found_inside_if, "json.dumps(messages) must be inside if cache_enabled"
+        parsed = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
+        dumps_of_messages = [
+            ast.unparse(node)
+            for node in ast.walk(parsed)
+            if isinstance(node, ast.Call)
+            and ast.unparse(node.func) == "json.dumps"
+            and node.args
+            and ast.unparse(node.args[0]) == "messages"
+        ]
+        assert not dumps_of_messages, dumps_of_messages
+        assert "semantic_cache" not in Path(mod.__file__).read_text(encoding="utf-8")
 
 
 # ── M7: HTTP Pool Lock Hygiene ──────────────────────────────────────────────

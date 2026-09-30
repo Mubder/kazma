@@ -455,6 +455,14 @@ var KazmaStream = (function() {
       return String(str).replace(/[&<>"']/g, function(c) { return entityMap[c]; });
     }
 
+    // A path on this server: "/x" -- never "//host" or "/\host", which a
+    // browser resolves to another host (it reads "\" as "/" and drops tabs
+    // and newlines inside a URL).
+    function isSameOriginPath(url) {
+      var u = String(url).replace(/[\t\n\r]/g, '');
+      return u.charAt(0) === '/' && u.charAt(1) !== '/' && u.charAt(1) !== '\\';
+    }
+
     function codeBlock(lang, code) {
       var escaped = esc(code);
       var langLabel = lang ? '<span class="code-lang">' + esc(lang) + '</span>' : '';
@@ -681,11 +689,26 @@ var KazmaStream = (function() {
 
       function inline(s) {
         var html = esc(s);
-        // Images first (so ![a](u) isn't partially eaten by links)
+        // Images first (so ![a](u) isn't partially eaten by links).
+        // Only this server's own images load. A reply is steerable by any
+        // untrusted text the agent read (a web page, an email, a document),
+        // and loading an image sends its URL -- with whatever a prompt
+        // injection put in it -- to that host; a same-origin path check that
+        // accepted "//host/..." let it out too (audit 2026-09-30, AUD-018).
+        // An image elsewhere is shown as a link the reader chooses to open.
         html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function(_, alt, url) {
           var decodedUrl = url.replace(/&amp;/g, '&');
-          if (/^(https?:\/\/|\/)/i.test(decodedUrl)) {
+          if (isSameOriginPath(decodedUrl)) {
             return '<img src="' + esc(decodedUrl) + '" alt="' + esc(alt) + '" loading="lazy" class="md-img">';
+          }
+          if (/^https?:\/\//i.test(decodedUrl)) {
+            // The link text carries the full URL in `title`; when there is no
+            // alt it shows the URL without its scheme/host prefix, which the
+            // auto-URL linkifier below cannot re-match (it needs https:// or
+            // www.), so the anchor is never wrapped a second time.
+            var label = alt ? esc(alt) : esc(decodedUrl.replace(/^https?:\/\//i, '').replace(/^www\./i, ''));
+            return '<a href="' + esc(decodedUrl) + '" target="_blank" rel="noopener noreferrer" dir="ltr"' +
+              ' class="md-img-link" title="' + esc(decodedUrl) + '">' + label + '</a>';
           }
           return esc(alt || '');
         });
@@ -700,7 +723,7 @@ var KazmaStream = (function() {
           if (/^(https?:|mailto:)/i.test(decodedUrl)) {
             return '<a href="' + esc(decodedUrl) + '" target="_blank" rel="noopener noreferrer" dir="ltr">' + text + '</a>';
           }
-          if (/^\/[A-Za-z0-9_./?#&=%-]+$/.test(decodedUrl)) {
+          if (isSameOriginPath(decodedUrl) && /^\/[A-Za-z0-9_./?#&=%-]+$/.test(decodedUrl)) {
             return '<a href="' + esc(decodedUrl) + '">' + text + '</a>';
           }
           return '<span class="dead-link" title="Blocked URL">' + text + '</span>';

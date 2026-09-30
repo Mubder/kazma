@@ -137,12 +137,13 @@
       <a class="btn-oidc" id="oidcBtn" href="/api/auth/oidc/start">{{ t('login.sso') }}</a>
     </div>
   </div>
+  <script src="/static/js/safe_next.js?v={{ js_version() }}"></script>
   <script>
     (function () {
       var err = document.getElementById('err');
       var params = new URLSearchParams(location.search);
-      var next = params.get('next') || '/';
-      if (!next.startsWith('/') || next.startsWith('//')) next = '/';
+      // Only a path on this server (static/js/safe_next.js, audit AUD-019).
+      var next = window.kazmaSafeNext(params.get('next'));
 
       // If redirected here due to an expired session, explain it instead of
       // showing a bare login form. 'info' = amber informational banner.
