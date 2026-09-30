@@ -88,6 +88,7 @@ class TutorialScreen(ModalScreen[bool]):
                 "[bold]g/G[/]       Go to top/bottom\n"
                 "[bold]Ctrl+N/B[/]  Next/Previous tab\n"
                 "[bold]Ctrl+P[/]    Command palette\n"
+                "[bold]Ctrl+L[/]    English / Arabic\n"
                 "[bold]?[/]         Contextual help\n"
                 "[bold]Ctrl+Q[/]    Quit"
             ),

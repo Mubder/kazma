@@ -21,7 +21,7 @@ All endpoints are mounted by `KazmaAppBuilder` in `kazma-ui/kazma_ui/app.py:615-
 | `mcp_router` | MCP | mcp routes |
 | `agents_router` | agents | agents routes |
 | `providers_router` | `/api/providers` | providers routes |
-| `sse_router` | `/api/chat/*` | `sse_chat.py` |
+| `sse_router` | `/api/chat/*` | `sse_chat/` |
 | `telemetry_router` | telemetry | telemetry routes |
 | `dashboard_router` | `/api/dashboard/*` | `dashboard.py` |
 | `models_router` | models | models routes |
@@ -30,7 +30,7 @@ All endpoints are mounted by `KazmaAppBuilder` in `kazma-ui/kazma_ui/app.py:615-
 | `monitor_router` | monitor | monitor routes |
 | `metrics_router` | metrics | metrics routes |
 
-Plus direct routes in `routes_direct.py` and a conditional Telegram webhook at `/api/webhooks/telegram` (`app.py:365`).
+Plus direct routes in `routes_direct/` and a conditional Telegram webhook at `/api/webhooks/telegram` (`app.py`).
 
 ---
 
@@ -40,7 +40,7 @@ Plus direct routes in `routes_direct.py` and a conditional Telegram webhook at `
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/chat/stream` | Primary chat transport. Body `\{message, session_id, model\}`. Returns `text/event-stream`. (`sse_chat.py:353`) |
+| `POST` | `/api/chat/stream` | Primary chat transport. Body `\{message, session_id, model\}`. Returns `text/event-stream`. (`sse_chat/__init__.py`) |
 | `GET` | `/api/chat/sessions` | List sessions. (line 547) |
 | `DELETE` | `/api/chat/sessions/\{session_id\}` | Delete session. (line 555) |
 | `GET` | `/api/chat/sessions/\{session_id\}/messages` | Session history. (line 561) |
@@ -84,7 +84,7 @@ message uses. It resolves nothing by hand, and it does not write.
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/pending-approvals` | Pending HITL approvals. (`hitl_approval.py:146`) |
-| `POST` | `/api/approve/\{thread_id\}` | Approve/deny a paused tool. Body `\{action: "approve"|"deny", reason?\}`. Protected by `KAZMA_SECRET`. (`routes_direct.py:454`) |
+| `POST` | `/api/approve/\{thread_id\}` | Approve/deny a paused tool. Body `\{action: "approve"|"deny", reason?\}`. Protected by `KAZMA_SECRET`. (`routes_direct/misc.py`) |
 
 ### 2.4 Dashboard
 
@@ -120,7 +120,7 @@ message uses. It resolves nothing by hand, and it does not write.
 
 ## 3. SSE event contract {#sse-event-contract}
 
-`POST /api/chat/stream` returns a stream of Server-Sent Events. Each event has a typed `event:` line and a JSON `data:` payload (`sse_chat.py:8-13`).
+`POST /api/chat/stream` returns a stream of Server-Sent Events. Each event has a typed `event:` line and a JSON `data:` payload (`sse_chat/__init__.py`).
 
 | `event:` | Meaning | Key payload fields |
 |---|---|---|

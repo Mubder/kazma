@@ -146,7 +146,7 @@ kazma/
 | `division_sandbox.py` | **[LIBRARY]** Division-scoped sandbox |
 | `exceptions.py` | Shared exception types |
 | `git_identity.py` | Bot git author identity for commits |
-| `google_genai_provider.py` / `google_llm.py` | Google/Vertex LLM paths |
+| `google_llm.py` | Google/Vertex LLM paths |
 | `http_pool.py` | Shared httpx client pool |
 | `kuwaiti_tokenizer.py` / `msa_tokenizer.py` | Arabic tokenization helpers |
 | `language_lock.py` | Response language lock |
@@ -155,7 +155,6 @@ kazma/
 | `majlis.py` | **[LIBRARY]** Cultural orchestrator shell |
 | `mcp_client.py` | Legacy/alternate MCP client helpers |
 | `metrics.py` | Metrics helpers |
-| `migrations.py` | Config/admin migration runner |
 | `model_registry.py` / `model_registry_store.py` | Provider/model resolution + persistence |
 | `pacing.py` | Reply pacing for gateways |
 | `paths.py` | Data path resolution |
@@ -169,14 +168,12 @@ kazma/
 | `settings_manager.py` / `settings_mcp.py` | Settings facades |
 | `shutdown.py` | Global graceful-shutdown flag |
 | `state.py` | Agent state types |
-| `streaming.py` | Streaming helpers |
 | `summarizer.py` | Summarization utility |
 | `telemetry.py` | Telemetry collection |
 | `tenant_context.py` | ContextVar tenant_id |
 | `time_travel.py` | Checkpoint time-travel helpers |
 | `token_counter.py` / `tokenizer.py` | Token counting |
 | `tone_adapter.py` | Tone adaptation for platforms |
-| `tool_sandbox.py` | **[LIBRARY]** Alternate tool policy sandbox |
 | `tracing.py` | Langfuse/tracer integration |
 | `url_utils.py` | URL helpers |
 | **agent/** | |
@@ -238,13 +235,13 @@ kazma/
 | `providers.py` / `models_route.py` / `models.py` | Provider/model management UI |
 | `health.py` | live/ready public; `/health/details` **sensitive** (L-1) |
 | `metrics.py` | Prometheus metrics |
-| `routes_direct.py` | Login, approve, system, gateway wiring, OIDC, many APIs |
+| `routes_direct/` | Login, approve, system, gateway wiring, OIDC, many APIs |
 | `routes_voice.py` / `routes_voice_ws.py` | STT/TTS REST + WS |
-| `routes_chaos.py` / `routes_migrate.py` | Chaos + migrations UI APIs |
+| `routes_chaos.py` | Chaos UI APIs |
 | `telemetry_route.py` | Telemetry SSE/snapshot |
 | `gateway_monitor.py` | Gateway status start/stop |
 | `hitl_approval.py` | HITL API helpers |
-| `i18n.py` | en/ar translations |
+| `i18n/` | en/ar translations (one catalog module per UI section) |
 | `services.py` | Service status helpers |
 | `static/js/*` | Alpine/UI modules (chat, ide, swarm, settings, streaming) |
 | `templates/*` | Jinja pages (chat, ide, swarm, settings, login, …) |
@@ -314,7 +311,6 @@ kazma/
 |------|--------|-------|
 | Agent tools | `LocalToolRegistry` | file_*, shell_exec, python_exec, memory_*, config_*, spawn_agent(s), context_info |
 | MCP | `mcp/manager.py` | `force_danger=True`; prod HITL for non-allowlist |
-| Swarm shell | `tools/registry.py` ShellTool | Stricter binary allowlist |
 | code_exec | `tools/code_exec.py` | Docker network=none preferred; import blocklist local |
 | shell_exec | tool_registry | shlex + `asyncio.to_thread(subprocess…)` (Windows SelectorEventLoop — never bare `create_subprocess_exec`); `_EXEC_CAPABLE_ARGS`; env scrub; HITL |
 | IDE | `ide/service.py` | All mutations via registry execute |

@@ -3681,6 +3681,23 @@ and the sibling suites):**
   `ti()` key. **Mixed-direction content sits in a `<bdi>`** -- a tool call, an
   id, a date inside Arabic text is reordered by the bidi algorithm otherwise
   (`dir="ltr"` for code-like content, automatic for a date).
+- **The TUI names its pages from one table, in the web UI's words**
+  (`kazma_tui/nav_rail.py` `TAB_LABELS`, 2026-10-01): the tabs and the
+  navigation rail read it. The tabs' Arabic labels were never applied --
+  `update_localization` called `TabbedContent.tabs`, which does not exist, and
+  a catch-all logged it at DEBUG -- and the rail stayed English. A tab the web
+  UI also has takes its `nav.<tab>` word, or is declared with its reason
+  (`tests/test_tui_labels.py`, through the real app in both languages).
+  **Ctrl+L** (`action_toggle_language`, also in the command palette) switches
+  and saves the language; nothing called `set_language` before.
+  `update_localization` works on the MAIN screen (`screen_stack[0]`), never
+  `self.screen`: a switch from the palette runs with a modal on top.
+  **A handler reads only what its event carries** (`tests/test_tui_event_attributes.py`,
+  from Textual's own source): the Traces tab read `event.coordinate` from
+  `DataTable.RowHighlighted` and crashed the TUI whenever a trace existed.
+  Text in a RichLog or a DataTable cell is Rich markup: escape what comes
+  from data (`rich.markup.escape`) and never put a Textual `$variable` in it
+  (`App.get_css_variables()` gives the colour).
 - **A save the server accepted never reports failure.** Only the request
   sits in the save's `try`; applying the result to the page is a separate
   step (`tests/js/test_settings_saves_report_truth.js` runs every Settings
@@ -3935,4 +3952,4 @@ new *guard* (its own code, or other OS-level variables) still needs the
 - `docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md` — Deferred Guard/ops alerting sprint
 - `docs/plans/done/DOCS_CONSOLIDATION_PLAN.md` — Docs consolidation plan (completed)
 - `CHANGELOG.md` — Sprint history
-- Live docs only under `docs/docs/` (Docusaurus). Do not resurrect retired `docs-v2` / loose handover trees. A page added, moved or deleted there (or directly in `docs/`) changes `docs/website-pages.json` and `docs/sidebars.js` in the same commit (`tests/test_website_pages.py`, `tests/test_docs_sidebar.py`). Every `#anchor` a docs link names is a heading of its page -- a `{#id}` or the id Docusaurus derives -- because Docusaurus only warns and CI does not build the docs (`tests/test_docs_anchors.py`; five pointed at removed sections on 2026-10-01). kazma.ai honours `{#id}`, and its build fails on a missing anchor and on an Arabic page linking to an English page that has an Arabic one (docs/docs/ops/website-sync.md).
+- Live docs only under `docs/docs/` (Docusaurus). Do not resurrect retired `docs-v2` / loose handover trees. A page added, moved or deleted there (or directly in `docs/`) changes `docs/website-pages.json` and `docs/sidebars.js` in the same commit (`tests/test_website_pages.py`, `tests/test_docs_sidebar.py`). Every `#anchor` a docs link names is a heading of its page -- a `{#id}` or the id Docusaurus derives -- because Docusaurus only warns and CI does not build the docs (`tests/test_docs_anchors.py`; five pointed at removed sections on 2026-10-01). kazma.ai honours `{#id}`, and its build fails on a missing anchor and on an Arabic page linking to an English page that has an Arabic one (docs/docs/ops/website-sync.md). Every file a published page names in a code span is a tracked file, or declared with its reason -- runtime, example, another repository, a removal the page states (`tests/test_docs_file_refs.py`; 39 pointed at nothing on 2026-10-01, one of them a security protection whose code had been deleted).

@@ -536,18 +536,7 @@ cross_division_rules:
 
 > **No code reads `kazma-security.yaml`** (checked 2026-09-27): it declares the security program (disclosure contacts, no paid bounty) for people. Its `scanning` and `hardening` keys schedule nothing; the hardening report and the dependency scan run on demand through `GET /api/security/hardening` and `GET /api/security/deps`. See [Security & Safety](security-and-safety).
 
-### 7.3 `services.yaml`
-
-```yaml
-commands:
-  install: "pip install -e kazma-tui/ -e kazma-core/"
-  test: "python -m pytest kazma-tui/tests/ -v"
-  lint: "python -m ruff check kazma-tui/kazma_tui/"
-  typecheck: "python -m mypy kazma-tui/kazma_tui/"
-services: {}
-```
-
-### 7.4 `proxy.*` keys (scraping proxy provider addon)
+### 7.3 `proxy.*` keys (scraping proxy provider addon)
 
 Opt-in. Configured via **Settings → System → Proxy Provider** (the values below
 live in ConfigStore under `proxy.*`; `proxy.password` auto-vault-encrypts). The

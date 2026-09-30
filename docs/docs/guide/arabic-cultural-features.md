@@ -4,34 +4,37 @@ title: Arabic & Cultural Features
 sidebar_label: Arabic & Cultural Features
 description: Kazma Arabic & Cultural Features — code-audited reference (unified docs, v0.9+)
 ---
-> Kazma is Arabic-native by default. This document covers the three components that implement it: the Arabic tokenizer, the i18n + RTL UI layer, and the Majlis cultural protocol — all source-referenced, with honest notes on scope.
+> Kazma is Arabic-native: Arabic works out of the box, beside English. This document covers the components that implement it: dialect detection and the tokenizers, Arabic in search, the i18n + RTL UI layer, and the Majlis cultural protocol — all source-referenced, with honest notes on scope.
 
 ---
 
-## 1. The three components
+## 1. The components
 
 | Component | Package | Role |
 |---|---|---|
-| **Arabic tokenizer** | `kazma-core` (`msa_tokenizer.py`) | MSA normalization for Arabic search. |
+| **Dialect detection + tokenizers** | `kazma-core` (`dialect_detector.py`, `tokenizer.py`) | Tell Kuwaiti from MSA and tokenize each, for the dialect router. |
+| **Arabic in search** | `kazma-core` (`documents/arabic.py`) | One normal form for indexing and searching Arabic. |
 | **i18n + RTL UI** | `kazma-ui` | UI string translation, per-request `dir`/`lang`, font policy. |
-| **Majlis Protocol** | `kazma-core` | Gulf cultural conversational flow (4-phase). |
+| **Majlis Protocol** | `kazma-core` | Gulf greetings and farewells on the chat-app path. |
 
-These are **independent** layers. The tokenizer does not depend on the i18n system, and Majlis is a core conversational module — not a UI feature.
+These are **independent** layers. The tokenizers do not depend on the i18n system, and Majlis is a core conversational module — not a UI feature.
 
 ---
 
-## 2. The Arabic tokenizer
+## 2. Dialect detection and the tokenizers
 
-`kazma-core/kazma_core/msa_tokenizer.py` (`MSATokenizer`). The dialect router (`kazma_core/router.py`) uses it through `DualEngineTokenizer` (`tokenizer.py`); memory search folds Arabic on its own ([Memory & RAG → `recall()`](memory-and-rag#recall)). Normalization pipeline:
+`kazma-core/kazma_core/tokenizer.py` (`DualEngineTokenizer`) detects the dialect first — `dialect_detector.py` tells Kuwaiti, Egyptian, Levantine, Maghrebi and MSA apart, with fasttext when it is installed and rules otherwise, the Kuwaiti markers coming from `arabic/kuwaiti_lexicon.py` — then hands Kuwaiti text to `KuwaitiTokenizer` (`kuwaiti_tokenizer.py`: dialect words kept as they are, Arabic–English code-switching, proper nouns) and everything else to `MSATokenizer` (`msa_tokenizer.py`). The dialect router (`kazma_core/router.py`, used by the routing engine) is what calls it.
 
-1. Diacritics removal — regex `[\u064B-\u065F\u0670]`.
-2. Alef normalization — `أ`, `إ`, `آ` → `ا`.
-3. Teh Marbuta → Heh — `ة` → `ه`.
-4. Yeh normalization — `ئ`, `ؤ`, `ى` → `ي`.
-5. Tatweel/Kashida removal — `text.replace("ـ", "")`.
-6. Whitespace collapse.
+`MSATokenizer` normalizes in two steps:
 
-Stop words include **Kuwaiti dialect** terms (`يلا`, `شلون`, `عشان`, `مو`, `ليه`, `ماكو`, `فد`). The stemmer is basic regex suffix/prefix stripping (not a lemmatizer). Two classes: `ArabicTokenizer.tokenize()` → string; `ArabicTantivyTokenizer.tokenize()` → list.
+1. Diacritics removal — the tashkeel marks (`\u064B`–`\u0655`) and the small Quranic marks (`\u0610`–`\u061A`).
+2. Alef unification — `أ`, `إ`, `آ`, `ٱ` → `ا`.
+
+It does **not** fold taa marbuta (`ة`) or alef maqsura (`ى`): that loses grammatical information the tokenizer keeps. Search does fold them (§2.1).
+
+### 2.1 Arabic in search
+
+The Knowledge Library indexes and searches Arabic in one normal form, `fold_for_search` (`kazma_core/documents/arabic.py`), applied to the stored text and to the query alike: harakat, tatweel and bidi controls dropped; the alef-hamza forms, taa marbuta, alef maqsura, the hamza carriers and the Farsi/Urdu letter variants folded; Arabic-Indic digits turned ASCII; whitespace collapsed. Memory recall folds a question's words and a memory's the same way (`memory/query_terms.py`), drops English and Gulf/MSA stop words (`شنو`, `وش`, `شلون`, `وين`, `ليش`, `بس` …) and handles the article and one-letter prefixes ([Memory & RAG → `recall()`](memory-and-rag#recall)). There is no Arabic stemmer ([Troubleshooting → Arabic text in search](troubleshooting-and-workarounds#7-arabic-text-in-search)).
 
 ---
 
@@ -39,7 +42,7 @@ Stop words include **Kuwaiti dialect** terms (`يلا`, `شلون`, `عشان`, 
 
 ### 3.1 The i18n system
 
-`kazma-ui/kazma_ui/i18n.py` is a **custom, lightweight** i18n system — **not** Babel/gettext. The strings live as one module per UI section under `kazma_ui/i18n/catalog/` (including `x_studio.py`) and merge into `TRANSLATIONS` at import.
+`kazma-ui/kazma_ui/i18n/` is a **custom, lightweight** i18n system — **not** Babel/gettext. The strings live as one module per UI section under `i18n/catalog/` (including `x_studio.py`) and merge into `TRANSLATIONS` at import.
 
 - **No separate `ar.json`/`en.json` files.** Keys are dotted strings with `{"en": ..., "ar": ...}` values.
 - Only `en` and `ar` are shipped by default.
@@ -50,22 +53,23 @@ API:
 | Function | Purpose |
 |---|---|
 | `t(key, lang, **kwargs)` | Translate with `str.format` interpolation. |
+| `t_plural(key, count, lang, **kwargs)` | The plural form for a count — Arabic has six. |
 | `make_translator(lang)` | Closure bound to a language, for Jinja2. |
 | `SUPPORTED_LANGUAGES` | Computed dynamically from the dict. |
 
 **Jinja2 patching:** `_patch_jinja2_templates()` monkey-patches `Jinja2Templates.__init__` to always inject default i18n globals (`t`, `lang="en"`, `dir="ltr"`) so templates never raise `UndefinedError`. Called at module load.
 
-**Server-side wiring** (`app.py:222-248`): the builder injects `t`, `lang`, `dir`, and `translations_json` (full dict as JSON for client-side Alpine.js) into Jinja2 globals. A `language_middleware` reads the `kazma-lang` cookie and sets `lang`/`dir` per request.
+**Server-side wiring** (`app.py`): the builder injects `t`, `lang`, `dir`, and `translations_json` (full dict as JSON for client-side Alpine.js) into Jinja2 globals. A `language_middleware` reads the `kazma-lang` cookie and sets `lang`/`dir` per request.
 
 ### 3.2 Coverage
 
-The translation dict is extensive — keys span nav, header, chat, dashboard, settings, swarm, agents, skills, MCP, workspace, **X Studio** (`i18n/catalog/x_studio.py`), and scheduled. The 1,979-entry literal now lives as one module per UI section under `kazma_ui/i18n/catalog/` and is merged at import so `TRANSLATIONS` keeps its previous shape. Examples: `swarm.arabic_dialect`, `swarm.dialect_msa` ("Modern Standard Arabic" / "العربية الفصحى").
+The translation dict is extensive — keys span nav, header, chat, dashboard, settings, swarm, agents, skills, MCP, workspace, **X Studio** (`i18n/catalog/x_studio.py`), and scheduled. The entries live as one module per UI section under `kazma_ui/i18n/catalog/` and are merged at import, so `TRANSLATIONS` keeps its shape. Examples: `swarm.arabic_dialect`, `swarm.dialect_msa` ("Modern Standard Arabic" / "العربية الفصحى").
 
 ### 3.3 RTL handling
 
-- **Template:** `templates/base.html:2` — `&lt;html lang="\{\{ lang|default('en') \}\}" dir="\{\{ dir|default('ltr') \}\}">`.
-- **`dir` global** set in `app.py:235`: `"rtl" if _startup_lang == "ar" else "ltr"`, updated per-request by the middleware.
-- **Client-side:** `base.html:71` injects `window.KAZMA_LANG`; lines 76-77 expose a client-side `t()` lookup.
+- **Template:** `templates/base.html` — `&lt;html lang="\{\{ lang()|default('en') \}\}" dir="\{\{ dir()|default('ltr') \}\}">`.
+- **`dir`** is `"rtl"` for Arabic, set per request by the language middleware.
+- **Client-side:** `base.html` injects `window.KAZMA_LANG` and a client-side `t()` lookup for Alpine expressions.
 
 ### 3.4 Arabic font policy (IBM Plex, equal EN/AR size)
 
@@ -109,17 +113,17 @@ Plex is the primary font for **both** Latin and Arabic. Tabular numerals
 
 ## 4. The Majlis Protocol
 
-`kazma-core/kazma_core/majlis.py` (348 lines). **This exists** — confirmed during audit (some earlier summaries were uncertain).
+`kazma-core/kazma_core/majlis.py`. **Status: greetings and farewells only** (§4.5).
 
 ### 4.1 What it is
 
-The `MajlisProtocol` class (line 91). From the docstring (lines 1-12):
+The `MajlisProtocol` class. From the module docstring:
 
 > *Majlis Protocol — Cultural conversational protocol for Gulf Arabic interactions. The Majlis (مجلس) is the traditional Gulf gathering space where conversation follows specific cultural rhythms: greetings first, then social talk, then business.*
 
 ### 4.2 The 4-phase flow
 
-`ConversationPhase` enum (line 38):
+`ConversationPhase` enum:
 
 ```mermaid
 flowchart LR
@@ -137,18 +141,18 @@ flowchart LR
 
 ### 4.3 Defaults & cultural modifiers
 
-- **Default dialect:** Kuwaiti (`dialect: str = "kw"`, line 54).
-- **Hardcoded Kuwaiti greeting/farewell patterns** (lines 105-120): `"السلام عليكم"`, `"هلا والله"`, `"شلونك"`, etc.
-- **Cultural modifiers** (lines 150-158, 287-288): Ramadan, Eid, National Day adjust greeting-phase length and formality.
-- **Sibling modules:** `CulturalContext`, `ConversationPacing`/`Intent`/`TransitionDecision`, `ToneAdapter`/`FormalityLevel` (imports lines 21-30).
+- **Default dialect:** Kuwaiti (`dialect: str = "kw"`).
+- **Hardcoded Kuwaiti greeting/farewell patterns** (`GREETING_PATTERNS`, `FAREWELL_PATTERNS`): `"السلام عليكم"`, `"هلا والله"`, `"شلونك"`, etc.
+- **Cultural modifiers:** Ramadan, Eid, National Day adjust greeting-phase length and formality.
+- **Sibling modules:** `CulturalContext`, `ConversationPacing`/`Intent`/`TransitionDecision`, `ToneAdapter`/`FormalityLevel`.
 
 ### 4.4 API
 
-- `process_input(text, context)` (line 162) — async entry point, returns a `MajlisResponse` (line 73).
+- `process_input(text, context)` — async entry point, returns a `MajlisResponse`.
 
 ### 4.5 Scope (honest note)
 
-Majlis lives in **kazma-core**, not in the UI or gateway. There is **no "Majlis Mode" toggle in the web settings or i18n keys** — the i18n layer is a generic EN/AR string system. Majlis is a core conversational protocol intended to be wired into the agent's system prompt or a skill. If documentation implies Majlis is a user-facing UI mode, that is not supported by the UI code. Tests exist at `tests/test_majlis.py`, and an example lives at `examples/almuhalab_custom_skills/trading_intel/`.
+Majlis lives in **kazma-core**. On the chat-app path (Telegram, Discord, Slack), `majlis_runtime.maybe_majlis_short_circuit` — called from `kazma_gateway/agent_handler/graph.py` — answers a short greeting or farewell through `MajlisProtocol.process_input`; ordinary conversation does not enter the phase machine. Tone adaptation and cultural-context enrichment run beside it on that path, and the agent's system prompt carries a Kuwaiti/Gulf dialect instruction for Arabic replies (`cultural_context_enrichment.py`). There is **no "Majlis Mode" toggle** in the web settings or i18n keys. Tests exist at `tests/test_majlis.py`, and an example lives at `examples/almuhalab_custom_skills/trading_intel/`.
 
 ---
 
@@ -156,9 +160,8 @@ Majlis lives in **kazma-core**, not in the UI or gateway. There is **no "Majlis 
 
 The TUI has its own RTL/localization (`kazma_tui/app.py`):
 
-- `update_localization()` (line 512) toggles an `rtl-mode` CSS class (line 520) and translates tab labels (lines 528-546).
-
-> **Minor inconsistency:** the TUI labels Dashboard "لوحة القيادة" (line 539); the web i18n uses "لوحة التحكم" (`i18n.py:77`).
+- `update_localization()` toggles an `rtl-mode` CSS class and translates the tab labels and the navigation rail from one table, `TAB_LABELS` (`kazma_tui/nav_rail.py`). A page the web UI also has takes the web's word (Dashboard is `لوحة التحكم` in both).
+- **Ctrl+L** switches between English and Arabic (also in the command palette, *Switch language*), and the choice is saved.
 
 ---
 
@@ -166,27 +169,28 @@ The TUI has its own RTL/localization (`kazma_tui/app.py`):
 
 | Dialect evidence | Where |
 |---|---|
-| Kuwaiti stop words | `arabic_tokenizer.py:35-102` (`يلا`, `شلون`, `عشان`, `مو`, `ليه`, `ماكو`, `فد`) |
-| Kuwaiti default dialect | `majlis.py:54` (`dialect: str = "kw"`) |
-| Kuwaiti greeting/farewell patterns | `majlis.py:105-120` |
-| MSA (Modern Standard Arabic) UI label | `i18n.py:977` (`swarm.dialect_msa`) |
-| `swarm.arabic_dialect` config key | `i18n.py:976` |
+| Kuwaiti markers (dialect detection) | `arabic/kuwaiti_lexicon.py` (`CANONICAL_KUWAITI_MARKERS`), read by `dialect_detector.py` |
+| Gulf/MSA stop words (memory search) | `memory/query_terms.py` (`شنو`, `وش`, `شلون`, `وين`, `ليش`, `بس` …) |
+| Kuwaiti/Gulf replies in Arabic | `cultural_context_enrichment.py` (the dialect instruction in the system prompt) |
+| Kuwaiti default dialect | `majlis.py` (`dialect: str = "kw"`) |
+| Kuwaiti greeting/farewell patterns | `majlis.py` (`GREETING_PATTERNS`, `FAREWELL_PATTERNS`) |
+| MSA (Modern Standard Arabic) UI label | `kazma_ui/i18n/catalog/swarm.py` (`swarm.dialect_msa`) |
+| `swarm.arabic_dialect` config key | `kazma_ui/i18n/catalog/swarm.py` |
 
 ---
 
 ## 7. Bilingual usage notes
 
-- **Default language is Arabic** (`agent.language: ar`, `agent.rtl: true`). Set to `en` for English-first.
+- **The shipped default is English** (`agent.language: en`, `agent.rtl: false`). Set `ar` and `true` for an Arabic-first install.
 - The `kazma-lang` cookie switches the Web UI language per-browser without a restart.
-- The `system_prompt` (`kazma.yaml:33-45`) instructs the model to respond in the user's language/dialect.
+- The `system_prompt` in `kazma.yaml` has the model answer in the language of the user's latest message (a mix gets a mix) and call itself كاظمه in Arabic; a per-turn language lock overrides it.
 - For bilingual deployments, consider providing both EN and AR examples in skills/tools where the output language matters.
 
 ---
 
 ## Documentation Audit Notes
 
-- **Majlis exists** in `kazma-core/kazma_core/majlis.py` (348 lines, with tests and an example) — confirmed against earlier uncertainty.
-- **Majlis is NOT a UI feature.** There is no settings toggle or i18n key for "Majlis Mode." It is a core conversational protocol to be wired into prompts/skills.
-- **No separate translation files.** All EN/AR strings live inline in `i18n.py`. Contributors add a key by editing the dict.
-- **Dashboard label inconsistency** between TUI ("لوحة القيادة") and web ("لوحة التحكم") — minor, worth aligning eventually.
-- **Tokenizer ↔ i18n are independent.** Don't assume changing i18n affects search indexing; they serve different layers.
+- **Majlis is wired for greetings and farewells only**, on the chat-app path (§4.5).
+- **Majlis is NOT a UI feature.** There is no settings toggle or i18n key for "Majlis Mode." It is a core conversational protocol.
+- **No separate translation files.** EN/AR strings live in `kazma_ui/i18n/catalog/`, one module per UI section; contributors add a key to its section's module.
+- **Tokenizers, search folding and i18n are independent.** Changing i18n does not affect search indexing; the dialect tokenizers do not affect search either.

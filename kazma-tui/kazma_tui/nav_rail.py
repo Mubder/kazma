@@ -12,7 +12,7 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Button, Static
 
-__all__ = ["NavRail", "NavSelected", "NAV_ITEMS"]
+__all__ = ["NavRail", "NavSelected", "NAV_ITEMS", "TAB_LABELS"]
 
 # (tab_id, full label, key hint)
 NAV_ITEMS: tuple[tuple[str, str, str], ...] = (
@@ -25,6 +25,24 @@ NAV_ITEMS: tuple[tuple[str, str, str], ...] = (
     ("settings", "Settings", "7"),
     ("documents", "Documents", "8"),
 )
+
+# Each tab's label per language, for the tabs and the rail alike. A page the
+# web UI also has takes the web's word (nav.<tab> in kazma_ui's catalog): the
+# TUI's Arabic Dashboard label differed from the web's until 2026-10-01
+# (tests/test_tui_labels.py). Arabic stays escaped: TUI sources are ASCII.
+TAB_LABELS: dict[str, dict[str, str]] = {
+    "en": {tab_id: label for tab_id, label, _key in NAV_ITEMS},
+    "ar": {
+        "dashboard": "\u0644\u0648\u062d\u0629 \u0627\u0644\u062a\u062d\u0643\u0645",
+        "memory": "\u0627\u0644\u0630\u0627\u0643\u0631\u0629",
+        "chat": "\u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629",
+        "files": "\u0627\u0644\u0645\u0644\u0641\u0627\u062a",
+        "traces": "\u0627\u0644\u062a\u062a\u0628\u0639\u0627\u062a",
+        "swarm": "\u0627\u0644\u0633\u0631\u0628",
+        "settings": "\u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a",
+        "documents": "\u0627\u0644\u0645\u0633\u062a\u0646\u062f\u0627\u062a",
+    },
+}
 
 _WIDTH_EXPANDED = 20
 _WIDTH_COLLAPSED = 5
@@ -115,11 +133,21 @@ class NavRail(Widget):
     }
     """
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # tab_id -> label in the interface language; English until set_labels.
+        self._labels: dict[str, str] = dict(TAB_LABELS["en"])
+
+    def set_labels(self, labels: dict[str, str]) -> None:
+        """Show the rail in another language (the tabs' labels, TAB_LABELS)."""
+        self._labels = {tab_id: labels.get(tab_id, label) for tab_id, label, _key in NAV_ITEMS}
+        self._refresh_labels()
+
     def compose(self) -> ComposeResult:
         yield Static("KAZMA", classes="nav-brand", id="nav-brand")
-        for tab_id, label, key in NAV_ITEMS:
+        for tab_id, _label, key in NAV_ITEMS:
             yield Button(
-                f" {key}  {label}",
+                f" {key}  {self._labels[tab_id]}",
                 id=f"nav-{tab_id}",
                 classes="nav-btn",
             )
@@ -153,7 +181,8 @@ class NavRail(Widget):
             brand.update("K" if self.collapsed else "KAZMA")
         except Exception:
             pass
-        for tab_id, label, key in NAV_ITEMS:
+        for tab_id, _label, key in NAV_ITEMS:
+            label = self._labels[tab_id]
             try:
                 btn = self.query_one(f"#nav-{tab_id}", Button)
                 if self.collapsed:

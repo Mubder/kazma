@@ -313,17 +313,16 @@ This is by design — the LLM needs the value to make authenticated API calls. T
 
 ---
 
-## 7. Delegation (agent-to-agent) — library only (not runtime)
+## 7. Delegation (agent-to-agent) — removed
 
-> **Status (2026-07):** the multi-agent **delegation** package is **archived /
-> library-only**. Production multi-worker orchestration is **SwarmEngine**
-> (`kazma_core/swarm/*`). See `docs/audits/UNWIRED_INVENTORY.md`.
+> **Status:** there is no delegation package. Its code (an Ed25519 + AES-GCM
+> protocol between agents) was never wired into the agent or the swarm; it
+> sat in `archive/delegation/` until 2026-07-28, when it was deleted.
+> Multi-worker orchestration is **SwarmEngine** (`kazma_core/swarm/`).
 
-Historical code (Ed25519 + AES-GCM protocol) may still exist under
-`archive/delegation/` or as retained library modules for future product
-decisions — it is **not** wired into the default agent / swarm execute path.
-Do not configure production systems as if live cross-agent cryptographic
-delegation is active.
+Nothing signs or encrypts work handed between agents; do not configure a
+deployment as if it did. What protects swarm work is in
+[Security & Safety](security-and-safety#62-no-signed-delegation-between-agents).
 
 ---
 

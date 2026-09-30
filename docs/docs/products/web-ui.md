@@ -23,7 +23,7 @@ Open `http://127.0.0.1:9090` (or your `KAZMA_HOST`/`KAZMA_PORT`).
 
 | Page | Path | Purpose |
 |------|------|---------|
-| Chat | `/` or chat route | SSE streaming agent chat (`sse_chat.py`, `streaming.js`) |
+| Chat | `/` or chat route | SSE streaming agent chat (`sse_chat/`, `streaming.js`) |
 | Dashboard | `/dashboard` | Observability + **Memory & Governance** (health board, L2 property graph explorer, backups) |
 | Settings | `/settings` | Models, providers, safety, account, **Voice** (`?tab=voice` — STT/TTS pickers; keys stay on Providers), **Email** (`?tab=email`), **Documents** (`?tab=documents`), **About me** (Memory tab), **Chat step history** and **Swarm task history** retention and **Proxy Provider** (System tab) |
 | Providers control plane | `/settings?tab=providers_connectors` | Master-detail over every provider: state pill + edge stripe per row, declared capability badges, wire facts (base URL, API version read off it), and **Test** — `GET /models` plus a real **chat** completion (`reachable` vs `chat_ok`). Speech models (Whisper) are omitted; STT lives on the Voice tab. Key/model resolution rides the same registry paths a real message uses. |

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime
 from typing import Any
 
+from rich.markup import escape
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Input, RichLog, Static
@@ -196,16 +198,12 @@ class TracesPanel(Vertical):
         for idx, entry in enumerate(self._displayed_entries):
             time_str = datetime.fromtimestamp(entry.timestamp).strftime("%H:%M:%S")
             
-            # Formatted status
-            if entry.status == "error":
-                status_markup = "[bold $error]ERROR[/bold $error]"
-            elif entry.status == "warning":
-                status_markup = "[bold $secondary]WARN[/bold $secondary]"
-            else:
-                status_markup = "[bold $success]OK[/bold $success]"
-
-            # Formatted type
-            type_markup = f"[dim]{entry.trace_type.upper()}[/dim]"
+            # Cells are Rich markup (DataTable's cell formatter): the status
+            # takes the theme's colour, and the trace's own text is escaped --
+            # "list[str]" lost its "[str]" and "a [/b] b" raised MarkupError.
+            word = {"error": "ERROR", "warning": "WARN"}.get(entry.status, "OK")
+            status_markup = f"[bold {self._status_color(entry.status)}]{word}[/]"
+            type_markup = f"[dim]{escape(entry.trace_type.upper())}[/dim]"
             
             # Formatted duration (None-safe — an entry recorded before
             # completion / on an error path may have duration_ms=None, which
@@ -216,7 +214,7 @@ class TracesPanel(Vertical):
             table.add_row(
                 time_str,
                 type_markup,
-                entry.label,
+                escape(entry.label),
                 status_markup,
                 dur_str,
                 key=str(idx),
@@ -231,15 +229,24 @@ class TracesPanel(Vertical):
             table.cursor_coordinate = (0, 0)
             self._update_preview(0)
 
+    def _status_color(self, status: str) -> str:
+        """The theme's colour for a trace status, as Rich markup takes it
+        (Rich knows no Textual "$variables")."""
+        name = status if status in ("error", "warning") else "success"
+        return self.app.get_css_variables().get(name) or {
+            "error": "red", "warning": "yellow", "success": "green"}[name]
+
+    # Textual's row events carry ``cursor_row``; both handlers read
+    # ``event.coordinate``, which they do not have, so the first row the
+    # table put its cursor on raised AttributeError and took the app down --
+    # whenever there were traces (tests/test_tui_traces_panel.py, 2026-10-01).
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Update details pane on row click/select."""
-        row_idx = event.coordinate.row
-        self._update_preview(row_idx)
+        self._update_preview(event.cursor_row)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         """Update details pane on keyboard navigation."""
-        row_idx = event.coordinate.row
-        self._update_preview(row_idx)
+        self._update_preview(event.cursor_row)
 
     def _update_preview(self, row_idx: int) -> None:
         """Render detailed trace info into details view panel."""
@@ -254,15 +261,19 @@ class TracesPanel(Vertical):
         details_pane = self.query_one("#trace-details", RichLog)
         details_pane.clear()
 
-        # Format general information header
+        # Format general information header. A RichLog parses Rich markup,
+        # which knows no Textual "$variables" -- "[$success]" raised
+        # MarkupError -- so the status colour is the theme's value; and what
+        # a trace carries (label, type, details: tool output, JSON with
+        # brackets) is escaped, never read as markup.
         time_str = datetime.fromtimestamp(entry.timestamp).strftime("%Y-%m-%d %H:%M:%S")
-        status_color = "$error" if entry.status == "error" else ("$secondary" if entry.status == "warning" else "$success")
+        status_color = self._status_color(entry.status)
 
         details_pane.write("[bold]TRACE METRICS[/]")
         details_pane.write(f"  [dim]Timestamp:[/]  {time_str}")
-        details_pane.write(f"  [dim]Type:[/]       {entry.trace_type.upper()}")
-        details_pane.write(f"  [dim]Label:[/]      {entry.label}")
-        details_pane.write(f"  [dim]Status:[/]     [{status_color}]{entry.status.upper()}[/{status_color}]")
+        details_pane.write(f"  [dim]Type:[/]       {escape(entry.trace_type.upper())}")
+        details_pane.write(f"  [dim]Label:[/]      {escape(entry.label)}")
+        details_pane.write(f"  [dim]Status:[/]     [{status_color}]{escape(entry.status.upper())}[/]")
         details_pane.write(f"  [dim]Duration:[/]   {entry.duration_ms:.1f} ms")
 
         if entry.tokens > 0:
@@ -272,16 +283,13 @@ class TracesPanel(Vertical):
         details_pane.write("\n" + "─" * 40 + "\n")
         details_pane.write("[bold]TRACE BODY / DIAGNOSTIC DETAILS[/]\n")
         
-        # Details text formatting (JSON, XML or raw text)
+        # Details text formatting (JSON pretty-printed, else as it came)
         raw_details = entry.details or ""
-        if raw_details.strip().startswith("{") or raw_details.strip().startswith("["):
+        if raw_details.strip().startswith(("{", "[")):
             try:
-                import json
-                parsed = json.loads(raw_details)
-                pretty_details = json.dumps(parsed, indent=2)
-                details_pane.write(pretty_details)
+                details_pane.write(escape(json.dumps(json.loads(raw_details), indent=2)))
                 return
-            except Exception:
-                pass
-                
-        details_pane.write(raw_details)
+            except ValueError:
+                pass  # not JSON after all: shown as it came, below
+
+        details_pane.write(escape(raw_details))

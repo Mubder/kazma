@@ -115,20 +115,10 @@ python -m pytest tests/test_system_install_allowlist.py -v   # one file
 
 # Lint
 python -m ruff check kazma-core/kazma_core/
-python -m ruff check kazma-tui/kazma_tui/  # (per services.yaml)
+python -m ruff check kazma-tui/kazma_tui/
 
 # Type check
-python -m mypy kazma-tui/kazma_tui/        # (per services.yaml)
-```
-
-Per-package commands are also declared in `services.yaml`:
-
-```yaml
-commands:
-  install: "pip install -e kazma-tui/ -e kazma-core/"
-  test: "python -m pytest kazma-tui/tests/ -v"
-  lint: "python -m ruff check kazma-tui/kazma_tui/"
-  typecheck: "python -m mypy kazma-tui/kazma_tui/"
+python -m mypy kazma-tui/kazma_tui/
 ```
 
 ---
@@ -188,5 +178,4 @@ See `CONTRIBUTING.md` (root) for the full guide. Quick rules:
 ## Documentation Audit Notes
 
 - The repo root has **many `.pytest_tmp_*` directories** from prior test runs — git-ignored clutter, safe to clean.
-- `services.yaml` is scoped to `kazma-tui` commands; treat it as an example, not the canonical task runner for all packages.
 - `run.sh` is a minimal end-to-end reproduction (installs, runs the full suite, exercises a live agent, writes `EVAL.md`) — useful for CI-like validation.

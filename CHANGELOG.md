@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## The docs name only files that exist, and say what the code does (2026-10-01)
+
+- **The security guide described a protection Kazma does not have.** Its
+  "Delegation Ed25519 + AES-256-GCM" section said work handed between agents
+  was signed and encrypted and verified fail-closed. That code was an archived
+  package, never wired in, and deleted on 2026-07-28. The guide, the Skills,
+  MCP & Tools page and the glossary now say nothing signs or encrypts work
+  between agents, and name what does protect swarm work.
+- **The Arabic & Cultural Features guide matches the code.** It described a
+  six-step normalization and two tokenizer classes from a file that no longer
+  exists; the tokenizer in use does two steps (diacritics, Alef) and folds
+  neither taa marbuta nor alef maqsura. The guide now covers dialect
+  detection and the two tokenizers, how Arabic is folded for search (where
+  those letters are folded), where the Kuwaiti words live, that Majlis
+  answers greetings and farewells on the chat-app path, and that the shipped
+  default language is English, not Arabic. Troubleshooting §7 described the
+  old tokenizer's hamza rules and stemmer; it now says how Arabic is matched.
+- **The TUI speaks Arabic.** Its tabs' Arabic labels were never applied: the
+  code called a method Textual does not have, and a catch-all logged the
+  error at DEBUG. Nothing could switch the language either, short of editing
+  its preferences file. **Ctrl+L** (or the command palette, *Switch
+  language*) now switches between English and Arabic and keeps the choice;
+  the tabs and the navigation rail, which stayed English, follow it from one
+  table in the web UI's words -- the Dashboard is لوحة التحكم in both -- with
+  right-to-left styling, whatever screen is on top.
+- **The TUI's Traces tab no longer takes the app down.** With any trace to
+  show, the first row the list selected raised an error that closed the TUI:
+  its handlers read an attribute Textual's row events do not have. Behind
+  that, the details pane wrote a colour Rich cannot read (another crash), and
+  a label or details with brackets -- tool output has them -- were read as
+  formatting: `list[str]` lost its `[str]`, a stray `[/b]` crashed the
+  render. Every trace now shows as it is. A test checks that every TUI
+  handler reads only what its event carries.
+- **39 file names in the docs pointed at nothing:** modules that became
+  packages (`sse_chat/`, `routes_direct/`, `swarm_panel/`, `i18n/`,
+  `tracing/`), modules removed as orphans, and a `services.yaml` deleted in
+  July that still had a configuration section. A test now checks every file
+  name the published docs cite against the repository.
+
 ## The documentation's links land where they point (2026-10-01)
 
 - **74 of the 164 section links on kazma.ai landed at the top of their page
