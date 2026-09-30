@@ -120,15 +120,13 @@ def register_system_tools(registry: Any) -> None:
     )
     def config_save(key: str, value: str) -> str:
         from kazma_core.config_store import get_config_store, is_sensitive_config_key
+        from kazma_core.safety.protected_config import is_protected_config_key
 
-        # Block security-critical + any secret-class keys (audit H8)
-        _BLOCKED_PREFIXES = (
-            "security.",
-            "kazma_secret",
-            "vault.",
-            "yolo.",
-        )
-        if any(key.startswith(p) or key == p.rstrip(".") for p in _BLOCKED_PREFIXES):
+        # Self-protection: the agent cannot change config that would disable a
+        # safety gate, hand it a new way to run code (agent.hooks.*, mcp.*) or
+        # expose a secret. One list, shared with the commitment resolver
+        # (kazma_core.safety.protected_config; audit 2026-09-30, AUD-007).
+        if is_protected_config_key(key):
             return f"Error: Cannot modify restricted key '{key}'."
         if is_sensitive_config_key(key):
             return (

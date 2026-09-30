@@ -3427,6 +3427,46 @@ problem was its database. Each layer now holds on its own:
   clears its failure (`restart_required`: the volatile settings store), or
   one not ready for `KAZMA_GUARD_DEPENDENCY_OUTAGE_S`.
 
+### 45. The full audit's fixes (2026-09-30, `docs/audits/AUDIT_FULL_2026-09-30.md`)
+
+- **Model output never makes the browser reach another host.** A reply is
+  steerable by any untrusted text the agent read, so the markdown renderer
+  (`static/js/streaming.js`) links an off-site `![](…)` instead of loading
+  it (`isSameOriginPath`: "/x", never "//host" or a tab-split path), and
+  `kazma_ui/security_headers.py` sends a CSP (`img-src`/`media-src 'self'
+  data: blob:`, `object-src`/`frame-ancestors 'none'`), nosniff and
+  referrer on every response — outermost but for the forwarded-headers
+  layer; `pin_static_types` keeps `.js` executable under nosniff. Not
+  scripts/styles (Alpine needs inline). A route may set its own policy (chat
+  file downloads). Gates: `tests/js/test_markdown_images.js`,
+  `tests/test_security_headers.py`, the page tour's CSP-refusal control
+  (AUD-018).
+- **No LLM call is answered from a cache of another request.** The semantic
+  response cache is gone (module + tests deleted, `llm_provider.chat` no
+  longer serializes `messages`): it keyed on the whole conversation, the
+  system prompt dominated the embedding, and it replayed a stored answer AND
+  tool calls for a different request. `KAZMA_SEMANTIC_CACHE` warns at boot;
+  `semantic_cache.db` is a retired store. Gate:
+  `tests/test_no_llm_response_replay.py` (AUD-001).
+- **One protected-config list.** `kazma_core.safety.protected_config` is the
+  only definition of the keys the agent may not write —
+  `safety.`/`agent.commitment.`/`yolo.` (gates), `agent.hooks.`/`mcp.`
+  (commands), `security.`/`vault.`/`kazma_secret`,
+  `notifications.lifecycle.`. Both `config_save` and the commitment
+  `config_change` resolver call `is_protected_config_key`; neither keeps its
+  own list. Tool hooks (`agent/tool_hooks.py`) run with `tool_child_env()`,
+  and the agent folder is under the child-env gate. Gates:
+  `tests/test_protected_config.py`, `tests/test_child_env.py` (AUD-007).
+- **Sign-in.** `static/js/safe_next.js` (`kazmaSafeNext`) keeps `?next=` only
+  when `new URL(next, origin)` is same-origin; the old `startsWith` check let
+  `/\host` and a tab-split path through. The login throttle is per client
+  address AND per username, never a global lockout (that let anyone lock the
+  owner out); `authenticate_local_user` and `revoke_session` run through
+  `asyncio.to_thread` (they are in `_LOOP_STALL_HELPERS`); a short
+  `KAZMA_SECRET` set by hand is said at boot (`auth.warn_if_weak_secret`).
+  Gates: `tests/js/test_safe_next.js`, `tests/test_login_throttle.py`
+  (AUD-019/020/002/003).
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

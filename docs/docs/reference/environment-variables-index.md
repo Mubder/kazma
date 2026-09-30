@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**266** variables are read by the product code; **266** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**264** variables are read by the product code; **264** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -223,9 +223,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_SEARXNG_URL` | (none) | `kazma_core.tools.research_readiness`, `kazma_core.tools.web_search` | yes |
 | `KAZMA_SECRET` | `""` | `kazma_cli.main`, `kazma_core.config_store`, `kazma_core.runtime.local_api` +3 | yes |
 | `KAZMA_SELF_IMPROVEMENT` | (none) | `kazma_core.skills.self_improvement` | yes |
-| `KAZMA_SEMANTIC_CACHE` | `"false"` | `kazma_core.llm_provider` | yes |
-| `KAZMA_SEMANTIC_CACHE_MAX_ROWS` | (none) | `kazma_core.swarm.semantic_cache` | yes |
-| `KAZMA_SEMANTIC_CACHE_TTL_SECONDS` | (none) | `kazma_core.swarm.semantic_cache` | yes |
+| `KAZMA_SEMANTIC_CACHE` | (none) | `kazma_ui.app` | yes |
 | `KAZMA_SEMANTIC_COMPACT` | (none) | `kazma_core.agent.semantic_compact` | yes |
 | `KAZMA_SESSION_OPEN_TAKEOVER` | (none) | `kazma_core.sessions.directory` | yes |
 | `KAZMA_SESSION_TTL_SECONDS` | (none) | `kazma_core.security.web_sessions` | yes |

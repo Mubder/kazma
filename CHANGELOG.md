@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## Full-repository audit, and its first fixes (2026-09-30)
+
+A file-by-file audit (`docs/audits/AUDIT_FULL_2026-09-30.md`, with a
+per-file coverage table): every product and script file covered by automated
+whole-file analysis, the security boundary and every automated hit read by
+hand. 28 findings, none exploitable without a session or a prompt injection.
+The ones acted on:
+
+- **A model reply can no longer make the browser send your data to another
+  server.** The markdown renderer turned `![](https://any.host/…)` in a reply
+  into an `<img>`, and a reply is steerable by any untrusted text the agent
+  read (a web page, an email, a document), so a prompt injection could
+  exfiltrate the conversation the moment it rendered. External images are now
+  links you choose to open, and every page carries a Content-Security-Policy
+  (`img-src 'self'`), framing, nosniff and referrer headers.
+- **The semantic LLM response cache is removed.** With
+  `KAZMA_SEMANTIC_CACHE=true` it keyed on the whole conversation, whose
+  embedding the shared system prompt dominates, and replayed one turn's answer
+  and tool calls for later, different requests — reproduced returning "delete
+  file A" for an unrelated question. Off by default and off on the live
+  install; the switch now only warns at boot.
+- **Sign-in is safer.** The `?next=` after login is checked as a real URL, so
+  `/\evil.example` and a tab-split path can no longer bounce a freshly
+  signed-in user to another site. The login throttle is per address and per
+  username — a global lockout let anyone lock the owner out — and the
+  password check and logout run off the event loop.
+- **The agent cannot write its own command execution.** One protected-key
+  list now covers `agent.hooks.*` and `mcp.*` (config that carries commands)
+  as well as the safety and secret keys, used by both `config_save` and the
+  commitment gate; tool hooks run without the server's secrets in their
+  environment.
+
 ## Kazma runs at normal priority; the restart card counts only downtime; Slack says why it reconnects (2026-09-30)
 
 Found while checking the deploy below on the live install.

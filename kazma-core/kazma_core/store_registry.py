@@ -149,8 +149,9 @@ STORES: dict[str, Store] = {
         "the sandbox mailbox used when no email account is connected", "bundle"),
     # ── caches and per-machine state ───────────────────────────────────
     "semantic_cache.db": Store(
-        "the swarm semantic response cache", "rebuilt",
-        reason="a cache; refilled by use"),
+        "the retired semantic LLM response cache", "legacy",
+        reason="removed 2026-09-30 (audit AUD-001: it replayed one turn's answer and "
+               "tool calls for later requests); a leftover file is not carried"),
     "security_scan.db": Store(
         "dependency scan results", "rebuilt", reason="re-scanned on demand"),
     "file_checkpoints.db": Store(

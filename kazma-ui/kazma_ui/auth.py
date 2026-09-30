@@ -1519,6 +1519,7 @@ __all__: list[str] = [
     "undeclared_proxy_detected",
     "reset_proxy_detection",
     "proxy_health",
+    "warn_if_weak_secret",
 ]
 
 
@@ -1560,6 +1561,31 @@ def client_address(request: Request) -> str:
     behind a reverse proxy collapses into a single bucket (audit F-01/F-12).
     """
     return _client_host(request)
+
+
+#: Shorter than this, a KAZMA_SECRET set by hand is guessable at scale. A
+#: generated one is 32 hex characters (128 bits).
+WEAK_SECRET_CHARS = 20
+
+
+def warn_if_weak_secret() -> bool:
+    """Say at boot when ``KAZMA_SECRET`` was set by hand and is short.
+
+    The login throttle is per client address and per username (a global
+    lockout let anyone lock the owner out, audit AUD-020), so a distributed
+    guesser is slowed per address only: a long random secret is what makes
+    guessing hopeless. True when the warning was given.
+    """
+    configured = (os.environ.get(SECRET_ENV_VAR) or "").strip()
+    if not configured or len(configured) >= WEAK_SECRET_CHARS:
+        return False
+    logger.warning(
+        "[SECURITY] %s is %d characters long; use at least %d random characters "
+        "(e.g. python -c \"import secrets; print(secrets.token_hex(16))\"): the "
+        "login throttle limits each address, not the internet as a whole.",
+        SECRET_ENV_VAR, len(configured), WEAK_SECRET_CHARS,
+    )
+    return True
 
 
 def assert_proxy_configuration() -> None:

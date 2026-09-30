@@ -892,11 +892,10 @@ _EXEC_DENYLIST = [
 _RM_CATASTROPHIC = _EXEC_DENYLIST[0]
 _CHMOD_SYSTEM = _EXEC_DENYLIST[-1]
 
-# Protected config keys — mutating these could DISABLE the safety layer itself.
-# (A self-protection measure: the agent can't turn off its own gates via config.)
-_CONFIG_PROTECTED_PREFIXES = (
-    "safety.", "agent.commitment.", "notifications.lifecycle.",
-)
+# Protected config keys — mutating these could disable the safety layer, hand
+# the agent a new way to run code (agent.hooks.*, mcp.*) or reach a secret.
+# One list, shared with config_save (audit 2026-09-30, AUD-007).
+from kazma_core.safety.protected_config import is_protected_config_key
 
 
 def _exec_names_kazma_store(args: dict, command: str) -> str | None:
@@ -1261,12 +1260,13 @@ def _resolve_config_change_act(profile, tool_name, args, *, audit, thread_id, te
     """config_change resolver (protected-key denylist, plan §5 / WS5).
 
     Self-protection: the agent cannot mutate config keys that would disable its
-    own safety layer (safety.*, agent.commitment.*, lifecycle notifications).
+    own safety layer, hand it a new way to run code (agent.hooks.*, mcp.*) or
+    expose a secret (kazma_core.safety.protected_config).
     """
     from .store import Commitment, create_commitment
 
     key = str(args.get("key") or "")
-    if key and any(key.startswith(p) for p in _CONFIG_PROTECTED_PREFIXES):
+    if key and is_protected_config_key(key):
         c = Commitment(thread_id=thread_id or "", act="config_change", tool_name=tool_name,
                        goal_text=f"config {key}", args_digest=_args_digest(args),
                        request_at=time.time(), tenant_id=tenant_id,

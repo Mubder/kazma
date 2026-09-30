@@ -383,7 +383,7 @@ Full product guide: [Document Intelligence](document-intelligence). Ops:
 | `KAZMA_MAX_COST` | Cost breaker ceiling (default `$0.50`). | `cost_breaker.py:42` |
 | `KAZMA_HARD_MAX_COST` | Hard max cost ceiling for immediate trip (default 3x soft max, `$15.0`). | `cost_breaker.py:46` |
 | `KAZMA_SILENCE_WINDOW` | Cost breaker silence window (default `300`s). | `cost_breaker.py:44` |
-| `KAZMA_SEMANTIC_CACHE` | Enable response cache (`"true"`, default off). | `llm_provider.py:212` |
+| `KAZMA_SEMANTIC_CACHE` | Retired 2026-09-30 (the semantic response cache was removed, audit AUD-001); setting it only logs a warning. | `kazma_ui/app.py` |
 | `KAZMA_FETCH_MAX_BYTES` | Streamed response byte limit for `read_url` (default `5242880` / 5 MB). | `tools/read_url.py` |
 | `KAZMA_CRAWL_RESPECT_ROBOTS` | Opt-in `robots.txt` compliance switch for `crawl_site` (`1` or `true`). | `tools/web_research.py` |
 | `KAZMA_OTLP_ENDPOINT` | OTLP HTTP JSON trace collector endpoint. | `swarm/tracing.py` |

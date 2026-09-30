@@ -33,7 +33,7 @@ Measured 2026-09-21, importing everything first and *then* changing
 * **Frozen at IMPORT** (cannot): ``agent_runner.CHECKPOINT_DB``,
   ``time_travel.DEFAULT_DB_PATH``,
   ``swarm.task_store._DEFAULT_DB``, ``observability.llm_ledger._DEFAULT_DB``,
-  ``swarm.semantic_cache._DEFAULT_DB``, ``tools.image_gen.IMAGE_DIR``,
+  ``tools.image_gen.IMAGE_DIR``,
   ``chat_attachments.ATTACHMENT_DIR``.
 
 The frozen set is **fine for the bug this file is about**: a real deployment
@@ -67,7 +67,6 @@ PROBES: list[tuple[str, str]] = [
     ("from kazma_core.time_travel import DEFAULT_DB_PATH", "DEFAULT_DB_PATH"),
     ("from kazma_core.swarm.task_store import _DEFAULT_DB", "_DEFAULT_DB"),
     ("from kazma_core.observability.llm_ledger import _DEFAULT_DB", "_DEFAULT_DB"),
-    ("from kazma_core.swarm.semantic_cache import _DEFAULT_DB", "_DEFAULT_DB"),
     ("from kazma_core.tools.image_gen import IMAGE_DIR", "IMAGE_DIR"),
     ("from kazma_ui.chat_attachments import ATTACHMENT_DIR", "ATTACHMENT_DIR"),
     ("from kazma_core.stores.knowledge import _default_db", "_default_db()"),

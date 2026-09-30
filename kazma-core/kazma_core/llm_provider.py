@@ -819,39 +819,6 @@ class LLMProvider:
             LLMResponse with content, tool_calls, usage, and cost.
         """
         self._sync_gateway()
-        # Check semantic cache if enabled. Defaults to OFF: the LLM layer has
-        # no user/session identity (AGENTS.md platform isolation), so a shared
-        # global cache can return one user's response to another for identical
-        # or semantically-similar prompts. Enable KAZMA_SEMANTIC_CACHE=true
-        # only for single-operator deployments or all-global-prompt workloads.
-        cache_enabled = os.environ.get("KAZMA_SEMANTIC_CACHE", "false").lower() == "true"
-        prompt_str = ""
-        if cache_enabled:
-            prompt_str = json.dumps(messages, sort_keys=True)
-            try:
-                from kazma_core.swarm.semantic_cache import SemanticCache
-                global _semantic_cache_singleton
-                if "_semantic_cache_singleton" not in globals():
-                    _semantic_cache_singleton = SemanticCache()
-                cached_data = _semantic_cache_singleton.lookup(prompt_str, tools=tools)
-                if cached_data is not None:
-                    tool_calls = [
-                        ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
-                        for tc in cached_data.get("tool_calls", [])
-                    ]
-                    logger.info("[LLMProvider] Cache hit! Returning cached response.")
-                    return LLMResponse(
-                        content=cached_data.get("content", ""),
-                        tool_calls=tool_calls,
-                        finish_reason=cached_data.get("finish_reason", ""),
-                        model=cached_data.get("model", ""),
-                        usage=cached_data.get("usage", {}),
-                        cost_usd=cached_data.get("cost_usd", 0.0),
-                        duration_ms=0.0,
-                    )
-            except Exception as cache_exc:
-                logger.warning("[LLMProvider] Semantic cache lookup error: %s", cache_exc)
-
         client = await self._get_client()
 
         payload = self._chat_payload(
@@ -930,20 +897,6 @@ class LLMProvider:
                             # Return the successful response after retry
                             duration_ms = (time.monotonic() - start) * 1000
                             response = self._parse_response(data, duration_ms)
-                            if cache_enabled:
-                                try:
-                                    response_dict = {
-                                        "content": response.content,
-                                        "tool_calls": [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in response.tool_calls],
-                                        "finish_reason": response.finish_reason,
-                                        "model": response.model,
-                                        "usage": response.usage,
-                                        "cost_usd": response.cost_usd,
-                                        "duration_ms": response.duration_ms,
-                                    }
-                                    _semantic_cache_singleton.store(prompt_str, response_dict, tools=tools)
-                                except Exception as cache_exc:
-                                    logger.warning("[LLMProvider] Semantic cache store error: %s", cache_exc)
                             return response
                         # Still 429, continue retrying
                     except httpx.HTTPStatusError as retry_err:
@@ -1105,20 +1058,6 @@ class LLMProvider:
                     ) from retry_err
                 duration_ms = (time.monotonic() - start) * 1000
                 response = self._parse_response(data, duration_ms)
-                if cache_enabled:
-                    try:
-                        response_dict = {
-                            "content": response.content,
-                            "tool_calls": [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in response.tool_calls],
-                            "finish_reason": response.finish_reason,
-                            "model": response.model,
-                            "usage": response.usage,
-                            "cost_usd": response.cost_usd,
-                            "duration_ms": response.duration_ms,
-                        }
-                        _semantic_cache_singleton.store(prompt_str, response_dict, tools=tools)
-                    except Exception as cache_exc:
-                        logger.warning("[LLMProvider] Semantic cache store error: %s", cache_exc)
                 return response
 
             # ── Structured-output fallback ──────────────────────────────
@@ -1156,20 +1095,6 @@ class LLMProvider:
                     ) from retry_err
                 duration_ms = (time.monotonic() - start) * 1000
                 response = self._parse_response(data, duration_ms)
-                if cache_enabled:
-                    try:
-                        response_dict = {
-                            "content": response.content,
-                            "tool_calls": [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in response.tool_calls],
-                            "finish_reason": response.finish_reason,
-                            "model": response.model,
-                            "usage": response.usage,
-                            "cost_usd": response.cost_usd,
-                            "duration_ms": response.duration_ms,
-                        }
-                        _semantic_cache_singleton.store(prompt_str, response_dict, tools=tools)
-                    except Exception as cache_exc:
-                        logger.warning("[LLMProvider] Semantic cache store error: %s", cache_exc)
                 return response
 
             # Try fallback model if configured
@@ -1351,20 +1276,6 @@ class LLMProvider:
                     )
                     response.cost_usd += retry_response.cost_usd
 
-        if cache_enabled and response.finish_reason != "length":
-            try:
-                response_dict = {
-                    "content": response.content,
-                    "tool_calls": [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in response.tool_calls],
-                    "finish_reason": response.finish_reason,
-                    "model": response.model,
-                    "usage": response.usage,
-                    "cost_usd": response.cost_usd,
-                    "duration_ms": response.duration_ms,
-                }
-                _semantic_cache_singleton.store(prompt_str, response_dict, tools=tools)
-            except Exception as cache_exc:
-                logger.warning("[LLMProvider] Semantic cache store error: %s", cache_exc)
         return response
 
     # ── Streaming (OpenAI-compatible SSE, including LiteLLM proxy) ──

@@ -246,7 +246,15 @@ def _run_command_sync(
     ``shell_exec`` in ``tool_builtins``, which parses with ``shlex``, enforces
     a binary allowlist plus a per-binary argument policy, and hard-rejects
     shell metacharacters.
+
+    The hook gets no server secrets: its environment is the server's minus
+    every ``KAZMA_*`` name and credential (``tool_child_env``, §26I / audit
+    2026-09-30 AUD-007). A hook that needs one names it in
+    ``KAZMA_CHILD_ENV_ALLOW``.
     """
+    from kazma_core.security.child_env import tool_child_env
+
+    env = tool_child_env()
     if isinstance(command, str):
         return subprocess.run(  # nosec B602 - operator-authored hook, see docstring
             command,
@@ -256,6 +264,7 @@ def _run_command_sync(
             timeout=timeout,
             shell=True,
             cwd=cwd,
+            env=env,
             encoding="utf-8",
             errors="replace",
         )
@@ -267,6 +276,7 @@ def _run_command_sync(
         timeout=timeout,
         shell=False,
         cwd=cwd,
+        env=env,
         encoding="utf-8",
         errors="replace",
     )
