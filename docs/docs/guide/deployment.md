@@ -151,21 +151,40 @@ Cross-platform path policy and data layout: **[Portability](../ops/portability)*
 
 On a host watched by `KazmaAgent` (the health-gated supervisor), pick up
 code with **one** command. Do not kill `python`/`uvicorn` by hand — that
-fights the guard (stale port holder or a 180s false "never ready").
+fights the guard.
 
 ```powershell
 cd <kazma-install>
-& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --reload
+& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --reload --when-idle
 ```
 
-Wait for `Kazma is up. build …` (first boot can take a few minutes for
-imports / MCP / Postgres; budget 900s). `--reload` plants a flag **before**
-killing `serve.py`, so the long-lived guard does **not** treat that kill as
-a crash and climb the backoff ladder (5s → 300s). If `--reload` still sits
-on `WinError 10061` for minutes, the **guard process** is still running old
-code — restart `KazmaAgent` once (`schtasks /End` then `/Run KazmaAgent`
-on Windows). `--status` shows whether the watcher and `/health/ready`
-agree. `--install` registers the OS task (`install_service.py`).
+The **running guard** carries out the reload: `--reload` writes a request,
+and the guard stops the server gracefully (Ctrl+Break or SIGTERM, waiting up
+to `KAZMA_GUARD_GRACEFUL_STOP_S`, 60 s, so the app's shutdown hooks run) and
+starts the code on disk. The command waits for the new build to answer
+(`Kazma is up. build …`; a first boot can take a few minutes for imports,
+MCP and Postgres). `--when-idle` first waits until no chat turn is running;
+exit code 3 means one still was at `--idle-timeout` (default 900 s) and
+nothing was touched. `--status` says whether a guard is running (from its
+heartbeat) and whether the server answers `/health/ready`. With no guard
+running, `--reload` starts the `KazmaAgent` task, and the new guard clears
+the old server with its own rights, so a reload never needs an elevated
+shell. A change to the guard itself needs the task restarted
+(`schtasks /End /TN KazmaAgent`, then `schtasks /Run /TN KazmaAgent`).
+
+**The task.** `python scripts/service/install_service.py --install`
+registers `KazmaAgent`: at boot with nobody logged on (S4U, highest
+privileges), at logon, and every 5 minutes to bring back a guard that exited
+— a trigger that finds the guard running is ignored, which Task Scheduler
+records as `0x800710E0` — at priority 4. `install_service.py --status`
+compares the registered task with that, setting by setting, marks each
+difference `FIX` and exits 1. To change an existing task, run `--install`
+again from an **elevated** PowerShell, with the installer of the folder
+whose guard the task starts (`--status` names it). It refuses to make things
+worse: without admin rights it does not replace a task that starts at boot
+with the user-level one, which starts only after a logon; and run from a
+second checkout on the same machine it does not move the task there unless
+you add `--move`.
 
 **PATH changes.** Windows hands a process its parent's environment, and the
 guard runs from one boot to the next, so a tool installed (or put back on
@@ -186,10 +205,11 @@ something heavy ran beside Kazma (a test suite, a benchmark), it froze for
 interactive program's priority as they start — CPU, memory and disk,
 never lower — and the server's log says what it started with
 (`[startup] Raised the process to interactive priority …`).
-`install_service.py` registers the task at priority 4; to change an existing
-task, run `python scripts/service/install_service.py --install` again from an
-elevated PowerShell. `KAZMA_PROCESS_PRIORITY=keep` leaves both where they
-were started.
+`install_service.py` registers the task at priority 4, and its `--status`
+shows the priority the registered task has; to change an existing task, run
+`python scripts/service/install_service.py --install` again from an elevated
+PowerShell. `KAZMA_PROCESS_PRIORITY=keep` leaves both where they were
+started.
 
 On Windows, start via `kazma serve` or the guard — not `python -m uvicorn`.
 Uvicorn 0.36+ hardcodes `ProactorEventLoop`, and psycopg-async then cannot

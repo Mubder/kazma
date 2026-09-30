@@ -3200,6 +3200,19 @@ code) and Kazma ran with nobody supervising it.
 - **The OS brings a dead guard back:** `install_service.py` registers a
   5-minute repeating trigger with `MultipleInstances IgnoreNew`. An existing
   task gets it only when re-registered from an elevated shell (owner action).
+- **`--install` never replaces the task for the worse; `--status` says what
+  differs** (2026-09-30). `install_service.py --status` reads the registered
+  task (`registered_task`: none is `registered: false`, unreadable is `null`
+  -- never the same) and checks each setting `--install` registers (state,
+  account, triggers, IgnoreNew, `TASK_PRIORITY`, the guard it starts), `FIX`
+  per difference, exit 1. A rerun of `--install` refuses, changing nothing:
+  without admin rights over a task that starts at boot, or one it could not
+  read (its user-level fallback used `-Force`); and over a task that starts
+  another folder's guard unless `--move` (a second checkout beside the live
+  install). Both name the command to run instead. The elevated `--install`
+  prints the status after registering. Gate:
+  `tests/test_windows_task_registration.py` (every check fails alone; each
+  refusal with its negative control; the real query on Windows).
 - **Kazma runs at an interactive program's priority**
   (`kazma_core/process_priority.py`, 2026-09-30). The live task had no
   `<Priority>`, so Task Scheduler's default (7, background) started the

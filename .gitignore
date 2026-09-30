@@ -94,6 +94,11 @@ kazma-data/
 .kazma/
 swarm_registry.json
 
+# Written by scripts/service/install_service.py --install: this machine's
+# paths. `--print` shows the same script for any machine.
+scripts/service/install_windows_task.ps1
+scripts/service/install_windows_task_userlevel.ps1
+
 # Machine-local config overrides (never commit — use Settings UI or this file)
 # Shipped defaults stay in tracked kazma.yaml; edit this for local ports/tokens.
 kazma.local.yaml
