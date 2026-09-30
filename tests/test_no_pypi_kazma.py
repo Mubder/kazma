@@ -304,7 +304,7 @@ class FakeGitHub:
 
     def get(self, url: str, **_kw: Any) -> _Resp:
         self.seen.append(url)
-        if url.endswith("/releases/latest"):
+        if url.endswith(("/releases/latest", "/releases/tags/v0.12.0")):
             return _Resp(self.status, self.release()) if self.status == 200 else _Resp(self.status)
         if url == _DOWNLOAD + "SHA256SUMS":
             line = f"{self.listed}  {_WHEEL}\n" if self.listed else ""
@@ -465,10 +465,61 @@ def test_update_run_hands_the_release_to_the_installer(github, monkeypatch):
     monkeypatch.setattr(update, "get_current_version", lambda: "0.11.0")
     monkeypatch.setattr(update, "detect_active_extras", lambda cwd=None: ["rag"])
     seen: list[tuple[Any, Any]] = []
-    monkeypatch.setattr(update, "do_pip_update", lambda rel, extras=(): seen.append((rel, extras)) or True)
+    monkeypatch.setattr(update, "do_pip_update", lambda rel, extras=(), reinstall=False: seen.append((rel, extras)) or True)
     update.run(["--yes"])
     assert len(seen) == 1
     assert seen[0][0].wheel_name == _WHEEL and seen[0][1] == ["rag"]
+
+
+# ── repairing a wheel install: --reinstall and --force ──────────────────────
+
+
+def test_a_reinstall_puts_the_same_version_back(github, monkeypatch):
+    """pip calls an installed version satisfied; forced for Kazma alone, then its deps."""
+    from kazma_cli.update import do_pip_update, get_latest_release
+
+    github(FakeGitHub())
+    calls = _pip_recorder(monkeypatch)
+    assert do_pip_update(get_latest_release(), ["rag"], reinstall=True) is True
+    assert [c[:-1] for c in calls] == [["install", "--force-reinstall", "--no-deps"], ["install"]]
+    assert calls[0][-1].endswith(_WHEEL) and calls[1][-1].endswith(f"{_WHEEL}[rag]")
+
+
+def test_reinstall_on_a_wheel_install_uses_its_own_release(github, monkeypatch):
+    """It used to take the current folder for the project (an editable install of it)."""
+    from kazma_cli import update
+
+    fake = github(FakeGitHub())
+    monkeypatch.setattr(update, "_find_git_root", lambda: None)
+    monkeypatch.setattr(update, "detect_install_type", lambda: "pip")
+    monkeypatch.setattr(update, "get_current_version", lambda: "0.12.0")
+    monkeypatch.setattr(update, "detect_active_extras", lambda cwd=None: [])
+    monkeypatch.setattr(update, "_reinstall_local", lambda cwd: pytest.fail(f"editable install of {cwd}"))
+    seen: list[tuple[Any, Any, Any]] = []
+    monkeypatch.setattr(
+        update, "do_pip_update", lambda rel, extras=(), reinstall=False: seen.append((rel, extras, reinstall)) or True,
+    )
+    update.run(["--reinstall", "--yes"])
+    assert len(seen) == 1 and seen[0][0].version == "0.12.0" and seen[0][2] is True
+    assert any(u.endswith("/releases/tags/v0.12.0") for u in fake.seen)
+    _never_pypi(fake)
+
+
+def test_force_on_the_latest_version_reinstalls(github, monkeypatch):
+    from kazma_cli import update
+
+    github(FakeGitHub())
+    monkeypatch.setattr(update, "_find_git_root", lambda: None)
+    monkeypatch.setattr(update, "detect_install_type", lambda: "pip")
+    monkeypatch.setattr(update, "get_current_version", lambda: "0.12.0")
+    monkeypatch.setattr(update, "detect_active_extras", lambda cwd=None: [])
+    seen: list[bool] = []
+    monkeypatch.setattr(update, "do_pip_update", lambda rel, extras=(), reinstall=False: seen.append(reinstall) or True)
+    update.run(["--force", "--yes"])
+    assert seen == [True]
+    monkeypatch.setattr(update, "get_current_version", lambda: "0.11.0")
+    update.run(["--yes"])  # a newer release: an ordinary upgrade
+    assert seen == [True, False]
 
 
 # ── Settings: "Check for updates" ───────────────────────────────────────────

@@ -3587,6 +3587,10 @@ and the sibling suites):**
   release's wheel, from the file, only when it matches `SHA256SUMS` and
   GitHub's asset digest (URL pinned to the repo's releases, streamed, size
   capped, extras kept); a release it cannot verify is refused with its page.
+  On a wheel install `--reinstall` fetches its own release (`_get_release`,
+  tag `v<version>`) and `--force` with nothing newer reinstalls
+  (`do_pip_update(reinstall=True)`: `--force-reinstall --no-deps`, then the
+  extras install); `--reinstall` used to run an editable install of the CWD.
   The Settings check reads the same release (`settings_manager._RELEASE_API`,
   the CLI's own copy because the updater must run while `kazma_core` may not
   import; a test holds them equal), shows `kazma_core.version`, and reports an

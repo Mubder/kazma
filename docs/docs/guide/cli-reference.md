@@ -290,9 +290,9 @@ manual `git pull` on production/git installs. Full guide:
 | Flag | Purpose |
 |------|---------|
 | `--check` / `-c` | Dry-run: show available update |
-| `--force` / `-f` | Force sync even if already latest |
+| `--force` / `-f` | Force sync even if already latest; on a release-wheel install, reinstall the latest release |
 | `--yes` / `-y` | Skip confirmation |
-| `--reinstall` / `-r` | Packages/extras only (repair wiped venv) |
+| `--reinstall` / `-r` | Packages/extras only (repair wiped venv): a checkout reinstalls from itself; a release-wheel install reinstalls its own release (tag `v<version>`), SHA-256 checked |
 | `--sync-main` | Checkout `main` first (feature-branch safety) |
 | `--accept-discard-local-commits` | Allow hard-reset when local commits are ahead of `origin/main` |
 

@@ -1217,7 +1217,7 @@ class TestUpdateRunDispatch:
             "kazma_cli.update.do_pip_update", return_value=True
         ) as mock_do_update:
             run(["--yes"])
-        mock_do_update.assert_called_once_with(release, [])
+        mock_do_update.assert_called_once_with(release, [], reinstall=False)
 
     def test_update_run_pip_release_error_exits(self) -> None:
         """If the GitHub release cannot be read, run() should exit with code 1."""
