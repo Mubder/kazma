@@ -340,13 +340,24 @@ def get_latest_release() -> ReleaseInfo | None:
     Returns ``None`` when GitHub cannot be read; a release whose wheel may not
     be installed automatically comes back with ``problem`` set.
     """
+    return _read_release(_RELEASE_API)
+
+
+def _get_release(version: str) -> ReleaseInfo | None:
+    """Release ``v<version>``: a wheel install's own release, for ``--reinstall``."""
+    base = version.split("+", 1)[0].strip().removeprefix("v")
+    return _read_release(f"https://api.github.com/repos/{_GITHUB_REPO}/releases/tags/v{base}")
+
+
+def _read_release(api_url: str) -> ReleaseInfo | None:
+    """The release *api_url* answers with (see :func:`get_latest_release`)."""
     try:
         import httpx
 
         with httpx.Client(timeout=_CHECK_TIMEOUT, follow_redirects=True) as client:
-            resp = client.get(_RELEASE_API, headers={"Accept": "application/vnd.github+json"})
+            resp = client.get(api_url, headers={"Accept": "application/vnd.github+json"})
             if resp.status_code != 200:
-                logger.warning("GitHub answered %s for the latest Kazma release", resp.status_code)
+                logger.warning("GitHub answered %s for %s", resp.status_code, api_url)
                 return None
             data = resp.json()
             tag = str(data.get("tag_name") or "").strip()
@@ -496,15 +507,22 @@ def get_git_commit(ref: str = "HEAD") -> str:
 # Update operations
 # ---------------------------------------------------------------------------
 
-def do_pip_update(release: ReleaseInfo, extras: list[str] | tuple[str, ...] = ()) -> bool:
+def do_pip_update(
+    release: ReleaseInfo,
+    extras: list[str] | tuple[str, ...] = (),
+    *,
+    reinstall: bool = False,
+) -> bool:
     """Install *release*'s wheel once its SHA-256 matches the release's.
 
     Never installs ``kazma`` by name (see :func:`get_latest_release`). The
     wheel is downloaded from the canonical repo's release, hashed as it
     arrives, and installed from that file with the extras already installed.
-    A release whose wheel may not be installed automatically is refused, with
-    the page to verify and install it by hand (``gh attestation verify``).
-    Returns ``True`` on success.
+    With *reinstall* the installed version is put back even when it is the
+    same one (``--force``, ``--reinstall``): pip otherwise calls it satisfied
+    and does nothing. A release whose wheel may not be installed
+    automatically is refused, with the page to verify and install it by hand
+    (``gh attestation verify``). Returns ``True`` on success.
     """
     page = release.page or f"https://github.com/{_GITHUB_REPO}/releases"
     problem = release.problem
@@ -550,7 +568,18 @@ def do_pip_update(release: ReleaseInfo, extras: list[str] | tuple[str, ...] = ()
                 spec += f"[{','.join(extras)}]"
                 console.print(f"[cyan]Preserving optional extras:[/cyan] {', '.join(extras)}")
             console.print(f"[cyan]Installing {release.wheel_name} (SHA-256 verified)...[/cyan]")
-            result = _run_pip(["install", "--upgrade", spec], timeout=_INSTALL_TIMEOUT)
+            # Extras (rag: torch) can take far longer than Kazma itself.
+            timeout = _INSTALL_TIMEOUT_HEAVY if extras else _INSTALL_TIMEOUT
+            if reinstall:
+                # --no-deps keeps the forced reinstall to Kazma itself; the
+                # second install then brings back any missing dependency.
+                result = _run_pip(
+                    ["install", "--force-reinstall", "--no-deps", str(wheel)], timeout=_INSTALL_TIMEOUT,
+                )
+                if result.returncode == 0:
+                    result = _run_pip(["install", spec], timeout=timeout)
+            else:
+                result = _run_pip(["install", "--upgrade", spec], timeout=timeout)
         if result.returncode == 0:
             console.print("[green]pip upgrade completed.[/green]")
             return True
@@ -1593,8 +1622,9 @@ def print_help() -> None:
     console.print()
     console.print("Options:")
     console.print("  --check, -c       Only check for updates, don't install (dry run)")
-    console.print("  --force, -f       Force git sync even if already latest")
-    console.print("  --reinstall, -r   Only reinstall packages/extras (no git pull)")
+    console.print("  --force, -f       Sync git, or reinstall the release wheel, even if already latest")
+    console.print("  --reinstall, -r   Only reinstall packages/extras: a checkout without git pull,")
+    console.print("                    a wheel install from its own GitHub release")
     console.print("  --sync-main       If on a feature branch, checkout main first")
     console.print("  --accept-discard-local-commits")
     console.print(
@@ -1720,7 +1750,7 @@ def _run_pip_check_and_update(
             console.print("Update cancelled.")
             return
 
-    if do_pip_update(release, detect_active_extras()):
+    if do_pip_update(release, detect_active_extras(), reinstall=not update_available):
         new_version = get_current_version()
         console.print()
         console.print(f"[green]Update complete![/green] Now at v{new_version}")
@@ -1822,6 +1852,24 @@ def _run_git_check_and_update(
 # Sync entry point
 # ---------------------------------------------------------------------------
 
+def _reinstall_release_wheel(current_version: str, skip_confirm: bool) -> None:
+    """``--reinstall`` on a release-wheel install: its own release again, with its extras."""
+    release = _get_release(current_version)
+    if release is None:
+        console.print(f"[red]Could not read release v{current_version} from GitHub.[/red]")
+        console.print(f"Releases: https://github.com/{_GITHUB_REPO}/releases")
+        sys.exit(1)
+    extras = detect_active_extras()
+    if not skip_confirm and not _confirm(
+        f"Reinstall kazma v{release.version} from its GitHub release? [y/N] "
+    ):
+        console.print("Cancelled.")
+        return
+    if not do_pip_update(release, extras, reinstall=True):
+        sys.exit(1)
+    console.print("[green]Reinstall complete.[/green]")
+
+
 def run(args: list[str]) -> None:
     """Dispatch the ``kazma update`` command."""
     flags, _positionals = parse_update_flags(args)
@@ -1848,7 +1896,14 @@ def run(args: list[str]) -> None:
     # Package-only path (no git) — recover from bare uv sync / missing rag
     if reinstall_only:
         git_root = _find_git_root()
-        cwd = str(git_root) if git_root else str(Path.cwd())
+        if git_root is None:
+            # A release-wheel install has no checkout to reinstall from: it
+            # reinstalls its own release's wheel. Until 2026-09-30 this took
+            # the current folder for the project and ran an editable install
+            # of whatever the operator stood in.
+            _reinstall_release_wheel(current_version, skip_confirm)
+            return
+        cwd = str(git_root)
         extras = detect_active_extras(cwd)
         # Always ensure rag when memory data exists or nothing detected but
         # user asked for reinstall after a wipe — default to rag for recovery.
