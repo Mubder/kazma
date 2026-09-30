@@ -120,7 +120,7 @@ By default the agent calls `knowledge_search` when *it* decides the question nee
 When auto-inject is on, the top-k chunks for the user's latest message are retrieved and added to the system prompt — **fenced as untrusted data** (`<kazma:data source="knowledge" untrusted="true">`), so a malicious doc page can't smuggle instructions. Three injection points (mirroring the self-improvement Soul, see [Security & safety](./security-and-safety.md)):
 
 - `agent_runner.py` — main agent init (no-op; auto-inject is per-turn)
-- `sse_chat.py` — Web SSE chat, per turn
+- `sse_chat/` — Web SSE chat, per turn
 - `gateway graph.py` — Telegram/Discord/Slack, per turn
 
 **Kill switch:** `KAZMA_KB_AUTO_INJECT=0` disables the whole subsystem at runtime (checked live, per turn). Per-library opt-in is still required even with the kill switch on, so behaviour is strictly opt-in.

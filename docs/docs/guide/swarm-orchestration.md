@@ -382,7 +382,7 @@ flowchart LR
 | `standard` | `researcher` (worker `core`) → `refiner` (worker `bridge`) → `builder` (worker `core`) → `validator` (worker `bridge`). |
 | `quick` | `researcher` (worker `core`) → `builder` (worker `core`). |
 
-Each stage carries a `system_prompt`. See [Configuration → pipelines](configuration#pipelines-lines-129-162).
+Each stage carries a `system_prompt`. See [Configuration → pipelines](configuration#pipelines).
 
 ---
 

@@ -247,15 +247,17 @@ Verified in [Skills, MCP & Tools → Cryptographic signing](skills-mcp-and-tools
 - `kazma hub sign` writes `checksum` (SHA-256) + `signature` (HMAC-SHA256 over checksum, keyed by `KAZMA_SECRET`) into `skill_manifest.yaml`.
 - `SkillLoader._load_module_from_file` verifies both with `hmac.compare_digest` (constant-time) and refuses to load tampered/unsigned-by-required skills.
 
-### 6.2 Delegation Ed25519 + AES-256-GCM
+### 6.2 No signed delegation between agents
 
-`delegation/security.py` (`DelegationSecurity`, line 30):
-
-- **Signing:** Ed25519 (lines 81-119).
-- **Encryption:** X25519 key agreement + AES-256-GCM (lines 121-161).
-- Requests signed on send (`protocol.py:153`), verified on receipt with **fail-closed** on missing/invalid signature (`:179-208`).
-
-This is inter-agent delegation — unrelated to MCP or skills.
+Nothing in Kazma signs or encrypts work handed from one agent to another.
+An inter-agent delegation package (Ed25519 signing, X25519 key agreement +
+AES-256-GCM) was never wired into the product: it sat in `archive/` and was
+deleted on 2026-07-28. Work between swarm workers is dispatched by
+`SwarmEngine` (`kazma_core/swarm/`); what protects it is on this page — the
+[swarm bus gate](#the-swarm-bus-gate), the Commitment Layer's scope token
+and the [danger-tool lists](#danger-tool-lists-three-of-them) — not message
+signing. The [roadmap](roadmap-and-future) lists signed delegation as not in
+the code.
 
 ### 6.3 HITL endpoint secret
 

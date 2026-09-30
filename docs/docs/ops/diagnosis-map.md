@@ -271,7 +271,7 @@ Never construct `ConfigStore()` in app code — only `get_config_store()`.
 
 - IDE **must not** call raw `file_write` / `file_apply_patch` / shell functions — always `_call_tool` → registry.  
 - Tool “exists in chat but not IDE” is often **MCP-only** on UnifiedToolExecutor.  
-- Swarm package has a separate `tools/registry.py` name — do not confuse with agent `tool_registry.py`.
+- The swarm package's `registry.py` is the worker registry — do not confuse it with the agent's `tool_registry.py`.
 
 ---
 

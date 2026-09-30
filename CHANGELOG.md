@@ -1,5 +1,68 @@
 # CHANGELOG
 
+## The docs name only files that exist, and say what the code does (2026-10-01)
+
+- **The security guide described a protection Kazma does not have.** Its
+  "Delegation Ed25519 + AES-256-GCM" section said work handed between agents
+  was signed and encrypted and verified fail-closed. That code was an archived
+  package, never wired in, and deleted on 2026-07-28. The guide, the Skills,
+  MCP & Tools page and the glossary now say nothing signs or encrypts work
+  between agents, and name what does protect swarm work.
+- **The Arabic & Cultural Features guide matches the code.** It described a
+  six-step normalization and two tokenizer classes from a file that no longer
+  exists; the tokenizer in use does two steps (diacritics, Alef) and folds
+  neither taa marbuta nor alef maqsura. The guide now covers dialect
+  detection and the two tokenizers, how Arabic is folded for search (where
+  those letters are folded), where the Kuwaiti words live, that Majlis
+  answers greetings and farewells on the chat-app path, and that the shipped
+  default language is English, not Arabic. Troubleshooting §7 described the
+  old tokenizer's hamza rules and stemmer; it now says how Arabic is matched.
+- **The TUI speaks Arabic.** Its tabs' Arabic labels were never applied: the
+  code called a method Textual does not have, and a catch-all logged the
+  error at DEBUG. Nothing could switch the language either, short of editing
+  its preferences file. **Ctrl+L** (or the command palette, *Switch
+  language*) now switches between English and Arabic and keeps the choice;
+  the tabs and the navigation rail, which stayed English, follow it from one
+  table in the web UI's words -- the Dashboard is لوحة التحكم in both -- with
+  right-to-left styling, whatever screen is on top.
+- **The TUI's Traces tab no longer takes the app down.** With any trace to
+  show, the first row the list selected raised an error that closed the TUI:
+  its handlers read an attribute Textual's row events do not have. Behind
+  that, the details pane wrote a colour Rich cannot read (another crash), and
+  a label or details with brackets -- tool output has them -- were read as
+  formatting: `list[str]` lost its `[str]`, a stray `[/b]` crashed the
+  render. Every trace now shows as it is. A test checks that every TUI
+  handler reads only what its event carries.
+- **39 file names in the docs pointed at nothing:** modules that became
+  packages (`sse_chat/`, `routes_direct/`, `swarm_panel/`, `i18n/`,
+  `tracing/`), modules removed as orphans, and a `services.yaml` deleted in
+  July that still had a configuration section. A test now checks every file
+  name the published docs cite against the repository.
+
+## The documentation's links land where they point (2026-10-01)
+
+- **74 of the 164 section links on kazma.ai landed at the top of their page
+  instead of the section,** and 25 headings showed `{#…}` after their title.
+  The docs give some headings an id the Docusaurus way (`## Title {#id}`),
+  which the site did not understand; an Arabic heading gets an id made of
+  Arabic words, so the English section names in the Arabic pages' links
+  missed; and five links in the docs themselves pointed at sections renamed
+  or removed. One of those sat behind a sentence saying memory recall needs
+  the model to call a tool -- untrue since the V2 memory cutover: recall runs
+  on every turn. The site now honours those ids, the Arabic headings that
+  links point at carry the English id, and the five links point where they
+  should.
+- **Links in the Arabic pages stay in Arabic.** 140 of them led to the
+  English version of a page that has an Arabic one.
+- **Checks keep it so.** The site's build fails on a section a link names
+  that its page does not have, and on an Arabic page's link to an English
+  page that has an Arabic one; the sync plan flags the second too; a test
+  checks every section link in the docs. The sync plan also no longer takes
+  inline code at the start of a line for the start of a code block -- on the
+  Task Ledger page it had skipped checking every link after one.
+- The configuration guide's section headings no longer cite kazma.yaml line
+  numbers; all 17 were wrong.
+
 ## Re-registering the Windows task: a status that checks it, a rerun that cannot make it worse (2026-09-30)
 
 - **`install_service.py --status` now checks the task.** It printed the

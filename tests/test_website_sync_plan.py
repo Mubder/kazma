@@ -290,7 +290,38 @@ def test_broken_and_unconverted_links(repos):
         assert (f"{lang}:alpha", "/docs/nowhere/") in found
         assert (f"{lang}:alpha", "../guide/alpha.md") in found
         assert (f"{lang}:alpha", "https://github.com/Mubder/kazma/blob/main/docs/nope.md") in found
-    assert len(found) == 6, found  # the valid links and the one in a code block are not flagged
+    # the same body on the Arabic page leads to the English alpha
+    assert ("ar:alpha", "/docs/alpha/#use") in found
+    assert len(found) == 7, found  # the valid links and the one in a code block are not flagged
+
+
+def test_an_arabic_page_that_leads_to_an_english_one_is_flagged(repos):
+    """Translations copied the English links: on 2026-10-01, 140 links in
+    kazma.ai's Arabic pages led to English pages that have Arabic ones."""
+    fw, site, first = repos
+    _write(site, "src/content/docs/ops/beta.md", PAGE.replace("Alpha", "Beta"))  # English only
+    links = "\n[a](/docs/alpha/) [b](/docs/alpha/#use) [c](/ar/docs/alpha/) [d](/docs/ops/beta/)\n"
+    _write(site, "src/content/docs/alpha.md", PAGE + links)
+    _write(site, "src/content/docs/ar/alpha.md", PAGE.replace("# Alpha", "# ألفا") + links)
+    flagged = {(l["page"], l["link"]): l["problem"] for l in _plan(fw, site, assume_at=first).links}
+    assert flagged == {
+        ("ar:alpha", "/docs/alpha/"): "an Arabic page leads to the English page: link /ar/docs/alpha/",
+        ("ar:alpha", "/docs/alpha/#use"): "an Arabic page leads to the English page: link /ar/docs/alpha/#use",
+    }, flagged  # an English page may link English; beta has no Arabic page to go to
+
+
+def test_inline_code_opening_a_line_is_not_a_fence():
+    """``` ```` ```plan ```` ``` opening a line is inline code: the naive rule
+    took it for a fence and skipped the rest of the page (task-ledger's links
+    were never checked). A fence closes on its own character, as long."""
+    page = (
+        "# A\n\n```` ```plan ```` fence becomes the ledger's steps\n\n"
+        "## After\n\n[x](/docs/after/)\n\n"
+        "````md\n```bash\nkazma serve\n```\n````\n"
+    )
+    assert wsp.structure(page) == {"headings": 2, "code blocks": 1, "table rows": 0, "asides": 0}
+    assert wsp.links(page) == ["/docs/after/"]
+    assert wsp.code_blocks(page) == ["```bash\nkazma serve\n```"]
 
 
 def test_new_changelog_entries_and_changed_claims_are_listed(repos):

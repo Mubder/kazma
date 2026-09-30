@@ -75,7 +75,7 @@ Items are marked:
 | Pipeline HITL checkpoints with auto-reject timeout | ✅ | `checkpoint_manager.py`. |
 | Handoff cycle detection (depth 5, visits 2) | ✅ | `handoff_guards.py`. |
 | Worker autoscaling | ✅ | `dispatch_inner` spawns a worker from `swarm_templates.json` when none matches; idle workers are reaped after 5 minutes. |
-| Prometheus metrics | ✅ | Optional `prometheus-client` extra; `/metrics` endpoint in `routes_direct.py`. |
+| Prometheus metrics | ✅ | Optional `prometheus-client` extra; `/metrics` endpoint in `kazma_ui/metrics.py`. |
 
 ---
 

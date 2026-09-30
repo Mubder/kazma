@@ -221,7 +221,7 @@ These were fixed in the July 2026 memory overhaul and are now moot (the V1 code 
 
 ### 3.2 HITL pauses never resume
 
-**Cause:** the resume endpoint is `POST /api/approve/\{thread_id\}` in `routes_direct.py:454` (not `app.py`). It requires `KAZMA_SECRET` if set, and enforces ownership (403 on cross-user).
+**Cause:** the resume endpoint is `POST /api/approve/\{thread_id\}` in `routes_direct/misc.py` (not `app.py`). It requires `KAZMA_SECRET` if set, and enforces ownership (403 on cross-user).
 
 **Fix:** ensure the approving caller has the matching identity fields and the correct secret.
 
@@ -287,19 +287,27 @@ Use `/api/gateway/status` (as `docker-compose.yml` does) or `/health/live` — *
 
 ---
 
-## 7. Arabic tokenization edge cases
+## 7. Arabic text in search
 
-### 7.1 Conflicting hamza rules
+### 7.1 How Arabic is matched
 
-`ؤ` and `ئ` are normalized by **two** overlapping rules in `arabic_tokenizer.py` (Yeh normalization at lines 220-232 and the Waw/Ya-Hamza rules at lines 154-157). This is a known minor conflict; in practice the later rule wins. If you see inconsistent search results for hamza-bearing words, this is why.
+The Knowledge Library folds Arabic the same way when it indexes text and when
+it searches (`kazma_core/documents/arabic.py`, `fold_for_search`): diacritics
+(harakat), tatweel and bidi control characters are dropped; the alef-hamza
+forms, taa marbuta, alef maqsura, the hamza carriers and the Farsi/Urdu letter
+variants fold together; Arabic-Indic digits become ASCII; runs of whitespace
+collapse. A word written with or without diacritics, tatweel or hamza finds
+the same passages. Memory recall folds a question's words and a memory's
+words the same way when it weighs how much of the question a memory holds
+(`memory/query_terms.py`), and it also compares them by meaning.
 
-### 7.2 Stemmer is basic
+### 7.2 No stemming
 
-The stemmer (`_init_stemmer`, lines 104-130) does regex suffix/prefix stripping only — it's **not** a lemmatizer. Plural/gender variants may not collapse to a common stem. For higher recall, consider pre-normalizing queries or adding domain synonyms.
-
-### 7.3 Tatweel (ـ) in stored text
-
-Tatweel is stripped on tokenize, so stored `content_arabic` won't contain it — but if you query with raw text containing `ـ`, the same normalization applies, so matches still work.
+Nothing reduces Arabic words to a stem: to keyword search, a plural or a
+feminine form is a different word. Memory search handles light plurals and
+the article and one-letter prefixes (`memory/query_terms.py`), and its
+meaning search finds related forms. In the Knowledge Library, search with the
+form the text uses, or add the variants.
 
 ---
 
@@ -382,7 +390,7 @@ for name in ("kazma_core", "kazma_gateway", "kazma_ui"):
 - Swarm TaskStore → `kazma-data/swarm_tasks.db`
 - Gateway sessions → `kazma-data/sessions.db`
 - LangGraph checkpoints → `kazma-data/checkpoints.db`
-- Console tracing → `KazmaTracer` (`backend="console"`) writes to stdout via `kazma_core/tracing.py`
+- Console tracing → `KazmaTracer` (`backend="console"`) writes to stdout via `kazma_core/tracing/`
 
 ### 9.2 Inspect the TaskStore directly
 
@@ -669,7 +677,7 @@ Raise the per-task timeout for genuinely long work: `\{"workers": ["worker-1"], 
 
 ### 14.3 Task not appearing in Active Tasks
 
-**Cause:** the SSE bus isn't wired to the engine — `kazma-ui/kazma_ui/swarm_panel.py` calls `wire_engine_events(engine, _sse_bus)` in `_current_engine()`; if the engine predates the bus, events are lost. Or the dispatch didn't return a `task_id`; or a frontend JS error in `swarm.js` `dispatchTask()`.
+**Cause:** the SSE bus isn't wired to the engine. The Swarm panel registers its bus with `SwarmService` (`kazma-ui/kazma_ui/swarm_panel/__init__.py`), and `SwarmService.resolve_engine()` (`kazma_ui/services.py`) wires it into whichever engine it resolves, one created later included; a wiring failure is logged at DEBUG (`wire_engine_events failed during resolve_engine`). Or the dispatch didn't return a `task_id`; or a frontend JS error in `swarm.js` `dispatchTask()`.
 
 **Fix:**
 1. Confirm `wire_engine_events()` ran and the engine was obtained **after** the SSE bus was available.
@@ -685,7 +693,7 @@ Raise the per-task timeout for genuinely long work: `\{"workers": ["worker-1"], 
 
 ### 14.4 Results Dashboard empty / task-detail modal blank
 
-**Cause:** `SwarmTask.to_dict()` nests result fields under `result`, but the UI expects them top-level — `_flatten_swarm_task()` in `swarm_panel.py` is the bridge. If it misses a field, the UI renders nothing. Or the modal element is missing from the template / `viewTaskDetail()` reads the wrong key.
+**Cause:** `SwarmTask.to_dict()` nests result fields under `result`, but the UI expects them top-level — `_flatten_swarm_task()` in `swarm_panel/routes_tasks.py` is the bridge. If it misses a field, the UI renders nothing. Or the modal element is missing from the template / `viewTaskDetail()` reads the wrong key.
 
 **Fix:**
 ```bash
@@ -717,7 +725,7 @@ engine = SwarmEngine(SwarmConfig(enabled=True, workers=[]), task_store=TaskStore
 
 ### 14.6 Pipeline HITL checkpoint missing (swarm/pipeline)
 
-> **Two HITL mechanisms, don't confuse them.** This section is about **swarm/pipeline checkpoints** (`POST /api/swarm/tasks/\{id\}/approve|reject`). The **agent tool-call** approval gate is a different endpoint — `POST /api/approve/\{thread_id\}` (`routes_direct.py:454`) — covered in [§3.2](#32-hitl-pauses-never-resume).
+> **Two HITL mechanisms, don't confuse them.** This section is about **swarm/pipeline checkpoints** (`POST /api/swarm/tasks/\{id\}/approve|reject`). The **agent tool-call** approval gate is a different endpoint — `POST /api/approve/\{thread_id\}` (`routes_direct/misc.py`) — covered in [§3.2](#32-hitl-pauses-never-resume).
 
 **Symptom:** a pipeline task should pause at a checkpoint, but no HITL card appears, or approve/reject does nothing.
 

@@ -119,6 +119,7 @@ class CommandPalette(ModalScreen[str | None]):
             ("copy-selection", "Copy selection", "Ctrl+Shift+C"),
         ],
         "System": [
+            ("toggle-language", "Switch language (English / Arabic)", "Ctrl+L"),
             ("quit", "Exit Kazma", "Ctrl+Q"),
             ("refresh", "Refresh", None),
         ],
@@ -340,6 +341,7 @@ class CommandPalette(ModalScreen[str | None]):
             "quit": "quit",
             "copy-selection": "copy_clipboard",
             "refresh": "refresh_all",
+            "toggle-language": "toggle_language",
         }
         
         if cmd_id in action_map:

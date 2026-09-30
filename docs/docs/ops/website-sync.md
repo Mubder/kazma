@@ -91,6 +91,10 @@ machine-readable output).
   `/docs/<page>/` of the page `docs/website-pages.json` maps it to; a link to
   a source that is not published becomes its GitHub URL. The plan flags a
   link left in the source's form.
+- **Heading ids:** a source heading may end with a Docusaurus id,
+  `## Title {#id}`. Keep it: the site gives the heading that id and shows
+  only the title (`src/plugins/remark-heading-ids.mjs`). Until 2026-10-01 the
+  site showed the braces and every link to such an id missed.
 - **Asides:** `:::note`, `:::tip` and `:::danger` exist in both;
   `:::info` becomes `:::note` and `:::warning` becomes `:::caution`.
 - **Code is copied exactly**, into both languages: comments included. The
@@ -120,6 +124,16 @@ machine-readable output).
 - Modern Standard Arabic; the product's Arabic name is كاظمه.
 - Direction is automatic (the `ar` locale is right-to-left); add no `dir`
   attributes.
+- **Links go to Arabic pages:** `/docs/<page>/` in the English text is
+  `/ar/docs/<page>/` in the Arabic one. The plan flags a link in an Arabic
+  page that leads to the English page of a page that has an Arabic one, and
+  so does the build.
+- **Anchors keep their English id.** A heading's id is made from its words,
+  so an Arabic heading gets an Arabic id and `#<english-id>` misses it. When
+  a link points at an Arabic heading, end that heading with the English
+  page's id for the same heading: `## 10. إشعارات حالة دورة الحياة {#10-lifecycle-status-notifications}`.
+  A heading that already carries `{#id}` in English carries the same one in
+  Arabic.
 
 ### 5. Check the claims
 
@@ -137,7 +151,12 @@ above, in both languages:
 ### 6. Prove it, then record it
 
 1. `npm run build` passes. Cloudflare Pages runs the same build on every pull
-   request; a failed build leaves the live site on its last deployment.
+   request; a failed build leaves the live site on its last deployment. The
+   build fails on a link to a page that does not exist or answers only
+   through a redirect, on a `#anchor` its page does not have, and on a link
+   in an Arabic page's text to an English page that has an Arabic one
+   (`src/plugins/check-internal-links.mjs`). Anchors inside this
+   repository's docs are checked by `tests/test_docs_anchors.py`.
 2. Record what you synced, both languages done:
    `python kazma/scripts/website_sync_plan.py --site KazmaAI --mark-synced <page> [...]`
    (a site path such as `ops/migration`, or a source path such as

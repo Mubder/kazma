@@ -16,6 +16,7 @@ from typing import Any, Optional
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.widgets import Footer, RichLog, TabbedContent, TabPane
 
 from kazma_tui.chat import ChatPanel
@@ -24,7 +25,7 @@ from kazma_tui.documents import DocumentsPanel
 from kazma_tui.files import FilesPanel
 from kazma_tui.header import KazmaHeader
 from kazma_tui.memory_panel import MemoryTab
-from kazma_tui.nav_rail import NAV_ITEMS, NavRail, NavSelected
+from kazma_tui.nav_rail import NAV_ITEMS, TAB_LABELS, NavRail, NavSelected
 from kazma_tui.settings_panel import SettingsPanel
 from kazma_tui.swarm import SwarmPanel
 from kazma_tui.traces import TracesPanel
@@ -83,6 +84,7 @@ class KazmaTUI(App[None]):
         Binding("Tab", "focus_next", "Next Focus", show=False),
         Binding("shift+tab", "focus_previous", "Prev Focus", show=False),
         Binding("ctrl+h", "toggle_high_contrast", "High Contrast", show=False),
+        Binding("ctrl+l", "toggle_language", "EN/AR"),
         Binding(":", "command_bar", "Console", show=False),
     ]
 
@@ -483,6 +485,23 @@ class KazmaTUI(App[None]):
         mode = "enabled" if enabled else "disabled"
         self.push_screen(Toast(f"High contrast mode {mode}", "info", duration=2.0))
 
+    def action_toggle_language(self) -> None:
+        """Switch the interface between English and Arabic; the choice is saved.
+
+        Until 2026-10-01 nothing called ``ThemeManager.set_language``: the TUI
+        had Arabic labels and right-to-left styles that only a hand edit of
+        preferences.json could reach.
+        """
+        lang = "en" if self.theme_manager.language == "ar" else "ar"
+        self.theme_manager.set_language(lang)
+        try:
+            self.theme_manager.apply_theme(self)  # adds or drops the RTL styles
+        except ValueError:
+            logger.warning("[tui] could not re-apply the theme for %s", lang, exc_info=True)
+        self.update_localization()
+        name = "Arabic" if lang == "ar" else "English"
+        self.push_screen(Toast(f"Language: {name}", "info", duration=2.0))
+
     def action_record_activity(self) -> None:
         """Record user activity (no-op — adaptive refresh removed)."""
         pass
@@ -614,60 +633,43 @@ class KazmaTUI(App[None]):
                 self._shown_approvals.remove(key)
 
     def update_localization(self) -> None:
-        """Apply dynamic translations and text mirroring based on preferred language."""
+        """Apply the preferred language: right-to-left styling and the labels.
+
+        Works on the main screen, whatever is on top of it: the language can
+        change from the command palette, a modal over the main screen, where
+        ``self.query_one`` finds none of the main screen's widgets.
+        """
         lang = self.theme_manager.language
-        
-        # 1. Toggle the 'rtl-mode' class on the screen
-        try:
-            screen = self.screen
-            if lang == "ar":
-                screen.add_class("rtl-mode")
-            else:
-                screen.remove_class("rtl-mode")
-        except Exception as exc:
-            logger.debug("Failed to toggle rtl-mode class: %s", exc)
+        main = self.screen_stack[0] if self.screen_stack else self.screen
 
-        # 2. Translate Tab labels dynamically
-        try:
-            tabs = self.query_one("#main-tabs", TabbedContent)
-            labels = {
-                "en": {
-                    "dashboard": "Dashboard",
-                    "memory": "Memory",
-                    "chat": "Chat",
-                    "files": "Files",
-                    "traces": "Traces",
-                    "swarm": "Swarm",
-                    "settings": "Settings",
-                    "documents": "Documents",
-                },
-                "ar": {
-                    "dashboard": "\u0644\u0648\u062d\u0629 \u0627\u0644\u0642\u064a\u0627\u062f\u0629",
-                    "memory": "\u0627\u0644\u0630\u0627\u0643\u0631\u0629",
-                    "chat": "\u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629",
-                    "files": "\u0627\u0644\u0645\u0644\u0641\u0627\u062a",
-                    "traces": "\u0627\u0644\u062a\u062a\u0628\u0639\u0627\u062a",
-                    "swarm": "\u0627\u0644\u0633\u0631\u0628",
-                    "settings": "\u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a",
-                    "documents": "\u0627\u0644\u0645\u0633\u062a\u0646\u062f\u0627\u062a",
-                }
-            }
-            for tab_id, label in labels[lang].items():
-                try:
-                    tab = tabs.tabs.get_tab(tab_id)
-                    tab.label = label
-                except Exception as tab_exc:
-                    logger.debug("Failed to update tab label for %s: %s", tab_id, tab_exc)
-        except Exception as exc:
-            logger.debug("Failed to locate or update main-tabs: %s", exc)
+        # 1. Right-to-left styling on the main screen
+        main.set_class(lang == "ar", "rtl-mode")
 
-        # 3. Update Header title (KazmaHeader — RTL class for Arabic)
+        # 2. Translate the tab labels, and the rail's, from one table. The tab
+        # lookup was ``tabs.tabs.get_tab`` -- no such attribute -- and a blind
+        # ``except`` logged it at DEBUG, so no tab was ever translated
+        # (found 2026-10-01 by tests/test_tui_labels.py).
+        labels = TAB_LABELS.get(lang, TAB_LABELS["en"])
         try:
-            header = self.query_one(KazmaHeader)
-            if lang == "ar":
-                header.add_class("header-title")
-        except Exception as exc:
-            logger.debug("Failed to update header localization: %s", exc)
+            tabs = main.query_one("#main-tabs", TabbedContent)
+        except NoMatches:
+            tabs = None
+            logger.debug("No main tabs to relabel")
+        for tab_id, label in labels.items() if tabs is not None else ():
+            try:
+                tabs.get_tab(tab_id).label = label
+            except (ValueError, NoMatches) as tab_exc:
+                logger.debug("No tab %s to relabel: %s", tab_id, tab_exc)
+        try:
+            main.query_one(NavRail).set_labels(labels)
+        except NoMatches:
+            logger.debug("No nav rail to relabel")
+
+        # 3. The header's right-to-left title, on for Arabic and off again
+        try:
+            main.query_one(KazmaHeader).set_class(lang == "ar", "header-title")
+        except NoMatches:
+            logger.debug("No header to relabel")
 
 
 def _load_local_env() -> None:

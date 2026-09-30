@@ -170,7 +170,7 @@ The `IncomingMessage` docstring (`gateway.py:62-66`) states it plainly: *"The Br
 
 The Web UI uses **Server-Sent Events** as the graph transport.
 
-- **Endpoint:** `POST /api/chat/stream` (`sse_chat.py`) — accepts `{message, session_id, model}`, returns a `StreamingResponse` (`text/event-stream`).
+- **Endpoint:** `POST /api/chat/stream` (`sse_chat/`) — accepts `{message, session_id, model}`, returns a `StreamingResponse` (`text/event-stream`).
 - **Telemetry WebSocket:** `/ws/chat/{session_id}` is the Turn Delivery V2 cursor / live-frame bus. It does **not** run the graph and takes no turn control.
 - **Client wiring:** `chat.js` always calls `KS.sse('/api/chat/stream', …)` for turns and `POST /api/approve/{thread_id}` for HITL.
 
@@ -185,7 +185,7 @@ The full SSE event contract (`token`, `tool_call`, `tool_result`, `approval_requ
 | **Telegram** | Inline keyboard buttons | `hitl:approve:\{id\}` / `hitl:deny:\{id\}` | `telegram.py:733` |
 | **Discord** | Components v2 buttons | `swarm_approve_\{task_id\}` / `swarm_reject_\{task_id\}` | `discord.py:312` |
 | **Slack** | Interactive callback | swarm approval block | `slack.py:401` |
-| **Web UI** | Button → `POST /api/approve/\{thread_id\}` + `approval_required` SSE event | — | `routes_direct.py:454` |
+| **Web UI** | Button → `POST /api/approve/\{thread_id\}` + `approval_required` SSE event | — | `routes_direct/misc.py` |
 
 > The **bus adapter singleton** priority is Telegram > Discord > Slack (only one active at a time, wired in `app.py:506-556`). See [Security & Safety](security-and-safety#bus-adapter-priority).
 
@@ -214,13 +214,11 @@ A read-mostly observability dashboard over the same core singletons.
 
 | Aspect | Detail |
 |---|---|
-| Entry point | `kazma_tui.app:main` → `KazmaTUI().run()` (`app.py:576`). |
-| Tabs | Dashboard (`MetricsDashboard`), Chat (`ChatPanel`), Files (`FilesPanel`), Traces (`TracesPanel`), Swarm (`SwarmPanel`), Settings (`SettingsPanel`). |
-| Singleton init | `_initialize_core()` (`app.py:158`) initializes `ModelRegistry` and `SwarmEngine` if launched standalone. |
-| HITL | Approval modal (`widgets/hitl_modal.py`); `_check_pending_approvals` (`app.py:443`), `_submit_hitl_decision` (`app.py:483`). |
-| RTL | `update_localization()` (`app.py:512`) toggles an `rtl-mode` CSS class and translates tab labels. |
-
-> **Minor inconsistency:** TUI labels Dashboard "لوحة القيادة" (`app.py:539`); Web i18n uses "لوحة التحكم" (`i18n.py:77`).
+| Entry point | `kazma_tui.app:main` → `KazmaTUI().run()`. |
+| Tabs | Dashboard (`MetricsDashboard`), Memory (`MemoryTab`), Chat (`ChatPanel`), Files (`FilesPanel`), Traces (`TracesPanel`), Swarm (`SwarmPanel`), Settings (`SettingsPanel`), Documents (`DocumentsPanel`). |
+| Singleton init | `_initialize_core()` initializes `ModelRegistry` and `SwarmEngine` if launched standalone. |
+| HITL | Approval modal (`widgets/hitl_modal.py`); `_check_pending_approvals`, `_submit_hitl_decision`. |
+| RTL | `update_localization()` toggles an `rtl-mode` CSS class and translates the tab labels, in the web UI's words (`TAB_LABELS`). |
 
 ---
 

@@ -92,7 +92,7 @@ See *Authority*.
 A tool that requires HITL approval before execution. There are **three** lists (graph/swarm/MCP) — see [Security & Safety](security-and-safety#danger-tool-lists-three-of-them).
 
 **Delegation**
-Historical inter-agent task handoff with cryptographic integrity (Ed25519 / AES-GCM). **Library/archive only** as of 2026-07 — live multi-worker work uses SwarmEngine handoffs, not the delegation package. Distinct from MCP and skills.
+*Removed.* An inter-agent task handoff with cryptographic integrity (Ed25519 / AES-GCM) that was never wired in; its archived code was deleted on 2026-07-28. Multi-worker work uses SwarmEngine handoffs, and nothing signs or encrypts it.
 
 **DISPATCH**
 A swarm pattern: one worker handles a task.
@@ -145,7 +145,7 @@ The skill registry/marketplace (`kazma_core/hub/`) with signing, certification, 
 ## I
 
 **i18n**
-The inline EN/AR translation system in `kazma-ui/kazma_ui/i18n.py` (no separate files). Drives `dir`/`lang` per request.
+The EN/AR translation system in `kazma-ui/kazma_ui/i18n/`: one catalog module per UI section, merged at import (no separate language files). Drives `dir`/`lang` per request.
 
 **interrupt()**
 LangGraph's suspension primitive, called in `tool_worker_node` for danger tools. Resumed via `Command(resume=...)`.

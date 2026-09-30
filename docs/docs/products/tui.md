@@ -22,6 +22,7 @@ Built with **Textual** (`kazma-tui`). Provides a dashboard for chat, status, fil
 | Documents | **Documents** tab (`DocumentsPanel`) — list/inspect processed docs via shared `DocumentIngestionService` (upload still Web/chat) |
 | HITL | Approval modal widgets for danger tools |
 | Status | Models, gateway, health |
+| Language | English or Arabic: **Ctrl+L**, or **Ctrl+P** → *Switch language*; the choice is saved. The tabs and the navigation rail follow it in the web UI's words, with right-to-left styling for Arabic |
 | Demo mode | `KAZMA_DEMO_MODE` (never use in real prod) |
 
 ### Documents tab
