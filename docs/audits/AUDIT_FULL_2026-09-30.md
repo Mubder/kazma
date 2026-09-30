@@ -52,12 +52,63 @@ whether it was read.
   3. **AUD-019 / AUD-020** — open redirect after login, and a global login
      lockout any internet client can trigger (Medium).
 
-Fixed in this audit's own change set (with regression tests, see §44 of
+Fixed in this audit's first change set (with regression tests, see §45 of
 AGENTS.md and the CHANGELOG): AUD-018 (CSP + off-site images as links),
 AUD-001 (semantic cache removed), AUD-019 (login `next` origin check),
 AUD-020/002/003 (per-address+per-username login throttle, auth off the loop),
 AUD-007 (one protected-config list covering `agent.hooks.`/`mcp.`, hooks with
-no server secrets). The rest remain in the action plan below.
+no server secrets).
+
+**Second change set (2026-09-30, gates in `tests/test_audit_full_backlog_2026_09_30.py`
+plus the sibling suites):**
+- Blocking I/O off the loop: AUD-004 (system-log tail from the end, in a
+  thread), AUD-005 (skill-install validate + extract in a thread), AUD-006
+  (Drive resumable upload above 5 MB, reads offloaded — was a multipart POST
+  Google rejects for large files), AUD-008 (voice STT read bounded to 25 MB →
+  413).
+- Security hardening: AUD-021 (`0.0.0.0` dropped from the loopback-name set),
+  AUD-022 (WS cookie auth requires a same-origin handshake — CSWSH; header
+  credentials still fall through), AUD-023 (a session row is minted only for
+  browser clients, not curl/CLI), AUD-024 (OAuth state logged as a short
+  fingerprint, never the raw secret), AUD-025 (JSON in a `<script>` block is
+  context-escaped via `json_for_script`), AUD-009 (voice extension allowlist),
+  AUD-028 (migration PK identifiers quote-doubled).
+- Dead code / wiring: AUD-013 (deleted the dead hub REST API **and** its
+  server-side `badges.py` — the CLI `badge` command is a remote client),
+  AUD-014 (removed the never-minted per-session WS token path), AUD-016
+  (dropped unused `aiogram`/`tenacity` deps + the stale inventory rows),
+  AUD-011 (declared `pydantic`/`langchain-core` — the two unconditional
+  imports; the guarded-optional ones stay undeclared by design), AUD-010
+  (load tests point at real routes: `/api/swarm/tasks/{id}`,
+  `/api/chat/stream`, `/api/settings`; k6 too).
+
+**Review of the second change set (same day)** found the fixes above had
+gaps, now closed with their own gates:
+- AUD-022 compared the Origin with the `Host` header only. Behind the live
+  tunnel the forwarded Host depends on the proxy's configuration, and the
+  install sits behind Cloudflare Access, so it could not be measured from
+  outside; the check now also trusts the declared browser origins
+  (`KAZMA_PUBLIC_URL`), the set CSRF and CORS use.
+- AUD-025 fixed one instance of the class; `swarm.html` had another
+  (`JSON.parse('{{ … | tojson }}')`), reproduced in node to throw on a quote,
+  newline or backslash in a worker's task or logs. All templates are gated.
+- AUD-009's neighbour: `voice.js` uploaded Safari's `audio/mp4` as
+  `voice.webm`.
+- AUD-010 fixed the five paths the audit listed; three more were dead
+  (`/api/approve/pending`, `/api/approve/{id}/status`, `/ws/swarm/{id}`), every
+  dispatch sent `prompt` (the route reads `task` → 400), and the HITL flows read
+  keys no route returns. Fixed with one request-shape module and a route/body
+  gate against the built app.
+- The verification run itself took 1 h 22 min (`fast_test.py --chunks 4` with a
+  fixed 900 s budget; a timeout killed only the venv launcher and fell back to
+  serial per-file runs). The runner now kills whole process trees, bounds the
+  drain, scales the budget with chunk size, and splits a timed-out chunk.
+
+Deliberately deferred (not bugs): AUD-015 (annotate the ~18 API-only routes —
+docs hygiene), AUD-017 (73-file unused-import sweep — its own batch), AUD-026
+(split the two 270-complexity chat transports — touches the gated §31
+delivery path, needs its own effort + full delivery matrix), AUD-027 (keep
+lowering the exception ratchet, module by module).
 
 Resolved during the audit window (already deployed, `b06fece5`): the live
 server ran below every normal program (Task Scheduler priority 7 — it started

@@ -36,10 +36,6 @@ ALLOWED_UNREACHED: dict[str, str] = {
         "checks it). Its only product caller was the pattern-delete cleanup route, "
         "removed 2026-09-26 (tests/test_memory_deletes.py)."
     ),
-    "kazma_core.hub.api": (
-        "Hub REST API kept as a tested library when its broken Kubernetes "
-        "deployment was removed (2026-09-23); nothing runs it."
-    ),
 }
 
 

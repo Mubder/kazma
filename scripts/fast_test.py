@@ -195,26 +195,188 @@ def pytest_env() -> dict[str, str]:
     return env
 
 
+# ── One pytest run = one killable process tree ────────────────────────────
+#
+# 2026-09-30, a 4-chunk run took 1 h 22 min and was still going. A chunk hit
+# its timeout and ``subprocess.run(timeout=)`` killed only its DIRECT child --
+# on Windows the venv's python.exe, a launcher that starts the real
+# interpreter as ITS child. The interpreter kept running tests, and CPython
+# then calls ``communicate()`` with no timeout on Windows, which waits for
+# every holder of the output pipe: the "15-minute" timeout ran 28 minutes.
+# A test's own child (the leaked-thread negative control) was orphaned for
+# over an hour. Now every run is a unit: a Job Object that kills its members
+# when closed (Windows; the launcher starts suspended and joins before it
+# can start anything) or its own process group (POSIX). A timeout kills the
+# whole tree and the drain after it is bounded; a run that finished is
+# reaped too, so nothing a test left running outlives its chunk.
+
+_CREATE_SUSPENDED = 0x00000004
+_JOB_KILL_ON_CLOSE = 0x00002000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+_JOB_EXTENDED_LIMIT_INFO = 9     # JobObjectExtendedLimitInformation
+
+#: How long the output drain may take after the tree was killed.
+_DRAIN_S = 30.0
+
+
+def _win_job_for(handle: int):
+    """Put a suspended process in a kill-on-close job, then resume it.
+
+    Returns the job handle, or None when the job could not be made (the
+    process is resumed either way; the caller then falls back to killing
+    the direct child). Membership is inherited, so everything the process
+    starts is in the job -- no parent-PID walk that a reused PID could fool.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class _Basic(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class _Extended(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _Basic),
+            ("IoInfo", ctypes.c_uint64 * 6),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.CreateJobObjectW.restype = wintypes.HANDLE
+    k.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    k.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    k.SetInformationJobObject.restype = wintypes.BOOL
+    k.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    k.AssignProcessToJobObject.restype = wintypes.BOOL
+    k.CloseHandle.argtypes = [wintypes.HANDLE]
+    ntdll = ctypes.WinDLL("ntdll")
+    ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+
+    job = k.CreateJobObjectW(None, None)
+    try:
+        if job:
+            info = _Extended()
+            info.BasicLimitInformation.LimitFlags = _JOB_KILL_ON_CLOSE
+            joined = k.SetInformationJobObject(
+                job, _JOB_EXTENDED_LIMIT_INFO, ctypes.byref(info), ctypes.sizeof(info)
+            ) and k.AssignProcessToJobObject(job, handle)
+            if not joined:
+                k.CloseHandle(job)
+                job = None
+    finally:
+        ntdll.NtResumeProcess(handle)  # never leave a run suspended
+    return job or None
+
+
+def _win_close_job(job) -> None:
+    """Close the job: kill-on-close ends every member still running."""
+    import ctypes
+    from ctypes import wintypes
+
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.CloseHandle.argtypes = [wintypes.HANDLE]
+    k.CloseHandle(job)
+
+
+class _Tree:
+    """The process tree of one pytest run, killable as a unit."""
+
+    def __init__(self, proc: subprocess.Popen) -> None:
+        self.proc = proc
+        self._job = _win_job_for(int(proc._handle)) if os.name == "nt" else None
+        self._closed = False
+
+    def _kill_group(self) -> None:
+        import signal
+
+        try:
+            os.killpg(self.proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass  # the group is already gone
+
+    def kill(self) -> None:
+        """Kill every process of the run (a timeout; the leader is alive, so
+        on POSIX its process group is certainly this run's)."""
+        if os.name == "nt":
+            if self._job is not None:
+                self.close()
+            else:
+                self.proc.kill()
+        else:
+            self._kill_group()
+
+    def close(self) -> None:
+        """Reap whatever a finished run left behind; idempotent.
+
+        Windows only: closing the kill-on-close job ends its members, and job
+        membership cannot be confused with another process. On POSIX the
+        leader is reaped by now, so its group id could in principle belong
+        to a new group -- a kill there could hit an unrelated process.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        if os.name == "nt" and self._job is not None:
+            _win_close_job(self._job)
+
+
+def _start(cmd: list[str], env: dict[str, str]) -> tuple[subprocess.Popen, _Tree]:
+    """Launch one pytest process whose whole tree can be killed at once.
+
+    The ONLY process launch in this runner (a test holds it to that): every
+    pytest process comes through ``run_pytest``, so the priority bootstrap
+    and the thread cap apply to all of them.
+    """
+    extra = {"creationflags": _CREATE_SUSPENDED} if os.name == "nt" else {"start_new_session": True}
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(REPO),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        **extra,
+    )
+    return proc, _Tree(proc)
+
+
 def run_pytest(args: list[str], timeout: float) -> tuple[int, str]:
-    """Run pytest serially; return (exit_code, output). Crash-tolerant."""
+    """Run pytest serially; return (exit_code, output). Crash-tolerant.
+
+    A timeout kills the run's whole tree and returns within ``_DRAIN_S`` of
+    it; a run that finished has anything it left running reaped.
+    """
     cmd = pytest_command(args)
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=str(REPO),
-            env=pytest_env(),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            encoding="utf-8",
-            errors="replace",
-        )
-        return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
-    except subprocess.TimeoutExpired as exc:
-        out = (exc.stdout or b"").decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        return 124, out + "\nRUNNER: chunk timed out"
+        proc, tree = _start(cmd, pytest_env())
     except Exception as exc:  # noqa: BLE001 — report, never crash the runner
         return -1, f"RUNNER error: {exc}"
+    try:
+        try:
+            out, err = proc.communicate(timeout=timeout)
+            return proc.returncode, (out or "") + (err or "")
+        except subprocess.TimeoutExpired:
+            tree.kill()
+            try:
+                out, err = proc.communicate(timeout=_DRAIN_S)
+            except subprocess.TimeoutExpired:
+                out, err = "", ""
+            return 124, (out or "") + (err or "") + "\nRUNNER: chunk timed out"
+    finally:
+        tree.close()
 
 
 #: Match a pytest -q progress line, e.g. "path/to/test_x.py ....   [ 12%]".
@@ -376,10 +538,48 @@ def default_chunk_count(cpus: int | None) -> int:
     return max(2, min(cpus or 4, DEFAULT_MAX_CHUNKS))
 
 
+#: A chunk's budget when ``--chunk-timeout`` is not given: so much per file,
+#: never under the floor. A fixed 900 s was sized for the default 8 chunks
+#: (~115 files each); ``--chunks 4`` doubled the files and kept 900 s, and
+#: every chunk timed out with all its tests passing (2026-09-30: 45% through
+#: at the limit). A chunk's budget is a backstop -- a hung TEST is caught by
+#: pytest-timeout (``--timeout=120``) long before it.
+_SECONDS_PER_FILE = 10.0
+_MIN_CHUNK_TIMEOUT = 900.0
+
+
+def chunk_timeout_for(n_files: int, explicit: float | None) -> float:
+    """The timeout of a chunk of ``n_files`` files; an explicit value wins."""
+    if explicit is not None:
+        return float(explicit)
+    return max(_MIN_CHUNK_TIMEOUT, _SECONDS_PER_FILE * n_files)
+
+
+def needs_recovery(r: dict) -> bool:
+    """A chunk result whose tally cannot be trusted: it crashed, ran out of
+    time, or produced no parseable summary."""
+    return is_crash(r["code"]) or r["code"] == 124 or (
+        r["code"] in (0, 1) and not r["counts"]
+    )
+
+
+def split_for_retry(files: list[Path], parallelism: int) -> list[list[Path]]:
+    """Pieces a timed-out chunk is re-run as, in parallel.
+
+    A chunk that ran out of TIME had more work than its budget. Re-running
+    the same work in one process under the same budget times out again, and
+    one process per file, serially, is what made a 10-minute suite take over
+    an hour (2026-09-30: 210 serial processes). Smaller pieces in parallel.
+    """
+    return chunk_files(files, max(2, min(len(files), parallelism)))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--chunks", type=int, default=default_chunk_count(os.cpu_count()))
-    ap.add_argument("--chunk-timeout", type=float, default=900.0)
+    ap.add_argument("--chunk-timeout", type=float, default=None,
+                    help="seconds per chunk (default: %.0f s per file, at least %.0f s)"
+                         % (_SECONDS_PER_FILE, _MIN_CHUNK_TIMEOUT))
     ap.add_argument("--file-timeout", type=float, default=180.0,
                     help="per-file timeout during poison-file retry")
     ap.add_argument("--foreground", action="store_true",
@@ -392,8 +592,9 @@ def main() -> int:
 
     files = discover_test_files()
     chunks = chunk_files(files, args.chunks)
+    budget = max(chunk_timeout_for(len(c), args.chunk_timeout) for c in chunks)
     print(f"[fast-test] {len(files)} test files in {len(chunks)} chunks "
-          f"({args.chunks} requested, timeout {args.chunk_timeout:.0f}s/chunk)")
+          f"({args.chunks} requested, timeout {budget:.0f}s/chunk)")
     t0 = time.time()
 
     totals: dict[str, int] = {}
@@ -402,7 +603,7 @@ def main() -> int:
     failure_logs: list[str] = []
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(chunks)) as pool:
-        futs = {pool.submit(run_chunk, i, c, args.chunk_timeout): i
+        futs = {pool.submit(run_chunk, i, c, chunk_timeout_for(len(c), args.chunk_timeout)): i
                 for i, c in enumerate(chunks)}
         for fut in concurrent.futures.as_completed(futs):
             r = fut.result()
@@ -417,9 +618,7 @@ def main() -> int:
                 failure_logs.append(r["log"])
             # A chunk that produced NO summary line lost its output (observed
             # under heavy concurrency) — treat like a crash and retry per-file.
-            if is_crash(r["code"]) or r["code"] == 124 or (
-                r["code"] in (0, 1) and not r["counts"]
-            ):
+            if needs_recovery(r):
                 crashed_chunks.append(r)
 
     # ── Retry crashed chunks file-by-file to isolate poison ────────────────
@@ -434,7 +633,13 @@ def main() -> int:
     # tests/test_reply_sink.py was reported as `exit=-11` with nothing to act
     # on. A tail of it is printed with the POISON list now.
     poison_diag: dict[str, str] = {}
-    for r in crashed_chunks:
+    # A work queue: a timed-out chunk is re-run as smaller pieces in parallel,
+    # and a piece that still needs recovery comes back here (it splits again,
+    # or goes to the crash isolation below). Each split shrinks the pieces,
+    # and a single file never splits, so the queue drains.
+    pending = list(crashed_chunks)
+    while pending:
+        r = pending.pop(0)
         # Name the actual reason. These three arrive here for different
         # causes and need different first hypotheses, and calling all of them
         # "crashed/timed out" sent a 2026-09-20 audit to the wrong diagnosis:
@@ -453,7 +658,7 @@ def main() -> int:
         else:
             why = "produced no parseable test tally"
         print(f"[fast-test] chunk {r['idx']:02d} {why} "
-              f"(exit={r['code']}) — retrying {len(r['files'])} files individually")
+              f"(exit={r['code']}) — recovering its {len(r['files'])} files")
         # Show WHY. The chunk's own log was captured and then dropped on the
         # floor, so "crashed/timed out (exit=1)" arrived with no evidence
         # whatsoever — and a chunk that genuinely died looked identical to one
@@ -474,6 +679,28 @@ def main() -> int:
                 _safe_print(f"  | {_ln}")
         else:
             print(f"[fast-test] --- chunk {r['idx']:02d} produced NO output at all ---")
+        if r["code"] == 124 and len(r["files"]) > 1:
+            # Out of TIME is not a crash: the same work in one process under
+            # the same budget times out again (see split_for_retry).
+            pieces = split_for_retry(r["files"], args.chunks)
+            print(f"[fast-test] chunk {r['idx']:02d} ran out of time — re-running its "
+                  f"{len(r['files'])} files as {len(pieces)} parallel pieces")
+            jobs = [
+                (r["idx"], piece, chunk_timeout_for(len(piece), args.chunk_timeout))
+                for piece in pieces
+            ]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+                subs = list(pool.map(lambda job: run_chunk(*job), jobs))
+            for s in subs:
+                if needs_recovery(s):
+                    pending.append(s)
+                    continue
+                for k, v in s["counts"].items():
+                    totals[k] = totals.get(k, 0) + v
+                all_failed.extend(s["failed"])
+                if s["failed"]:
+                    failure_logs.append(s["log"])
+            continue
         # Re-run the chunk MINUS the file it died in, as ONE process, then
         # that file alone. Falling straight to per-file reruns costs ~160
         # processes to isolate a single hang.
@@ -495,7 +722,7 @@ def main() -> int:
                 _code, _log = run_pytest(
                     [*[str(f.relative_to(REPO)) for f in _rest], "-m", "not slow",
                      "--timeout=120", "--continue-on-collection-errors"],
-                    timeout=args.chunk_timeout,
+                    timeout=chunk_timeout_for(len(_rest), args.chunk_timeout),
                 )
                 if _code in _BENIGN_EXIT_CODES and _parse_summary(_log):
                     for k, v in _parse_summary(_log).items():

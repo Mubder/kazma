@@ -3467,6 +3467,63 @@ problem was its database. Each layer now holds on its own:
   Gates: `tests/js/test_safe_next.js`, `tests/test_login_throttle.py`
   (AUD-019/020/002/003).
 
+**Second batch (2026-09-30, gates in `tests/test_audit_full_backlog_2026_09_30.py`
+and the sibling suites):**
+- **A cookie is auto-sent on a cross-site WebSocket handshake** (SameSite=Lax
+  does not stop it), so `websocket_is_authenticated` honours the `kazma-session`
+  / legacy-secret cookie only with a same-origin `_ws_origin_allowed` handshake
+  (CSWSH, AUD-022). Header credentials (X-Kazma-Secret / Bearer) are never
+  auto-sent cross-site, so they fall through a failing Origin unchanged — the
+  "no lock-out" guarantee is narrowed to headers, not cookies
+  (`tests/test_ws_origin_cswsh.py`). The dead per-session WS `?token=` path is
+  gone (AUD-014). **`_ws_origin_allowed` also trusts the declared browser
+  origins** (`browser_origins.configured_browser_origins()`: `KAZMA_PUBLIC_URL`
+  / `KAZMA_CORS_ORIGINS`) — the same set CSRF and CORS trust, so "is this
+  Origin ours?" has one answer. Behind a tunnel the `Host` the app sees depends
+  on the proxy's config (cloudflared forwards the public name unless
+  `httpHostHeader` is set; the live install is also behind Cloudflare Access, so
+  it cannot be measured from outside); without this the live chat and dashboard
+  sockets would be refused whenever the forwarded Host is not the public name.
+  Gate: the tunnelled-handshake tests, with the no-`KAZMA_PUBLIC_URL` case as
+  the negative control.
+- **A web session row is minted only for a browser** (`_looks_like_browser`:
+  Sec-Fetch-*, `Accept: text/html`, or a cookie already present) — curl / CLI /
+  webhooks authenticate by header every request and never use the cookie
+  (AUD-023). **`0.0.0.0` is not a loopback host name** — browsers route it to
+  loopback, so it must not inherit peer-trust auto-login (AUD-021).
+- **`json_for_script()` (`kazma_ui/app.py`)** is the one way to embed JSON in a
+  `<script>` block: it escapes `<`/`>` and U+2028/9 to `\uXXXX` (AUD-025). In a
+  template, `{{ value | tojson }}` directly — **never inside
+  `JSON.parse('…')`**: the JS string literal decodes the escapes first, so the
+  Swarm page threw for any worker whose task or logs held a quote, newline or
+  backslash (reproduced in node). Gate: no template parses Jinja JSON out of a
+  JS string, and the real `swarm.html` line is rendered with such data. An
+  OAuth state mismatch logs a short SHA-256 fingerprint, never the raw
+  anti-CSRF secret (`github.py`, AUD-024). Migration PK identifiers are
+  quote-doubled (`path_rewrite._quote_ident`, AUD-028).
+- **Blocking I/O stays off the loop:** the system-log tool tails from the file
+  END in a thread (AUD-004), the skill installer validates + extracts in a
+  thread (AUD-005), Drive uploads over 5 MB use a chunked **resumable** session
+  with offloaded reads — a multipart POST fails for large files (AUD-006,
+  `tests/test_cloud_sync.py`), and the voice STT read is bounded to 25 MB →
+  413 with an audio-extension allowlist (`routes_voice._audio_ext`, AUD-008/009;
+  a real route test drives the bound). **The browser names the recording's real
+  container** (`voice.js` `uploadExtFor`): Safari's MediaRecorder records
+  `audio/mp4`, which was uploaded as `voice.webm` (`tests/js/test_voice_upload_ext.js`).
+- **Dead code removed:** the hub REST API and its server-side `badges.py` (the
+  CLI `badge` command is a remote client, AUD-013). Unused main deps
+  `aiogram`/`tenacity` dropped and the two unconditional imports
+  `pydantic`/`langchain-core` declared; guarded-optional imports (numpy,
+  jsonschema, huggingface_hub, aiohttp) stay undeclared by design (AUD-011/016).
+  **The load tests call the real API** (AUD-010): they were written against one
+  that did not exist — 8 paths 404ed, every dispatch sent `prompt` where the
+  route reads `task` (a 400 on every call), and the HITL flows read keys no
+  route returns. Request bodies are built once, in `loadtests/kazma_api.py`;
+  `tests/test_loadtest_routes.py` matches every path the locustfiles and k6
+  call against the built app's route table and every body against the keys the
+  route reads — without dispatching anything (negative controls: the old paths
+  and the old body).
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser
@@ -3688,7 +3745,17 @@ new *guard* (its own code, or other OS-level variables) still needs the
   processes; crashed/empty chunks are retried per-file; poison files are
   reported. One chunk per CPU, at most 8 (`DEFAULT_MAX_CHUNKS`: 32 chunks
   each loading torch crashed 12 of them, 2026-09-25); CI passes
-  `--chunks 4`. Every pytest process it starts first lowers itself below a
+  `--chunks 4 --chunk-timeout 1500`. Locally, pass NO `--chunks`. **Every
+  pytest run is one killable unit** (2026-09-30: a `--chunks 4` run took
+  1 h 22 min): a chunk's budget scales with its files (10 s each, floor 900 s)
+  unless given; a timeout kills the whole tree -- a kill-on-close Job Object on
+  Windows, where the venv's `python.exe` is a launcher and killing it left the
+  interpreter running tests while CPython's post-timeout `communicate()` waited
+  with no timeout; a process group on POSIX -- and the drain after it is
+  bounded; a finished run's leftovers are reaped (Windows); and a chunk that
+  ran out of TIME is re-run as parallel pieces, not one process per file,
+  serially (`tests/test_fast_test_runner.py`, real processes, with the old
+  direct-child kill as the negative control). Every pytest process it starts first lowers itself below a
   normal program (`pytest_command`: Windows CPU class below normal and
   memory priority low; `nice` elsewhere; `--foreground` opts out), and gets
   its share of math-library threads (CPUs / chunks, `OMP_NUM_THREADS` & co.

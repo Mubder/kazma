@@ -2,21 +2,23 @@
 Locust load test for Kazma Swarm Dispatch endpoints.
 
 Tests:
-- /api/swarm/dispatch - Main swarm dispatch endpoint
-- /api/swarm/status - Swarm task status polling
-- WebSocket /ws/swarm/{task_id} - Real-time swarm updates
-- HITL approval flow: POST /api/approve/{thread_id}
+- POST /api/swarm/dispatch - Main swarm dispatch endpoint (background)
+- GET  /api/swarm/tasks/{task_id} - Swarm task status polling
+- GET  /api/swarm/tasks/{task_id}/stream - SSE task events
+- GET  /api/swarm/tasks - Task list
+
+Request shapes come from kazma_api.py; tests/test_loadtest_routes.py checks
+them and every path here against the real app.
 
 Usage:
     locust -f loadtests/locustfile_swarm.py --host=http://localhost:9090 --users=50 --spawn-rate=5 --run-time=60s
 """
 
 from locust import HttpUser, task, between, events
-from locust.exception import StopUser
 import random
-import json
 import uuid
-import time
+
+from kazma_api import DISPATCH_PATTERNS, chat_body, dispatch_body
 
 
 class SwarmDispatchUser(HttpUser):
@@ -38,15 +40,6 @@ class SwarmDispatchUser(HttpUser):
         "Generate a Docker Compose file for a microservices architecture",
     ]
     
-    WORKER_POOLS = [
-        ["researcher", "analyst", "writer"],
-        ["coder", "reviewer", "tester"],
-        ["planner", "executor", "critic"],
-        ["all"],  # All workers
-    ]
-    
-    TASK_TYPES = ["SWARM", "PIPELINE", "DAG"]
-    
     def on_start(self):
         """Called when a simulated user starts."""
         self.thread_id = f"loadtest-{uuid.uuid4().hex[:8]}"
@@ -57,24 +50,12 @@ class SwarmDispatchUser(HttpUser):
         self._authenticate()
     
     def _authenticate(self):
-        """Attempt to get a session/thread ID for testing."""
-        try:
-            # Try to create a session or get thread ID
-            resp = self.client.post("/api/session/create", json={
-                "platform": "web",
-                "user_id": f"loadtest_{random.randint(1000, 9999)}",
-                "metadata": {"source": "loadtest"}
-            }, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                self.session_id = data.get("thread_id") or data.get("session_id")
-                self.authenticated = True
-        except Exception:
-            pass
-        
-        # Fallback: generate our own thread_id
-        if not self.session_id:
-            self.session_id = f"loadtest-thread-{uuid.uuid4().hex[:12]}"
+        """Get a thread ID for testing.
+
+        There is no session-create endpoint — a web chat/swarm thread id is
+        minted client-side and passed on each request, so generate one.
+        """
+        self.session_id = f"loadtest-thread-{uuid.uuid4().hex[:12]}"
     
     @task(10)
     def dispatch_swarm_task(self):
@@ -82,17 +63,11 @@ class SwarmDispatchUser(HttpUser):
         if not self.session_id:
             return
             
-        task_data = {
-            "prompt": random.choice(self.SWARM_TASKS),
-            "workers": random.choice(self.WORKER_POOLS),
-            "task_type": random.choice(self.TASK_TYPES),
-            "thread_id": self.session_id,
-            "metadata": {
-                "source": "loadtest",
-                "user_id": f"loadtest_user_{random.randint(1, 100)}",
-            }
-        }
-        
+        task_data = dispatch_body(
+            random.choice(self.SWARM_TASKS),
+            pattern=random.choice(DISPATCH_PATTERNS),
+        )
+
         with self.client.post(
             "/api/swarm/dispatch",
             json=task_data,
@@ -101,11 +76,14 @@ class SwarmDispatchUser(HttpUser):
         ) as response:
             if response.status_code == 200:
                 try:
-                    data = response.json()
-                    self.last_task_id = data.get("task_id") or data.get("thread_id")
-                    response.success()
+                    self.last_task_id = response.json().get("task_id")
                 except Exception:
                     response.failure("Invalid JSON response")
+                    return
+                if self.last_task_id:
+                    response.success()
+                else:
+                    response.failure("dispatch returned no task_id")
             elif response.status_code == 429:
                 response.failure("Rate limited (429)")
             else:
@@ -118,18 +96,17 @@ class SwarmDispatchUser(HttpUser):
             return
             
         with self.client.get(
-            f"/api/swarm/status/{self.last_task_id}",
+            f"/api/swarm/tasks/{self.last_task_id}",
             catch_response=True,
-            name="/api/swarm/status/[task_id]",
+            name="/api/swarm/tasks/[task_id]",
         ) as response:
+            # The task store is durable (it survives completion and restart),
+            # so a task this user dispatched is never a legitimate 404.
             if response.status_code == 200:
-                response.success()
-            elif response.status_code == 404:
-                # Task might not exist yet or completed
                 response.success()
             else:
                 response.failure(f"HTTP {response.status_code}")
-    
+
     @task(3)
     def list_swarm_tasks(self):
         """List recent swarm tasks."""
@@ -140,26 +117,6 @@ class SwarmDispatchUser(HttpUser):
             name="/api/swarm/tasks",
         ) as response:
             if response.status_code == 200:
-                response.success()
-            else:
-                response.failure(f"HTTP {response.status_code}")
-    
-    @task(1)
-    def hitl_approve(self):
-        """Simulate HITL approval flow."""
-        if not hasattr(self, 'last_task_id') or not self.last_task_id:
-            return
-            
-        # Randomly approve or deny
-        approved = random.choice([True, False])
-        
-        with self.client.post(
-            f"/api/approve/{self.last_task_id}",
-            json={"approved": approved, "reason": "Load test approval"},
-            catch_response=True,
-            name="/api/approve/[thread_id]",
-        ) as response:
-            if response.status_code in (200, 404):  # 404 if no pending approval
                 response.success()
             else:
                 response.failure(f"HTTP {response.status_code}")
@@ -184,24 +141,45 @@ class WebSocketSwarmUser(HttpUser):
     wait_time = between(5, 15)
     
     def on_start(self):
-        self.thread_id = f"ws-loadtest-{uuid.uuid4().hex[:8]}"
+        self.task_id = None
         self.ws = None
-    
+
     @task
     def websocket_swarm_updates(self):
-        """Connect to WebSocket and listen for swarm updates."""
-        # Note: Locust doesn't have native WebSocket support in HttpUser
-        # This would need WebSocketUser from locust-plugins or custom implementation
-        # For now, we'll test the SSE endpoint instead
-        self._test_sse()
-    
+        """Stream a real task's SSE events (HttpUser has no WebSocket)."""
+        if not self.task_id:
+            self._dispatch()
+        if self.task_id:
+            self._test_sse()
+
+    def _dispatch(self):
+        """Dispatch one background task so there is a real task to stream."""
+        with self.client.post(
+            "/api/swarm/dispatch",
+            json=dispatch_body("Summarise the benefits of load testing in one line"),
+            catch_response=True,
+            name="/api/swarm/dispatch (for SSE)",
+        ) as response:
+            if response.status_code != 200:
+                response.failure(f"HTTP {response.status_code}")
+                return
+            try:
+                self.task_id = response.json().get("task_id")
+            except Exception:
+                response.failure("Invalid JSON response")
+                return
+            if self.task_id:
+                response.success()
+            else:
+                response.failure("dispatch returned no task_id")
+
     def _test_sse(self):
         """Test Server-Sent Events endpoint as WebSocket alternative."""
         with self.client.get(
-            f"/api/swarm/stream/{self.thread_id}",
+            f"/api/swarm/tasks/{self.task_id}/stream",
             headers={"Accept": "text/event-stream"},
             catch_response=True,
-            name="/api/swarm/stream/[thread_id] (SSE)",
+            name="/api/swarm/tasks/[task_id]/stream (SSE)",
             stream=True,
         ) as response:
             if response.status_code == 200:
@@ -223,16 +201,17 @@ class GatewayApiUser(HttpUser):
     
     @task(5)
     def chat_completion(self):
-        """Test chat completion endpoint."""
+        """Test the chat endpoint (SSE stream)."""
         with self.client.post(
-            "/api/chat",
-            json={
-                "message": "Hello, this is a load test message",
-                "thread_id": f"loadtest-{uuid.uuid4().hex[:8]}",
-                "model": "gpt-4o-mini",
-            },
+            "/api/chat/stream",
+            json=chat_body(
+                "Hello, this is a load test message",
+                f"loadtest-{uuid.uuid4().hex[:8]}",
+            ),
+            headers={"Accept": "text/event-stream"},
             catch_response=True,
-            name="/api/chat",
+            name="/api/chat/stream",
+            stream=True,
         ) as response:
             if response.status_code == 200:
                 response.success()
@@ -258,9 +237,9 @@ class GatewayApiUser(HttpUser):
     def get_config(self):
         """Get configuration."""
         with self.client.get(
-            "/api/config",
+            "/api/settings",
             catch_response=True,
-            name="/api/config",
+            name="/api/settings",
         ) as response:
             if response.status_code == 200:
                 response.success()

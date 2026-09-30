@@ -823,7 +823,11 @@
 
 {% block scripts %}
 <script>
-  window.KAZMA_WORKERS = JSON.parse('{{ workers | tojson | replace("<", "\\u003c") | safe if workers else "[]" }}');
+  {# tojson is a valid JS expression and already escapes < > & ' for a
+     script element. Never wrap it in JSON.parse('...'): the JS string
+     literal decodes the escapes first, so a worker whose task or logs held a
+     quote, newline or backslash threw and broke this page. #}
+  window.KAZMA_WORKERS = {{ (workers or []) | tojson }};
 </script>
 <!-- Mermaid 10.9.8 vendored locally (matches htmx/alpine) — the CDN load
      left window.mermaid undefined whenever the browser couldn't reach

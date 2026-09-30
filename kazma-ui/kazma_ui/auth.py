@@ -400,7 +400,11 @@ def _ws_origin_allowed(websocket: Any) -> bool:
 
       1. The header is absent (curl / TUI / non-browser client), OR
       2. It matches the request ``Host`` exactly (same-origin page), OR
-      3. It appears in ``KAZMA_WS_EXTRA_ORIGINS`` (comma-separated
+      3. It is one of the operator's declared browser origins
+         (``KAZMA_PUBLIC_URL`` / ``KAZMA_CORS_ORIGINS`` — the same set CSRF
+         and CORS trust, so a tunnel that forwards a different ``Host`` does
+         not lock the operator's own public page out), OR
+      4. It appears in ``KAZMA_WS_EXTRA_ORIGINS`` (comma-separated
          ``scheme://host[:port]`` entries).
 
     Kill-switch: ``KAZMA_WS_ORIGIN_CHECK=0`` disables the guard entirely.
@@ -421,6 +425,18 @@ def _ws_origin_allowed(websocket: Any) -> bool:
     except Exception:
         origin_authority = ""
     if host and origin_authority and origin_authority == host.strip().lower():
+        return True
+    # The operator's declared browser origins (KAZMA_PUBLIC_URL /
+    # KAZMA_CORS_ORIGINS) — the SAME trust set the CSRF middleware and CORS
+    # use (browser_origins.py), so "is this Origin ours?" has one answer.
+    # Behind a tunnel the Host header the app sees depends on the proxy's
+    # configuration; the declared public URL does not. Without this, a
+    # cookie-authenticated socket from the operator's own public page is
+    # refused whenever the proxy forwards a different Host (AUD-022).
+    from kazma_ui.browser_origins import configured_browser_origins, normalize_origin
+
+    normalized = normalize_origin(origin)
+    if normalized and normalized in configured_browser_origins():
         return True
     extra = {
         o.strip().lower()
@@ -500,7 +516,10 @@ def _host_is_local_name(request: Request) -> bool:
     if not host:
         return False
     hostname = host.split(":")[0].strip("[]") if not host.startswith("[") else host.split("]")[0].lstrip("[")
-    local_names = {"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"}
+    # NOT "0.0.0.0": browsers route it to loopback, so on a direct bind with
+    # peer trust a request to http://0.0.0.0:<port> would inherit the
+    # loopback auto-login (AUD-021). It is a bind address, never a client host.
+    local_names = {"localhost", "127.0.0.1", "::1", "[::1]"}
     machine = socket.gethostname().lower() if hasattr(socket, "gethostname") else ""
     if machine:
         local_names.add(machine)
@@ -828,54 +847,6 @@ def verify_api_token(provided: str) -> bool:
         return False
 
 
-# ── Per-session WebSocket tokens ─────────────────────────────────────────
-# The browser can't set custom headers on a WebSocket handshake, so the
-# WS auth path uses ?token=... query parameter. Previously this exposed
-# the raw KAZMA_SECRET (which gates ALL HTTP APIs) in browser history,
-# proxy logs, and view-source via a <meta> tag. These functions generate
-# short-lived, per-process WS tokens that grant ONLY WebSocket access and
-# expire after 1 hour — never the raw secret.
-
-_ws_session_tokens: dict[str, float] = {}  # token → expiry epoch
-_WS_TOKEN_TTL_SECONDS = 3600  # 1 hour
-
-
-def generate_ws_session_token() -> str:
-    """Generate a short-lived per-session WS token (NOT the raw KAZMA_SECRET).
-
-    The token grants ONLY WebSocket access and expires after 1 hour.
-    Call this once per page render and inject into the meta tag so the
-    browser JS can use it for WS ?token=... without exposing the secret.
-    """
-    import secrets
-    import time
-
-    # Prune expired tokens (keep dict small).
-    now = time.time()
-    expired = [k for k, exp in _ws_session_tokens.items() if exp < now]
-    for k in expired:
-        del _ws_session_tokens[k]
-
-    token = secrets.token_urlsafe(32)
-    _ws_session_tokens[token] = now + _WS_TOKEN_TTL_SECONDS
-    return token
-
-
-def verify_ws_session_token(token: str) -> bool:
-    """Verify a per-session WS token. Returns False if expired or unknown."""
-    import time
-
-    if not token:
-        return False
-    expiry = _ws_session_tokens.get(token)
-    if expiry is None:
-        return False
-    if time.time() > expiry:
-        _ws_session_tokens.pop(token, None)
-        return False
-    return True
-
-
 def extract_provided_credential(request: Request) -> str:
     """Pull auth material from headers/cookie (secret, session, or API token).
 
@@ -930,24 +901,30 @@ def is_authenticated(request: Request, expected_secret: str = "") -> bool:
 def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> bool:
     """Auth for WebSocket handshakes (cookies/headers/query/loopback/private LAN).
 
-    Accepts the same credentials as HTTP, plus query parameter token:
+    Accepts the same credentials as HTTP:
       1. ``X-Kazma-Secret`` header
       2. ``Authorization: Bearer …``
-      3. ``?token=…`` query parameter — accepts a **per-session WS token**
-         (NOT the raw KAZMA_SECRET). See ``generate_ws_session_token()``.
-      4. ``kazma-session`` opaque cookie (preferred, mint by /login or TRUST_LAN)
-      5. ``kazma-secret`` legacy cookie — only when opaque sessions are off
-      6. Loopback or private LAN peers (WSL bridge 172.28.x.x, Docker 172.17.x.x, 192.168.x.x)
+      3. ``kazma-session`` opaque cookie (preferred, mint by /login or TRUST_LAN)
+         — a browser sends it automatically on a cross-site WS handshake
+         (SameSite=Lax does not stop that), so it is honoured only with a
+         same-host / allow-listed ``Origin`` (``_ws_origin_allowed``, CSWSH).
+      4. ``kazma-secret`` legacy cookie — only when opaque sessions are off,
+         and under the same Origin check.
+      5. Loopback or private LAN peers (WSL bridge 172.28.x.x, Docker 172.17.x.x, 192.168.x.x)
          — with a cross-origin check (``_ws_origin_allowed``): a public page can
          open ``ws://127.0.0.1`` from any browser (CSWSH), so the handshake
          ``Origin`` must be absent / same-host / allow-listed
          (``KAZMA_WS_EXTRA_ORIGINS``). Kill-switch ``KAZMA_WS_ORIGIN_CHECK=0``.
-         If the Origin check fails, credential paths below are still tried.
+         If the Origin check fails, header credential paths below are still tried.
          Peer trust is additionally disabled whenever a reverse proxy is
          declared (``KAZMA_TRUSTED_PROXIES``) — see :func:`_peer_trust_allowed`
          and audit F-01, where an absent ``Origin`` plus a proxied loopback
          peer authenticated any anonymous non-browser client.
-      7. Dev bypass: ``KAZMA_DEV_WS_BYPASS=1`` (local testing only — blocked in production)
+      6. Dev bypass: ``KAZMA_DEV_WS_BYPASS=1`` (local testing only — blocked in production)
+
+    Header credentials (X-Kazma-Secret / Bearer) are never sent automatically
+    by a browser, so they carry no Origin requirement; only the auto-sent
+    cookies and peer trust do.
     """
     expected = expected_secret or get_kazma_secret()
 
@@ -993,23 +970,9 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
         ):
             return True
 
-    # Query parameter: per-session WS token only — never the raw KAZMA_SECRET
-    # (URL query lands in access logs / Referer).
-    provided = ""
-    try:
-        query_params = websocket.query_params
-        if query_params:
-            provided = (query_params.get("token") or "").strip()
-    except Exception:
-        pass  # no query params on this transport — treated as no token
-
-    if provided and verify_ws_session_token(provided):
-        return True
-    # Ignore leftover query tokens that are not session tokens (incl. raw secret).
-    provided = ""
-
-    if not provided:
-        provided = (websocket.headers.get(SECRET_HEADER) or "").strip()
+    # Header credentials are never auto-sent by a browser (WS handshakes carry
+    # no custom headers cross-site), so they need no Origin check.
+    provided = (websocket.headers.get(SECRET_HEADER) or "").strip()
     if not provided:
         auth = (websocket.headers.get("authorization") or "").strip()
         if auth.lower().startswith("bearer "):
@@ -1017,21 +980,30 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
     if not provided:
         sess = (websocket.cookies.get(SESSION_COOKIE) or "").strip()
         if sess:
-            try:
-                from kazma_core.security.web_sessions import validate_session
-
-                if validate_session(sess):
-                    return True
-            except Exception:
-                # Fail-closed by construction (audit O3): an unvalidated
-                # session simply does not authenticate; the credential checks
-                # below still run. Logged because a session-store outage
-                # otherwise looks like mass credential rejection.
+            # A cookie IS auto-sent on a cross-site WS handshake, so a public
+            # page could open ws://…/ carrying the user's session (CSWSH,
+            # AUD-022). Require a same-host / allow-listed Origin first —
+            # SameSite=Lax alone does not stop a WebSocket connection.
+            if not _ws_origin_allowed(websocket):
                 logger.warning(
-                    "[SECURITY] WebSocket session validation failed",
-                    exc_info=True,
+                    "[SECURITY] WebSocket cookie auth rejected: cross-origin handshake"
                 )
-    if not provided and _accept_legacy_secret_cookie():
+            else:
+                try:
+                    from kazma_core.security.web_sessions import validate_session
+
+                    if validate_session(sess):
+                        return True
+                except Exception:
+                    # Fail-closed by construction (audit O3): an unvalidated
+                    # session simply does not authenticate; the credential checks
+                    # below still run. Logged because a session-store outage
+                    # otherwise looks like mass credential rejection.
+                    logger.warning(
+                        "[SECURITY] WebSocket session validation failed",
+                        exc_info=True,
+                    )
+    if not provided and _accept_legacy_secret_cookie() and _ws_origin_allowed(websocket):
         provided = (websocket.cookies.get(SECRET_COOKIE) or "").strip()
     if not provided:
         return False
@@ -1134,8 +1106,37 @@ def require_admin(request: Request) -> JSONResponse | None:
     return JSONResponse({"error": "Admin role required"}, status_code=403)
 
 
+def _looks_like_browser(request: Request) -> bool:
+    """Whether the client will store and resend a ``Set-Cookie``.
+
+    curl / CLI / webhooks authenticate with ``X-Kazma-Secret`` on every call
+    and never use the cookie, so minting them an admin session row per request
+    is pure churn (AUD-023). Browsers send ``Sec-Fetch-*`` on every request and
+    ``Accept: text/html`` on navigations; a client already carrying one of our
+    cookies is, by definition, participating in the cookie scheme.
+    """
+    try:
+        headers = request.headers
+        for key in headers.keys():
+            if key.lower().startswith("sec-fetch-"):
+                return True
+        if "text/html" in (headers.get("accept") or "").lower():
+            return True
+        if request.cookies.get(SESSION_COOKIE) or request.cookies.get(SECRET_COOKIE):
+            return True
+    except Exception:
+        # An unusual transport with no readable headers — treat as non-browser
+        # so we do not mint a session row we cannot deliver.
+        return False
+    return False
+
+
 def _mint_auth_cookie(response: Response, request: Request, expected: str) -> None:
     """Set browser auth cookie — opaque session preferred (audit H1)."""
+    # Only a browser will keep and resend the cookie. A header-authenticated
+    # non-browser client gets nothing to store — no session row minted (AUD-023).
+    if not _looks_like_browser(request):
+        return
     try:
         from kazma_core.security.web_sessions import (
             SESSION_COOKIE as _SC,

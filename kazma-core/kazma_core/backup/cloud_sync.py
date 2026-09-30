@@ -190,6 +190,87 @@ _GDRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
 _GDRIVE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 _GDRIVE_ROOT_FOLDER = "kazma-backups"
 
+#: Google documents ``uploadType=multipart`` for files of 5 MB or less; a
+#: backup archive is larger, so anything above this goes through a resumable
+#: session instead of silently failing (AUD-006).
+_GDRIVE_MULTIPART_MAX = 5 * 1024 * 1024
+#: Resumable chunk size — must be a multiple of 256 KiB (Google's requirement).
+_GDRIVE_RESUMABLE_CHUNK = 8 * 1024 * 1024
+
+
+async def _gdrive_upload(
+    client: httpx.AsyncClient,
+    token: str,
+    *,
+    name: str,
+    parent_id: str,
+    local: Path,
+) -> httpx.Response:
+    """Upload one file to Drive — multipart under 5 MB, resumable above it.
+
+    Every disk read is offloaded with ``asyncio.to_thread`` so the event loop
+    is never blocked on a large archive, and files over Google's 5 MB
+    multipart cap go through a chunked resumable session instead of failing.
+    """
+    import json
+
+    metadata = json.dumps({"name": name, "parents": [parent_id]})
+    size = await asyncio.to_thread(lambda: local.stat().st_size)
+
+    if size <= _GDRIVE_MULTIPART_MAX:
+        data = await asyncio.to_thread(local.read_bytes)
+        return await client.post(
+            _GDRIVE_UPLOAD_URL,
+            params={"uploadType": "multipart"},
+            headers={"Authorization": f"Bearer {token}"},
+            files={
+                "metadata": (None, metadata, "application/json"),
+                "file": (name, data, "application/octet-stream"),
+            },
+        )
+
+    # Resumable session: initiate, then PUT chunks with a Content-Range header.
+    init = await client.post(
+        _GDRIVE_UPLOAD_URL,
+        params={"uploadType": "resumable"},
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=UTF-8",
+            "X-Upload-Content-Type": "application/octet-stream",
+        },
+        content=metadata,
+    )
+    if init.status_code not in (200, 201):
+        return init
+    session_uri = init.headers.get("Location")
+    if not session_uri:
+        return init
+
+    def _read_chunk(offset: int) -> bytes:
+        with open(local, "rb") as f:
+            f.seek(offset)
+            return f.read(_GDRIVE_RESUMABLE_CHUNK)
+
+    offset = 0
+    last = init
+    while offset < size:
+        chunk = await asyncio.to_thread(_read_chunk, offset)
+        if not chunk:
+            break
+        end = offset + len(chunk) - 1
+        last = await client.put(
+            session_uri,
+            headers={"Content-Range": f"bytes {offset}-{end}/{size}"},
+            content=chunk,
+        )
+        if last.status_code in (200, 201):
+            return last
+        # 308 = chunk stored, send the next; anything else is a hard failure.
+        if last.status_code != 308:
+            return last
+        offset = end + 1
+    return last
+
 # Google error reasons mapped to actionable guidance. A 403 on Drive is almost
 # always one of the first two: the API is off in the Cloud project, or the
 # token predates / never received the drive.file scope (Google never adds
@@ -350,21 +431,10 @@ class GoogleDriveSync:
                 parent_id = await self._ensure_folder(token, folder, parent=parent_id)
 
             async with httpx.AsyncClient(timeout=300, verify=shared_ssl_context()) as client:
-                with open(local, "rb") as f:
-                    resp = await client.post(
-                        _GDRIVE_UPLOAD_URL,
-                        params={"uploadType": "multipart"},
-                        headers={"Authorization": f"Bearer {token}"},
-                        files={
-                            "metadata": (
-                                None,
-                                f'{{"name": "{parts[-1]}", "parents": ["{parent_id}"]}}',
-                                "application/json",
-                            ),
-                            "file": (parts[-1], f, "application/octet-stream"),
-                        },
-                    )
-                    return resp.status_code in (200, 201)
+                resp = await _gdrive_upload(
+                    client, token, name=parts[-1], parent_id=parent_id, local=local
+                )
+                return resp.status_code in (200, 201)
 
         display = f"google_drive:{_GDRIVE_ROOT_FOLDER}/{remote_path}"
         return await _upload_all_files(dest, upload_one, remote_path, display)
@@ -373,20 +443,9 @@ class GoogleDriveSync:
         token = await self._get_access_token()
         root_id = await self._ensure_folder(token, _GDRIVE_ROOT_FOLDER)
         async with httpx.AsyncClient(timeout=300, verify=shared_ssl_context()) as client:
-            with open(local, "rb") as f:
-                resp = await client.post(
-                    _GDRIVE_UPLOAD_URL,
-                    params={"uploadType": "multipart"},
-                    headers={"Authorization": f"Bearer {token}"},
-                    files={
-                        "metadata": (
-                            None,
-                            f'{{"name": "{remote_name}", "parents": ["{root_id}"]}}',
-                            "application/json",
-                        ),
-                        "file": (remote_name, f, "application/octet-stream"),
-                    },
-                )
+            resp = await _gdrive_upload(
+                client, token, name=remote_name, parent_id=root_id, local=local
+            )
         display = f"google_drive:{_GDRIVE_ROOT_FOLDER}/{remote_name}"
         if resp.status_code in (200, 201):
             return {"ok": True, "remote": display, "files": 1}

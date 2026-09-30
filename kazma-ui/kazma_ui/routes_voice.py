@@ -22,6 +22,40 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 
+#: STT providers cap the audio they accept (OpenAI Whisper: 25 MB). Bound the
+#: read itself so one upload cannot exhaust process memory before rejection —
+#: the sibling chat upload does the same (routes_chat_upload.py).
+_MAX_STT_BYTES = 25 * 1024 * 1024
+
+#: The audio-format token derived from a filename/Content-Type becomes a
+#: temp-file suffix in the faster-whisper path (voice/stt.py) and the format
+#: hint for every provider. Anything outside this allowlist is neither a real
+#: audio extension nor safe to splice into a filename, so it falls back to the
+#: safe default rather than reaching NamedTemporaryFile(suffix=...).
+_AUDIO_EXTS = frozenset(
+    {"ogg", "oga", "opus", "mp3", "mpga", "mpeg", "wav", "flac", "webm", "m4a", "mp4", "aac"}
+)
+
+
+#: MIME subtypes that name an allow-listed format by another spelling — so a
+#: filename-less upload typed ``audio/x-wav`` is labelled wav, not the default.
+_AUDIO_ALIASES = {
+    "x-wav": "wav", "wave": "wav", "vnd.wave": "wav",
+    "x-m4a": "m4a", "x-flac": "flac", "x-mpeg": "mp3",
+}
+
+
+def _audio_ext(filename: str | None, content_type: str | None) -> str:
+    """A safe audio extension from the upload, always in ``_AUDIO_EXTS``."""
+    ext = ""
+    if filename and "." in filename:
+        ext = filename.rsplit(".", 1)[-1]
+    elif content_type:
+        ext = content_type.split("/")[-1].split(";")[0]
+    ext = ext.strip().lower()
+    ext = _AUDIO_ALIASES.get(ext, ext)
+    return ext if ext in _AUDIO_EXTS else "ogg"
+
 
 def _read_settings(*keys: str) -> dict[str, Any]:
     """The voice settings one request needs, in one pass.
@@ -62,16 +96,17 @@ async def speech_to_text(
     if db_language and str(db_language).strip() and str(db_language).strip().lower() != "none":
         language = str(db_language)
 
-    audio_bytes = await file.read()
+    audio_bytes = await file.read(_MAX_STT_BYTES + 1)
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Empty audio file")
+    if len(audio_bytes) > _MAX_STT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Audio too large (max {_MAX_STT_BYTES // (1024 * 1024)} MB)",
+        )
 
-    # Detect format from filename/Content-Type
-    ext = "ogg"
-    if file.filename:
-        ext = file.filename.rsplit(".", 1)[-1] if "." in file.filename else "ogg"
-    elif file.content_type:
-        ext = file.content_type.split("/")[-1].split(";")[0]
+    # Detect format from filename/Content-Type, constrained to an audio allowlist.
+    ext = _audio_ext(file.filename, file.content_type)
 
     started = time.monotonic()
     try:

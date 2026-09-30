@@ -10,6 +10,13 @@ dependencies = [
     "uvicorn[standard]>=0.29.0",
     "langgraph>=0.2.0",
     "langgraph-checkpoint-sqlite>=3.0.0",
+    # Imported unconditionally at module level (FastAPI request models;
+    # kazma_gateway checkpoint RunnableConfig). Transitively present via
+    # fastapi / langgraph today, but declared so a transitive change cannot
+    # break the import (AUD-011). Optional deps imported behind a guard
+    # (numpy, jsonschema, huggingface_hub, aiohttp) stay undeclared by design.
+    "pydantic>=2.0.0",
+    "langchain-core>=0.2.0",
     "aiosqlite>=0.20.0",
     "langfuse>=2.0.0",
     "pyyaml>=6.0",
@@ -20,7 +27,6 @@ dependencies = [
     "python-multipart>=0.0.9",
     "textual>=8.0.0",
     "psutil>=5.9.0",
-    "aiogram>=3.0.0",
     "websockets>=12.0",
     "duckduckgo-search>=6.0",
     "trafilatura>=1.12",
@@ -29,7 +35,6 @@ dependencies = [
     # zoneinfo database — bare Windows/containers have no system tzdata;
     # cron.timezone (and anything using ZoneInfo) needs it to resolve names.
     "tzdata>=2024.1",
-    "tenacity>=8.0.0",
     "networkx>=3.1",
     "click>=8.1.0",
     "rich>=13.0.0",

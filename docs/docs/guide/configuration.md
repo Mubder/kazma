@@ -482,7 +482,7 @@ Hardcoded `GEMINI_MODELS` (Vertex AI has no static `/models` endpoint): `gemini-
 
 ## 6. `retry` keys
 
-The `tenacity`-based retry decorators read overrides from ConfigStore (`retry.py:69-86`):
+The retry/backoff helpers read overrides from ConfigStore (`retry.py`):
 
 | Key | Default | Description |
 |---|---|---|

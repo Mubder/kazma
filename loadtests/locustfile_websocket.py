@@ -2,10 +2,13 @@
 Locust load test for Kazma WebSocket/SSE and HITL Approval Flow.
 
 Tests:
-- WebSocket /ws/swarm/{task_id} - Real-time swarm updates
-- SSE /api/swarm/stream/{thread_id} - Server-sent events fallback
-- HITL Approval: POST /api/approve/{thread_id}
-- HITL WebSocket: /ws/hitl/{thread_id} - Real-time approval notifications
+- WebSocket /ws/dashboard - Real-time dashboard feed (needs locust-plugins)
+- SSE /api/swarm/tasks/{task_id}/stream - Server-sent events for a real task
+- HITL: GET /api/swarm/tasks/{task_id}, POST /api/swarm/tasks/{task_id}/approve|reject
+  for a task paused at a checkpoint, GET /api/pending-approvals
+
+Request shapes come from kazma_api.py; tests/test_loadtest_routes.py checks
+them and every path here against the real app.
 
 Usage:
     # WebSocket test (requires locust-plugins)
@@ -16,13 +19,12 @@ Usage:
 """
 
 from locust import HttpUser, task, between, events
-from locust.exception import StopUser
 import random
-import uuid
 import time
 import json
-import threading
 from typing import Optional
+
+from kazma_api import PAUSED, TERMINAL, dispatch_body, task_status
 
 try:
     from locust_plugins.users import WebSocketUser
@@ -38,26 +40,55 @@ class SSESwarmUser(HttpUser):
     wait_time = between(3, 10)
     
     def on_start(self):
-        self.thread_id = f"sse-loadtest-{uuid.uuid4().hex[:8]}"
+        self.task_ids: list[str] = []
         self.active_connections = 0
         self.max_concurrent = 3
-    
+
+    def _dispatch(self) -> Optional[str]:
+        """Dispatch one background task so there is a real task to stream."""
+        with self.client.post(
+            "/api/swarm/dispatch",
+            json=dispatch_body("Name three uses of server-sent events"),
+            catch_response=True,
+            name="/api/swarm/dispatch (for SSE)",
+        ) as response:
+            if response.status_code != 200:
+                response.failure(f"HTTP {response.status_code}")
+                return None
+            try:
+                task_id = response.json().get("task_id")
+            except Exception:
+                response.failure("Invalid JSON response")
+                return None
+            if not task_id:
+                response.failure("dispatch returned no task_id")
+                return None
+            response.success()
+            self.task_ids.append(task_id)
+            return task_id
+
+    def _task_id(self) -> Optional[str]:
+        return random.choice(self.task_ids) if self.task_ids else self._dispatch()
+
     @task(5)
     def sse_swarm_stream(self):
-        """Connect to SSE endpoint and consume events."""
+        """Connect to a real task's SSE stream and consume events."""
         if self.active_connections >= self.max_concurrent:
             return
-            
+        task_id = self._task_id()
+        if not task_id:
+            return
+
         self.active_connections += 1
         try:
             with self.client.get(
-                f"/api/swarm/stream/{self.thread_id}",
+                f"/api/swarm/tasks/{task_id}/stream",
                 headers={
                     "Accept": "text/event-stream",
                     "Cache-Control": "no-cache",
                 },
                 catch_response=True,
-                name="/api/swarm/stream/[thread_id] (SSE)",
+                name="/api/swarm/tasks/[task_id]/stream (SSE)",
                 stream=True,
             ) as response:
                 if response.status_code == 200:
@@ -70,27 +101,28 @@ class SSESwarmUser(HttpUser):
                             if event_count >= 10 or (time.time() - start_time) > 30:
                                 break
                     response.success()
-                elif response.status_code == 404:
-                    # Thread might not have active swarm - that's OK for load test
-                    response.success()
                 else:
+                    # The stream serves every stored task (finished ones
+                    # replay their history), so a real task never 404s.
                     response.failure(f"HTTP {response.status_code}")
         finally:
             self.active_connections -= 1
-    
+
     @task(3)
     def sse_multiple_streams(self):
-        """Open multiple concurrent SSE connections."""
-        for i in range(2):
-            thread_id = f"{self.thread_id}-{i}"
+        """Open two SSE connections, each on a real task."""
+        while len(self.task_ids) < 2:
+            if not self._dispatch():
+                return
+        for task_id in self.task_ids[-2:]:
             with self.client.get(
-                f"/api/swarm/stream/{thread_id}",
+                f"/api/swarm/tasks/{task_id}/stream",
                 headers={"Accept": "text/event-stream"},
                 catch_response=True,
-                name="/api/swarm/stream/[thread_id] (SSE multi)",
+                name="/api/swarm/tasks/[task_id]/stream (SSE multi)",
                 stream=True,
             ) as response:
-                if response.status_code in (200, 404):
+                if response.status_code == 200:
                     # Read a couple events then close
                     count = 0
                     for line in response.iter_lines():
@@ -117,94 +149,92 @@ class HITLApprovalUser(HttpUser):
     wait_time = between(2, 8)
     
     def on_start(self):
-        self.thread_id = f"hitl-loadtest-{uuid.uuid4().hex[:8]}"
-        self.pending_approvals = []
-    
+        self.watched: list[str] = []  # swarm task ids this user dispatched
+
     @task(10)
-    def trigger_hitl_tool(self):
-        """Trigger a tool that requires HITL approval."""
-        # Dispatch a task that uses a danger tool (file_write, shell_exec, etc.)
-        task_data = {
-            "prompt": "Write a test file to /tmp/loadtest_output.txt with content 'load test'",
-            "workers": ["coder"],
-            "task_type": "SWARM",
-            "thread_id": self.thread_id,
-            "metadata": {
-                "source": "loadtest",
-                "hitl_test": True,
-                "require_approval": True,
-            }
-        }
-        
+    def trigger_task(self):
+        """Dispatch a background task; its status is watched below."""
         with self.client.post(
             "/api/swarm/dispatch",
-            json=task_data,
+            json=dispatch_body("Write a two-line summary of what HITL means"),
             catch_response=True,
             name="/api/swarm/dispatch (HITL trigger)",
         ) as response:
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    task_id = data.get("task_id") or data.get("thread_id")
-                    if task_id:
-                        self.pending_approvals.append(task_id)
-                    response.success()
-                except Exception:
-                    response.failure("Invalid JSON")
-            else:
+            if response.status_code != 200:
                 response.failure(f"HTTP {response.status_code}")
-    
+                return
+            try:
+                task_id = response.json().get("task_id")
+            except Exception:
+                response.failure("Invalid JSON")
+                return
+            if not task_id:
+                response.failure("dispatch returned no task_id")
+                return
+            self.watched.append(task_id)
+            response.success()
+
     @task(8)
-    def check_pending_approvals(self):
-        """Check for pending HITL approvals."""
-        if not self.pending_approvals:
+    def check_task_for_checkpoint(self):
+        """Poll a watched task; decide it only when it is paused at a checkpoint.
+
+        A swarm task's approval is a pipeline checkpoint (``paused``), decided
+        through the swarm's own route. The chat approve route is for chat
+        turns and never matches a swarm task id.
+        """
+        if not self.watched:
             return
-            
-        # Check a random pending approval
-        thread_id = random.choice(self.pending_approvals)
-        
+        task_id = random.choice(self.watched)
+
         with self.client.get(
-            f"/api/approve/{thread_id}/status",
+            f"/api/swarm/tasks/{task_id}",
             catch_response=True,
-            name="/api/approve/[thread_id]/status",
+            name="/api/swarm/tasks/[task_id]",
         ) as response:
+            if response.status_code != 200:
+                response.failure(f"HTTP {response.status_code}")
+                return
+            try:
+                status = task_status(response.json())
+            except Exception:
+                response.failure("Invalid JSON")
+                return
+            response.success()
+        if status == PAUSED:
+            self._decide_checkpoint(task_id)
+        elif status in TERMINAL:
+            self.watched.remove(task_id)
+
+    def _decide_checkpoint(self, task_id: str):
+        """Approve (75%) or reject a task paused at a checkpoint.
+
+        Each route is written out (not built from a variable action) so
+        tests/test_loadtest_routes.py can check it exists.
+        """
+        body = {"reason": "Load test decision"}
+        if random.random() < 0.75:
+            decision = self.client.post(
+                f"/api/swarm/tasks/{task_id}/approve", json=body,
+                catch_response=True, name="/api/swarm/tasks/[task_id]/approve",
+            )
+        else:
+            decision = self.client.post(
+                f"/api/swarm/tasks/{task_id}/reject", json=body,
+                catch_response=True, name="/api/swarm/tasks/[task_id]/reject",
+            )
+        with decision as response:
             if response.status_code == 200:
-                data = response.json()
-                if data.get("pending"):
-                    self._submit_approval(thread_id)
-                response.success()
-            elif response.status_code == 404:
-                # No pending approval - remove from list
-                if thread_id in self.pending_approvals:
-                    self.pending_approvals.remove(thread_id)
                 response.success()
             else:
                 response.failure(f"HTTP {response.status_code}")
-    
-    def _submit_approval(self, thread_id: str):
-        """Submit approval decision."""
-        approved = random.choice([True, True, True, False])  # 75% approve
-        
-        with self.client.post(
-            f"/api/approve/{thread_id}",
-            json={"approved": approved, "reason": "Load test decision"},
-            catch_response=True,
-            name="/api/approve/[thread_id]",
-        ) as response:
-            if response.status_code == 200:
-                if thread_id in self.pending_approvals:
-                    self.pending_approvals.remove(thread_id)
-                response.success()
-            else:
-                response.failure(f"HTTP {response.status_code}")
-    
+
     @task(3)
     def list_approvals(self):
-        """List all pending approvals."""
+        """List every pending approval (the gate registry, all mechanisms)."""
         with self.client.get(
-            "/api/approve/pending",
+            "/api/pending-approvals",
             catch_response=True,
-            name="/api/approve/pending",
+            name="/api/pending-approvals",
         ) as response:
             if response.status_code == 200:
                 response.success()
@@ -226,21 +256,14 @@ class WebSocketSwarmUser:
             host = "ws://localhost:9090"  # WebSocket host
             
             def on_start(self):
-                self.thread_id = f"ws-loadtest-{uuid.uuid4().hex[:8]}"
+                self.ws = None
                 self.connect_websocket()
-            
+
             def connect_websocket(self):
-                """Connect to WebSocket endpoint."""
-                ws_url = f"/ws/swarm/{self.thread_id}"
-                self.ws = self.client.connect(ws_url)
-                
-                # Send initial subscription message
-                if self.ws:
-                    self.ws.send(json.dumps({
-                        "type": "subscribe",
-                        "thread_id": self.thread_id,
-                        "event_types": ["task_started", "worker_progress", "task_completed", "hitl_required"]
-                    }))
+                """Open the real-time dashboard feed (the app's live WebSocket;
+                it greets with {"type": "connected"} and streams trace events).
+                There is no per-task swarm socket — task events are SSE."""
+                self.ws = self.client.connect("/ws/dashboard")
             
             @task
             def listen_for_updates(self):
@@ -258,7 +281,7 @@ class WebSocketSwarmUser:
                         msg_type = data.get("type", "unknown")
                         self.environment.events.request.fire(
                             request_type="WS",
-                            name=f"ws/swarm/{msg_type}",
+                            name=f"ws/dashboard/{msg_type}",
                             response_time=0,
                             response_length=len(message),
                             exception=None,
@@ -269,7 +292,7 @@ class WebSocketSwarmUser:
                 except Exception as e:
                     self.environment.events.request.fire(
                         request_type="WS",
-                        name="ws/swarm/error",
+                        name="ws/dashboard/error",
                         response_time=0,
                         response_length=0,
                         exception=e,

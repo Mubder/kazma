@@ -248,6 +248,59 @@ def test_google_drive_upload_and_folder_creation(
     assert all(r.headers.get("authorization") == "Bearer tok" for r in captured)
 
 
+def test_google_drive_large_file_uses_resumable_upload(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """AUD-006: a file over Google's 5 MB multipart cap uploads through a
+    chunked resumable session, not one multipart POST that Drive rejects."""
+    monkeypatch.setattr(cs, "_read_config", _FakeConfig({"backups.offsite.provider": "google_drive"}))
+    monkeypatch.setattr(cs, "_read_vault", _FakeVault({"email.gmail.access_token": "tok"}))
+    # 9 MB > 5 MB cap and > one 8 MB chunk → two resumable PUTs.
+    big = tmp_path / "big.dump"
+    big.write_bytes(b"x" * (9 * 1024 * 1024))
+    total = big.stat().st_size
+
+    captured: list[httpx.Request] = []
+    session_uri = "https://upload.example/session/abc"
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if path == "/drive/v3/about":
+            return _json_response(200, {"user": {"emailAddress": "a@b.c"}})
+        if path == "/drive/v3/files" and req.method == "GET":
+            return _json_response(200, {"files": []})
+        if path == "/drive/v3/files" and req.method == "POST":
+            return _json_response(200, {"id": "root"})
+        if path == "/upload/drive/v3/files" and req.method == "POST":
+            assert req.url.params.get("uploadType") == "resumable"
+            return httpx.Response(200, headers={"Location": session_uri})
+        if str(req.url) == session_uri and req.method == "PUT":
+            cr = req.headers["content-range"]  # "bytes start-end/total"
+            end = int(cr.split("-", 1)[1].split("/", 1)[0])
+            if end + 1 >= total:
+                return _json_response(200, {"id": "file-1"})
+            return httpx.Response(308)
+        return httpx.Response(404)
+
+    _install_mock_transport(monkeypatch, handler, captured)
+
+    result = asyncio.run(cs.GoogleDriveSync().upload_file(big, "big.dump"))
+    assert result["ok"] is True
+
+    inits = [
+        r for r in captured
+        if r.url.path == "/upload/drive/v3/files" and r.method == "POST"
+    ]
+    assert len(inits) == 1  # one resumable session, no multipart POST
+    assert inits[0].url.params.get("uploadType") == "resumable"
+
+    puts = [r for r in captured if str(r.url) == session_uri and r.method == "PUT"]
+    assert len(puts) == 2  # 9 MB / 8 MB chunk
+    ranges = [r.headers["content-range"] for r in puts]
+    assert ranges[0].startswith("bytes 0-")
+    assert ranges[-1].endswith(f"/{total}")
+
+
 def test_google_drive_refreshes_expired_token(
     monkeypatch: pytest.MonkeyPatch, tmp_backup_dir: Path
 ) -> None:

@@ -241,7 +241,7 @@ def _rewrite_one_column(
 
     # Count rows for progress reporting.
     try:
-        total = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+        total = conn.execute(f'SELECT COUNT(*) FROM {_quote_ident(table)}').fetchone()[0]
     except sqlite3.OperationalError:
         logger.warning("[migrate] table %s not found in %s — skipping", table, conn.execute("PRAGMA database_list").fetchone()[2] if False else "?")
         return 0
@@ -251,8 +251,8 @@ def _rewrite_one_column(
 
     # Build the SELECT. Prefer the declared PK; fall back to rowid; last
     # resort scan all columns (re-identification by full-row equality).
-    select_pk = ", ".join(f'"{c}"' for c in pk_cols) if pk_cols else ("rowid" if has_rowid else "*")
-    select_sql = f'SELECT {select_pk}, "{col}" FROM "{table}"'
+    select_pk = ", ".join(_quote_ident(c) for c in pk_cols) if pk_cols else ("rowid" if has_rowid else "*")
+    select_sql = f'SELECT {select_pk}, {_quote_ident(col)} FROM {_quote_ident(table)}'
 
     try:
         cursor = conn.execute(select_sql)
@@ -274,7 +274,7 @@ def _rewrite_one_column(
 
         # Build the UPDATE keyed on the PK / rowid.
         if pk_cols:
-            where = " AND ".join(f'"{c}" = ?' for c in pk_cols)
+            where = " AND ".join(f"{_quote_ident(c)} = ?" for c in pk_cols)
             params = [new_value, *pk_values]
         elif has_rowid:
             where = "rowid = ?"
@@ -283,13 +283,23 @@ def _rewrite_one_column(
             # No stable key — skip (rare; all Kazma tables have a PK).
             logger.warning("[migrate] %s has no PK/rowid — cannot update row %r", table, pk_values)
             continue
-        conn.execute(f'UPDATE "{table}" SET "{col}" = ? WHERE {where}', params)
+        conn.execute(f'UPDATE {_quote_ident(table)} SET {_quote_ident(col)} = ? WHERE {where}', params)
         changed += 1
         if progress and done % progress_every == 0:
             progress(done, total)
     if progress:
         progress(done, total)
     return changed
+
+
+def _quote_ident(name: str) -> str:
+    """Quote a SQLite identifier, doubling any embedded double-quote.
+
+    Table / column / PK names here come from the imported bundle's OWN schema
+    (operator-supplied). A ``"`` in a name would otherwise close the quoting
+    early and produce a malformed statement on the staging copy (AUD-028).
+    """
+    return '"' + str(name).replace('"', '""') + '"'
 
 
 def _is_safe_identifier(name: str) -> bool:
@@ -300,7 +310,7 @@ def _is_safe_identifier(name: str) -> bool:
 def _primary_key_cols(conn: sqlite3.Connection, table: str) -> list[str]:
     """Return the declared PK column names for ``table`` (empty if none/rowid)."""
     try:
-        cols = conn.execute(f'PRAGMA table_info("{table}")').fetchall()
+        cols = conn.execute(f"PRAGMA table_info({_quote_ident(table)})").fetchall()
     except sqlite3.OperationalError:
         return []
     pk_cols = [c[1] for c in cols if c[5] > 0]  # c[5] = pk index
