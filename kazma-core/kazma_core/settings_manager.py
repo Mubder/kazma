@@ -30,6 +30,31 @@ def _paths_data_dir():
     return data_dir()
 
 
+# Where Kazma learns of a newer version: the canonical repo's newest release.
+# ``kazma update`` holds the same URL in kazma_cli/update.py (it must run while
+# this package may not import); tests/test_no_pypi_kazma.py keeps them one.
+_RELEASE_REPO = "Mubder/kazma"
+_RELEASE_API = f"https://api.github.com/repos/{_RELEASE_REPO}/releases/latest"
+
+
+def _release_key(version: str) -> tuple[int, ...]:
+    """A version's numbers, pre-release and ``+local`` parts ignored.
+
+    ``0.11.0+g1a2b3c4`` -> ``(0, 11)``: trailing zeros go, so 0.11 == 0.11.0.
+    """
+    parts: list[int] = []
+    for part in version.split("+", 1)[0].split("."):
+        digits = ""
+        for ch in part:
+            if not ch.isdigit():
+                break
+            digits += ch
+        parts.append(int(digits) if digits else 0)
+    while parts and parts[-1] == 0:
+        parts.pop()
+    return tuple(parts)
+
+
 # ── Default shortcuts ─────────────────────────────────────────────────
 
 DEFAULT_SHORTCUTS: dict[str, str] = {
@@ -1251,34 +1276,54 @@ class SettingsManager:
         return self._cs.reset_all()
 
     def check_updates(self) -> dict[str, Any]:
-        """Check for new Kazma versions."""
-        current_version = "0.5.0"
-        try:
-            import kazma_core
-            current_version = getattr(kazma_core, "__version__", current_version)
-        except (ImportError, AttributeError):
-            pass
+        """Is a newer Kazma release out? Asks GitHub, the one channel Kazma ships through.
 
-        # Try PyPI
-        try:
-            import httpx
-            resp = httpx.get("https://pypi.org/pypi/kazma/json", timeout=5.0)
-            if resp.status_code == 200:
-                data = resp.json()
-                latest = data.get("info", {}).get("version", current_version)
-                return {
-                    "current_version": current_version,
-                    "latest_version": latest,
-                    "update_available": latest != current_version,
-                }
-        except Exception as exc:
-            logger.debug("PyPI version check failed: %s", exc)
+        Never PyPI: no Kazma package is published there, so ``kazma`` is
+        anyone's name to register, and a version read from it could announce
+        an "update" that installing ``kazma`` by name would fetch from whoever
+        registered it (2026-09-30: this read PyPI's ``kazma`` and, when that
+        failed, said the install was current). The running version is the one
+        the rest of Kazma shows (``kazma_core.version``); it used to read a
+        ``kazma_core.__version__`` that does not exist, so it said "0.5.0".
+        A check that cannot read GitHub says so in ``error``.
+        """
+        from kazma_core.version import get_base_version, get_version
 
-        return {
-            "current_version": current_version,
-            "latest_version": current_version,
+        result: dict[str, Any] = {
+            "current_version": get_version(),
+            "latest_version": None,
             "update_available": False,
         }
+        try:
+            import httpx
+
+            resp = httpx.get(
+                _RELEASE_API,
+                timeout=10.0,
+                headers={"Accept": "application/vnd.github+json"},
+                follow_redirects=True,
+                verify=shared_ssl_context(),
+            )
+        except Exception as exc:
+            logger.warning("Update check could not reach GitHub: %s", exc)
+            result["error"] = f"GitHub could not be reached ({type(exc).__name__})"
+            return result
+        if resp.status_code != 200:
+            result["error"] = f"GitHub answered {resp.status_code}"
+            return result
+        try:
+            data = resp.json()
+        except ValueError:
+            data = None
+        tag = str(data.get("tag_name") or "").strip() if isinstance(data, dict) else ""
+        latest = tag[1:] if tag.startswith("v") else tag
+        if not latest:
+            result["error"] = "GitHub listed no release"
+            return result
+        result["latest_version"] = latest
+        result["update_available"] = _release_key(latest) > _release_key(get_base_version())
+        result["release_url"] = f"https://github.com/{_RELEASE_REPO}/releases/tag/{tag}"
+        return result
 
     def get_diagnostics(self) -> dict[str, Any]:
         """Get system health and diagnostics."""

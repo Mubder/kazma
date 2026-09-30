@@ -197,6 +197,20 @@ Gate: `tests/test_ws_chat_is_telemetry_only.py`. Fifteen source locks that
 described the removed copy were re-pointed, not deleted: each kept its SSE /
 HTTP half, and its WebSocket half became "the socket runs no turn".
 
+**AUD-029, found after the audit (seventh change set).** Reading the updater
+for the deferred items: no Kazma package is published on PyPI (all eight
+names answer 404), yet `kazma update` on a wheel install asked PyPI for the
+newest version and had pip upgrade `kazma` by name, the Settings update check
+read PyPI's `kazma`, and twelve hints sent readers to install `kazma[...]` or
+`kazma-core[swarm]` by name. The live install (a git checkout) never took the
+wheel path. Fixed: the updater installs the newest GitHub release's wheel only
+when it matches the release's `SHA256SUMS` and GitHub's own digest (streamed,
+size-capped, extras kept); Settings reads the same release, shows the real
+version and says when it could not check; hints go through
+`kazma_core.install_hint`. Gate: `tests/test_no_pypi_kazma.py` (every tracked
+product, script and doc file, and every install argv by AST; it flags all 27
+old sites, and each old form is a negative control).
+
 Previously deferred: AUD-015 (annotate the ~18 API-only routes —
 docs hygiene), AUD-017 (73-file unused-import sweep — its own batch), AUD-026
 (split the two 270-complexity chat transports — touches the gated §31
@@ -570,6 +584,21 @@ starved the live server.
   bundle (sqlite3 runs one statement).
 - **Remediation:** quote identifiers by doubling `"`.
 
+**[AUD-029] [Severity: High] [Confidence: High — every name answers 404 on PyPI] [Category: Security/Supply chain] [kazma-cli/kazma_cli/update.py:58, 286-330, 427-446; kazma-core/kazma_core/settings_manager.py:1253-1281; 12 hints in code and docs]**
+
+- **Evidence:** `PYPI_URL = "https://pypi.org/pypi/kazma/json"`; `do_pip_update`
+  ran `_run_pip(["install", "--upgrade", PACKAGE_NAME])`; `check_updates` read
+  the same URL and reported `kazma_core.__version__` (absent, so "0.5.0");
+  hints such as `pip install 'kazma[web]'` (read_url, knowledge ingest, e2b,
+  durable, eight docs pages) and `pip install kazma-core[swarm]` (swarm page;
+  no such extra). `kazma`, `kazma-core`, `-ui`, `-cli`, `-gateway`, `-skills`,
+  `-tui`, `-memory`: HTTP 404 from `pypi.org/pypi/<name>/json`, 2026-09-30.
+- **Impact:** anyone who registers `kazma` on PyPI runs code on every wheel
+  install that runs `kazma update`, and on anyone who follows a hint in an
+  environment where Kazma is not installed; the Settings page would show their
+  version as an available update.
+- **Remediation (done):** see the seventh change set above.
+
 **Audited and cleared (no finding with high confidence):**
 
 - SQL injection — all 198 bandit B608 sites; every interpolated expression
@@ -611,6 +640,8 @@ starved the live server.
    6. AUD-007 — one protected-key list incl. `agent.hooks.` and `mcp.`;
       hooks run with `tool_child_env()`.
    7. AUD-012 — owner: find or rotate the Slack app-level token.
+   8. AUD-029 (found after the audit) — install and update only from
+      Kazma's own releases, never a Kazma name on PyPI.
 2. **Short-term refactoring (wiring & cleanup)**
    - AUD-013/014/016/017 — delete the hub API, the WS token path, `aiogram`
      and `tenacity`, unused imports and commented-out code; lower the
@@ -618,7 +649,7 @@ starved the live server.
    - AUD-008/009 — bounded voice upload, extension allowlist.
    - AUD-010/011/015 — fix or delete the load tests; declare direct
      dependencies; mark API-only routes.
-   - AUD-021/023/024/025/026/029 — the Low security hardening items.
+   - AUD-021/023/024/025/028 — the Low and Info security hardening items.
 3. **Long-term improvements (architecture & performance)**
    - AUD-026 — split the two chat transports' message handling into shared,
      testable functions.

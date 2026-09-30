@@ -12,7 +12,7 @@ from typing import Any, cast
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from kazma_ui.services import get_swarm_service
+from kazma_ui.services import SWARM_CORE_MISSING, get_swarm_service
 from kazma_core.errors import safe_error, validation_error
 
 logger = logging.getLogger(__name__)
@@ -133,11 +133,7 @@ def register_general_routes(
             "setup_instructions": None,
         }
         if not svc.has_swarm_core():
-            result["setup_instructions"] = (
-                "kazma_core.swarm is not installed. "
-                "Install with: pip install kazma-core[swarm] "
-                "or add kazma_core.swarm to your project."
-            )
+            result["setup_instructions"] = SWARM_CORE_MISSING
         return result
 
     @router.post("/api/swarm/workflows/validate")
@@ -377,12 +373,11 @@ def _fallback_html(has_core: bool, workers: list[dict[str, Any]]) -> str:
     """Inline HTML fallback for /swarm when the template is unavailable."""
     setup_banner = ""
     if not has_core:
-        setup_banner = """
+        setup_banner = f"""
         <div style="background:#fff3cd;border:1px solid #ffc107;padding:12px 20px;
                     border-radius:6px;margin-bottom:20px;font-family:sans-serif;">
-          ⚠️ <strong>kazma_core.swarm is not installed.</strong>
-          Workers can be registered, but they won't execute tasks.
-          Install: <code>pip install kazma-core[swarm]</code>
+          ⚠️ {SWARM_CORE_MISSING} Workers can be registered, but they won't
+          execute tasks.
         </div>"""
 
     worker_rows = ""

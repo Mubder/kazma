@@ -188,8 +188,15 @@ def _run_serve(port: int) -> None:
         import uvicorn
         from kazma_ui.app import create_app
     except ImportError as e:
-        print(f"Error: WebUI dependencies not installed: {e}")
-        print("Install with: pip install 'kazma[ui]' or pip install jinja2 python-multipart")
+        # The web UI's packages are Kazma's own dependencies (there is no
+        # ``ui`` extra), so this is a broken install or an import bug -- never
+        # a name to fetch from PyPI, where no Kazma package is published.
+        print(f"Error: the web UI failed to import: {e}")
+        print(
+            "If a package is missing, reinstall Kazma from its folder "
+            "(pip install -e .) or its release wheel; otherwise the error "
+            "above is a bug."
+        )
         sys.exit(1)
 
     app = create_app()

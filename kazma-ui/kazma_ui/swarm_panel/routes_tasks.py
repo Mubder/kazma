@@ -18,7 +18,7 @@ from kazma_gateway.telegram_format import (
     HEADING_RULE,
 )
 from kazma_ui.rate_limit import rate_limit
-from kazma_ui.services import get_swarm_service
+from kazma_ui.services import SWARM_CORE_MISSING, get_swarm_service
 
 logger = logging.getLogger(__name__)
 
@@ -378,8 +378,8 @@ def register_tasks_routes(
                 {
                     "status": "warning",
                     "message": (
-                        "kazma_core.swarm is not installed — task recorded locally "
-                        "but no workers will execute it. Install: pip install kazma-core[swarm]"
+                        f"{SWARM_CORE_MISSING} The task was recorded, but no "
+                        "worker will run it."
                     ),
                     "dispatched": [],
                     "missing": list(worker_names),

@@ -19,7 +19,7 @@ hang / empty tabs) and is gone. Agent edits to existing files should use
 
 **Codebase index:** `codebase_search` (and `GET /api/ide/codebase?q=`) finds
 definitions via a per-workspace SQLite symbol index (tree-sitter if you
-`pip install 'kazma[index]'`, else regex) plus live ripgrep. Install `rg`
+`pip install -e ".[index]"`, else regex) plus live ripgrep. Install `rg`
 for faster text hits. Kill-switch `KAZMA_CODE_INDEX=0`.
 
 **Language intelligence:** the Web editor is **syntax-only** (CodeMirror

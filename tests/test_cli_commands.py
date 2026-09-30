@@ -940,19 +940,19 @@ class TestDetectInstallType:
 
 
 # ---------------------------------------------------------------------------
-# Update command — PyPI version fetch (mocked httpx)
+# Update command — latest GitHub release (mocked httpx). PyPI is never asked:
+# no Kazma package is published there (tests/test_no_pypi_kazma.py).
 # ---------------------------------------------------------------------------
 
-class TestPypiVersionFetch:
-    """get_latest_pypi_version with mocked httpx."""
+class TestLatestReleaseFetch:
+    """get_latest_release with mocked httpx."""
 
     def test_returns_version_on_success(self) -> None:
-        from kazma_cli.update import get_latest_pypi_version
+        from kazma_cli.update import get_latest_release
 
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"info": {"version": "0.5.0"}}
-        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"tag_name": "v0.5.0", "assets": []}
 
         client = MagicMock()
         client.__enter__.return_value = client
@@ -960,12 +960,15 @@ class TestPypiVersionFetch:
         client.get.return_value = mock_response
 
         with patch("httpx.Client", return_value=client):
-            result = get_latest_pypi_version()
-        assert result == "0.5.0"
+            result = get_latest_release()
+        assert result is not None and result.version == "0.5.0"
+        # No wheel to verify: the version is known, installing is refused.
+        assert result.problem == "the release has no wheel"
+        assert client.get.call_args[0][0] == "https://api.github.com/repos/Mubder/kazma/releases/latest"
 
     def test_returns_none_on_network_error(self) -> None:
         import httpx
-        from kazma_cli.update import get_latest_pypi_version
+        from kazma_cli.update import get_latest_release
 
         client = MagicMock()
         client.__enter__.return_value = client
@@ -973,15 +976,15 @@ class TestPypiVersionFetch:
         client.get.side_effect = httpx.ConnectError("no network")
 
         with patch("httpx.Client", return_value=client):
-            result = get_latest_pypi_version()
+            result = get_latest_release()
         assert result is None
 
     def test_returns_none_on_missing_version_field(self) -> None:
-        from kazma_cli.update import get_latest_pypi_version
+        from kazma_cli.update import get_latest_release
 
         mock_response = MagicMock()
-        mock_response.json.return_value = {"info": {}}
-        mock_response.raise_for_status = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"assets": []}
 
         client = MagicMock()
         client.__enter__.return_value = client
@@ -989,7 +992,7 @@ class TestPypiVersionFetch:
         client.get.return_value = mock_response
 
         with patch("httpx.Client", return_value=client):
-            result = get_latest_pypi_version()
+            result = get_latest_release()
         assert result is None
 
 
@@ -1165,12 +1168,16 @@ class TestUpdateRunDispatch:
 
     def test_update_run_pip_check_only_up_to_date(self) -> None:
         """With --check and already up to date, should not attempt install."""
-        from kazma_cli.update import run
+        from kazma_cli.update import ReleaseInfo, run
 
-        with patch("kazma_cli.update.detect_install_type", return_value="pip"), patch(
+        # _find_git_root patched too: in a checkout the pip path hands over to
+        # the git path (which fetched origin from this test until 2026-09-30).
+        with patch("kazma_cli.update._find_git_root", return_value=None), patch(
+            "kazma_cli.update.detect_install_type", return_value="pip"
+        ), patch(
             "kazma_cli.update.get_current_version", return_value="0.1.0"
         ), patch(
-            "kazma_cli.update.get_latest_pypi_version", return_value="0.1.0"
+            "kazma_cli.update.get_latest_release", return_value=ReleaseInfo(version="0.1.0")
         ), patch(
             "kazma_cli.update.do_pip_update"
         ) as mock_do_update:
@@ -1179,14 +1186,14 @@ class TestUpdateRunDispatch:
 
     def test_update_run_pip_check_only_update_available(self) -> None:
         """With --check and update available, should not install."""
-        from kazma_cli.update import run
+        from kazma_cli.update import ReleaseInfo, run
 
         with patch("kazma_cli.update._find_git_root", return_value=None), patch(
             "kazma_cli.update.detect_install_type", return_value="pip"
         ), patch(
             "kazma_cli.update.get_current_version", return_value="0.1.0"
         ), patch(
-            "kazma_cli.update.get_latest_pypi_version", return_value="0.2.0"
+            "kazma_cli.update.get_latest_release", return_value=ReleaseInfo(version="0.2.0")
         ), patch(
             "kazma_cli.update.do_pip_update"
         ) as mock_do_update:
@@ -1195,29 +1202,32 @@ class TestUpdateRunDispatch:
 
     def test_update_run_pip_update_with_yes(self) -> None:
         """With --yes and update available, should install without prompting."""
-        from kazma_cli.update import run
+        from kazma_cli.update import ReleaseInfo, run
 
+        release = ReleaseInfo(version="0.2.0")
         with patch("kazma_cli.update._find_git_root", return_value=None), patch(
             "kazma_cli.update.detect_install_type", return_value="pip"
         ), patch(
             "kazma_cli.update.get_current_version", return_value="0.1.0"
         ), patch(
-            "kazma_cli.update.get_latest_pypi_version", return_value="0.2.0"
+            "kazma_cli.update.get_latest_release", return_value=release
+        ), patch(
+            "kazma_cli.update.detect_active_extras", return_value=[]
         ), patch(
             "kazma_cli.update.do_pip_update", return_value=True
         ) as mock_do_update:
             run(["--yes"])
-        mock_do_update.assert_called_once()
+        mock_do_update.assert_called_once_with(release, [])
 
-    def test_update_run_pip_pypi_error_exits(self) -> None:
-        """If PyPI fetch fails, run() should exit with code 1."""
+    def test_update_run_pip_release_error_exits(self) -> None:
+        """If the GitHub release cannot be read, run() should exit with code 1."""
         from kazma_cli.update import run
 
         with patch("kazma_cli.update._find_git_root", return_value=None), patch(
             "kazma_cli.update.detect_install_type", return_value="pip"
         ), patch(
             "kazma_cli.update.get_current_version", return_value="0.1.0"
-        ), patch("kazma_cli.update.get_latest_pypi_version", return_value=None):
+        ), patch("kazma_cli.update.get_latest_release", return_value=None):
             with pytest.raises(SystemExit) as exc_info:
                 run(["--check"])
         assert exc_info.value.code == 1

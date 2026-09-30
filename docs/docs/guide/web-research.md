@@ -179,7 +179,7 @@ Not invincible against enterprise bot walls. Improves success rate:
 
 Knowledge ingest (`knowledge_ingest_url` / site) reuses the same `_fetch_full_text` cascade.
 
-Playwright (optional install): `pip install 'kazma[web]'` and `playwright install chromium`.
+Playwright (optional install): `pip install -e ".[web]"` and `playwright install chromium`.
 
 ## Bulletproof scraping: proxy provider addon (IP/UA rotation)
 

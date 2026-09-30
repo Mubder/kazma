@@ -14,7 +14,17 @@ from typing import Any, Optional
 
 logger = __import__("logging").getLogger(__name__)
 
-__all__ = ["SwarmService", "get_swarm_service", "reset_swarm_service"]
+__all__ = ["SWARM_CORE_MISSING", "SwarmService", "get_swarm_service", "reset_swarm_service"]
+
+# What the swarm page says when kazma_core.swarm does not import. It ships in
+# the same wheel as this module, so that is an import error to read in the
+# log, never a package to install: the old text sent readers to PyPI for
+# ``kazma-core[swarm]`` -- an extra that never existed, under a name anyone
+# can register (2026-09-30).
+SWARM_CORE_MISSING = (
+    "The swarm engine (kazma_core.swarm) did not load. It ships with Kazma, so "
+    "this is an import error, not a missing package: the server log names it."
+)
 
 
 class SwarmService:
@@ -22,6 +32,7 @@ class SwarmService:
 
     def __init__(self) -> None:
         self._engine: Any = None
+        self._swarm_import_logged = False
         # Retained so resolve_engine() can re-wire SSE after the engine is created.
         self._sse_bus: Any = None
 
@@ -121,7 +132,11 @@ class SwarmService:
                 logger.debug("set_sse_bus failed: %s", exc)
 
     def has_swarm_core(self) -> bool:
-        """Return whether kazma_core.swarm is importable."""
+        """Return whether kazma_core.swarm is importable.
+
+        False is an import error (see ``SWARM_CORE_MISSING``); the first one
+        is logged with its traceback, since the page polls this.
+        """
         try:
             from kazma_core.swarm import SwarmConfig, SwarmEngine, SwarmTask, TaskType, WorkerConfig, get_swarm_engine, set_swarm_engine
             return all(
@@ -137,6 +152,9 @@ class SwarmService:
                 )
             )
         except ImportError:
+            if not self._swarm_import_logged:
+                self._swarm_import_logged = True
+                logger.warning("kazma_core.swarm failed to import; the swarm cannot run", exc_info=True)
             return False
 
     def is_started(self) -> bool:

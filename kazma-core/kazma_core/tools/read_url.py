@@ -33,6 +33,7 @@ from typing import Any
 
 from kazma_core.safety.prompt_fence import fence_untrusted
 from kazma_core.http_tls import shared_ssl_context
+from kazma_core.install_hint import extra_install_hint
 
 __all__ = [
     "DEFAULT_CHUNK_SIZE",
@@ -1001,7 +1002,8 @@ async def _fetch_full_text(url: str) -> str:
                         "Recovery tried Firecrawl/Jina/Playwright. "
                         "Set ``KAZMA_FIRECRAWL_API_KEY``, ensure Jina is not disabled "
                         "(``KAZMA_JINA_READER=0``), or install Playwright "
-                        "(`pip install 'kazma[web]'` + browsers)."
+                        f"(the web extra: {extra_install_hint('web')}; then "
+                        "`playwright install chromium`)."
                     )
 
             if status_code >= 400 and not _looks_like_bot_block(html, status_code):
@@ -1088,7 +1090,8 @@ async def _fetch_full_text(url: str) -> str:
             "The page may be empty, require JavaScript, or block automated access. "
             "Tried hard-page recovery (Firecrawl/Jina/Playwright). "
             "Set ``KAZMA_FIRECRAWL_API_KEY``, leave Jina enabled, "
-            "or `pip install 'kazma[web]'` + `playwright install chromium`."
+            f"or install the web extra ({extra_install_hint('web')}) "
+            "and run `playwright install chromium`."
         )
 
     _cache_put(url, text)

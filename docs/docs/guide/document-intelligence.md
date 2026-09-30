@@ -140,7 +140,7 @@ Install: `pip install -e ".[document-platform]"` (includes `pymupdf` +
 pdfplumber alone.
 
 **Hard-PDF salvage (after the isolated parser returns):** if the native score
-is weak, the parent process may try **Docling** (`pip install 'kazma[docling]'`)
+is weak, the parent process may try **Docling** (`pip install -e ".[docling]"`)
 then **LlamaParse / Reducto** when `LLAMAPARSE_API_KEY` / `REDUCTO_API_KEY` are
 set. API keys never enter the parser sandbox. Kill-switches:
 `KAZMA_DOCLING=0`, `KAZMA_REMOTE_PARSE=0`.

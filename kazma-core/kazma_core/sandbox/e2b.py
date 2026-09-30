@@ -4,7 +4,8 @@ Default remains Docker/local (one trusted operator). When an E2B API key is
 set, HITL-approved code runs in a microVM instead of on the Kazma host.
 
 Kill-switch: ``KAZMA_E2B=0``. Keys: ``KAZMA_E2B_API_KEY`` or ``E2B_API_KEY``.
-SDK is optional (``pip install 'kazma[sandbox]'``).
+SDK is optional: the ``sandbox`` extra (``pip install -e ".[sandbox]"`` in
+the Kazma folder).
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ import asyncio
 import logging
 import os
 from typing import Any
+
+from kazma_core.install_hint import extra_install_hint
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +78,7 @@ def _run_sync(code: str, timeout: int) -> str:
     if sdk is None:
         raise RuntimeError(
             "E2B is configured but the SDK is missing. "
-            "Install with: pip install 'kazma[sandbox]'"
+            f"Install the sandbox extra: {extra_install_hint('sandbox')}"
         )
     kind, Sandbox = sdk
     key = e2b_api_key()

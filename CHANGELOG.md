@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## Updates come only from Kazma's own releases (2026-09-30)
+
+- **`kazma update` no longer installs whatever is called "kazma" on PyPI.**
+  Kazma is not published on PyPI, so the name is free for anyone to take. On
+  an install made from a release wheel, the updater asked PyPI for the newest
+  version and then had pip install "kazma" from there: the day someone
+  registered the name, every such update would have run their code. It now
+  reads Kazma's own GitHub release, downloads the wheel from it, and installs
+  it only when the file matches the checksum the release publishes and the
+  one GitHub reports; the extras you have are kept. Installs that are a git
+  checkout (the usual kind) update from the repository and were not affected.
+- **Settings → Check for Updates tells the truth.** It showed version "0.5.0"
+  whatever you ran, asked PyPI, and said "Running the latest version" whenever
+  the check failed. It now shows your real version, compares it with the
+  newest release, links to that release's notes, and says so when it could
+  not check.
+- **Install tips no longer send you to PyPI.** Twelve messages and doc pages
+  said to install extras such as `kazma[web]` or `kazma[durable]` by name,
+  which fetches from PyPI, where anyone could publish under those names, and
+  the Swarm page named an extra that never existed. They now point to
+  Settings → Packages or the Kazma folder (`pip install -e ".[web]"`), and a
+  test fails the build if any file brings the old form back.
+
 ## One way to run a chat turn (2026-09-30)
 
 - **The chat's WebSocket no longer carries a second copy of the chat.** Since

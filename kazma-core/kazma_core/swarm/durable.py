@@ -6,7 +6,8 @@ can resume a long task instead of dropping it.
 
 Default: in-process asyncio (one trusted operator).
 Opt-in: ``KAZMA_TEMPORAL_HOST`` (or ``TEMPORAL_ADDRESS``) +
-``pip install 'kazma[durable]'``. Kill-switch ``KAZMA_TEMPORAL=0``.
+the ``durable`` extra (``pip install -e ".[durable]"`` in the Kazma
+folder). Kill-switch ``KAZMA_TEMPORAL=0``.
 Required (no fallback): ``KAZMA_TEMPORAL_REQUIRED=1``.
 """
 
@@ -16,6 +17,8 @@ import logging
 import os
 from contextvars import ContextVar
 from typing import Any
+
+from kazma_core.install_hint import extra_install_hint
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +99,7 @@ async def run_via_durable(
     if not _sdk_available():
         msg = (
             "Temporal host is set but temporalio is not installed "
-            "(pip install 'kazma[durable]')."
+            f"(the durable extra: {extra_install_hint('durable')})."
         )
         if durable_required():
             return TaskResult(task_id=task.id, status="failed", error=msg)
@@ -183,7 +186,8 @@ async def start_temporal_worker() -> None:
     if not _sdk_available():
         logger.info(
             "[durable] Temporal host set but temporalio missing — "
-            "in-process swarm only (pip install 'kazma[durable]')"
+            "in-process swarm only (the durable extra: %s)",
+            extra_install_hint("durable"),
         )
         return
     try:
