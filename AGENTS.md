@@ -2365,6 +2365,19 @@ the question the human had never seen (approved `file_write`, authorized
 `claimed`/`resuming` leave as `inflight`, because chat.js converges on
 that and paints an ERROR on anything else.
 
+**B3. A click on a pending card waits for the segment that showed it**
+(2026-10-01). A segment journals its approval card and THEN finishes (the
+turn's totals, the reply's save); until its task ends the thread counts as
+running, and the route refused an Approve sent in that window as "no longer
+pending" over a gate that was pending -- the button did nothing. When the
+registry has the named gate on record as `pending` (`gate_is_pending`, the
+positive question `gate_not_pending` does not answer), the route waits for
+that task (`_await_segment_tail`, 10 s), checks the gate again and resumes;
+no id, no row or a timeout keeps the old refusal. The lifecycle job caught
+it once the route's own checks became faster than that tail.
+`test_an_approve_sent_as_the_card_appears_is_taken` holds the tail open for
+a second (negative control: the same turn without the wait is refused).
+
 **C. Two-id rule.** `register_gate` is idempotent on both `gate_id`
 (LangGraph `intr.id` preferred) and `alias_id` (the deterministic
 `make_gate_id` hash) — one pause can never mint two cards. A terminal row

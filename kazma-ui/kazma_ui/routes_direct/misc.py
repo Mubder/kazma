@@ -168,7 +168,40 @@ async def _decide_bridge_gate(thread_id: str, body: dict, approved: bool):
 #: closed, one transport over, because the check lived in the caller instead
 #: of in the bridge both callers share. The alias is kept so the (many)
 #: existing references in this module keep reading naturally.
+from kazma_ui.hitl_gate_bridge import gate_is_pending as _gate_is_pending
 from kazma_ui.hitl_gate_bridge import gate_not_pending as _gate_not_pending
+
+#: How long an Approve waits for the segment that showed its gate to finish.
+_SEGMENT_TAIL_WAIT_S = 10.0
+
+
+async def _await_segment_tail(thread_id: str, timeout: float = _SEGMENT_TAIL_WAIT_S) -> bool:
+    """Wait for the turn segment that showed this gate to end; True when it has.
+
+    A segment journals its approval card first and then finishes: the turn's
+    totals, the reply's save. Until its task ends the thread counts as
+    running, and an Approve sent the moment the card appeared was refused as
+    "no longer pending" over a gate that WAS pending: the button did nothing
+    and the human had to click again (the lifecycle job caught it on
+    2026-10-01, once the route's own checks got faster than that tail).
+    Called only after the registry has the answered gate on record as
+    pending, so the graph is parked at it and nothing else can be running.
+    The resume flag clears in the task's done callback; poll briefly for it.
+    """
+    from kazma_ui.active_turns import get_active_turn, is_turn_running
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while is_turn_running(thread_id) or thread_id in _resume_inflight:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return False
+        task = get_active_turn(thread_id)
+        if task is not None and not task.done():
+            await asyncio.wait({task}, timeout=remaining)
+        else:
+            await asyncio.sleep(min(0.05, remaining))
+    return True
 
 
 def _approve_lock_for(thread_id: str) -> asyncio.Lock:
@@ -725,7 +758,17 @@ def register_misc_routes(self: Any) -> None:
             from kazma_ui.turn_runtime import ensure_session_for_thread, resolve_session_id
 
             async with _approve_lock_for(thread_id):
-                if is_turn_running(thread_id) or thread_id in _resume_inflight:
+                _busy = is_turn_running(thread_id) or thread_id in _resume_inflight
+                if _busy and await _gate_is_pending(thread_id, _req_gate):
+                    # The answered gate is on record as pending, so the graph
+                    # is parked at it and the running task is the segment
+                    # that showed it, finishing up. Wait for it rather than
+                    # refuse a click on a card the human is looking at.
+                    _busy = not (
+                        await _await_segment_tail(thread_id)
+                        and await _gate_is_pending(thread_id, _req_gate)
+                    )
+                if _busy:
                     _claimed_turn = ""
                     try:
                         # WITH the session id. `resolve_reply_turn` guards

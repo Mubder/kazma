@@ -35,6 +35,7 @@ __all__ = [
     "gate_pending_from_payload",
     "gate_claimed",
     "gate_claimed_for_thread",
+    "gate_is_pending",
     "gate_not_pending",
     "gate_resuming",
     "settle_thread_gates",
@@ -43,6 +44,26 @@ __all__ = [
     "pending_items_from_registry",
     "ensure_paused_gate",
 ]
+
+
+async def _gate_row(gate_id: str) -> Any | None:
+    """The registry's row for *gate_id*, or None: off, unreadable, or unknown.
+
+    Fail-open on plumbing, never on a recorded decision: a registry that
+    cannot be read must not block a human who is waiting.
+    """
+    try:
+        from kazma_core.safety.hitl_gates import (
+            gate_for_async,
+            gate_registry_enabled,
+        )
+
+        if not gate_registry_enabled():
+            return None
+        return await gate_for_async(gate_id)
+    except Exception:
+        logger.debug("[HITL] gate-state probe failed", exc_info=True)
+        return None
 
 
 async def gate_not_pending(thread_id: str, gate_id: str) -> str:
@@ -71,20 +92,7 @@ async def gate_not_pending(thread_id: str, gate_id: str) -> str:
     """
     if not gate_id:
         return ""
-    try:
-        from kazma_core.safety.hitl_gates import (
-            gate_for_async,
-            gate_registry_enabled,
-        )
-
-        if not gate_registry_enabled():
-            return ""
-        row = await gate_for_async(gate_id)
-    except Exception:
-        # Fail-open on plumbing, never on a recorded decision: a registry
-        # that cannot be read must not block a human who is waiting.
-        logger.debug("[HITL] gate-state probe failed", exc_info=True)
-        return ""
+    row = await _gate_row(gate_id)
     if row is None:
         return ""
     if str(getattr(row, "thread_id", "") or "") not in ("", thread_id):
@@ -93,6 +101,24 @@ async def gate_not_pending(thread_id: str, gate_id: str) -> str:
         return "foreign"
     state = str(getattr(row, "state", "") or "")
     return "" if state == "pending" else (state or "")
+
+
+async def gate_is_pending(thread_id: str, gate_id: str) -> bool:
+    """True only when the registry holds *gate_id*, on this thread, ``pending``.
+
+    The positive question :func:`gate_not_pending` deliberately does not
+    answer: "no objection" there includes a registry that is off or has
+    never heard of the id. A caller that will wait on the strength of the
+    answer needs the gate on the record as an open question.
+    """
+    if not gate_id:
+        return False
+    row = await _gate_row(gate_id)
+    if row is None:
+        return False
+    if str(getattr(row, "thread_id", "") or "") not in ("", thread_id):
+        return False
+    return str(getattr(row, "state", "") or "") == "pending"
 
 
 def registry_on() -> bool:
