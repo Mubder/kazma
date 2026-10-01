@@ -298,33 +298,31 @@ class TestSettingsManager:
     # ── Export/Import ──
 
     def test_export_yaml(self, sm):
-        """Exporting as YAML returns a string."""
+        """A backup in YAML holds the settings saved (settings_restore)."""
         sm.save_agent_config({"name": "export-test"})
-        result = sm.export_config("yaml")
-        assert isinstance(result, str)
-        assert len(result) > 0
+        result = sm.create_backup("yaml")
+        assert "agent.name: export-test" in result
 
     def test_export_json(self, sm):
-        """Exporting as JSON returns valid JSON."""
+        """The same backup as JSON."""
         sm.save_agent_config({"name": "json-test"})
-        result = sm.export_config("json")
-        assert isinstance(result, str)
-        data = json.loads(result)
-        assert isinstance(data, dict)
+        data = json.loads(sm.create_backup("json"))
+        assert data["settings"]["agent.name"] == "json-test"
 
     def test_import_config(self, sm):
-        """Importing YAML config works."""
+        """A pasted nested YAML restores through the same engine."""
         yaml_data = "agent:\n  name: imported\n  language: en\n"
-        count = sm.import_config(yaml_data, "yaml")
-        assert count > 0
+        out = sm.restore_backup(yaml_data)
+        assert out["restored"] > 0
         config = sm.get_agent_config()
         assert config["name"] == "imported"
 
     def test_import_selective(self, sm):
-        """Selective import only imports specified sections."""
-        yaml_data = "agent:\n  name: selective\nmodel:\n  model: gpt-4\n"
-        count = sm.import_config(yaml_data, "yaml", selective=True, sections=["agent"])
-        assert count >= 1
+        """Selective import only writes the picked sections."""
+        yaml_data = "agent:\n  name: selective\nmodels:\n  defaults:\n    chat: gpt-4\n"
+        out = sm.restore_backup(yaml_data, sections=["agent"])
+        assert out["plan"]["changed"] == ["agent.name"]
+        assert out["plan"]["not_selected"] == 1
 
     def test_config_diff(self, sm):
         """Config diff detects additions, removals, and changes."""
@@ -628,32 +626,41 @@ class TestSettingsAPI:
         assert "application/json" in resp.headers.get("content-type", "")
 
     def test_import_endpoint(self, client):
-        """POST /api/settings/import imports config."""
-        resp = client.post("/api/settings/import", json={
-            "data": "agent:\n  name: imported\n",
-            "format": "yaml",
-        })
-        assert resp.status_code == 200
-        assert int(resp.json()["imported"]) > 0
+        """Import/Export restores through /api/settings/system/restore."""
+        resp = client.post(
+            "/api/settings/system/restore", content="agent:\n  name: imported\n",
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["restored"] > 0
 
     def test_import_selective(self, client):
-        """POST /api/settings/import with selective=True imports selected sections."""
-        resp = client.post("/api/settings/import", json={
-            "data": "agent:\n  name: selective\nmodel:\n  model: gpt-4\n",
-            "format": "yaml",
-            "selective": True,
-            "sections": ["agent"],
-        })
-        assert resp.status_code == 200
+        """``sections`` restores only the picked sections."""
+        resp = client.post(
+            "/api/settings/system/restore?sections=agent",
+            content="agent:\n  name: selective\nmodels:\n  defaults:\n    chat: gpt-4\n",
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["plan"]["changed"] == ["agent.name"]
 
-    def test_reset_endpoint(self, client):
-        """POST /api/settings/reset resets all settings."""
-        # Add some settings first
-        client.put("/api/settings", json=[
-            {"key": "test.reset", "value": "yes", "category": "test"}
+    def test_the_batch_save_applies_the_single_save_checks(self, client):
+        """A value the single save refuses, the batch save refuses, and the
+        batch writes nothing (settings_validation)."""
+        resp = client.put("/api/settings", json=[
+            {"key": "agent.test_marker", "value": "written", "category": "agent"},
+            {"key": "cron.timezone", "value": "Mars/Olympus", "category": "cron"},
         ])
-        resp = client.post("/api/settings/reset")
-        assert resp.status_code == 200
+        assert resp.status_code == 400 and "cron.timezone" in resp.json()["detail"]
+        stored = {k for cat in client.get("/api/settings").json().values() for k in cat}
+        assert "agent.test_marker" not in stored, "a refused batch wrote part of itself"
+        single = client.put("/api/settings/single", json={
+            "key": "notifications.lifecycle.events", "value": ["started", "nope"],
+            "category": "notifications",
+        })
+        assert single.status_code == 400 and "nope" in single.json()["detail"]
+        ok = client.put("/api/settings", json=[
+            {"key": "swarm.task_retention_days", "value": "14", "category": "anything"},
+        ])
+        assert ok.status_code == 200
 
     def test_account_sessions(self, client):
         """GET /api/settings/account/sessions returns a list."""

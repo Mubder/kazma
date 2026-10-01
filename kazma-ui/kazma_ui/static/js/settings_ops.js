@@ -16,6 +16,13 @@
         }
         return text;
     }
+    // A value with its own direction (a file name, a version, setting names)
+    // inside a translated sentence of a plain-text dialog: Unicode's isolate
+    // marks are the plain-text <bdi>. Without them an Arabic preview showed
+    // "(Kazma 0.11.0+gae2008f)" as "f0.11.0+gae2008)".
+    function _iso(text) {
+        return String.fromCharCode(0x2068) + String(text) + String.fromCharCode(0x2069);
+    }
     root.KazmaSettingsMixins = root.KazmaSettingsMixins || {};
     root.KazmaSettingsMixins.ops = function () {
         return {
@@ -693,109 +700,248 @@
             }
         },
 
+        // A settings backup (kazma_core.settings_restore): every setting, keys
+        // as references to this install's vault, never the keys themselves.
+        async _downloadSettings(url, ext) {
+            const resp = await fetch(url);
+            // An error page saved as a backup looks like one until the day it
+            // is needed.
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const blob = await resp.blob();
+            const href = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = href;
+            a.download = `kazma-settings-${new Date().toISOString().split('T')[0]}.${ext}`;
+            a.click();
+            URL.revokeObjectURL(href);
+        },
+
         async createBackup() {
             try {
-                const resp = await fetch('/api/settings/system/backup');
-                // An error page saved as kazma-backup.yaml looks like a backup
-                // until the day it is needed.
-                if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                const blob = await resp.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `kazma-backup-${new Date().toISOString().split('T')[0]}.yaml`;
-                a.click();
-                URL.revokeObjectURL(url);
+                await this._downloadSettings('/api/settings/system/backup', 'yaml');
                 showToast(_t('settings.backup_downloaded', 'Backup downloaded'), 'success');
             } catch (e) {
                 showToast(_t('settings.backup_failed_reason', 'Backup failed: {error}', {error: e.message}), 'error');
             }
         },
 
-        async systemReset() {
-            if (!(await window.kazmaConfirm({
-                title: _t('settings.ops.reset_all_settings', 'Reset all settings'),
-                message: _t('settings.ops.this_will_reset_all_settings', '[!]  This will reset ALL settings to defaults. Are you sure?'),
-                confirmText: _t('settings.ops.reset', 'Reset'),
-                danger: true,
-            }))) return;
-            if (!(await window.kazmaConfirm({
-                title: _t('settings.ops.final_confirmation', 'Final confirmation'),
-                message: _t('settings.ops.reset_everything_this_cannot_be', 'Reset everything? This cannot be undone.'),
-                confirmText: _t('settings.ops.reset_everything', 'Reset everything'),
-                danger: true,
-            }))) return;
-            try {
-                await window.kazmaSave('/api/settings/reset', { method: 'POST' });
-                showToast(_t('settings.system_reset_reloading', 'System reset complete. Reloading...'), 'success');
-                setTimeout(() => location.reload(), 1500);
-            } catch (e) {
-                showToast(_t('settings.reset_failed', 'Reset failed: {error}', {error: e.message}), 'error');
-            }
-        },
-
         async exportConfig() {
+            const ext = this.exportFormat === 'json' ? 'json' : 'yaml';
             try {
-                const url = `/api/settings/export?format=${this.exportFormat}`;
-                const resp = await fetch(url);
-                if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                const blob = await resp.blob();
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = `kazma-config.${this.exportFormat}`;
-                a.click();
+                await this._downloadSettings(`/api/settings/export?format=${ext}`, ext);
                 showToast(_t('settings.config_exported', 'Configuration exported'), 'success');
             } catch (e) {
                 showToast(_t('settings.export_failed', 'Export failed: {error}', {error: e.message}), 'error');
             }
         },
 
+        // Import/Export restores through the same preview as Restore backup.
         async importConfig() {
-            if (!this.importData.trim()) { showToast(_t('settings.paste_or_upload', 'Paste or upload config data'), 'error'); return; }
-            this.saving = true;
-            try {
-                await window.kazmaSave('/api/settings/import', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                    body: JSON.stringify({
-                        data: this.importData,
-                        format: this.importFormat,
-                        selective: this.importSelective,
-                        sections: this.importSections,
-                    }),
-                });
-                showToast(_t('settings.config_imported', 'Configuration imported. Reloading...'), 'success');
-                setTimeout(() => location.reload(), 1500);
-            } catch (e) {
-                showToast(_t('settings.import_failed', 'Import failed: {error}', {error: e.message}), 'error');
+            const sections = this.importSelective ? this._sectionPrefixes(this.importSections) : null;
+            if (sections && !sections.length) {
+                showToast(_t('settings.select_a_section', 'Pick at least one section to import.'), 'error');
+                return;
             }
-            this.saving = false;
+            await this.restoreSettings(this.importData, {
+                sections,
+                source: _t('settings.restore_source_pasted', 'the text above'),
+            });
+        },
+
+        // The settings key sections a picked section stands for.
+        _sectionPrefixes(ids) {
+            const groups = { model: ['models', 'providers', 'registry', 'llm'], skills: ['skills', 'agent_skills'] };
+            const out = [];
+            (ids || []).forEach((id) => (groups[id] || [id]).forEach((p) => { if (!out.includes(p)) out.push(p); }));
+            return out;
         },
 
         handleFileUpload(event) {
             const file = event.target.files[0];
             if (!file) return;
             const reader = new FileReader();
-            reader.onload = (e) => {
-                this.importData = e.target.result;
-                this.importFormat = file.name.endsWith('.json') ? 'json' : 'yaml';
-            };
+            reader.onload = (e) => { this.importData = e.target.result; };
             reader.readAsText(file);
         },
 
-        async resetToDefaults() {
-            if (!(await window.kazmaConfirm({
-                title: _t('settings.ops.reset_settings', 'Reset settings'),
-                message: _t('settings.ops.reset_all_settings_to_defaults', 'Reset ALL settings to defaults? This cannot be undone.'),
-                confirmText: _t('settings.ops.reset', 'Reset'),
-                danger: true,
-            }))) return;
+        async onRestoreFile(event) {
+            const input = event.target;
+            const file = input.files && input.files[0];
+            input.value = ''; // the same file can be picked again
+            if (!file) return;
+            if (file.size > 10 * 1024 * 1024) {
+                showToast(_t('settings.restore_too_large', 'The file is larger than a settings backup can be (10 MB).'), 'error');
+                return;
+            }
+            await this.restoreSettings(await file.text(), { source: file.name });
+        },
+
+        _restoreNames(names, max) {
+            const limit = max || 8;
+            const shown = _iso(names.slice(0, limit).join(', '));
+            return names.length > limit
+                ? shown + ' ' + _t('settings.restore_and_more', '… and {count} more', { count: names.length - limit })
+                : shown;
+        },
+
+        // The preview a restore shows before it writes: names and counts,
+        // never a value.
+        _restorePreviewText(plan, source) {
+            const lines = [];
+            const fmt = window.KazmaFormat;
+            const made = plan.backup || {};
+            if (source) lines.push(_t('settings.restore_from', 'From: {source}', { source: _iso(source) }));
+            if (made.created_at) {
+                lines.push(_t('settings.restore_backup_made', 'Backup made {date}.', {
+                    date: _iso(fmt ? fmt.dateTime(made.created_at) : made.created_at),
+                }));
+            }
+            if (made.kazma_version) {
+                lines.push(_t('settings.restore_backup_version', 'Kazma version: {version}', { version: _iso(made.kazma_version) }));
+            }
+            lines.push('');
+            lines.push(_t('settings.restore_will_change', 'Settings that will change: {count}', { count: plan.changed.length }));
+            lines.push('  ' + this._restoreNames(plan.changed));
+            Object.entries(plan.lists || {}).forEach(([list, d]) => {
+                if (d.added && d.added.length) lines.push(_t('settings.restore_list_added', 'Back in {list}: {names}', { list: _iso(list), names: _iso(d.added.join(', ')) }));
+                if (d.updated && d.updated.length) lines.push(_t('settings.restore_list_updated', 'Updated in {list}: {names}', { list: _iso(list), names: _iso(d.updated.join(', ')) }));
+            });
+            if (plan.keys_restored.length) {
+                lines.push(_t('settings.restore_keys_back', "Keys brought back from this install's vault (nothing to enter): {count}", { count: plan.keys_restored.length }));
+                lines.push('  ' + this._restoreNames(plan.keys_restored));
+            }
+            if (plan.keys_to_reenter.length) {
+                lines.push(_t('settings.restore_keys_reenter', 'Keys this vault no longer has, to enter again in Settings: {count}', { count: plan.keys_to_reenter.length }));
+                lines.push('  ' + this._restoreNames(plan.keys_to_reenter));
+            }
+            const kept = plan.kept || {};
+            if (kept.keys) lines.push(_t('settings.restore_keys_kept', 'Keys you have now stay as they are: {count}', { count: kept.keys }));
+            if ((kept.runtime || 0) + (kept.credentials || 0)) {
+                lines.push(_t('settings.restore_state_kept', "Left as they are: {count} of Kazma's own records and sign-in records.", { count: (kept.runtime || 0) + (kept.credentials || 0) }));
+            }
+            if (kept.learned) lines.push(_t('settings.restore_learned_kept', 'What Kazma learned (its Soul) stays as it is now.'));
+            if (kept.retired_defaults) lines.push(_t('settings.restore_retired_kept', 'Defaults Kazma changed since the backup keep their new value: {count}', { count: kept.retired_defaults }));
+            const refused = Object.entries(plan.refused || {});
+            if (refused.length) {
+                lines.push(_t('settings.restore_refused', 'Not restored, the value is not allowed: {count}', { count: refused.length }));
+                refused.forEach(([key, why]) => lines.push('  ' + _iso(key + ': ' + why)));
+            }
+            if (plan.unchanged) lines.push(_t('settings.restore_unchanged', 'Already as in the backup: {count}', { count: plan.unchanged }));
+            lines.push('');
+            lines.push(_t('settings.restore_nothing_deleted', 'Nothing is deleted, and you can undo this restore afterwards.'));
+            return lines.join('\n');
+        },
+
+        async _offerRestartAfterRestore() {
+            await this.restartServer({
+                restartNeeded: () => true,
+                setBusy: (v) => { this.restoring = v; },
+                title: _t('settings.restore_restart_title', 'Restart Kazma now?'),
+                message: _t('settings.restore_restart_message', 'Some settings are read when Kazma starts: providers, models, chat apps. Restart now so every part of Kazma uses the restored ones.'),
+            });
+        },
+
+        // Preview, confirm, write: the server writes exactly the plan the
+        // owner confirmed (its digest), or answers 409 with the plan as it is
+        // now, which is shown again.
+        async restoreSettings(text, opts = {}) {
+            if (!text || !String(text).trim()) {
+                showToast(_t('settings.paste_or_upload', 'Paste or upload config data'), 'error');
+                return;
+            }
+            const url = (params) => {
+                const q = new URLSearchParams(params);
+                if (opts.sections && opts.sections.length) q.set('sections', opts.sections.join(','));
+                return '/api/settings/system/restore?' + q.toString();
+            };
+            const post = (params) => window.kazmaSave(url(params), {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+                body: String(text),
+            });
+            this.restoring = true;
             try {
-                await window.kazmaSave('/api/settings/reset', { method: 'POST' });
-                showToast(_t('settings.settings_reset_reloading', 'Settings reset. Reloading...'), 'success');
-                setTimeout(() => location.reload(), 1500);
+                let plan = (await post({ dry_run: 'true' })).plan;
+                for (let shown = 0; shown < 3; shown++) {
+                    if (!plan.changed.length) {
+                        const lines = [_t('settings.restore_nothing_to_do', 'Your settings already match this backup; nothing to restore.')];
+                        if (plan.keys_to_reenter.length) {
+                            lines.push('');
+                            lines.push(_t('settings.restore_keys_reenter', 'Keys this vault no longer has, to enter again in Settings: {count}', { count: plan.keys_to_reenter.length }));
+                            lines.push('  ' + this._restoreNames(plan.keys_to_reenter));
+                        }
+                        await window.kazmaAlert({ title: _t('settings.restore_preview_title', 'Restore settings?'), message: lines.join('\n') });
+                        return;
+                    }
+                    const ok = await window.kazmaConfirm({
+                        title: _t('settings.restore_preview_title', 'Restore settings?'),
+                        message: this._restorePreviewText(plan, opts.source),
+                        confirmText: _t('settings.restore_confirm', 'Restore'),
+                    });
+                    if (!ok) return;
+                    try {
+                        const done = await post({ expect: plan.digest });
+                        showToast(_t('settings.restore_done', 'Settings restored: {count}', { count: done.restored }), 'success');
+                        await this.loadRestoreUndo();
+                        if (done.restart_recommended) await this._offerRestartAfterRestore();
+                        return;
+                    } catch (e) {
+                        if (e.status !== 409 || !e.body || !e.body.plan) throw e;
+                        showToast(_t('settings.restore_changed_since', 'Your settings changed since the preview; here is the plan as it is now.'), 'info');
+                        plan = e.body.plan;
+                    }
+                }
             } catch (e) {
-                showToast(_t('settings.reset_failed', 'Reset failed: {error}', {error: e.message}), 'error');
+                showToast(_t('settings.restore_failed', 'Restore failed: {error}', { error: e.message }), 'error');
+            } finally {
+                this.restoring = false;
+            }
+        },
+
+        async loadRestoreUndo() {
+            const data = await window.kazmaGetJson('/api/settings/system/restore/undo');
+            this.restoreUndo = data && data.available ? data.plan : null;
+        },
+
+        async undoRestore() {
+            this.restoring = true;
+            try {
+                const preview = await window.kazmaGetJson('/api/settings/system/restore/undo');
+                const plan = preview && preview.available ? preview.plan : null;
+                this.restoreUndo = plan;
+                if (!plan) {
+                    showToast(_t('settings.undo_nothing', 'There is no restore to undo.'), 'info');
+                    return;
+                }
+                const fmt = window.KazmaFormat;
+                const lines = [];
+                if (plan.restored_at) lines.push(_t('settings.undo_restored_at', 'Restored {date}.', { date: _iso(fmt ? fmt.dateTime(plan.restored_at) : plan.restored_at) }));
+                lines.push(_t('settings.undo_will_revert', 'Settings that go back to what they were: {count}', { count: plan.reverted.length }));
+                if (plan.reverted.length) lines.push('  ' + this._restoreNames(plan.reverted));
+                if (plan.changed_since.length) {
+                    lines.push(_t('settings.undo_changed_since', 'Changed again since the restore, left as they are now: {count}', { count: plan.changed_since.length }));
+                    lines.push('  ' + this._restoreNames(plan.changed_since));
+                }
+                if (plan.kept_keys.length) lines.push(_t('settings.undo_keys_kept', 'Keys the restore brought back stay: {count}', { count: plan.kept_keys.length }));
+                if (!plan.reverted.length) {
+                    await window.kazmaAlert({ title: _t('settings.undo_title', 'Undo the last restore?'), message: lines.join('\n') });
+                    return;
+                }
+                const ok = await window.kazmaConfirm({
+                    title: _t('settings.undo_title', 'Undo the last restore?'),
+                    message: lines.join('\n'),
+                    confirmText: _t('settings.undo_confirm', 'Undo'),
+                });
+                if (!ok) return;
+                const done = await window.kazmaSave('/api/settings/system/restore/undo?expect=' + encodeURIComponent(plan.digest), { method: 'POST' });
+                showToast(_t('settings.undo_done', 'Settings put back: {count}', { count: done.reverted }), 'success');
+                this.restoreUndo = null;
+                if (done.restart_recommended) await this._offerRestartAfterRestore();
+            } catch (e) {
+                showToast(_t('settings.undo_failed', 'Undo failed: {error}', { error: e.message }), 'error');
+                await this.loadRestoreUndo();
+            } finally {
+                this.restoring = false;
             }
         },
 

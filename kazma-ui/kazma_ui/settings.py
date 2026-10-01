@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from kazma_ui.rate_limit import rate_limit
 from fastapi.templating import Jinja2Templates
@@ -24,21 +24,15 @@ from kazma_core.checkpoint_retention import (
     INACTIVE_KEEP as CHECKPOINT_INACTIVE_KEEP,
     KEEP_PER_THREAD as CHECKPOINT_KEEP_PER_CHAT,
     MAX_RETENTION_DAYS as MAX_CHECKPOINT_RETENTION_DAYS,
-    RETENTION_KEY as CHECKPOINT_RETENTION_KEY,
-    parse_retention_days as parse_checkpoint_retention_days,
     retention_setting as checkpoint_retention_setting,
 )
+from kazma_core.config_store import is_volatile_store
 from kazma_core.errors import safe_error, validation_error
-from kazma_core.lifecycle_notifier import (
-    EVENT_NAMES as LIFECYCLE_EVENT_NAMES,
-    EVENTS_KEY as LIFECYCLE_EVENTS_KEY,
-    parse_lifecycle_events,
-)
+from kazma_core.settings_restore import MAX_BACKUP_BYTES, NotABackup, PlanChanged
+from kazma_core.settings_validation import SettingRejected, validate_setting
 from kazma_core.swarm.task_store import (
     DEFAULT_TASK_RETENTION_DAYS,
     MAX_TASK_RETENTION_DAYS,
-    TASK_RETENTION_KEY,
-    parse_task_retention_days,
     task_retention_days,
 )
 from kazma_ui.models import (
@@ -46,7 +40,6 @@ from kazma_ui.models import (
     AppearanceUpdate,
     ConnectorConfigUpdate,
     ConnectorTestRequest,
-    ImportConfigRequest,
     MCPServerAddRequest,
     MCPServerToggleRequest,
     ModelCompareRequest,
@@ -216,6 +209,36 @@ def _mask_sensitive_values(data: dict[str, dict[str, Any]]) -> None:
         if not isinstance(settings_dict, dict):
             continue
         data[category] = mask_deep(settings_dict)
+
+
+#: A restore or its undo on the in-memory fallback would be gone at the restart.
+_VOLATILE_SETTINGS = (
+    "The settings database is not available, so Kazma is running on settings held "
+    "in memory; a restore now would be lost at the next restart. Restart Kazma once "
+    "the database is back, then restore."
+)
+
+
+async def _read_backup_body(request: Request) -> str:
+    """The request body as text, read no further than a backup can be: a
+    larger upload is refused before it is held in memory."""
+    too_large = "The file is larger than a settings backup can be (10 MB)."
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_BACKUP_BYTES:
+        raise HTTPException(status_code=413, detail=too_large)
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > MAX_BACKUP_BYTES:
+            raise HTTPException(status_code=413, detail=too_large)
+        chunks.append(chunk)
+    try:
+        return b"".join(chunks).decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=400, detail="The file is not text; a settings backup is YAML or JSON."
+        ) from None
 
 
 class SettingsRouterBuilder:
@@ -404,98 +427,49 @@ class SettingsRouterBuilder:
 
         @router.get("/api/settings/export")
         def api_export_yaml(fmt: str = Query("yaml", alias="format")) -> Response:
-            """Export settings as YAML or JSON file download (secrets masked)."""
-            sm = _get_sm()
+            """The settings backup as a YAML or JSON download -- the same file
+            as Settings -> System -> Download backup: keys as vault references,
+            no credential, no running state (kazma_core.settings_restore)."""
             try:
-                content = sm.export_config(fmt, mask_secrets=True)
-                media = "application/json" if fmt == "json" else "text/yaml"
-                ext = "json" if fmt == "json" else "yaml"
-                return Response(
-                    content=content,
-                    media_type=f"{media}; charset=utf-8",
-                    headers={"Content-Disposition": f"attachment; filename=kazma-config.{ext}"},
-                )
+                content = _get_sm().create_backup("json" if fmt == "json" else "yaml")
             except Exception as e:
                 logger.error("Failed to export: %s", e)
                 return Response(content="Error: Unable to export settings", media_type="text/plain", status_code=500)
+            media = "application/json" if fmt == "json" else "text/yaml"
+            ext = "json" if fmt == "json" else "yaml"
+            return Response(
+                content=content,
+                media_type=f"{media}; charset=utf-8",
+                headers={"Content-Disposition": f"attachment; filename=kazma-settings.{ext}"},
+            )
 
         @router.put("/api/settings")
         def api_update_settings(updates: list[SettingsUpdate]) -> dict[str, str]:
-            """Update multiple settings at once (atomic batch)."""
-            items = [(u.key, u.value, u.category) for u in updates]
+            """Update multiple settings at once (atomic batch). Each value goes
+            through the same check as a single save (settings_validation): a
+            value one save refuses, the batch refuses, and writes nothing."""
+            items = []
+            for u in updates:
+                try:
+                    value, category = validate_setting(u.key, u.value)
+                except SettingRejected as exc:
+                    raise HTTPException(status_code=400, detail=f"{u.key}: {exc}") from None
+                items.append((u.key, value, category or u.category))
             count = config_store.batch_set(items)
             return {"status": "ok", "updated": str(count)}
 
         @router.put("/api/settings/single")
         def api_update_single(setting: SettingsUpdate) -> dict[str, str]:
-            """Update a single setting."""
-            # cron.timezone is validated at save time: get_cron_timezone()
-            # falls back to UTC with only a warn-once on unresolvable names,
-            # so a typo here would silently become "always UTC" — reject it
-            # with an actionable 400 instead.
-            if setting.key == "cron.timezone":
-                from zoneinfo import ZoneInfo
-
-                name = str(setting.value or "").strip()
-                if not name:
-                    setting.value = ""  # explicit clear → UTC default
-                else:
-                    try:
-                        ZoneInfo(name)
-                    except Exception:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=(
-                                f"Invalid timezone {name!r} — use an IANA name "
-                                "(e.g. 'Asia/Kuwait', 'Europe/London', 'UTC')."
-                            ),
-                        )
-            # Swarm task retention decides what the 15-minute sweep deletes,
-            # so a value it cannot read is refused here rather than quietly
-            # replaced by the default there.
-            if setting.key == TASK_RETENTION_KEY:
-                days = parse_task_retention_days(setting.value)
-                if days is None:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            "Swarm task retention must be a whole number of days "
-                            f"from 0 (keep every task) to {MAX_TASK_RETENTION_DAYS}."
-                        ),
-                    )
-                setting.value = days
-                setting.category = "swarm"
-            # Checkpoint retention decides what the 15-minute sweep deletes
-            # from every chat's step history: the same rule.
-            if setting.key == CHECKPOINT_RETENTION_KEY:
-                days = parse_checkpoint_retention_days(setting.value)
-                if days is None:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            "Step history retention must be a whole number of days "
-                            f"from 0 (keep every step) to {MAX_CHECKPOINT_RETENTION_DAYS}."
-                        ),
-                    )
-                setting.value = days
-                setting.category = "system"
-            # Server status messages: only events Kazma sends. A name it
-            # does not know would switch that message off at the next boot
-            # without a word, so it is refused here.
-            if setting.key == LIFECYCLE_EVENTS_KEY:
-                known, unknown = parse_lifecycle_events(setting.value)
-                if unknown or not isinstance(setting.value, (list, str)):
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            "Server status messages are a list of: "
-                            f"{', '.join(LIFECYCLE_EVENT_NAMES)}"
-                            + (f" (not {', '.join(unknown)})." if unknown else ".")
-                        ),
-                    )
-                setting.value = known
-                setting.category = "notifications"
-            config_store.set(setting.key, setting.value, category=setting.category)
+            """Update a single setting. A value the setting cannot hold -- a
+            time zone the scheduler cannot resolve, a retention the sweep cannot
+            read, a server-status event Kazma does not send -- is refused with
+            what it may hold (kazma_core.settings_validation, the one check a
+            batch save and a restore apply too)."""
+            try:
+                value, category = validate_setting(setting.key, setting.value)
+            except SettingRejected as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from None
+            config_store.set(setting.key, value, category=category or setting.category)
             return {"status": "ok"}
 
         @router.get("/api/settings/swarm/task-retention")
@@ -1480,7 +1454,9 @@ class SettingsRouterBuilder:
 
         @router.get("/api/settings/system/backup")
         async def api_backup() -> Response:
-            """Download a full config backup."""
+            """Download a settings backup: every stored setting, keys as vault
+            references; no credential, no running state
+            (kazma_core.settings_restore)."""
             content = await asyncio.to_thread(_get_sm().create_backup)
             return Response(
                 content=content,
@@ -1489,25 +1465,62 @@ class SettingsRouterBuilder:
             )
 
         @router.post("/api/settings/system/restore")
-        async def api_restore(request: Request) -> dict[str, str]:
-            """Restore from backup."""
-            body = await request.body()
-            if len(body) > 10 * 1024 * 1024:  # 10MB limit
-                return {"error": "Backup too large (max 10MB)"}
-            # Validate the payload is valid YAML/JSON before restoring
+        async def api_restore(
+            request: Request,
+            dry_run: bool = Query(False),
+            sections: str = Query(""),
+            expect: str = Query(""),
+        ) -> Any:
+            """Preview (``dry_run=true``) or apply a restore of the settings
+            backup in the request body (kazma_core.settings_restore).
+
+            The backup's settings are written through the checks the page
+            applies; a key held now is kept, and a missing one comes back only
+            where its reference opens in this vault; Kazma's own state and
+            credentials are never written; nothing is deleted. ``expect`` is
+            the preview's ``digest``: a plan that changed since is refused with
+            409 and nothing is written."""
+            text = await _read_backup_body(request)
+            if is_volatile_store(config_store):
+                raise HTTPException(status_code=503, detail=_VOLATILE_SETTINGS)
+            wanted = [s.strip() for s in sections.split(",") if s.strip()] or None
             try:
-                import yaml as _yaml
+                result = await asyncio.to_thread(
+                    _get_sm().restore_backup, text,
+                    dry_run=dry_run, sections=wanted, expect=expect or None,
+                )
+            except NotABackup as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from None
+            except PlanChanged as exc:
+                return JSONResponse(
+                    status_code=409,
+                    content={"status": "error", "detail": str(exc), "plan": exc.summary},
+                )
+            return {"status": "ok", **result, "restart_recommended": bool(result.get("restored"))}
 
-                _yaml.safe_load(body.decode("utf-8"))
-            except Exception:
-                try:
-                    import json as _json
+        @router.get("/api/settings/system/restore/undo")
+        async def api_restore_undo_preview() -> dict[str, Any]:
+            """What undoing the last restore would put back; ``available`` is
+            False when there is nothing to undo."""
+            result = await asyncio.to_thread(_get_sm().undo_restore, dry_run=True)
+            return {"status": "ok", **result}
 
-                    _json.loads(body.decode("utf-8"))
-                except Exception:
-                    return {"error": "Backup content is not valid YAML or JSON"}
-            count = _get_sm().restore_backup(body.decode("utf-8"))
-            return {"status": "ok", "restored": str(count)}
+        @router.post("/api/settings/system/restore/undo")
+        async def api_restore_undo(expect: str = Query("")) -> Any:
+            """Undo the last restore: what it changed goes back, except a
+            setting changed again since and a key it brought back, which stay."""
+            if is_volatile_store(config_store):
+                raise HTTPException(status_code=503, detail=_VOLATILE_SETTINGS)
+            try:
+                result = await asyncio.to_thread(_get_sm().undo_restore, expect=expect or None)
+            except PlanChanged as exc:
+                return JSONResponse(
+                    status_code=409,
+                    content={"status": "error", "detail": str(exc), "plan": exc.summary},
+                )
+            if not result.get("available"):
+                raise HTTPException(status_code=409, detail="There is no restore to undo.")
+            return {"status": "ok", **result, "restart_recommended": bool(result.get("reverted"))}
 
         @router.get("/api/settings/system/diagnostics")
         def api_diagnostics() -> dict[str, Any]:
@@ -1660,30 +1673,14 @@ class SettingsRouterBuilder:
             """Check for updates."""
             return await asyncio.to_thread(_get_sm().check_updates)
 
-        @router.post("/api/settings/import")
-        def api_import_config(req: ImportConfigRequest) -> dict[str, str]:
-            """Import configuration."""
-            count = _get_sm().import_config(req.data, req.format, req.selective, req.sections)
-            return {"status": "ok", "imported": str(count)}
-
-        @router.post("/api/settings/reset")
-        async def api_reset_settings(request: Request) -> dict[str, str]:
-            """Reset all DB settings (reverts to YAML defaults).
-
-            Requires a confirmation body ``{"confirm": "RESET"}`` to
-            prevent accidental or malicious triggering.
-            """
-            try:
-                body = await request.json()
-            except Exception:
-                return {"error": "Invalid JSON body. Expected {'confirm': 'RESET'}"}
-            if body.get("confirm") != "RESET":
-                return {"error": "Confirmation required. Send {\"confirm\": \"RESET\"} to confirm."}
-            # Whole-table delete + cache invalidation. Unbounded in the number
-            # of settings rows, so it does not belong on the event loop.
-            count = await asyncio.to_thread(config_store.reset_all)
-            config_store.invalidate_yaml_cache()
-            return {"status": "ok", "reset": str(count)}
+        # No /api/settings/import and no /api/settings/reset (2026-10-01).
+        # The import wrote every value of a pasted file raw -- the sign-in
+        # secret, the password, browser sessions, Kazma's own state, keys over
+        # keys -- and could not read its own export; Import/Export now restores
+        # through /api/settings/system/restore. The reset deleted every row,
+        # keys and sign-in included; both of its buttons posted without the
+        # confirmation body, so the route answered 200 with an error and the
+        # page announced a reset that never ran.
 
     def _build_models_routes(self) -> None:
         router = self.models_router

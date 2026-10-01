@@ -118,12 +118,20 @@ def register_system_tools(registry: Any) -> None:
                 f"Error: '{key}' is a sensitive credential. "
                 "Change it in Settings UI — not via tools."
             )
+        # The value checks the Settings page applies (a time zone the
+        # scheduler can resolve, a retention the sweep can read...).
+        from kazma_core.settings_validation import SettingRejected, validate_setting
+
+        try:
+            checked, category = validate_setting(key, value)
+        except SettingRejected as exc:
+            return f"Error: {exc}"
 
         store = get_config_store()
         store.set(
             key,
-            value,
-            category="connectors" if key.startswith("connectors.") else "general",
+            checked,
+            category=category or ("connectors" if key.startswith("connectors.") else "general"),
         )
         logger.info("[config_save] Saved setting: %s", key)
         # Never echo secret-like values back into chat

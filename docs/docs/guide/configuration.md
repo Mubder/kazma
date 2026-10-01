@@ -33,10 +33,37 @@ flowchart LR
 - `ConfigStore.batch_set(items)` is the **atomic** multi-key write — single `BEGIN`/`COMMIT`, rollback on any failure (`config_store.py:538-568`). Always prefer it for multi-key updates.
 - `ConfigStore.transaction()` is a `@contextmanager` yielding the raw connection for caller-driven multi-op transactions (`config_store.py:572`).
 - `reconcile_from_yaml()` seeds DB with `kazma.yaml` leaf values for keys **not already in DB** — it never overwrites existing DB keys (`config_store.py:678-685`). This is the startup step that makes ConfigStore authoritative.
-- `export_yaml()` / `import_yaml()` round-trip DB overrides merged into YAML (`config_store.py:632, 650`).
-- `reset_all()` deletes all DB rows → reverts to YAML defaults (`config_store.py:732`).
+- `export_yaml()` / `import_yaml()` round-trip every DB row merged into YAML; `kazma migrate` carries settings this way (`config_store.py:632, 650`). The Settings page's backup is a different file, below.
+- `reset_all()` deletes all DB rows → reverts to YAML defaults (`config_store.py:732`). No page offers it: it would also delete keys and sign-in.
 
 > **Singleton rule:** Always use `get_config_store()` (`config_store.py:760`), never `ConfigStore()` directly. On SQLite init failure it falls back to a thread-safe `_InMemoryStore` with TTL eviction (`config_store.py:777`) — settings then won't survive a restart.
+
+### Backing up and restoring settings {#settings-backup}
+
+**Settings → System → Download settings backup** saves a YAML file named with today's date; **Settings → Import/Export → Export** gives the same file as YAML or JSON. It holds:
+
+- every setting this install stores, one line each (`agent.language: ar`), not kazma.yaml's defaults, so a restore never pins an old default;
+- keys only by name, as references to this install's vault (`vault://cfg:providers.list.deepseek.api_key`), never the keys themselves. A key kept in plain text (no vault) and a password inside a URL are written as `****`;
+- nothing of Kazma's own state (approval grants, a chat's long-task record, boot stamps) and no credential (the sign-in secret, the password, signed-in browsers, who may use the install).
+
+**Restore settings backup…** (and **Import/Export → Import**, which can restore chosen sections) first shows what will change, and writes only after you confirm:
+
+| What the backup holds | What a restore does |
+|---|---|
+| A setting | Writes the backup's value, through the same checks as a Settings save. A value Settings would refuse is listed and left as it is. |
+| A key you have now | Keeps yours. It is never replaced. |
+| A key you no longer have | Brings it back from this install's vault when the backup's reference still opens, so you enter nothing. Otherwise it is listed for you to enter again in Settings. |
+| Providers, MCP servers, mail accounts | Merges by name. Entries and fields added since the backup stay, and each keeps its keys. A mail account comes back only while the vault still holds its sign-in. |
+| Kazma's own state, credentials | Never written. |
+| The Soul Kazma learned | Restored only where the install has none. |
+| A default Kazma changed since the backup | Keeps today's value (`config_defaults.RETIRED_DEFAULTS`). |
+| A setting the backup does not name | Stays. A restore deletes nothing. |
+
+If your settings change between the preview and the confirmation, nothing is written and the preview is shown again. **Undo last restore** puts back what the last restore changed, except a setting changed again since and a key it brought back. Kazma then offers a restart, because providers, models and chat apps are read at start.
+
+Older files restore too: the earlier backup (every row, nested) and Import/Export's earlier export (rows grouped by category). Their credentials and Kazma's own state are left out the same way.
+
+Source: `kazma_core/settings_restore.py`. Every key is classed there (`KEY_RULES`); `tests/test_settings_restore_classes.py` fails on a key the code writes that no rule names. The value checks are `kazma_core/settings_validation.py`, shared with every save.
 
 ---
 

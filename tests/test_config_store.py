@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 from kazma_core.config_store import ConfigStore
 
 import pytest
@@ -104,6 +106,23 @@ class TestConfigStoreYaml:
         assert isinstance(yaml_str, str)
         assert len(yaml_str) > 0
         store.close()
+
+    def test_an_export_leaves_the_defaults_as_they_are(self, tmp_path) -> None:
+        """export_yaml merged the rows into the store's cached kazma.yaml: after
+        a backup download, a setting deleted later read its old value instead
+        of the shipped one until a restart (2026-10-01)."""
+        (tmp_path / "kazma.yaml").write_text("agent:\n  language: en\n", encoding="utf-8")
+        store = ConfigStore(db_path=str(tmp_path / "s.db"), yaml_path=str(tmp_path / "kazma.yaml"))
+        try:
+            store.set("agent.language", "ar", category="agent")
+            assert "language: ar" in store.export_yaml()
+            store.delete("agent.language")
+            assert store.get("agent.language") == "en"
+            copy = store.yaml_defaults()
+            copy["agent"]["language"] = "changed"
+            assert store.get("agent.language") == "en", "yaml_defaults hands out a copy"
+        finally:
+            store.close()
 
     def test_import_yaml(self) -> None:
         store = ConfigStore()

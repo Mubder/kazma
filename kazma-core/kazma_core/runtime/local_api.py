@@ -12,11 +12,39 @@ from typing import Any
 from kazma_core.http_tls import shared_ssl_context
 
 __all__ = [
+    "LocalApiRefused",
     "auth_headers",
     "candidate_api_bases",
     "request_json",
     "request_json_async",
 ]
+
+#: Answers that mean the server read the request and refused it: not a
+#: reason to try another address, and never "the server is unreachable".
+_REFUSALS = frozenset({400, 409, 413, 422})
+
+
+class LocalApiRefused(RuntimeError):
+    """The running server answered and refused the request; ``detail`` is
+    its reason (a value a setting cannot hold, for example)."""
+
+    def __init__(self, detail: str, status: int) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.status = status
+
+
+def _refusal(resp: Any) -> LocalApiRefused | None:
+    if resp.status_code not in _REFUSALS:
+        return None
+    try:
+        body = resp.json()
+    except ValueError:
+        return None
+    if not isinstance(body, dict):
+        return None
+    detail = body.get("detail") or body.get("error")
+    return LocalApiRefused(str(detail), resp.status_code) if detail else None
 
 
 def _is_loopback(url: str) -> bool:
@@ -116,6 +144,9 @@ def request_json(
                     f"{url} returned {resp.status_code} — set KAZMA_SECRET "
                     "to the same secret the server is using (cwd .env)."
                 )
+            refused = _refusal(resp)
+            if refused is not None:
+                raise refused
             if resp.status_code >= 400:
                 errors.append(f"{url} -> {resp.status_code}")
                 continue
@@ -162,6 +193,9 @@ async def request_json_async(
                     f"{url} returned {resp.status_code} — set KAZMA_SECRET "
                     "to the same secret the server is using (cwd .env)."
                 )
+            refused = _refusal(resp)
+            if refused is not None:
+                raise refused
             if resp.status_code >= 400:
                 snippet = ""
                 try:

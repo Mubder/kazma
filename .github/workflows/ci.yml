@@ -508,7 +508,8 @@ jobs:
             tests/e2e/test_session_list_loading.py \
             tests/e2e/test_layout_widths.py \
             tests/e2e/test_instant_reply_closes.py \
-            tests/e2e/test_dashboard_session_table.py
+            tests/e2e/test_dashboard_session_table.py \
+            tests/e2e/test_settings_restore_browser.py
         env:
           KAZMA_DB_BACKEND: sqlite
 

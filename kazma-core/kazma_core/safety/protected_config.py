@@ -22,13 +22,24 @@ the agent a new way to run code or reach the network, or expose a secret:
   the secret vault.
 - ``notifications.lifecycle.`` — the operator's own status channel.
 
+And every key that is not a setting at all (2026-10-01): Kazma's own state,
+credentials and what it learned, as ``kazma_core.settings_restore.classify``
+names them -- approval grants (``task_grant.``, ``hitl_grant.``,
+``path_grant.``), signed-in browsers, the Soul. ``config_save`` could write
+those: an approval card stood between the agent and a grant it gave itself,
+but a card is not a reason to offer the write.
+
 Membership is by prefix (``key`` equals a prefix without its trailing dot,
-or starts with it). ``is_sensitive_config_key`` (secret-CLASS keys, e.g.
-provider API keys) is a SEPARATE, additional gate that ``config_save``
-already applies; this list is the self-protection gate.
+or starts with it), on the key without its tenant prefix: ``tenant.<id>.
+mcp.servers`` is a tenant's MCP servers and was not protected.
+``is_sensitive_config_key`` (secret-CLASS keys, e.g. provider API keys) is a
+SEPARATE, additional gate that ``config_save`` already applies; this list is
+the self-protection gate.
 """
 
 from __future__ import annotations
+
+from kazma_core.settings_validation import base_key
 
 __all__ = ["PROTECTED_CONFIG_PREFIXES", "is_protected_config_key"]
 
@@ -49,7 +60,13 @@ PROTECTED_CONFIG_PREFIXES: tuple[str, ...] = (
 
 def is_protected_config_key(key: str) -> bool:
     """Whether *key* is one the agent may not change about itself."""
-    k = str(key or "").strip()
+    k = base_key(str(key or "").strip())
     if not k:
         return False
-    return any(k == p.rstrip(".") or k.startswith(p) for p in PROTECTED_CONFIG_PREFIXES)
+    if any(k == p.rstrip(".") or k.startswith(p) for p in PROTECTED_CONFIG_PREFIXES):
+        return True
+    # Imported here: settings_restore reads the settings store's module, which
+    # must not depend on the safety package at import time.
+    from kazma_core.settings_restore import SETTING, classify
+
+    return classify(k) != SETTING

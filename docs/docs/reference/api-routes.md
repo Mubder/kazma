@@ -104,6 +104,11 @@ Page: `GET /memory` (HTML admin). Guide: [Memory & RAG](../guide/memory-and-rag)
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | * | `/api/settings*`, config export | Admin/operator | ConfigStore-backed settings UI |
+| PUT | `/api/settings/single`, `/api/settings` | Admin | Save one setting, or several in one transaction. Both apply the same value checks (`settings_validation`): a time zone the scheduler cannot resolve, a retention the sweep cannot read, a server-status event Kazma does not send answer 400 and nothing is written. |
+| GET | `/api/settings/system/backup` | Admin | The settings backup (YAML): every stored setting, keys as vault references, no credential and none of Kazma's own state. [Configuration](../guide/configuration#settings-backup). |
+| GET | `/api/settings/export?format=yaml\|json` | Admin | The same backup as YAML or JSON. |
+| POST | `/api/settings/system/restore?dry_run=&sections=&expect=` | Admin | Body: a backup (YAML or JSON, at most 10 MB). `dry_run=true` returns the plan (`changed`, `keys_restored`, `keys_to_reenter`, `refused`, `kept`, `digest`) and writes nothing. Without it the plan is written; with `expect` (the preview's `digest`) a plan that changed since is refused with 409 and the plan as it is now. 400 for a file that is not a backup, 413 over 10 MB, 503 while settings are held in memory (database away). `sections=agent,providers` restores only those. |
+| GET / POST | `/api/settings/system/restore/undo` | Admin | GET: what undoing the last restore would put back (`available`). POST (`expect=` the GET's `digest`): put it back; a setting changed again since and a key the restore brought back stay. 409 when there is nothing to undo. |
 | GET/PUT | `/api/settings/agent/nonstop` | Session / Admin | Non-Stop & Self-Healing watchdog/failover/ledger settings |
 | * | Workspace routes `/api/workspaces*` | Session | WorkspaceStore CRUD |
 | GET/PUT | `/api/workspace/extra-roots` | Session | Folders outside the workspace the agent may use without asking (Workspace page). PUT replaces the list; a new root must be a full path to an existing folder, not a whole drive and not one holding Kazma's own files (400 says why). A failed read is a 500, never an empty list. |
