@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## More of what pages build follows the page language (2026-10-01)
+
+- **19 more English strings now come from the translation catalog.** All are
+  text that scripts write straight into the page. In the chat: the
+  clarification card's "Clarification Needed", "Resolving…" and "Failed —
+  retry", the "Loading messages…" screen, the model picker's "— default —",
+  and the swarm's "Background Task Active:". Also the approval sidebar's
+  clarify card, the memory graph's hover tips, and a research result's
+  cost, tokens, duration and workers. The research line now escapes worker
+  names too.
+- **The check now reads HTML that scripts build.** It looks only at the text
+  the page shows (words between tags, and titles and labels), so markup split
+  across strings is not mistaken for English.
+
 ## The check for routes nothing calls reads the method (2026-10-01)
 
 - **A route is "called" only when something calls it with its own method.**

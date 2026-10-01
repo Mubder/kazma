@@ -3456,12 +3456,14 @@
           var tc = _v2gNodeColor(p);
           var tLabel = _v2gTitle(_v2gDisplayName(p));
           var modeHint = '';
-          if (_v2gOps.mode === 'link') modeHint = '<br><span style="color:var(--accent);">link pick</span>';
-          else if (_v2gOps.mode === 'merge') modeHint = '<br><span style="color:var(--warning);">merge pick</span>';
+          if (_v2gOps.mode === 'link') modeHint = '<br><span style="color:var(--accent);">' + _v2gEsc(_mt('memory.console.tip_link_pick', 'link pick')) + '</span>';
+          else if (_v2gOps.mode === 'merge') modeHint = '<br><span style="color:var(--warning);">' + _v2gEsc(_mt('memory.console.tip_merge_pick', 'merge pick')) + '</span>';
           tip.innerHTML = '<b style="color:' + tc + ';word-break:break-word;">' + _v2gEsc(tLabel) + '</b><br><span style="color:var(--text-muted);">' +
-            (_v2gIsUser(p) ? 'you · center of memory' : ('type: ' + p.type)) +
-            (p.isHighStakes ? ' · high-stakes' : '') +
-            (p.isVirtual ? ' · fact' : '') +
+            _v2gEsc(_v2gIsUser(p)
+              ? _mt('memory.console.tip_you', 'you · center of memory')
+              : _mt('memory.console.tip_type', 'type: {type}', { type: p.type })) +
+            (p.isHighStakes ? ' · ' + _v2gEsc(_mt('memory.console.tip_high_stakes', 'high-stakes')) : '') +
+            (p.isVirtual ? ' · ' + _v2gEsc(_mt('memory.console.tip_fact', 'fact')) : '') +
             (p.id && _v2gDisplayName(p) !== p.id ? ' · id: ' + _v2gEsc(String(p.id).slice(0, 24)) : '') +
             '</span>' + modeHint;
           tip.style.display = 'block';
@@ -3472,10 +3474,10 @@
         } else if (eHover >= 0 && tip) {
           var edh = _v2gEdges[eHover];
           var Ah = _v2gPts[edh.a], Bh = _v2gPts[edh.b];
-          tip.innerHTML = '<b style="color:#fbbf24;">' + _v2gEsc((edh.fullLabel || edh.label || 'edge').replace(/_/g, ' ')) + '</b><br>' +
+          tip.innerHTML = '<b style="color:#fbbf24;">' + _v2gEsc((edh.fullLabel || edh.label || _mt('memory.console.tip_edge', 'edge')).replace(/_/g, ' ')) + '</b><br>' +
             '<span style="color:var(--text-muted);">' +
             _v2gEsc(Ah ? _v2gDisplayName(Ah) : '?') + ' → ' + _v2gEsc(Bh ? _v2gDisplayName(Bh) : '?') +
-            '</span><br><span style="color:var(--text-muted);font-size:0.68rem;">click to edit / unlink</span>';
+            '</span><br><span style="color:var(--text-muted);font-size:0.68rem;">' + _v2gEsc(_mt('memory.console.tip_edge_click', 'click to edit / unlink')) + '</span>';
           tip.style.display = 'block';
           tip.style.borderColor = 'rgba(251,191,36,0.4)';
           var rect2 = canvas.getBoundingClientRect();

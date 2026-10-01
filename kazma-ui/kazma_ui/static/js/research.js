@@ -528,14 +528,15 @@
           $('research-detail').style.display = 'block';
           $('research-detail-title').textContent = (t.prompt || i18n('research.ui.research', 'Research')).slice(0, 80);
           if (window.KazmaBidi) KazmaBidi.apply($('research-detail-title'), t.prompt || '');
+          // Labels from the catalog; the worker names are data (escaped).
           $('research-detail-meta').innerHTML =
-            '<span>Cost: <strong>$' + (t.cost || 0).toFixed(4) + '</strong></span> · ' +
-            '<span>Tokens: ' + (t.tokens || 0) + '</span> · ' +
-            '<span>Duration: ' + (t.duration || 0).toFixed(1) + 's</span> · ' +
-            '<span>Workers: ' + (t.workers || []).join(', ') + '</span>';
+            '<span>' + esc(i18n('research.ui.meta_cost', 'Cost: {cost}', { cost: '$' + (t.cost || 0).toFixed(4) })) + '</span> · ' +
+            '<span>' + esc(i18n('research.ui.meta_tokens', 'Tokens: {n}', { n: t.tokens || 0 })) + '</span> · ' +
+            '<span>' + esc(i18n('research.ui.meta_duration', 'Duration: {s}s', { s: (t.duration || 0).toFixed(1) })) + '</span> · ' +
+            '<span>' + esc(i18n('research.ui.meta_workers', 'Workers: {names}', { names: (t.workers || []).join(', ') })) + '</span>';
           var output = t.aggregated_output || t.synthesized_output ||
             (t.worker_results && t.worker_results[0] ? t.worker_results[0].output : '') ||
-            '(no output)';
+            i18n('research.ui.no_output', '(no output)');
           var el = $('research-detail-output');
           el.className = 'markdown-body bidi-content';
           if (window.KazmaStream && KazmaStream.markdown) {

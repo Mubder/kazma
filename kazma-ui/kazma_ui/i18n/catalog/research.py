@@ -444,4 +444,25 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "حذف نتيجة البحث هذه؟",
         "en": "Delete this research result?",
     },
+    # A result's summary line (2026-10-01).
+    "research.ui.meta_cost": {
+        "ar": "التكلفة: {cost}",
+        "en": "Cost: {cost}",
+    },
+    "research.ui.meta_tokens": {
+        "ar": "الرموز: {n}",
+        "en": "Tokens: {n}",
+    },
+    "research.ui.meta_duration": {
+        "ar": "المدة: {s} ث",
+        "en": "Duration: {s}s",
+    },
+    "research.ui.meta_workers": {
+        "ar": "العاملون: {names}",
+        "en": "Workers: {names}",
+    },
+    "research.ui.no_output": {
+        "ar": "(لا مخرجات)",
+        "en": "(no output)",
+    },
 }

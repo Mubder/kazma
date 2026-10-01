@@ -472,6 +472,14 @@ function setupWall() {
     session_id_label: {{ t('chat.session_id_label') | tojson }},
     session_messages_failed: {{ t('chat.session_messages_failed') | tojson }},
     session_messages_retrying: {{ t('chat.session_messages_retrying') | tojson }},
+    /* Text chat.js builds into HTML (2026-10-01): the model picker's empty
+       state, the swarm badge, the clarify card and the loading block. */
+    model_default_option: {{ t('chat.model_default_option') | tojson }},
+    background_task_active: {{ t('chat.background_task_active') | tojson }},
+    clarification_needed: {{ t('chat.clarification_needed') | tojson }},
+    gate_resolving: {{ t('chat.gate_resolving') | tojson }},
+    gate_failed_retry: {{ t('chat.gate_failed_retry') | tojson }},
+    loading_messages: {{ t('chat.loading_messages') | tojson }},
     no_reply_title: {{ t('chat.no_reply_title') | tojson }},
     yolo_session_on: {{ t('chat.yolo_session_on') | tojson }},
     tool_allowed_session: {{ t('chat.tool_allowed_session') | tojson }},

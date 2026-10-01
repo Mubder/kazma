@@ -1058,6 +1058,30 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تعذّر تحميل رسائل الجلسة{detail} — جارٍ إعادة المحاولة…",
         "en": "Failed to load session messages{detail} — retrying…",
     },
+    "chat.model_default_option": {
+        "ar": "— الافتراضي —",
+        "en": "— default —",
+    },
+    "chat.background_task_active": {
+        "ar": "مهمة تعمل في الخلفية:",
+        "en": "Background Task Active:",
+    },
+    "chat.clarification_needed": {
+        "ar": "مطلوب توضيح",
+        "en": "Clarification Needed",
+    },
+    "chat.gate_resolving": {
+        "ar": "جارٍ التنفيذ…",
+        "en": "Resolving…",
+    },
+    "chat.gate_failed_retry": {
+        "ar": "فشل — أعد المحاولة",
+        "en": "Failed — retry",
+    },
+    "chat.loading_messages": {
+        "ar": "جارٍ تحميل الرسائل…",
+        "en": "Loading messages…",
+    },
     "chat.no_reply_title": {
         "ar": "انتهى الدور بلا رد — راجع منطقة الرسائل أو window.KazmaChat.diagnostics()",
         "en": "Turn ended without a reply — see the message area or window.KazmaChat.diagnostics()",

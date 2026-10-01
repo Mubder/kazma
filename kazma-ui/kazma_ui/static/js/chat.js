@@ -2607,7 +2607,7 @@
     var hasProviders = providerGroups.some(function(g) { return g.models && g.models.length > 0; });
     var allEmpty = !hasProviders && savedProfiles.length === 0;
     if (allEmpty) {
-      modelSelectorEl.innerHTML = '<option value="">— default —</option>';
+      modelSelectorEl.innerHTML = '<option value="">' + escapeHtml(ti('model_default_option', '— default —')) + '</option>';
       return;
     }
     var html = '';
@@ -3095,7 +3095,7 @@
           var content = currentMsgEl.querySelector('.message-content');
           var resultBox = document.createElement('div');
           resultBox.className = 'swarm-bg-badge';
-          resultBox.innerHTML = '<span class="pulse-dot"></span><div><strong>Background Task Active:</strong> ' + escapeHtml(truncateStr(data.result, 300)) + '</div>';
+          resultBox.innerHTML = '<span class="pulse-dot"></span><div><strong>' + escapeHtml(ti('background_task_active', 'Background Task Active:')) + '</strong> ' + escapeHtml(truncateStr(data.result, 300)) + '</div>';
           content.appendChild(resultBox);
         }
         scrollToBottom();
@@ -5664,7 +5664,7 @@
         try { _semCard.setAttribute('data-interrupt-id', _semIid); } catch (eAttr) { /* ignore */ }
       }
       _semCard.innerHTML =
-        '<div class="hitl-approval-header">\u2754 Clarification Needed</div>' +
+        '<div class="hitl-approval-header">\u2754 ' + escapeHtml(ti('clarification_needed', 'Clarification Needed')) + '</div>' +
         '<div class="hitl-approval-body">' +
           '<p class="hitl-message">' + escapeHtml(truncateStr(_semQ, 500)) + '</p>' +
         '</div>' +
@@ -5686,7 +5686,7 @@
           var optId = this.getAttribute('data-opt');
           _semCard.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
           var act = _semCard.querySelector('.hitl-approval-actions');
-          if (act) act.innerHTML = '<span class="hitl-status">Resolving\u2026</span>';
+          if (act) act.innerHTML = '<span class="hitl-status">' + escapeHtml(ti('gate_resolving', 'Resolving\u2026')) + '</span>';
           // Record the decision in the document immediately; TurnView
           // re-orders the settled card above the incoming reply.
           _noteGateDecided(data, optId === 'cancel' ? 'denied' : 'approved');
@@ -5715,7 +5715,7 @@
               return;
             }
             if (res.status >= 400 || (res.body && res.body.ok === false)) {
-              if (act) act.innerHTML = '<span class="hitl-status text-danger">Failed — retry</span>';
+              if (act) act.innerHTML = '<span class="hitl-status text-danger">' + escapeHtml(ti('gate_failed_retry', 'Failed — retry')) + '</span>';
               _semCard.querySelectorAll('button').forEach(function(b) { b.disabled = false; });
               return;
             }
@@ -5723,7 +5723,7 @@
             _awaitingReply = true;
             _reattachAfterApproval('approve-json');
           }).catch(function() {
-            if (act) act.innerHTML = '<span class="hitl-status text-danger">Failed — retry</span>';
+            if (act) act.innerHTML = '<span class="hitl-status text-danger">' + escapeHtml(ti('gate_failed_retry', 'Failed — retry')) + '</span>';
             _semCard.querySelectorAll('button').forEach(function(b) { b.disabled = false; });
           });
         });
@@ -6708,8 +6708,8 @@
     messagesEl.innerHTML =
       '<div class="chat-welcome">' +
         '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
-        '<h2>Session ' + escapeHtml(sessionId.slice(0, 8)) + '</h2>' +
-        '<p>Loading messages\u2026</p>' +
+        '<h2>' + escapeHtml(tiFmt('session_heading', 'Session {id}', { id: sessionId.slice(0, 8) })) + '</h2>' +
+        '<p>' + escapeHtml(ti('loading_messages', 'Loading messages\u2026')) + '</p>' +
       '</div>';
     renderSessionList();
     resetSessionStats();

@@ -3894,7 +3894,12 @@ channel it booted with.
   every script and every template's inline script and fails on English words
   at those sinks outside a translation helper (found from the source: a
   function whose first parameter is the key and whose body reads the
-  catalog). In the same file: every option a page passes to
+  catalog). HTML a script builds (`innerHTML`, `outerHTML`,
+  `insertAdjacentHTML`) is read too: the expression's literals are joined in
+  order and only what the browser shows is checked -- text between tags and
+  the `title`/`aria-label`/`placeholder`/`alt` values, never a tag, a style,
+  a class or a data attribute -- so markup split across literals is not
+  English; on the old scripts it found 19 strings and no markup. In the same file: every option a page passes to
   `kazmaConfirm`/`kazmaPrompt`/`kazmaAlert` is one `stores.js` reads (the
   Workspace passed `confirmLabel`, so "Delete files too" read "Confirm"); no
   template quotes `{{ ... }}` inside a script -- write `{{ value | tojson }}`

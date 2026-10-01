@@ -175,7 +175,7 @@
         }).join(' ');
         return (
           '<div class="hitl-approval-card" data-thread-id="' + threadId + '" data-interrupt-id="' + interruptId + '" data-gate-id="' + gateId + '">' +
-          '  <div class="hitl-approval-header"><span class="hitl-tool-name">❓ Clarification</span>' +
+          '  <div class="hitl-approval-header"><span class="hitl-tool-name">❓ ' + escapeHtml(t('chat.clarification_needed', 'Clarification Needed')) + '</span>' +
             (threadId ? '<span class="hitl-thread-id">' + threadId + '</span>' : '') + '</div>' +
           '  <div class="hitl-approval-message" dir="auto">' + _sq + '</div>' +
           '  <div class="hitl-approval-actions">' + _ob + '</div>' +
@@ -247,7 +247,7 @@
         var card = btn.closest('.hitl-approval-card');
         if (card) card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
         var act = card ? card.querySelector('.hitl-approval-actions') : null;
-        if (act) act.innerHTML = '<span>Resolving…</span>';
+        if (act) act.innerHTML = '<span>' + escapeHtml(t('chat.gate_resolving', 'Resolving…')) + '</span>';
         var payload = { action: optId === 'cancel' ? 'deny' : 'approve', scope: 'once', choices: {} };
         // Bind the decision to THIS gate — without interrupt_id a stale card
         // could approve a newly raised, different gate on the same thread.
@@ -260,7 +260,7 @@
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         }).then(function() { refreshPending(); })
-          .catch(function() { if (act) act.innerHTML = '<span class="text-danger">Failed</span>'; });
+          .catch(function() { if (act) act.innerHTML = '<span class="text-danger">' + escapeHtml(t('chat.gate_failed_retry', 'Failed — retry')) + '</span>'; });
       });
     });
   }
