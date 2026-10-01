@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Kazma's names can be held on PyPI (2026-10-01)
+
+- **Ready to reserve `kazma` and the names around it.** Nothing Kazma
+  published was on PyPI, so `kazma`, `kazma-core` and six more names were
+  anyone's to register. A stranger's upload under them would have run on any
+  machine that asked pip for Kazma by name. Each name now has a reservation:
+  version 0.0.1, no code, only a page pointing at the GitHub releases.
+  Installing one installs nothing.
+- **Uploaded by a workflow, with no PyPI token.** Actions → Reserve PyPI
+  names builds and checks the eight reservations, and with "publish" ticked
+  uploads each through PyPI Trusted Publishing. Each name first needs its
+  pending publisher on pypi.org; the supply-chain guide lists what to enter.
+  Kazma itself still installs only from its GitHub releases.
+
 ## Slack no longer holds you to one message a minute (2026-10-01)
 
 - **The flood guard lets a person type.** `gateway.rate_limits` shipped

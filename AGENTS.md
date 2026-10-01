@@ -3648,6 +3648,15 @@ and the sibling suites):**
   Gate: `tests/test_no_pypi_kazma.py` -- every tracked product, script and doc
   file (history, plans and tests excepted), a PyPI URL for a Kazma name, and
   every install argv by AST; negative controls are the 27 old forms.
+  **The names are held on PyPI** (2026-10-01, the owner's decision):
+  `scripts/pypi_reserve.py` builds a reservation per name (0.0.1, no code, a
+  page pointing at the GitHub releases) and `.github/workflows/pypi-reserve.yml`
+  uploads them by hand through Trusted Publishing -- no PyPI token exists; each
+  name needs its pending publisher (owner `Mubder`, repo `kazma`, workflow
+  `pypi-reserve.yml`, environment `pypi`; `docs/SUPPLY_CHAIN.md`). Kazma still
+  installs only from GitHub, so the rules above stand. The gate holds its
+  `KAZMA_DISTS` equal to the reservation list: a new package name is reserved
+  with the rest.
 - **An MCP server's secrets live in the vault** (`kazma_core/mcp/secrets.py`,
   AUD-030). An `env` entry named like a credential, `auth.value`/`auth.token`,
   a credential header, the value of a `--api-key=...`-style command flag and a

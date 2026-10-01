@@ -29,9 +29,11 @@ Provenance attestations are not files in the release; GitHub stores them and
 ## Kazma is not on PyPI
 
 Kazma ships through the GitHub releases of `Mubder/kazma` and the repository
-itself, nowhere else. No Kazma package is published on PyPI, so `kazma`,
-`kazma-core` and the other names are anyone's to register: never install
-`kazma` (or `kazma[...]`) by name from PyPI. Install an extra from your Kazma
+itself, nowhere else. On PyPI the project holds `kazma`, `kazma-core` and the
+names around them with reservations: version 0.0.1 of each, with no code, only
+a page that sends the reader to the GitHub releases. Installing one installs
+nothing, and no one else can publish under the name. Never install `kazma` (or
+`kazma[...]`) by name from PyPI to get Kazma. Install an extra from your Kazma
 folder (`pip install -e ".[web]"`, or Settings → Packages) and upgrade with
 `kazma update`.
 
@@ -43,6 +45,34 @@ stops and names the release page. It does not check the Sigstore signature
 itself: run `gh attestation verify` (below) when you want that proof. The
 Settings update check reads the same release. Until 2026-09-30 both asked
 PyPI, and `kazma update` then had pip upgrade `kazma` by name.
+
+### How the names are held {#pypi-names}
+
+The names are `kazma`, `kazma-cli`, `kazma-core`, `kazma-gateway`,
+`kazma-memory` (retired), `kazma-skills`, `kazma-tui` and `kazma-ui`
+(`scripts/pypi_reserve.py`, which builds the reservations). The workflow
+`.github/workflows/pypi-reserve.yml` uploads them through PyPI Trusted
+Publishing, so no PyPI token exists anywhere. It runs only by hand
+(Actions → Reserve PyPI names), and without its "publish" box it only builds
+and checks the packages.
+
+PyPI accepts the first upload of a name only from a publisher you register
+for it. On pypi.org, under Account → Publishing → Add a new pending publisher
+→ GitHub, register each name with:
+
+| Field | Value |
+|---|---|
+| PyPI Project Name | the name (`kazma`, then `kazma-cli`, …) |
+| Owner | `Mubder` |
+| Repository name | `kazma` |
+| Workflow name | `pypi-reserve.yml` |
+| Environment name | `pypi` |
+
+Then run the workflow with "publish" ticked. Each name is uploaded in its own
+job, so a name whose publisher is missing fails alone, and the run can be
+repeated for just that name. If PyPI limits how many pending publishers you
+can hold at once, register a few, run the workflow for those names, then the
+next few.
 
 ---
 

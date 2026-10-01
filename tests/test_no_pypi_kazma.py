@@ -20,16 +20,27 @@ The gate reads every tracked product, script and doc file for an install
 command naming a Kazma distribution, and every Python file's AST for an install
 argv built from the package name; negative controls feed it each old form. The
 behavioural half runs the updater and the Settings check against a fake GitHub.
+
+Since 2026-10-01 the project holds these names on PyPI with reservations
+(``scripts/pypi_reserve.py``, uploaded by ``.github/workflows/pypi-reserve.yml``):
+version 0.0.1 of each, with no code, only a page pointing at the GitHub
+releases. Kazma still installs only from GitHub, so every rule above holds: an
+install by name from PyPI would get a reservation, not Kazma. The reservation
+list and ``KAZMA_DISTS`` are held equal below, so a new package name is
+reserved with the rest.
 """
 
 from __future__ import annotations
 
 import ast
 import hashlib
+import importlib.util
 import logging
 import re
 import subprocess
+import tomllib
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -231,6 +242,37 @@ show = _run_pip(["show", PACKAGE_NAME])
 wheel = _run_pip(["install", "--upgrade", spec])
 '''
     assert install_argv_names(ast.parse(fine)) == []
+
+
+def _reservations() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("pypi_reserve", REPO / "scripts" / "pypi_reserve.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_reservations_hold_every_kazma_name():
+    """The names held on PyPI are this gate's Kazma names: a package name
+    added to one list and not the other is a name left for anyone."""
+    assert set(_reservations().NAMES) == KAZMA_DISTS
+
+
+def test_a_reservation_installs_nothing_and_points_at_the_releases(tmp_path):
+    reserve = _reservations()
+    for name in reserve.NAMES:
+        project = reserve.write_project(name, tmp_path / name)
+        meta = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
+        readme = (project / "README.md").read_text(encoding="utf-8")
+        assert meta["project"]["name"] == name
+        assert meta["project"]["version"] == "0.0.1", "below every real Kazma version"
+        assert "dependencies" not in meta["project"]
+        assert meta["tool"]["hatch"]["build"]["targets"]["wheel"]["bypass-selection"] is True
+        assert set(p.name for p in project.iterdir()) == {"README.md", "pyproject.toml"}
+        assert "https://github.com/Mubder/kazma/releases" in readme
+        assert not _INSTALL_VERB.search(readme), "a reservation never says how to install by name"
+    with pytest.raises(ValueError):
+        reserve.write_project("kazma-extra", tmp_path / "extra")
 
 
 def test_both_update_checks_read_one_release():
