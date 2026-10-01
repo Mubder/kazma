@@ -275,3 +275,61 @@ def test_gates_are_registered_and_settled(harness: Harness) -> None:
     assert live_gates(run.thread_id) == [], (
         "the finished turn left a non-terminal gate row behind"
     )
+
+
+def _slow_segment_tail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hold every segment open for a second after it journals its gate.
+
+    The turn totals are read after the approval card is journaled; a slow
+    read keeps the segment's task running while the card is on screen. The
+    sleep runs in the worker thread the read already uses.
+    """
+    import time
+
+    from kazma_ui import turn_usage
+
+    real = turn_usage.turn_totals
+
+    def slow(*args: object, **kwargs: object) -> object:
+        time.sleep(1.0)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(turn_usage, "turn_totals", slow)
+
+
+def test_an_approve_sent_as_the_card_appears_is_taken(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A click on a card the human can see is a decision, however fast.
+
+    The segment that shows a gate finishes AFTER it journals the card (the
+    turn's totals, the reply's save), and until its task ends the thread
+    counts as running. The approve route refused every decision in that
+    window as "no longer pending" over a gate that was pending -- the button
+    did nothing. The lifecycle job caught it on 2026-10-01, once the route's
+    own checks became faster than that tail. Every approval here is sent the
+    moment its card arrives, inside a tail held open for a second.
+    """
+    _slow_segment_tail(monkeypatch)
+    run = drive_turn(
+        harness, "Set up the project scaffold.", [True, True, True, True],
+        leg_timeout=120.0,
+    )
+    assert run.finished
+    assert [c.ack.get("_status") for c in run.cycles] == [200] * len(run.cycles)
+
+
+def test_the_tail_window_is_real(harness: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Negative control: without the wait, the same turn's approvals are refused."""
+    from kazma_ui.routes_direct import misc
+
+    async def refuse(_thread_id: str, timeout: float = 0.0) -> bool:
+        return False
+
+    _slow_segment_tail(monkeypatch)
+    monkeypatch.setattr(misc, "_await_segment_tail", refuse)
+    with pytest.raises(AssertionError, match="no longer pending"):
+        drive_turn(
+            harness, "Set up the project scaffold.", [True, True, True, True],
+            leg_timeout=120.0,
+        )

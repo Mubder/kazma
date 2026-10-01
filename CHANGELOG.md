@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## An Approve clicked the moment its card appears is taken (2026-10-02)
+
+- **The approval button no longer does nothing when clicked quickly.** A turn
+  segment shows its approval card and then finishes its own work (the turn's
+  totals, saving the reply). Until it ends, the thread counts as running,
+  and the approve route refused a decision sent in that window as "no longer
+  pending" over a card that was pending. The human had to click again; the
+  required lifecycle check failed on it once the route's own checks became
+  faster than that work. When the gate the click names is on record as
+  pending, the route now waits (up to 10 seconds) for the segment that
+  showed it, checks again, and resumes.
+- **Gate:** `tests/e2e/test_unified_turn_app_graph.py` holds every segment
+  open for a second after its card and approves each gate the moment it
+  appears; the negative control refuses the same turn without the wait.
+
 ## A migration carries the whole data dir (2026-10-01)
 
 - **`kazma migrate export` carries every file a move needs.** The bundle took
