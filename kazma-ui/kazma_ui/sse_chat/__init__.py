@@ -1885,7 +1885,10 @@ def create_sse_chat_router(
         try:
             from kazma_core.runtime.model_switch import switch_active_provider
 
-            sw = switch_active_provider(
+            # Off the loop: settings and vault writes, then the agent rebinds
+            # and the graph is compiled again.
+            sw = await asyncio.to_thread(
+                switch_active_provider,
                 provider=body.get("provider", ""),
                 base_url=body.get("base_url", "") or "",
                 model=body.get("model", "") or "",
@@ -1898,7 +1901,7 @@ def create_sse_chat_router(
             # masked in get_active_profile-style responses).
             if registry is not None and sw.ok:
                 try:
-                    prof = registry.get_active_profile()
+                    prof = await asyncio.to_thread(registry.get_active_profile)
                     out["base_url"] = prof.get("base_url", "")
                     out["api_key"] = "***" if prof.get("api_key") else ""
                 except Exception:

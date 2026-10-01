@@ -272,7 +272,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
     # ── LLM Providers ──────────────────────────────────────────────────
 
     @router.get("/api/providers")
-    async def list_providers() -> list[dict[str, Any]]:
+    def list_providers() -> list[dict[str, Any]]:
         """List all LLM providers with masked API keys and discovered models."""
         registry = get_model_registry()
         providers = []
@@ -305,7 +305,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         return providers
 
     @router.post("/api/providers")
-    async def upsert_provider(req: ProviderUpdateRequest) -> dict[str, Any]:
+    def upsert_provider(req: ProviderUpdateRequest) -> dict[str, Any]:
         """Add or update an LLM provider.
 
         If the request contains a masked API key placeholder, the existing key
@@ -326,14 +326,14 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         return _mask_provider_entry(result)
 
     @router.delete("/api/providers/{name}")
-    async def delete_provider(name: str) -> dict[str, str]:
+    def delete_provider(name: str) -> dict[str, str]:
         """Delete an LLM provider by name."""
         registry = get_model_registry()
         registry.delete_provider(name)
         return {"status": "ok"}
 
     @router.post("/api/providers/{name}/toggle")
-    async def toggle_provider(name: str, req: ProviderToggleRequest) -> dict[str, str]:
+    def toggle_provider(name: str, req: ProviderToggleRequest) -> dict[str, str]:
         """Enable or disable an LLM provider."""
         registry = get_model_registry()
         registry.toggle_provider(name, req.enabled)
@@ -384,11 +384,11 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                     resp = await http_client.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={client.config.api_key}")
                     latency = int((time.monotonic() - start) * 1000)
                     if resp.status_code == 200:
-                        registry.set_provider_health(name, "healthy")
-                        _activate_tested_provider(registry, name)
+                        await asyncio.to_thread(registry.set_provider_health, name, "healthy")
+                        await asyncio.to_thread(_activate_tested_provider, registry, name)
                         return {"success": True, "latency_ms": latency}
                     else:
-                        registry.set_provider_health(name, "degraded")
+                        await asyncio.to_thread(registry.set_provider_health, name, "degraded")
                         error_msg = f"AI Studio returned HTTP {resp.status_code}"
                         if resp.status_code == 401:
                             error_msg += " (Unauthorized: Your Google AI Studio API key is invalid or has expired. Please verify your key or generate a new one at https://aistudio.google.com/)"
@@ -400,14 +400,14 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                     try:
                         resp = await http_client.get("")
                         latency = int((time.monotonic() - start) * 1000)
-                        registry.set_provider_health(name, "healthy")
-                        _activate_tested_provider(registry, name)
+                        await asyncio.to_thread(registry.set_provider_health, name, "healthy")
+                        await asyncio.to_thread(_activate_tested_provider, registry, name)
                         return {"success": True, "latency_ms": latency}
                     except httpx.ConnectError:
-                        registry.set_provider_health(name, "down")
+                        await asyncio.to_thread(registry.set_provider_health, name, "down")
                         return {"success": False, "error": f"Cannot connect to Vertex AI at {client.config.base_url}"}
             except Exception as e:
-                registry.set_provider_health(name, "down")
+                await asyncio.to_thread(registry.set_provider_health, name, "down")
                 return {"success": False, "error": f"Google Provider test failed: {e}"}
 
         base_url = str(provider.get("base_url", "")).rstrip("/")
@@ -561,7 +561,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                             # is also what a failing model list writes, and
                             # collapsing the two loses the distinction the
                             # moment the page reloads.
-                            registry.set_provider_health(name, "chat_failing")
+                            await asyncio.to_thread(registry.set_provider_health, name, "chat_failing")
                             return {
                                 "success": False,
                                 "latency_ms": latency,
@@ -575,16 +575,16 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                             }
                         if typed_key:
                             try:
-                                registry.upsert_provider(
-                                    {"name": name, "api_key": typed_key}
+                                await asyncio.to_thread(
+                                    registry.upsert_provider, {"name": name, "api_key": typed_key}
                                 )
                             except Exception:
                                 logger.debug(
                                     "[providers] persist tested key failed",
                                     exc_info=True,
                                 )
-                        registry.set_provider_health(name, "healthy")
-                        _activate_tested_provider(registry, name)
+                        await asyncio.to_thread(registry.set_provider_health, name, "healthy")
+                        await asyncio.to_thread(_activate_tested_provider, registry, name)
                         return {
                             "success": True,
                             "latency_ms": latency,
@@ -594,7 +594,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                             "chat_model": chat["model"],
                         }
                 latency = int((time.monotonic() - start) * 1000)
-                registry.set_provider_health(name, "degraded")
+                await asyncio.to_thread(registry.set_provider_health, name, "degraded")
                 if last_status is None:
                     logger.debug("Provider test %r: all endpoints unreachable: %s", name, last_exc)
                     return {
@@ -615,10 +615,10 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                     "error": f"{hint}HTTP {last_status}: {last_body}",
                 }
         except httpx.ConnectError:
-            registry.set_provider_health(name, "down")
+            await asyncio.to_thread(registry.set_provider_health, name, "down")
             return {"success": False, "error": f"Cannot connect to {base_url}"}
         except Exception as exc:  # pragma: no cover - defensive
-            registry.set_provider_health(name, "down")
+            await asyncio.to_thread(registry.set_provider_health, name, "down")
             logger.error("Provider test failed for %r: %s", name, exc)
             return {"success": False, "error": "Provider test failed unexpectedly"}
 
@@ -627,7 +627,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         """Discover models available for a provider and persist them."""
         registry = get_model_registry()
         models = await registry.discover_models(name)
-        registry.serialize()  # persist discovered models to ConfigStore
+        await asyncio.to_thread(registry.serialize)  # persist discovered models to ConfigStore
         from kazma_core.models.modality import chat_models, speech_models
 
         chat = chat_models(models)
@@ -640,7 +640,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         }
 
     @router.delete("/api/providers/{name}/models/{model_id:path}")
-    async def delete_provider_model(name: str, model_id: str) -> dict[str, Any]:
+    def delete_provider_model(name: str, model_id: str) -> dict[str, Any]:
         """Delete a specific model from a provider's discovered, selected, and manual lists."""
         registry = get_model_registry()
         deleted = registry.remove_provider_model(name, model_id)
@@ -654,7 +654,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         }
 
     @router.post("/api/providers/{name}/clear-discovered")
-    async def clear_discovered_provider_models(name: str) -> dict[str, Any]:
+    def clear_discovered_provider_models(name: str) -> dict[str, Any]:
         """Clear cached discovered models and selection for a provider."""
         registry = get_model_registry()
         registry.clear_discovered_models(name)
@@ -667,7 +667,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         }
 
     @router.post("/api/providers/{name}/select-models")
-    async def set_selected_models(name: str, req: dict[str, Any]) -> dict[str, Any]:
+    def set_selected_models(name: str, req: dict[str, Any]) -> dict[str, Any]:
         """Set which discovered models should appear in dropdowns.
 
         Body: ``{"models": ["model-a", "model-b"]}``
@@ -682,14 +682,14 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
     # ── Saved Model Profiles ────────────────────────────────────────────
 
     @router.get("/api/models/profiles")
-    async def list_model_profiles() -> list[dict[str, Any]]:
+    def list_model_profiles() -> list[dict[str, Any]]:
         """List all saved model profiles with masked API keys."""
         registry = get_model_registry()
         profiles: list[dict[str, Any]] = registry.list_model_profiles(mask_api_key=True)
         return profiles
 
     @router.post("/api/models/profiles")
-    async def save_model_profile(req: ModelProfileUpdateRequest) -> dict[str, Any]:
+    def save_model_profile(req: ModelProfileUpdateRequest) -> dict[str, Any]:
         """Save a named model profile.
 
         Stores under ``models.saved.{name}`` with the provider, base URL, API key,
@@ -720,7 +720,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         return result
 
     @router.delete("/api/models/profiles/{name}")
-    async def delete_model_profile(name: str) -> dict[str, str]:
+    def delete_model_profile(name: str) -> dict[str, str]:
         """Delete a saved model profile by name."""
         registry = get_model_registry()
         if not registry.delete_model_profile(name):

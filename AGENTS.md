@@ -2830,6 +2830,14 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   (2026-09-30): the restic maintenance handler's repo/password reads, the
   workspace ladder (`resolve_active_root`, six async tools) and the GitHub
   token helpers (a token lookup can mint a GitHub App token over the network).
+  Fourth (2026-10-01): switching the model or provider (`switch_active_model`,
+  `switch_active_provider`, `ensure_active_model`,
+  `maybe_activate_provider_for_chat`: settings and vault writes, then the
+  agent rebinds and the graph compiles again) and the provider list's writes
+  (`set_provider_health`, `upsert_provider`) ran on the loop from the
+  Settings route, the chat's provider switch, setup, the provider Test and
+  the `/model` menu. Twelve provider and setup routes that never awaited are
+  plain `def`s now.
 - **The settings store is never used on the loop** (2026-09-30,
   `test_the_settings_store_is_not_used_on_the_loop`, negative control beside
   it). On Postgres a settings read that misses the cache, and every write, is a
