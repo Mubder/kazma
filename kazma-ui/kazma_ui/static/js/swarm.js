@@ -168,7 +168,7 @@
   function switchTab(tabId) {
     // Update tab buttons
     var tabs = document.querySelectorAll('#swarm-tabs .tab');
-    tabs.forEach(function(t) { t.classList.toggle('active', t.dataset.tab === tabId); });
+    tabs.forEach(function(tab) { tab.classList.toggle('active', tab.dataset.tab === tabId); });
     // Update panels
     var panels = document.querySelectorAll('.tab-panel');
     panels.forEach(function(p) { p.style.display = 'none'; });
@@ -848,7 +848,7 @@
       clearInterval(timerInterval);
       var statusEl = $('status-' + taskId);
       if (statusEl) {
-        statusEl.textContent = data.result ? data.result.status : t('swarm.completed');
+        statusEl.textContent = data.result ? stateLabel(data.result.status) : t('swarm.completed');
         statusEl.className = 'badge badge-' + ((data.result && data.result.status === 'success') ? 'success' : 'danger');
       }
       addEventLine(taskId, '', t('swarm.task_completed'));
@@ -1031,9 +1031,9 @@
         var tasks = data.tasks || [];
         // Merge with in-memory results
         var allResults = completedResults.slice();
-        tasks.forEach(function(t) {
-          if (!allResults.find(function(r) { return r.task_id === t.id; })) {
-            allResults.push(t);
+        tasks.forEach(function(task) {
+          if (!allResults.find(function(r) { return r.task_id === task.id; })) {
+            allResults.push(task);
           }
         });
         renderResultsDashboard(allResults, 'all');
@@ -1407,20 +1407,20 @@
     }
 
     var patternIcons = {dispatch:'',broadcast:'',pipeline:'',fan_out:'',consult:'',conditional:''};
-    tbody.innerHTML = tasks.map(function(t) {
-      var icon = patternIcons[t.type] || '';
-      var statusColor = t.status === 'completed' ? 'var(--success)' : (t.status === 'failed' || t.status === 'cancelled') ? 'var(--danger)' : 'var(--warning)';
-      var prompt = (t.prompt || '').slice(0, 80);
-      var workers = workerLabels(t.workers);
-      var dur = t.duration_seconds ? t.duration_seconds.toFixed(1) + 's' : '—';
-      var cost = t.total_cost ? '$' + t.total_cost.toFixed(4) : '—';
+    tbody.innerHTML = tasks.map(function(task) {
+      var icon = patternIcons[task.type] || '';
+      var statusColor = task.status === 'completed' ? 'var(--success)' : (task.status === 'failed' || task.status === 'cancelled') ? 'var(--danger)' : 'var(--warning)';
+      var prompt = (task.prompt || '').slice(0, 80);
+      var workers = workerLabels(task.workers);
+      var dur = task.duration_seconds ? task.duration_seconds.toFixed(1) + 's' : '—';
+      var cost = task.total_cost ? '$' + task.total_cost.toFixed(4) : '—';
 
-      return '<tr data-task-id="' + esc(t.id) + '" style="cursor:pointer;border-bottom:1px solid var(--border-subtle);">' +
-        '<td style="padding:8px 12px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-tertiary);">' + esc((t.id || '').slice(0, 16)) + '</td>' +
-        '<td style="padding:8px 12px;">' + icon + ' ' + esc(patternLabel(t.type)) + '</td>' +
+      return '<tr data-task-id="' + esc(task.id) + '" style="cursor:pointer;border-bottom:1px solid var(--border-subtle);">' +
+        '<td style="padding:8px 12px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-tertiary);">' + esc((task.id || '').slice(0, 16)) + '</td>' +
+        '<td style="padding:8px 12px;">' + icon + ' ' + esc(patternLabel(task.type)) + '</td>' +
         '<td translate="no" style="padding:8px 12px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(prompt) + '</td>' +
         '<td translate="no" style="padding:8px 12px;font-size:0.8rem;">' + esc(workers) + '</td>' +
-        '<td style="padding:8px 12px;"><span style="color:' + statusColor + ';">• ' + esc(stateLabel(t.status)) + '</span></td>' +
+        '<td style="padding:8px 12px;"><span style="color:' + statusColor + ';">• ' + esc(stateLabel(task.status)) + '</span></td>' +
         '<td style="padding:8px 12px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' + dur + '</td>' +
         '<td style="padding:8px 12px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' + cost + '</td>' +
       '</tr>';
@@ -1737,7 +1737,7 @@
         var tasks = data.tasks || [];
         if (emptyEl) emptyEl.style.display = tasks.length ? 'none' : 'block';
         // Remove cards for tasks no longer active
-        var activeIds = tasks.map(function(t) { return t.id; });
+        var activeIds = tasks.map(function(task) { return task.id; });
         container.querySelectorAll('[id^="active-task-"]').forEach(function(el) {
           var tid = el.id.replace('active-task-', '');
           if (activeIds.indexOf(tid) === -1) {
@@ -1749,34 +1749,34 @@
           }
         });
         // Add/update cards for active tasks
-        tasks.forEach(function(t) {
-          var cardId = 'active-task-' + t.id;
+        tasks.forEach(function(task) {
+          var cardId = 'active-task-' + task.id;
           var existing = $(cardId);
           if (existing) {
             // Update status text
             var statusEl = existing.querySelector('.active-task-status');
             if (statusEl) {
-              statusEl.textContent = t.status || t('swarm.running_lower');
-              statusEl.className = 'active-task-status status-' + (t.status || 'running');
+              statusEl.textContent = task.status ? stateLabel(task.status) : t('swarm.running_lower');
+              statusEl.className = 'active-task-status status-' + (task.status || 'running');
             }
           } else {
             var card = document.createElement('div');
             card.className = 'card';
             card.id = cardId;
             card.style.cssText = 'margin-bottom:12px;padding:12px;border-left:3px solid var(--warning);';
-            var workers = (t.workers || []).join(', ') || t('swarm.all_workers');
-            var statusColor = t.status === 'paused' ? 'var(--info)' : 'var(--warning)';
+            var workers = (task.workers || []).join(', ') || t('swarm.all_workers');
+            var statusColor = task.status === 'paused' ? 'var(--info)' : 'var(--warning)';
             card.innerHTML =
               '<div style="display:flex;justify-content:space-between;align-items:center;">' +
                 '<div>' +
-                  '<strong>' + esc((t.prompt || t.id).substring(0, 60)) + '</strong>' +
+                  '<strong>' + esc((task.prompt || task.id).substring(0, 60)) + '</strong>' +
                   '<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">' +
-                    esc(t('swarm.workers_label_inline')) + esc(workers) + esc(t('swarm.type_inline')) + esc(t.type || 'dispatch') +
+                    esc(t('swarm.workers_label_inline')) + esc(workers) + esc(t('swarm.type_inline')) + esc(patternLabel(task.type || 'dispatch')) +
                   '</div>' +
                 '</div>' +
-                '<span class="active-task-status status-' + esc(t.status || 'running') + '" ' +
+                '<span class="active-task-status status-' + esc(task.status || 'running') + '" ' +
                   'style="padding:2px 8px;border-radius:4px;background:' + statusColor + ';color:#fff;font-size:0.75rem;">' +
-                  esc(t.status || t('swarm.running_lower')) +
+                  esc(task.status ? stateLabel(task.status) : t('swarm.running_lower')) +
                 '</span>' +
               '</div>';
             container.appendChild(card);
@@ -1784,12 +1784,12 @@
           // Rehydrate SSE stream for tasks discovered after page refresh.
           // If this task has no active SSE connection, attach one so the
           // user sees live events (worker_progress, tool calls, etc.).
-          if (!activeTasks[t.id]) {
-            connectSSE(t.id, {
-              task: t.prompt || '',
-              workers: t.workers || [],
-              pattern: t.type || 'dispatch',
-              status: t.status || 'running'
+          if (!activeTasks[task.id]) {
+            connectSSE(task.id, {
+              task: task.prompt || '',
+              workers: task.workers || [],
+              pattern: task.type || 'dispatch',
+              status: task.status || 'running'
             });
           }
         });
@@ -1806,20 +1806,20 @@
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(data) {
         if (!data || !data.output_target) return;
-        var t = data.output_target;
+        var target = data.output_target;
         var cb = $('output-routing-enabled');
         var id = $('output-routing-chat-id');
         var st = $('output-routing-status');
-        if (cb) cb.checked = !!t.enabled;
-        if (id) id.value = t.chat_id != null ? String(t.chat_id) : '';
+        if (cb) cb.checked = !!target.enabled;
+        if (id) id.value = target.chat_id != null ? String(target.chat_id) : '';
         var bt = $('output-routing-bot-token');
-        if (bt) bt.value = t.bot_token || '';
+        if (bt) bt.value = target.bot_token || '';
         if (st) {
-          if (t.chat_id != null && t.enabled) {
-            var mode = t.bot_token ? window.t('swarm.routing_swarm_bot') : window.t('swarm.routing_gateway');
-            st.textContent = window.t('swarm.routing_active', {id: t.chat_id, mode: mode});
+          if (target.chat_id != null && target.enabled) {
+            var mode = target.bot_token ? window.t('swarm.routing_swarm_bot') : window.t('swarm.routing_gateway');
+            st.textContent = window.t('swarm.routing_active', {id: target.chat_id, mode: mode});
             st.style.color = 'var(--success)';
-          } else if (t.chat_id != null) {
+          } else if (target.chat_id != null) {
             st.textContent = window.t('swarm.routing_disabled');
             st.style.color = 'var(--text-muted)';
           } else {
@@ -2494,7 +2494,7 @@
       addPipelineTerminalLine('', esc(t('swarm.pipeline_finalized')));
       
       var res = d.result || {};
-      var summary = res.synthesis || res.response || t('swarm.no_synthesis');
+      var summary = res.synthesized_output || res.aggregated_output || t('swarm.no_synthesis');
       addPipelineTerminalLine('', '<strong>' + esc(t('swarm.synthesis_output')) + '</strong><div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:4px;padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
       
       cleanupPipelineSession();
@@ -2775,7 +2775,7 @@
       
       var res = d.result || {};
       var finalStatus = res.status || 'success';
-      setText('play-state-status', finalStatus.toUpperCase());
+      setText('play-state-status', stateLabel(finalStatus));
       var statusBadge = $('play-state-status');
       if (statusBadge) {
         statusBadge.className = 'badge badge-' + (finalStatus === 'success' ? 'success' : 'danger');
@@ -2788,7 +2788,7 @@
         setText('play-state-cost', '$' + parseFloat(res.total_cost).toFixed(4));
       }
       
-      var summary = res.synthesis || res.response || t('swarm.no_synthesis');
+      var summary = res.synthesized_output || res.aggregated_output || t('swarm.no_synthesis');
       addTerminalLine('', '<strong>' + esc(t('swarm.synthesis_output')) + '</strong><div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:4px;padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
       
       cleanupPlaygroundSession();
@@ -2883,8 +2883,8 @@
     try { if (playgroundTimer) clearInterval(playgroundTimer); } catch (e) {}
     playgroundTimer = null;
     Object.keys(activeTasks).forEach(function (id) {
-      var t = activeTasks[id];
-      try { if (t && t.sse && t.sse.close) t.sse.close(); } catch (e) {}
+      var entry = activeTasks[id];
+      try { if (entry && entry.sse && entry.sse.close) entry.sse.close(); } catch (e) {}
     });
     activeTasks = {};
   }
@@ -2986,7 +2986,7 @@
     fetch('/api/swarm/templates')
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        var tmpl = (data.templates || []).find(function(t) { return t.name === name; });
+        var tmpl = (data.templates || []).find(function(tp) { return tp.name === name; });
         if (!tmpl) return;
         var en = $('tmpl-edit-name'); if (en) en.value = tmpl.name;
         var n = $('tmpl-name'); if (n) n.value = tmpl.name;

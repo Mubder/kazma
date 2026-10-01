@@ -10,7 +10,17 @@ from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from typing import Any, TypeVar, cast
 
-__all__ = ["HandoffRecord", "SwarmTask", "TaskResult", "TaskStatus", "TaskType", "WorkerCapabilities", "WorkerResult"]
+__all__ = [
+    "TERMINAL_STATUSES",
+    "HandoffRecord",
+    "SwarmTask",
+    "TaskResult",
+    "TaskStatus",
+    "TaskType",
+    "WorkerCapabilities",
+    "WorkerResult",
+    "is_terminal",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +95,27 @@ class TaskStatus(StrEnum):
     FAILED = "failed"
     TIMEOUT = "timeout"
     CANCELLED = "cancelled"
+
+
+#: The statuses a task never leaves: its result is final. The one list for
+#: the engine, the task store's retention and the Swarm page's task stream --
+#: the stream kept its own copy without ``cancelled``, so a cancelled task's
+#: stream never ended (2026-10-02). ``tests/test_swarm_task_stream_ends.py``
+#: fails on a hand-written copy and on a status declared neither way.
+TERMINAL_STATUSES: frozenset[TaskStatus] = frozenset({
+    TaskStatus.COMPLETED,
+    TaskStatus.FAILED,
+    TaskStatus.TIMEOUT,
+    TaskStatus.CANCELLED,
+})
+
+
+def is_terminal(status: TaskStatus | str | None) -> bool:
+    """True when *status* -- the enum or its value -- is one a task never leaves."""
+    try:
+        return TaskStatus(status) in TERMINAL_STATUSES
+    except ValueError:
+        return False
 
 
 @dataclass

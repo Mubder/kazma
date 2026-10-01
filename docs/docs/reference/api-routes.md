@@ -45,7 +45,7 @@ description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway c
 | * | `/api/swarm/*` | Session / RBAC | Workers, dispatch, tasks, metrics |
 | POST | `/api/swarm/workers/{name}/circuit-breaker/reset` | Session | Close a worker's breaker now (the worker card's **Reset**, shown while the breaker is open or half-open) |
 | GET | `/api/swarm/tasks/export` | Session | Task history as JSON, or CSV with `?format=csv` (newest 1,000; filters `type`, `status`, `q` as the history list). Task History's **Export CSV** |
-| GET | SSE swarm events | Session | Live task stream (`swarm_sse`) |
+| GET | `/api/swarm/tasks/{id}/stream` | Session | Live task stream (`swarm_sse`): the task's events so far, then live ones until it ends. A finished task's stream always ends with `task_completed` and the task's result, rebuilt from the stored task when the server no longer holds its events (after a restart). |
 | GET | `/swarm` | Session | Swarm panel page |
 | * | `/api/replay/*` | Session | Time travel: threads, snapshots, restore, fork, compare, clear (`replay_routes.py`) |
 | GET | `/replay` | Session | Time Travel panel page |

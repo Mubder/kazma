@@ -532,6 +532,18 @@ swarm works with zero pre-registered workers.
   reads on the loop). `tests/test_worker_registry_store.py`. A migration
   bundle carries it, and the operator's templates, even with `--no-assets`
   (§18, `store_registry.DATA_DIR_ENTRIES`).
+- **"Finished" is one list** (`swarm.task.TERMINAL_STATUSES` / `is_terminal`,
+  2026-10-02): the engine (finalize, approve, reject), the task store's
+  retention and the task stream all ask it. The stream kept a copy without
+  `cancelled`, so a cancelled task's stream never ended. **A finished task's
+  stream ends with `task_completed`** whatever the bus remembers
+  (`swarm_sse._final_event`, from the stored result): the Swarm page's
+  client reconnects on every close, and the bus forgets a task at a restart
+  and at cleanup -- a deploy left cards counting through ten reconnects.
+  `tests/test_swarm_task_stream_ends.py`; what the page reads off a result
+  must be a `TaskResult` field (`tests/test_swarm_page_result_fields.py`:
+  the pipeline view and Play mode read `synthesis`/`response`, which no
+  result has).
 - **`matches_task` uses word-boundary token matching** (not raw substring). When
   adding expertise tags to a template, pick whole words — the tag `code` would
   not match "barcode" (intentional). Templates are first-match-wins by file order
@@ -4181,7 +4193,12 @@ channel it booted with.
   A page-level helper for catalog strings must not be named after an
   element tag: the Dashboard's `tr()` was shadowed by `var tr =
   createElement('tr')` in its row loop and rendered no rows (caught by
-  `tests/e2e/test_dashboard_session_table.py`).
+  `tests/e2e/test_dashboard_session_table.py`). **No script declares the
+  name of a translation helper it calls**, as a parameter or a variable
+  (`tests/test_scripts_keep_their_translator.py`, 2026-10-02): the Swarm
+  page's active-task loop `function(t)` hid `t()`, and the first translated
+  word threw inside an empty `catch` -- a running task the page had not
+  started never appeared.
 - **The Dashboard's session table reads the chat store** for a thread's
   title, platform and message count, and the checkpoints for its saved steps
   and last activity (`list_checkpoints`: newest per thread, time from the

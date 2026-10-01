@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## The Swarm page settles finished tasks and shows running ones (2026-10-02)
+
+- **A finished task's card settles.** The page opens a task's live stream
+  and settles the card on its `task_completed` event, and its client
+  reconnects whenever a stream closes. The stream only replayed what the
+  server remembered of the task, which is nothing after a restart (a deploy)
+  or once a finished task has been cleaned up. So the stream closed empty,
+  the client reconnected ten times over a few minutes, and the card's timer
+  kept counting. A finished task's stream now always ends with
+  `task_completed` and the task's result, rebuilt from the stored task.
+- **A cancelled task's stream ends.** The stream's own list of finished
+  statuses left out `cancelled`, so it polled once a second and never ended.
+  "Finished" is now one list in the swarm's task module; the engine held
+  three more copies of it and the task store a fourth.
+- **The pipeline view and Play mode show the answer.** Both read the
+  finished task's answer from fields no task result has (`synthesis`,
+  `response`), so they always said "no synthesis". They now read
+  `synthesized_output`, then `aggregated_output`.
+- **Running tasks appear in Active Tasks again.** A task the page had not
+  started (another tab, a chat, a page refresh) was drawn inside a loop whose
+  variable `t` hid the page's translation helper `t()`. The first translated
+  word threw, and an empty `catch` hid the error. The card's status and type,
+  and the result status on the task card and in Play mode, are now in the
+  reader's language.
+- **Gates:**
+  - `tests/test_swarm_task_stream_ends.py`: the stream for every ending,
+    with a negative control; every task status classified; no hand-written
+    list of finished statuses, with a planted control.
+  - `tests/test_swarm_page_result_fields.py`: every result field the page
+    reads exists on `TaskResult`.
+  - `tests/test_scripts_keep_their_translator.py`: no script declares the
+    name of a translation helper it calls. It found fifteen, in the Swarm,
+    Scheduled, Settings and X Studio scripts.
+
 ## An Approve clicked the moment its card appears is taken (2026-10-02)
 
 - **The approval button no longer does nothing when clicked quickly.** A turn
