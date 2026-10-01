@@ -394,28 +394,33 @@ kazma-web
 
 ## 12. Slash commands (in-chat)
 
-These are typed inside a connected chat (Telegram/Discord/Slack/Web). Defined in `kazma-gateway/.../slash_commands.py`.
+These are typed in a connected chat app (Telegram, Discord, Slack). The full
+reference, with every subcommand and response, is
+[Slash Commands](../reference/slash-commands); `/help` in any chat lists the
+same commands as Telegram's "/" menu.
 
 | Command | Description |
 |---|---|
 | `/help` | List commands by category. |
-| `/reset` | Clear conversation (handled in `graph.py:196`). |
-| `/status` | Gateway health overview. |
-| `/model` or `/models` | Interactive model selector (Telegram inline keyboard). |
-| `/memory` | Facts held, and whether this chat is remembered. |
-| `/memory off` \| `/memory on` | Keep this chat out of memory (and forget what it left), or let new messages back in. |
-| `/cost` | Token spend for the session. |
-| `/replay list \| &lt;iter> \| compare &lt;a> &lt;b> \| clear` | Time-travel: list snapshots, restore (rewind), compare diff, clear. |
-| `/fork &lt;iter>` | Branch from a snapshot into a new thread (original stays intact). |
-| `/config show \| model &lt;n> \| personality &lt;n> \| memory on\|off \| tools list \| tools toggle &lt;n> \| export` | Config wizard. |
-| `/personality` | Delegate to `/config personality`. |
-| `/context` | Context-window token usage. |
-| `/undo` | *Stub — not implemented.* |
-| `/edit` | *Stub — not implemented.* |
-| `hitl approve|deny &lt;thread_id>` | HITL resume (note: no `/` prefix on Slack, which blocks slash commands). |
-| `/swarm` | Swarm orchestration (Telegram-registered; interactive handler). |
+| `/sessions` · `/session <#>` · `/new` | List, take over or start a season (shared with the Web UI). |
+| `/reset` · `/compact` | Clear the conversation, or compact its context now. |
+| `/undo` · `/edit <text>` | Remove the last reply, or replace it with corrected text. |
+| `/replay list \| <iter> \| compare <a> <b> \| clear` · `/fork <iter>` | Time travel: snapshots, rewind in place, compare, clear, branch. |
+| `/steer <text>` · `/steer! <text>` · `/abort` | Add to, interrupt or abandon the running task. |
+| `/long` · `/mission` · `/yolo` · `/unrestricted` | Tool-round budget and approval bypass for this chat. |
+| `/plan` | Plan mode: inspect and propose, execute on approval. |
+| `/hitl approve \| deny \| approve_task` | Answer a pending approval from the chat. |
+| `/model` (`/models`) | Show and switch the model (a picker on Telegram). |
+| `/status` | Each chat app's connection, the queue, messages in progress. |
+| `/memory` · `/memory off \| on` | Facts held and whether this chat is remembered; keep it out of memory, or let it back in. |
+| `/cost` | This chat's tokens and cost, from the per-call ledger. |
+| `/context` | How much of the model's window this chat fills. |
+| `/config` · `/personality` | Settings wizard; changing the model, memory, MCP servers or personality is admin-only. |
+| `/research` · `/swarm` · `/ide` · `/kb` · `/documents` · `/skill` | Research, swarm dispatch, workspace, Knowledge Library, documents, Agent Skills. |
 
-> **Parity note:** `/help` text omits `/hitl` and `/swarm` even though both are functional. Telegram's `setMyCommands` registers `/swarm` but not `/hitl`. Discord reserves `/`-prefixed commands for itself, so Kazma receives them as plain text. See [Gateways & Platforms](gateways-and-platforms).
+Slack's client runs `/`-commands itself, so on Slack approvals are answered
+with `hitl approve` or `hitl deny`, without the `/`. See
+[Gateways & Platforms](gateways-and-platforms).
 
 ---
 

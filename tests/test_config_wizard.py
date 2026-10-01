@@ -61,7 +61,7 @@ class TestConfigShow:
         assert "Model" in result
         assert "Personality" in result
         assert "Memory" in result
-        assert "Tools" in result
+        assert "MCP servers" in result
 
     def test_config_show_contains_model_info(self):
         """`/config show` table contains model/provider info."""
@@ -87,14 +87,26 @@ class TestConfigShow:
 
 class TestConfigModel:
     def test_config_model_switch_confirms(self):
-        """`/config model <name>` switches and confirms."""
+        """`/config model <name>` switches the model AND its provider through
+        switch_active_model, as the /model menu does."""
+        from kazma_core.runtime.model_switch import SwitchResult
+
         ctx = _mock_context()
-        with patch("kazma_gateway.slash_commands._load_config", return_value=copy.deepcopy(_MOCK_CONFIG)), \
-             patch("kazma_gateway.slash_commands._save_config"):
+        done = SwitchResult(ok=True, model="claude-sonnet-4", provider="anthropic")
+        with patch("kazma_core.runtime.model_switch.switch_active_model", return_value=done) as switch:
             result = resolve_slash_command("/config model claude-sonnet-4", ctx)
-        assert result is not None
-        assert "claude-sonnet-4" in result
-        assert "Switched" in result or "✅" in result
+        assert switch.call_args.args == ("claude-sonnet-4",)
+        assert result == "✅ Switched to **claude-sonnet-4** (provider: anthropic)"
+
+    def test_config_model_failure_is_not_reported_as_a_switch(self):
+        """It used to write llm.model alone and say "Switched" even when the
+        write failed."""
+        from kazma_core.runtime.model_switch import SwitchResult
+
+        refused = SwitchResult(ok=False, error="Profile is locked by KAZMA_MODEL", error_code="env_locked")
+        with patch("kazma_core.runtime.model_switch.switch_active_model", return_value=refused):
+            result = resolve_slash_command("/config model claude-sonnet-4", _mock_context())
+        assert result == "⚠️ Failed to switch model: Profile is locked by KAZMA_MODEL"
 
     def test_config_model_invalid_gives_error(self):
         """`/config model` with empty name gives usage error."""
@@ -141,12 +153,36 @@ class TestConfigPersonality:
 
 
 class TestConfigMemory:
-    def test_config_memory_toggle(self):
-        """`/config memory on|off` toggles and confirms."""
-        with patch("kazma_gateway.slash_commands._load_config", return_value=copy.deepcopy(_MOCK_CONFIG)), \
-             patch("kazma_gateway.slash_commands._save_config"):
+    def test_config_memory_toggle(self, tmp_path, monkeypatch):
+        """`/config memory off` writes memory.enabled and nothing else. It
+        used to save the whole merged configuration back, every setting."""
+        from kazma_core.config_store import ConfigStore
+        from kazma_gateway import slash_commands
+
+        yaml_path = tmp_path / "kazma.yaml"
+        yaml_path.write_text("llm:\n  model: gpt-4o-mini\n", encoding="utf-8")
+        store = ConfigStore(db_path=str(tmp_path / "settings.db"), yaml_path=str(yaml_path))
+        monkeypatch.setattr(slash_commands, "_get_config_store", lambda: store)
+        try:
+            before = {k for group in store.get_all().values() for k in group}
             result = resolve_slash_command("/config memory off", {})
-        assert "OFF" in result or "off" in result.upper()
+            after = {k for group in store.get_all().values() for k in group}
+            assert result == "💾 Memory **OFF**."
+            assert store.get("memory.enabled") is False
+            assert after - before == {"memory.enabled"}
+        finally:
+            store.close()
+
+    def test_config_memory_failure_changes_nothing_and_says_so(self, monkeypatch):
+        from kazma_gateway import slash_commands
+
+        class _Refusing:
+            def set(self, *_a):
+                raise RuntimeError("database is locked")
+
+        monkeypatch.setattr(slash_commands, "_get_config_store", lambda: _Refusing())
+        result = resolve_slash_command("/config memory off", {})
+        assert result == "⚠️ Memory was not changed: database is locked"
 
     def test_config_memory_shows_current(self):
         """`/config memory` without arg shows current state."""
@@ -161,33 +197,35 @@ class TestConfigMemory:
 
 
 class TestConfigTools:
-    def test_config_tools_list_shows_names(self):
-        """`/config tools list` shows tool names."""
-        with patch("kazma_gateway.slash_commands._load_config", return_value=_MOCK_CONFIG):
-            result = resolve_slash_command("/config tools list", {})
-        assert result is not None
-        assert "filesystem" in result
+    _SERVERS = [
+        {"name": "filesystem", "transport": "stdio", "enabled": True},
+        {"name": "github", "transport": "stdio", "enabled": False},
+    ]
 
-    def test_config_tools_toggle_enables_disables(self):
-        """`/config tools toggle <name>` enables/disables a tool."""
-        test_config = {
-            **{k: v for k, v in _MOCK_CONFIG.items()},
-            "mcp": {
-                "servers": [{"name": "filesystem", "transport": "stdio", "command": ["npx"]}],
-                "disabled_servers": ["filesystem"],
-            },
-        }
-        with patch("kazma_gateway.slash_commands._load_config", return_value=test_config), \
-             patch("kazma_gateway.slash_commands._save_config"):
-            result = resolve_slash_command("/config tools toggle filesystem", {})
-        assert "filesystem" in result
-        assert "enabled" in result.lower()
+    def test_config_tools_list_shows_the_mcp_servers(self):
+        """`/config tools list` lists the servers Settings -> MCP lists."""
+        with patch("kazma_gateway.slash_commands._mcp_servers", return_value=self._SERVERS):
+            result = resolve_slash_command("/config tools list", {})
+        assert "• `filesystem`" in result
+        assert "• `github` _(disabled)_" in result
+
+    def test_config_tools_toggle_switches_the_server(self):
+        """It used to write mcp.disabled_servers, which nothing reads, and
+        report the server switched."""
+        with (
+            patch("kazma_gateway.slash_commands._mcp_servers", return_value=self._SERVERS),
+            patch("kazma_core.mcp_servers_store.set_mcp_server_enabled") as toggle,
+        ):
+            result = resolve_slash_command("/config tools toggle GitHub", {})
+        toggle.assert_called_once_with("github", True)
+        assert result == "🔧 MCP server `github` **enabled**. It applies when Kazma next starts."
 
     def test_config_tools_toggle_unknown(self):
         """`/config tools toggle <unknown>` gives error."""
-        with patch("kazma_gateway.slash_commands._load_config", return_value=_MOCK_CONFIG):
+        with patch("kazma_gateway.slash_commands._mcp_servers", return_value=self._SERVERS):
             result = resolve_slash_command("/config tools toggle nonexistent", {})
-        assert "Unknown" in result or "❌" in result
+        assert result.startswith("❌ Unknown MCP server: `nonexistent`")
+        assert "filesystem, github" in result
 
 
 # ══════════════════════════════════════════════════════════════════════

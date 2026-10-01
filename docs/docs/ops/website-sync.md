@@ -77,6 +77,7 @@ machine-readable output).
 | ENGLISH DRIFT | The English page is built differently from its source (headings, code blocks, table rows, asides), or its code is not the source's code: it was not ported, or only in part. Port it in full |
 | ARABIC MISSING, ARABIC ORPHANS | Translate the missing page; remove the orphan, or give it its English page |
 | ARABIC DRIFT | The Arabic page is built differently from the English one (headings, code blocks, table rows, asides), or its code differs: it is a partial or old translation. Translate the English page again, in full, with the code copied exactly |
+| ARABIC UNTRANSLATED | Less than half the letters of the Arabic page's prose (code, inline code and link targets aside) are Arabic: it is the English page, copied, which no structure check can see (eight such pages on 2026-10-01). Translate it. `--mark-synced` refuses the page until then |
 | SIDEBAR MISSING, SIDEBAR DEAD | Add the entry (English label and Arabic translation); remove the dead one |
 | LINKS | Point it at `/docs/<page>/` for a published page, or at `https://github.com/Mubder/kazma/blob/main/<path>` for anything else |
 | CLAIMS | `docs/FEATURES.md` changed: re-read it, then every claim location in the table above (step 5) |
@@ -117,7 +118,8 @@ machine-readable output).
 
 - A page that changes in English changes in Arabic in the same commit.
 - Translate all of it: the Arabic page has the same headings, tables, code
-  blocks and asides as the English one. The plan counts them (ARABIC DRIFT).
+  blocks and asides as the English one. The plan counts them (ARABIC DRIFT),
+  and measures how much of the prose is Arabic (ARABIC UNTRANSLATED).
 - Code blocks are copied exactly, comments included. Commands, paths, setting
   names, environment variables, tool names and numbers in the text stay as
   they are, in Latin script.

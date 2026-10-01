@@ -11,6 +11,7 @@ from typing import Any
 
 from kazma_gateway.gateway import Attachment, IncomingMessage, OutboundMessage, SessionStore
 from kazma_gateway.telegram_format import md_to_tg_html
+from kazma_gateway.slash_commands import changes_global_config, is_slash_command, resolve_slash_command
 from .store import (
     _InMemoryStore,
     _resolve_thread,
@@ -1347,67 +1348,56 @@ def create_graph_handler(
         # ── Slash-command intercept (/model, /help, /reset, etc.) ──
         # Resolve common commands without an LLM call. This keeps
         # responses instant and saves tokens.
-        try:
-            from kazma_gateway.slash_commands import is_slash_command, resolve_slash_command
-
-            if is_slash_command(msg.text):
-                # Admin gate for global-mutating /config subcommands (audit
-                # H-8): model/memory/tools writes change the process-global
-                # config for EVERY user and platform — in the default
-                # allow_all posture that must not be reachable by anyone.
-                _cmd_head = (msg.text.strip().lower().split() or [""])[0]
-                _cmd_head = _cmd_head.split("@", 1)[0]
-                if _cmd_head == "/config":
-                    _cfg_parts = msg.text.strip().split()
-                    _mutating = (
-                        len(_cfg_parts) >= 2
-                        and _cfg_parts[1].lower() in ("model", "memory", "tools")
+        if is_slash_command(msg.text):
+            # Admin gate (audit H-8): a command that changes what every user
+            # and platform gets -- the model, memory, MCP servers, the
+            # personality -- must not be reachable by anyone in the default
+            # allow_all posture.
+            if changes_global_config(msg.text) and not _sender_is_gateway_admin(msg):
+                ctx = await _store.get(thread_id) or msg.context_metadata
+                await manager.send(
+                    OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text=(
+                            "⛔ This changes Kazma for every user and platform, "
+                            "so it is admin-only. Set `KAZMA_GATEWAY_ADMINS` "
+                            "(comma-separated user ids) or add yourself to the "
+                            "platform user allowlist."
+                        ),
+                        context_metadata=ctx,
                     )
-                    if _mutating and not _sender_is_gateway_admin(msg):
-                        ctx = await _store.get(thread_id) or msg.context_metadata
-                        await manager.send(
-                            OutboundMessage(
-                                target_id=_build_target_id(msg.platform, ctx),
-                                text=(
-                                    "⛔ `/config` changes are admin-only. Set "
-                                    "`KAZMA_GATEWAY_ADMINS` (comma-separated user "
-                                    "ids) or add yourself to the platform user "
-                                    "allowlist."
-                                ),
-                                context_metadata=ctx,
-                            )
-                        )
-                        return
-                # Build context for the command resolver with real data
-                slash_ctx = await _build_slash_ctx(thread_id, msg, state, _store)
-
-                # Off the loop: the resolver is sync and some commands do real
-                # I/O — `/replay list` reads SQLite and decodes every snapshot
-                # (audit 2026-09-22). It uses no asyncio, and to_thread copies
-                # the context, so the tenant travels with it.
-                reply = await asyncio.to_thread(
-                    resolve_slash_command, msg.text, context=slash_ctx
                 )
-                if reply is not None:
-                    # Command was recognised — send the response and skip graph
-                    ctx = await _store.get(thread_id)
-                    if not ctx:
-                        ctx = msg.context_metadata
-                    await manager.send(
-                        OutboundMessage(
-                            target_id=_build_target_id(msg.platform, ctx),
-                            text=reply,
-                            context_metadata=ctx,
-                        )
+                return
+            # Build context for the command resolver with real data
+            slash_ctx = await _build_slash_ctx(
+                thread_id, msg, manager=manager, graph=graph, config=config
+            )
+
+            # Off the loop: the resolver is sync and some commands do real
+            # I/O — `/replay list` reads SQLite and decodes every snapshot
+            # (audit 2026-09-22). It uses no asyncio, and to_thread copies
+            # the context, so the tenant travels with it.
+            reply = await asyncio.to_thread(
+                resolve_slash_command, msg.text, context=slash_ctx
+            )
+            if reply is not None:
+                # Command was recognised — send the response and skip graph
+                ctx = await _store.get(thread_id)
+                if not ctx:
+                    ctx = msg.context_metadata
+                await manager.send(
+                    OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text=reply,
+                        context_metadata=ctx,
                     )
-                    logger.info(
-                        "[agent-handler] Slash command resolved (cmd=%s, thread=%s)",
-                        msg.text.strip().split()[0] if msg.text else "?",
-                        thread_id,
-                    )
-                    return
-        except ImportError:
-            pass  # slash_commands module not available
+                )
+                logger.info(
+                    "[agent-handler] Slash command resolved (cmd=%s, thread=%s)",
+                    msg.text.strip().split()[0] if msg.text else "?",
+                    thread_id,
+                )
+                return
 
         # ── Swarm slash-command intercept ──────────────────────────
         # If the message starts with /swarm, dispatch to the swarm engine

@@ -11,9 +11,10 @@ layer (Ed25519, X25519 + AES-256-GCM) presented as a protection although its
 archived code had been deleted two months earlier.
 
 The pages checked are the docs under docs/docs and every other page kazma.ai
-publishes (docs/website-pages.json). A name passes when a tracked file ends
-with it (``a/.../b.py`` elides folders; a leading ``./`` and a ``:line``
-suffix are ignored), or when it is declared below: a file Kazma or the
+publishes (docs/website-pages.json). A name passes when a repository file
+(committed, or new and not ignored) ends with it (``a/.../b.py`` elides
+folders; a leading ``./`` and a ``:line`` suffix are ignored), or when it is
+declared below: a file Kazma or the
 operator creates at runtime, an example, a file of another program or
 repository, or a page's deliberate mention of a removed module. A module that
 became a package is reported with the package to name instead.
@@ -93,8 +94,12 @@ REMOVED_AND_SAID_SO = {
 
 
 def _tracked() -> list[str]:
-    out = subprocess.run(["git", "-C", str(REPO), "ls-files"], capture_output=True,
-                         text=True, encoding="utf-8", check=True).stdout
+    # --others: a file added in the same change as the page that names it
+    # counts before it is committed (ignored files do not).
+    out = subprocess.run(
+        ["git", "-C", str(REPO), "ls-files", "--cached", "--others", "--exclude-standard"],
+        capture_output=True, text=True, encoding="utf-8", check=True,
+    ).stdout
     return out.splitlines()
 
 

@@ -953,6 +953,11 @@ _LOOP_STALL_HELPERS = frozenset({
     "restic_available", "ensure_password", "repo_paths",
     "resolve_active_root", "get_active_cwd", "resolve_repo",
     "get_github_token", "is_oauth_connected", "store_oauth_token", "clear_oauth_token",
+    # Chat apps' /cost and /context (2026-10-01): the per-call ledger's
+    # totals for a chat (SQLite), and the context report -- the active
+    # profile, the window and the trim budget are settings reads, which the
+    # context_info tool made on the loop.
+    "thread_usage", "context_report",
 })
 
 

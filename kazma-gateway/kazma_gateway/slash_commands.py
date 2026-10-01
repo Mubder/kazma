@@ -1,17 +1,20 @@
 """Slash command router — resolves common commands without LLM calls.
 agent.  This keeps responses instant (<50ms) and saves tokens.
 
-Registered commands:
+Resolved here (every other command is handled by the gateway's handler
+before this resolver runs, or returns None from it):
   /help         — list available commands grouped by category
-  /reset        — clear conversation history
-  /status       — return gateway health overview
-  /model        — show active model
+  /status       — the gateway: each chat app's connection, the queue, messages in progress
   /memory       — report memory stats; /memory off|on — keep this chat out of memory
-  /cost         — show token spend for this session
+  /cost         — this chat's model calls: tokens and cost, from the per-call ledger
   /replay       — time travel: list snapshots, replay, or compare
   /personality  — show, list, or switch agent personality (core tool)
-  /context      — context window token usage report (core tool)
+  /context      — how much of the model's window this chat fills (core tool)
   /config       — interactive config wizard (show, model, personality, memory, tools, export)
+
+What a command reports comes from ``agent_handler.commands._build_slash_ctx``,
+which reads each fact from where it lives; ``tests/test_gateway_slash_facts.py``
+fails on a key a command reads that nothing fills, or fills with a constant.
 """
 
 from __future__ import annotations
@@ -30,14 +33,17 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "BOT_MENU_COMMANDS",
+    "changes_global_config",
     "is_slash_command",
     "resolve_slash_command",
+    "switch_model_from_chat",
 ]
 
 # Telegram setMyCommands menu (and any other mouth that shows a "/" picker).
 # Telegram only lists what we register here — handlers may accept more
 # aliases, but if a command is missing from this list it will not appear
-# next to the chat input. Keep in sync with _cmd_help + gateway intercepts.
+# next to the chat input. The menu and _cmd_help list the same commands
+# (tests/test_slash_help_and_menu.py).
 # Constraints: command 1–32 [a-z0-9_]; description 3–256 chars; max 100.
 BOT_MENU_COMMANDS: list[dict[str, str]] = [
     {"command": "help", "description": "Show available commands"},
@@ -63,6 +69,7 @@ BOT_MENU_COMMANDS: list[dict[str, str]] = [
     {"command": "mission", "description": "Mission-length budget for this chat"},
     {"command": "yolo", "description": "Toggle session YOLO safety bypass"},
     {"command": "unrestricted", "description": "Mission budget + YOLO for this chat"},
+    {"command": "plan", "description": "Plan mode: inspect and propose before acting"},
     {"command": "steer", "description": "Add context to the running task"},
     {"command": "abort", "description": "Stop and abandon the running task"},
     {"command": "replay", "description": "Time travel snapshots"},
@@ -76,7 +83,7 @@ BOT_MENU_COMMANDS: list[dict[str, str]] = [
     {"command": "context", "description": "Context window usage"},
     {"command": "status", "description": "Gateway health overview"},
     {"command": "memory", "description": "Report memory usage"},
-    {"command": "cost", "description": "Token spend this session"},
+    {"command": "cost", "description": "Tokens and cost of this chat"},
     {"command": "hitl", "description": "Approve or deny a pending HITL tool"},
 ]
 
@@ -152,9 +159,9 @@ def _apply_overrides(base: dict[str, Any], overrides: dict[str, Any]) -> dict[st
 def _load_config() -> dict[str, Any]:
     """Return the effective config: bootstrap YAML overridden by ConfigStore DB values.
 
-    kazma.yaml is treated as read-only.  Runtime mutations made via
-    ``_save_config`` (which delegates to ``ConfigStore.set``) are merged on
-    top of the bootstrap so subsequent reads reflect the latest changes.
+    kazma.yaml is treated as read-only here. What ``/config`` changes is
+    written one key at a time to the settings store (never the whole
+    merged configuration back) and read here on top of the bootstrap.
     """
     base = _read_bootstrap_yaml()
     try:
@@ -169,28 +176,6 @@ def _load_config() -> dict[str, Any]:
         overrides.update(settings)
     return _apply_overrides(base, overrides)
 
-
-def _save_config(config: dict[str, Any]) -> None:
-    """Persist ``config`` through the locked ``ConfigStore``.
-
-    Walks the (possibly nested) dict and writes all leaf scalars to the
-    SQLite override DB **atomically** via ``batch_set()``. kazma.yaml is
-    never opened for writing at runtime.
-    """
-    store = _get_config_store()
-    items: list[tuple[str, Any, str]] = []
-
-    def _flatten(data: dict[str, Any], prefix: str = "") -> None:
-        for key, value in data.items():
-            full_key = f"{prefix}.{key}" if prefix else str(key)
-            if isinstance(value, dict):
-                _flatten(value, full_key)
-            else:
-                category = prefix.split(".")[0] if prefix else "general"
-                items.append((full_key, value, category))
-
-    _flatten(config)
-    store.batch_set(items)
 
 # Lazy-loaded time-travel components — may not be available if time_travel
 # module is absent. Cached so the import is attempted only once per process.
@@ -223,6 +208,38 @@ def _get_replay_components():
 def is_slash_command(text: str) -> bool:
     """Check if a message is a slash command."""
     return text.startswith("/") and len(text) > 1
+
+
+def changes_global_config(text: str) -> bool:
+    """Whether a command changes what every user and platform gets, and so
+    needs a gateway admin (audit H-8; ``allowlists.is_gateway_admin``): with
+    an empty allowlist anyone in a chat may talk to Kazma, and none of them
+    may install or remove code, change the model or the configuration.
+
+    ``/config model``, ``memory`` and ``tools`` are gated whole, as before.
+    Until 2026-10-01 the rest of the class was open to any chat member: the
+    personality switch (every reply, web chats included), ``/skill
+    uninstall``, switching or cloning the active workspace (``/ide repo``) and
+    the swarm's output routing (``/swarm config``). Showing and listing stay
+    open. ``graph.py`` asks this before every slash command; the ``/model``
+    menu's pick (``/_models_select``) is handled before that and checks the
+    same admin rule itself.
+    """
+    parts = (text or "").strip().split()
+    head = parts[0].lower().split("@", 1)[0] if parts else ""
+    sub = parts[1].lower() if len(parts) > 1 else ""
+    arg = parts[2].lower() if len(parts) > 2 else ""
+    if head == "/config":
+        return sub in ("model", "memory", "tools") or (sub == "personality" and bool(arg))
+    if head == "/personality":
+        return bool(sub) and sub != "list"
+    if head == "/skill":
+        return sub in ("install", "add", "uninstall", "remove", "rm")
+    if head == "/ide":
+        return sub == "repo" and (arg in ("switch", "clone") or "/" in arg)
+    if head == "/swarm":
+        return sub == "config" and arg in ("group", "clear")
+    return head == "/_models_select"
 
 
 def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> str | None:
@@ -265,7 +282,7 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
     if cmd == "/personality":
         return _cmd_config(f"/config {text}", ctx)
     if cmd == "/context":
-        return _cmd_context(ctx)
+        return _cmd_context(text, ctx)
 
     # NOTE: /undo, /edit, /fork, /replay <n>, /steer, /steer!, and /abort
     # are intentionally NOT handled here. They target a running turn or
@@ -287,8 +304,10 @@ def _cmd_help() -> str:
         "• `/session new [name]` — Start a fresh season (`/new` still works)\n"
         "• `/research deep <topic>` — deep research via the same agent\n"
         "• `/swarm <task>` — dispatch workers via the same agent\n"
-        "• `/reset` — Clear conversation history and starting fresh\n"
+        "• `/reset` — Clear the conversation history and start fresh\n"
         "• `/compact` — Manually trigger context window compaction\n"
+        "• `/undo` — Remove the last reply from the conversation\n"
+        "• `/edit <text>` — Replace the last reply with your corrected text\n"
         "• `/replay list` — Show available snapshots\n"
         "• `/replay <iteration>` — Restore from iteration (rewinds in-place)\n"
         "• `/replay compare <a> <b>` — Compare two snapshots\n"
@@ -297,9 +316,11 @@ def _cmd_help() -> str:
         "🧭 *Running task*\n"
         "• `/steer <text>` — Add context to the running task (applies next step)\n"
         "• `/steer! <text>` — Pause the task, inject a requirement, then resume\n"
-        "• `/abort` — Stop and abandon the running task (won't continue unless re-asked)\n\n"
+        "• `/abort` — Stop and abandon the running task (won't continue unless re-asked)\n"
+        "• `/hitl approve` · `/hitl deny` — Answer a pending approval "
+        "(`/hitl approve_task` — every approval of this task)\n\n"
         "⚡ *Capacity & YOLO*\n"
-        "• `/long on` · `/long mission` — raise tool-round budget (HITL stays on)\n"
+        "• `/long on` · `/long mission` (`/mission`) — raise tool-round budget (HITL stays on)\n"
         "• `/yolo` — skip danger-tool approvals (does **not** raise the budget)\n"
         "• `/long yolo` — research budget **and** YOLO\n"
         "• `/unrestricted` — mission + YOLO (full power this chat)\n"
@@ -313,13 +334,15 @@ def _cmd_help() -> str:
         "• `/personality list` — List all available personalities\n"
         "• `/personality <name>` — Switch personality\n"
         "• `/context` — Show context window usage\n"
+        "• `/ide` — Workspace files, git and coding skills (`/ide help`)\n"
+        "• `/kb` — Knowledge libraries: list, crawl, search (`/kb help`)\n"
         "• `/skill list` — List installed Agent Skills\n"
         "• `/skill install <owner/repo>` — Install from GitHub (agentskills.io)\n"
         "• `/skill activate <name>` — Arm a skill for this chat\n"
         "• `/skill deactivate` — Clear the active skill\n"
         "• `/skill uninstall <name>` — Remove an Agent Skill\n\n"
         "📄 *Documents*\n"
-        "• `/documents list` — List processed documents\n"
+        "• `/documents list` (`/docs`) — List processed documents\n"
         "• `/documents status <id>` — Durable job state\n"
         "• `/documents read <id>` — Read a ready document\n"
         "• `/documents search <library> <query>` — Search indexed docs\n\n"
@@ -328,52 +351,63 @@ def _cmd_help() -> str:
         "• `/config model <name>` — Switch model\n"
         "• `/config personality <name>` — Switch personality\n"
         "• `/config memory on|off` — Toggle memory\n"
-        "• `/config tools list` — Show configured tools\n"
-        "• `/config tools toggle <name>` — Enable/disable a tool\n"
+        "• `/config tools list` — Show the MCP servers\n"
+        "• `/config tools toggle <name>` — Turn an MCP server on or off (from the next start)\n"
         "• `/config export` — Export config as JSON\n\n"
         "ℹ️ *Info*\n"
         "• `/help` — Show this list\n"
         "• `/status` — Gateway health overview\n"
-        "• `/model` — Show active model\n"
+        "• `/model` (`/models`) — Show and switch the model\n"
         "• `/memory` — Report memory usage; `/memory off` / `/memory on` — keep this chat out of memory, or let it back in\n"
-        "• `/cost` — Token spend this session\n\n"
+        "• `/cost` — Tokens and cost of this chat\n\n"
         "For anything else, just ask the agent directly!"
     )
 
 
-def _cmd_context(ctx: dict[str, Any]) -> str:
-    """Show context window token usage."""
-    token_count = ctx.get("token_count", 0)
-    max_tokens = ctx.get("max_tokens", 128000)
-    model = ctx.get("model", "unknown")
-    pct = (token_count / max_tokens * 100) if max_tokens else 0
-    bar_len = 20
-    filled = int(bar_len * pct / 100)
-    bar = "█" * filled + "░" * (bar_len - filled)
-    return (
-        f"📊 *Context Window*\n\n"
-        f"Model: `{model}`\n"
-        f"Tokens: `{token_count:,}` / `{max_tokens:,}` ({pct:.1f}%)\n"
-        f"[{bar}]\n\n"
-        f"Compaction triggers at 80% usage."
-    )
+def _cmd_context(text: str, ctx: dict[str, Any]) -> str:
+    """``/context``: how much of the model's window this chat's saved
+    conversation fills -- the ``context_info`` tool's report
+    (``kazma_core.tools.context_cmd``); ``/context details`` adds the
+    per-role breakdown. Until 2026-10-01 it measured the ``/context`` message
+    itself against a fixed 128,000."""
+    history = ctx.get("history")
+    if not isinstance(history, list):
+        return "📊 The size of this conversation could not be read."
+    from kazma_core.tools.context_cmd import context_report
+
+    parts = (text or "").strip().lower().split()
+    detailed = len(parts) > 1 and parts[1] in ("details", "detail", "detailed")
+    return context_report(history, detailed=detailed)
 
 
 def _cmd_status(ctx: dict[str, Any]) -> str:
+    """``/status``: the gateway as it is -- each chat app's line is what its
+    connection says (``GatewayManager.connection_report``), then the queue
+    and the other messages being handled. What could not be read shows as
+    ``?``. Until 2026-10-01 these were constants: running, the asking
+    platform as the only adapter, queue 0, one thread."""
     parts = ["*Gateway Status*"]
-    if ctx.get("started"):
+    started = ctx.get("started")
+    if started is None:
+        parts.append("? Gateway: **unknown**")
+    elif started:
         parts.append("● Gateway: **running**")
     else:
         parts.append("○ Gateway: **stopped**")
-    parts.append(f"• Adapters: `{ctx.get('adapters', '?')}`")
+    adapters = ctx.get("adapters")
+    if not isinstance(adapters, list):
+        parts.append("• Chat apps: `?`")
+    elif not adapters:
+        parts.append("• Chat apps: none configured")
+    for row in adapters if isinstance(adapters, list) else []:
+        line = f"• {row.get('name') or '?'}: `{row.get('state') or '?'}`"
+        detail = str(row.get("detail") or "").strip()
+        if detail:
+            line += f" — {detail[:160]}"
+        parts.append(line)
     parts.append(f"• Queue depth: `{ctx.get('queue_depth', '?')}`")
-    parts.append(f"• Active threads: `{ctx.get('active_threads', '?')}`")
+    parts.append(f"• Messages in progress: `{ctx.get('in_progress', '?')}`")
     return "\n".join(parts)
-
-
-def _cmd_model(ctx: dict[str, Any]) -> str:
-    model = ctx.get("model", "default")
-    return f"🧠 Active model: **{model}**"
 
 
 def _cmd_memory(text: str, ctx: dict[str, Any]) -> str:
@@ -387,7 +421,11 @@ def _cmd_memory(text: str, ctx: dict[str, Any]) -> str:
     parts = (text or "").strip().split()
     sub = parts[1].lower() if len(parts) > 1 else ""
     thread = str(ctx.get("thread_id") or "")
-    tenant = str(ctx.get("memory_tenant") or "default")
+    tenant = str(ctx.get("memory_tenant") or "")
+    if not tenant:
+        # Whose memory this is could not be read. Falling back to "default"
+        # would write the forget ledger under another tenant.
+        return "💾 Memory could not be reached, so nothing was read or changed."
     if sub in ("off", "on"):
         if not thread:
             return "💾 There is no chat here to set memory for."
@@ -410,9 +448,24 @@ def _cmd_memory(text: str, ctx: dict[str, Any]) -> str:
 
 
 def _cmd_cost(ctx: dict[str, Any]) -> str:
-    tokens = ctx.get("total_tokens", 0)
-    cost = ctx.get("total_cost", 0.0)
-    return f"💰 Session cost: `${cost:.4f}` ({tokens} tokens)"
+    """``/cost``: this chat's model calls, summed from the per-call ledger
+    (``llm_calls.db``). Until 2026-10-01 it said ``$0.0000`` whatever the
+    chat had spent: the gateway set both numbers to zero."""
+    if ctx.get("cost_tracking") is False:
+        return (
+            "💰 Cost tracking is off (`agent.nonstop.ledger.enabled`), so this "
+            "chat's model calls are not recorded."
+        )
+    tokens, cost, calls = ctx.get("total_tokens"), ctx.get("total_cost"), ctx.get("total_calls")
+    if not isinstance(tokens, int) or not isinstance(cost, (int, float)) or not isinstance(calls, int):
+        return "💰 Session cost: unknown (the cost ledger could not be read)."
+    text = (
+        f"💰 Session cost: `${cost:.4f}` ({tokens:,} tokens, "
+        f"{calls:,} model call{'' if calls == 1 else 's'})"
+    )
+    if tokens and not cost:
+        text += " — no price is recorded for this chat's models"
+    return text
 
 
 # ── Replay / Time Travel ────────────────────────────────────────────
@@ -578,11 +631,13 @@ def _cmd_config(text: str, ctx: dict[str, Any]) -> str:
 
 def _config_show(ctx: dict[str, Any]) -> str:
     """Format current config as a table."""
+    from kazma_core.memory.config import memory_enabled as _memory_enabled
+
     config = _load_config()
     model = _resolve_current_model(config, ctx)
     personality = _resolve_personality(config)
-    memory_enabled = config.get("memory", {}).get("enabled", True)
-    tools = _list_tool_names(config)
+    memory_enabled = _memory_enabled()
+    tools = [str(s["name"]) for s in _mcp_servers()]
 
     lines = [
         "⚙️ *Current Configuration*",
@@ -593,29 +648,40 @@ def _config_show(ctx: dict[str, Any]) -> str:
         f"{'Model':<20} {model:<30}",
         f"{'Personality':<20} {personality:<30}",
         f"{'Memory':<20} {'enabled' if memory_enabled else 'disabled':<30}",
-        f"{'Tools':<20} {', '.join(tools) if tools else '(none)':<30}",
+        f"{'MCP servers':<20} {', '.join(tools) if tools else '(none)':<30}",
         "```",
     ]
     return "\n".join(lines)
 
 
 def _config_model(parts: list, ctx: dict[str, Any]) -> str:
-    """Switch the active model."""
+    """Show or switch the active model (``switch_model_from_chat``)."""
     if len(parts) < 3:
         current = _resolve_current_model(_load_config(), ctx)
         return f"🧠 Current model: **{current}**\n\nUsage: `/config model <name>`"
+    return switch_model_from_chat(parts[2])  # model names are case-sensitive
 
-    model_name = parts[2]  # Preserve case — model names are case-sensitive
-    # Persist to kazma.yaml
-    try:
-        config = _load_config()
-        config.setdefault("models", {})["default"] = model_name
-        config.setdefault("llm", {})["model"] = model_name
-        _save_config(config)
-        return f"✅ Switched to **{model_name}**.  Restart or reload for the change to take full effect."
-    except Exception as exc:
-        logger.warning("[slash] /config model save failed: %s", exc)
-        return f"✅ Switched to **{model_name}** _(config write skipped: {exc})_"
+
+def switch_model_from_chat(model_id: str) -> str:
+    """Switch the process's model the one way, and say what happened.
+
+    ``switch_active_model`` sets the model AND its provider and rebinds the
+    live agent. The ``/model`` menu and ``/config model`` both come here.
+    Until 2026-10-01 ``/config model`` wrote ``llm.model`` alone -- a legacy
+    key the registry reads only when no profile is active, so the running
+    agent kept its model -- and said "Switched" even when the write failed.
+    Blocking (settings writes, a graph recompile): call it from a thread.
+    """
+    from kazma_core.agent_runner import KazmaAgent
+    from kazma_core.runtime.model_switch import switch_active_model
+    from kazma_core.service_container import get_container
+
+    container = get_container()
+    agent = container.get(KazmaAgent) if container.has(KazmaAgent) else None
+    result = switch_active_model(model_id, agent=agent)
+    if result.ok:
+        return f"✅ Switched to **{result.model}** (provider: {result.provider or '—'})"
+    return f"⚠️ Failed to switch model: {result.error or result.error_code or 'unknown'}"
 
 
 def _config_personality(parts: list) -> str:
@@ -634,58 +700,69 @@ def _config_personality(parts: list) -> str:
 
 
 def _config_memory(parts: list) -> str:
-    """Toggle memory on/off."""
+    """Turn memory on or off: ``memory.enabled``, the one key it changes
+    (read live by ``kazma_core.memory.config``). It used to save the whole
+    merged configuration back, every setting, to change this one."""
+    from kazma_core.memory.config import memory_enabled
+
     if len(parts) < 3 or parts[2].lower() not in ("on", "off"):
-        config = _load_config()
-        state = "enabled" if config.get("memory", {}).get("enabled", True) else "disabled"
+        state = "enabled" if memory_enabled() else "disabled"
         return f"💾 Memory is currently **{state}**.\n\nUsage: `/config memory on` or `/config memory off`"
 
     toggle = parts[2].lower()
     try:
-        config = _load_config()
-        config.setdefault("memory", {})["enabled"] = (toggle == "on")
-        _save_config(config)
-        return f"💾 Memory **{toggle.upper()}**.  Restart for the change to take full effect."
+        _get_config_store().set("memory.enabled", toggle == "on", "memory")
     except Exception as exc:
-        logger.warning("[slash] /config memory save failed: %s", exc)
-        return f"💾 Memory **{toggle.upper()}** _(config write skipped: {exc})_"
+        logger.warning("[slash] /config memory could not be saved: %s", exc)
+        return f"⚠️ Memory was not changed: {exc}"
+    return f"💾 Memory **{toggle.upper()}**."
+
+
+def _mcp_servers() -> list[dict[str, Any]]:
+    """The MCP servers as Settings -> MCP lists them (settings over kazma.yaml)."""
+    from kazma_core.mcp_servers_store import list_mcp_servers
+
+    return [s for s in list_mcp_servers() if isinstance(s, dict) and s.get("name")]
 
 
 def _config_tools(parts: list, ctx: dict[str, Any]) -> str:
-    """Handle /config tools sub-commands."""
+    """``/config tools list|toggle``: the MCP servers, switched the way
+    Settings -> MCP switches them (``set_mcp_server_enabled``). The toggle
+    used to write ``mcp.disabled_servers``, which nothing reads, and report
+    the server disabled."""
     if len(parts) < 3:
         return _config_usage()
 
     action = parts[2].lower()
-    config = _load_config()
+    servers = _mcp_servers()
 
     if action == "list":
-        tools = _list_tool_names(config)
-        if not tools:
-            return "🔧 No tools configured.\n\nAdd tools to `mcp.servers` in kazma.yaml."
-        lines = ["🔧 *Configured Tools:*", ""]
-        for t in tools:
-            line = f"• `{t}`"
-            if _tool_is_disabled(config, t):
+        if not servers:
+            return "🔧 No MCP servers are configured.\n\nAdd one in the Web UI under Settings → MCP."
+        lines = ["🔧 *MCP servers:*", ""]
+        for server in servers:
+            line = f"• `{server['name']}`"
+            if not server.get("enabled", True):
                 line += " _(disabled)_"
             lines.append(line)
         return "\n".join(lines)
 
     if action == "toggle" and len(parts) >= 4:
-        tool_name = parts[3].lower()
-        tools = _list_tool_names(config)
-        if tool_name not in [t.lower() for t in tools]:
-            available = ", ".join(tools) if tools else "(none)"
-            return f"❌ Unknown tool: `{tool_name}`\n\nAvailable: {available}"
+        wanted = parts[3].lower()
+        match = next((s for s in servers if str(s["name"]).lower() == wanted), None)
+        if match is None:
+            available = ", ".join(str(s["name"]) for s in servers) or "(none)"
+            return f"❌ Unknown MCP server: `{parts[3]}`\n\nAvailable: {available}"
+        from kazma_core.mcp_servers_store import set_mcp_server_enabled
+
+        name, enable = str(match["name"]), not match.get("enabled", True)
         try:
-            was_enabled = not _tool_is_disabled(config, tool_name)
-            _toggle_tool(config, tool_name, not was_enabled)
-            _save_config(config)
-            new_state = "enabled" if not was_enabled else "disabled"
-            return f"🔧 Tool `{tool_name}` **{new_state}**."
+            set_mcp_server_enabled(name, enable)
         except Exception as exc:
-            logger.warning("[slash] /config tools toggle save failed: %s", exc)
-            return f"🔧 Tool `{tool_name}` toggled _(config write skipped: {exc})_"
+            logger.warning("[slash] /config tools toggle could not be saved: %s", exc)
+            return f"⚠️ `{name}` was not changed: {exc}"
+        state = "enabled" if enable else "disabled"
+        return f"🔧 MCP server `{name}` **{state}**. It applies when Kazma next starts."
 
     return "Usage: `/config tools list` or `/config tools toggle <name>`"
 
@@ -730,8 +807,8 @@ def _config_usage() -> str:
         "• `/config model <name>` — Switch model\n"
         "• `/config personality <name>` — Switch personality\n"
         "• `/config memory on|off` — Toggle memory\n"
-        "• `/config tools list` — Show configured tools\n"
-        "• `/config tools toggle <name>` — Enable/disable a tool\n"
+        "• `/config tools list` — Show the MCP servers\n"
+        "• `/config tools toggle <name>` — Turn an MCP server on or off (from the next start)\n"
         "• `/config export` — Export config as JSON"
     )
 
@@ -752,33 +829,3 @@ def _resolve_personality(config: dict[str, Any]) -> str:
     except ImportError:
         return config.get("agent", {}).get("personality", "default")
 
-
-def _list_tool_names(config: dict[str, Any]) -> list[str]:
-    """List tool/server names from MCP config."""
-    servers = config.get("mcp", {}).get("servers", [])
-    if not servers:
-        return []
-    names: list[str] = []
-    for s in servers:
-        if isinstance(s, dict):
-            name = s.get("name", "unnamed")
-            names.append(name)
-    return names
-
-
-def _tool_is_disabled(config: dict[str, Any], tool_name: str) -> bool:
-    """Check if a tool is explicitly disabled."""
-    disabled: list[str] = config.get("mcp", {}).get("disabled_servers", [])
-    return tool_name.lower() in [d.lower() for d in disabled]
-
-
-def _toggle_tool(config: dict[str, Any], tool_name: str, enable: bool) -> None:
-    """Toggle a tool in the disabled_servers list."""
-    disabled: list[str] = config.setdefault("mcp", {}).setdefault("disabled_servers", [])
-    if enable:
-        # Remove from disabled list
-        config["mcp"]["disabled_servers"] = [d for d in disabled if d.lower() != tool_name.lower()]
-    else:
-        # Add to disabled list if not present
-        if tool_name.lower() not in [d.lower() for d in disabled]:
-            disabled.append(tool_name)

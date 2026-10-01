@@ -1794,41 +1794,16 @@ async def _try_model_command(
         if not model_id:
             return True
 
+        # The one switch (model AND provider, the live agent rebound), shared
+        # with /config model. Off the loop: it writes settings and recompiles
+        # the graph.
+        from kazma_gateway.slash_commands import switch_model_from_chat
+
         try:
-            from kazma_core.runtime.model_switch import switch_active_model
-
-            # Prefer the process agent when the gateway shares the web app
-            # process so graphs recompile; falls back to registry-only rebind.
-            agent = None
-            try:
-                from kazma_core.agent_runner import KazmaAgent
-                from kazma_core.service_container import get_container
-
-                container = get_container()
-                if container.has(KazmaAgent):
-                    agent = container.get(KazmaAgent)
-            except Exception:
-                agent = None
-            result = switch_active_model(model_id, agent=agent)
-            if result.ok:
-                await _send_model_reply(
-                    msg,
-                    store,
-                    manager,
-                    thread_id,
-                    f"✅ Switched to **{result.model}** (provider: {result.provider or '—'})",
-                )
-            else:
-                await _send_model_reply(
-                    msg,
-                    store,
-                    manager,
-                    thread_id,
-                    f"⚠️ Failed to switch model: {result.error or result.error_code or 'unknown'}",
-                )
+            reply = await asyncio.to_thread(switch_model_from_chat, model_id)
         except Exception as exc:
-            await _send_model_reply(msg, store, manager, thread_id,
-                f"⚠️ Failed to switch model: {exc}")
+            reply = f"⚠️ Failed to switch model: {exc}"
+        await _send_model_reply(msg, store, manager, thread_id, reply)
         return True
 
     return False
@@ -2026,6 +2001,18 @@ async def _try_skill_command(
                     "⚠️ Usage: `/skill uninstall <name>`",
                 )
                 return True
+            # Deletes the skill for every user and platform: admin-only, like
+            # install (audit H-8). It was open to any chat member until
+            # 2026-10-01.
+            from kazma_gateway.agent_handler.graph import _sender_is_gateway_admin
+
+            if not _sender_is_gateway_admin(msg):
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    "⛔ Uninstalling skills is admin-only. Set "
+                    "`KAZMA_GATEWAY_ADMINS` or join the platform user allowlist.",
+                )
+                return True
             from kazma_core.agent_skills.tools import uninstall_agent_skill
 
             result = await uninstall_agent_skill(name=rest.split()[0])
@@ -2129,64 +2116,105 @@ async def _send_model_reply(
 async def _build_slash_ctx(
     thread_id: str,
     msg: IncomingMessage,
-    state: dict[str, Any],
-    store: SessionStore,
+    *,
+    manager: Any = None,
+    graph: Any = None,
+    config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build rich context for slash commands with real data."""
+    """The facts a slash command reports, each read from where it lives.
+
+    A command gets what it shows: ``/status`` the gateway (``manager``),
+    ``/cost`` the per-call ledger, ``/context`` the chat's saved conversation
+    (``graph`` + ``config``), ``/memory`` the fact count, ``/config`` the
+    active model. A fact that cannot be read is left out, and the command
+    says so. Until 2026-10-01 ``/status`` and ``/cost`` reported constants
+    (every chat app running, queue 0, $0.0000) and ``/context`` measured
+    the ``/context`` message itself against a fixed 128,000.
+    ``tests/test_gateway_slash_facts.py`` fails on a key a command reads that
+    this function does not fill, or fills with a constant.
+    """
     ctx: dict[str, Any] = {
         "thread_id": thread_id,
         "platform": msg.platform,
     }
+    head = (msg.text or "").strip().lower().split(maxsplit=1)
+    head_cmd = head[0].split("@", 1)[0] if head else ""
 
-    # Active model
     try:
-        from kazma_core.model_registry import get_model_registry
-        reg = get_model_registry()
-        ctx["model"] = reg._active_model or "default"
-    except Exception as exc:
-        logger.debug("Failed to get active model for slash context: %s", exc, exc_info=True)
-        ctx["model"] = "default"
+        if head_cmd == "/memory":
+            # The facts held for this sender. It read a V1 agent memory
+            # through an import that no longer resolved
+            # (agent_runner.get_agent), so /memory answered "?" from the V1
+            # removal until 2026-09-26.
+            from kazma_core.memory.config import resolve_tenant_id
+            from kazma_core.memory.v2_health import count_current_facts
 
-    # Token / cost data from checkpoint state
-    try:
-        messages = state.get("messages", [])
-        ctx["token_count"] = sum(
-            len(str(m.get("content", ""))) // 4
-            for m in messages
-            if isinstance(m, dict)
+            # Off the loop: the tenant mode is a memory-settings read.
+            tenant = await asyncio.to_thread(
+                resolve_tenant_id,
+                msg.platform or "unknown",
+                sender_id=str(msg.sender_id or ""),
+                prefer_context=True,
+            )
+            ctx["memory_tenant"] = tenant  # /memory off|on writes the ledger under it
+            count = await asyncio.to_thread(count_current_facts, tenant)
+            if count is not None:
+                ctx["memory_count"] = count
+
+        elif head_cmd == "/cost":
+            usage = await asyncio.to_thread(_chat_cost, thread_id)
+            ctx["cost_tracking"] = usage is not None
+            if usage:
+                ctx["total_tokens"] = usage["tokens"]
+                ctx["total_cost"] = usage["cost"]
+                ctx["total_calls"] = usage["calls"]
+
+        elif head_cmd == "/status":
+            if manager is not None:
+                stats = manager.stats
+                ctx["started"] = bool(stats["started"])
+                ctx["queue_depth"] = int(stats["queue_depth"])
+                ctx["adapters"] = manager.connection_report()
+                ctx["in_progress"] = manager.messages_in_progress(exclude=asyncio.current_task())
+
+        elif head_cmd == "/context":
+            if graph is not None and config is not None:
+                snapshot = await graph.aget_state(config)
+                values = getattr(snapshot, "values", None) or {}
+                ctx["history"] = [m for m in (values.get("messages") or []) if isinstance(m, dict)]
+
+        elif head_cmd in ("/config", "/personality"):
+            model = await asyncio.to_thread(_active_model_name)
+            if model:
+                ctx["model"] = model
+    except Exception as exc:  # the fact stays out; the command says it could not read it
+        logger.warning(
+            "[agent-handler] %s could not read what it reports (thread=%s): %s",
+            head_cmd, thread_id[:12], exc,
         )
-    except Exception as exc:
-        logger.debug("Failed to calculate token count for slash context: %s", exc, exc_info=True)
-        ctx["token_count"] = 0
-
-    # Memory: the facts it holds for this sender. It read a V1 agent memory
-    # through an import that no longer resolved (agent_runner.get_agent), so
-    # /memory answered "?" from the V1 removal until 2026-09-26.
-    try:
-        from kazma_core.memory.config import resolve_tenant_id
-        from kazma_core.memory.v2_health import count_current_facts
-
-        tenant = resolve_tenant_id(
-            msg.platform or "unknown", sender_id=str(msg.sender_id or ""), prefer_context=True
-        )
-        ctx["memory_tenant"] = tenant  # /memory off|on writes the ledger under it
-        count = await asyncio.to_thread(count_current_facts, tenant)
-        if count is not None:
-            ctx["memory_count"] = count
-    except Exception as exc:
-        logger.debug("Failed to count memory facts: %s", exc)
-
-    # Cost data from cost breaker
-    ctx["total_tokens"] = 0
-    ctx["total_cost"] = 0.0
-
-    # Gateway status
-    ctx["started"] = True
-    ctx["adapters"] = msg.platform
-    ctx["queue_depth"] = 0
-    ctx["active_threads"] = 1
 
     return ctx
+
+
+def _chat_cost(thread_id: str) -> dict[str, Any] | None:
+    """This chat's model calls from the ledger: ``None`` when the ledger is
+    switched off (nothing is recorded), ``{}`` when it cannot be read."""
+    from kazma_core.agent.nonstop import get_nonstop_config
+    from kazma_core.observability.llm_ledger import thread_usage
+
+    if not get_nonstop_config().ledger_enabled:
+        return None
+    return thread_usage(thread_id) or {}
+
+
+def _active_model_name() -> str:
+    """The model the next turn uses: the active profile's (a settings read).
+
+    ``ModelRegistry._active_model`` is empty until a profile is chosen, and
+    ``/config show`` then said "default"."""
+    from kazma_core.model_registry import get_model_registry
+
+    return str(get_model_registry().get_active_profile().get("model") or "")
 
 
 

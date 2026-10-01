@@ -14,9 +14,8 @@ Never pass masked API keys (``***``) into ``LLMProvider.reconfigure`` — use
 from __future__ import annotations
 
 import logging
-import threading
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +25,10 @@ __all__ = [
     "ensure_active_model",
     "maybe_activate_provider_for_chat",
     "notify_credentials_changed",
-    "register_rebind_hook",
     "switch_active_model",
     "switch_active_provider",
-    "unregister_rebind_hook",
 ]
 
-# Extra rebind hooks beyond agent.sync_active_model's callback (e.g. tests).
-_extra_hooks: list[Callable[[], None]] = []
-_hooks_lock = threading.Lock()
 # Process-wide agent so a key save (upsert) can rebuild the live client
 # even when the caller has no agent handle (Settings > Providers).
 _live_agent: Any | None = None
@@ -80,25 +74,6 @@ def notify_credentials_changed(provider: str = "") -> None:
             "[model_switch] credential rebind failed (provider=%s): %s",
             provider, exc,
         )
-    try:
-        _run_extra_hooks()
-    except Exception as exc:
-        logger.debug("[model_switch] credential rebind hooks failed: %s", exc)
-
-
-def register_rebind_hook(cb: Callable[[], None]) -> None:
-    """Register an extra callback after a successful registry + agent sync."""
-    with _hooks_lock:
-        if cb not in _extra_hooks:
-            _extra_hooks.append(cb)
-
-
-def unregister_rebind_hook(cb: Callable[[], None]) -> None:
-    with _hooks_lock:
-        try:
-            _extra_hooks.remove(cb)
-        except ValueError:
-            pass
 
 
 def _profile_snapshot(registry: Any) -> tuple[str, str]:
@@ -145,16 +120,6 @@ def _sync_agent(agent: Any | None) -> None:
                 agent.llm_config = agent.llm.config
     except Exception as exc:
         logger.warning("[model_switch] agent fallback rebind failed: %s", exc)
-
-
-def _run_extra_hooks() -> None:
-    with _hooks_lock:
-        hooks = list(_extra_hooks)
-    for cb in hooks:
-        try:
-            cb()
-        except Exception as exc:
-            logger.warning("[model_switch] rebind hook failed: %s", exc)
 
 
 def switch_active_model(
@@ -223,7 +188,6 @@ def switch_active_model(
             )
         _mirror_chat_model(reg, clean)
         _sync_agent(agent)
-        _run_extra_hooks()
     except Exception as exc:
         logger.warning("[model_switch] switch_active_model failed: %s", exc, exc_info=True)
         cur_model, cur_prov = _profile_snapshot(reg)
@@ -315,7 +279,6 @@ def switch_active_provider(
         if final_model:
             _mirror_chat_model(reg, final_model)
         _sync_agent(agent)
-        _run_extra_hooks()
     except Exception as exc:
         logger.warning("[model_switch] switch_active_provider failed: %s", exc, exc_info=True)
         cur_model, cur_prov = _profile_snapshot(reg)

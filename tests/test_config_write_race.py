@@ -1,12 +1,11 @@
 """Tests for the config write-race fix (VAL-CRIT-006 / VAL-CRIT-007).
 
 These tests assert that:
-  * ``_save_config`` no longer opens ``kazma.yaml`` directly for writing
-    (treating it as a read-only bootstrap).
-  * All runtime config writes route through ``ConfigStore.set()`` which
-    serializes them with a ``threading.Lock``.
-  * Concurrent writes do not corrupt the store: after N parallel writes,
-    every key is readable.
+  * ``/config`` never opens ``kazma.yaml`` for writing (a read-only
+    bootstrap); a change is one key written through ``ConfigStore``, which
+    serializes writes with a ``threading.Lock``. (Until 2026-10-01 it saved
+    the whole merged configuration back through ``_save_config``.)
+  * Concurrent writes do not corrupt the store.
   * ``/config`` slash commands still function end-to-end.
 """
 
@@ -14,7 +13,6 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -40,9 +38,9 @@ def _isolated_store(tmp_path) -> ConfigStore:
 
 
 @pytest.mark.postgres
-class TestSaveConfigRoutesThroughConfigStore:
-    def test_save_config_does_not_open_yaml_for_writing(self, tmp_path, monkeypatch):
-        """_save_config must NOT call ``open(kazma.yaml, 'w')``."""
+class TestConfigWritesRouteThroughConfigStore:
+    def test_config_memory_does_not_open_yaml_for_writing(self, tmp_path, monkeypatch):
+        """``/config memory off`` must NOT call ``open(kazma.yaml, 'w')``."""
         store = _isolated_store(tmp_path)
         monkeypatch.setattr(slash_commands, "_get_config_store", lambda: store, raising=False)
 
@@ -58,51 +56,15 @@ class TestSaveConfigRoutesThroughConfigStore:
                 opened_for_write.append(file_str)
             return real_open(file, mode, *args, **kwargs)
 
-        config = {"llm": {"model": "gpt-4o"}, "memory": {"enabled": False}}
         try:
             with patch("builtins.open", side_effect=spy_open):
-                slash_commands._save_config(config)
+                result = slash_commands.resolve_slash_command("/config memory off", {})
+            assert result == "💾 Memory **OFF**."
+            assert store.get("memory.enabled") is False
         finally:
             store.close()
 
-        assert opened_for_write == [], (
-            f"_save_config wrote directly to kazma.yaml: {opened_for_write}"
-        )
-
-    def test_save_config_calls_configstore_set(self, tmp_path, monkeypatch):
-        """_save_config must persist each leaf key atomically via batch_set."""
-        store = _isolated_store(tmp_path)
-        monkeypatch.setattr(slash_commands, "_get_config_store", lambda: store, raising=False)
-
-        batch_calls: list[list[tuple[str, Any, str]]] = []
-        real_batch_set = store.batch_set
-
-        def spy_batch_set(items):
-            batch_calls.append(items)
-            return real_batch_set(items)
-
-        try:
-            with patch.object(store, "batch_set", side_effect=spy_batch_set):
-                slash_commands._save_config({"llm": {"model": "claude-sonnet-4"}})
-        finally:
-            store.close()
-
-        # batch_set should have been called once with all items
-        assert len(batch_calls) == 1, f"Expected 1 batch_set call, got {len(batch_calls)}"
-        items = batch_calls[0]
-        keys = [(key, value) for key, value, _ in items]
-        assert ("llm.model", "claude-sonnet-4") in keys
-
-    def test_save_config_persists_via_configstore_get(self, tmp_path, monkeypatch):
-        """After _save_config, the value is readable via ConfigStore.get()."""
-        store = _isolated_store(tmp_path)
-        monkeypatch.setattr(slash_commands, "_get_config_store", lambda: store, raising=False)
-
-        try:
-            slash_commands._save_config({"llm": {"model": "claude-sonnet-4"}})
-            assert store.get("llm.model") == "claude-sonnet-4"
-        finally:
-            store.close()
+        assert opened_for_write == [], f"/config wrote directly to kazma.yaml: {opened_for_write}"
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -112,29 +74,6 @@ class TestSaveConfigRoutesThroughConfigStore:
 
 @pytest.mark.postgres
 class TestConcurrentConfigWrites:
-    def test_ten_concurrent_writes_all_visible(self, tmp_path, monkeypatch):
-        """N parallel _save_config calls must all persist (no lost updates)."""
-        store = _isolated_store(tmp_path)
-        monkeypatch.setattr(slash_commands, "_get_config_store", lambda: store, raising=False)
-
-        n = 10
-
-        def writer(i: int) -> None:
-            # Each writer sets a distinct leaf key via the public path.
-            slash_commands._save_config({"concurrent": {"writer": f"val-{i}"}})
-
-        try:
-            with ThreadPoolExecutor(max_workers=n) as pool:
-                list(pool.map(writer, range(n)))
-
-            # All N writes should be present and uncorrupted.
-            for i in range(n):
-                assert store.get("concurrent.writer") in {f"val-{j}" for j in range(n)}, (
-                    f"write {i} lost"
-                )
-        finally:
-            store.close()
-
     def test_high_contention_single_key(self, tmp_path, monkeypatch):
         """Many threads hammering the SAME key through ConfigStore.set must
         produce a single consistent final value (lock serializes them)."""
@@ -173,16 +112,18 @@ def isolated_store_for_slash(tmp_path, monkeypatch):
 
 @pytest.mark.postgres
 class TestSlashConfigStillFunctions:
-    def test_config_model_uses_configstore(self, isolated_store_for_slash):
-        """/config model routes its save through ConfigStore."""
+    def test_config_model_switches_through_the_registry(self, isolated_store_for_slash):
+        """/config model switches model AND provider (switch_active_model).
+        It used to write ``llm.model`` alone, which the registry reads only
+        when no profile is active."""
+        from kazma_core.runtime.model_switch import SwitchResult
         from kazma_gateway.slash_commands import resolve_slash_command
 
-        ctx = {"model": "gpt-4o-mini"}
-        result = resolve_slash_command("/config model claude-sonnet-4", ctx)
-        assert result is not None
-        assert "claude-sonnet-4" in result
-        # Persistence went through the locked store
-        assert isolated_store_for_slash.get("llm.model") == "claude-sonnet-4"
+        done = SwitchResult(ok=True, model="claude-sonnet-4", provider="anthropic")
+        with patch("kazma_core.runtime.model_switch.switch_active_model", return_value=done):
+            result = resolve_slash_command("/config model claude-sonnet-4", {"model": "gpt-4o-mini"})
+        assert result == "✅ Switched to **claude-sonnet-4** (provider: anthropic)"
+        assert isolated_store_for_slash.get("llm.model") != "claude-sonnet-4"
 
     def test_config_memory_toggle_persists(self, isolated_store_for_slash):
         """/config memory off persists via ConfigStore."""
@@ -317,7 +258,6 @@ class TestConcurrentCrossInstanceWrites:
 
     def test_cross_instance_concurrent_writes(self, tmp_path):
         """Two separate instances writing to the same DB file should not corrupt."""
-        import random
 
         db_path = str(tmp_path / "shared.db")
         yaml_path = tmp_path / "kazma.yaml"
