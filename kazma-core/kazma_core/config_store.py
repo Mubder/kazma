@@ -1399,7 +1399,7 @@ class ConfigStore(_ChangeNotices):
                             (key, json.dumps(value), category, now),
                         )
                     pg_conn.commit()
-                self._clear_cache()
+                self._invalidate_key(key)
             return
         with self._lock:
             conn = self._get_conn()
@@ -1411,7 +1411,7 @@ class ConfigStore(_ChangeNotices):
                     (key, json.dumps(value), category, now),
                 )
                 conn.execute("COMMIT")
-                self._clear_cache()
+                self._invalidate_key(key)
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
@@ -1668,9 +1668,30 @@ class ConfigStore(_ChangeNotices):
     _CACHE_TTL_SECONDS = 15.0
 
     def _clear_cache(self) -> None:
-        """Drop the read cache AND its timestamps (local write invalidation)."""
+        """Drop the read cache AND its timestamps (local write invalidation).
+
+        For writes whose keys are not known (a raw transaction, a reset, a
+        YAML reload). A write of known keys uses :meth:`_invalidate_key`.
+        """
         self._cache.clear()
         self._cache_at.clear()
+
+    def _invalidate_key(self, key: str) -> None:
+        """Drop what a write to *key* can change in the read cache (lock held).
+
+        The key, every ancestor (``get`` merges a missing key's children, so
+        ``a``'s cached view holds ``a.b``) and every descendant. Every write
+        used to clear the whole cache -- misses included -- so any write
+        anywhere (the heartbeat, a session stamp) sent the next read of every
+        setting back to the database, often from the event loop (2026-10-01).
+        """
+        parts = key.split(".")
+        affected = {".".join(parts[:i]) for i in range(1, len(parts) + 1)}
+        below = key + "."
+        for cached in list(self._cache):
+            if cached in affected or cached.startswith(below):
+                self._cache.pop(cached, None)
+                self._cache_at.pop(cached, None)
 
     def _cache_fresh(self, key: str) -> bool:
         ts = self._cache_at.get(key)
@@ -1801,7 +1822,7 @@ class ConfigStore(_ChangeNotices):
                             (key, json.dumps(to_store), category, now),
                         )
                     conn.commit()
-                self._clear_cache()
+                self._invalidate_key(key)
             else:
                 conn = self._get_conn()
                 try:
@@ -1812,7 +1833,7 @@ class ConfigStore(_ChangeNotices):
                         (key, json.dumps(to_store), category, now),
                     )
                     conn.execute("COMMIT")
-                    self._clear_cache()
+                    self._invalidate_key(key)
                 except Exception:
                     logger.debug("set() write failed, rolling back for key=%s", key)
                     conn.execute("ROLLBACK")
@@ -1912,7 +1933,7 @@ class ConfigStore(_ChangeNotices):
                             (key, json.dumps(to_store), category, now_iso),
                         )
                     conn.commit()
-                self._cache.pop(key, None)
+                self._invalidate_key(key)
                 return True
             else:
                 conn = self._get_conn()
@@ -1952,7 +1973,7 @@ class ConfigStore(_ChangeNotices):
                         (key, json.dumps(to_store), category, now_iso),
                     )
                     conn.execute("COMMIT")
-                    self._cache.pop(key, None)
+                    self._invalidate_key(key)
                     return True
                 except Exception:
                     conn.execute("ROLLBACK")
@@ -2018,6 +2039,7 @@ class ConfigStore(_ChangeNotices):
                             (key, val_str, category, now_iso),
                         )
                     conn.commit()
+                self._invalidate_key(key)
                 self._cache_put(key, new_val)
                 return new_val
             else:
@@ -2049,6 +2071,7 @@ class ConfigStore(_ChangeNotices):
                         (key, val_str, category, now_iso),
                     )
                     conn.execute("COMMIT")
+                    self._invalidate_key(key)
                     self._cache_put(key, new_val)
                     return new_val
                 except Exception:
@@ -2104,7 +2127,8 @@ class ConfigStore(_ChangeNotices):
                                 (key, json.dumps(value), category, now),
                             )
                     conn.commit()
-                self._clear_cache()
+                for key, _value, _category in prepared:
+                    self._invalidate_key(key)
             else:
                 conn = self._get_conn()
                 try:
@@ -2116,7 +2140,8 @@ class ConfigStore(_ChangeNotices):
                             (key, json.dumps(value), category, now),
                         )
                     conn.execute("COMMIT")
-                    self._clear_cache()
+                    for key, _value, _category in prepared:
+                        self._invalidate_key(key)
                 except Exception:
                     conn.execute("ROLLBACK")
                     raise
@@ -2240,7 +2265,7 @@ class ConfigStore(_ChangeNotices):
                         deleted = cur.rowcount > 0
                     conn.commit()
                 if deleted:
-                    self._clear_cache()
+                    self._invalidate_key(key)
             else:
                 conn = self._get_conn()
                 try:
@@ -2249,7 +2274,7 @@ class ConfigStore(_ChangeNotices):
                     conn.execute("COMMIT")
                     deleted = cursor.rowcount > 0
                     if deleted:
-                        self._clear_cache()
+                        self._invalidate_key(key)
                 except Exception:
                     conn.execute("ROLLBACK")
                     raise

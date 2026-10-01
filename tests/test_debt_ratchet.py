@@ -16,11 +16,12 @@ gets ignored (docs/KNOWN_GAPS.md). So this is a ratchet:
 docs/KNOWN_GAPS.md and deliberately NOT swept, because a big-bang rewrite is
 riskier than the debt — but which nothing stopped from growing:
 
-* ``async_route_never_awaits`` — an ``async def`` route handler with no
-  ``await`` runs its body on the event loop that serves every SSE/WS stream;
-  AGENTS §35 says such a handler is a plain ``def``. Not swept: moving a
-  handler into the threadpool breaks ``spawn_background``/``create_task``
-  calls and exposes in-memory state the loop used to serialise.
+* ``async_route_never_awaits`` (counted here until 2026-10-01; 115 then) --
+  an ``async def`` route handler with no ``await`` runs its body on the event
+  loop that serves every SSE/WS stream. Swept that day: each one left names
+  its reason to run on the loop in ``tests/test_async_routes_on_the_loop.py``
+  (``ON_THE_LOOP``), which uses this module's detector, and a new one fails
+  there.
 * ``module_local_public_symbols`` — public (no ``_``), undecorated top-level
   functions and classes named in no other product file, script or config.
   Either dead or private-by-use; the fix is a ``_`` prefix or deletion. Not
@@ -89,18 +90,17 @@ BASELINE = {
     # except Exception / except BaseException / bare except, any body
     "blind_except": 3582,
     # ...whose body is only `pass` (or a docstring): the error vanishes
-    "silent_except": 454,
+    "silent_except": 452,
 }
 
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
 STRUCTURAL_BASELINE = {
-    "async_route_never_awaits": 52,
     "module_local_public_symbols": 571,
     "patched_value_imports": 79,
     "sleep_then_assert": 52,
     "bare_module_attr_assignments": 0,
     "shared_temp_names": 0,
-    "async_inline_db_calls": 17,
+    "async_inline_db_calls": 11,
     "async_tools_never_await": 8,
     "functions_over_complexity_50": 36,
 }
@@ -584,7 +584,6 @@ def structural_debt() -> dict[str, list[str]]:
         if f not in product and not _is_test_path(f)
     }
     return {
-        "async_route_never_awaits": async_routes_never_awaiting(product),
         "module_local_public_symbols": module_local_public_symbols(product, elsewhere),
         "patched_value_imports": patched_value_imports(product, tests),
         "sleep_then_assert": sleep_then_assert(tests),

@@ -5,6 +5,7 @@ Extracted from the original god module swarm_panel.py.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any, cast
@@ -131,7 +132,7 @@ def register_general_routes(
             return JSONResponse({"status": "error", "message": safe_error(exc)}, status_code=500)
 
     @router.get("/api/swarm/models")
-    async def swarm_models() -> dict[str, Any]:
+    def swarm_models() -> dict[str, Any]:
         """Return supported models and providers."""
         options = _registry_options()
         if options is not None:
@@ -173,7 +174,7 @@ def register_general_routes(
         return JSONResponse({"status": "error", "message": "Admin role required"}, status_code=403)
 
     @router.get("/api/swarm/templates")
-    async def list_templates() -> JSONResponse:
+    def list_templates() -> JSONResponse:
         """List all worker templates for auto-scaling."""
         svc = get_swarm_service()
         svc.resolve_engine(swarm_manager)
@@ -202,7 +203,9 @@ def register_general_routes(
             if not template.name:
                 return JSONResponse({"status": "error", "message": "Template name required"}, status_code=400)
             scaler.register_template(template)
-            scaler.save_templates()
+            # The template file is written in a thread; the change itself
+            # stays on the loop, which reads the templates when it dispatches.
+            await asyncio.to_thread(scaler.save_templates)
             return JSONResponse({"status": "ok", "template": template.to_dict()})
         except Exception as exc:
             return JSONResponse({"status": "error", "message": safe_error(exc)}, status_code=500)
@@ -220,7 +223,7 @@ def register_general_routes(
             return JSONResponse({"status": "error", "message": "AutoScaler not available"}, status_code=503)
         try:
             scaler.unregister_template(name)
-            scaler.save_templates()
+            await asyncio.to_thread(scaler.save_templates)
             return JSONResponse({"status": "ok"})
         except Exception as exc:
             return JSONResponse({"status": "error", "message": safe_error(exc)}, status_code=500)

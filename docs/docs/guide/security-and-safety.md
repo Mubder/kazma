@@ -287,7 +287,7 @@ the code.
 
 ### 8.1 Hardening report (`security/hardening.py`)
 
-`SecurityHardeningRunner` is an **on-demand operator report**, not a gate: `GET /api/security/hardening` runs it over the install's source tree and returns the findings. It does not run at startup, and no page calls it yet. The file's `run_on_startup` / `fail_on_critical` keys are not read. Each check it implements:
+`SecurityHardeningRunner` is an **on-demand operator report**, not a gate: `GET /api/security/hardening` runs it over the install's source tree (the install's own folder, never the working directory) and returns the findings. The scans skip virtualenvs, `.git`, caches, the data folder and task worktrees, and take about five seconds on a checkout. The report runs in a worker thread, so the server keeps answering while it does. It does not run at startup, and no page calls it yet. The file's `run_on_startup` / `fail_on_critical` keys are not read. Each check it implements:
 
 | Check (yaml label) | Implemented method | Severity |
 |---|---|---|

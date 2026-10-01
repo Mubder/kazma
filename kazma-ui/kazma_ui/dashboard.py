@@ -179,7 +179,7 @@ def _get_metrics() -> dict[str, Any]:
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request) -> HTMLResponse:
+def dashboard(request: Request) -> HTMLResponse:
     """Render observability dashboard with traces, costs, and metrics."""
     from kazma_ui.i18n import make_translator
 
@@ -276,7 +276,7 @@ def _safe_silence(sr: Any) -> float | None:
 
 
 @router.get("/api/dashboard/status")
-async def dashboard_status() -> JSONResponse:
+def dashboard_status() -> JSONResponse:
     """JSON endpoint for dashboard status (for AJAX refresh)."""
     status: dict[str, Any] = {
         "tracing_backend": "console",

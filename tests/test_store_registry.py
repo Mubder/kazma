@@ -24,6 +24,12 @@ declaration in ``kazma_core/store_registry.py``; do not loosen the gate.
 6. every door the model can try refuses every store and names its reader;
    the user's own sandbox database passes every door
 7. no store path is built from the process working directory
+8. no except-branch re-derives the data dir from the CWD
+9. no path joins the process working directory with "kazma-data"
+10. everything else product code puts in the data dir is declared with how
+    it crosses machines, and a bundle carries the data dir by that one rule:
+    the registry's workers, the default workspace and the operator's own
+    files travel; the install id, backups and logs never do
 """
 
 from __future__ import annotations
@@ -836,3 +842,360 @@ def test_cwd_joined_with_data_dir_is_caught():
         ),
     }
     assert _cwd_joined_with_data_dir(planted) == ["a.py:4", "b.py:3"]
+
+
+# ── 10. the data dir's other entries: declared, and carried by one rule ──
+
+
+def _data_dir_call_names(tree: ast.Module) -> set[str]:
+    """Names that call up the data dir in a module: data_dir, its aliases, wrappers."""
+    names = {"data_dir"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "kazma_core.paths":
+            names.update(a.asname or a.name for a in node.names if a.name == "data_dir")
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.endswith(
+            "data_dir"
+        ):
+            names.add(node.name)
+    return names
+
+
+def _is_data_dir_expr(node: ast.AST, calls: set[str], bound: set[str]) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id in bound
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Name) and func.id in calls:
+        return True
+    if isinstance(func, ast.Attribute) and func.attr == "data_dir":
+        return True
+    if isinstance(func, ast.Name) and func.id in ("Path", "str") and node.args:
+        return _is_data_dir_expr(node.args[0], calls, bound)
+    if isinstance(func, ast.Attribute) and func.attr in ("resolve", "absolute", "expanduser"):
+        return _is_data_dir_expr(func.value, calls, bound)
+    return False
+
+
+def _names_bound_to_the_data_dir(
+    nodes: list[ast.AST], calls: set[str], start: set[str]
+) -> set[str]:
+    """Names assigned the data dir in a scope (``root = data_dir()``), to a fixpoint."""
+    bound = set(start)
+    assigns = [
+        n for n in nodes if isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None
+    ]
+    changed = True
+    while changed:
+        changed = False
+        for node in assigns:
+            if not _is_data_dir_expr(node.value, calls, bound):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id not in bound:
+                    bound.add(target.id)
+                    changed = True
+    return bound
+
+
+def _entry_named(node: ast.AST, consts: dict[str, str]) -> str | None:
+    """The data-dir entry a joined path names: its first component, ``*`` for a hole."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        text = node.value
+    elif isinstance(node, ast.Name) and node.id in consts:
+        text = consts[node.id]
+    elif isinstance(node, ast.JoinedStr):
+        text = "".join(v.value if isinstance(v, ast.Constant) else "*" for v in node.values)
+    else:
+        return None  # a variable: the name is decided elsewhere
+    return text.replace(chr(92), "/").lstrip("/").split("/", 1)[0] or None
+
+
+def _data_dir_joins(nodes, calls, bound, consts):
+    for node in nodes:
+        if (
+            isinstance(node, ast.BinOp)
+            and isinstance(node.op, ast.Div)
+            and _is_data_dir_expr(node.left, calls, bound)
+        ):
+            yield node.lineno, _entry_named(node.right, consts)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            func = node.func
+            if (
+                func.attr == "joinpath"
+                and node.args
+                and _is_data_dir_expr(func.value, calls, bound)
+            ):
+                yield node.lineno, _entry_named(node.args[0], consts)
+            elif (
+                func.attr == "join"
+                and len(node.args) >= 2
+                and _is_data_dir_expr(node.args[0], calls, bound)
+            ):
+                yield node.lineno, _entry_named(node.args[1], consts)
+
+
+def _data_dir_entries_named(sources: dict[str, str]) -> list[tuple[str, str]]:
+    """``(file:line, entry)`` for each place product code puts something in the data dir.
+
+    Read from the source: ``<data dir> / "name"``, ``.joinpath("name")`` and
+    ``os.path.join(<data dir>, "name")``, where the data dir is a call to
+    ``data_dir`` (by any alias or wrapper), ``Path()`` of one, or a name
+    assigned one in the same scope or at module level. A name given as a
+    module constant is resolved; an f-string's holes become ``*``.
+    """
+    found: set[tuple[str, int, str]] = set()
+    for rel, text in sources.items():
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        calls = _data_dir_call_names(tree)
+        consts = {
+            target.id: node.value.value
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+        top = [
+            n
+            for stmt in tree.body
+            if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            for n in ast.walk(stmt)
+        ]
+        module_bound = _names_bound_to_the_data_dir(top, calls, set())
+        scopes = [(top, module_bound)]
+        for fn in ast.walk(tree):
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                nodes = list(ast.walk(fn))
+                scopes.append((nodes, _names_bound_to_the_data_dir(nodes, calls, module_bound)))
+        for nodes, bound in scopes:
+            for lineno, entry in _data_dir_joins(nodes, calls, bound, consts):
+                if entry:
+                    found.add((rel, lineno, entry))
+    return [(f"{rel}:{line}", entry) for rel, line, entry in sorted(found)]
+
+
+def _undeclared_data_dir_entries(sources: dict[str, str]) -> list[str]:
+    from kazma_core.store_registry import _data_dir_entry
+
+    problems = []
+    for where, entry in _data_dir_entries_named(sources):
+        if DB_TAIL.search(re.sub(r"-(wal|shm|journal)$", "", entry)):
+            continue  # a database: gate 1 judges it against STORES
+        if _data_dir_entry(entry) is None:
+            problems.append(f"{where} puts {entry!r} in the data dir")
+    return problems
+
+
+def test_every_entry_put_in_the_data_dir_is_declared():
+    problems = _undeclared_data_dir_entries(_product_sources())
+    assert not problems, (
+        "Something Kazma keeps in the data dir that is not declared: a migration\n"
+        "bundle would carry it as the operator's own file, or leave it behind,\n"
+        "with nobody having decided. Declare it in DATA_DIR_ENTRIES\n"
+        "(kazma_core/store_registry.py) with how it crosses machines:\n  "
+        + "\n  ".join(problems)
+    )
+
+
+def test_undeclared_data_dir_entries_are_caught():
+    """Negative control: each way of putting a new entry in the data dir."""
+    planted = {
+        "a.py": textwrap.dedent(
+            """
+            import os
+            from pathlib import Path
+            from kazma_core.paths import data_dir
+            from kazma_core.paths import data_dir as _dd
+            _NAME = "constant_cache.json"
+            DIRECT = data_dir() / "new_folder" / "x"
+            ALIASED = _dd() / "aliased.json"
+            JOINED = os.path.join(data_dir(), "joined_thing")
+            def f(n):
+                root = Path(data_dir())
+                return root / f"tmp-{n}" / "y", root.joinpath("joinpath_thing"), root / _NAME
+            KNOWN = data_dir() / "attachments" / "shared"
+            STORE = data_dir() / "some_store.db"
+            """
+        ),
+    }
+    assert _undeclared_data_dir_entries(planted) == [
+        "a.py:7 puts 'new_folder' in the data dir",
+        "a.py:8 puts 'aliased.json' in the data dir",
+        "a.py:9 puts 'joined_thing' in the data dir",
+        "a.py:12 puts 'constant_cache.json' in the data dir",
+        "a.py:12 puts 'joinpath_thing' in the data dir",
+        "a.py:12 puts 'tmp-*' in the data dir",
+    ]
+
+
+def test_every_data_dir_entry_says_how_it_crosses_machines():
+    from kazma_core.store_registry import DATA_DIR_ENTRIES, MIGRATION_DISPOSITIONS
+
+    for name, entry in DATA_DIR_ENTRIES.items():
+        assert entry.holds, name
+        assert entry.migration in MIGRATION_DISPOSITIONS, (name, entry.migration)
+        if entry.migration != "bundle":
+            assert entry.reason, f"{name}: say why it does not travel in a bundle"
+        if entry.state:
+            assert entry.migration == "bundle", f"{name}: state that stays behind is not state"
+
+
+def test_what_a_bundle_carries_from_the_data_dir():
+    """The rule name by name: state always, files unless lean, the rest never."""
+    from kazma_core.store_registry import carried_in_bundle
+
+    for name in ("swarm_registry.json", "swarm_templates.json"):
+        assert carried_in_bundle(name) and carried_in_bundle(name, lean=True), name
+    for name in ("workspace", "attachments", "images", "branding", "notes.md"):
+        assert carried_in_bundle(name), name
+        assert not carried_in_bundle(name, lean=True), name
+    for name in (
+        "install_id", "backups", "vector_memory", "code-index", "document-store",
+        ".migrate-backup-1789", ".swarm_registry.json.1.2.tmp", "kazma.log",
+        "update-state.json", "agent_evolution.json.migrated", "vault.db",
+        "chat_sessions.db", "memory_state.db-wal", "x_posts.sqlite3", "", "..",
+    ):
+        assert not carried_in_bundle(name), name
+
+
+def test_a_migration_carries_the_data_dir_and_keeps_the_targets_own(tmp_path):
+    """Export a data dir holding every kind of entry, import it over a target.
+
+    The registry's workers, the default workspace and the operator's own
+    folder arrive; the target keeps its identity, and a file of the target's
+    that the bundle replaces is kept in the pre-import backup.
+    """
+    src, dst = tmp_path / "src" / "kazma-data", tmp_path / "dst" / "kazma-data"
+    bundle, lean = tmp_path / "bundle.zip", tmp_path / "lean.zip"
+    base = {k: v for k, v in os.environ.items() if not k.startswith("KAZMA_")}
+    base.update({"KAZMA_DB_BACKEND": "sqlite", "KAZMA_VAULT_KEY": "test-only-not-a-secret"})
+    for rel, text in {
+        "branding/logo.txt": "source logo",
+        "workspace/notes.md": "carried note",
+        "workspace/app/node_modules/pkg/index.js": "installed again, not carried",
+        "install_id": "a" * 32,
+        "backups/old.txt": "this machine's backup",
+        "vector_memory/index.bin": "rebuilt",
+        ".migrate-backup-1/x.txt": "an old import's backup",
+        "kazma.log": "a log",
+        ".install_id.1.tmp": "half written",
+    }.items():
+        (src / rel).parent.mkdir(parents=True, exist_ok=True)
+        (src / rel).write_text(text, encoding="utf-8")
+    for rel, text in {
+        "install_id": "b" * 32,
+        "branding/logo.txt": "target logo",
+        "branding/other.txt": "the target's own",
+    }.items():
+        (dst / rel).parent.mkdir(parents=True, exist_ok=True)
+        (dst / rel).write_text(text, encoding="utf-8")
+
+    out = _run(
+        f"""
+        import json, zipfile
+        from kazma_core.swarm.registry import WorkerEntry, WorkerRegistry
+        WorkerRegistry().register(WorkerEntry(name="carried-worker", expertise=["research"]))
+        from kazma_core.migration.exporter import export_bundle
+        full = zipfile.ZipFile(export_bundle({str(bundle)!r})).namelist()
+        thin = zipfile.ZipFile(export_bundle({str(lean)!r}, include_assets=False)).namelist()
+        print(json.dumps({{"full": full, "lean": thin}}))
+        """,
+        {**base, "KAZMA_DATA_DIR": str(src)},
+        tmp_path,
+    )
+    names = json.loads(out.strip().splitlines()[-1])
+    assert {n for n in names["full"] if n.startswith("assets/")} == {
+        "assets/swarm_registry.json",
+        "assets/branding/logo.txt",
+        "assets/workspace/notes.md",
+    }, names["full"]
+    assert {n for n in names["lean"] if n.startswith("assets/")} == {
+        "assets/swarm_registry.json"
+    }, names["lean"]
+
+    out = _run(
+        f"""
+        import json
+        from kazma_core.migration.importer import import_bundle
+        r = import_bundle({str(bundle)!r}, target_workspace_root={str(tmp_path / "ws")!r})
+        from kazma_core.swarm.registry import WorkerRegistry
+        print(json.dumps({{
+            "ok": r.ok, "errors": r.errors, "restored": r.files_restored,
+            "backup": r.backup_path,
+            "workers": [w.name for w in WorkerRegistry().list_all()],
+        }}))
+        """,
+        {**base, "KAZMA_DATA_DIR": str(dst)},
+        tmp_path,
+    )
+    report = json.loads(out.strip().splitlines()[-1])
+    assert report["ok"], report["errors"]
+    assert report["workers"] == ["carried-worker"]
+    assert {"swarm_registry.json", "branding/", "workspace/"} <= set(report["restored"])
+    assert (dst / "install_id").read_text(encoding="utf-8") == "b" * 32
+    assert (dst / "branding" / "logo.txt").read_text(encoding="utf-8") == "source logo"
+    assert (dst / "branding" / "other.txt").read_text(encoding="utf-8") == "the target's own"
+    assert (dst / "workspace" / "notes.md").read_text(encoding="utf-8") == "carried note"
+    kept = Path(report["backup"]) / "files" / "branding" / "logo.txt"
+    assert kept.read_text(encoding="utf-8") == "target logo"
+    for rel in ("backups/old.txt", "vector_memory/index.bin", "kazma.log", ".install_id.1.tmp"):
+        assert not (dst / rel).exists(), rel
+
+
+def test_a_bundle_cannot_plant_what_the_target_keeps_for_itself(tmp_path):
+    """The importer asks the exporter's question again of every name a bundle holds."""
+    from kazma_core.migration.importer import ImportReport, _restore_data_dir_files
+
+    staged, target = tmp_path / "assets", tmp_path / "data"
+    for rel, text in {
+        "install_id": "c" * 32,
+        "vault.db": "not a vault",
+        "backups/planted.txt": "x",
+        "branding/logo.txt": "carried",
+    }.items():
+        (staged / rel).parent.mkdir(parents=True, exist_ok=True)
+        (staged / rel).write_text(text, encoding="utf-8")
+    target.mkdir()
+    report = ImportReport()
+    failures = _restore_data_dir_files(
+        staged, target, tmp_path / "kept", report, lambda _msg: None
+    )
+    assert failures == []
+    restored = sorted(
+        p.relative_to(target).as_posix() for p in target.rglob("*") if p.is_file()
+    )
+    assert restored == ["branding/logo.txt"]
+    assert len(report.warnings) == 3, report.warnings
+
+
+def test_an_unreadable_file_is_named_and_the_bundle_refused(tmp_path, monkeypatch):
+    """A file the export cannot read goes in the manifest, which verify refuses."""
+    from kazma_core.migration import exporter
+    from kazma_core.migration.bundle import BUNDLE_VERSION, Manifest
+
+    data = tmp_path / "data"
+    (data / "branding").mkdir(parents=True)
+    (data / "branding" / "a.txt").write_text("a", encoding="utf-8")
+    (data / "branding" / "b.txt").write_text("b", encoding="utf-8")
+    real_copy = exporter.shutil.copy2
+
+    def copy2(src, dest, *args, **kwargs):
+        if Path(src).name == "b.txt":
+            raise PermissionError(13, "Permission denied")
+        return real_copy(src, dest, *args, **kwargs)
+
+    monkeypatch.setattr(exporter.shutil, "copy2", copy2)
+    manifest = Manifest(bundle_version=BUNDLE_VERSION)
+    exporter._export_data_dir_files(
+        data, tmp_path / "out", manifest, lambda _msg: None,
+        lean=False, skip=tmp_path / "bundle.zip",
+    )
+    error = manifest.table_counts["_files"]["error"]
+    assert "branding/b.txt (Permission denied)" in error, error
+    assert (tmp_path / "out" / "branding" / "a.txt").is_file()

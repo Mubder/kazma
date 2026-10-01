@@ -66,7 +66,7 @@ def create_chat_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRout
     r = APIRouter(tags=["chat"])
 
     @r.get("/chat", response_class=HTMLResponse)
-    async def chat_page(request: Request) -> HTMLResponse:
+    def chat_page(request: Request) -> HTMLResponse:
         """Render the chat page."""
         return templates.TemplateResponse(
             request,

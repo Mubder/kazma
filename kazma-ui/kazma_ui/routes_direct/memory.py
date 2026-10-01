@@ -45,7 +45,7 @@ __all__ = ["register_memory_routes"]
 def register_memory_routes(self: Any) -> None:
     """Register the memory routes onto ``self.app``."""
     @self.app.get("/api/memory/graph")
-    async def _memory_graph(q: str = "", limit: int = 80):
+    def _memory_graph(q: str = "", limit: int = 80):
         """Retired — V2 belief graph superseded this. Use /api/memory/v2/graph."""
         from starlette.responses import JSONResponse
 
@@ -59,7 +59,7 @@ def register_memory_routes(self: Any) -> None:
             },
         )
     @self.app.get("/api/memory/graph/stats")
-    async def _memory_graph_stats():
+    def _memory_graph_stats():
         """Retired — V2 belief counts live in /api/memory/v2/health."""
         from starlette.responses import JSONResponse
 
@@ -258,7 +258,7 @@ def register_memory_routes(self: Any) -> None:
             if ops is not None:
                 ops.close()
     @self.app.get("/api/memory/graph/export")
-    async def _memory_graph_export():
+    def _memory_graph_export():
         """Retired — V2 nightly JSONL/GraphML export superseded this."""
         from starlette.responses import JSONResponse
 

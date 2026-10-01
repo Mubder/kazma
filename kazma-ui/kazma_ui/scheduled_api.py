@@ -17,6 +17,7 @@ X/email APIs.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any
@@ -112,7 +113,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
     # ── Page ──────────────────────────────────────────────────────────
 
     @router.get("/scheduled", response_class=HTMLResponse)
-    async def scheduled_page(request: Request) -> HTMLResponse:
+    def scheduled_page(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
             request,
             "scheduled.html",
@@ -159,15 +160,17 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
         except Exception as exc:  # noqa: BLE001
             logger.warning("[scheduled] cron list failed: %s", exc)
 
-        # Scheduled X posts.
+        # Scheduled X posts. The store is a database (and the tenant rule may
+        # read settings): read in a thread, never on the event loop.
         try:
             from kazma_core.x_api.schedule import get_x_scheduled_store
 
-            store = get_x_scheduled_store()
-            tenant = _tenant_filter()
+            def _scheduled_posts() -> list[Any]:
+                return list(get_x_scheduled_store().list_all(tenant_id=_tenant_filter(), limit=200))
+
             from kazma_core.text_display import extract_post_body, text_dir
 
-            for p in store.list_all(tenant_id=tenant, limit=200):
+            for p in await asyncio.to_thread(_scheduled_posts):
                 body = extract_post_body(p.text or "")
                 items.append({
                     "source": "x",

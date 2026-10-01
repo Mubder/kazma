@@ -236,7 +236,7 @@ async def text_to_speech(
 
 
 @router.get("/providers")
-async def list_providers() -> dict[str, list[str]]:
+def list_providers() -> dict[str, list[str]]:
     """List available STT and TTS providers."""
     from kazma_core.voice.stt import list_stt_providers
     from kazma_core.voice.tts import list_tts_providers
@@ -462,7 +462,7 @@ def _livekit_public_status() -> dict[str, Any]:
 
 
 @router.get("/livekit/status")
-async def livekit_voice_status() -> dict[str, Any]:
+def livekit_voice_status() -> dict[str, Any]:
     """Whether LiveKit duplex is configured (no secrets)."""
     return _livekit_public_status()
 
@@ -473,7 +473,7 @@ class _LiveKitTokenBody(BaseModel):
 
 
 @router.post("/livekit/token", dependencies=[Depends(rate_limit("voice", 30))])
-async def livekit_voice_token(body: _LiveKitTokenBody | None = None) -> dict[str, Any]:
+def livekit_voice_token(body: _LiveKitTokenBody | None = None) -> dict[str, Any]:
     """Mint a LiveKit room token for the browser participant.
 
     The agent brain is still LangGraph (STT → graph → TTS on ``/ws/voice``).

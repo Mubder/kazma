@@ -84,9 +84,22 @@ def _adopt_legacy_registry(target: Path) -> None:
     """
     if target.exists():
         return
+    from kazma_core import paths as _paths
+
     for legacy in _legacy_registry_paths():
         try:
             if not legacy.is_file() or legacy.resolve() == target.resolve():
+                continue
+            if _paths._is_throwaway(target) and not _paths._is_throwaway(legacy):
+                # A one-way move of an install's only copy into a folder
+                # that is deleted later -- a test's data dir, or a scratch
+                # copy's. A subprocess a test starts has no conftest pin, and
+                # its install root is the checkout the tests run in. The home
+                # folder's migration refuses the same (paths.migrate_legacy_user_home).
+                logger.warning(
+                    "[WorkerRegistry] not moving %s into the temporary data dir %s",
+                    legacy, target.parent,
+                )
                 continue
             raw = json.loads(legacy.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:

@@ -8,6 +8,7 @@ public advisory publication.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 import threading
@@ -109,7 +110,9 @@ class VulnerabilityDisclosure:
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
-            self._conn = sqlite3.connect(str(self._db_path))
+            # Used from asyncio.to_thread workers; every statement holds
+            # self._lock, so one connection may serve any of them.
+            self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
             from kazma_core.config_store import apply_sqlite_pragmas
 
             apply_sqlite_pragmas(self._conn)
@@ -169,6 +172,10 @@ class VulnerabilityDisclosure:
     # ------------------------------------------------------------------
 
     async def submit_report(self, report: dict) -> str:
+        """See :meth:`_submit_report_sync` (store work, run in a thread)."""
+        return await asyncio.to_thread(self._submit_report_sync, report)
+
+    def _submit_report_sync(self, report: dict) -> str:
         """Submit a vulnerability report.
 
         Args:
@@ -217,6 +224,10 @@ class VulnerabilityDisclosure:
         return report_id
 
     async def acknowledge(self, report_id: str) -> dict:
+        """See :meth:`_acknowledge_sync` (store work, run in a thread)."""
+        return await asyncio.to_thread(self._acknowledge_sync, report_id)
+
+    def _acknowledge_sync(self, report_id: str) -> dict:
         """Acknowledge receipt of a report.
 
         Args:
@@ -263,6 +274,10 @@ class VulnerabilityDisclosure:
         }
 
     async def update_status(self, report_id: str, status: str, notes: str = "") -> None:
+        """See :meth:`_update_status_sync` (store work, run in a thread)."""
+        return await asyncio.to_thread(self._update_status_sync, report_id, status, notes)
+
+    def _update_status_sync(self, report_id: str, status: str, notes: str = "") -> None:
         """Update the status of a report.
 
         Args:
@@ -308,6 +323,10 @@ class VulnerabilityDisclosure:
                 )
 
     async def get_report(self, report_id: str) -> dict:
+        """See :meth:`_get_report_sync` (store work, run in a thread)."""
+        return await asyncio.to_thread(self._get_report_sync, report_id)
+
+    def _get_report_sync(self, report_id: str) -> dict:
         """Get full report details with status history.
 
         Args:
@@ -349,6 +368,10 @@ class VulnerabilityDisclosure:
         return result
 
     async def list_reports(self, status: str | None = None) -> list:
+        """See :meth:`_list_reports_sync` (store work, run in a thread)."""
+        return await asyncio.to_thread(self._list_reports_sync, status)
+
+    def _list_reports_sync(self, status: str | None = None) -> list:
         """List all reports, optionally filtered by status.
 
         Args:
@@ -372,6 +395,10 @@ class VulnerabilityDisclosure:
         return [dict(r) for r in rows]
 
     async def publish_advisory(self, report_id: str) -> dict:
+        """See :meth:`_publish_advisory_sync` (store work, run in a thread)."""
+        return await asyncio.to_thread(self._publish_advisory_sync, report_id)
+
+    def _publish_advisory_sync(self, report_id: str) -> dict:
         """Generate and store a security advisory for publication.
 
         Args:
@@ -438,6 +465,10 @@ class VulnerabilityDisclosure:
         }
 
     async def encrypt_report(self, report: dict) -> bytes:
+        """See :meth:`_encrypt_report_sync` (store work, run in a thread)."""
+        return await asyncio.to_thread(self._encrypt_report_sync, report)
+
+    def _encrypt_report_sync(self, report: dict) -> bytes:
         """Sign and serialize a report for tamper-evident storage.
 
         Uses HMAC-SHA256 to sign the JSON payload. Full PGP encryption is not

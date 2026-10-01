@@ -142,6 +142,15 @@ class IdeService:
         self._root = _resolve_workspace_root()
         return self._root
 
+    async def _aresolve(self, rel_path: str) -> Path:
+        """:meth:`resolve` in a thread.
+
+        Resolving reads the workspace store (the root is re-resolved on every
+        call) and the filesystem (``realpath``): every async method resolves
+        through this, never on the event loop (2026-10-01).
+        """
+        return await asyncio.to_thread(self.resolve, rel_path)
+
     def resolve(self, rel_path: str) -> Path:
         """Resolve a (possibly relative) path against the workspace root.
 
@@ -255,6 +264,10 @@ class IdeService:
         go through ``file_write`` and its HITL gate — only the read shape
         changed.
         """
+        return await asyncio.to_thread(self._read_file_sync, rel_path)
+
+    def _read_file_sync(self, rel_path: str) -> dict[str, Any]:
+        """Blocking half of :meth:`read_file` (store, path checks, bytes)."""
         try:
             target = self.resolve(rel_path)
         except ValueError as exc:
@@ -294,7 +307,7 @@ class IdeService:
                     f"File is too large to open in the editor "
                     f"({size // 1024} KB > {MAX_EDITOR_FILE_BYTES // 1024} KB)."
                 )
-            raw = await asyncio.to_thread(target.read_bytes)
+            raw = target.read_bytes()
         except OSError as exc:
             return _fail(f"Could not read {rel_path}: {exc}")
 
@@ -323,7 +336,7 @@ class IdeService:
         success/error message.
         """
         try:
-            target = self.resolve(rel_path)
+            target = await self._aresolve(rel_path)
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "path": rel_path}
         res = await self._call_tool("file_write", {"path": str(target), "content": content})
@@ -345,7 +358,7 @@ class IdeService:
         Prefer this over :meth:`write_file` for edits to existing files.
         """
         try:
-            target = self.resolve(rel_path)
+            target = await self._aresolve(rel_path)
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "path": rel_path}
         res = await self._call_tool(
@@ -367,7 +380,7 @@ class IdeService:
         for item in patches or []:
             rel = str(item.get("path") or "")
             try:
-                target = self.resolve(rel)
+                target = await self._aresolve(rel)
             except ValueError as exc:
                 return {"ok": False, "error": str(exc), "path": rel}
             row = dict(item)
@@ -380,7 +393,8 @@ class IdeService:
         from kazma_core.ide.file_checkpoints import restore_checkpoint
 
         try:
-            paths = restore_checkpoint(checkpoint_id)
+            # File writes and a store read: in a thread.
+            paths = await asyncio.to_thread(restore_checkpoint, checkpoint_id)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "paths": paths, "checkpoint_id": checkpoint_id}
@@ -393,10 +407,10 @@ class IdeService:
         recursively. The path is traversal-checked via :meth:`resolve`.
         """
         try:
-            target = self.resolve(rel_path)
+            target = await self._aresolve(rel_path)
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "path": rel_path}
-        if not target.exists():
+        if not await asyncio.to_thread(target.exists):
             return {"ok": False, "error": f"Path not found: {rel_path}", "path": rel_path}
         res = await self._call_tool("file_delete", {"path": str(target)})
         res["path"] = rel_path
@@ -411,6 +425,10 @@ class IdeService:
         compatible callers (TUI/Web). The path is resolved and
         traversal-checked via :meth:`resolve` first.
         """
+        return await asyncio.to_thread(self._list_path_sync, rel_path)
+
+    def _list_path_sync(self, rel_path: str) -> dict[str, Any]:
+        """Blocking half of :meth:`list_path` (store, directory listing)."""
         try:
             target = self.resolve(rel_path)
         except ValueError as exc:
@@ -492,17 +510,17 @@ class IdeService:
         error instead of a misleading allowlist failure after HITL.
         """
         try:
-            target = self.resolve(rel_path)
+            target = await self._aresolve(rel_path)
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "output": ""}
-        if not target.exists() or not target.is_file():
+        if not await asyncio.to_thread(target.is_file):
             return {"ok": False, "error": f"File not found: {rel_path}", "output": ""}
 
         ext = target.suffix.lower()
         if ext == ".py":
             # Prefer reading source + python_exec (sandboxed / Docker-jail path).
             try:
-                source = target.read_text(encoding="utf-8")
+                source = await asyncio.to_thread(target.read_text, encoding="utf-8")
             except OSError as exc:
                 return {"ok": False, "error": f"Cannot read {rel_path}: {exc}", "output": ""}
             # Cap runaway files before shipping to the executor.
@@ -592,7 +610,7 @@ class IdeService:
 
         from kazma_core.security.child_env import tool_child_env
 
-        cwd = str(self.root)
+        cwd = str(await asyncio.to_thread(lambda: self.root))
         try:
             argv = ["git", *shlex.split(subcommand, posix=os.name != "nt")]
         except ValueError as exc:

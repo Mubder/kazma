@@ -18,12 +18,17 @@ drifted apart — "is this file one of Kazma's stores?":
 - the migration exporter's list of files to carry (14 names),
 - the migration importer's map of files to restore.
 
-This module is the one answer, in two tables:
+This module is the one answer, in three tables:
 
 ``STORES``
     Every database Kazma keeps: what it holds and whether it travels in a
     ``kazma migrate`` bundle. ``tests/test_store_registry.py`` fails when
     product code names a database file that is not declared here.
+
+``DATA_DIR_ENTRIES``
+    Everything else Kazma keeps directly in the data dir, and whether a
+    bundle carries it (:func:`carried_in_bundle`). Anything undeclared there
+    is the operator's own and travels.
 
 ``TOOL_WRITES``
     Every tool that can change anything: where its writes land and which
@@ -49,15 +54,18 @@ from pathlib import Path
 
 __all__ = [
     "CONTEXT_FEEDERS",
+    "DATA_DIR_ENTRIES",
     "DYNAMIC_NAME_SITES",
     "MIGRATION_DISPOSITIONS",
     "STORES",
     "STORE_FAMILIES",
     "TOOL_WRITES",
+    "DataDirEntry",
     "Store",
     "Write",
     "bundle_family_patterns",
     "bundle_store_names",
+    "carried_in_bundle",
     "distinctive_store_names",
     "is_kazma_store",
     "readers_for_store",
@@ -219,6 +227,81 @@ DYNAMIC_NAME_SITES: dict[str, str] = {
     "kazma-core/kazma_core/paths.py": "chat_sessions_spool.db",
     "kazma-core/kazma_core/memory/backup.py": "backup copies (backups dir)",
     "kazma-core/kazma_core/migration/vault_pairing.py": "vault backup before a key reset",
+}
+
+@dataclass(frozen=True)
+class DataDirEntry:
+    """Something Kazma keeps directly in the data dir that is not a database."""
+
+    holds: str
+    migration: str
+    #: Why, whenever migration is not "bundle".
+    reason: str = ""
+    #: Carried even by a lean bundle (``kazma migrate export --no-assets``):
+    #: small state Kazma reads at boot, not a folder of files.
+    state: bool = False
+
+
+#: Every entry product code puts directly in the data dir that is not a
+#: database (those are ``STORES``), by name or glob pattern, and how it
+#: crosses machines. Anything in the data dir that is neither declared here
+#: nor a database is the operator's own -- or the agent's, written there
+#: through its file tools (the live install's workspace IS its install
+#: folder) -- and a bundle carries it with the files.
+#:
+#: Until 2026-10-01 a bundle carried five hand-listed folders: the swarm's
+#: worker registry and templates, the default workspace and everything the
+#: owner kept in the data dir stayed behind. ``tests/test_store_registry.py``
+#: fails on an entry product code names that is not declared here.
+DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
+    "swarm_registry.json": DataDirEntry("the swarm's registered workers", "bundle", state=True),
+    "swarm_templates.json": DataDirEntry(
+        "the operator's own worker templates", "bundle", state=True),
+    "attachments": DataDirEntry(
+        "files sent in chats and files shared into a web chat", "bundle"),
+    "documents": DataDirEntry("documents the agent generated or processed", "bundle"),
+    "exports": DataDirEntry("exports the operator asked for", "bundle"),
+    "images": DataDirEntry("generated images and browser screenshots", "bundle"),
+    "workspace": DataDirEntry("the default workspace: the files the agent works on", "bundle"),
+    "document-store": DataDirEntry(
+        "the document platform's content-addressed files", "documents",
+        reason="carried with the document store export, beside documents.db"),
+    "vector_memory": DataDirEntry(
+        "the Knowledge Library's vectors", "rebuilt",
+        reason="the knowledge vector repair sweep re-embeds every chunk"),
+    "code-index": DataDirEntry(
+        "codebase search indexes", "rebuilt", reason="re-indexed from the workspace"),
+    "vuln_cache.json": DataDirEntry(
+        "cached vulnerability lookups", "rebuilt", reason="fetched again by the next scan"),
+    "backups": DataDirEntry(
+        "this machine's backups", "machine",
+        reason="the target keeps its own; the source's history stays in its restic repository"),
+    "install_id": DataDirEntry(
+        "this install's identity", "machine",
+        reason="two installs must never share one: shared-store peers and the "
+               "memory mirror tell installs apart by it"),
+    "kazma.log": DataDirEntry(
+        "a log file", "machine", reason="logs stay with the machine that wrote them"),
+    "restart.log": DataDirEntry(
+        "the log of a restart started from Settings", "machine",
+        reason="logs stay with the machine that wrote them"),
+    "update-state.json": DataDirEntry(
+        "the state of an update in progress", "machine",
+        reason="it describes this machine's checkout, part way through an update"),
+    ".migrate-*": DataDirEntry(
+        "the migration's own working folders", "machine",
+        reason="this machine's staging and pre-import backups"),
+    "*.tmp": DataDirEntry(
+        "a file being written", "machine", reason="a half-written file is never read"),
+    "agent_evolution.json": DataDirEntry(
+        "the Soul, before it moved into the settings", "legacy",
+        reason="read once into the settings, which the bundle carries"),
+    "pending_evolution.json": DataDirEntry(
+        "Soul changes waiting for review, before they moved into the settings", "legacy",
+        reason="read once into the settings, which the bundle carries"),
+    "*.migrated": DataDirEntry(
+        "a legacy file already moved into a store", "legacy",
+        reason="its content is in a store the bundle carries"),
 }
 
 #: The names a wrong read or write must never reach, wherever the file sits:
@@ -554,3 +637,36 @@ def bundle_family_patterns() -> tuple[str, ...]:
     return tuple(
         sorted(p for p, s in STORE_FAMILIES.items() if s.migration == "bundle" and "/" not in p)
     )
+
+
+def _data_dir_entry(name: str) -> DataDirEntry | None:
+    """The declaration of a data-dir entry by its name, or None: the operator's own."""
+    if name in DATA_DIR_ENTRIES:
+        return DATA_DIR_ENTRIES[name]
+    for pattern, entry in DATA_DIR_ENTRIES.items():
+        if any(ch in pattern for ch in "*?[") and fnmatch.fnmatchcase(name, pattern):
+            return entry
+    return None
+
+
+def carried_in_bundle(name: str, *, lean: bool = False) -> bool:
+    """Does a ``kazma migrate`` bundle carry this entry of the data dir?
+
+    The one answer for the exporter, which asks it of every entry, and the
+    importer, which asks it again of every entry a bundle holds, so a bundle
+    cannot plant an install identity or a database through its files.
+    Databases are never carried here: the declared stores travel through
+    :func:`bundle_store_names`. A declared entry travels when its migration
+    is "bundle" -- in a *lean* bundle only if it is state; anything
+    undeclared is the operator's own and travels with the files.
+    """
+    if not name or name in (".", ".."):
+        return False
+    if _strip_sidecar(name).endswith(_DB_SUFFIXES):
+        return False
+    entry = _data_dir_entry(name)
+    if entry is None:
+        return not lean
+    if entry.migration != "bundle":
+        return False
+    return entry.state or not lean

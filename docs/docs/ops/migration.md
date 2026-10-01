@@ -48,7 +48,7 @@ A `.zip` archive with:
 | `document-store/` (bundle tree) | Content-addressed blobs + manifests for the document platform (immutable SHA-256 tree). Restored into the target `documents.storage_root` |
 | `data/postgres.dump` | Postgres dump (only when source is Postgres-backed) |
 | `data/workspaces.db` | Workspace table (root paths rewritten on import) |
-| `assets/` | Binary artifacts: chat attachments, exports, images, fonts (distinct from the document-platform CAS tree) |
+| `assets/` | Everything else in the data dir that travels: the swarm's worker registry and templates, chat attachments, documents, exports, images, the default workspace, and any file you (or the agent) keep there. Not carried: the install's identity (`install_id`), its backups, logs, and what is rebuilt (vectors, code indexes) |
 | `pathmap.json` | Source workspace root + data dir (for path translation) |
 
 **Document store notes:** `documents.db` has **no embedded absolute paths** that need rewrite (content is content-addressed). Export snapshots the DB first, then copies referenced blobs/manifests with checksum verification. Import backs up any live store, then swaps staged DB + tree into the target document-store root (resolved after config import so a custom `documents.storage_root` is honored). See [Document processing ops](./document-processing.md).
@@ -152,7 +152,7 @@ kazma migrate export [--out PATH] [--no-assets]
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `--out PATH` | `kazma-bundle-<timestamp>.zip` | Output bundle path |
-| `--no-assets` | (assets included) | Skip binary assets (smaller bundle for config+data only) |
+| `--no-assets` | (assets included) | Leave the data dir's files out (a smaller bundle of settings and databases). The swarm's worker registry and templates still travel |
 
 ### `kazma migrate verify`
 
@@ -189,11 +189,15 @@ See also: [Environment variables](../reference/environment-variables) · [Portab
 
 ## Rollback
 
-Every import creates a pre-import backup at `kazma-data/.migrate-backup-<ts>/`. To roll back:
+Every import creates a pre-import backup at `kazma-data/.migrate-backup-<ts>/`: the databases it replaced, and under `files/` every file of the target's that the bundle replaced with a different one. To roll back:
 
 ```bash
 # Stop Kazma, then copy the backup .db files back over the live ones
 cp kazma-data/.migrate-backup-<ts>/*.db kazma-data/
+# and the replaced files, if any
+cp -r kazma-data/.migrate-backup-<ts>/files/. kazma-data/
 ```
+
+An export that cannot read a file names it in the manifest, and `verify` (and so `import`) refuses that bundle. An import that cannot restore a file reports it, does not report success, and leaves the bundle's copy in its staging folder.
 
 For Postgres, `pg_restore --clean --if-exists` is idempotent — re-running the import restores from the bundle cleanly.

@@ -191,11 +191,12 @@ def create_sse_router(*, event_bus: SSEEventBus | None = None) -> APIRouter:
                 status_code=404,
             )  # type: ignore[return-value]
 
-        # Resolve the task from the store or in-memory history.
+        # Resolve the task from the store (a database read: in a thread) or
+        # the in-memory history.
         task = None
         store = getattr(engine, "task_store", None)
         if store is not None:
-            task = store.get_task(task_id)
+            task = await asyncio.to_thread(store.get_task, task_id)
         if task is None:
             task = engine.get_task(task_id)
         if task is None:
@@ -256,7 +257,8 @@ async def _stream_events(
                     task = None
                     store = getattr(engine, "task_store", None)
                     if store is not None:
-                        task = store.get_task(task_id)
+                        # Once a second per open stream: never on the loop.
+                        task = await asyncio.to_thread(store.get_task, task_id)
                     if task is None:
                         task = engine.get_task(task_id)
                     if task is not None:

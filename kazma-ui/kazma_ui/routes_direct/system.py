@@ -27,7 +27,7 @@ def register_system_routes(self: Any) -> None:
     # here shadowed it depending on registration order — removed (audit).
 
     @self.app.get("/api/system/debug/registry")
-    async def _debug_registry():
+    def _debug_registry():
         import kazma_core.model_registry as _mr
 
         from kazma_ui.settings import mask_deep
@@ -881,7 +881,7 @@ def register_system_routes(self: Any) -> None:
             except Exception:
                 pass  # already closed / never opened
     @self.app.post("/api/system/snapshots/maintain")
-    async def _run_snapshot_maintenance():
+    def _run_snapshot_maintenance():
         """Time-travel snapshots: TTL prune + VACUUM to reclaim disk.
 
         Retention is read LIVE from the ConfigStore (Settings UI), so the

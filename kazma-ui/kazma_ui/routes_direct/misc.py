@@ -205,7 +205,7 @@ def register_misc_routes(self: Any) -> None:
     # ownership check — history returned any thread's full state_json, and
     # replay raised TypeError on every call. Use /api/replay/*.
     @self.app.get("/api/alerts/recent")
-    async def _get_recent_alerts():
+    def _get_recent_alerts():
         from fastapi.encoders import jsonable_encoder
         from kazma_core.observability.alerts import AlertDispatcher
 
@@ -223,12 +223,12 @@ def register_misc_routes(self: Any) -> None:
                 out.append({"repr": repr(item), "error": "unserializable alert omitted"})
         return out
     @self.app.get("/packages")
-    async def _packages_redirect() -> RedirectResponse:
+    def _packages_redirect() -> RedirectResponse:
         """Legacy /packages page → Settings Packages tab."""
         return RedirectResponse("/settings?tab=packages", status_code=307)
     # ── Auth bootstrap (remote clients — loopback auto-cookie is disabled) ──
     @self.app.get("/login", response_class=HTMLResponse)
-    async def _login_page(request: Request) -> HTMLResponse:
+    def _login_page(request: Request) -> HTMLResponse:
         """Render the secret login form for non-loopback browsers."""
         return self.templates.TemplateResponse(
             request,
@@ -276,12 +276,12 @@ def register_misc_routes(self: Any) -> None:
         finally:
             store.unregister_ws(websocket)
     @self.app.get("/")
-    async def root(request: Request) -> RedirectResponse:
+    def root(request: Request) -> RedirectResponse:
         # Hands 0.11: chat is home. Dashboard stays an inspector at /dashboard.
         # Auth middleware still gates HTML pages — do not add "/" to ALWAYS_OPEN_PATHS.
         return RedirectResponse(url="/chat", status_code=303)
     @self.app.get("/workspace", response_class=HTMLResponse)
-    async def workspace_page(request: Request) -> HTMLResponse:
+    def workspace_page(request: Request) -> HTMLResponse:
         return self.templates.TemplateResponse(
             request,
             "workspace.html",
@@ -291,7 +291,7 @@ def register_misc_routes(self: Any) -> None:
             },
         )
     @self.app.get("/ide", response_class=HTMLResponse)
-    async def ide_page(request: Request) -> HTMLResponse:
+    def ide_page(request: Request) -> HTMLResponse:
         return self.templates.TemplateResponse(
             request,
             "ide.html",
@@ -301,7 +301,7 @@ def register_misc_routes(self: Any) -> None:
             },
         )
     @self.app.get("/replay", response_class=HTMLResponse)
-    async def replay_page(request: Request) -> HTMLResponse:
+    def replay_page(request: Request) -> HTMLResponse:
         return self.templates.TemplateResponse(
             request,
             "replay.html",
@@ -311,7 +311,7 @@ def register_misc_routes(self: Any) -> None:
             },
         )
     @self.app.get("/research", response_class=HTMLResponse)
-    async def research_page(request: Request) -> HTMLResponse:
+    def research_page(request: Request) -> HTMLResponse:
         return self.templates.TemplateResponse(
             request,
             "research.html",
@@ -321,7 +321,7 @@ def register_misc_routes(self: Any) -> None:
             },
         )
     @self.app.get("/knowledge", response_class=HTMLResponse)
-    async def knowledge_page(request: Request) -> HTMLResponse:
+    def knowledge_page(request: Request) -> HTMLResponse:
         return self.templates.TemplateResponse(
             request,
             "knowledge_base.html",
@@ -331,7 +331,7 @@ def register_misc_routes(self: Any) -> None:
             },
         )
     @self.app.get("/documents", response_class=HTMLResponse)
-    async def documents_page(request: Request) -> HTMLResponse:
+    def documents_page(request: Request) -> HTMLResponse:
         return self.templates.TemplateResponse(
             request,
             "documents.html",
@@ -341,7 +341,7 @@ def register_misc_routes(self: Any) -> None:
             },
         )
     @self.app.get("/x", response_class=HTMLResponse)
-    async def x_studio_page(request: Request) -> HTMLResponse:
+    def x_studio_page(request: Request) -> HTMLResponse:
         return self.templates.TemplateResponse(
             request,
             "x_studio.html",
@@ -1060,7 +1060,7 @@ def register_misc_routes(self: Any) -> None:
             logger.exception("[HITL] Failed to clear pending approvals")
             return _JSONResponse({"error": "Internal error"}, status_code=500)
     @self.app.get("/api/status")
-    async def get_status() -> dict[str, Any]:
+    def get_status() -> dict[str, Any]:
         return {
             "status": "degraded" if self._init_errors else "ok",
             "init_errors": [
