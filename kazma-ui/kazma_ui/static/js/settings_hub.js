@@ -192,30 +192,6 @@
             this.comparing = false;
         },
 
-        async saveConnector(platform) {
-            this.saving = true;
-            try {
-                await window.kazmaSave('/api/settings/connectors', {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                    body: JSON.stringify({ platform, settings: this.connectors[platform] || {} }),
-                });
-                // Auto-refresh gateway adapters so the new connector config
-                // takes effect immediately (no manual server restart needed).
-                try {
-                    const refreshResp = await fetch('/api/gateway/refresh-adapters', { method: 'POST' });
-                    const refreshData = await refreshResp.json();
-                    showToast(_k('settings.hub.platform_saved_refreshed', '{platform} settings saved. Gateway refreshed ({n} adapters).', { platform: platform, n: refreshData.adapters_count || 0 }), 'success');
-                } catch (refreshErr) {
-                    console.warn('[Settings] Gateway refresh failed:', refreshErr);
-                    showToast(_k('settings.hub.platform_saved_refresh_failed', '{platform} settings saved, but gateway refresh failed. Use "Refresh Gateway" button.', { platform: platform }), 'warning');
-                }
-            } catch (e) {
-                showToast(_k('settings.hub.save_failed', 'Save failed'), 'error');
-            }
-            this.saving = false;
-        },
-
         async refreshGateway() {
             this.saving = true;
             try {
@@ -231,22 +207,6 @@
                 showToast(_k('settings.hub.gateway_refresh_failed', 'Gateway refresh failed: ') + e.message, 'error');
             }
             this.saving = false;
-        },
-
-        async testConnector(platform) {
-            this.testingConnector = platform;
-            try {
-                const resp = await fetch('/api/settings/connectors/test', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                    body: JSON.stringify({ platform }),
-                });
-                const result = await resp.json();
-                showToast(result.success ? `${platform}: Connected!` : `${platform}: ${result.error}`, result.success ? 'success' : 'error');
-            } catch (e) {
-                showToast(_k('settings.hub.test_failed_error', 'Test failed: {error}', { error: e.message }), 'error');
-            }
-            this.testingConnector = null;
         },
 
         async loadHubProviders() {
@@ -451,9 +411,9 @@
 
         async saveAdapterRouting() {
             // Diff-driven save (2026-09-04): only the CHANGED values are
-            // written, and the (slow) adapter restart runs ONLY when
-            // platform credentials/allowlists changed — in the background,
-            // so the Save button never sits grayed for seconds.
+            // written. The server rebuilds a platform's adapter when its
+            // token or switch changed, in the background, so the Save button
+            // never sits grayed while a platform reconnects.
             this.adapterRoutingSaving = true;
             try {
                 const r = this.adapterRouting;
@@ -482,7 +442,6 @@
                 // Platform connectors (POST /api/connectors — the endpoint the
                 // old dialogs used: normalizes tokens, preserves masks, applies
                 // allowlists live). Only platforms with actual changes.
-                let platformChanged = false;
                 const platforms = [
                     {
                         name: 'telegram',
@@ -524,7 +483,6 @@
                 ];
                 for (const p of platforms) {
                     if (!p.dirty) continue;
-                    platformChanged = true;
                     connectorPut(p.payload());
                 }
 
@@ -573,21 +531,9 @@
                 showToast(_k('settings.hub.saved', 'Saved.'), 'success');
                 this.adapterRoutingSnapshot = JSON.stringify(curr);
 
-                // Adapter rebuild (seconds) runs AFTER the save confirms —
-                // only when platform credentials/allowlists changed.
-                if (platformChanged) {
-                    this.adapterRoutingApplying = true;
-                    fetch('/api/gateway/refresh-adapters', { method: 'POST' })
-                        .then(resp => {
-                            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                            showToast(_k('settings.hub.adapters_refreshed', 'Adapters refreshed.'), 'success');
-                        })
-                        .catch(eRef => {
-                            console.warn('[Hub] Gateway refresh failed:', eRef);
-                            showToast(_k('settings.hub.saved_but_adapter_refresh_failed', 'Saved, but adapter refresh failed — use Refresh Adapters.'), 'error');
-                        })
-                        .finally(() => { this.adapterRoutingApplying = false; });
-                }
+                // No adapter refresh from here: the server applies a changed
+                // token, switch or channel to the running adapter itself
+                // (kazma_gateway.chat_adapters, 2026-10-01).
                 this.loadAdapterRouting();
             } catch (e) {
                 showToast(_k('settings.hub.save_failed_2', 'Save failed: ') + e.message, 'error');
@@ -1119,11 +1065,6 @@
                 } else {
                     this.hubConnectorModal = false;
                     await this.loadHubConnectors();
-                    try {
-                        await window.kazmaSave('/api/gateway/refresh-adapters', { method: 'POST' });
-                    } catch (refreshErr) {
-                        console.warn('[Hub] Gateway refresh failed:', refreshErr);
-                    }
                     showToast(_k('settings.hub.connector_saved', 'Connector saved'), 'success');
                 }
             } catch (e) {

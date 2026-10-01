@@ -16,14 +16,16 @@ Concurrency model:
 
 from __future__ import annotations
 
+import contextlib
 import copy
+import functools
 import json
 import logging
 import os
 import sqlite3
 import threading
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,7 +43,7 @@ from kazma_core.security.url_credentials import (
     url_password_is_masked,
 )
 
-__all__ = ["CONFIG_STORE_MIGRATIONS", "ConfigStore", "ConfigStoreProtocol", "Migration", "MigrationRunner", "apply_sqlite_pragmas", "apply_sqlite_pragmas_async", "get_config_store", "get_kazma_secret", "get_or_create_disclosure_key", "get_validated_config", "is_masked_secret_placeholder", "is_sensitive_config_key", "is_vault_ref", "reset_config_store", "run_config_store_migrations", "set_config_store"]
+__all__ = ["CONFIG_STORE_MIGRATIONS", "ChangeListener", "ConfigStore", "ConfigStoreProtocol", "Migration", "MigrationRunner", "apply_sqlite_pragmas", "apply_sqlite_pragmas_async", "get_config_store", "get_kazma_secret", "get_or_create_disclosure_key", "get_validated_config", "is_masked_secret_placeholder", "is_sensitive_config_key", "is_vault_ref", "reset_config_store", "run_config_store_migrations", "set_config_store"]
 
 logger = logging.getLogger(__name__)
 
@@ -660,9 +662,92 @@ def run_config_store_migrations(db_path: str) -> list[Migration]:
     return runner.run()
 
 
+#: Told which settings a write changed: the keys, or None when the write may
+#: have changed any of them (a raw transaction, an import, a reset). It runs on
+#: the writer's thread once the write has committed and the store's lock is
+#: released, so it must be quick and must not write settings itself: it
+#: schedules its work elsewhere (``kazma_gateway.chat_adapters`` does).
+ChangeListener = Callable[[frozenset[str] | None], None]
+
+
+class _ChangeNotices:
+    """Every write tells the store's listeners what it changed (2026-10-01).
+
+    A chat app's token saved in Settings reached no running adapter: the
+    adapter kept the old token until a separate Refresh, and the Test
+    reported the old connection's failure for a token that worked. Each
+    mutator of both stores announces what it wrote (``_announces``), so what
+    applies a setting at run time hears every writer -- a route, a restore,
+    the terminal app, the agent's config tool -- without each one wiring it.
+    """
+
+    def add_change_listener(self, listener: ChangeListener) -> Callable[[], None]:
+        """Call *listener* after every write; returns the call that stops it."""
+        listeners: list[ChangeListener] = self.__dict__.setdefault("_change_listeners", [])
+        listeners.append(listener)
+
+        def _remove() -> None:
+            with contextlib.suppress(ValueError):
+                listeners.remove(listener)
+
+        return _remove
+
+    def _announce(self, keys: Iterable[str] | None) -> None:
+        listeners = list(self.__dict__.get("_change_listeners") or ())
+        if not listeners:
+            return
+        changed = None if keys is None else frozenset(keys)
+        for listener in listeners:
+            try:
+                listener(changed)
+            except Exception:
+                # The write has committed: a listener's failure is its own and
+                # must never make the write look failed to its caller.
+                logger.warning("[ConfigStore] Change listener %r failed", listener, exc_info=True)
+
+
+def _key_argument(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+    return str(kwargs["key"] if "key" in kwargs else args[0])
+
+
+def _announces(
+    keys_of: Callable[[Any, tuple[Any, ...], dict[str, Any]], Iterable[str] | None],
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """A store mutator: once it returns, announce what ``keys_of(result, args,
+    kwargs)`` names -- the keys written, nothing (an empty tuple), or None for
+    "any key may have changed". Its failures announce nothing."""
+
+    def decorate(method: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(method)
+        def wrapper(self: _ChangeNotices, *args: Any, **kwargs: Any) -> Any:
+            result = method(self, *args, **kwargs)
+            keys = keys_of(result, args, kwargs)
+            if keys is None or keys:
+                self._announce(keys)
+            return result
+
+        wrapper.__announces__ = True  # type: ignore[attr-defined]
+        return wrapper
+
+    return decorate
+
+
+_ONE_KEY = _announces(lambda _result, args, kwargs: (_key_argument(args, kwargs),))
+_ONE_KEY_IF_WRITTEN = _announces(
+    lambda result, args, kwargs: (_key_argument(args, kwargs),) if result else ()
+)
+_BATCH_KEYS = _announces(
+    lambda _result, args, kwargs: tuple(
+        str(item[0]) for item in (kwargs["items"] if "items" in kwargs else args[0])
+    )
+)
+_ANY_KEY_IF_WRITTEN = _announces(lambda result, _args, _kwargs: None if result else ())
+
+
 class ConfigStoreProtocol(Protocol):
     """Protocol defining the ConfigStore interface for type safety."""
-    
+
+    def add_change_listener(self, listener: ChangeListener) -> Callable[[], None]: ...
     def get(self, key: str, default: Any = None) -> Any: ...
     def set(self, key: str, value: Any) -> None: ...
     def set_if_absent(self, key: str, value: Any, ttl: float | None = None, category: str = "general") -> bool: ...
@@ -679,7 +764,7 @@ class ConfigStoreProtocol(Protocol):
     def close(self) -> None: ...
 
 
-class _InMemoryStore:
+class _InMemoryStore(_ChangeNotices):
     """Thread-safe in-memory fallback with TTL eviction.
     
     Implements ConfigStoreProtocol for use when SQLite is unavailable.
@@ -699,6 +784,7 @@ class _InMemoryStore:
             self._evict_expired()
             return self._data.get(key, default)
     
+    @_ONE_KEY
     def set(self, key: str, value: Any, category: str = "general") -> None:
         refuse_write("config", key)
         with self._lock:
@@ -708,6 +794,7 @@ class _InMemoryStore:
             self._data[key] = value
             self._timestamps[key] = time.monotonic()
 
+    @_ONE_KEY_IF_WRITTEN
     def set_if_absent(self, key: str, value: Any, ttl: float | None = None, category: str = "general") -> bool:
         refuse_write("config", key)
         with self._lock:
@@ -739,6 +826,7 @@ class _InMemoryStore:
             self._timestamps[key] = time.monotonic()
             return True
     
+    @_BATCH_KEYS
     def batch_set(self, items: list[tuple[str, Any, str]]) -> int:
         for key, _value, _category in items:
             refuse_write("config", key)
@@ -751,6 +839,7 @@ class _InMemoryStore:
                 self._timestamps[key] = time.monotonic()
             return len(items)
 
+    @_ONE_KEY
     def atomic_update(self, key: str, updater: Callable[[Any], Any], category: str = "general") -> Any:
         """Read-modify-write under the lock (protocol parity, audit L-24).
 
@@ -803,6 +892,7 @@ class _InMemoryStore:
             self._evict_expired()
             return {"general": dict(self._data)}
     
+    @_ONE_KEY_IF_WRITTEN
     def delete(self, key: str) -> bool:
         refuse_write("config", key)
         with self._lock:
@@ -817,6 +907,7 @@ class _InMemoryStore:
             self._evict_expired()
             return yaml.dump(self._data, default_flow_style=False, allow_unicode=True, sort_keys=False)
     
+    @_ANY_KEY_IF_WRITTEN
     def import_yaml(self, yaml_str: str) -> int:
         data = yaml.safe_load(yaml_str)
         if not isinstance(data, dict):
@@ -832,9 +923,11 @@ class _InMemoryStore:
         _flatten(data)
         return self.batch_set(items)
     
+    @_ANY_KEY_IF_WRITTEN
     def reconcile_from_yaml(self) -> int:
         return 0
     
+    @_ANY_KEY_IF_WRITTEN
     def reset_all(self) -> int:
         refuse_write("config", "<every setting>")
         with self._lock:
@@ -850,7 +943,7 @@ class _InMemoryStore:
 
 
 
-class ConfigStore:
+class ConfigStore(_ChangeNotices):
     """Runtime configuration with YAML fallback.
 
     Backend:
@@ -1667,6 +1760,7 @@ class ConfigStore:
                 return default
         return self._resolve_vault_value(key, val)
 
+    @_ONE_KEY
     def set(self, key: str, value: Any, category: str = "general") -> None:
         """Set a setting in the DB.
 
@@ -1728,6 +1822,7 @@ class ConfigStore:
             key, _redact_for_log(key, to_store), category,
         )
 
+    @_ONE_KEY_IF_WRITTEN
     def set_if_absent(
         self,
         key: str,
@@ -1863,6 +1958,7 @@ class ConfigStore:
                     conn.execute("ROLLBACK")
                     raise
 
+    @_ONE_KEY
     def atomic_update(
         self,
         key: str,
@@ -1959,6 +2055,7 @@ class ConfigStore:
                     conn.execute("ROLLBACK")
                     raise
 
+    @_BATCH_KEYS
     def batch_set(self, items: list[tuple[str, Any, str]]) -> int:
         """Atomically set multiple keys in a single transaction.
 
@@ -2040,6 +2137,7 @@ class ConfigStore:
                 conn.execute("UPDATE ...", ...)
         """
         refuse_write("config", "<raw transaction>")
+        committed = False
         with self._lock:
             conn = self._get_conn()
             conn.execute("BEGIN")
@@ -2047,9 +2145,13 @@ class ConfigStore:
                 yield conn
                 conn.execute("COMMIT")
                 self._clear_cache()
+                committed = True
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
+        if committed:
+            # Raw SQL names no keys: any of them may have changed.
+            self._announce(None)
 
     def get_category(self, category: str) -> dict[str, Any]:
         """Get all settings in a category from DB."""
@@ -2119,6 +2221,7 @@ class ConfigStore:
             cursor[parts[-1]] = json.loads(val) if isinstance(val, str) else val
         return merged or None
 
+    @_ONE_KEY_IF_WRITTEN
     def delete(self, key: str) -> bool:
         """Delete a setting. Returns True if a row was deleted.
 
@@ -2184,6 +2287,7 @@ class ConfigStore:
 
         return yaml.dump(base, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
+    @_ANY_KEY_IF_WRITTEN
     def import_yaml(self, yaml_str: str) -> int:
         """Import settings from YAML string. Returns number of settings imported.
 
@@ -2212,6 +2316,7 @@ class ConfigStore:
         _flatten(data)
         return self.batch_set(items)
 
+    @_ANY_KEY_IF_WRITTEN
     def reconcile_from_yaml(self) -> int:
         """Seed DB with kazma.yaml values for keys not already in the DB.
 
@@ -2360,6 +2465,7 @@ class ConfigStore:
             )
         return dropped
 
+    @_ANY_KEY_IF_WRITTEN
     def reset_all(self) -> int:
         """Delete all DB settings (reverts to YAML defaults). Returns count deleted."""
         refuse_write("config", "<every setting>")

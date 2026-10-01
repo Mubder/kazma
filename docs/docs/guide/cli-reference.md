@@ -223,7 +223,7 @@ If the server is unreachable, the CLI prints `Server not running. Start with: ka
 | `kazma gateway start` | `POST /api/gateway/start` | Start gateway. |
 | `kazma gateway stop` | `POST /api/gateway/stop` | Stop gateway. |
 | `kazma gateway restart` | stop + 0.5 s + start | Restart gateway. |
-| `kazma gateway refresh` | `POST /api/gateway/refresh-adapters` | Re-scan adapters. |
+| `kazma gateway refresh` | `POST /api/gateway/refresh-adapters` | Rebuild every chat adapter from the saved settings, as boot does (a saved setting applies on its own). |
 
 ```bash
 kazma gateway status

@@ -81,6 +81,7 @@ class KazmaAppBuilder:
         self.templates = None
         self.app = None
         self.gateway = None
+        self.chat_adapters = None
         self.session_store = None
         self.swarm_manager = None
         self.cron_scheduler = None
@@ -1008,176 +1009,48 @@ class KazmaAppBuilder:
 
         try:
             from kazma_gateway import GatewayManager
-            from kazma_gateway.adapters.telegram import TelegramAdapter
             from kazma_gateway.agent_handler import create_graph_handler
             from kazma_gateway.stores import SQLiteSessionStore
 
             self.gateway = GatewayManager(max_queue_size=100)
 
-            # Resolve Telegram token
-            telegram_token = (
-                self.config_store.get("connectors.telegram.token", "")
-                or self.config.raw.get("connectors", {}).get("telegram", {}).get("token", "")
+            # Telegram, Discord, Slack and the swarm bus's senders: one
+            # builder for boot, Settings' Refresh and every saved setting
+            # (kazma_gateway.chat_adapters). Boot and Refresh kept a copy
+            # each until 2026-10-01, and the copies drifted.
+            import sys as _sys
+
+            from kazma_gateway.adapters.telegram import telegram_webhook_router
+            from kazma_gateway.chat_adapters import ChatAdapters
+
+            _swarm_bus = None
+            # Never wire real platform senders under pytest: tests call
+            # create_app() with the real kazma.yaml, and a live sender would
+            # send test dispatches to the operator's chat. NullBusAdapter (the
+            # bus default) keeps swarm events in-process for tests.
+            if self.swarm_manager is not None and "pytest" not in _sys.modules:
+                from kazma_core.swarm.bus import get_message_bus
+
+                _swarm_bus = get_message_bus()
+            self.chat_adapters = ChatAdapters(
+                self.gateway,
+                self.config_store,
+                voice=self.config.raw.get("gateway", {}).get("voice", {}),
+                swarm_bus=_swarm_bus,
             )
-            if not telegram_token:
-                telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+            try:
+                self.chat_adapters.build()
+            except Exception as e:
+                logger.warning("[Gateway] Chat adapters failed to build: %s: %s", type(e).__name__, e, exc_info=True)
 
-            tg_adapter: TelegramAdapter | None = None
-            # Strict allowlists (deep-audit 2026-08-19, finding #12): the
-            # adapters fail closed on an empty allowlist by default, but the
-            # backward-compat _allow_all=True below neutralizes that for
-            # existing single-operator installs. KAZMA_GATEWAY_STRICT_ALLOWLIST=1
-            # opts into the fail-closed posture (no allowlist → no messages).
-            _strict_allowlists = os.environ.get(
-                "KAZMA_GATEWAY_STRICT_ALLOWLIST", ""
-            ).strip().lower() in ("1", "true", "yes", "on")
-            # connectors.<platform>.enabled is authoritative (audit N1):
-            # previously only token presence gated the adapter, so the YAML
-            # `enabled: false` flag was dead config.
-            tg_enabled = bool(
-                self.config.raw.get("connectors", {}).get("telegram", {}).get("enabled", True)
+            # Telegram's optional webhook ingress answers with whichever
+            # Telegram adapter runs now (none: 503), so it follows a token or
+            # switch saved after boot.
+            gateway = self.gateway
+            self.app.include_router(
+                telegram_webhook_router(lambda: gateway.adapter_named("telegram")),
+                prefix="/api/webhooks/telegram",
             )
-            if not tg_enabled:
-                logger.info("[Gateway] Telegram disabled via connectors.telegram.enabled — skipped")
-            elif telegram_token:
-                voice_cfg = self.config.raw.get("gateway", {}).get("voice", {})
-                webhook_secret = (
-                    self.config_store.get("connectors.telegram.webhook_secret", "")
-                    or os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
-                    or ""
-                )
-                tg_adapter = TelegramAdapter(
-                    token=telegram_token,
-                    voice_enabled=voice_cfg.get("enabled", False),
-                    voice_provider=voice_cfg.get("stt_provider", "openai"),
-                    stt_api_key=None,  # reads from env vars
-                    tts_provider=voice_cfg.get("tts_provider", "edgetts"),
-                    tts_voice=voice_cfg.get("tts_voice", "default"),
-                    tts_output_format=voice_cfg.get("tts_output_format", "mp3"),
-                    stt_language=voice_cfg.get("stt_language", "auto"),
-                    webhook_secret=webhook_secret or None,
-                )
-                # Set allowed users (backward compat: empty = allow_all for existing installs)
-                allowed = self.config_store.get("connectors.telegram.allowed_users", "")
-                if _strict_allowlists:
-                    tg_adapter._allow_all = False  # fail-closed until an allowlist is set
-                else:
-                    tg_adapter._allow_all = True  # backward compat: existing single-operator installs
-                    if not allowed:
-                        logger.warning(
-                            "[Gateway] Telegram allow_all forced (backward compat) with no "
-                            "allowed_users — set connectors.telegram.allowed_users or "
-                            "KAZMA_GATEWAY_STRICT_ALLOWLIST=1"
-                        )
-                if allowed:
-                    try:
-                        allowed_ids = [int(uid.strip()) for uid in allowed.split(",") if uid.strip()]
-                        tg_adapter.set_allowed_users(allowed_ids)
-                        logger.info("[Gateway] Telegram allowed users: %d IDs", len(allowed_ids))
-                    except ValueError:
-                        logger.warning("[Gateway] Invalid allowed_users format: %s", allowed)
-                self.gateway.add_adapter(tg_adapter)
-                logger.info("[Gateway] Telegram adapter registered (polling mode)")
-
-                # Webhook ingress
-                webhook_router = tg_adapter.create_webhook_router()
-                self.app.include_router(webhook_router, prefix="/api/webhooks/telegram")
-                logger.info("[Gateway] Webhook ingress mounted at /api/webhooks/telegram")
-            else:
-                logger.info("[Gateway] No Telegram token — Telegram adapter skipped")
-
-            # Discord adapter
-            discord_token = self.config_store.get("connectors.discord.token", "") or os.environ.get("DISCORD_BOT_TOKEN", "")
-            discord_enabled = bool(
-                self.config.raw.get("connectors", {}).get("discord", {}).get("enabled", True)
-            )
-            if not discord_enabled:
-                logger.info("[Gateway] Discord disabled via connectors.discord.enabled — skipped")
-            elif discord_token:
-                from kazma_gateway.adapters.discord import DiscordAdapter
-
-                discord_adapter = DiscordAdapter(token=discord_token)
-                # User-level allowlist (mirrors Telegram). Stored in ConfigStore
-                # as a comma-separated string of Discord user IDs.
-                discord_allowed = self.config_store.get("connectors.discord.allowed_users", "")
-                if _strict_allowlists:
-                    discord_adapter._allow_all = False  # fail-closed until an allowlist is set
-                else:
-                    discord_adapter._allow_all = True  # backward compat
-                    if not discord_allowed:
-                        logger.warning(
-                            "[Gateway] Discord allow_all forced (backward compat) with no "
-                            "allowed_users — set connectors.discord.allowed_users or "
-                            "KAZMA_GATEWAY_STRICT_ALLOWLIST=1"
-                        )
-                if discord_allowed:
-                    discord_ids = [uid.strip() for uid in discord_allowed.split(",") if uid.strip()]
-                    discord_adapter.set_allowed_users(discord_ids)
-                    logger.info("[Gateway] Discord allowed users: %d IDs", len(discord_ids))
-                discord_guilds = [
-                    g.strip()
-                    for g in str(self.config_store.get("connectors.discord.guild_id", "") or "").split(",")
-                    if g.strip()
-                ]
-                if discord_guilds:
-                    discord_adapter.set_allowed_guilds(discord_guilds)
-                    logger.info("[Gateway] Discord answers server messages from %d server(s) only", len(discord_guilds))
-                self.gateway.add_adapter(discord_adapter)
-                logger.info("[Gateway] Discord adapter registered")
-            else:
-                logger.info("[Gateway] No DISCORD_BOT_TOKEN — Discord adapter skipped")
-
-            # Slack adapter
-            # Slack adapter — resolve tokens from config_store or env.
-            # ConfigStore may store masked tokens (e.g. "***3554") from the
-            # settings UI, so fall back to env vars when the stored value
-            # doesn't look like a real token.
-            _cs_slack_bot = self.config_store.get("connectors.slack.token", "")
-            _cs_slack_app = self.config_store.get("connectors.slack.app_token", "")
-            slack_bot_token = (_cs_slack_bot if _cs_slack_bot.startswith("xoxb-") else "") or os.environ.get("SLACK_BOT_TOKEN", "")
-            slack_app_token = (_cs_slack_app if _cs_slack_app.startswith("xapp-") else "") or os.environ.get("SLACK_APP_TOKEN", "")
-            slack_enabled = bool(
-                self.config.raw.get("connectors", {}).get("slack", {}).get("enabled", True)
-            )
-            if not slack_enabled:
-                logger.info("[Gateway] Slack disabled via connectors.slack.enabled — skipped")
-            elif slack_bot_token:
-                from kazma_gateway.adapters.slack import SlackAdapter
-
-                # Team/channel allowlists — empty = allow all. Stored in
-                # ConfigStore as comma-separated strings. Without these the
-                # adapter accepts messages from any team/channel.
-                def _split_ids(raw: str) -> list[str]:
-                    return [s.strip() for s in raw.split(",") if s.strip()]
-
-                slack_teams = _split_ids(self.config_store.get("connectors.slack.allowed_teams", ""))
-                slack_channels = _split_ids(self.config_store.get("connectors.slack.allowed_channels", ""))
-                slack_users = _split_ids(self.config_store.get("connectors.slack.allowed_users", ""))
-                if not _strict_allowlists and not (slack_teams or slack_channels or slack_users):
-                    logger.warning(
-                        "[Gateway] Slack allow_all forced (backward compat) with no "
-                        "allowed_teams/allowed_channels/allowed_users — set them or "
-                        "KAZMA_GATEWAY_STRICT_ALLOWLIST=1"
-                    )
-                slack_adapter = SlackAdapter(
-                    bot_token=slack_bot_token,
-                    app_token=slack_app_token or None,
-                    allowed_teams=slack_teams or None,
-                    allowed_channels=slack_channels or None,
-                    allowed_users=slack_users or None,
-                    allow_all=not _strict_allowlists,  # backward compat unless strict mode
-                )
-                self.gateway.add_adapter(slack_adapter)
-                if slack_app_token:
-                    logger.info("[Gateway] Slack adapter registered (Socket Mode)")
-                else:
-                    logger.info("[Gateway] Slack adapter registered (polling mode — no app token)")
-                if slack_teams:
-                    logger.info("[Gateway] Slack allowed teams: %d", len(slack_teams))
-                if slack_channels:
-                    logger.info("[Gateway] Slack allowed channels: %d", len(slack_channels))
-            else:
-                logger.info("[Gateway] No SLACK_BOT_TOKEN — Slack adapter skipped")
 
             # Session Store
             from kazma_core.paths import data_dir as _dd_sess
@@ -1205,11 +1078,11 @@ class KazmaAppBuilder:
 
                     # Build per-platform active limits dictionary
                     _active_limits_dict = {}
-                    if tg_adapter is not None and "telegram" in rate_limits_cfg:
+                    if self.gateway.adapter_named("telegram") is not None and "telegram" in rate_limits_cfg:
                         _active_limits_dict["telegram"] = int(rate_limits_cfg["telegram"])
-                    if discord_token and "discord" in rate_limits_cfg:
+                    if self.gateway.adapter_named("discord") is not None and "discord" in rate_limits_cfg:
                         _active_limits_dict["discord"] = int(rate_limits_cfg["discord"])
-                    if slack_bot_token and "slack" in rate_limits_cfg:
+                    if self.gateway.adapter_named("slack") is not None and "slack" in rate_limits_cfg:
                         _active_limits_dict["slack"] = int(rate_limits_cfg["slack"])
                     if _active_limits_dict:
                         rfm = RateFeedbackManager(
@@ -1258,101 +1131,10 @@ class KazmaAppBuilder:
             except Exception as e:
                 logger.warning("[Gateway] Brain handler failed to register: %s", e)
 
-            # SwarmMessageBus (swarm -> platform outbound)
-            if self.swarm_manager is not None:
-                try:
-                    from kazma_core.swarm.bus import get_message_bus
-
-                    bus = get_message_bus()
-                    # Never wire real platform adapters under pytest: tests
-                    # call create_app() with the real kazma.yaml, which would
-                    # wire a live TelegramBusAdapter and cause test dispatches
-                    # to send real messages to the operator's chat. NullBusAdapter
-                    # (the bus default) keeps swarm events in-process for tests.
-                    import sys as _sys
-                    _skip_real_adapters = "pytest" in _sys.modules
-                    _wired_adapters: list[Any] = []
-
-                    # Collect every available platform bus (fan-out, not exclusive).
-                    if not _skip_real_adapters and tg_adapter is not None and telegram_token:
-                        try:
-                            from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
-
-                            _wired_adapters.append(
-                                TelegramBusAdapter(
-                                    bot_token=telegram_token,
-                                    chat_id=self.config_store.get(
-                                        "connectors.telegram.swarm_chat_id", ""
-                                    ),
-                                )
-                            )
-                            logger.info(
-                                "[SwarmBus] TelegramBusAdapter ready"
-                            )
-                        except ImportError:
-                            logger.debug("[SwarmBus] TelegramBusAdapter not available")
-                        except Exception as e:
-                            logger.warning("[SwarmBus] Failed to build TelegramBusAdapter: %s", e)
-
-                    _discord_tok = self.config_store.get("connectors.discord.token", "") or os.environ.get("DISCORD_BOT_TOKEN", "")
-                    _discord_chan = self.config_store.get("connectors.discord.swarm_channel_id", "")
-                    if not _skip_real_adapters and _discord_tok and _discord_chan:
-                        try:
-                            from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
-
-                            _wired_adapters.append(
-                                DiscordBusAdapter(
-                                    bot_token=_discord_tok, channel_id=_discord_chan
-                                )
-                            )
-                            logger.info("[SwarmBus] DiscordBusAdapter ready")
-                        except ImportError:
-                            logger.debug("[SwarmBus] DiscordBusAdapter not available")
-                        except Exception as e:
-                            logger.warning("[SwarmBus] Failed to build DiscordBusAdapter: %s", e)
-
-                    _slack_tok = self.config_store.get("connectors.slack.token", "") or os.environ.get("SLACK_BOT_TOKEN", "")
-                    _slack_chan = self.config_store.get("connectors.slack.swarm_channel_id", "")
-                    if not _skip_real_adapters and _slack_tok and _slack_chan:
-                        try:
-                            from kazma_gateway.adapters.slack_bus import SlackBusAdapter
-
-                            _wired_adapters.append(
-                                SlackBusAdapter(
-                                    bot_token=_slack_tok, channel_id=_slack_chan
-                                )
-                            )
-                            logger.info("[SwarmBus] SlackBusAdapter ready")
-                        except ImportError:
-                            logger.debug("[SwarmBus] SlackBusAdapter not available")
-                        except Exception as e:
-                            logger.warning("[SwarmBus] Failed to build SlackBusAdapter: %s", e)
-
-                    if len(_wired_adapters) == 1:
-                        bus.set_adapter(_wired_adapters[0])
-                        logger.info(
-                            "[SwarmBus] Single adapter wired: %s",
-                            type(_wired_adapters[0]).__name__,
-                        )
-                    elif len(_wired_adapters) > 1:
-                        from kazma_core.swarm.bus import FanOutBusAdapter
-
-                        bus.set_adapter(FanOutBusAdapter(_wired_adapters))
-                        logger.info(
-                            "[SwarmBus] FanOutBusAdapter wired with %d platforms: %s",
-                            len(_wired_adapters),
-                            ", ".join(type(a).__name__ for a in _wired_adapters),
-                        )
-                    else:
-                        logger.info(
-                            "[SwarmBus] No platform adapter — swarm events stay internal (NullBusAdapter)"
-                        )
-                except Exception as e:
-                    logger.warning("[SwarmBus] Failed to initialize message bus: %s", e)
-
             # Register services in Dependency Injection Container
             container = get_container()
             container.register(GatewayManager, self.gateway)
+            container.register(ChatAdapters, self.chat_adapters)
             container.register(SQLiteSessionStore, self.session_store)
 
             # ── Sub-Agent Manager ─────────────────────────────────────
@@ -2143,6 +1925,10 @@ class KazmaAppBuilder:
                     ", ".join(a.name for a in self.gateway.adapters),
                     self.gateway.queue.maxsize,
                 )
+                # From here a saved chat-app setting reaches the running
+                # adapter and swarm sender, whoever saved it.
+                if self.chat_adapters is not None:
+                    self.chat_adapters.start_watching()
             except Exception as e:
                 logger.warning("[Gateway] Failed to start: %s", e)
                 # Surface the most common boot failure (bad token, network)
@@ -2640,6 +2426,9 @@ class KazmaAppBuilder:
 
         if self.gateway is None:
             return
+        if self.chat_adapters is not None:
+            # No rebuild may start while the gateway goes down.
+            self.chat_adapters.stop_watching()
         try:
             await self.gateway.stop()
             logger.info("[Gateway] Stopped cleanly")

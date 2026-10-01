@@ -256,7 +256,6 @@
         // (kazma_core.lifecycle_notifier.EVENT_NAMES).
         lifecycleEventNames: ['started', 'startup_failed', 'starting', 'shutting_down'],
         adapterRoutingSaving: false,
-        adapterRoutingApplying: false,
         adapterRoutingSnapshot: '',
         routingShow: { tgToken: false, tgGroupToken: false, discordToken: false, slackToken: false, slackAppToken: false },
         adapterRoutingTesting: '',

@@ -111,15 +111,44 @@ def test_x_credentials_stay_per_tenant() -> None:
 _BOOT_READ = re.compile(r'config_store\.get\(\s*"(connectors\.[a-z_]+\.[a-z_]+)"')
 
 
+def _builder_reads() -> set[str]:
+    """Every ``connectors.*`` key the chat-adapter builder reads, recorded by
+    running it (it builds the keys from its field tables, which a source scan
+    cannot see; app.py's own reads moved there on 2026-10-01)."""
+    from kazma_gateway import chat_adapters
+
+    read: set[str] = set()
+
+    class _Recording:
+        def get(self, key: str, default: object = None) -> object:
+            read.add(key)
+            return default
+
+    for platform in chat_adapters.CHAT_PLATFORMS:
+        chat_adapters._read_platform_settings(_Recording(), platform)
+    declared = {
+        f"connectors.{platform}.{name}"
+        for table in (chat_adapters.ADAPTER_FIELDS, chat_adapters.BUS_FIELDS, chat_adapters.ALLOWLIST_FIELDS)
+        for platform, names in table.items()
+        for name in names
+    }
+    # What the builder reads is what its tables declare: a field read but not
+    # declared would never wake the gateway when it changes.
+    assert read == declared, sorted(read ^ declared)
+    return read
+
+
 def test_every_credential_the_boot_reads_is_install_scoped() -> None:
-    """The adapters are built in app.py at boot, with no tenant bound. Every
-    sensitive ``connectors.*`` key read there must be install-scoped, or the
-    next platform added boots from a stale copy the same way."""
+    """The adapters are built at boot with no tenant bound (now by
+    ``kazma_gateway.chat_adapters``, and by app.py for anything it still reads
+    itself). Every sensitive ``connectors.*`` key read there must be
+    install-scoped, or the next platform added boots from a stale copy the
+    same way."""
     from kazma_core.config_store import is_sensitive_config_key
 
     src = (REPO / "kazma-ui" / "kazma_ui" / "app.py").read_text(encoding="utf-8")
     sensitive = sorted(
-        k for k in set(_BOOT_READ.findall(src)) if is_sensitive_config_key(k)
+        k for k in set(_BOOT_READ.findall(src)) | _builder_reads() if is_sensitive_config_key(k)
     )
     assert "connectors.slack.app_token" in sensitive, f"the scan is blind: {sensitive}"
     missing = [k for k in sensitive if not vault_mod.is_install_scoped_secret("cfg:" + k)]
