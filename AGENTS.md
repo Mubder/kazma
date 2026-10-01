@@ -3653,7 +3653,9 @@ and the sibling suites):**
   page pointing at the GitHub releases) and `.github/workflows/pypi-reserve.yml`
   uploads them by hand through Trusted Publishing -- no PyPI token exists; each
   name needs its pending publisher (owner `Mubder`, repo `kazma`, workflow
-  `pypi-reserve.yml`, environment `pypi`; `docs/SUPPLY_CHAIN.md`). Kazma still
+  `pypi-reserve.yml`, environment `pypi-<name>`: PyPI holds one configuration
+  pending for one new project at a time, and refused a third name sharing
+  `pypi`; `docs/SUPPLY_CHAIN.md`). Kazma still
   installs only from GitHub, so the rules above stand. The gate holds its
   `KAZMA_DISTS` equal to the reservation list: a new package name is reserved
   with the rest.

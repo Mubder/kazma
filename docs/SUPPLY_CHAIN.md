@@ -66,13 +66,19 @@ for it. On pypi.org, under Account → Publishing → Add a new pending publishe
 | Owner | `Mubder` |
 | Repository name | `kazma` |
 | Workflow name | `pypi-reserve.yml` |
-| Environment name | `pypi` |
+| Environment name | `pypi-` and the name (`pypi-kazma`, then `pypi-kazma-cli`, …) |
+
+Each name has its own environment because PyPI keeps one configuration
+pending for only one new project at a time. With the same environment for
+every name, it accepts the first and refuses the rest: "A pending trusted
+publisher matching this configuration has already been registered for a
+different project name".
 
 Then run the workflow with "publish" ticked. Each name is uploaded in its own
-job, so a name whose publisher is missing fails alone, and the run can be
-repeated for just that name. If PyPI limits how many pending publishers you
-can hold at once, register a few, run the workflow for those names, then the
-next few.
+job, under its own environment, so a name whose publisher is missing fails
+alone, and the run can be repeated for just that name. If PyPI limits how many
+pending publishers you can hold at once, register a few, run the workflow for
+those names, then the next few.
 
 ---
 
