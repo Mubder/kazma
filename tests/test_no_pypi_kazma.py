@@ -258,6 +258,22 @@ def test_the_reservations_hold_every_kazma_name():
     assert set(_reservations().NAMES) == KAZMA_DISTS
 
 
+def test_each_name_publishes_under_its_own_environment():
+    """PyPI keeps one pending-publisher configuration (owner, repository,
+    workflow, environment) pending for one new project at a time: live
+    2026-10-01 it took `kazma` and `kazma-cli` and refused every later name.
+    So each name uploads under its own environment, and the guide says so."""
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO / ".github" / "workflows" / "pypi-reserve.yml").read_text(encoding="utf-8")
+    )
+    assert workflow["jobs"]["publish"]["environment"] == "pypi-${{ matrix.name }}"
+    assert workflow["jobs"]["publish"]["permissions"] == {"id-token": "write"}
+    guide = (REPO / "docs" / "SUPPLY_CHAIN.md").read_text(encoding="utf-8")
+    assert "`pypi-kazma`" in guide and "`pypi-kazma-cli`" in guide
+
+
 def test_a_reservation_installs_nothing_and_points_at_the_releases(tmp_path):
     reserve = _reservations()
     for name in reserve.NAMES:

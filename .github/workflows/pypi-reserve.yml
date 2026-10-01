@@ -6,8 +6,9 @@
 # "publish" it builds and checks the packages and uploads nothing. With it,
 # each name is uploaded through PyPI Trusted Publishing -- no token, no secret
 # -- and each name needs its pending publisher on pypi.org first (owner Mubder,
-# repository kazma, workflow pypi-reserve.yml, environment pypi). See
-# docs/docs/security/supply-chain.md.
+# repository kazma, workflow pypi-reserve.yml, environment pypi-<name>). Each
+# name has its own environment because PyPI holds one configuration pending
+# for one new project at a time. See docs/SUPPLY_CHAIN.md.
 name: Reserve PyPI names
 
 on:
@@ -69,7 +70,10 @@ jobs:
     needs: build
     if: ${{ inputs.publish }}
     runs-on: ubuntu-latest
-    environment: pypi
+    # One environment per name: a pending publisher is unique by owner,
+    # repository, workflow and environment, and PyPI refuses a second pending
+    # project for a configuration already pending for another.
+    environment: pypi-${{ matrix.name }}
     permissions:
       id-token: write
     strategy:

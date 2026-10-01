@@ -1,8 +1,12 @@
 # CHANGELOG
 
-## Kazma's names can be held on PyPI (2026-10-01)
+## Kazma's names are held on PyPI (2026-10-01)
 
-- **Ready to reserve `kazma` and the names around it.** Nothing Kazma
+- **`kazma` and the seven names around it are reserved.** All eight were
+  published the same day, in four rounds: PyPI lets an account keep only
+  three pending publishers at once, and each configuration may be pending for
+  one new project only, so every name has its own environment (`pypi-<name>`).
+- **Why.** Nothing Kazma
   published was on PyPI, so `kazma`, `kazma-core` and six more names were
   anyone's to register. A stranger's upload under them would have run on any
   machine that asked pip for Kazma by name. Each name now has a reservation:
