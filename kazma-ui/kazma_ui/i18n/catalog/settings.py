@@ -497,12 +497,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Document Intelligence",
     },
     "settings.download_backup": {
-        "ar": "تنزيل نسخة احتياطية",
-        "en": "Download Backup",
+        "ar": "تنزيل نسخة احتياطية من الإعدادات",
+        "en": "Download settings backup",
     },
     "settings.download_complete_config": {
-        "ar": "نزّل إعدادات كاظمه الكاملة.",
-        "en": "Download your complete Kazma configuration.",
+        "ar": "نزّل إعداداتك في ملف. تظهر المفاتيح بأسمائها فقط، كإشارات إلى خزنة هذا التثبيت، ولا تظهر المفاتيح نفسها.",
+        "en": "Download your settings as a file. Keys appear only by name, as references to this install's vault, never the keys themselves.",
     },
     "settings.download_config": {
         "ar": "تنزيل الإعدادات",
@@ -972,10 +972,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "حجم الخط",
         "en": "Font Size",
     },
-    "settings.format": {
-        "ar": "الصيغة",
-        "en": "Format",
-    },
     "settings.gateway_adapters": {
         "ar": "محولات البوابة",
         "en": "Gateway Adapters",
@@ -1007,10 +1003,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.import_configuration": {
         "ar": "استيراد الإعدادات",
         "en": "Import Configuration",
-    },
-    "settings.importing": {
-        "ar": "جاري الاستيراد…",
-        "en": "Importing…",
     },
     "settings.incoming_webhook_url": {
         "ar": "رابط الويب هوك الوارد",
@@ -1724,19 +1716,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "إزالة النموذج من القائمة",
         "en": "Remove model from list",
     },
-    "settings.reset_all_settings": {
-        "ar": "إعادة تعيين كل الإعدادات",
-        "en": "Reset All Settings",
-    },
-    "settings.reset_description": {
-        "ar": "امسح جميع الإعدادات المحفوظة وارجع للإعدادات الافتراضية. لا يمكن التراجع عن هذا الإجراء.",
-        "en": "Clear all saved settings and revert to factory defaults. This cannot be undone.",
-    },
     "settings.reset_to_defaults": {
-        "ar": "إعادة التعيين للافتراضي",
-        "en": "Reset to Defaults",
-    },
-    "settings.reset_to_defaults_section": {
         "ar": "إعادة التعيين للافتراضي",
         "en": "Reset to Defaults",
     },
@@ -1951,10 +1931,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.system_prompt_placeholder": {
         "ar": "أنت مساعد ذكاء اصطناعي مفيد...",
         "en": "You are a helpful AI assistant...",
-    },
-    "settings.system_reset": {
-        "ar": "إعادة تعيين النظام",
-        "en": "System Reset",
     },
     "settings.tab_account": {
         "ar": "الحساب",
@@ -2225,8 +2201,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Upload File",
     },
     "settings.upload_or_paste": {
-        "ar": "ارفع أو الصق ملف إعدادات لاستيراد البيانات.",
-        "en": "Upload or paste a configuration file to import settings.",
+        "ar": "ارفع ملف إعدادات أو الصقه (YAML أو JSON). سترى ما سيتغير قبل كتابة أي شيء، وتبقى المفاتيح التي لديك الآن.",
+        "en": "Upload or paste a settings file (YAML or JSON). You see what will change before anything is written, and the keys you have now are kept.",
     },
     "settings.url": {
         "ar": "العنوان",
@@ -2544,13 +2520,165 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشل النسخ الاحتياطي: {error}",
         "en": "Backup failed: {error}",
     },
-    "settings.system_reset_reloading": {
-        "ar": "أُعيد ضبط النظام. جارٍ إعادة التحميل...",
-        "en": "System reset complete. Reloading...",
+    "settings.settings_backup_hint": {
+        "ar": "هذه إعداداتك فقط. تذكر النسخة الاحتياطية مفاتيحك بأسمائها (إشارات إلى خزنة هذا التثبيت) ولا تحفظ المفاتيح نفسها. النسخ الاحتياطية الكاملة للمحادثات والذاكرة والملفات في تبويب النسخ الاحتياطي.",
+        "en": "These are your settings only. A backup names your keys (references to this install's vault) and never holds the keys themselves. Full backups of chats, memory and files are on the Backup tab.",
     },
-    "settings.reset_failed": {
-        "ar": "فشل إعادة الضبط: {error}",
-        "en": "Reset failed: {error}",
+    "settings.restore_backup": {
+        "ar": "استعادة نسخة احتياطية من الإعدادات…",
+        "en": "Restore settings backup…",
+    },
+    "settings.restoring": {
+        "ar": "جارٍ الاستعادة…",
+        "en": "Restoring…",
+    },
+    "settings.undo_restore": {
+        "ar": "التراجع عن آخر استعادة",
+        "en": "Undo last restore",
+    },
+    "settings.select_a_section": {
+        "ar": "اختر قسمًا واحدًا على الأقل للاستيراد.",
+        "en": "Pick at least one section to import.",
+    },
+    "settings.restore_source_pasted": {
+        "ar": "النص أعلاه",
+        "en": "the text above",
+    },
+    "settings.restore_too_large": {
+        "ar": "الملف أكبر مما يمكن أن تكون عليه نسخة احتياطية للإعدادات (10 ميغابايت).",
+        "en": "The file is larger than a settings backup can be (10 MB).",
+    },
+    "settings.restore_and_more": {
+        "ar": "… و{count} غيرها",
+        "en": "… and {count} more",
+    },
+    "settings.restore_from": {
+        "ar": "من: {source}",
+        "en": "From: {source}",
+    },
+    "settings.restore_backup_made": {
+        "ar": "أُنشئت النسخة في {date}.",
+        "en": "Backup made {date}.",
+    },
+    "settings.restore_backup_version": {
+        "ar": "إصدار Kazma: {version}",
+        "en": "Kazma version: {version}",
+    },
+    "settings.restore_will_change": {
+        "ar": "الإعدادات التي ستتغير: {count}",
+        "en": "Settings that will change: {count}",
+    },
+    "settings.restore_list_added": {
+        "ar": "تعود إلى {list}: {names}",
+        "en": "Back in {list}: {names}",
+    },
+    "settings.restore_list_updated": {
+        "ar": "تُحدَّث في {list}: {names}",
+        "en": "Updated in {list}: {names}",
+    },
+    "settings.restore_keys_back": {
+        "ar": "مفاتيح تُستعاد من خزنة هذا التثبيت (دون إدخال شيء): {count}",
+        "en": "Keys brought back from this install's vault (nothing to enter): {count}",
+    },
+    "settings.restore_keys_reenter": {
+        "ar": "مفاتيح لم تعد في هذه الخزنة، أدخلها مجددًا من الإعدادات: {count}",
+        "en": "Keys this vault no longer has, to enter again in Settings: {count}",
+    },
+    "settings.restore_keys_kept": {
+        "ar": "المفاتيح التي لديك الآن تبقى كما هي: {count}",
+        "en": "Keys you have now stay as they are: {count}",
+    },
+    "settings.restore_state_kept": {
+        "ar": "تبقى كما هي: {count} من سجلات Kazma الخاصة وسجلات تسجيل الدخول.",
+        "en": "Left as they are: {count} of Kazma's own records and sign-in records.",
+    },
+    "settings.restore_learned_kept": {
+        "ar": "ما تعلّمه Kazma (الروح) يبقى كما هو الآن.",
+        "en": "What Kazma learned (its Soul) stays as it is now.",
+    },
+    "settings.restore_retired_kept": {
+        "ar": "القيم الافتراضية التي غيّرها Kazma بعد النسخة تبقى على قيمتها الجديدة: {count}",
+        "en": "Defaults Kazma changed since the backup keep their new value: {count}",
+    },
+    "settings.restore_refused": {
+        "ar": "لم تُستعد لأن القيمة غير مسموح بها: {count}",
+        "en": "Not restored, the value is not allowed: {count}",
+    },
+    "settings.restore_unchanged": {
+        "ar": "مطابقة للنسخة أصلًا: {count}",
+        "en": "Already as in the backup: {count}",
+    },
+    "settings.restore_nothing_deleted": {
+        "ar": "لا يُحذف شيء، ويمكنك التراجع عن هذه الاستعادة لاحقًا.",
+        "en": "Nothing is deleted, and you can undo this restore afterwards.",
+    },
+    "settings.restore_restart_title": {
+        "ar": "إعادة تشغيل Kazma الآن؟",
+        "en": "Restart Kazma now?",
+    },
+    "settings.restore_restart_message": {
+        "ar": "بعض الإعدادات تُقرأ عند بدء تشغيل Kazma: المزوّدون والنماذج وتطبيقات المحادثة. أعد التشغيل الآن ليستخدم كل جزء من Kazma الإعدادات المستعادة.",
+        "en": "Some settings are read when Kazma starts: providers, models, chat apps. Restart now so every part of Kazma uses the restored ones.",
+    },
+    "settings.restore_nothing_to_do": {
+        "ar": "إعداداتك مطابقة لهذه النسخة بالفعل؛ لا شيء لاستعادته.",
+        "en": "Your settings already match this backup; nothing to restore.",
+    },
+    "settings.restore_preview_title": {
+        "ar": "استعادة الإعدادات؟",
+        "en": "Restore settings?",
+    },
+    "settings.restore_confirm": {
+        "ar": "استعادة",
+        "en": "Restore",
+    },
+    "settings.restore_done": {
+        "ar": "الإعدادات المستعادة: {count}",
+        "en": "Settings restored: {count}",
+    },
+    "settings.restore_changed_since": {
+        "ar": "تغيّرت إعداداتك بعد المعاينة؛ هذه الخطة كما هي الآن.",
+        "en": "Your settings changed since the preview; here is the plan as it is now.",
+    },
+    "settings.restore_failed": {
+        "ar": "فشلت الاستعادة: {error}",
+        "en": "Restore failed: {error}",
+    },
+    "settings.undo_nothing": {
+        "ar": "لا توجد استعادة للتراجع عنها.",
+        "en": "There is no restore to undo.",
+    },
+    "settings.undo_restored_at": {
+        "ar": "تمت الاستعادة في {date}.",
+        "en": "Restored {date}.",
+    },
+    "settings.undo_will_revert": {
+        "ar": "إعدادات تعود إلى ما كانت عليه: {count}",
+        "en": "Settings that go back to what they were: {count}",
+    },
+    "settings.undo_changed_since": {
+        "ar": "تغيّرت مجددًا بعد الاستعادة، وتبقى كما هي الآن: {count}",
+        "en": "Changed again since the restore, left as they are now: {count}",
+    },
+    "settings.undo_keys_kept": {
+        "ar": "المفاتيح التي أعادتها الاستعادة تبقى: {count}",
+        "en": "Keys the restore brought back stay: {count}",
+    },
+    "settings.undo_title": {
+        "ar": "التراجع عن آخر استعادة؟",
+        "en": "Undo the last restore?",
+    },
+    "settings.undo_confirm": {
+        "ar": "تراجع",
+        "en": "Undo",
+    },
+    "settings.undo_done": {
+        "ar": "الإعدادات التي عادت إلى ما كانت عليه: {count}",
+        "en": "Settings put back: {count}",
+    },
+    "settings.undo_failed": {
+        "ar": "فشل التراجع: {error}",
+        "en": "Undo failed: {error}",
     },
     "settings.config_exported": {
         "ar": "صُدّر الإعداد",
@@ -2563,18 +2691,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.paste_or_upload": {
         "ar": "الصق أو ارفع بيانات الإعداد",
         "en": "Paste or upload config data",
-    },
-    "settings.config_imported": {
-        "ar": "استُورد الإعداد. جارٍ إعادة التحميل...",
-        "en": "Configuration imported. Reloading...",
-    },
-    "settings.import_failed": {
-        "ar": "فشل الاستيراد: {error}",
-        "en": "Import failed: {error}",
-    },
-    "settings.settings_reset_reloading": {
-        "ar": "أُعيدت الإعدادات. جارٍ إعادة التحميل...",
-        "en": "Settings reset. Reloading...",
     },
     "settings.google_drive_failed": {
         "ar": "اتصلت جوجل، لكن دريف فشل: {error}. اختبر البطاقة لخطوات الإصلاح.",
@@ -4507,34 +4623,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.ops.install": {
         "ar": "تثبيت",
         "en": "Install",
-    },
-    "settings.ops.reset_all_settings": {
-        "ar": "إعادة ضبط كل الإعدادات",
-        "en": "Reset all settings",
-    },
-    "settings.ops.this_will_reset_all_settings": {
-        "ar": "[!]  سيعيد هذا كل الإعدادات إلى الافتراضي. هل أنت متأكد؟",
-        "en": "[!]  This will reset ALL settings to defaults. Are you sure?",
-    },
-    "settings.ops.final_confirmation": {
-        "ar": "التأكيد الأخير",
-        "en": "Final confirmation",
-    },
-    "settings.ops.reset_everything_this_cannot_be": {
-        "ar": "إعادة ضبط كل شيء؟ لا يمكن التراجع عن ذلك.",
-        "en": "Reset everything? This cannot be undone.",
-    },
-    "settings.ops.reset_everything": {
-        "ar": "أعد ضبط كل شيء",
-        "en": "Reset everything",
-    },
-    "settings.ops.reset_settings": {
-        "ar": "إعادة ضبط الإعدادات",
-        "en": "Reset settings",
-    },
-    "settings.ops.reset_all_settings_to_defaults": {
-        "ar": "إعادة كل الإعدادات إلى الافتراضي؟ لا يمكن التراجع عن ذلك.",
-        "en": "Reset ALL settings to defaults? This cannot be undone.",
     },
     "settings.ops.delete_backup": {
         "ar": "حذف النسخة الاحتياطية",

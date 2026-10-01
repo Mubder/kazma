@@ -30,6 +30,13 @@ REPO = Path(__file__).resolve().parents[1]
     "agent.commitment.mode", "yolo.window", "yolo",
     "security.secret", "kazma_secret", "vault.master",
     "notifications.lifecycle.events",
+    # Not settings at all (settings_restore.classify, 2026-10-01): approval
+    # grants, sessions, the learned Soul.
+    "task_grant.t1", "hitl_grant.t1.shell_exec", "path_grant.t1.g1",
+    "web_session.abc", "account.password_hash", "self_improvement.agent_evolution",
+    "long_task.t1", "platform.users",
+    # A tenant's copy is the same key (tenant_isolation.tenant_key).
+    "tenant.acme.mcp.servers", "tenant.acme.safety.hitl_enabled",
 ])
 def test_command_and_safety_keys_are_protected(key) -> None:
     assert is_protected_config_key(key) is True
@@ -57,9 +64,13 @@ def test_config_save_blocks_a_hook_and_an_mcp_server(monkeypatch) -> None:
         save = reg._tools.get(name) if hasattr(reg, "_tools") else None
     assert save is not None, "config_save is registered"
     fn = save.func
-    for key in ("agent.hooks.post_tool", "mcp.servers", "safety.hitl_enabled"):
+    for key in ("agent.hooks.post_tool", "mcp.servers", "safety.hitl_enabled",
+                "task_grant.t1", "tenant.acme.mcp.servers"):
         out = fn(key=key, value='["echo x"]')
         assert out.startswith("Error: Cannot modify restricted key"), (key, out)
+    # The value checks the Settings page applies (settings_validation).
+    bad = fn(key="cron.timezone", value="Mars/Olympus")
+    assert bad.startswith("Error: Invalid timezone"), bad
     ok = fn(key="agent.personality", value="cheerful")
     assert ok.startswith("Setting saved"), ok
 

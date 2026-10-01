@@ -16,6 +16,7 @@ Concurrency model:
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -1137,6 +1138,12 @@ class ConfigStore:
                 self._yaml_cache = {}
         return self._yaml_cache
 
+    def yaml_defaults(self) -> dict[str, Any]:
+        """kazma.yaml (+ ``kazma.local.yaml``) as parsed: the values ``get()``
+        falls back to when no row holds a key. A copy -- the parsed file is
+        this store's cache."""
+        return copy.deepcopy(self._load_yaml())
+
     def invalidate_yaml_cache(self) -> None:
         """Force re-read of kazma.yaml (+ local) on next access."""
         self._yaml_cache = None
@@ -2153,8 +2160,15 @@ class ConfigStore:
         return deleted
 
     def export_yaml(self) -> str:
-        """Export current settings as YAML, merging DB overrides with base YAML."""
-        base = self._load_yaml()
+        """Export current settings as YAML, merging DB overrides with base YAML.
+
+        Merges into a COPY of the parsed kazma.yaml: ``_load_yaml`` returns
+        the store's cache, and merging into it put every database row into
+        the defaults ``get()`` falls back to -- after a backup download, a
+        setting deleted later still read its old value instead of the shipped
+        one, until a restart (2026-10-01).
+        """
+        base = self.yaml_defaults()
         db_settings = self.get_all()
 
         # Merge DB settings into base config using dotted keys
@@ -2474,13 +2488,18 @@ def get_config_store() -> ConfigStore:
     return _config_store
 
 
+def is_volatile_store(store: Any) -> bool:
+    """True for the in-memory fallback: a write to it is gone at the restart."""
+    return isinstance(store, _InMemoryStore)
+
+
 def is_config_store_volatile() -> bool:
     """True when the process runs on the in-memory settings fallback.
 
     Every settings write in this state is silently non-durable. Polled by
     the deep health canary and the app startup banner.
     """
-    return isinstance(get_config_store(), _InMemoryStore)
+    return is_volatile_store(get_config_store())
 
 
 def set_config_store(store: ConfigStore) -> None:

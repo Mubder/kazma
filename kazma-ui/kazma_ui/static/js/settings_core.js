@@ -325,6 +325,10 @@
         diagnostics: {},
         updateInfo: null,
         vaultStatus: { enabled: false, secret_count: 0 },
+        // A settings restore runs (preview, confirm, write, restart offer);
+        // restoreUndo is the undo preview of the last restore, or null.
+        restoring: false,
+        restoreUndo: null,
 
         // ── Packages Tab ──
         pkgCore: [],
@@ -343,10 +347,11 @@
         // ── Import/Export Tab ──
         exportFormat: 'yaml',
         importData: '',
-        importFormat: 'yaml',
         importSelective: false,
         importSections: [],
-        availableSections: ['model', 'agent', 'connectors', 'mcp', 'skills', 'appearance', 'shortcuts', 'tools', 'safety'],
+        // Settings key sections; ``model`` and ``skills`` stand for several
+        // (settings_ops.js ``_sectionPrefixes``).
+        availableSections: ['model', 'agent', 'connectors', 'mcp', 'skills', 'tools', 'safety', 'memory', 'notifications', 'voice', 'appearance', 'shortcuts'],
 
         // ── Backup Tab ──
         backupRunning: false,
@@ -822,7 +827,7 @@
                 case 'shortcuts': this.shortcutConflicts = this.detectConflicts(); break;
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
-                case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadSwarmRetention(); await this.loadCheckpointRetention(); await this.loadProxy(); break;
+                case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); await this.loadLogging(); await this.loadSwarmRetention(); await this.loadCheckpointRetention(); await this.loadProxy(); await this.loadRestoreUndo(); break;
                 case 'backup': await Promise.all([this.loadBackupList(), this.loadOffsiteConfig(), this.syncBackupState()]); break;
                 case 'packages': await this.loadPackages(); break;
                 case 'import': break;

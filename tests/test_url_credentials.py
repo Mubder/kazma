@@ -371,13 +371,16 @@ def key_name_maskers(sources: dict[str, str]) -> set[str]:
 
 
 def _product_sources() -> dict[str, str]:
+    # --others: a new module counts before it is committed (committed files
+    # only let a local run pass that CI then failed, 2026-09-26).
     files = subprocess.run(
-        ["git", "ls-files", "kazma-*/*.py", "kazma-*/**/*.py"],
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard",
+         "kazma-*/*.py", "kazma-*/**/*.py"],
         cwd=REPO, capture_output=True, text=True, check=True,
     ).stdout.split()
     return {
         f: (REPO / f).read_text(encoding="utf-8", errors="replace")
-        for f in files
+        for f in sorted(set(files))
         if "/tests/" not in f and "_tests" not in f and (REPO / f).is_file()
     }
 
@@ -402,11 +405,14 @@ def _probe_redact_for_log():
 
 
 def _probe_settings_export():
-    from kazma_core.settings_manager import SettingsManager
+    """The settings backup (and Import/Export's export, the same file)."""
+    from kazma_core.settings_restore import _mask_backup_secrets
 
-    data = {"memory": {"memory.backends.state.url": DSN, "x.list": [TOKEN_URL]}}
-    SettingsManager._mask_secrets_in_dict(data)
-    return data
+    return [
+        _mask_backup_secrets("memory.backends.state.url", DSN),
+        _mask_backup_secrets("x.list", [TOKEN_URL]),
+        _mask_backup_secrets("mcp.servers", '[{"name": "pg", "env": {"DATABASE_URL": "%s"}}]' % DSN),
+    ]
 
 
 def _probe_config_export_command():
@@ -452,7 +458,7 @@ PROBES = {
     "kazma-ui/kazma_ui/settings.py::mask_deep": _probe_mask_deep,
     "kazma-core/kazma_core/memory/backends.py::mask_backends_cfg": _probe_mask_backends_cfg,
     "kazma-core/kazma_core/config_store.py::_redact_for_log": _probe_redact_for_log,
-    "kazma-core/kazma_core/settings_manager.py::SettingsManager._mask_secrets_in_dict": _probe_settings_export,
+    "kazma-core/kazma_core/settings_restore.py::_mask_backup_secrets": _probe_settings_export,
     "kazma-gateway/kazma_gateway/slash_commands.py::_redact_secrets": _probe_config_export_command,
     "kazma-gateway/kazma_gateway/agent_handler/hitl.py::_build_approval_prompt._redact": _probe_approval_card,
     "kazma-core/kazma_core/migration/pg_bridge.py::_redact_cmd": _probe_pg_argv,

@@ -2233,10 +2233,13 @@
         <!-- Backup/Restore -->
         <div class="settings-group">
             <h3>{{ t('settings.backup_maintenance') }}</h3>
+            <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0">{{ t('settings.settings_backup_hint') }}</p>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
                 <button class="btn btn-secondary" @click="createBackup()"><span class="ki" data-icon="package" aria-hidden="true"></span> {{ t('settings.download_backup') }}</button>
+                <input type="file" accept=".yaml,.yml,.json" id="settings-restore-file" @change="onRestoreFile($event)" style="display:none">
+                <button class="btn btn-secondary" @click="document.getElementById('settings-restore-file').click()" :disabled="restoring"><span class="ki" data-icon="upload" aria-hidden="true"></span> <span x-show="!restoring" x-cloak>{{ t('settings.restore_backup') }}</span><span x-show="restoring" x-cloak>{{ t('settings.restoring') }}</span></button>
+                <button class="btn btn-secondary" x-show="restoreUndo" x-cloak @click="undoRestore()" :disabled="restoring"><span class="ki" data-icon="clock" aria-hidden="true"></span> {{ t('settings.undo_restore') }}</button>
                 <button class="btn btn-secondary" @click="checkUpdates()"><span class="ki" data-icon="refresh" aria-hidden="true"></span> {{ t('settings.check_updates') }}</button>
-                <button class="btn btn-danger" @click="systemReset()"><span class="ki" data-icon="alert" aria-hidden="true"></span> {{ t('settings.system_reset') }}</button>
             </div>
             <div x-show="updateInfo" style="margin-top:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)" x-cloak>
                 <template x-if="updateInfo?.update_available">
@@ -2447,13 +2450,6 @@
             <h3>{{ t('settings.import_config') }}</h3>
             <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">{{ t('settings.upload_or_paste') }}</p>
             <div class="form-group">
-                <label>{{ t('settings.format') }}</label>
-                <select class="form-select" x-model="importFormat" style="width:120px">
-                    <option value="yaml">YAML</option>
-                    <option value="json">JSON</option>
-                </select>
-            </div>
-            <div class="form-group">
                 <label>{{ t('settings.config_data') }}</label>
                 <textarea class="form-textarea" x-model="importData" rows="8" style="font-family:var(--font-mono)" placeholder="{{ t('settings.paste_yaml_json') }}"></textarea>
             </div>
@@ -2478,19 +2474,12 @@
                     <template x-for="section in availableSections" :key="section">
                         <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;padding:4px 8px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer" :style="importSections.includes(section) ? 'border-color:var(--accent);background:rgba(59,130,246,0.08)' : ''">
                             <input type="checkbox" :value="section" x-model="importSections" style="display:none">
-                            <span x-text="section"></span>
+                            <span translate="no" x-text="section"></span>
                         </label>
                     </template>
                 </div>
             </div>
-            <button class="btn btn-primary" @click="importConfig()" :disabled="saving" x-text="saving ? '{{ t('settings.importing') }}' : '{{ t('settings.import_configuration') }}'"></button>
-        </div>
-
-        <!-- Reset -->
-        <div class="settings-group">
-            <h3>{{ t('settings.reset_to_defaults_section') }}</h3>
-            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">{{ t('settings.reset_description') }}</p>
-            <button class="btn btn-danger" @click="resetToDefaults()">{{ t('settings.reset_all_settings') }}</button>
+            <button class="btn btn-primary" @click="importConfig()" :disabled="restoring"><span x-show="!restoring" x-cloak>{{ t('settings.import_configuration') }}</span><span x-show="restoring" x-cloak>{{ t('settings.restoring') }}</span></button>
         </div>
     </div>
 

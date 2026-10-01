@@ -17,6 +17,7 @@ give you -- so these run requests through the ASGI layers themselves.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -235,11 +236,28 @@ def _launches_leaving_proxy_headers_on(sources: dict[str, str]) -> list[str]:
     )
 
 
+def _repo_python_files() -> list[str]:
+    """Every Python file of this checkout, tracked or new, as git lists it.
+
+    Not a folder walk: the desktop app puts a task's worktree INSIDE the
+    checkout (``.claude/worktrees/<name>``, locally excluded), and the walk
+    read that copy of every file as this repository's -- its
+    ``kazma_core/eventloop.py`` failed the gate under a path the exemption
+    did not name (2026-10-01)."""
+    out = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "*.py"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    ).stdout.split()
+    return sorted(set(out))
+
+
 def test_every_server_launch_leaves_forwarded_headers_to_the_app():
     sources = {}
-    for path in REPO_ROOT.rglob("*.py"):
-        rel = path.relative_to(REPO_ROOT).as_posix()
+    for rel in _repo_python_files():
         if rel.startswith((".venv/", "tests/", "node_modules/")) or "/tests/" in rel:
+            continue
+        path = REPO_ROOT / rel
+        if not path.is_file():
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         # Code, not prose: a docstring that mentions uvicorn.run( is not a launch.

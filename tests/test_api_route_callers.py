@@ -144,12 +144,6 @@ NOT_CALLED_BY_A_PAGE: dict[str, str] = {
         "notification setting the client checks (/api/notifications/turn-complete), "
         "and a subscription that fails with 410 is pruned (kazma_ui/push.py)"
     ),
-    "/api/settings/system/restore": (
-        "restores every setting from a Create-backup file (atomic batch_set; "
-        "round trip in tests/test_settings_restore.py). A one-click control "
-        "must first keep runtime state out -- active chat threads, boot "
-        "stamps -- so it is operator-only for now (AUD-015 follow-up)"
-    ),
     # ── the memory graph API, retired with the V1 stack ─────────────────
     "/api/memory/graph": "retired: answers 410 naming /api/memory/v2/graph",
     "/api/memory/graph/stats": "retired: answers 410 naming /api/memory/v2/health",

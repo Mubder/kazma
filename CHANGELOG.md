@@ -1,5 +1,51 @@
 # CHANGELOG
 
+## Settings can be restored from a backup, and your keys stay yours (2026-10-01)
+
+- **Settings → System → Restore settings backup…** The backup file had no
+  way back in. Now picking one shows what will change before anything is
+  written: which settings change, which keys come back from this install's
+  vault without being entered, which keys the vault no longer has and must be
+  entered again, and what is left as it is. It writes exactly what you
+  confirmed. If your settings change in between, it shows the new plan
+  instead. Then it offers a restart, and **Undo last restore** puts back what
+  it changed.
+- **A key you have is never replaced, and a key you lost comes back without
+  typing it.** The backup names each key by its reference in this install's
+  vault, never the key itself. Restoring keeps every key you hold now, and
+  brings a missing one back when the vault still has it. Providers, MCP
+  servers and mail accounts merge by name, so anything added since the backup
+  stays.
+- **The backup holds settings only.** It carried every row of the settings
+  database: signed-in browser sessions, the password hash, approval grants, a
+  chat's long-task record. A restore would have written them all back,
+  including sessions that had since signed out. Now none of that is in the
+  file, and none of it is ever restored from an older one. A key kept without
+  the vault, and a password inside a URL, are written as `****`.
+- **Import/Export uses the same restore.** Its import wrote any pasted text
+  straight into the settings database (credentials included), and could not
+  read its own export, which came back as `<category>.<key>` keys. Its export
+  is now the backup file, and its import previews like a restore and can pick
+  sections.
+- **The two Reset buttons are gone.** Both posted without the confirmation
+  their route required, so the route answered with an error the page did not
+  read. The page said "System reset complete" and nothing was reset. A working
+  reset would have deleted your keys and your sign-in along with the settings.
+- **Every way of saving a setting checks the value.** Only the single-setting
+  save refused a time zone the scheduler cannot resolve, a retention the
+  cleanup cannot read, or a status message Kazma does not send. The batch
+  save, the agent's `config_save`, the TUI and a restore now apply the same
+  check. The TUI had another fault: it passed its payload the wrong way, so
+  every save failed, was written locally, and said "server unreachable".
+  Values the server refuses are now refused there too.
+- **The agent cannot write Kazma's own state.** `config_save` could write
+  approval grants (`task_grant.*`, `hitl_grant.*`), signed-in sessions and the
+  learned Soul, and a tenant's copy of a protected key (`tenant.<id>.mcp.servers`).
+  Those keys are protected now.
+- **A backup download no longer changes the defaults.** Building the backup
+  wrote the database rows into the cached kazma.yaml. Until a restart, a
+  setting deleted afterwards kept its old value instead of the shipped one.
+
 ## Switching the model no longer holds up every open chat (2026-10-01)
 
 - **Switching the model or provider, testing a provider and first-run setup

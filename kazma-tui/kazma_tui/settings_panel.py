@@ -135,26 +135,37 @@ class SettingsPanel(VerticalScroll):
         return self._live_settings
 
     def _persist_setting(self, key: str, value: Any, category: str) -> str:
-        """Write via the live server; fall back to this-process ConfigStore."""
-        try:
-            from kazma_core.runtime.local_api import request_json
+        """Write via the live server; when no server answers, to this
+        process's ConfigStore through the same value check
+        (kazma_core.settings_validation). A value the server refuses is
+        refused here too -- never written locally behind its back.
 
+        The payload went in positionally to a keyword-only parameter, so every
+        save raised TypeError, was written locally and reported "server
+        unreachable" (2026-10-01)."""
+        from kazma_core.runtime.local_api import LocalApiRefused, request_json
+
+        try:
             request_json(
                 "PUT",
                 "/api/settings/single",
-                {"key": key, "value": value, "category": category},
+                payload={"key": key, "value": value, "category": category},
                 timeout=2.0,
             )
-            if self._live_settings is not None:
-                self._live_settings[key] = value
-            self._settings_source = "server"
-            return "server"
+        except LocalApiRefused:
+            raise
         except Exception:
             logger.debug("TUI settings live PUT failed", exc_info=True)
             from kazma_core.config_store import get_config_store
+            from kazma_core.settings_validation import validate_setting
 
-            get_config_store().set(key, value, category=category)
+            checked, forced = validate_setting(key, value)
+            get_config_store().set(key, checked, category=forced or category)
             return "local"
+        if self._live_settings is not None:
+            self._live_settings[key] = value
+        self._settings_source = "server"
+        return "server"
 
     @property
     def theme_manager(self) -> ThemeManager:

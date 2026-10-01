@@ -968,6 +968,9 @@ _LOOP_STALL_HELPERS = frozenset({
     # a Test, a saved entry (its key goes to the vault). The Test route wrote
     # both on the loop.
     "set_provider_health", "upsert_provider", "_activate_tested_provider",
+    # A settings backup, its restore and the undo (2026-10-01): every stored
+    # row read, vault references opened, one batch written.
+    "create_backup", "restore_backup", "undo_restore", "backup_text",
 })
 
 

@@ -1263,13 +1263,33 @@ class SettingsManager:
                     return {"lines": [f"Error reading log: {e}"], "total": 0}
         return {"lines": ["No log file found"], "total": 0}
 
-    def create_backup(self) -> str:
-        """Export full config as YAML."""
-        return self.export_config("yaml")
+    def create_backup(self, fmt: str = "yaml") -> str:
+        """A settings backup (``kazma_core.settings_restore``): every stored
+        setting, keys as vault references; no credential, no running state."""
+        from kazma_core.settings_restore import backup_text
 
-    def restore_backup(self, data: str) -> int:
-        """Import backup data."""
-        return self.import_config(data, "yaml")
+        return backup_text(self._cs, fmt)
+
+    def restore_backup(
+        self,
+        data: str,
+        *,
+        dry_run: bool = False,
+        sections: list[str] | None = None,
+        expect: str | None = None,
+    ) -> dict[str, Any]:
+        """Preview or apply a restore of the backup *data*; keys held now are
+        kept (``kazma_core.settings_restore.restore``). Raises ``NotABackup``
+        and ``PlanChanged`` from that module."""
+        from kazma_core.settings_restore import restore
+
+        return restore(data, self._cs, dry_run=dry_run, sections=sections, expect=expect)
+
+    def undo_restore(self, *, dry_run: bool = False, expect: str | None = None) -> dict[str, Any]:
+        """Preview or apply the undo of the last restore."""
+        from kazma_core.settings_restore import undo
+
+        return undo(self._cs, dry_run=dry_run, expect=expect)
 
     def system_reset(self) -> int:
         """Full reset of all settings."""
@@ -1371,95 +1391,11 @@ class SettingsManager:
     # IMPORT / EXPORT
     # ══════════════════════════════════════════════════════════════════
 
-    def export_config(self, fmt: str = "yaml", mask_secrets: bool = False) -> str:
-        """Export configuration as YAML or JSON.
-
-        When ``mask_secrets=True``, sensitive values (api keys, tokens,
-        passwords) are replaced with ``***`` to prevent leaking through
-        browser download dialogs or network logs.
-        """
-        if fmt == "json":
-            all_settings = self._cs.get_all()
-            if mask_secrets:
-                self._mask_secrets_in_dict(all_settings)
-            return json.dumps(all_settings, indent=2, ensure_ascii=False)
-        # YAML export
-        if mask_secrets:
-            all_settings = self._cs.get_all()
-            self._mask_secrets_in_dict(all_settings)
-            import yaml as _yaml
-            return _yaml.dump(all_settings, default_flow_style=False, allow_unicode=True)
-        return self._cs.export_yaml()
-
-    @staticmethod
-    def _mask_secrets_in_dict(data: dict) -> None:
-        """Replace values whose key looks like a secret with '***', in place.
-
-        Every other value keeps its shape with URL passwords masked: a key
-        rule cannot see the Postgres DSN in ``memory.backends.state.url``,
-        and the masked export shipped it whole (2026-09-25).
-        """
-        from kazma_core.security.url_credentials import mask_url_credentials_deep
-
-        _SENSITIVE = ("api_key", "token", "secret", "password", "passphrase")
-        for category, settings_dict in data.items():
-            if not isinstance(settings_dict, dict):
-                continue
-            for key in list(settings_dict.keys()):
-                raw = settings_dict[key]
-                if not any(frag in key.lower() for frag in _SENSITIVE):
-                    settings_dict[key] = mask_url_credentials_deep(raw)
-                    continue
-                if isinstance(raw, str) and raw.strip():
-                    try:
-                        import json as _json
-                        parsed = _json.loads(raw)
-                        if isinstance(parsed, dict):
-                            for sub_k in list(parsed.keys()):
-                                if isinstance(parsed[sub_k], str) and parsed[sub_k].strip():
-                                    parsed[sub_k] = "***"
-                            settings_dict[key] = _json.dumps(parsed)
-                            continue
-                    except (ValueError, TypeError):
-                        pass
-                    settings_dict[key] = "***"
-
-    def import_config(self, data: str, fmt: str = "yaml", selective: bool = False, sections: list[str] | None = None) -> int:
-        """Import configuration from YAML or JSON string."""
-        if fmt == "json":
-            try:
-                parsed = json.loads(data)
-            except json.JSONDecodeError as e:
-                logger.error("Failed to parse JSON: %s", e)
-                return 0
-        else:
-            import yaml
-            parsed = yaml.safe_load(data)
-
-        if not isinstance(parsed, dict):
-            return 0
-
-        if selective and sections:
-            # Filter to only selected sections
-            filtered = {}
-            for section in sections:
-                if section in parsed:
-                    filtered[section] = parsed[section]
-            parsed = filtered
-
-        items: list[tuple[str, Any, str]] = []
-
-        def _flatten_to_items(d: dict, prefix: str = "") -> None:
-            for k, v in d.items():
-                full_key = f"{prefix}.{k}" if prefix else k
-                if isinstance(v, dict):
-                    _flatten_to_items(v, full_key)
-                else:
-                    cat = prefix.split(".")[0] if prefix else "general"
-                    items.append((full_key, v, cat))
-
-        _flatten_to_items(parsed)
-        return self._cs.batch_set(items)
+    # Backup and restore: create_backup / restore_backup / undo_restore above,
+    # through kazma_core.settings_restore. The raw export (every row, keys
+    # masked by name, grouped by category) and import (every value written,
+    # credentials and Kazma's own state included) are gone: an import could
+    # not read its own export, and wrote what a restore must never write.
 
     def get_config_diff(self, old_config: dict[str, Any], new_config: dict[str, Any]) -> dict[str, Any]:
         """Compare two config dicts and return differences."""

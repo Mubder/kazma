@@ -55,9 +55,10 @@ async function main() {
     ok(method + ": a good answer is saved", good.saved.length === 1, good.saved);
   }
 
-  // Negative control: the old body saved the error page.
-  const old = src.replace("                if (!resp.ok) throw new Error('HTTP ' + resp.status);\n                const blob = await resp.blob();\n                const url = URL.createObjectURL(blob);",
-    "                const blob = await resp.blob();\n                const url = URL.createObjectURL(blob);");
+  // Negative control: the old body saved the error page. Both downloads go
+  // through _downloadSettings since 2026-10-01; the check is removed there.
+  const old = src.replace("            if (!resp.ok) throw new Error('HTTP ' + resp.status);\n            const blob = await resp.blob();",
+    "            const blob = await resp.blob();");
   ok("control: the check was removed", old !== src);
   const was = run(old, 500);
   await was.ops.createBackup();

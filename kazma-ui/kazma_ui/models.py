@@ -19,7 +19,6 @@ __all__ = [
     "ConnectorUpdateRequest",
     "ContextSettingsUpdate",
     "DashboardMetrics",
-    "ImportConfigRequest",
     "MaskedSecretResponse",
     "MCPServerAddRequest",
     "MCPServerTestRequest",
@@ -369,18 +368,6 @@ class ToolTestRequest(BaseModel):
     """Test a tool with arguments."""
 
     arguments: dict[str, Any] = Field(default_factory=dict)
-
-
-# ── Import/Export Models ──────────────────────────────────────────────
-
-
-class ImportConfigRequest(BaseModel):
-    """Import configuration from YAML/JSON."""
-
-    data: str
-    format: str = "yaml"
-    selective: bool = False
-    sections: list[str] = Field(default_factory=list)
 
 
 # ── Model Comparison ──────────────────────────────────────────────────
