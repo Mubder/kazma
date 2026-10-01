@@ -2475,6 +2475,15 @@ Load-bearing rules:
   under `'live'` ADOPTS that document (`applyTurnEvent` -> `_retagDoc`) --
   never a fresh one, which would repaint the bubble from one frame.
   `tests/test_frames_name_their_turn.py`.
+- **The stream's frames are documented as they are built** (2026-10-01).
+  `docs/docs/guide/api-and-extension-points.md` §3 lists every `event:` with
+  when it is sent and its fields, and the `sse_chat` package docstring the
+  same list. `tests/test_sse_event_contract.py` reads the code (every
+  `emit_j` / `_sse_frame` / `_journal_fast_path` call and every journal
+  write, with its literal payload keys) and fails on a frame or field
+  either is missing, a row no code sends, or a frame the browser's
+  `dispatch` does not handle. The table had kept `tool`/`args`/`is_error`,
+  `cost_usd` and an error `message` that nothing sent.
 - **A `done` frame carries the answer** (2026-09-28). The client closes a
   turn from `done.content`; the instant replies (`/replay`, `/research`
   usage, `/reset`, `/compact`, `/swarm` usage) sent their text in a token
