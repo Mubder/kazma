@@ -19,8 +19,13 @@ Strategy (v1, "SQLite-portable"):
     reads them through their store APIs and writes SQLite copies into the
     bundle so the target can ingest them uniformly. (When the source is
     already SQLite, the file copy above already captures them.)
-  * **Assets** (attachments, documents, exports, images, fonts): copied
-    verbatim — they contain no embedded absolute paths.
+  * **The data dir's other entries** (``assets/``): everything
+    :func:`kazma_core.store_registry.carried_in_bundle` says travels --
+    the swarm's worker registry and templates, attachments, documents,
+    exports, images, the default workspace and the operator's own files --
+    copied verbatim, never path-rewritten (they are the operator's files).
+    Machine-only entries (the install id, backups, logs) and rebuilt ones
+    (vectors, code indexes) stay behind.
   * **meta.env**: the source's ``KAZMA_VAULT_KEY`` + ``KAZMA_PUBLIC_URL``
     (the key is what makes vault.db decrypt on the target; public url is
     OAuth-relevant).
@@ -97,8 +102,9 @@ _DATA_DIR_DBS = _data_dir_dbs()
 _WORKSPACES_BUNDLE_NAME = "workspaces.db"
 _SETTINGS_BUNDLE_NAME = "settings.db"
 
-# Binary asset subdirs under kazma-data/ (copied verbatim, no path rewrite).
-_ASSET_DIRS = ("attachments", "documents", "exports", "images", "fonts")
+#: Never copied out of a carried folder: Python's caches, and the packages a
+#: project installs again from its own lock file.
+_SKIP_INSIDE = frozenset({"__pycache__", "node_modules"})
 
 
 def export_bundle(
@@ -211,13 +217,16 @@ def export_bundle(
         _log("Source is Postgres — dumping shared-state tables to SQLite…")
         _dump_postgres_shared_state(staging, manifest, _log)
 
-    # 6. Assets — verbatim copy (no embedded paths).
-    if include_assets:
-        for sub in _ASSET_DIRS:
-            src = data_dir / sub
-            if src.exists() and any(src.iterdir()):
-                _log(f"Copying assets/{sub}/…")
-                shutil.copytree(src, staging / "assets" / sub, dirs_exist_ok=True)
+    # 6. The data dir's other entries, verbatim under assets/: the swarm's
+    #    worker registry and templates always; attachments, documents,
+    #    exports, images, the default workspace and whatever else the
+    #    operator or the agent keeps there unless lean. The store registry
+    #    decides (carried_in_bundle); this was a hand-kept list of five
+    #    folders, and everything else stayed behind.
+    _export_data_dir_files(
+        data_dir, staging / "assets", manifest, _log,
+        lean=not include_assets, skip=out_path.resolve(),
+    )
 
     # 6b. Document store — documents.db (consistent snapshot) + the immutable
     #     content-addressed tree (quarantine/originals/artifacts/manifests).
@@ -276,6 +285,69 @@ def export_bundle(
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
+
+
+def _export_data_dir_files(
+    data_dir: Path,
+    dest: Path,
+    manifest: Manifest,
+    log: Callable[[str], object],
+    *,
+    lean: bool,
+    skip: Path,
+) -> None:
+    """Copy every data-dir entry a bundle carries into *dest* (``assets/``).
+
+    A file that cannot be read is recorded in the manifest, and ``verify``
+    then refuses the bundle: a migration that leaves a file behind without a
+    word is what this replaced. A file that vanished between the listing and
+    the copy was not there to carry. Links are never followed (one in the
+    workspace can point anywhere on the machine), special files are not
+    data, and *skip* -- the bundle being written, should the operator put it
+    inside the data dir -- is never copied into itself.
+    """
+    from kazma_core.store_registry import carried_in_bundle
+
+    failures: list[str] = []
+    for item in sorted(data_dir.resolve().iterdir()):
+        if item.is_symlink() or not carried_in_bundle(item.name, lean=lean):
+            continue
+        log(f"Copying {item.name}{'/' if item.is_dir() else ''}…")
+        _copy_carried(item, dest / item.name, item.name, failures, skip)
+    if failures:
+        logger.warning(
+            "[migrate:export] %d file(s) could not be read: %s",
+            len(failures), ", ".join(failures[:20]),
+        )
+        manifest.table_counts["_files"] = {
+            "error": f"{len(failures)} file(s) could not be read: " + ", ".join(failures[:10])
+        }
+        log(f"  ⚠ {len(failures)} file(s) could not be read")
+
+
+def _copy_carried(src: Path, dest: Path, rel: str, failures: list[str], skip: Path) -> None:
+    """Copy one carried file or folder; what cannot be read goes in *failures*."""
+    if src.is_dir():
+        try:
+            children = sorted(src.iterdir())
+        except OSError as exc:
+            if src.exists():
+                failures.append(f"{rel}/ ({exc.strerror or exc})")
+            return
+        dest.mkdir(parents=True, exist_ok=True)
+        for child in children:
+            if child.is_symlink() or child.name in _SKIP_INSIDE:
+                continue
+            _copy_carried(child, dest / child.name, f"{rel}/{child.name}", failures, skip)
+        return
+    if not src.is_file() or src == skip:
+        return
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+    except OSError as exc:
+        if src.exists():
+            failures.append(f"{rel} ({exc.strerror or exc})")
 
 
 def _safe_copy(src: Path, dest: Path) -> bool:

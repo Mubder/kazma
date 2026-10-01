@@ -525,11 +525,13 @@ swarm works with zero pre-registered workers.
   `Path("swarm_registry.json").resolve()` at import -- the process's working
   directory: no backup copied it, and a test run inside an install wrote the
   install's. An older build's file there (or at the install root) is moved in
-  once and renamed `.migrated`; writes are atomic; every change and every
-  read of the entries holds the registry's lock (route threads write while
-  the swarm reads on the loop). `tests/test_worker_registry_store.py`. The
-  migration bundle does not carry it yet (it carries databases and asset
-  folders).
+  once and renamed `.migrated` -- never into a temporary data dir (a test's
+  subprocess has no conftest pin, and its install root is the checkout the
+  tests run in); writes are atomic; every change and every read of the
+  entries holds the registry's lock (route threads write while the swarm
+  reads on the loop). `tests/test_worker_registry_store.py`. A migration
+  bundle carries it, and the operator's templates, even with `--no-assets`
+  (§18, `store_registry.DATA_DIR_ENTRIES`).
 - **`matches_task` uses word-boundary token matching** (not raw substring). When
   adding expertise tags to a template, pick whole words — the tag `code` would
   not match "barcode" (intentional). Templates are first-match-wins by file order
@@ -1258,8 +1260,17 @@ vault-key fingerprint, table counts, source workspace root), `meta.env`
 are `vault://` refs, not plaintext), `vault.db` (encrypted, under `data/`),
 the 13 data SQLite files under `data/`, `data/postgres.dump` (only when the
 source was Postgres — custom format, restored via pg_restore), `pathmap.json`,
-and verbatim `assets/` (attachments/documents/exports/images/fonts — no
-embedded paths).
+and verbatim `assets/`: every other entry of the data dir that
+`store_registry.carried_in_bundle` says travels (2026-10-01) -- the swarm's
+worker registry and templates even with `--no-assets`; attachments,
+documents, exports, images, the default workspace and the operator's own
+files otherwise. It was five hand-listed folders, so the workers, the
+workspace and everything the agent wrote into the data dir stayed behind.
+The import asks the same question of every name the bundle holds (a bundle
+cannot plant `install_id`, backups or a database), keeps a target file it
+replaces in `.migrate-backup-<ts>/files/`, and fails on a file it could not
+restore; an export that could not read a file records it and `verify`
+refuses the bundle.
 
 **Key files:**
 - `migration/bundle.py` — `Manifest`, `KazmaBundle`, `verify()`, `sha256_file`
@@ -2989,6 +3000,13 @@ location rule, migration exporter, importer) — the bundle silently left
   `rebuilt` / `machine` / `legacy`, with a reason when not `bundle`).
   Runtime-named files are `STORE_FAMILIES` + `DYNAMIC_NAME_SITES`. The
   migration exporter and importer derive their lists from it.
+- **`DATA_DIR_ENTRIES` declares everything else in the data dir** (2026-10-01):
+  the registry and templates JSON, the asset folders, the install id, logs,
+  caches, the migration's own folders, with the same dispositions; anything
+  undeclared is the operator's own and travels. Gate 10 in
+  `tests/test_store_registry.py` reads every `<data dir> / "name"` product
+  code builds (aliases, wrappers, module constants, f-strings) and fails on
+  an undeclared one; a round trip proves what arrives and what stays.
 - **`TOOL_WRITES`: every tool that can change anything declares where the
   write lands and which tool reads it back** — per WRITER, not per store
   (`agent_artifacts.db` always had a reader: the scratchpad context feed; the

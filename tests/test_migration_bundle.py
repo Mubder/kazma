@@ -90,6 +90,15 @@ class TestManifestArchiveCrossCheck:
         assert not report.ok
         assert any("document store export incomplete" in err for err in report.errors)
 
+    def test_incomplete_data_dir_files_fail_verify(self, tmp_path: Path) -> None:
+        bundle = _write_bundle(
+            tmp_path / "files.zip",
+            table_counts={"_files": {"error": "1 file(s) could not be read: branding/x"}},
+        )
+        report = KazmaBundle(bundle).verify()
+        assert not report.ok
+        assert any("data-dir files export incomplete" in err for err in report.errors)
+
     def test_unlisted_extra_db_fails_verification(self, tmp_path: Path) -> None:
         """Rogue zip member absent from the manifest is a tamper signal."""
         bundle = _write_bundle(tmp_path / "rogue.zip", extra_members=["data/rogue.db"])

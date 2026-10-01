@@ -59,6 +59,29 @@ def test_an_older_builds_registry_is_moved_once(unpinned) -> None:
     assert reg.WorkerRegistry().get("kept") is not None
 
 
+def test_an_installs_registry_is_never_moved_into_a_temporary_data_dir(
+    unpinned, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A test's (or a scratch copy's) data dir must not take an install's file.
+
+    Here the working directory plays the install: only the data dir is
+    temporary. The move test above is the negative control -- both there
+    are temporary, and the file moves.
+    """
+    import kazma_core.paths as paths
+
+    data, cwd = unpinned
+    legacy = cwd / "swarm_registry.json"
+    legacy.write_text(json.dumps([{"name": "the installs"}]), encoding="utf-8")
+    monkeypatch.setattr(paths, "_is_throwaway", lambda p: Path(p).resolve().is_relative_to(data.resolve()))
+
+    registry = reg.WorkerRegistry()
+
+    assert registry.get("the installs") is None
+    assert legacy.is_file() and not (cwd / "swarm_registry.json.migrated").exists()
+    assert json.loads((data / "swarm_registry.json").read_text(encoding="utf-8")) == []
+
+
 def test_the_old_default_was_the_working_directory(unpinned) -> None:
     """Negative control: the old default, resolved where the process ran."""
     data, cwd = unpinned

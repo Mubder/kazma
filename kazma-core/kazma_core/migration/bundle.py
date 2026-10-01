@@ -17,8 +17,11 @@ Bundle layout (all paths relative to the archive root)::
       kazma_core.store_registry.STORES marks "bundle" (chat_sessions.db,
       checkpoints.db and checkpoints_<tenant>.db, memory_state.db,
       agent_artifacts.db, x_scheduled.db, hitl_gates.db, …)
-    assets/                # binary artifacts with no embedded paths (copied verbatim)
-      attachments/ documents/ exports/ images/ fonts/
+    assets/                # the data dir's other entries, copied verbatim
+      swarm_registry.json, swarm_templates.json (even with --no-assets),
+      attachments/ documents/ exports/ images/ workspace/ and the
+      operator's own files -- whatever kazma_core.store_registry
+      .carried_in_bundle says travels
     pathmap.json           # source workspace root + data dir (for path translation on import)
 
 Three load-bearing invariants the bundle enforces (see AGENTS.md §18):
@@ -64,6 +67,13 @@ BUNDLE_VERSION = "1.0"
 # Note: vault.db is a DATA file — it lives at data/vault.db, not the root,
 # because it's copied alongside the other SQLite DBs by the exporter.
 _META_FILES = ("manifest.json", "meta.env", "config.yaml", "pathmap.json")
+
+#: Manifest entries the exporter writes when a part of the install could not
+#: be read whole, and what verify calls each part when it refuses the bundle.
+_INCOMPLETE_PARTS = {
+    "_document_store": "document store",
+    "_files": "data-dir files",
+}
 
 
 def sha256_file(path: Path, *, chunk: int = 1 << 20) -> str:
@@ -246,7 +256,14 @@ class KazmaBundle:
                     for rel, expected in self.manifest.file_hashes.items():
                         if rel not in arc_files:
                             continue  # already reported above as missing
-                        actual = hashlib.sha256(zf.read(rel)).hexdigest()
+                        # Streamed: a member can be the 864 MB snapshots
+                        # database or a large workspace file, and reading one
+                        # whole held all of it in memory.
+                        digest = hashlib.sha256()
+                        with zf.open(rel) as member:
+                            for chunk in iter(lambda: member.read(1 << 20), b""):
+                                digest.update(chunk)
+                        actual = digest.hexdigest()
                         if actual != expected:
                             report.add_error(
                                 f"hash mismatch for {rel}: manifest={expected[:12]}… actual={actual[:12]}…"
@@ -255,11 +272,12 @@ class KazmaBundle:
             report.add_error(f"corrupt zip: {exc}")
 
         report.table_counts = dict(self.manifest.table_counts)
-        doc_store = report.table_counts.get("_document_store")
-        if isinstance(doc_store, dict) and doc_store.get("error"):
-            report.add_error(
-                "document store export incomplete: " + str(doc_store["error"])
-            )
+        # A part the exporter could not take whole makes the bundle unusable:
+        # importing it would report success over what it left behind.
+        for key, label in _INCOMPLETE_PARTS.items():
+            part = report.table_counts.get(key)
+            if isinstance(part, dict) and part.get("error"):
+                report.add_error(f"{label} export incomplete: " + str(part["error"]))
         return report
 
     # ── Extraction ─────────────────────────────────────────────────────

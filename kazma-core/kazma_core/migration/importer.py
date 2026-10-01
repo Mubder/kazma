@@ -13,7 +13,10 @@ Entry point: :func:`import_bundle`. Orchestrates:
   5. **backup** the existing live DBs to ``.migrate-backup-<ts>/`` (WAL-safe).
   6. **preflight** Postgres-bundle vs SQLite-target (abort before live writes).
      Then **pg_restore** (if dump present), then **swap** SQLite atomically.
-  7. **report** — row counts changed, warnings, the backup path to roll back.
+  7. **files** — the data dir's other entries (``assets/``), each asked
+     ``store_registry.carried_in_bundle`` again; a file the target had and
+     the bundle replaces is kept in ``.migrate-backup-<ts>/files/``.
+  8. **report** — row counts changed, warnings, the backup path to roll back.
 
 Any exception before the SQLite swap leaves live SQLite untouched; a failed
 swap rolls ``.migrate-backup-<ts>`` back. Staging is preserved on failure.
@@ -496,14 +499,14 @@ def import_bundle(
         except Exception as exc:
             report.warn(f"Knowledge Library merge failed: {exc}")
 
-    # 8. Restore assets (verbatim).
-    staged_assets = staging / "assets"
-    if staged_assets.exists():
-        for sub in staged_assets.iterdir():
-            dest_sub = data_dir / sub.name
-            if sub.is_dir():
-                shutil.copytree(sub, dest_sub, dirs_exist_ok=True)
-                _log(f"  restored assets/{sub.name}/")
+    # 8. Restore the data dir's other entries (assets/), verbatim. Each is
+    #    asked again whether a bundle carries it, so a bundle cannot plant
+    #    an install identity or a database; a file it replaces is kept in
+    #    the pre-import backup. Only folders were restored before, so the
+    #    swarm's worker registry could not have come back even if exported.
+    file_failures = _restore_data_dir_files(
+        staging / "assets", data_dir, backup_dir / "files", report, _log
+    )
 
     # 8b. Restore the document store — documents.db + the content-addressed
     # tree — into the target's document-store root (resolved AFTER config
@@ -523,12 +526,16 @@ def import_bundle(
         except Exception as exc:
             logger.debug("[migrate:import] notify_root_changed failed: %s", exc)
 
-    # Clean up staging on success.
-    shutil.rmtree(staging, ignore_errors=True)
+    # Clean up staging on success. A file that could not be restored is still
+    # there, and the operator needs it.
+    if file_failures:
+        _log(f"  the files that could not be restored stay in {staging}")
+    else:
+        shutil.rmtree(staging, ignore_errors=True)
     # Only succeed if every DB swapped cleanly. A partial install (some DBs
     # swapped, one failed) must not report ok=True — the operator would believe
     # the migration succeeded while live data is stale/missing (audit finding).
-    report.ok = not install_failures
+    report.ok = not install_failures and not file_failures
     if install_failures:
         _log(f"  {len(install_failures)} DB(s) failed to install: "
              + ", ".join(install_failures))
@@ -536,6 +543,77 @@ def import_bundle(
     if report.backup_path:
         _log(f"  pre-import backup: {report.backup_path}")
     return report
+
+
+def _restore_data_dir_files(
+    src_root: Path,
+    data_dir: Path,
+    backup_root: Path,
+    report: ImportReport,
+    log: Callable[[str], object],
+) -> list[str]:
+    """Put the bundle's data-dir entries (``assets/``) into *data_dir*.
+
+    Folders merge into the target's. A file replaces the target's copy only
+    when the two differ, and the target's copy is first kept under
+    *backup_root*, inside the pre-import backup, so an import loses nothing
+    of the target's. An entry this install keeps for itself -- its identity,
+    its backups, a database -- is refused: every name the bundle holds is
+    asked :func:`carried_in_bundle` again, the exporter's question. Returns
+    what could not be restored.
+    """
+    import filecmp
+
+    from kazma_core.store_registry import carried_in_bundle
+
+    if not src_root.is_dir():
+        return []
+    failures: list[str] = []
+    replaced = 0
+    try:
+        items = sorted(src_root.iterdir())
+    except OSError as exc:
+        items = []
+        failures.append(f"assets/ ({exc.strerror or exc})")
+    for item in items:
+        label = item.name + ("/" if item.is_dir() else "")
+        if item.is_symlink() or not carried_in_bundle(item.name):
+            report.warn(f"not restored: {label} (this install keeps its own)")
+            continue
+        try:
+            sources = [item] if item.is_file() else sorted(
+                p for p in item.rglob("*") if p.is_file() and not p.is_symlink()
+            )
+        except OSError as exc:
+            failures.append(f"{label} ({exc.strerror or exc})")
+            continue
+        for src in sources:
+            rel = src.relative_to(src_root)
+            dest = data_dir / rel
+            try:
+                if dest.exists() and not dest.is_file():
+                    failures.append(f"{rel.as_posix()} (a folder of that name is here)")
+                    continue
+                if dest.is_file():
+                    if filecmp.cmp(src, dest, shallow=False):
+                        continue
+                    keep = backup_root / rel
+                    keep.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(dest, keep)
+                    replaced += 1
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dest)
+            except OSError as exc:
+                failures.append(f"{rel.as_posix()} ({exc.strerror or exc})")
+        report.files_restored.append(label)
+        log(f"  restored {label}")
+    if replaced:
+        log(f"  {replaced} file(s) this install had are kept in {backup_root}")
+    if failures:
+        report.error(
+            f"{len(failures)} file(s) could not be restored: " + ", ".join(failures[:10])
+        )
+    return failures
 
 
 def _dest_for_bundle_db(

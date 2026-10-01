@@ -124,18 +124,21 @@ def test_indent_guides_are_installed() -> None:
 
 
 # Same spelling, different object — neither is pathlib, so neither takes an
-# encoding kwarg. Keyed by "<path>:<line>" to stay honest if the code moves.
+# encoding kwarg. Keyed by (file, receiver): a line number broke the gate on
+# every edit above the call, and the receiver is what makes it not pathlib --
+# a pathlib call under any other name in the same file is still caught.
 _NOT_PATHLIB = {
-    # ImportBundle.read_text(name) reads a member out of the migration bundle.
-    "kazma-core/kazma_core/migration/importer.py:267",
+    # KazmaBundle.read_text(name) reads a member out of the migration bundle.
+    ("kazma-core/kazma_core/migration/importer.py", "bundle"),
 }
 
 
-def _calls_without_encoding(path: Path) -> list[str]:
+def _calls_without_encoding(path: Path, root: Path = _ROOT) -> list[str]:
     """Find .read_text(/.write_text( calls whose argument list omits encoding."""
     src = path.read_text(encoding="utf-8")
+    rel = path.relative_to(root).as_posix()
     found: list[str] = []
-    for match in re.finditer(r"\.(read_text|write_text)\s*\(", src):
+    for match in re.finditer(r"(\w*)\.(read_text|write_text)\s*\(", src):
         # A call named inside a comment is documentation, not a call.
         line_start = src.rfind("\n", 0, match.start()) + 1
         if src[line_start : match.start()].lstrip().startswith("#"):
@@ -152,12 +155,23 @@ def _calls_without_encoding(path: Path) -> list[str]:
                     call = src[open_paren : j + 1]
                     break
         if call and "encoding" not in call:
-            line = src[: match.start()].count("\n") + 1
-            ref = f"{path.relative_to(_ROOT).as_posix()}:{line}"
-            if ref in _NOT_PATHLIB:
+            if (rel, match.group(1)) in _NOT_PATHLIB:
                 continue
-            found.append(f"{ref} {match.group(1)}")
+            line = src[: match.start()].count("\n") + 1
+            found.append(f"{rel}:{line} {match.group(2)}")
     return found
+
+
+def test_the_bundle_exemption_names_its_receiver_only(tmp_path: Path) -> None:
+    """Negative control: the exempt receiver passes, any other receiver there is caught."""
+    planted = tmp_path / "kazma-core" / "kazma_core" / "migration" / "importer.py"
+    planted.parent.mkdir(parents=True)
+    planted.write_text(
+        "meta = bundle.read_text('meta.env')\nenv = env_path.read_text()\n", encoding="utf-8"
+    )
+    assert _calls_without_encoding(planted, root=tmp_path) == [
+        "kazma-core/kazma_core/migration/importer.py:2 read_text"
+    ]
 
 
 def test_shipped_code_never_reads_or_writes_in_the_platform_locale() -> None:

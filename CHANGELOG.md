@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## A migration carries the whole data dir (2026-10-01)
+
+- **`kazma migrate export` carries every file a move needs.** The bundle took
+  five hand-listed folders (attachments, documents, exports, images, fonts).
+  These stayed behind:
+  - the swarm's registered workers and the operator's worker templates (both
+    in the data dir since the morning's change);
+  - the default workspace;
+  - every file the owner, or the agent, kept in the data dir (the live
+    install had logos, email drafts and notes there).
+  The store registry now declares everything Kazma itself puts in the data
+  dir and how each crosses machines. The worker registry and templates
+  travel even with `--no-assets`. Anything undeclared is the owner's and
+  travels with the files. The install's identity, its backups, its logs and
+  what is rebuilt stay behind.
+- **The import keeps what the target had.** A target file the bundle
+  replaces with a different one is kept in the pre-import backup
+  (`.migrate-backup-<ts>/files/`). Every name in the bundle is checked
+  against the same rule, so a bundle cannot plant an install identity or a
+  database through its files. Before, only folders were restored, so a
+  top-level file could not have come back at all.
+- **Nothing is dropped without a word.** An export that cannot read a file
+  names it in the manifest, and `verify` refuses the bundle. An import that
+  cannot restore a file reports it and does not report success.
+- **Hash checks stream.** `verify` read each bundle member whole into memory
+  (the snapshots database alone is hundreds of MB). It now hashes in 1 MB
+  pieces.
+- **A test can no longer move an install's old worker registry.** A test's
+  subprocess has a temporary data dir, and its install root is the checkout
+  the tests run in. The registry's one-time move of an older build's file
+  now refuses to move an install's copy into a temporary folder, the same
+  rule the home-folder migration follows.
+- **Gate:** `tests/test_store_registry.py` section 10 reads every
+  `<data dir> / "name"` product code builds and fails on an undeclared
+  entry. It has a planted negative control and a real export-then-import
+  round trip.
+
 ## No GET route reads the database on the event loop; a settings write keeps the read cache (2026-10-01)
 
 - **A settings write no longer empties the read cache.** Every `set`,
