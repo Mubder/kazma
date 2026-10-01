@@ -3655,7 +3655,8 @@ and the sibling suites):**
   name needs its pending publisher (owner `Mubder`, repo `kazma`, workflow
   `pypi-reserve.yml`, environment `pypi-<name>`: PyPI holds one configuration
   pending for one new project at a time, and refused a third name sharing
-  `pypi`; `docs/SUPPLY_CHAIN.md`). Kazma still
+  `pypi`; `docs/SUPPLY_CHAIN.md`). All eight went up on 2026-10-01, in four
+  rounds (an account holds three pending publishers at once). Kazma still
   installs only from GitHub, so the rules above stand. The gate holds its
   `KAZMA_DISTS` equal to the reservation list: a new package name is reserved
   with the rest.
