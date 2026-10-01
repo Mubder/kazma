@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## The IDE's hunk reject writes only checkpoint files; the worker registry moves to the data dir (2026-10-01)
+
+- **Rejecting a hunk in the IDE restores only a file the checkpoint holds.**
+  `POST /api/ide/checkpoints/{id}/restore-hunk` wrote any path the request
+  named, never checked against the checkpoint or the path rules, and in text
+  mode, which turned an LF file into CRLF on Windows. Hunk restore now lives
+  in the checkpoint store beside the whole-file restore, under the same rules,
+  and keeps the file's line endings. The review compares exact text: an
+  unchanged CRLF file is no longer listed as changed, and a file created
+  after the checkpoint is now listed.
+- **The swarm's worker registry lives in the data dir**
+  (`<data dir>/swarm_registry.json`). It sat in whatever folder the server
+  started from, so no backup copied it, and a test run inside an install
+  wrote to that install's copy. An older build's file is moved in once and
+  renamed `.migrated`. Writes are atomic: a crash mid-write used to leave a
+  truncated file, which loaded as empty. Every change and every read of the
+  registry now holds its lock; the Swarm page's handlers run in threads
+  while the swarm reads on the loop.
+- **45 more route handlers left the event loop.** They are mostly plain
+  `def`s now, and the async handlers that never await went from 97 to 52.
+  The largest: the backup archive and delete, which zipped or removed a
+  whole backup on the loop. Also moved: the IDE checkpoint, LSP and skills
+  routes, the email status and settings saves, the Agents page's polls, the
+  Swarm page, status and output target, the worker metrics, the saved model
+  profiles, the workspace file list and the gateway's workspace routes. The
+  Swarm worker add, update and remove routes keep their engine changes on
+  the loop and write the registry in a thread.
+- `/api/system/config-paths` names the paths Kazma actually uses, the worker
+  registry's included. It used to fall back to paths built from the working
+  directory.
+
 ## Every route exists when the app is built; research reads only reports (2026-10-01)
 
 - **The research and replay APIs are mounted with the app.** Both were

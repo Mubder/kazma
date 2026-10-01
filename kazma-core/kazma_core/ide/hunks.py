@@ -2,10 +2,27 @@
 
 from __future__ import annotations
 
+import difflib
 import re
 from typing import Any
 
-__all__ = ["apply_reverse_hunk", "split_hunks"]
+__all__ = ["apply_reverse_hunk", "file_diff", "split_hunks"]
+
+
+def file_diff(before: str, after: str, name: str = "file") -> str:
+    """The unified diff of a file's checkpoint text against its text now.
+
+    One function for the checkpoint review (the hunks the page lists) and the
+    per-hunk restore (the hunk it undoes), so an index means the same hunk in
+    both. Lines are compared without their endings.
+    """
+    return "\n".join(difflib.unified_diff(
+        before.splitlines(),
+        after.splitlines(),
+        fromfile="a/" + name,
+        tofile="b/" + name,
+        lineterm="",
+    ))
 
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 

@@ -80,14 +80,19 @@ def register_backup_routes(self: Any) -> None:
         # was enqueueing. So this button backed up 25 SQLite databases, said
         # "Done", and never touched the main database. Enqueue it here too,
         # exactly as the scheduled sweep does, so "Backup Now" means it.
-        pg_queued = False
-        try:
+        def _queue_pg_dump() -> bool:
             from kazma_core.db.pg_backup import pg_backup_enabled
             from kazma_core.memory.task_queue import enqueue_task
 
-            if pg_backup_enabled():
-                enqueue_task("native_pg_backup", {})
-                pg_queued = True
+            if not pg_backup_enabled():
+                return False
+            enqueue_task("native_pg_backup", {})
+            return True
+
+        pg_queued = False
+        try:
+            # A settings read and a SQLite insert: off the event loop.
+            pg_queued = await asyncio.to_thread(_queue_pg_dump)
         except Exception:  # noqa: BLE001 -- never block the button
             logger.warning("[backup] could not enqueue the Postgres dump", exc_info=True)
 
@@ -98,19 +103,19 @@ def register_backup_routes(self: Any) -> None:
             "progress": get_backup_progress(),
         }
     @self.app.get("/api/backup/status")
-    async def _backup_status() -> Any:
+    def _backup_status() -> Any:
         """Poll the current backup progress (phase + detail)."""
         from kazma_core.backup.universal import get_backup_progress
 
         return get_backup_progress()
     @self.app.get("/api/backup/list")
-    async def _backup_list() -> Any:
+    def _backup_list() -> Any:
         """List all universal backups (newest first)."""
         from kazma_core.backup.universal import list_universal_backups
 
         return {"backups": list_universal_backups()}
     @self.app.delete("/api/backup/{dir_name}")
-    async def _backup_delete(dir_name: str, request: Request) -> Any:
+    def _backup_delete(dir_name: str, request: Request) -> Any:
         """Delete a universal backup by its directory name (timestamp)."""
         denied = _require_admin(request)
         if denied:
@@ -119,7 +124,7 @@ def register_backup_routes(self: Any) -> None:
 
         return delete_universal_backup(dir_name)
     @self.app.post("/api/backup/{dir_name}/archive", dependencies=[Depends(rate_limit("backup", 3))])
-    async def _backup_archive(dir_name: str, request: Request) -> Any:
+    def _backup_archive(dir_name: str, request: Request) -> Any:
         """Archive a universal backup into a downloadable .zip."""
         denied = _require_admin(request)
         if denied:
@@ -128,7 +133,7 @@ def register_backup_routes(self: Any) -> None:
 
         return archive_universal_backup(dir_name)
     @self.app.get("/api/backup/{dir_name}/download")
-    async def _backup_download(dir_name: str, request: Request) -> Any:
+    def _backup_download(dir_name: str, request: Request) -> Any:
         """Download an archived backup (.zip)."""
         denied = _require_admin(request)
         if denied:

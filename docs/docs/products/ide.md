@@ -80,6 +80,7 @@ grant, so the loop is smooth rather than a hard failure.
 | Language intelligence | Safe | `/api/ide/lsp` backend exists; Web editor is syntax-only CodeMirror |
 | Write / delete | Danger tools | Graph or bus approval |
 | Apply patch | Danger (`file_apply_patch` / `file_apply_patch_set`) | Search-replace or unified diff; one HITL card for a set; same HITL as write |
+| Review / reject a patch | Restores from the checkpoint | The review lists each file changed since the checkpoint taken before the patch, a file created since included. Rejecting a hunk or a whole file restores it from that checkpoint: only a file the checkpoint holds, within the paths the tools may write, keeping its own line endings (`/api/ide/checkpoints/*`) |
 | Run / run_file / shell | Danger | `shell_exec` / `python_exec` policy; Docker `force` blocks host shell unless `KAZMA_HOST_SHELL=1` |
 | Git status / diff / log | Safe | Read-only git is a workspace subprocess (not HITL `shell_exec`) |
 | Git commit / push / clean | Danger | Native git skill tools |

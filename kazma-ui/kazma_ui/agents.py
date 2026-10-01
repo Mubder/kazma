@@ -78,7 +78,7 @@ def create_agents_router(agent: Any, templates: Jinja2Templates) -> APIRouter:
     router = APIRouter(tags=["agents"])
 
     @router.get("/agents", response_class=HTMLResponse)
-    async def agents_page(request: Request) -> HTMLResponse:
+    def agents_page(request: Request) -> HTMLResponse:
         """Render agent management page."""
         agent_info = _get_agent_info(agent)
         agent_info["active_page"] = "agents"
@@ -89,12 +89,12 @@ def create_agents_router(agent: Any, templates: Jinja2Templates) -> APIRouter:
         )
 
     @router.get("/api/agents/status")
-    async def agents_status() -> JSONResponse:
+    def agents_status() -> JSONResponse:
         """JSON endpoint for agent status (for AJAX refresh)."""
         return JSONResponse(_get_agent_info(agent))
 
     @router.get("/api/agents")
-    async def agents_list() -> JSONResponse:
+    def agents_list() -> JSONResponse:
         """JSON endpoint listing the active agent(s) with status/model/sessions.
 
         Satisfies VAL-UX-006 requirement for a populated agent list backed by a
@@ -103,7 +103,7 @@ def create_agents_router(agent: Any, templates: Jinja2Templates) -> APIRouter:
         return JSONResponse({"agents": [_get_agent_info(agent)]})
 
     @router.get("/api/agents/tools")
-    async def agents_tool_history(limit: int = 50) -> JSONResponse:
+    def agents_tool_history(limit: int = 50) -> JSONResponse:
         """Return tool execution history (filtered trace of type 'tool')."""
         store = _get_trace_store()
         entries = [e for e in store.recent(limit) if e.trace_type == "tool"]
@@ -115,7 +115,7 @@ def create_agents_router(agent: Any, templates: Jinja2Templates) -> APIRouter:
         )
 
     @router.get("/api/agents/reasoning")
-    async def agents_reasoning(limit: int = 50) -> JSONResponse:
+    def agents_reasoning(limit: int = 50) -> JSONResponse:
         """Return reasoning steps (LLM call traces from LangGraph)."""
         store = _get_trace_store()
         entries = [e for e in store.recent(limit) if e.trace_type == "llm"]

@@ -239,7 +239,7 @@ def create_workspace_select_router() -> APIRouter:
     # ------------------------------------------------------------------
 
     @router.get("/suggest")
-    async def suggest_dirs(path: str = "") -> JSONResponse:
+    def suggest_dirs(path: str = "") -> JSONResponse:
         """Return up to 15 child directories matching the typed path prefix.
 
         Used by the "Select Folder" input for click-to-navigate autocomplete

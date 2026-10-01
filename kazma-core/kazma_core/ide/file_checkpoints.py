@@ -178,7 +178,12 @@ class FileCheckpointStore:
             restored.append(str(p))
         return restored
 
-    def restore_one(self, checkpoint_id: str, path: str) -> str:
+    def _held_file(self, checkpoint_id: str, path: str) -> tuple[dict[str, Any], Path]:
+        """The checkpoint's record of *path*, and the file it may write.
+
+        *path* must be a file the checkpoint holds, and writable now
+        (``check_path_access``); anything else raises ValueError.
+        """
         rec = self.get(checkpoint_id)
         if rec is None:
             raise ValueError(f"unknown checkpoint {checkpoint_id}")
@@ -189,16 +194,49 @@ class FileCheckpointStore:
             if not access.allowed:
                 continue
             p = Path(access.resolved)
-            if p.resolve() != want:
-                continue
-            if item.get("missing"):
-                if p.is_file():
-                    p.unlink()
-                return str(p)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(str(item.get("content") or ""), encoding="utf-8", newline="")
-            return str(p)
+            if p.resolve() == want:
+                return item, p
         raise ValueError(f"path not in checkpoint: {path}")
+
+    def restore_one(self, checkpoint_id: str, path: str) -> str:
+        item, p = self._held_file(checkpoint_id, path)
+        if item.get("missing"):
+            if p.is_file():
+                p.unlink()
+            return str(p)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(str(item.get("content") or ""), encoding="utf-8", newline="")
+        return str(p)
+
+    def restore_hunk(self, checkpoint_id: str, path: str, hunk_index: int) -> str:
+        """Undo one change (one diff hunk) of a file the checkpoint holds.
+
+        Same rules as :meth:`restore_one`, and the file keeps its own line
+        endings. The route did this itself until 2026-10-01, on any path the
+        request named and in text mode (an LF file came back CRLF on Windows).
+        """
+        from kazma_core.ide.hunks import apply_reverse_hunk, file_diff, split_hunks
+        from kazma_core.tools.text_newlines import (
+            existing_newline,
+            in_newline_style,
+            newline_of,
+            read_exact,
+        )
+
+        item, p = self._held_file(checkpoint_id, path)
+        before = str(item.get("content") or "")
+        after = read_exact(p) if p.is_file() else ""
+        hunks = split_hunks(file_diff(before, after, p.name))
+        if not 0 <= hunk_index < len(hunks):
+            raise ValueError("hunk_index out of range")
+        header = str(hunks[hunk_index].get("header") or "")
+        body = str(hunks[hunk_index].get("diff") or "").splitlines()[1:]
+        rewritten = apply_reverse_hunk(after, header, body)
+        newline = existing_newline(p) or newline_of(before)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "w", encoding="utf-8", newline="") as fh:
+            fh.write(in_newline_style(rewritten, newline))
+        return str(p)
 
     def list_for_workspace(self, root: Path | None = None) -> list[dict[str, Any]]:
         ws = str(root or resolve_active_root())
