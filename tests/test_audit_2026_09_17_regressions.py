@@ -190,9 +190,10 @@ def test_saas_status_requires_admin():
         REPO_ROOT / "kazma-ui" / "kazma_ui" / "saas_api.py"
     ).read_text(encoding="utf-8")
     # The status handler must call _require_admin (the only route that skipped it).
-    # A plain def since 2026-09-26 (it never awaits: off the event loop).
+    # Both are plain defs (they never await: off the event loop) -- the status
+    # since 2026-09-26, the user list since 2026-10-01.
     status_idx = src.index("def saas_status(")
-    users_idx = src.index("async def list_platform_users")
+    users_idx = src.index("def list_platform_users(")
     block = src[status_idx:users_idx]
     assert "_require_admin" in block
 

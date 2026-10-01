@@ -37,9 +37,11 @@ def mcp_router(mcp_agent: MagicMock):
 
 
 @pytest.mark.asyncio
-async def test_add_server_forwards_sse_bearer_auth_and_trust(
+def test_add_server_forwards_sse_bearer_auth_and_trust(
     mcp_agent: MagicMock, mcp_router
 ) -> None:
+    # A plain def since 2026-10-01: it never awaited, so FastAPI runs it in a
+    # worker thread instead of on the event loop.
     endpoint = _router_endpoint(mcp_router, "/api/mcp/servers", "POST")
     request = MCPServerAddRequest(
         name="remote",
@@ -49,7 +51,7 @@ async def test_add_server_forwards_sse_bearer_auth_and_trust(
         trust="trusted",
     )
 
-    result = await endpoint(request)
+    result = endpoint(request)
 
     assert result == {"status": "ok"}
     assert mcp_agent.add_mcp_server.call_args.kwargs["auth"] == {

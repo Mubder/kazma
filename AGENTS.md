@@ -227,6 +227,16 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   `worker_bootstrap.background_schedulers_enabled()` is False there (override
   with `KAZMA_TEST_BACKGROUND_SCHEDULERS=1`). One switch for all eight
   schedulers — the purge was simply the one that got caught.
+- **A write drops only what it can change in the read cache**
+  (`ConfigStore._invalidate_key`, 2026-10-01): the key, its ancestors (`get`
+  merges a missing key's children, so `a`'s cached view holds `a.b`) and its
+  descendants. Every `set`/`batch_set`/`delete` cleared the WHOLE cache,
+  misses included, so any write anywhere -- the heartbeat, a session stamp --
+  sent the next read of every setting back to the database (on Postgres a
+  round trip, often from the event loop). A raw `transaction()`,
+  `reset_all()` and a YAML reload still clear everything (their keys are not
+  known). `tests/test_config_store_cache_scope.py` (the full clear as the
+  negative control).
 - **GET nested vault walk is resolve-only.** `_resolve_vault_value` decrypts
   `vault://` pointers inside dicts/lists. Lazy-migrate of plaintext secrets
   is **only** for the exact string key `get()` was called with. Nested
@@ -3146,16 +3156,37 @@ Read the named test before changing the code it guards.
 - **The date guard matches a subject by whole words** (Latin script;
   Arabic stays substring because of clitics), so three-letter heads are safe
   (`tests/test_date_guard_word_match.py`).
-- **Async routes that never await are plain `def`s** (§35); the debt ratchet
-  counts the rest (`async_route_never_awaits`), and it only goes down. On
-  2026-10-01 it went from 115 to 52: every handler that reads or writes a
-  store, a file or the network became a `def`, or awaits `to_thread` around
-  that work where it must stay on the loop (it spawns a task, or changes the
-  swarm engine's state, which the loop owns). Among them: the backup
-  archive and delete (a whole backup zipped or removed on the loop), the
-  research, IDE checkpoint and LSP routes, the email status and settings
-  saves (vault reads and writes), the Agents and Swarm pages' polls (the model registry and
-  the worker registry file), and the gateway's workspace routes.
+- **Async routes that never await are plain `def`s** (§35), and each one
+  left says why the loop is the point (`tests/test_async_routes_on_the_loop.py`,
+  `ON_THE_LOOP`: it reads or changes state the loop owns, starts a background
+  task or returns a stream, or is a probe whose answer proves the loop is
+  alive); a new one fails there. The debt ratchet counted them until
+  2026-10-01, when the sweep took them from 115 to 12: every handler that
+  reads or writes a store, a file or the network became a `def`, or awaits
+  `to_thread` around that work where it must stay on the loop. Among them:
+  the backup archive and delete (a whole backup zipped or removed on the
+  loop), the security hardening report (~50 s scanning the install, `.venv`
+  included -- now one pruning walk, `hardening._project_files`, ~5 s, in a
+  worker thread), snapshot maintenance (a `VACUUM`), the research, IDE and
+  LSP routes, the email status and settings saves, the Agents and Swarm
+  pages' polls, every page render, and the gateway's workspace routes.
+- **Every GET route is walked for database work on the loop**
+  (`tests/test_get_routes_off_the_loop.py`, 2026-10-01): the started app's
+  GET routes are each called twice and a SQLite statement run on the SERVER
+  loop during the second call fails the build (the memory routes' tracer,
+  for the whole app; the settings and session caches are frozen for the
+  walk, and a statement on a route's private loop in a worker thread does not
+  count). Nothing leaves the machine: connections AND name lookups to other
+  hosts are refused -- an async client connects through the loop, and the
+  walk reached OSV (the hardening report's dependency check) and GitHub until
+  name lookups were refused too. It sees what the name-based gates cannot: an async handler that
+  awaits AND reads a store inline. It found the Scheduled list's X-schedule
+  read, the document routes' scope (a workspace read for every request),
+  the IDE service resolving its root through the workspace store in every
+  async method (`IdeService._aresolve`), the disclosure and dependency
+  stores (async methods with no await, SQLite inline) and the embedder
+  rebuild's status writes. Streams are skipped: a generator's reads (the
+  swarm task stream read the TaskStore once a second) need reading by hand.
 - **A reload adopts the PATH the OS settings have now**
   (`kazma_core/path_refresh.py`). Windows gives a process its parent's
   environment, and the guard lives from boot to boot, so the operator fixed

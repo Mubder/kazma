@@ -55,7 +55,7 @@ def create_saas_router() -> APIRouter:
         })
 
     @router.get("/users")
-    async def list_platform_users(request: Request) -> JSONResponse:
+    def list_platform_users(request: Request) -> JSONResponse:
         denied = _require_admin(request)
         if denied:
             return denied

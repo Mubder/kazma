@@ -49,6 +49,7 @@ sensitive nature, or redaction terms are ever logged.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -69,8 +70,29 @@ __all__ = ["create_documents_router"]
 _COPY_CHUNK = 1024 * 1024
 
 
-def _resolve_scope(request: Request) -> tuple[str, str, str]:
-    """Return (tenant_id, actor_id, workspace_id) from trusted server context."""
+def _active_workspace_id() -> str:
+    """The active workspace's id, or ``"default"``.
+
+    A WorkspaceStore read (a database query): run it in a thread.
+    """
+    try:
+        from kazma_core.stores import get_workspace_store
+
+        active = get_workspace_store().get_active_workspace()
+        if active and active.get("id"):
+            return str(active["id"]).strip() or "default"
+    except Exception:  # pragma: no cover - defensive
+        logger.debug("[documents_api] active workspace lookup failed", exc_info=True)
+    return "default"
+
+
+async def _resolve_scope(request: Request) -> tuple[str, str, str]:
+    """Return (tenant_id, actor_id, workspace_id) from trusted server context.
+
+    Async since 2026-10-01: the workspace is a store read and the principal
+    may be a session-store read, which every document route ran on the event
+    loop through this helper. Both are read in one thread.
+    """
     tenant = "default"
     try:
         from kazma_core.tenant_context import get_current_tenant_id
@@ -79,26 +101,19 @@ def _resolve_scope(request: Request) -> tuple[str, str, str]:
     except Exception:  # pragma: no cover - defensive
         pass
 
-    actor = "local"
-    try:
-        from kazma_ui.auth import get_request_principal
+    def _actor_and_workspace() -> tuple[str, str]:
+        actor = "local"
+        try:
+            from kazma_ui.auth import get_request_principal
 
-        principal = get_request_principal(request)
-        if principal and principal.get("username"):
-            actor = str(principal["username"]).strip() or "local"
-    except Exception:  # pragma: no cover - defensive
-        pass
+            principal = get_request_principal(request)
+            if principal and principal.get("username"):
+                actor = str(principal["username"]).strip() or "local"
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("[documents_api] principal lookup failed", exc_info=True)
+        return actor, _active_workspace_id()
 
-    workspace = "default"
-    try:
-        from kazma_core.stores import get_workspace_store
-
-        active = get_workspace_store().get_active_workspace()
-        if active and active.get("id"):
-            workspace = str(active["id"]).strip() or "default"
-    except Exception:  # pragma: no cover - defensive
-        pass
-
+    actor, workspace = await asyncio.to_thread(_actor_and_workspace)
     return tenant, actor, workspace
 
 
@@ -167,7 +182,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, workspace = _resolve_scope(request)
+        tenant, actor, workspace = await _resolve_scope(request)
         raw_name = (
             request.headers.get("X-Document-Filename")
             or request.query_params.get("filename")
@@ -271,7 +286,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, workspace = _resolve_scope(request)
+        tenant, actor, workspace = await _resolve_scope(request)
         rel = str(payload.get("path", "")).strip()
         if not rel:
             return JSONResponse(
@@ -320,7 +335,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, workspace = _resolve_scope(request)
+        tenant, actor, workspace = await _resolve_scope(request)
         target_format = str(payload.get("target_format", "")).strip()
         body = payload.get("payload")
         if not target_format:
@@ -353,7 +368,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, workspace = _resolve_scope(request)
+        tenant, actor, workspace = await _resolve_scope(request)
         document_ids = payload.get("document_ids")
         if not isinstance(document_ids, list) or len(document_ids) < 2:
             return JSONResponse(
@@ -385,7 +400,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, _ = _resolve_scope(request)
+        tenant, actor, _ = await _resolve_scope(request)
         try:
             info = await asyncio.to_thread(
                 svc.resolve_artifact_blob,
@@ -406,7 +421,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, workspace = _resolve_scope(request)
+        tenant, actor, workspace = await _resolve_scope(request)
         target_format = str(payload.get("target_format", "")).strip()
         if not target_format:
             return JSONResponse(
@@ -430,7 +445,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, workspace = _resolve_scope(request)
+        tenant, actor, workspace = await _resolve_scope(request)
         try:
             data = await svc.pdf_info_document(
                 tenant_id=tenant,
@@ -447,7 +462,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, workspace = _resolve_scope(request)
+        tenant, actor, workspace = await _resolve_scope(request)
         start_page = _opt_int(payload.get("start_page"), 1)
         end_page = _opt_int(payload.get("end_page"), 0)
         if start_page is None or end_page is None:
@@ -474,7 +489,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, workspace = _resolve_scope(request)
+        tenant, actor, workspace = await _resolve_scope(request)
         fields = payload.get("fields")
         if not isinstance(fields, dict) or not fields:
             return JSONResponse(
@@ -498,7 +513,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, workspace = _resolve_scope(request)
+        tenant, actor, workspace = await _resolve_scope(request)
         terms = payload.get("terms")
         if not isinstance(terms, list) or not terms:
             return JSONResponse(
@@ -524,7 +539,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, _ = _resolve_scope(request)
+        tenant, actor, _ = await _resolve_scope(request)
         try:
             data = await asyncio.to_thread(
                 svc.list_document_artifacts,
@@ -539,7 +554,7 @@ def create_documents_router() -> APIRouter:
     # ── Health ──────────────────────────────────────────────────────────
 
     @router.get("/health")
-    async def health(request: Request) -> Any:
+    def health(request: Request) -> Any:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
@@ -561,7 +576,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, _ = _resolve_scope(request)
+        tenant, actor, _ = await _resolve_scope(request)
         try:
             docs = await asyncio.to_thread(
                 svc.list_documents, tenant_id=tenant, actor_id=actor
@@ -581,7 +596,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, _ = _resolve_scope(request)
+        tenant, actor, _ = await _resolve_scope(request)
         try:
             data = await asyncio.to_thread(
                 svc.get_document_detail,
@@ -600,7 +615,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, _ = _resolve_scope(request)
+        tenant, actor, _ = await _resolve_scope(request)
         try:
             data = await asyncio.to_thread(
                 svc.get_document_detail,
@@ -627,7 +642,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, _ = _resolve_scope(request)
+        tenant, actor, _ = await _resolve_scope(request)
         try:
             data = await asyncio.to_thread(
                 svc.get_content,
@@ -653,7 +668,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, _ = _resolve_scope(request)
+        tenant, actor, _ = await _resolve_scope(request)
         library_id = str(payload.get("library_id", "")).strip()
         if not library_id:
             return JSONResponse(
@@ -678,7 +693,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, _ = _resolve_scope(request)
+        tenant, actor, _ = await _resolve_scope(request)
         library_id = str(payload.get("library_id", "")).strip()
         if not library_id:
             return JSONResponse(
@@ -701,7 +716,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, _actor, _ = _resolve_scope(request)
+        tenant, _actor, _ = await _resolve_scope(request)
         library_id = str(payload.get("library_id", "")).strip()
         query = str(payload.get("query", "")).strip()
         try:
@@ -732,7 +747,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, _actor, _ = _resolve_scope(request)
+        tenant, _actor, _ = await _resolve_scope(request)
         try:
             data = await asyncio.to_thread(
                 svc.job_status, tenant_id=tenant, job_id=job_id
@@ -752,7 +767,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, _actor, _ = _resolve_scope(request)
+        tenant, _actor, _ = await _resolve_scope(request)
         try:
             data = await asyncio.to_thread(
                 svc.job_events, tenant_id=tenant, job_id=job_id
@@ -768,7 +783,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, _ = _resolve_scope(request)
+        tenant, actor, _ = await _resolve_scope(request)
         try:
             data = await asyncio.to_thread(
                 svc.cancel_job, tenant_id=tenant, job_id=job_id, actor_id=actor
@@ -784,7 +799,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, _ = _resolve_scope(request)
+        tenant, actor, _ = await _resolve_scope(request)
         try:
             data = await asyncio.to_thread(
                 svc.retry_job, tenant_id=tenant, job_id=job_id, actor_id=actor
@@ -802,7 +817,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, _actor, _ = _resolve_scope(request)
+        tenant, _actor, _ = await _resolve_scope(request)
         try:
             data = await asyncio.to_thread(svc.metrics_snapshot, tenant_id=tenant)
             return {"ok": True, "metrics": data}
@@ -819,7 +834,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, _actor, _ = _resolve_scope(request)
+        tenant, _actor, _ = await _resolve_scope(request)
         try:
             data = await asyncio.to_thread(svc.capacity_snapshot, tenant_id=tenant)
             return {"ok": True, "capacity": data}
@@ -830,7 +845,7 @@ def create_documents_router() -> APIRouter:
             )
 
     @router.get("/ops/readiness")
-    async def documents_readiness(request: Request) -> Any:
+    def documents_readiness(request: Request) -> Any:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
@@ -844,7 +859,7 @@ def create_documents_router() -> APIRouter:
             )
 
     @router.get("/ops/retention")
-    async def documents_retention(request: Request) -> Any:
+    def documents_retention(request: Request) -> Any:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
@@ -880,7 +895,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, _actor, _ = _resolve_scope(request)
+        tenant, _actor, _ = await _resolve_scope(request)
         document_id = _opt_str(request.query_params.get("document_id"))
         event_type = _opt_str(request.query_params.get("event_type"))
         limit = _opt_int(request.query_params.get("limit"), 50) or 50
@@ -912,7 +927,7 @@ def create_documents_router() -> APIRouter:
         denied = _require_admin(request)
         if denied:
             return denied
-        _tenant, actor, _ = _resolve_scope(request)
+        _tenant, actor, _ = await _resolve_scope(request)
         try:
             report = await asyncio.to_thread(
                 svc.run_maintenance, dry_run=True, actor_id=actor
@@ -934,7 +949,7 @@ def create_documents_router() -> APIRouter:
         denied = _require_admin(request)
         if denied:
             return denied
-        _tenant, actor, _ = _resolve_scope(request)
+        _tenant, actor, _ = await _resolve_scope(request)
         try:
             report = await asyncio.to_thread(
                 svc.run_maintenance, dry_run=False, actor_id=actor
@@ -958,7 +973,7 @@ def create_documents_router() -> APIRouter:
         svc = _svc(request)
         if svc is None:
             return _unavailable()
-        tenant, actor, _ = _resolve_scope(request)
+        tenant, actor, _ = await _resolve_scope(request)
         clean_reason = (reason or "user_requested").strip()[:200] or "user_requested"
         try:
             data = await asyncio.to_thread(

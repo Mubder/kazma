@@ -549,7 +549,7 @@ class KazmaAppBuilder:
             _favicon = _STATIC_DIR / "img" / "kazma-icon.png"
 
         @self.app.get("/favicon.ico", include_in_schema=False)
-        async def _favicon_ico() -> FileResponse:
+        def _favicon_ico() -> FileResponse:
             if not _favicon.is_file():
                 from fastapi import HTTPException
 

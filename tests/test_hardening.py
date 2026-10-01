@@ -256,3 +256,23 @@ class TestFixIssues:
         # (other checks may still fail, but secrets should pass)
         secrets_fix = next((f for f in fixes if f["check"] == "check_no_hardcoded_secrets"), None)
         assert secrets_fix is None  # No secrets fix needed
+
+
+def test_the_scans_never_enter_environments_data_or_worktrees(tmp_path: Path) -> None:
+    """The suite walked root.rglob() and dropped .venv paths after the fact:
+    every scan descended into .venv, .git, the data folder and task
+    worktrees (about 50 s, on the server's loop, until 2026-10-01)."""
+    from kazma_core.security.hardening import _project_files
+
+    for rel in (
+        "src/app.py", ".venv/lib/site.py", ".git/hooks/h.py",
+        "kazma-data/workspace/w.py", ".claude/worktrees/task/other.py",
+    ):
+        f = tmp_path / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("x = 1\n", encoding="utf-8")
+
+    found = sorted(p.relative_to(tmp_path).as_posix() for p in _project_files(tmp_path, ".py"))
+    assert found == ["src/app.py"]
+    # Negative control: the old walk reached every one of them.
+    assert len(list(tmp_path.rglob("*.py"))) == 5

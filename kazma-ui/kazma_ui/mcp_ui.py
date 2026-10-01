@@ -160,7 +160,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
             return {"status": "error", "error": f"OAuth login failed: {exc}"}
 
     @router.post("/api/mcp/servers/{name}/oauth/clear")
-    async def api_oauth_clear(name: str) -> dict[str, Any]:
+    def api_oauth_clear(name: str) -> dict[str, Any]:
         """Forget the stored OAuth token for a server (logout)."""
         from kazma_core.mcp.oauth import clear_oauth
 
@@ -183,7 +183,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
             return {"ok": False, "error": safe_error(exc), "categories": []}
 
     @router.post("/api/mcp/servers")
-    async def api_add_server(req: MCPServerAddRequest) -> dict[str, str]:
+    def api_add_server(req: MCPServerAddRequest) -> dict[str, str]:
         """Add a new MCP server to the configuration."""
         result = agent.add_mcp_server(
             name=req.name,
@@ -199,8 +199,8 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
 
     @router.delete("/api/mcp/servers/{name}")
     async def api_remove_server(name: str) -> dict[str, str]:
-        """Remove an MCP server from configuration."""
-        result = agent.remove_mcp_server(name)
+        """Remove an MCP server from configuration (written in a thread: settings, YAML, vault)."""
+        result = await asyncio.to_thread(agent.remove_mcp_server, name)
         if result.get("status") != "ok":
             return result
 

@@ -28,7 +28,7 @@ def create_pipeline_router() -> APIRouter:
     router = APIRouter(prefix="/api/pipelines", tags=["pipelines"])
 
     @router.get("/scaffold", response_model=PipelineDAG)
-    async def get_pipeline_scaffold() -> PipelineDAG:
+    def get_pipeline_scaffold() -> PipelineDAG:
         """Return a blueprint scaffold template of a multi-agent visual pipeline graph."""
         scaffold = PipelineDAG(
             nodes=[
@@ -49,7 +49,7 @@ def create_pipeline_router() -> APIRouter:
         return scaffold
 
     @router.post("/validate")
-    async def validate_pipeline(dag_data: dict[str, Any]) -> JSONResponse:
+    def validate_pipeline(dag_data: dict[str, Any]) -> JSONResponse:
         """Validate an ingested drag-and-drop DAG model.
 
         Ensures:

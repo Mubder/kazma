@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -14,7 +15,11 @@ def test_root_handler_redirects_to_chat() -> None:
     src = _MISC.read_text(encoding="utf-8")
     assert "RedirectResponse" in src
     assert 'url="/chat"' in src
-    assert "dashboard.html" not in src.split("async def root")[1].split("async def ")[0]
+    # A plain def since 2026-10-01 (a redirect needs no event loop).
+    body = re.split(r"(?:async )?def root\(", src)[1]
+    body = re.split(r"\n\s*(?:@|(?:async )?def )", body)[0]
+    assert 'url="/chat"' in body
+    assert "dashboard.html" not in body
 
 
 def test_no_disclosure_css_survives_the_disclosure() -> None:

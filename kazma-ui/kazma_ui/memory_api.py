@@ -307,7 +307,7 @@ def register_memory_page(app: Any, templates: Any, agent: Any) -> None:
     """Mount HTML page on the main FastAPI app."""
 
     @app.get("/memory", response_class=HTMLResponse)
-    async def memory_page(request: Request) -> HTMLResponse:
+    def memory_page(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
             request,
             "memory.html",

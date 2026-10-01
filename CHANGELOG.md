@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## No GET route reads the database on the event loop; a settings write keeps the read cache (2026-10-01)
+
+- **A settings write no longer empties the read cache.** Every `set`,
+  `batch_set` and `delete` cleared the whole cache, including remembered
+  misses. Any write anywhere (the heartbeat, a session stamp) therefore sent
+  the next read of every setting back to the database: on Postgres a round
+  trip, often from the event loop. A write now drops only the key, its
+  parents and its children. A raw transaction, a reset and a YAML reload
+  still clear everything.
+- **The security hardening report no longer freezes the server.** Its checks
+  scanned the install, `.venv` and `.git` included, for about 50 seconds, on
+  the loop that serves every chat. They now walk only the project's own
+  files, about 5 seconds, in a worker thread.
+- **A new check calls every GET route the started app serves, twice.** It
+  fails on any database statement run on the server's loop during the second
+  call. Its first run found:
+  - the Scheduled page's list, which read the X schedule store on every poll;
+  - the Documents API, which looked up the active workspace for every request;
+  - the IDE, which resolved its workspace root through the store in every
+    async method, and listed folders and read files there too;
+  - the security disclosure and dependency stores (async methods with SQLite
+    inside);
+  - the embedder rebuild's status writes.
+  All of them run in threads now. Snapshot maintenance (a `VACUUM`) and every
+  page render are plain `def`s.
+- **The swarm task stream** read the task store once a second on the loop
+  for every open stream; it reads it in a thread.
+- **Async handlers that never await are declared.** Twelve are left (probes,
+  streams, background starts, and readers of state the loop owns), and each
+  states why it runs on the loop. A new one fails the build until it is a
+  plain `def` or gives a reason. This replaces the debt ratchet's count, which
+  went from 115 to 12 today.
+
 ## The IDE's hunk reject writes only checkpoint files; the worker registry moves to the data dir (2026-10-01)
 
 - **Rejecting a hunk in the IDE restores only a file the checkpoint holds.**

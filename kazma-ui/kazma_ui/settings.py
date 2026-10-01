@@ -871,74 +871,75 @@ class SettingsRouterBuilder:
                 rebuild_embeddings,
             )
 
-            current = get_rebuild_status()
-            if current.get("state") == "running":
-                return {"status": "already", "detail": "A rebuild is already running."}
             from datetime import UTC, datetime
 
-            model = get_embedding_model_name()
-            now_iso = datetime.now(UTC).isoformat()
-            _get_sm()._cs.set(
-                REBUILD_STATUS_KEY,
-                {
+            # Every status read and write below is a settings-store call: in
+            # a thread, never on the event loop (2026-10-01; the start, the
+            # finish and the failure each wrote it on the loop).
+            def _write(status: dict[str, Any]) -> None:
+                _get_sm()._cs.set(REBUILD_STATUS_KEY, status, category="embedding")
+
+            def _claim() -> str | None:
+                if get_rebuild_status().get("state") == "running":
+                    return None
+                name = get_embedding_model_name()
+                _write({
                     "state": "running",
-                    "model": model,
+                    "model": name,
                     "total": 0,
                     "done": 0,
-                    "started_at": now_iso,
+                    "started_at": datetime.now(UTC).isoformat(),
                     "finished_at": None,
                     "error": None,
-                },
-                category="embedding",
-            )
+                })
+                return name
 
+            model = await asyncio.to_thread(_claim)
+            if model is None:
+                return {"status": "already", "detail": "A rebuild is already running."}
 
             def _progress(done: int, total: int) -> None:
-                _get_sm()._cs.set(
-                    REBUILD_STATUS_KEY,
-                    {
-                        "state": "running",
-                        "model": model,
-                        "total": total,
-                        "done": done,
-                        "started_at": get_rebuild_status().get("started_at"),
-                        "finished_at": None,
-                        "error": None,
-                    },
-                    category="embedding",
-                )
+                _write({
+                    "state": "running",
+                    "model": model,
+                    "total": total,
+                    "done": done,
+                    "started_at": get_rebuild_status().get("started_at"),
+                    "finished_at": None,
+                    "error": None,
+                })
+
+            def _finished(summary: dict[str, Any]) -> None:
+                count = summary.get("episodes", 0) + summary.get("beliefs", 0)
+                _write({
+                    "state": "done",
+                    "model": summary.get("model") or model,
+                    "total": count,
+                    "done": count,
+                    "started_at": summary.get("started_at"),
+                    "finished_at": summary.get("finished_at"),
+                    "error": None,
+                })
+
+            def _failed(exc: Exception) -> None:
+                status = get_rebuild_status()
+                _write({
+                    "state": "error",
+                    "model": model,
+                    "total": status.get("total", 0),
+                    "done": status.get("done", 0),
+                    "started_at": status.get("started_at"),
+                    "finished_at": None,
+                    "error": safe_error(exc),
+                })
 
             async def _run() -> None:
                 try:
                     summary = await asyncio.to_thread(rebuild_embeddings, _progress)
-                    _get_sm()._cs.set(
-                        REBUILD_STATUS_KEY,
-                        {
-                            "state": "done",
-                            "model": summary.get("model") or model,
-                            "total": summary.get("episodes", 0) + summary.get("beliefs", 0),
-                            "done": summary.get("episodes", 0) + summary.get("beliefs", 0),
-                            "started_at": summary.get("started_at"),
-                            "finished_at": summary.get("finished_at"),
-                            "error": None,
-                        },
-                        category="embedding",
-                    )
+                    await asyncio.to_thread(_finished, summary)
                 except Exception as exc:  # noqa: BLE001
                     logger.error("[Settings] embedder rebuild failed: %s", exc)
-                    _get_sm()._cs.set(
-                        REBUILD_STATUS_KEY,
-                        {
-                            "state": "error",
-                            "model": model,
-                            "total": get_rebuild_status().get("total", 0),
-                            "done": get_rebuild_status().get("done", 0),
-                            "started_at": get_rebuild_status().get("started_at"),
-                            "finished_at": None,
-                            "error": safe_error(exc),
-                        },
-                        category="embedding",
-                    )
+                    await asyncio.to_thread(_failed, exc)
 
             from kazma_core.background import spawn_background
 
@@ -1506,13 +1507,20 @@ class SettingsRouterBuilder:
                 return _get_sm().get_diagnostics()
 
         @router.get("/api/security/hardening")
-        async def api_security_hardening() -> dict[str, Any]:
-            """Run the offline hardening suite (operator report, not a gate)."""
-            from pathlib import Path
+        def api_security_hardening() -> dict[str, Any]:
+            """Run the offline hardening suite (operator report, not a gate).
 
+            A plain ``def``: the checks are file scans of the install and
+            store reads written as coroutines, and they ran on the server's
+            event loop -- every stream waited while the install was scanned
+            (2026-10-01). Here they run on their own loop in a worker thread.
+            The install's own folder is scanned, never the working directory.
+            """
+            from kazma_core.paths import get_project_root, installed_project_root
             from kazma_core.security.hardening import SecurityHardeningRunner
 
-            report = await SecurityHardeningRunner(Path.cwd()).run_all_checks()
+            root = installed_project_root() or get_project_root()
+            report = asyncio.run(SecurityHardeningRunner(root).run_all_checks())
             return {
                 "total": report.total,
                 "passed": report.passed,
@@ -1624,7 +1632,8 @@ class SettingsRouterBuilder:
             """Scan installed skill manifests (local; no NVD/OSV required)."""
             from kazma_core.security.dependency_scanner import DependabotStyleScanner
 
-            scanner = DependabotStyleScanner()
+            # The scanner opens its database as it is built: in a thread.
+            scanner = await asyncio.to_thread(DependabotStyleScanner)
             try:
                 hits = await scanner.scan_skill_manifests()
             except Exception as exc:

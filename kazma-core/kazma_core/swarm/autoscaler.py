@@ -253,8 +253,13 @@ class AutoScaler:
 
     def save_templates(self) -> None:
         """Persist templates to JSON file atomically (the operator's copy,
-        never the shipped file -- see __init__)."""
-        data = [t.to_dict() for t in self._templates.values()]
+        never the shipped file -- see __init__).
+
+        Runs in a worker thread (the Swarm page's template routes): the
+        templates are copied in one step first, so a change made on the loop
+        meanwhile cannot break the iteration.
+        """
+        data = [t.to_dict() for t in list(self._templates.values())]
         p = Path(self._saved_path)
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_name(f".{p.name}.tmp.{os.getpid()}.{time.time_ns()}")

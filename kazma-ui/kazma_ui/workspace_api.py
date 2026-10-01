@@ -311,7 +311,7 @@ def create_workspace_router() -> APIRouter:
     @router.get("/recent")
     async def recent_files(limit: int = Query(20, ge=1, le=100)) -> dict[str, Any]:
         """Return the most recently modified files in the workspace."""
-        root = _resolve_workspace_root()
+        root = await asyncio.to_thread(_resolve_workspace_root)
         files = await asyncio.to_thread(_scan_recent_files, root, limit)
         return {"files": files}
 

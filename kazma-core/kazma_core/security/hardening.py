@@ -9,7 +9,9 @@ audit logging, and privilege escalation prevention.
 
 from __future__ import annotations
 
+import os
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,6 +48,30 @@ class HardeningReport:
     failed: int = 0
     critical_failures: int = 0
     timestamp: str = ""
+
+
+#: Folders the scans never enter: environments, caches, data, other checkouts.
+_SKIP_DIRS = frozenset({
+    ".venv", "venv", "__pycache__", ".git", "node_modules", "kazma-data",
+    ".kazma", ".claude", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    "dist", "build", "site-packages",
+})
+
+
+def _project_files(root: Path, suffix: str) -> Iterator[Path]:
+    """The project's files ending in *suffix*, never inside ``_SKIP_DIRS``.
+
+    The checks walked ``root.rglob(...)`` and dropped virtualenv paths after
+    the fact, so every scan descended into ``.venv``, ``.git`` and the data
+    folder: about 50 s for the suite on a checkout, and it ran on the
+    server's event loop until 2026-10-01. ``.claude`` holds task worktrees,
+    whole other checkouts.
+    """
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+        for name in filenames:
+            if name.endswith(suffix):
+                yield Path(dirpath) / name
 
 
 class SecurityHardeningRunner:
@@ -250,11 +276,7 @@ class SecurityHardeningRunner:
         """Scan .py files for hardcoded API keys, tokens, and passwords."""
         findings: list[str] = []
 
-        for py_file in self.project_root.rglob("*.py"):
-            # Skip virtualenvs and cache dirs
-            parts = py_file.parts
-            if any(d in parts for d in (".venv", "venv", "__pycache__", ".git", "node_modules")):
-                continue
+        for py_file in _project_files(self.project_root, ".py"):
             try:
                 content = py_file.read_text(encoding="utf-8", errors="ignore")
             except OSError:
@@ -298,7 +320,7 @@ class SecurityHardeningRunner:
         found = any(p.exists() for p in sandbox_paths)
         if not found:
             # Check if any YAML file contains sandbox config
-            for yaml_file in self.project_root.rglob("*.yaml"):
+            for yaml_file in _project_files(self.project_root, ".yaml"):
                 try:
                     content = yaml_file.read_text(encoding="utf-8", errors="ignore")
                     if "sandbox" in content.lower():
@@ -331,10 +353,7 @@ class SecurityHardeningRunner:
         rbac_indicators = ["rbac", "role_based", "permission", "authorization"]
         found = False
 
-        for py_file in self.project_root.rglob("*.py"):
-            parts = py_file.parts
-            if any(d in parts for d in (".venv", "venv", "__pycache__", ".git", "node_modules")):
-                continue
+        for py_file in _project_files(self.project_root, ".py"):
             try:
                 content = py_file.read_text(encoding="utf-8", errors="ignore").lower()
             except OSError:
@@ -575,11 +594,7 @@ class SecurityHardeningRunner:
         ]
 
         findings: list[str] = []
-        for py_file in self.project_root.rglob("*.py"):
-            parts = py_file.parts
-            if any(d in parts for d in (".venv", "venv", "__pycache__", ".git", "node_modules")):
-                continue
-
+        for py_file in _project_files(self.project_root, ".py"):
             for lineno, label in _scan_file_for_dangerous_calls(py_file):
                 findings.append(f"{py_file.relative_to(self.project_root)}:{lineno} ({label})")
 
