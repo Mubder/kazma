@@ -62,6 +62,19 @@
   function toast(msg, type) {
     if (window.KazmaStream && KazmaStream.toast) KazmaStream.toast(msg, type || 'info', 3000);
   }
+  // "Delete this result?" in the page's language, through the Kazma dialog
+  // (it asked in English, through the browser's own confirm()).
+  function confirmDelete() {
+    var question = i18n('research.ui.delete_confirm', 'Delete this research result?');
+    if (typeof window.kazmaConfirm === 'function') {
+      return window.kazmaConfirm({
+        message: question,
+        confirmText: i18n('research.ui.delete', 'Delete'),
+        danger: true,
+      });
+    }
+    return Promise.resolve(window.confirm(question));
+  }
   function timeAgo(iso) {
     if (!iso) return '—';
     try {
@@ -598,7 +611,7 @@
 
     delAndBack: async function () {
       if (!currentId) return;
-      if (!await confirm('Delete this research result?')) return;
+      if (!await confirmDelete()) return;
       var id = currentId;
       fetch(researchDeleteUrl(id), {
         method: 'DELETE',
@@ -617,7 +630,7 @@
     },
 
     del: async function (id) {
-      if (!await confirm('Delete this research result?')) return;
+      if (!await confirmDelete()) return;
       fetch(researchDeleteUrl(id), {
         method: 'DELETE',
         credentials: 'same-origin',
@@ -632,7 +645,7 @@
     },
 
     delArchived: async function (id) {
-      if (!await confirm('Delete this research result?')) return;
+      if (!await confirmDelete()) return;
       fetch(researchDeleteUrl(id), {
         method: 'DELETE',
         credentials: 'same-origin',

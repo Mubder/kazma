@@ -1314,22 +1314,10 @@ class SettingsRouterBuilder:
 
 
 
-        @router.get("/api/settings/skills")
-        def api_get_skills() -> list[dict[str, Any]]:
-            """List installed skills."""
-            return _get_sm().get_installed_skills()
-
-        @router.put("/api/settings/skills/{skill_id}/toggle")
-        def api_toggle_skill(skill_id: str, req: dict[str, Any]) -> dict[str, str]:
-            """Toggle skill enabled/disabled."""
-            _get_sm().toggle_skill(skill_id, req.get("enabled", True))
-            return {"status": "ok"}
-
-        @router.delete("/api/settings/skills/{skill_id}")
-        def api_uninstall_skill(skill_id: str) -> dict[str, str]:
-            """Uninstall a skill."""
-            _get_sm().uninstall_skill(skill_id)
-            return {"status": "ok"}
+        # Skills are switched and uninstalled through /api/skills/toggle and
+        # /api/skills/uninstall (skills_ui.py), from the Skills page and the
+        # Settings tab alike. Routes here wrote skills.<id>.enabled, which
+        # nothing reads, and "uninstalled" by writing it (2026-10-01).
 
         @router.get("/api/settings/appearance")
         def api_get_appearance() -> dict[str, Any]:
@@ -1853,14 +1841,11 @@ class SettingsRouterBuilder:
             """Test an MCP server connection."""
             return await _get_sm().test_mcp_server(name)
 
-        # Catch-all DELETE must come AFTER all specific routes above,
-        # otherwise it matches paths like /api/settings/account/tokens/{id}
-        # before the specific handler can fire.
-        @router.delete("/api/settings/{key:path}")
-        def api_delete_setting(key: str) -> dict[str, str]:
-            """Delete a setting (reverts to YAML default)."""
-            config_store.delete(key)
-            return {"status": "ok"}
+        # No catch-all DELETE /api/settings/{key:path}: nothing called it, and
+        # it deleted whatever key the path named -- the provider list, the
+        # platform users, a secret's vault pointer -- with no check
+        # (2026-10-01). A setting is changed through the single and batch
+        # saves, which validate it (kazma_core/settings_validation.py).
 
     def build(self) -> APIRouter:
         self._build_general_routes()

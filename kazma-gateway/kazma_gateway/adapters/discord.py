@@ -233,7 +233,7 @@ class DiscordAdapter(BaseAdapter):
             if self._http:
                 await self._http.aclose()
                 self._http = None
-            logger.info("[discord] Adapter stopped")
+            logger.info("[discord] Gateway listener stopped")
 
     def _gateway_url(self) -> str:
         """Where to connect: READY's resume URL when resuming, else the default.

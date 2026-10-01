@@ -57,6 +57,11 @@ _TEST_DATA_DIR = _tempfile.mkdtemp(prefix="kazma-test-data-")
 _TEST_USER_HOME = _tempfile.mkdtemp(prefix="kazma-test-home-")
 os.environ["KAZMA_DATA_DIR"] = _TEST_DATA_DIR
 os.environ["KAZMA_USER_HOME"] = _TEST_USER_HOME
+# The skill folders in the user's home (~/.agents/skills and its siblings,
+# agent_skills/discovery.skills_home) too (2026-10-01): the live install runs
+# as the same user and reads them, an install writes there and an uninstall
+# removes from there.
+os.environ["KAZMA_SKILLS_HOME"] = _tempfile.mkdtemp(prefix="kazma-test-skills-home-")
 #: Every per-store path override ``kazma_core/paths.py`` reads.
 _STORE_PATH_OVERRIDES = (
     "KAZMA_BACKUPS_DIR",

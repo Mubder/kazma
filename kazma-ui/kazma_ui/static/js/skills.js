@@ -56,7 +56,9 @@ function skillsApp() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ skill_id: skillId, enabled: enabled })
                 });
-                showToast(enabled ? 'Skill enabled' : 'Skill disabled', 'success');
+                showToast(enabled
+                    ? _k('skills.ui.enabled', 'Skill enabled')
+                    : _k('skills.ui.disabled', 'Skill disabled'), 'success');
             } catch (e) {
                 showToast(_k('skills.ui.toggle_failed', 'Failed to toggle skill'), 'error');
             }

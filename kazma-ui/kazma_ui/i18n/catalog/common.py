@@ -1664,6 +1664,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "توقف وضع الصوت المباشر",
         "en": "Live voice mode stopped",
     },
+    # /voice status and the live button's title (2026-10-01): English in
+    # every language until then.
+    "voice.ui.status_line": {
+        "ar": "تحويل الكلام إلى نص: {stt} | تحويل النص إلى كلام: {tts} | الردود المسموعة: {replies}",
+        "en": "STT: {stt} | TTS: {tts} | Spoken replies: {replies}",
+    },
+    "voice.ui.replies_on": {
+        "ar": "مفعّلة",
+        "en": "on",
+    },
+    "voice.ui.replies_off": {
+        "ar": "متوقفة",
+        "en": "off",
+    },
+    "voice.ui.status_live": {
+        "ar": "الوضع المباشر يعمل",
+        "en": "live mode on",
+    },
+    "voice.ui.live_stop_title": {
+        "ar": "أوقف الصوت المباشر",
+        "en": "Stop live voice",
+    },
     "ide.dlg.close_tab_title": {
         "ar": "إغلاق التبويب",
         "en": "Close tab",
@@ -1683,6 +1705,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "ide.dlg.new_file_message": {
         "ar": "المسار (بالنسبة إلى جذر مساحة العمل)",
         "en": "Path (relative to workspace root)",
+    },
+    "ide.dlg.new_file_placeholder": {
+        "ar": "مثلًا src/new_module.py",
+        "en": "e.g. src/new_module.py",
     },
     "ide.dlg.create": {
         "ar": "إنشاء",

@@ -288,7 +288,7 @@
         },
 
         async deletePlatformUser(username) {
-            if (!await confirm('Delete user ' + username + '?')) return;
+            if (!await confirm(_t('settings.ops.delete_user_confirm', 'Delete user {name}?', { name: _iso(username) }))) return;
             try {
                 const resp = await fetch('/api/saas/users/' + encodeURIComponent(username), {
                     method: 'DELETE',

@@ -977,10 +977,10 @@ function workspaceApp() {
         ? await window.kazmaConfirm({
             title: t('workspace.delete_title'),
             message: t('workspace.delete_confirm', { name: name, path: path }),
-            confirmLabel: t('workspace.delete_registry'),
+            confirmText: t('workspace.delete_registry'),
             danger: true,
           })
-        : confirm('Remove workspace "' + name + '" from the list?');
+        : confirm(t('workspace.delete_confirm', { name: name, path: path }));
       if (!okRemove) return;
 
       let deleteFiles = false;
@@ -989,10 +989,10 @@ function workspaceApp() {
           ? await window.kazmaConfirm({
               title: t('workspace.delete_files_title'),
               message: t('workspace.delete_files_confirm', { path: path }),
-              confirmLabel: t('workspace.delete_files_btn'),
+              confirmText: t('workspace.delete_files_btn'),
               danger: true,
             })
-          : confirm('Also DELETE all files on disk at:\n' + path + '\n\nThis cannot be undone.');
+          : confirm(t('workspace.delete_files_confirm', { path: path }));
       }
 
       try {
@@ -1232,12 +1232,12 @@ function workspaceApp() {
       if (this.ghOAuthChecked && !this.ghOAuthConfigured) {
         const useSetup = window.kazmaConfirm
           ? await window.kazmaConfirm({
-              title: 'GitHub OAuth not configured',
-              message: 'Create a GitHub OAuth App and set GITHUB_OAUTH_CLIENT_ID / GITHUB_OAUTH_CLIENT_SECRET in .env, then restart Kazma. Or use a Personal Access Token (PAT) on this page instead.',
-              confirmText: 'Open setup guide',
-              cancelText: 'Use PAT instead',
+              title: t('workspace.oauth_missing_title'),
+              message: t('workspace.oauth_missing_message'),
+              confirmText: t('workspace.oauth_open_guide'),
+              cancelText: t('workspace.oauth_use_pat'),
             })
-          : confirm('GitHub OAuth is not configured. OK = open setup guide, Cancel = stay here for PAT.');
+          : confirm(t('workspace.oauth_missing_native'));
         if (useSetup) {
           window.open('/api/github/oauth/start', '_blank');
         } else if (this.showPatModal !== undefined) {
@@ -1269,9 +1269,9 @@ function workspaceApp() {
 
     async disconnectGitHub() {
       if (!(await window.kazmaConfirm({
-        title: 'Disconnect GitHub',
+        title: t('workspace.disconnect_title'),
         message: t('workspace.disconnect_confirm'),
-        confirmText: 'Disconnect',
+        confirmText: t('workspace.disconnect_btn'),
         danger: true,
       }))) return;
       try {
@@ -1313,41 +1313,52 @@ function workspaceApp() {
         if (!resp.ok) return;
         const pr = await resp.json();
         if (pr.error) { KazmaStream.toast(pr.error, 'error', 3000); return; }
-        const lines = [`#${pr.number} ${pr.title}`, `${pr.additions || 0} additions / ${pr.deletions || 0} deletions across ${pr.changed_files || 0} files`, `State: ${pr.merged ? 'merged' : pr.state}${pr.draft ? ' (draft)' : ''}${pr.mergeable_state ? ' / ' + pr.mergeable_state : ''}`];
-        if (pr.reviews && pr.reviews.length) lines.push('Reviews: ' + pr.reviews.map(r => `${r.user}=${r.state}`).join(', '));
-        
-        const actions = [{ label: 'Open on GitHub', variant: 'btn-primary', handler: () => window.open(pr.html_url, '_blank') }];
+        // The PR's own words (title, body, user names, GitHub's states) stay as
+        // written; the frame around them is the page's language.
+        const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+        const state = pr.merged ? t('workspace.pr_state_merged') : tOr('workspace.pr_state_' + pr.state, pr.state);
+        const lines = [
+          `<span translate="no" dir="auto">#${esc(pr.number)} ${esc(pr.title)}</span>`,
+          esc(t('workspace.pr_diff_stats', { additions: pr.additions || 0, deletions: pr.deletions || 0, files: pr.changed_files || 0 })),
+          esc(t('workspace.pr_state_line', { state: state + (pr.draft ? ' (' + t('workspace.pr_draft') + ')' : '') + (pr.mergeable_state ? ' / ' + pr.mergeable_state : '') })),
+        ];
+        if (pr.reviews && pr.reviews.length) {
+          lines.push(esc(t('workspace.pr_reviews_line', { reviews: pr.reviews.map(r => `${r.user}=${r.state}`).join(', ') })));
+        }
+
+        const actions = [{ label: t('workspace.pr_open_github'), variant: 'btn-primary', handler: () => window.open(pr.html_url, '_blank') }];
         if (pr.state === 'open' && !pr.merged) {
+          const mergeQuestion = t('workspace.pr_merge_confirm', { number: pr.number, title: pr.title });
           actions.push({
-            label: 'Merge PR',
+            label: t('workspace.pr_merge'),
             variant: 'btn-success',
             handler: async () => {
               const okMerge = window.kazmaConfirm
                 ? await window.kazmaConfirm({
-                    title: 'Merge pull request',
-                    message: `Merge PR #${pr.number} (${pr.title})?`,
-                    confirmText: 'Merge',
+                    title: t('workspace.pr_merge_title'),
+                    message: mergeQuestion,
+                    confirmText: t('workspace.pr_merge_btn'),
                     danger: true,
                   })
-                : window.confirm(`Merge PR #${pr.number} (${pr.title})?`);
+                : window.confirm(mergeQuestion);
               if (okMerge) {
                 try {
                   const mResp = await fetch(`/api/github/pulls/${pr.number}/merge`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({merge_method: 'squash'}) });
                   const mData = await mResp.json();
                   if (mData.merged) {
-                    KazmaStream.toast(`PR #${pr.number} merged successfully!`, 'success', 3000);
+                    KazmaStream.toast(t('workspace.pr_merged', { number: pr.number }), 'success', 3000);
                     this.ghLoadTab('pulls');
                   } else {
-                    KazmaStream.toast(mData.message || mData.error || 'Failed to merge PR', 'error', 3000);
+                    KazmaStream.toast(mData.message || mData.error || t('workspace.pr_merge_failed'), 'error', 3000);
                   }
                 } catch(e) { KazmaStream.toast(e.message, 'error', 3000); }
               }
             }
           });
         }
-        actions.push({ label: 'Close', variant: 'btn-secondary' });
+        actions.push({ label: t('common.close'), variant: 'btn-secondary' });
 
-        showModal({ title: 'Pull Request #' + number, body: '<pre style="white-space:pre-wrap;font-family:var(--font-mono);font-size:0.78rem;line-height:1.6;color:var(--text-secondary);">' + (pr.body || '(no description)').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).slice(0, 1200) + '</pre><p style="margin-top:12px;font-size:0.72rem;color:var(--text-muted);">' + lines.join('<br>') + '</p>', size: 'lg', actions });
+        showModal({ title: t('workspace.pr_modal_title', { number: number }), body: '<pre translate="no" dir="auto" style="white-space:pre-wrap;font-family:var(--font-mono);font-size:0.78rem;line-height:1.6;color:var(--text-secondary);">' + (pr.body ? esc(pr.body.slice(0, 1200)) : esc(t('workspace.pr_no_description'))) + '</pre><p style="margin-top:12px;font-size:0.72rem;color:var(--text-muted);">' + lines.join('<br>') + '</p>', size: 'lg', actions });
       } catch (e) { /* non-fatal */ }
     },
 
@@ -1492,17 +1503,17 @@ function workspaceApp() {
           })
         });
         if (resp.ok) {
-          KazmaStream.toast('GitHub App configured successfully!', 'success', 2500);
+          KazmaStream.toast(t('workspace.app_configured'), 'success', 2500);
           this.showAppModal = false;
           this.ghHasToken = true;
           this.ghTokenValid = true;
           await this.loadGitHubStatus();
         } else {
           const err = await resp.json();
-          KazmaStream.toast(err.detail || 'Failed to save App config', 'error', 3000);
+          KazmaStream.toast(err.detail || t('workspace.app_config_failed'), 'error', 3000);
         }
       } catch (e) {
-        KazmaStream.toast('Error saving App config: ' + e.message, 'error', 3000);
+        KazmaStream.toast(t('workspace.app_config_error', { error: e.message }), 'error', 3000);
       }
     },
 

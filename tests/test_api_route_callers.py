@@ -119,7 +119,6 @@ NOT_CALLED_BY_A_PAGE: dict[str, str] = {
         "the model options as one document; the pages read /api/models, "
         "/api/models/profiles and /api/models/saved"
     ),
-    "/api/settings/skills": "the installed skills; the Skills page lists them with /api/skills",
     "/api/settings/memory/backends/rebuild/status": (
         "rebuild progress for API clients; the Embedder section shows it "
         "through its own status route"

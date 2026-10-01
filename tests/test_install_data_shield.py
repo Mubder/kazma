@@ -116,6 +116,46 @@ def test_the_conftest_clears_every_store_override():
     assert read - pinned - cleared == set(), "a store override the conftest neither pins nor clears"
 
 
+def test_the_skill_folders_are_under_the_test_temp_folders():
+    """The user-level skill folders live in the user's home, outside the data
+    dir: the live install runs as the same user and reads them, an install
+    writes there and an uninstall removes from there (2026-10-01)."""
+    from kazma_core.agent_skills.discovery import skill_base_dirs, skills_home, user_skill_folders
+
+    user_scope = [path for scope, path in skill_base_dirs() if scope == "user"]
+    outside = [str(p) for p in [skills_home(), *user_skill_folders(), *user_scope] if not _under_temp(p)]
+    assert not outside, f"skill folders outside the suite's temp folders: {outside}"
+
+
+def test_only_skills_home_reads_the_home_folder():
+    """Every skill folder in the home comes from discovery.skills_home(), so
+    the one pin covers them all."""
+    folder = REPO / "kazma-core" / "kazma_core" / "agent_skills"
+    reads = {
+        f"{path.name}:{n}"
+        for path in sorted(folder.glob("*.py"))
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if "Path.home()" in line or "expanduser(\"~\")" in line or "legacy_user_home" in line
+    }
+    assert reads == {f"discovery.py:{_line_of('discovery.py', 'Path.home()')}"}, reads
+
+
+def _line_of(name: str, needle: str) -> int:
+    path = REPO / "kazma-core" / "kazma_core" / "agent_skills" / name
+    return next(n for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1) if needle in line)
+
+
+def test_without_the_pin_the_skill_folders_are_the_real_home():
+    """Negative control: with KAZMA_SKILLS_HOME removed, a fresh interpreter
+    resolves the skill folders into the user's real home."""
+    env = {k: v for k, v in os.environ.items() if k != "KAZMA_SKILLS_HOME"}
+    out = subprocess.run(
+        [sys.executable, "-c", "from kazma_core.agent_skills.discovery import skills_home; print(skills_home())"],
+        cwd=REPO, env=env, capture_output=True, text=True, timeout=60, check=True,
+    ).stdout.strip()
+    assert Path(out).resolve() == Path.home().resolve()
+
+
 def test_without_the_pin_the_same_code_resolves_into_the_checkout():
     """Negative control: in a fresh interpreter started in the checkout with
     the pins removed, paths resolve to <checkout>/kazma-data -- the live data

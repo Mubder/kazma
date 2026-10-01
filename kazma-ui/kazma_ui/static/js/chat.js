@@ -110,7 +110,9 @@
     var s = ti(key, fallback);
     if (vars) {
       Object.keys(vars).forEach(function(k) {
-        s = s.replace(new RegExp('\\{' + k + '\\}', 'g'), String(vars[k]));
+        // A function, so a value holding "$&" or "$'" is inserted as it is.
+        var value = String(vars[k]);
+        s = s.replace(new RegExp('\\{' + k + '\\}', 'g'), function() { return value; });
       });
     }
     return s;
@@ -1218,8 +1220,10 @@
       sendBtn.disabled = false;
       sendBtn.classList.remove('stop-mode');
       sendBtn.title = isAbortCommand(draft)
-        ? 'Abort the running task'
-        : (steerBody(draft) ? 'Send steer (Enter)' : 'Type your steer, then Enter');
+        ? ti('abort_task_title', 'Abort the running task')
+        : (steerBody(draft)
+          ? ti('send_steer_title', 'Send steer (Enter)')
+          : ti('type_steer_title', 'Type your steer, then Enter'));
       sendBtn.innerHTML = _SEND_SVG;
       return;
     }
@@ -1296,7 +1300,7 @@
           onInputResize.call(inputEl);
           if (window.showToast) {
             window.showToast(
-              'Steer queued — add your note, then Enter to apply.',
+              ti('steer_queued', 'Steer queued — add your note, then Enter to apply.'),
               'info', 2800);
           }
           return;
@@ -2762,7 +2766,7 @@
       if (!_steerText) {
         // Keep the draft queued so the user can type the note.
         if (window.showToast) window.showToast(
-          'Steer queued — add your note, then Enter to apply.', 'info', 3500);
+          ti('steer_queued', 'Steer queued — add your note, then Enter to apply.'), 'info', 3500);
         if (inputEl && !String(inputEl.value || '').trim()) {
           inputEl.value = _steerHard ? '/steer! ' : '/steer ';
         }
@@ -2776,7 +2780,7 @@
       }
       if (!chatSessionId) {
         if (window.showToast) window.showToast(
-          'No active task to steer — send a message first.', 'info', 3000);
+          ti('steer_no_task_send_first', 'No active task to steer — send a message first.'), 'info', 3000);
         return;
       }
       // Visible in the transcript; composer clears so they can queue another.
@@ -2785,7 +2789,9 @@
       inputEl.style.height = 'auto';
       syncSendButtonForDraft();
       if (window.showToast) window.showToast(
-        _steerHard ? '⏸️ Pausing task to apply your steer…' : '🧭 Steer noted — applying on the next step.',
+        _steerHard
+          ? ti('steer_pausing', '⏸️ Pausing task to apply your steer…')
+          : ti('steer_noted', '🧭 Steer noted — applying on the next step.'),
         'info', 3000);
       fetch('/api/chat/steer', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2807,7 +2813,7 @@
             fallback = String(fallback || '').replace(/^\/steer!?\s*/i, '').trim();
             if (fallback) {
               if (window.showToast) window.showToast(
-                'No paused task — sending as a new message.', 'info', 3000);
+                ti('steer_no_paused_task', 'No paused task — sending as a new message.'), 'info', 3000);
               if (inputEl) inputEl.value = fallback;
               sendMessage();
             } else if (window.showToast) {
@@ -2822,7 +2828,7 @@
         }
         if (body && body.demoted && window.showToast) {
           window.showToast(
-            'Steer will apply on the next step (could not pause in time).',
+            ti('steer_next_step', 'Steer will apply on the next step (could not pause in time).'),
             'info', 3500);
           return;
         }
@@ -2861,14 +2867,14 @@
           if (body && body.ok === false && body.reason === 'no_active_task') {
             _releaseHitlComposer('steer-idle');
             if (window.showToast) window.showToast(
-              'No paused task — sending as a new message.', 'info', 3000);
+              ti('steer_no_paused_task', 'No paused task — sending as a new message.'), 'info', 3000);
             if (inputEl) inputEl.value = text;
             sendMessage();
             return;
           }
           appendMessage('user', '/steer ' + text);
           if (window.showToast) window.showToast(
-            '🧭 Steering the paused task with your note.', 'info', 3000);
+            ti('steer_steering_paused', '🧭 Steering the paused task with your note.'), 'info', 3000);
         }).catch(function() {
           appendMessage('user', '/steer ' + text);
         });
@@ -2891,7 +2897,7 @@
       var _head = _cmdHead(text);
       if (!_knownHeads[_head] && window.showToast) {
         window.showToast(
-          'Unknown command ' + _head + ' — sending anyway. /help lists what works here.',
+          tiFmt('unknown_command', 'Unknown command {command} — sending anyway. /help lists what works here.', { command: _head }),
           'info', 3500);
       }
     }
@@ -4735,7 +4741,9 @@
         if (rxnBtn) {
           var reaction = rxnBtn.dataset.reaction;
           rxnBtn.classList.toggle('active');
-          KS.toast(reaction === 'up' ? '\uD83D\uDC4D Thanks for the feedback!' : '\uD83D\uDC4E Got it. I\'ll try to improve.', 'info', 2000);
+          KS.toast(reaction === 'up'
+            ? ti('feedback_thanks', '\uD83D\uDC4D Thanks for the feedback!')
+            : ti('feedback_improve', '\uD83D\uDC4E Got it. I\'ll try to improve.'), 'info', 2000);
         } else if (btn && btn.dataset.action === 'copy') {
           copyAssistantMessage(wrapper);
         } else if (btn && btn.dataset.action === 'speak') {
@@ -6126,7 +6134,7 @@
       var mine = wrap && wrap.dataset.speakId && wrap.dataset.speakId === owner;
       btn.classList.toggle('is-speaking', !!mine);
       btn.textContent = mine ? '⏹' : '🔊';
-      btn.title = mine ? 'Stop reading' : 'Read aloud';
+      btn.title = mine ? ti('msg_stop_reading', 'Stop reading') : ti('msg_read_aloud', 'Read aloud');
     }
   }
 
@@ -6521,7 +6529,7 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.status === 'ok') {
-          KS.toast(pinned ? 'Session pinned' : 'Session unpinned', 'success', 2000);
+          KS.toast(pinned ? ti('session_pinned', 'Session pinned') : ti('session_unpinned', 'Session unpinned'), 'success', 2000);
           for (var i = 0; i < sessions.length; i++) {
             if (sessions[i].session_id === sessionId) {
               sessions[i].pinned = !!data.pinned;
@@ -6615,12 +6623,16 @@
     var done = function() {
       if (window.KS && KS.toast) KS.toast(tiFmt('copied_session_id', 'Copied ID — /session {id} on Telegram/Discord', { id: text.slice(-8) }), 'success', 3500);
     };
+    // No clipboard: show the id in a field the user can copy from.
+    var showForCopy = function() {
+      var label = ti('session_id_label', 'Session ID');
+      if (window.kazmaPrompt) window.kazmaPrompt({ title: label, defaultValue: text });
+      else window.prompt(label, text);
+    };
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(payload).then(done).catch(function() {
-        window.prompt('Session ID', text);
-      });
+      navigator.clipboard.writeText(payload).then(done).catch(showForCopy);
     } else {
-      window.prompt('Session ID', text);
+      showForCopy();
     }
   }
 
@@ -6860,12 +6872,14 @@
           messagesEl.innerHTML =
             '<div class="chat-welcome">' +
               '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
-              '<h2>Session ' + escapeHtml(sessionId.slice(0, 8)) + '</h2>' +
-              '<p>Failed to load messages: ' + escapeHtml((err && err.message) || String(err)) + '</p>' +
+              '<h2>' + escapeHtml(tiFmt('session_heading', 'Session {id}', { id: sessionId.slice(0, 8) })) + '</h2>' +
+              '<p>' + escapeHtml(tiFmt('session_messages_failed', 'Failed to load messages: {error}', { error: (err && err.message) || String(err) })) + '</p>' +
             '</div>';
         }
         KS.toast(
-          'Failed to load session messages' + (err && err.message ? ' (' + err.message + ')' : '') + ' — retrying…',
+          tiFmt('session_messages_retrying', 'Failed to load session messages{detail} — retrying…', {
+            detail: err && err.message ? ' (' + err.message + ')' : '',
+          }),
           'error', 4000
         );
         if (_loadMsgAttempts < 2) {

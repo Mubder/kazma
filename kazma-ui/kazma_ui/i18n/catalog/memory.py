@@ -2132,6 +2132,24 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تنظيف",
         "en": "Clean up",
     },
+    # The graph's truncation notice and query-path toast (2026-10-01): written
+    # in English in every language until then.
+    "memory.console.hidden_connections": {
+        "ar": "روابط مخفية: {n}",
+        "en": "connections hidden: {n}",
+    },
+    "memory.console.graph_trunc_notice": {
+        "ar": "{summary} — استخدم التصفية لتضييق العرض.",
+        "en": "{summary} — filter to narrow the view.",
+    },
+    "memory.console.path_highlighted": {
+        "ar": "عُقد المسار المُبرزة: {n}",
+        "en": "Path: {n} nodes highlighted",
+    },
+    "memory.console.path_no_match": {
+        "ar": "لا عُقد تطابق مسار الاستعلام",
+        "en": "No matching nodes for the query path",
+    },
     "memory.console.snapshots_deleted_one": {
         "ar": "لقطة واحدة أقدم من {days} يوم",
         "en": "1 snapshot older than {days}d",

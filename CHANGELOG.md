@@ -1,5 +1,51 @@
 # CHANGELOG
 
+## Settings' skill controls work; the pull-request viewer shows titles as text; scripts speak Arabic (2026-10-01)
+
+- **The pull-request viewer could run a PR title as code.** Workspace →
+  GitHub → a pull request opens a window built as HTML. It escaped the PR's
+  description but put its title, the reviewers' names and GitHub's merge
+  state in as they came. Anyone who can open a pull request on the
+  repository chooses its title, so a title like `<img src=x onerror=...>`
+  ran script in your page when you opened it. Every value from the pull
+  request is now shown as text, and the window's own words follow the page
+  language.
+- **Settings → Skills changed nothing.** Its switch and its Uninstall button
+  wrote a setting nothing reads, and Uninstall said "Skill uninstalled", even
+  for skills built into Kazma. The tab now uses the Skills page's own
+  actions: the switch really switches the skill's tools on or off, Uninstall
+  is offered only for skills you installed, and an uninstall that removed
+  nothing says so. Switching a skill now needs an admin, like installing one.
+- **No more "delete any setting" route.** The server had a route that deleted
+  whatever setting its address named, with no check: the provider list,
+  the user accounts, a key's link to the vault. No page used it. It is gone;
+  settings are changed through the saves, which validate them.
+- **Toasts, dialogs and button titles follow the page language.** 57 messages
+  that scripts show after a click were English in every language. Among them:
+  the chat's steer messages, "Read aloud", "Session pinned", the
+  "Unknown command" hint and the feedback thanks. Also Settings' "Profile saved"
+  and "Rebuild started", the voice status line, Research's delete question,
+  the Workspace's GitHub dialogs and the memory graph's path messages. All
+  now come from the translation catalog, in English and Arabic. A new check
+  reads every script and fails on English text shown to a person, so this
+  stays fixed.
+- **Two delete buttons said "Confirm".** Workspace's "Remove from list" and
+  "Delete files too" dialogs passed their button text under a name the
+  dialog ignores. They say what they do now. A check now holds every dialog
+  option to the ones the dialog reads.
+- **The Dashboard's translations go into its script safely.** 71 translated
+  strings were pasted into the page's script inside quotes. A translation
+  containing a newline would have stopped the whole script, and "&" arrived
+  as "&amp;". They now go in through `tojson`, which a check enforces.
+- **Tests no longer use your real skill folders.** Kazma reads Agent Skills
+  from `~/.agents/skills` and its siblings, which the live install also
+  reads. The test suite now points those folders at a temporary folder
+  (`KAZMA_SKILLS_HOME`, new). Uninstalling from a named folder now removes
+  only from that folder; before, a test could delete a skill of the same
+  name from your real `~/.kazma`.
+- Discord's log no longer says "Adapter stopped" twice per stop; the
+  listener's own line now says "Gateway listener stopped".
+
 ## Kazma's names are held on PyPI (2026-10-01)
 
 - **`kazma` and the seven names around it are reserved.** All eight were

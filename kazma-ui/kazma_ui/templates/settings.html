@@ -1710,12 +1710,12 @@
             </div>
 
             <div class="skills-grid">
-                <template x-for="skill in filteredSkills" :key="skill.name">
+                <template x-for="skill in filteredSkills" :key="skill.id">
                     <div class="skill-card">
                         <div class="skill-header">
                             <h3 translate="no" x-text="skill.name"></h3>
                             <label class="toggle">
-                                <input type="checkbox" :checked="skill.enabled !== false" @change="toggleSkill(skill.name, $event.target.checked)">
+                                <input type="checkbox" :checked="skill.enabled !== false" @change="toggleSkill(skill, $event.target.checked)">
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
@@ -1727,7 +1727,9 @@
                             <span x-show="skill.author" x-cloak>{{ t('settings.by') }} <span translate="no" x-text="skill.author"></span></span>
                         </div>
                         <div class="skill-actions">
-                            <button class="btn btn-danger btn-sm" @click="uninstallSkill(skill.name)">{{ t('settings.uninstall') }}</button>
+                            {# A built-in skill ships with Kazma: it is switched off, never uninstalled. #}
+                            <span class="text-muted" x-show="skill.builtin" x-cloak>{{ t('skills.builtin') }}</span>
+                            <button class="btn btn-danger btn-sm" x-show="!skill.builtin" x-cloak @click="uninstallSkill(skill)">{{ t('settings.uninstall') }}</button>
                         </div>
                     </div>
                 </template>

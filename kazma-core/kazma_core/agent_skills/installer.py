@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from kazma_core.agent_skills.discovery import user_agent_skills_dir
+from kazma_core.agent_skills.discovery import user_agent_skills_dir, user_skill_folders
 from kazma_core.agent_skills.parser import is_safe_skill_name, parse_skill_md
 from kazma_core.http_tls import shared_ssl_context
 
@@ -604,25 +604,18 @@ async def _attach_basic_certification(result: InstallResult) -> InstallResult:
 
 
 def uninstall_skill(name: str, *, target_dir: Path | None = None) -> InstallResult:
-    """Remove an installed Agent Skill by name from the user skills dir."""
-    dest = target_dir or user_agent_skills_dir()
-    try:
-        target = _assert_skill_dest(dest, name)
-    except ValueError as exc:
-        return InstallResult(
-            success=False,
-            message="Invalid skill name",
-            source=name,
-            errors=[str(exc)],
-        )
-    # Project-local + legacy homes (read/remove only — no new writes to legacy)
-    try:
-        from kazma_core.paths import agent_skills_dir, legacy_user_home
+    """Remove an installed Agent Skill by name.
 
-        alts = [
-            _assert_skill_dest(agent_skills_dir(), name),
-            _assert_skill_dest(legacy_user_home() / "agent-skills", name),
-        ]
+    With ``target_dir``, from that folder only: the caller named it. Without,
+    from every user folder Kazma installs to or once did
+    (``discovery.user_skill_folders``). A named folder used to be searched AND
+    the legacy home, so a test uninstalling from its temporary folder also
+    deleted a same-named skill from the developer's real ``~/.kazma``
+    (2026-10-01).
+    """
+    folders = [target_dir] if target_dir is not None else user_skill_folders()
+    try:
+        targets = [_assert_skill_dest(folder, name) for folder in folders]
     except ValueError as exc:
         return InstallResult(
             success=False,
@@ -630,19 +623,9 @@ def uninstall_skill(name: str, *, target_dir: Path | None = None) -> InstallResu
             source=name,
             errors=[str(exc)],
         )
-    except Exception:
-        try:
-            alts = [_assert_skill_dest(Path.home() / ".kazma" / "agent-skills", name)]
-        except ValueError as exc:
-            return InstallResult(
-                success=False,
-                message="Invalid skill name",
-                source=name,
-                errors=[str(exc)],
-            )
     removed_from: list[str] = []
     seen: set[str] = set()
-    for path in (target, *alts):
+    for path in targets:
         key = str(path.resolve()) if path.exists() else str(path)
         if key in seen:
             continue
@@ -658,7 +641,7 @@ def uninstall_skill(name: str, *, target_dir: Path | None = None) -> InstallResu
             success=False,
             message="Skill not found",
             source=name,
-            errors=[f"No installed skill named {name!r} under {dest}"],
+            errors=[f"No installed skill named {name!r} under {', '.join(str(f) for f in folders)}"],
         )
     return InstallResult(
         success=True,

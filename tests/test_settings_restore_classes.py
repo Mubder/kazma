@@ -69,9 +69,6 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
     "kazma-ui/kazma_ui/app.py::_bootstrap_services": ("llm.",),
     "kazma-ui/kazma_ui/providers.py::_purge": ("connectors.",),
     "kazma-ui/kazma_ui/routes_direct/settings.py::_save": ("memory.v2.", "knowledge."),
-    "kazma-ui/kazma_ui/settings.py::api_delete_setting": (
-        "the page deletes a setting it shows; the key falls back to kazma.yaml's value"
-    ),
     "kazma-ui/kazma_ui/settings.py::api_save_document_settings": ("documents.",),
     "kazma-ui/kazma_ui/settings.py::api_save_voice_settings": ("voice.",),
     "kazma-ui/kazma_ui/settings.py::api_update_settings": (

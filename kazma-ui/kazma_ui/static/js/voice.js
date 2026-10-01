@@ -431,12 +431,13 @@
     }
     if (lower === '/voice' || lower === '/voice status') {
       var live = window.KazmaVoice.isStreaming && window.KazmaVoice.isStreaming();
-      showToast(
-        'STT: ' + getSttProvider() + ' | TTS: ' + getTtsProvider() +
-        ' | Replies: ' + (isTtsEnabled() ? 'ON' : 'OFF') +
-        (live ? ' | LIVE' : ''),
-        'info', 5000
-      );
+      var status = _k('voice.ui.status_line', 'STT: {stt} | TTS: {tts} | Spoken replies: {replies}', {
+        stt: getSttProvider(),
+        tts: getTtsProvider(),
+        replies: isTtsEnabled() ? _k('voice.ui.replies_on', 'on') : _k('voice.ui.replies_off', 'off'),
+      });
+      if (live) status += ' | ' + _k('voice.ui.status_live', 'live mode on');
+      showToast(status, 'info', 5000);
       return true;
     }
     return false;
@@ -812,7 +813,10 @@
     if (voiceBtn) voiceBtn.classList.toggle('is-live-disabled', !!streaming);
     if (liveBtn) {
       liveBtn.classList.toggle('is-live', !!streaming);
-      liveBtn.title = streaming ? 'Stop Live Voice Stream' : 'Start Live Voice Stream';
+      // The resting title is the template's own (chat.live_voice_hint).
+      liveBtn.title = streaming
+        ? _k('voice.ui.live_stop_title', 'Stop live voice')
+        : _k('chat.live_voice_hint', 'Live duplex voice (interrupt anytime)');
     }
   }
 

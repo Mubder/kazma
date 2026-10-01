@@ -980,6 +980,84 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشل التوجيه: {reason}",
         "en": "Steer failed: {reason}",
     },
+    # Steering, feedback, read-aloud, pin and session-load messages
+    # (2026-10-01): chat.js wrote these in English in every language.
+    "chat.abort_task_title": {
+        "ar": "أوقف المهمة الجارية",
+        "en": "Abort the running task",
+    },
+    "chat.send_steer_title": {
+        "ar": "أرسل التوجيه (Enter)",
+        "en": "Send steer (Enter)",
+    },
+    "chat.type_steer_title": {
+        "ar": "اكتب توجيهك ثم اضغط Enter",
+        "en": "Type your steer, then Enter",
+    },
+    "chat.steer_queued": {
+        "ar": "التوجيه في الانتظار — أضف ملاحظتك ثم اضغط Enter لتطبيقها.",
+        "en": "Steer queued — add your note, then Enter to apply.",
+    },
+    "chat.steer_no_task_send_first": {
+        "ar": "لا مهمة نشطة لتوجيهها — أرسل رسالة أولًا.",
+        "en": "No active task to steer — send a message first.",
+    },
+    "chat.steer_pausing": {
+        "ar": "⏸️ جارٍ إيقاف المهمة مؤقتًا لتطبيق توجيهك…",
+        "en": "⏸️ Pausing task to apply your steer…",
+    },
+    "chat.steer_noted": {
+        "ar": "🧭 سُجّل التوجيه — يُطبَّق في الخطوة التالية.",
+        "en": "🧭 Steer noted — applying on the next step.",
+    },
+    "chat.steer_no_paused_task": {
+        "ar": "لا مهمة متوقفة — تُرسل كرسالة جديدة.",
+        "en": "No paused task — sending as a new message.",
+    },
+    "chat.steer_next_step": {
+        "ar": "سيُطبَّق التوجيه في الخطوة التالية (تعذّر الإيقاف في الوقت المناسب).",
+        "en": "Steer will apply on the next step (could not pause in time).",
+    },
+    "chat.steer_steering_paused": {
+        "ar": "🧭 جارٍ توجيه المهمة المتوقفة بملاحظتك.",
+        "en": "🧭 Steering the paused task with your note.",
+    },
+    "chat.unknown_command": {
+        "ar": "أمر غير معروف {command} — يُرسل على أي حال. يعرض /help الأوامر المتاحة هنا.",
+        "en": "Unknown command {command} — sending anyway. /help lists what works here.",
+    },
+    "chat.feedback_thanks": {
+        "ar": "👍 شكرًا على رأيك!",
+        "en": "👍 Thanks for the feedback!",
+    },
+    "chat.feedback_improve": {
+        "ar": "👎 فهمت. سأحاول أن أتحسّن.",
+        "en": "👎 Got it. I'll try to improve.",
+    },
+    "chat.msg_stop_reading": {
+        "ar": "أوقف القراءة",
+        "en": "Stop reading",
+    },
+    "chat.session_pinned": {
+        "ar": "ثُبّتت الجلسة",
+        "en": "Session pinned",
+    },
+    "chat.session_unpinned": {
+        "ar": "أُلغي تثبيت الجلسة",
+        "en": "Session unpinned",
+    },
+    "chat.session_id_label": {
+        "ar": "معرّف الجلسة",
+        "en": "Session ID",
+    },
+    "chat.session_messages_failed": {
+        "ar": "تعذّر تحميل الرسائل: {error}",
+        "en": "Failed to load messages: {error}",
+    },
+    "chat.session_messages_retrying": {
+        "ar": "تعذّر تحميل رسائل الجلسة{detail} — جارٍ إعادة المحاولة…",
+        "en": "Failed to load session messages{detail} — retrying…",
+    },
     "chat.no_reply_title": {
         "ar": "انتهى الدور بلا رد — راجع منطقة الرسائل أو window.KazmaChat.diagnostics()",
         "en": "Turn ended without a reply — see the message area or window.KazmaChat.diagnostics()",
