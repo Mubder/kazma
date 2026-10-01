@@ -483,10 +483,10 @@
         get filteredTools() {
             if (!this.toolSearch) return this.tools;
             const q = this.toolSearch.toLowerCase();
-            return this.tools.filter(t =>
-                (t.name || '').toLowerCase().includes(q) ||
-                (t.description || '').toLowerCase().includes(q) ||
-                (t.category || '').toLowerCase().includes(q)
+            return this.tools.filter(tool =>
+                (tool.name || '').toLowerCase().includes(q) ||
+                (tool.description || '').toLowerCase().includes(q) ||
+                (tool.category || '').toLowerCase().includes(q)
             );
         },
 
@@ -576,7 +576,7 @@
 
         get pkgMemoryLayerRows() {
             const layers = (this.pkgMemory && this.pkgMemory.layers) || {};
-            const t = (k) => (typeof window.tOr === 'function' ? window.tOr(k, k) : k);
+            const layerText = (k) => (typeof window.tOr === 'function' ? window.tOr(k, k) : k);
             const order = [
                 ['embedder', 'packages.layer.embedder', 'Embedder'],
                 ['vector_memory', 'packages.layer.vector_memory', 'VectorMemory'],
@@ -597,7 +597,7 @@
                 if (!c) continue;
                 let name = fallback;
                 if (i18nKey) {
-                    const loc = t(i18nKey);
+                    const loc = layerText(i18nKey);
                     if (loc && loc !== i18nKey) name = loc;
                 }
                 rows.push({

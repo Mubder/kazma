@@ -1,5 +1,66 @@
 # CHANGELOG
 
+## Sending a task to the swarm from the IDE no longer freezes the chats (2026-10-02)
+
+- **The IDE's "send to swarm" builds its workspace block in a thread.** The
+  web IDE's dispatch and the chat `/ide` commands described the workspace to
+  the task (two `git` probes of up to 4 seconds each, and a store read) on
+  the loop that serves every open chat, by a choice made on 2026-08-27. They
+  now use the same threaded builder as every chat turn. The builder is on
+  the loop-stall gate's list, so no async code can call the blocking version
+  again. An unused helper that called it is gone.
+- **Gate:** `tests/test_ide_send_to_swarm.py` (the block is built off the
+  loop's thread and still reaches the task).
+
+## A shell command keeps its own files out of the workspace (2026-10-02)
+
+- **Tool caches and temp files no longer land in your repository.** A
+  command the agent runs got the workspace itself as its home and temp
+  folder, so every tool it ran kept its user-level files there. The live
+  install folder (the agent's workspace) held 143 MB of `uv` cache under
+  `AppData/Local/uv`, plus temp files, where a `git add -A` would commit
+  them. Each workspace now gets a private home under the system temp folder.
+  It is kept between commands, so caches still work, and it is still not
+  your own home, which a command must not read.
+- **Gate:** `tests/test_shell_child_home.py` runs a real command that writes
+  a temp file and a home-folder cache, and checks the workspace stays empty.
+  The negative control runs the old environment and finds both in the
+  workspace.
+
+## The Swarm page settles finished tasks and shows running ones (2026-10-02)
+
+- **A finished task's card settles.** The page opens a task's live stream
+  and settles the card on its `task_completed` event, and its client
+  reconnects whenever a stream closes. The stream only replayed what the
+  server remembered of the task, which is nothing after a restart (a deploy)
+  or once a finished task has been cleaned up. So the stream closed empty,
+  the client reconnected ten times over a few minutes, and the card's timer
+  kept counting. A finished task's stream now always ends with
+  `task_completed` and the task's result, rebuilt from the stored task.
+- **A cancelled task's stream ends.** The stream's own list of finished
+  statuses left out `cancelled`, so it polled once a second and never ended.
+  "Finished" is now one list in the swarm's task module; the engine held
+  three more copies of it and the task store a fourth.
+- **The pipeline view and Play mode show the answer.** Both read the
+  finished task's answer from fields no task result has (`synthesis`,
+  `response`), so they always said "no synthesis". They now read
+  `synthesized_output`, then `aggregated_output`.
+- **Running tasks appear in Active Tasks again.** A task the page had not
+  started (another tab, a chat, a page refresh) was drawn inside a loop whose
+  variable `t` hid the page's translation helper `t()`. The first translated
+  word threw, and an empty `catch` hid the error. The card's status and type,
+  and the result status on the task card and in Play mode, are now in the
+  reader's language.
+- **Gates:**
+  - `tests/test_swarm_task_stream_ends.py`: the stream for every ending,
+    with a negative control; every task status classified; no hand-written
+    list of finished statuses, with a planted control.
+  - `tests/test_swarm_page_result_fields.py`: every result field the page
+    reads exists on `TaskResult`.
+  - `tests/test_scripts_keep_their_translator.py`: no script declares the
+    name of a translation helper it calls. It found fifteen, in the Swarm,
+    Scheduled, Settings and X Studio scripts.
+
 ## An Approve clicked the moment its card appears is taken (2026-10-02)
 
 - **The approval button no longer does nothing when clicked quickly.** A turn

@@ -12,6 +12,14 @@ Event contract:
   event: checkpoint      data: {"step": N, "needs_approval": true, "output_preview": "..."}
   event: handoff         data: {"from": "...", "to": "..."}
   event: task_completed  data: {"task_id": "...", "result": {...}}
+
+A finished task's stream always ENDS with ``task_completed`` (2026-10-02).
+The page's client reconnects whenever a stream closes, and the bus's history
+is in memory: after a restart, or once the bus has cleaned up a finished
+task, a stream that only replayed history closed with nothing in it, and the
+card kept its timer running through ten reconnects. When the stream ends
+without its terminal event it is rebuilt from the stored task
+(:func:`_final_event`).
 """
 
 from __future__ import annotations
@@ -25,6 +33,7 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from kazma_core.swarm.engine import get_swarm_engine
+from kazma_core.swarm.task import TaskResult, is_terminal
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +51,8 @@ from kazma_ui.sse_utils import sse_frame as _sse_frame
 # SSE Event Bus — per-task event pub/sub with history
 # ══════════════════════════════════════════════════════════════════════════
 
-_TERMINAL_STATUSES = frozenset({"completed", "failed", "timeout"})
+#: The events that end a task's stream.
+_TERMINAL_EVENTS = frozenset({"task_completed", "task_failed"})
 
 
 class SSEEventBus:
@@ -103,7 +113,7 @@ class SSEEventBus:
 
     def _cleanup_terminal_history(self) -> None:
         """Remove history for terminal tasks that have no subscribers, or older than TTL."""
-        terminal_events = frozenset({"task_completed", "task_failed"})
+        terminal_events = _TERMINAL_EVENTS
         tasks_to_remove: list[str] = []
         now = time.time()
         ttl_seconds = 3600.0  # 1 hour TTL limit to prevent unbounded memory growth
@@ -191,14 +201,7 @@ def create_sse_router(*, event_bus: SSEEventBus | None = None) -> APIRouter:
                 status_code=404,
             )  # type: ignore[return-value]
 
-        # Resolve the task from the store (a database read: in a thread) or
-        # the in-memory history.
-        task = None
-        store = getattr(engine, "task_store", None)
-        if store is not None:
-            task = await asyncio.to_thread(store.get_task, task_id)
-        if task is None:
-            task = engine.get_task(task_id)
+        task = await _current_task(engine, task_id)
         if task is None:
             from fastapi.responses import JSONResponse
 
@@ -207,11 +210,8 @@ def create_sse_router(*, event_bus: SSEEventBus | None = None) -> APIRouter:
                 status_code=404,
             )  # type: ignore[return-value]
 
-        task_status = task.status.value if hasattr(task.status, "value") else str(task.status)
-        is_terminal = task_status in _TERMINAL_STATUSES
-
         return StreamingResponse(
-            _stream_events(task_id, bus, is_terminal),
+            _stream_events(task_id, bus, task),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -223,26 +223,68 @@ def create_sse_router(*, event_bus: SSEEventBus | None = None) -> APIRouter:
     return router
 
 
+async def _current_task(engine: Any, task_id: str) -> Any | None:
+    """The task as stored (a database read: in a thread), else in memory."""
+    task = None
+    store = getattr(engine, "task_store", None)
+    if store is not None:
+        task = await asyncio.to_thread(store.get_task, task_id)
+    if task is None:
+        task = engine.get_task(task_id)
+    return task
+
+
+def _final_event(task_id: str, task: Any) -> dict[str, Any] | None:
+    """The ``task_completed`` event of a finished task, rebuilt from the task.
+
+    The engine sends ``{"task_id", "result": TaskResult.to_dict()}`` when a
+    task ends, and the store keeps that result. A task with none (an older
+    row) gets its status, ``success`` for a completed one -- the word the
+    engine's results use.
+    """
+    result = getattr(task, "result", None)
+    if isinstance(result, TaskResult):
+        return {"event": "task_completed", "data": {"task_id": task_id, "result": result.to_dict()}}
+    status = getattr(task, "status", "")
+    status = str(getattr(status, "value", status) or "")
+    return {
+        "event": "task_completed",
+        "data": {
+            "task_id": task_id,
+            "result": {"task_id": task_id, "status": "success" if status == "completed" else status},
+        },
+    }
+
+
 async def _stream_events(
     task_id: str,
     bus: SSEEventBus,
-    is_terminal: bool,
+    task: Any,
 ) -> AsyncGenerator[str, None]:
     """Generate SSE frames for a task.
 
     Replays historical events for catch-up, then streams live events
-    for active tasks until a terminal event arrives.
+    for active tasks until a terminal event arrives. A stream never ends
+    for a finished task without its terminal event (module docstring).
     """
+    sent_terminal = False
+
+    def _closing(finished: Any) -> list[str]:
+        final = None if sent_terminal else _final_event(task_id, finished)
+        return [_sse_frame(final["event"], final["data"])] if final else []
+
     # Subscribe FIRST to avoid missing events between history replay
     # and live subscription.
     queue = bus.subscribe(task_id)
     try:
         # Replay historical events (catch-up for reconnecting clients).
         for entry in bus.get_history(task_id):
+            sent_terminal = sent_terminal or entry["event"] in _TERMINAL_EVENTS
             yield _sse_frame(entry["event"], entry["data"])
 
-        # For terminal tasks, all events are already in history -- close.
-        if is_terminal:
+        if is_terminal(getattr(task, "status", None)):
+            for frame in _closing(task):
+                yield frame
             return
 
         # Stream live events until task_completed or disconnect.
@@ -251,24 +293,19 @@ async def _stream_events(
                 entry = await asyncio.wait_for(queue.get(), timeout=1.0)
             except TimeoutError:
                 # No event in the last second -- check if task has become
-                # terminal (events already delivered via the queue).
+                # terminal (events already delivered via the queue). Once a
+                # second per open stream: the store read is in a thread.
                 engine = get_swarm_engine()
-                if engine is not None:
-                    task = None
-                    store = getattr(engine, "task_store", None)
-                    if store is not None:
-                        # Once a second per open stream: never on the loop.
-                        task = await asyncio.to_thread(store.get_task, task_id)
-                    if task is None:
-                        task = engine.get_task(task_id)
-                    if task is not None:
-                        status = task.status.value if hasattr(task.status, "value") else str(task.status)
-                        if status in _TERMINAL_STATUSES:
-                            # Drain any remaining events from the queue.
-                            while not queue.empty():
-                                remaining = queue.get_nowait()
-                                yield _sse_frame(remaining["event"], remaining["data"])
-                            return
+                current = await _current_task(engine, task_id) if engine is not None else None
+                if current is not None and is_terminal(getattr(current, "status", None)):
+                    # Drain any remaining events from the queue.
+                    while not queue.empty():
+                        remaining = queue.get_nowait()
+                        sent_terminal = sent_terminal or remaining["event"] in _TERMINAL_EVENTS
+                        yield _sse_frame(remaining["event"], remaining["data"])
+                    for frame in _closing(current):
+                        yield frame
+                    return
                 continue
             except asyncio.CancelledError:
                 return
@@ -276,7 +313,7 @@ async def _stream_events(
             yield _sse_frame(entry["event"], entry["data"])
 
             # Close the stream after any terminal event.
-            if entry["event"] in ("task_completed", "task_failed"):
+            if entry["event"] in _TERMINAL_EVENTS:
                 return
     finally:
         bus.unsubscribe(task_id, queue)

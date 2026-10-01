@@ -12,8 +12,11 @@ Env:
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
 __all__ = [
@@ -24,6 +27,8 @@ __all__ = [
     "shell_strict_mode",
     "system_path_dirs",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 def host_shell_allowed() -> bool:
@@ -156,6 +161,24 @@ def system_path_dirs() -> list[str]:
     return out or (os.environ.get("PATH") or "").split(os.pathsep)
 
 
+def _tool_home_for(cwd: str) -> Path:
+    """The private home a shell child gets for workspace *cwd*.
+
+    Outside the workspace and not the operator's own home: one folder per
+    workspace under the system temp folder (``kazma-tool-home/<hash>``),
+    kept between commands so tool caches still work. Until 2026-10-02 HOME,
+    USERPROFILE and TEMP were the workspace itself, so every tool a command
+    ran kept its user-level files in the repository the agent was working
+    in -- uv's whole cache (143 MB, ``AppData/Local/uv``) sat in the live
+    install folder, which is its workspace, where ``git add -A`` takes it.
+    """
+    resolved = os.path.normcase(os.path.abspath(cwd or "."))
+    key = hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:16]
+    home = Path(tempfile.gettempdir()) / "kazma-tool-home" / key
+    (home / "tmp").mkdir(parents=True, exist_ok=True)
+    return home
+
+
 def restricted_child_env(*, cwd: str) -> dict[str, str]:
     """Build scrubbed child env; in strict mode PATH is system-only.
 
@@ -173,15 +196,27 @@ def restricted_child_env(*, cwd: str) -> dict[str, str]:
             if d not in parts:
                 parts.append(d)
         path = os.pathsep.join(parts)
+    try:
+        home = _tool_home_for(cwd)
+    except OSError:
+        # The system temp folder cannot be written: the command still runs,
+        # with its files in the workspace as before.
+        logger.warning("[post_hitl] no private tool home for %s; using the workspace", cwd, exc_info=True)
+        home = Path(cwd)
+    private = home != Path(cwd)
+    tmp = str(home / "tmp") if private else cwd
     env: dict[str, str] = {
         "PATH": path,
         "LANG": os.environ.get("LANG") or "C.UTF-8",
         "LC_ALL": os.environ.get("LC_ALL") or "C.UTF-8",
-        "HOME": cwd,
-        "USERPROFILE": cwd,
-        "TMPDIR": cwd,
-        "TEMP": cwd,
-        "TMP": cwd,
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+        # Windows tools find their caches and settings here, not from HOME.
+        "APPDATA": str(home / "AppData" / "Roaming") if private and os.name == "nt" else "",
+        "LOCALAPPDATA": str(home / "AppData" / "Local") if private and os.name == "nt" else "",
+        "TMPDIR": tmp,
+        "TEMP": tmp,
+        "TMP": tmp,
         "SYSTEMROOT": os.environ.get("SYSTEMROOT") or "",
         "COMSPEC": os.environ.get("COMSPEC") or "",
         "PATHEXT": os.environ.get("PATHEXT") or "",

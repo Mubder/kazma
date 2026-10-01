@@ -226,9 +226,9 @@ function xStudioPage() {
         const resp = await fetch('/api/scheduled/tasks', { credentials: 'same-origin' });
         const data = await resp.json();
         const tasks = (data && data.tasks) || [];
-        this.queue = tasks.filter(function (t) {
-          return t.source === 'x' && (t.status === 'pending' || t.status === 'running');
-        }).map((t) => Object.assign({}, t, { editWhen: this.toLocalInput(t.when) }));
+        this.queue = tasks.filter(function (task) {
+          return task.source === 'x' && (task.status === 'pending' || task.status === 'running');
+        }).map((task) => Object.assign({}, task, { editWhen: this.toLocalInput(task.when) }));
         this._buildWeek();
       } catch (_e) { this.queue = []; }
     },

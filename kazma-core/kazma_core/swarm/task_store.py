@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.swarm.task import (
+    TERMINAL_STATUSES,
     SwarmTask,
     TaskResult,
     TaskStatus,
@@ -42,7 +43,7 @@ DEFAULT_TASK_RETENTION_DAYS = 30
 MAX_TASK_RETENTION_DAYS = 3650
 
 #: Statuses a task never leaves, and so the only ones retention deletes.
-_FINISHED_STATUSES = ("completed", "failed", "cancelled", "timeout")
+_FINISHED_STATUSES = tuple(sorted(s.value for s in TERMINAL_STATUSES))
 
 from kazma_core.db.pg_helpers import json_dumps as _pg_json
 

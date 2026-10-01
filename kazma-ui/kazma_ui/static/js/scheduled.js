@@ -36,11 +36,11 @@ function scheduledPage() {
 
         get counts() {
             const c = { upcoming: 0, failed: 0, done: 0, overdue: 0 };
-            for (const t of this.tasks) {
-                const st = t.status || '';
+            for (const task of this.tasks) {
+                const st = task.status || '';
                 if (st === 'pending' || st === 'running') {
                     c.upcoming++;
-                    if (this.isOverdue(t)) c.overdue++;
+                    if (this.isOverdue(task)) c.overdue++;
                 } else if (st === 'failed') c.failed++;
                 else c.done++;
             }
@@ -52,9 +52,9 @@ function scheduledPage() {
             if (this.filter === 'all') {
                 rows = this.tasks.slice();
             } else if (this.filter === 'history') {
-                rows = this.tasks.filter(t => !['pending', 'running'].includes(t.status || ''));
+                rows = this.tasks.filter(task => !['pending', 'running'].includes(task.status || ''));
             } else {
-                rows = this.tasks.filter(t => ['pending', 'running'].includes(t.status || ''));
+                rows = this.tasks.filter(task => ['pending', 'running'].includes(task.status || ''));
             }
             // Sort on a copy: the API's own order is the fallback for rows
             // with no usable timestamp, and mutating this.tasks would make

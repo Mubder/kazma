@@ -33,6 +33,7 @@ from kazma_core.swarm.reliability import (
 from kazma_core.swarm.reliability_registry import ReliabilityRegistry
 from kazma_core.routing_engine import UnifiedRouter
 from kazma_core.swarm.task import (
+    TERMINAL_STATUSES,
     HandoffRecord,
     SwarmTask,
     TaskResult,
@@ -1112,16 +1113,10 @@ class SwarmEngine:
     ) -> TaskResult:
         # Idempotent terminal finalize (audit H7): avoid double SSE/persist
         # when cancel() and CancelledError both race.
-        _TERMINAL = {
-            TaskStatus.COMPLETED,
-            TaskStatus.FAILED,
-            TaskStatus.CANCELLED,
-            TaskStatus.TIMEOUT,
-        }
         prior_status = getattr(task, "status", None)
         if (
             status != "paused"
-            and prior_status in _TERMINAL
+            and prior_status in TERMINAL_STATUSES
             and task.id not in self._active_tasks
             and task.result is not None
         ):
@@ -1329,17 +1324,11 @@ class SwarmEngine:
         # re-executed the remaining steps (real LLM spend) and the fresh
         # result was then silently discarded by _finalize_task's idempotency
         # guard. refuse to approve anything already terminal.
-        _terminal_statuses = {
-            TaskStatus.COMPLETED,
-            TaskStatus.FAILED,
-            TaskStatus.CANCELLED,
-            TaskStatus.TIMEOUT,
-        }
         try:
             existing = self._task_store.get_task(task_id) if self._task_store else None
         except Exception:
             existing = None
-        if existing is not None and getattr(existing, "status", None) in _terminal_statuses:
+        if existing is not None and getattr(existing, "status", None) in TERMINAL_STATUSES:
             logger.warning(
                 "[SwarmEngine] approve_checkpoint refused for terminal task %s "
                 "(status=%s) — stale card", task_id, existing.status,
@@ -1433,16 +1422,10 @@ class SwarmEngine:
         # restart (in history, not in _active_tasks) was never saved as
         # rejected, and came back paused at every boot. Live 2026-09-25: four
         # rejected with 200s, still ``paused`` in Postgres.
-        _terminal = {
-            TaskStatus.COMPLETED,
-            TaskStatus.FAILED,
-            TaskStatus.CANCELLED,
-            TaskStatus.TIMEOUT,
-        }
         _before = _hist_get_task(self._task_history, self._task_lock, task_id)
         _already_final = (
             _before is not None
-            and getattr(_before, "status", None) in _terminal
+            and getattr(_before, "status", None) in TERMINAL_STATUSES
             and getattr(_before, "result", None) is not None
         )
         result = await self._checkpoint_handler.reject(task_id, reason=reason)
