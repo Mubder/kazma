@@ -27,6 +27,11 @@ COMMON_REASONS: dict[str, str] = {
     "user_not_allowed": "was refused: its author is not in Allowed User IDs",
     "queue_full": "was dropped: Kazma's message queue was full",
     "processing_failed": "failed while being prepared (a voice note or file that could not be read?)",
+    # Left by the gateway after the adapter handed it on (its flood guard).
+    "rate_limited": (
+        "was left unanswered: its author sent more messages in a minute than "
+        "gateway.rate_limits allows (Kazma answered \"Slow down\")"
+    ),
 }
 
 
@@ -180,10 +185,11 @@ class ReceiveLog:
             if now - self._warned_at.get(reason, -self.WARN_EVERY_S) >= self.WARN_EVERY_S:
                 self._warned_at[reason] = now
                 level = logging.WARNING
+        place = f" in {record['where']}" if record["where"] else ""
         log.log(
             level,
-            "[%s] A message from user %s in %s (channel %s) was not answered: it %s",
-            platform, record["author_id"], record["where"] or "?", record["channel_id"], record["why"],
+            "[%s] A message from user %s%s (channel %s) was not answered: it %s",
+            platform, record["author_id"], place, record["channel_id"], record["why"],
         )
 
     def snapshot(self) -> dict[str, Any]:

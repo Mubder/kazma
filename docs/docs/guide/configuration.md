@@ -227,9 +227,9 @@ switch, run the rebuild so every row lives in the same vector space.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `gateway.rate_limits.telegram` | int | `30` | Requests per window. |
-| `gateway.rate_limits.discord` | int | `5` | Requests per window. |
-| `gateway.rate_limits.slack` | int | `1` | Requests per window. |
+| `gateway.rate_limits.telegram` | int | `30` | Messages one person may send per minute on Telegram. Past it Kazma answers "Slow down" (at most every 30 s) and leaves the rest unanswered; each one is logged and shows in the platform's Test. A flood guard, not Telegram's own send limit. |
+| `gateway.rate_limits.discord` | int | `30` | The same for Discord. Shipped as `5` until 2026-10-01; an install still holding `5` moves to `30` at its next start. |
+| `gateway.rate_limits.slack` | int | `30` | The same for Slack. Shipped as `1` until 2026-10-01, which allowed one Slack message a minute; an install still holding `1` moves to `30` at its next start. |
 | `gateway.suggestions.enabled` | bool | `true` | Suggested-followup UI. |
 | `gateway.voice.enabled` | bool | `false` | Voice (STT inbound + TTS outbound) across **all platforms** (Telegram, Discord, Slack) + Web. Also settable at runtime via Settings → Voice. |
 | `gateway.voice.stt_provider` | string | `openai` | Speech-to-text **name**: `openai`, `groq`, `cohere`, `nvidia`, or `faster-whisper`. API keys come from Settings → Providers, not this block. Whisper is not a chat model. |

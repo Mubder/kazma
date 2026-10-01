@@ -122,10 +122,14 @@ connectors:
   slack:
     enabled: false
 gateway:
+  # Messages one person may send per minute before Kazma answers "Slow
+  # down" and leaves the rest unanswered: a flood guard, not the platforms'
+  # own send limits (Discord 5 and Slack 1 were those, and held the owner to
+  # one Slack message a minute until 2026-10-01).
   rate_limits:
     telegram: 30
-    discord: 5
-    slack: 1
+    discord: 30
+    slack: 30
   suggestions:
     enabled: true
   voice:

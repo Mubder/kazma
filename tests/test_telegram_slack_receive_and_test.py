@@ -371,11 +371,23 @@ def test_each_slack_problem_is_named(routes, live, kw, key, ok, words) -> None:
 
 
 def test_the_slack_test_says_when_another_program_shares_the_app() -> None:
+    """Slack's count alone cannot say whether another program takes messages:
+    it also counts a connection that ended without closing, for hours (live
+    2026-10-01: 2 on a token used nowhere else, and all eight messages sent
+    in a minute arrived). The messages the Test checks decide."""
     at = NOW.isoformat()
-    shared = _check(_run_slack(_slack_routes(), live=_slack_live(
+    # Every checked message reached Kazma: a stale count, said plainly.
+    stale = _check(_run_slack(_slack_routes(), live=_slack_live(
         slack_open_connections=2, slack_open_connections_at=at)), "listening")
-    assert shared["ok"] is None, shared
-    assert "Slack counted 2 open connections" in shared["detail"]
+    assert stale["ok"] is True, stale
+    assert "Slack counted 2 open connections" in stale["detail"]
+    assert "ended without closing" in stale["detail"]
+    # A message newer than the session never reached Kazma: another program.
+    taken = _check(_run_slack(_slack_routes(), live=_slack_live(
+        slack_open_connections=2, slack_open_connections_at=at,
+        recent={f"D1:{TS}": "passed_on"})), "listening")
+    assert taken["ok"] is None, taken
+    assert "never reached Kazma" in taken["detail"] and "another program" in taken["detail"]
     alone = _check(_run_slack(_slack_routes(), live=_slack_live(
         slack_open_connections=1, slack_open_connections_at=at)), "listening")
     assert alone["ok"] is True and "counted" not in alone["detail"], alone

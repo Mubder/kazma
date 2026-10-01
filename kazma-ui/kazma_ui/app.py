@@ -1071,7 +1071,10 @@ class KazmaAppBuilder:
             )
 
             # Rate feedback (from gateway.rate_limits YAML config)
-            rate_limits_cfg = self.config.raw.get("gateway", {}).get("rate_limits", {})
+            # Messages per person per minute (a flood guard). From the settings
+            # store, seeded from kazma.yaml: a shipped value that changed
+            # reaches an install through config_defaults, like every setting.
+            rate_limits_cfg = self.config_store.get("gateway.rate_limits", {}) or {}
             if rate_limits_cfg:
                 try:
                     from kazma_gateway.rate_feedback import RateFeedbackManager

@@ -131,7 +131,7 @@ def test_a_stored_copy_of_the_old_default_follows_once(tmp_path):
     try:
         store.reconcile_from_yaml()
         assert store.get(KEY) == NEW
-        assert store.get(RETIRED_APPLIED_KEY) == [f"{KEY}@2026-09-29"]
+        assert f"{KEY}@2026-09-29" in store.get(RETIRED_APPLIED_KEY)
 
         store.set(KEY, OLD, category="notifications")   # the owner picks it again
         store.reconcile_from_yaml()
@@ -156,7 +156,7 @@ def test_an_owners_own_value_is_kept(tmp_path):
     try:
         store.reconcile_from_yaml()
         assert store.get(KEY) == ["started", "shutting_down"]
-        assert store.get(RETIRED_APPLIED_KEY) == [f"{KEY}@2026-09-29"], "checked once, even so"
+        assert f"{KEY}@2026-09-29" in store.get(RETIRED_APPLIED_KEY), "checked once, even so"
     finally:
         store.close()
 

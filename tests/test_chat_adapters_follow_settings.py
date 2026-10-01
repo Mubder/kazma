@@ -562,3 +562,108 @@ def test_halt_does_not_wait_out_the_stop_grace() -> None:
         await stopping
 
     asyncio.run(scenario())
+
+
+# ── The flood guard: sane limits, and every message it leaves accounted for ──
+
+
+class _RecordingAdapter(BaseAdapter):
+    """A platform adapter with a receive record, that sends nowhere."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__()
+        from kazma_gateway.receive_log import ReceiveLog
+
+        self.name = name
+        self._receive = ReceiveLog()
+        self.sent: list[str] = []
+
+    async def listen(self, queue: asyncio.Queue, shutdown_event: asyncio.Event) -> None:
+        await shutdown_event.wait()
+
+    async def send(self, outbound: Any) -> bool:
+        self.sent.append(outbound.text)
+        return True
+
+
+def _through_the_guard(count: int, *, recorded: bool) -> tuple[_RecordingAdapter, list[str]]:
+    """*count* messages from one Slack user, one a second apart in the guard's
+    eyes, with a limit of one a minute -- live 2026-10-01's shape."""
+    from kazma_gateway.gateway import IncomingMessage
+    from kazma_gateway.rate_feedback import RateFeedbackManager
+
+    handled: list[str] = []
+
+    async def scenario() -> _RecordingAdapter:
+        gateway = GatewayManager()
+        adapter = _RecordingAdapter("slack")
+        if not recorded:
+            adapter.note_left_unanswered = lambda msg, reason: None  # type: ignore[method-assign]
+        gateway.add_adapter(adapter)
+        gateway.set_rate_feedback(RateFeedbackManager(limit={"slack": 1}, window_seconds=60))
+
+        async def handler(msg: Any) -> None:
+            handled.append(msg.text)
+
+        gateway.on_message(handler)
+        await gateway.start()
+        try:
+            for n in range(count):
+                key = f"D1:{n}.000100"
+                adapter._receive.note_passed_on(key)
+                await gateway.queue.put(IncomingMessage(
+                    platform="slack", sender_id="slack:U1", text=f"message {n}",
+                    context_metadata={"receive_key": key, "user_id": "U1", "channel_id": "D1"},
+                ))
+            await _until(lambda: gateway.queue.empty() and len(adapter._receive.recent) == count)
+        finally:
+            await gateway.stop()
+        return adapter
+
+    return asyncio.run(scenario()), handled
+
+
+def test_a_message_the_flood_guard_leaves_is_recorded(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="kazma_gateway.gateway")
+    adapter, handled = _through_the_guard(4, recorded=True)
+    assert handled == ["message 0"]
+    recent = adapter._receive.recent
+    assert [recent[f"D1:{n}.000100"] for n in range(4)] == [
+        "passed_on", "rate_limited", "rate_limited", "rate_limited",
+    ]
+    assert adapter._receive.dropped["rate_limited"] == 3
+    said = [r for r in caplog.records if "was not answered" in r.getMessage()]
+    assert len(said) == 3
+    assert [r.levelno for r in said] == [logging.WARNING, logging.INFO, logging.INFO]
+    assert len(adapter.sent) == 1, "one Slow down per cooldown, not one per message"
+
+
+def test_without_the_record_a_left_message_looks_answered(caplog) -> None:
+    """Negative control: the 2026-10-01 state. The adapter's record still
+    says the message was handed on, so the Test would report it answered."""
+    adapter, handled = _through_the_guard(2, recorded=False)
+    assert handled == ["message 0"]
+    assert adapter._receive.recent["D1:1.000100"] == "passed_on"
+
+
+#: Fewer messages a minute than a person types in a burst. The values the
+#: limiter shipped with until 2026-10-01 (Discord 5, Slack 1) were the
+#: platforms' own send limits, and held the owner to one Slack message a minute.
+_LOWEST_SANE_LIMIT = 10
+
+
+def _too_low(limits: dict[str, Any]) -> list[str]:
+    return sorted(name for name, value in limits.items() if int(value) < _LOWEST_SANE_LIMIT)
+
+
+def test_the_shipped_flood_guard_lets_a_person_type() -> None:
+    import yaml
+
+    shipped = yaml.safe_load((REPO_ROOT / "kazma.yaml").read_text(encoding="utf-8"))
+    limits = shipped["gateway"]["rate_limits"]
+    assert set(limits) >= {"telegram", "discord", "slack"}
+    assert _too_low(limits) == []
+
+
+def test_the_flood_guard_floor_sees_the_old_limits() -> None:
+    assert _too_low({"telegram": 30, "discord": 5, "slack": 1}) == ["discord", "slack"]
