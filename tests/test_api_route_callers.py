@@ -15,6 +15,13 @@ A caller is a string literal in a page script, a template, the TUI, the CLI
 or a script. Server-side Python does not count: its strings are error texts
 and log lines ("POST /api/workspace/select first") -- one of those once made
 a dead route look called.
+
+Since 2026-10-01 each METHOD of a route needs a caller with that method too
+(read from the call around the literal: ``fetch``'s ``method:``, htmx's
+``hx-post``, a Python client's ``.delete(``...). Path matching alone let
+``DELETE /api/settings/{key:path}`` -- it deleted any setting by name --
+pass as "called" because the pages called other ``/api/settings/...`` paths,
+and six more uncalled methods hid the same way.
 """
 
 from __future__ import annotations
@@ -58,6 +65,9 @@ NOT_CALLED_BY_A_PAGE: dict[str, str] = {
     "/api/documents/{document_id}/versions": _DOCS_API,
     "/api/documents/search": _DOCS_API,
     "/api/documents/ops/retention": _DOCS_API,
+    # The page archives with POST .../delete; the REST spelling of the same
+    # call (one implementation) is part of the documented API.
+    "DELETE /api/documents/{document_id}": _DOCS_API,
     "/api/documents/jobs/{job_id}": (
         "job status for a client that polls; the page streams "
         "/jobs/{job_id}/events"
@@ -115,6 +125,10 @@ NOT_CALLED_BY_A_PAGE: dict[str, str] = {
     ),
     "/api/voice/status": "voice readiness for operators; Settings reads the voice settings",
     "/api/agents": "the agent list as JSON; the Agents page reads /api/agents/status",
+    "GET /api/kb/libraries/{library_id}": (
+        "one library's record for API clients; the Knowledge page reads every "
+        "library from GET /api/kb/libraries and changes one with PATCH/DELETE here"
+    ),
     "/api/settings/models/options": (
         "the model options as one document; the pages read /api/models, "
         "/api/models/profiles and /api/models/saved"
@@ -252,6 +266,103 @@ def is_called(path: str, calls: set[str]) -> bool:
     return False
 
 
+# ── methods (2026-10-01) ─────────────────────────────────────────────────
+#
+# The path gate below reads paths. DELETE /api/settings/{key:path} -- it
+# deleted any setting the path named -- looked called because a page called
+# other /api/settings/... paths, and six more uncalled methods hid behind a
+# called path the same way. So each METHOD of each route needs a caller with
+# that method too, or a declaration: the path's own (every method), or
+# "METHOD /path" (that method). A call whose method the code around it does
+# not say counts for every method, so the method gate can only find what the
+# path gate lets through.
+
+_JS_CALL = re.compile(r"\b(fetch|kazmaSave|kazmaGetJson|EventSource|sendBeacon)\s*\(\s*$")
+_JS_DEFAULT = {"fetch": "GET", "kazmaSave": "GET", "kazmaGetJson": "GET", "EventSource": "GET", "sendBeacon": "POST"}
+_JS_METHOD = re.compile(r"""\bmethod\s*:\s*['"]([A-Za-z]+)['"]""")
+_HTMX = re.compile(r"""\bhx-(get|post|put|patch|delete)\s*=\s*$""", re.I)
+_LINK = re.compile(r"""\b(?:href|src)\s*=\s*$""", re.I)
+_PY_VERB = re.compile(r"""\.(get|post|put|patch|delete)\(\s*[rRbBfFuU]{0,2}$""")
+_PY_REQUEST = re.compile(
+    r"""\b(?:_?request|_?api)\(\s*(?:\w+\s*,\s*)?['"](GET|POST|PUT|PATCH|DELETE)['"]\s*,\s*[rRbBfFuU]{0,2}$"""
+)
+_PY_METHOD = re.compile(r"""\bmethod\s*=\s*['"]([A-Za-z]+)['"]""")
+
+
+def _rest_of_call(text: str, end: int) -> str:
+    """From *end* to the parenthesis that closes the call around it."""
+    depth = 0
+    for i in range(end, min(len(text), end + 800)):
+        ch = text[i]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            if depth == 0:
+                return text[end:i]
+            depth -= 1
+    return text[end:end + 800]
+
+
+def literal_method(text: str, start: int, end: int, python: bool) -> str:
+    """The HTTP method of the call whose string literal spans
+    ``text[start:end]``; "ANY" when the code around it does not say."""
+    before = text[max(0, start - 160):start]
+    if python:
+        for rx in (_PY_REQUEST, _PY_VERB):
+            m = rx.search(before)
+            if m:
+                return m.group(1).upper()
+        m = _PY_METHOD.search(_rest_of_call(text, end))
+        return m.group(1).upper() if m else "ANY"
+    m = _HTMX.search(before)
+    if m:
+        return m.group(1).upper()
+    if _LINK.search(before):
+        return "GET"
+    m = _JS_CALL.search(before)
+    if m:
+        option = _JS_METHOD.search(_rest_of_call(text, end))
+        return option.group(1).upper() if option else _JS_DEFAULT[m.group(1)]
+    return "ANY"
+
+
+def method_calls_in(text: str, python: bool = False) -> set[tuple[str, str]]:
+    """Every (method, /api path) a source file's string literals name."""
+    found: set[tuple[str, str]] = set()
+    for m in _LITERAL.finditer(text):
+        literal = next(g for g in m.groups() if g is not None)
+        k = literal.find("/api/")
+        if k >= 0:
+            path = re.split(r"[?#\s'\"]", placeholders(literal[k:]))[0]
+            found.add((literal_method(text, m.start(), m.end(), python), path))
+    return found
+
+
+def is_called_with(method: str, path: str, calls: set[tuple[str, str]]) -> bool:
+    return is_called(path, {p for m, p in calls if m in (method, "ANY")})
+
+
+@pytest.fixture(scope="module")
+def method_calls() -> set[tuple[str, str]]:
+    found: set[tuple[str, str]] = set()
+    for f in _client_files():
+        found |= method_calls_in(f.read_text(encoding="utf-8", errors="replace"), python=f.suffix == ".py")
+    return found
+
+
+@pytest.fixture(scope="module")
+def api_route_methods() -> set[tuple[str, str]]:
+    from kazma_ui.app import create_app
+
+    return {
+        (method, p)
+        for r in _all_routes(create_app().routes)
+        if (p := getattr(r, "path", "")).startswith("/api/")
+        for method in (getattr(r, "methods", None) or ())
+        if method not in ("HEAD", "OPTIONS")
+    }
+
+
 # ── the gate ─────────────────────────────────────────────────────────────
 
 def test_every_api_route_has_a_caller_or_a_reason(api_routes, calls) -> None:
@@ -266,9 +377,33 @@ def test_every_api_route_has_a_caller_or_a_reason(api_routes, calls) -> None:
 
 
 def test_no_declaration_is_stale(api_routes, calls) -> None:
-    gone = sorted(p for p in NOT_CALLED_BY_A_PAGE if p not in api_routes)
+    paths = [p for p in NOT_CALLED_BY_A_PAGE if " " not in p]
+    gone = sorted(p for p in paths if p not in api_routes)
     assert not gone, f"declared routes the app no longer serves -- remove them: {gone}"
-    called_now = sorted(p for p in NOT_CALLED_BY_A_PAGE if is_called(p, calls))
+    called_now = sorted(p for p in paths if is_called(p, calls))
+    assert not called_now, f"declared as uncalled but now called -- remove them: {called_now}"
+
+
+def test_every_api_route_method_has_a_caller_or_a_reason(api_route_methods, method_calls) -> None:
+    missing = sorted(
+        f"{m} {p}" for m, p in api_route_methods
+        if p not in NOT_CALLED_BY_A_PAGE
+        and f"{m} {p}" not in NOT_CALLED_BY_A_PAGE
+        and not is_called_with(m, p, method_calls)
+    )
+    assert not missing, (
+        "No page, TUI, CLI or script calls these routes with this method (a "
+        "call of another method on the same path is not one). Remove the "
+        "route, give it a control, or declare 'METHOD /path' in "
+        f"NOT_CALLED_BY_A_PAGE with the reason: {missing}"
+    )
+
+
+def test_no_method_declaration_is_stale(api_route_methods, method_calls) -> None:
+    declared = [key.split(" ", 1) for key in NOT_CALLED_BY_A_PAGE if " " in key]
+    gone = sorted(f"{m} {p}" for m, p in declared if (m, p) not in api_route_methods)
+    assert not gone, f"declared methods the app no longer serves -- remove them: {gone}"
+    called_now = sorted(f"{m} {p}" for m, p in declared if is_called_with(m, p, method_calls))
     assert not called_now, f"declared as uncalled but now called -- remove them: {called_now}"
 
 
@@ -295,6 +430,46 @@ def test_a_concatenation_prefix_counts() -> None:
     src = "fetch('/api/x/reply/' + action, {method: 'POST'})"
     assert is_called("/api/x/reply/approve", calls_in(src))
     assert not is_called("/api/x/replies", calls_in(src))
+
+
+def test_a_method_nothing_calls_is_flagged() -> None:
+    """The route that deleted any setting: the Settings scripts called other
+    /api/settings/... paths, all with other methods."""
+    calls = method_calls_in(
+        "fetch('/api/settings/mcp/' + encodeURIComponent(name) + '/test', { method: 'POST' });"
+        "await window.kazmaSave('/api/settings/single', { method: 'PUT', body: {} });"
+    )
+    assert is_called("/api/settings/{key:path}", {p for _m, p in calls})
+    assert not is_called_with("DELETE", "/api/settings/{key:path}", calls)
+    assert is_called_with("PUT", "/api/settings/{key:path}", calls)
+
+
+@pytest.mark.parametrize(("src", "method"), [
+    ("fetch('/api/x')", "GET"),
+    ("fetch(`/api/x/${encodeURIComponent(id)}`, { method: 'DELETE' })", "DELETE"),
+    ("fetch('/api/x/' + id + '/run', {\n  method: \"POST\",\n})", "POST"),
+    ("await window.kazmaSave('/api/x', { method: 'PATCH', body: {} })", "PATCH"),
+    ("window.kazmaGetJson('/api/x')", "GET"),
+    ("new EventSource('/api/x/stream')", "GET"),
+    ("navigator.sendBeacon('/api/x', blob)", "POST"),
+    ('<button hx-post="/api/x">', "POST"),
+    ('<a href="/api/x/download">', "GET"),
+    ("const u = '/api/x';\nfetch(u, { method: 'PUT' })", "ANY"),
+])
+def test_the_method_comes_from_the_call(src, method) -> None:
+    assert {m for m, _p in method_calls_in(src)} == {method}
+
+
+@pytest.mark.parametrize(("src", "method"), [
+    ('client.get(f"{base}/api/x", headers=h)', "GET"),
+    ('httpx.post(\n    "/api/x", json={})', "POST"),
+    ('await _request(client, "DELETE", f"/api/x/{name}")', "DELETE"),
+    ('await self._api("POST", "/api/x")', "POST"),
+    ('client.request("PUT", "/api/x")', "PUT"),
+    ('url = "/api/x"', "ANY"),
+])
+def test_the_method_comes_from_a_python_call(src, method) -> None:
+    assert {m for m, _p in method_calls_in(src, python=True)} == {method}
 
 
 def test_server_side_python_is_not_a_caller() -> None:
