@@ -975,6 +975,28 @@ _LOOP_STALL_HELPERS = frozenset({
     # vault reads for each platform, and the allowlists applied from them.
     "_read_platform_settings", "_build_chat_adapter", "_build_swarm_sender",
     "apply_adapter_allowlists", "apply_gateway_allowlists",
+    # The chat store's lookup by thread (2026-10-01): a Postgres round trip
+    # under the store's lock whenever the session is not cached -- up to the
+    # pool's 5 s while the database is away. The approve route, the
+    # clear-approvals route, the approval timeout and reminder delivery
+    # called it on the loop, and so did the helpers below through them.
+    "get_by_thread_id", "resolve_session_id", "persisted_hitl_for_thread",
+    "_hitl_parts_for_thread", "_resolve_turn",
+    # ... and the session minted for a thread the web never opened (a read,
+    # then a write, of the same store), and the reply turn a resume joins
+    # (the store's copy of the session once the in-memory id is gone).
+    "ensure_session_for_thread", "canonical_web_session", "resolve_reply_turn",
+    # The reply's own write (2026-10-01): persist_reply -> upsert_reply ->
+    # store.transact, which takes the session's thread lock and writes the
+    # whole session (Postgres) before releasing it. During an outage every
+    # call waited for the pool on the loop.
+    "persist_reply", "upsert_reply", "close_reply_turn",
+    # The MCP server list through its wrappers (2026-10-01): kazma.yaml, the
+    # agent's config and the settings store merged (list_mcp_servers above),
+    # which the /mcp page and /api/mcp/servers ran on the loop.
+    "get_mcp_servers", "_get_configured_servers",
+    # A server's stored OAuth token (settings and vault), read for its badge.
+    "oauth_status",
 })
 
 

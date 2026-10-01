@@ -83,7 +83,8 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
     @router.get("/mcp", response_class=HTMLResponse)
     async def mcp_page(request: Request) -> HTMLResponse:
         """Render the MCP server management page."""
-        servers = _get_configured_servers()
+        # kazma.yaml, the agent's config and the settings store: off the loop.
+        servers = await asyncio.to_thread(_get_configured_servers)
         return templates.TemplateResponse(
             request,
             "mcp.html",
@@ -97,10 +98,13 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
     @router.get("/api/mcp/servers")
     async def api_list_servers() -> list[dict[str, Any]]:
         """List configured MCP servers, annotated with OAuth status."""
-        servers = _get_configured_servers()
+        servers = await asyncio.to_thread(_get_configured_servers)
         try:
             from kazma_core.mcp.oauth import oauth_status
 
+            # Each server's stored token is a settings/vault read: off the loop.
+            names = [str(s.get("name", "")) for s in servers]
+            statuses = await asyncio.to_thread(lambda: {n: oauth_status(n) for n in names})
             manager = getattr(agent.tools, "_mcp", None)
             # Audit M5: surface per-server connection failures so the UI can
             # badge them instead of silently showing a disconnected server.
@@ -112,7 +116,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
                     conn_errors = {}
             for s in servers:
                 name = s.get("name", "")
-                s["oauth_status"] = oauth_status(name)
+                s["oauth_status"] = statuses.get(str(name), "none")
                 if manager is not None and manager.oauth_challenge(name):
                     s["oauth_required"] = True
                 if name in conn_errors:

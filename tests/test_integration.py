@@ -61,28 +61,12 @@ class TestAgentRoutes:
         assert "llm" in data
         assert "tools" in data
 
-    def test_agents_stop_action(self, client: TestClient) -> None:
-        """There is no agent to stop apart from the server (2026-09-28): the
-        old answer, 200 "stopped", was a flag nothing read."""
-        resp = client.post("/api/agents/stop")
-        assert resp.status_code == 409
-        data = resp.json()
-        assert data["status"] == "error"
-        assert data["running"] is True
-        assert "supervisor" in data["message"]
-
-    def test_agents_start_action(self, client: TestClient) -> None:
-        resp = client.post("/api/agents/start")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "ok"
-        assert data["running"] is True
-
-    def test_agents_unknown_action(self, client: TestClient) -> None:
-        resp = client.post("/api/agents/reboot")
-        assert resp.status_code == 400
-        data = resp.json()
-        assert "error" in data or resp.status_code == 400
+    def test_no_route_starts_or_stops_the_agent(self, client: TestClient) -> None:
+        """The agent serves whenever the server runs. POST /api/agents/stop
+        flipped a flag nothing read (2026-09-28), then answered 409 saying
+        so; nothing called it, and it is gone (2026-10-01)."""
+        for action in ("start", "stop", "reboot"):
+            assert client.post(f"/api/agents/{action}").status_code in (404, 405)
 
 
 class TestSettingsRoutes:

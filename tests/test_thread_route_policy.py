@@ -62,7 +62,6 @@ POLICY: dict[tuple[str, str, str], tuple[str, str]] = {
     ("POST", "/api/approve/{thread_id}", MISC): ("owner", ""),
     ("GET", "/api/pending-approvals", MISC): ("owner", ""),
     ("POST", "/api/pending-approvals/clear", MISC): ("admin+owner", ""),
-    ("DELETE", "/api/pending-approvals", MISC): ("admin+owner", ""),
     # Dashboard: the instance's whole checkpoint store.
     ("GET", "/api/sessions", DASH): ("admin", ""),
     ("DELETE", "/api/sessions/{thread_id}", DASH): ("admin", ""),

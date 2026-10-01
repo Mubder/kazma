@@ -1516,8 +1516,11 @@ async def _stream_langgraph_events(
             # Ordering matters: a user who refreshes the instant the answer
             # paints must find it in the store. Emitting `done` first left a
             # window where the browser reloaded into a transcript that did
-            # not yet contain the reply it had just rendered.
-            _turn_runtime.persist_reply(
+            # not yet contain the reply it had just rendered. Awaited in a
+            # thread: the order holds, and the loop serving every other
+            # stream does not wait on the store's lock or Postgres.
+            await asyncio.to_thread(
+                _turn_runtime.persist_reply,
                 session_id,
                 reply_turn_id,
                 content_acc,
@@ -1605,7 +1608,8 @@ async def _stream_langgraph_events(
                 )
             # A crashed turn still owes the user a durable record of whatever
             # it managed to say; without this the transcript reloads blank.
-            _turn_runtime.persist_reply(
+            await asyncio.to_thread(
+                _turn_runtime.persist_reply,
                 session_id,
                 reply_turn_id,
                 content_acc,

@@ -23,6 +23,7 @@ can never mint two cards.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -291,7 +292,7 @@ async def abort_thread_hitl(thread_id: str, *, session_id: str = "") -> None:
             from kazma_ui.reply_sink import resolve_reply_turn
             from kazma_ui.turn_runtime import persist_reply
 
-            part = persisted_hitl_for_thread(thread_id) or {}
+            part = await asyncio.to_thread(persisted_hitl_for_thread, thread_id) or {}
             raw_payload = part.get("payload") if isinstance(part, dict) else None
             payload = raw_payload if isinstance(raw_payload, dict) else {}
             iid = str(
@@ -299,8 +300,9 @@ async def abort_thread_hitl(thread_id: str, *, session_id: str = "") -> None:
                 or payload.get("interrupt_id")
                 or ""
             )
-            turn_id = resolve_reply_turn(thread_id, session_id)
-            persist_reply(
+            turn_id = await asyncio.to_thread(resolve_reply_turn, thread_id, session_id)
+            await asyncio.to_thread(
+                persist_reply,
                 session_id,
                 turn_id,
                 "",
@@ -525,7 +527,7 @@ async def ensure_paused_gate(
                 persisted_hitl_for_thread,
             )
 
-            part = persisted_hitl_for_thread(thread_id)
+            part = await asyncio.to_thread(persisted_hitl_for_thread, thread_id)
             st = str((part or {}).get("state") or "").lower()
             if st in ("approved", "denied", "inflight", "settled") and not is_new_gate(
                 part, snapshot

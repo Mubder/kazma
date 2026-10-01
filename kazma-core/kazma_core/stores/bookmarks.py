@@ -181,42 +181,6 @@ class BookmarkStore:
             logger.debug("[BookmarkStore] Deleted bookmark id=%s", bookmark_id)
         return deleted
 
-    def update_bookmark(
-        self,
-        bookmark_id: int,
-        *,
-        name: str | None = None,
-        type_str: str | None = None,
-        target: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Partially update a bookmark.  Returns the updated record or ``None`` if not found."""
-        if type_str is not None and type_str not in ("file", "url"):
-            raise ValueError(f"Invalid bookmark type: {type_str!r}. Must be 'file' or 'url'.")
-
-        existing = self.get_bookmark(bookmark_id)
-        if existing is None:
-            return None
-
-        new_name = name.strip() if name is not None else existing["name"]
-        new_type = type_str if type_str is not None else existing["type"]
-        new_target = target.strip() if target is not None else existing["target"]
-
-        with self._lock:
-            conn = self._get_conn()
-            try:
-                conn.execute("BEGIN")
-                conn.execute(
-                    "UPDATE bookmarks SET name = ?, type = ?, target = ? WHERE id = ?",
-                    (new_name, new_type, new_target, bookmark_id),
-                )
-                conn.execute("COMMIT")
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
-
-        logger.debug("[BookmarkStore] Updated bookmark id=%s", bookmark_id)
-        return self.get_bookmark(bookmark_id)
-
     def close(self) -> None:
         """Close the underlying database connection."""
         if self._conn is not None:

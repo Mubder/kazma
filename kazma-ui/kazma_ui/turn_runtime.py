@@ -232,7 +232,9 @@ async def close_turn(
     """
     try:
         thread_id = _thread_id_of(config, thread_id)
-        session_id = resolve_session_id(thread_id, session_id)
+        if not session_id:
+            # A chat-store read (Postgres when the session is not cached).
+            session_id = await asyncio.to_thread(resolve_session_id, thread_id)
         snap = None
         asst = ""
         if graph is not None and config is not None:
@@ -344,7 +346,7 @@ async def close_turn(
         from kazma_ui.reply_sink import resolve_reply_text, resolve_reply_turn
 
         if not turn_id:
-            turn_id = resolve_reply_turn(thread_id, session_id)
+            turn_id = await asyncio.to_thread(resolve_reply_turn, thread_id, session_id)
         # An interrupted/cancelled turn's checkpoint often still holds the
         # PREVIOUS assistant message. Streamed narration is this turn's row.
         if interrupted and str(streamed_text or "").strip():
@@ -375,7 +377,10 @@ async def close_turn(
             final=text,
             activity=activity,
         )
-        return persist_reply(
+        # The chat-store write (the session's lock, then Postgres): off the
+        # loop, which every other stream is waiting on.
+        return await asyncio.to_thread(
+            persist_reply,
             session_id,
             turn_id,
             text,
@@ -414,12 +419,13 @@ async def invoke_turn(
     rather than producing a chat reply.
     """
     thread_id = _thread_id_of(config, thread_id)
-    session_id = resolve_session_id(thread_id, session_id)
+    if not session_id:
+        session_id = await asyncio.to_thread(resolve_session_id, thread_id)
     if not turn_id and persist:
         try:
             from kazma_ui.reply_sink import resolve_reply_turn
 
-            turn_id = resolve_reply_turn(thread_id, session_id)
+            turn_id = await asyncio.to_thread(resolve_reply_turn, thread_id, session_id)
         except Exception:
             turn_id = ""
 

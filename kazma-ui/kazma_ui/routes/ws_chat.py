@@ -12,6 +12,7 @@ shipped client sent to.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -253,7 +254,7 @@ def create_ws_chat_router(
                                 )
                                 from kazma_ui.turn_document import assign_interrupt_id
 
-                                part = persisted_hitl_for_thread(thread_id)
+                                part = await asyncio.to_thread(persisted_hitl_for_thread, thread_id)
                                 stored = ""
                                 if isinstance(part, dict):
                                     stored = str(

@@ -257,6 +257,18 @@ def compose_cron_delivery(summary: str | None, prompt: str | None) -> str:
     return (leftover or "Scheduled task fired.")[:4000]
 
 
+def _web_session_for_thread(thread_id: str) -> Any:
+    """The web chat session bound to *thread_id*, or None.
+
+    A chat-store read (a Postgres round trip when the session is not cached);
+    ``_deliver`` runs it in a thread.
+    """
+    from kazma_ui.session_manager import get_session_manager
+
+    mgr = get_session_manager()
+    return mgr.get_by_thread_id(thread_id) if mgr else None
+
+
 def parse_timing(timing: str, from_time: datetime | None = None) -> datetime:
     """Parse human-readable timing into next run time.
 
@@ -1237,10 +1249,10 @@ class CronScheduler:
                 # Session-store fallback (best effort — TTL is 5 min; the
                 # web SessionManager knows platform/chat_id per thread).
                 try:
-                    from kazma_ui.session_manager import get_session_manager
-
-                    mgr = get_session_manager()
-                    sess = mgr.get_by_thread_id(job.thread_id) if mgr else None
+                    # A chat-store read (Postgres when the session is not
+                    # cached, and the store itself may be built here): off
+                    # the loop.
+                    sess = await asyncio.to_thread(_web_session_for_thread, job.thread_id)
                     if sess is not None:
                         plat = str(getattr(sess, "platform", "") or job.platform or "")
                         chat = str(getattr(sess, "chat_id", "") or "")

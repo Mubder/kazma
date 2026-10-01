@@ -12,6 +12,7 @@ Statuses:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Literal
 
@@ -223,7 +224,7 @@ async def _thin_execution_status(
         return "idle"
     if not is_resume_claimed(thread_id):
         return "pending"
-    part = persisted_hitl_for_thread(thread_id)
+    part = await asyncio.to_thread(persisted_hitl_for_thread, thread_id)
     if is_new_gate(part, snap):
         return "pending"
     return "inflight"
