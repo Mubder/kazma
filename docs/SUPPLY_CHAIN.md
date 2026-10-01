@@ -50,15 +50,18 @@ PyPI, and `kazma update` then had pip upgrade `kazma` by name.
 
 The names are `kazma`, `kazma-cli`, `kazma-core`, `kazma-gateway`,
 `kazma-memory` (retired), `kazma-skills`, `kazma-tui` and `kazma-ui`
-(`scripts/pypi_reserve.py`, which builds the reservations). The workflow
-`.github/workflows/pypi-reserve.yml` uploads them through PyPI Trusted
-Publishing, so no PyPI token exists anywhere. It runs only by hand
+(`scripts/pypi_reserve.py`, which builds the reservations). All eight were
+published on 2026-10-01: version 0.0.1 of each, a wheel and a source archive.
+The workflow `.github/workflows/pypi-reserve.yml` uploaded them through PyPI
+Trusted Publishing, so no PyPI token exists anywhere. It runs only by hand
 (Actions → Reserve PyPI names), and without its "publish" box it only builds
 and checks the packages.
 
-PyPI accepts the first upload of a name only from a publisher you register
-for it. On pypi.org, under Account → Publishing → Add a new pending publisher
-→ GitHub, register each name with:
+PyPI accepts the first upload of a name only from a publisher registered for
+it, and the publisher then stays with the project. To hold another name, add
+it to the script's list (the gate in `tests/test_no_pypi_kazma.py` keeps that
+list equal to Kazma's package names), then, on pypi.org, under Account →
+Publishing → Add a new pending publisher → GitHub, register it with:
 
 | Field | Value |
 |---|---|
@@ -74,11 +77,12 @@ every name, it accepts the first and refuses the rest: "A pending trusted
 publisher matching this configuration has already been registered for a
 different project name".
 
-Then run the workflow with "publish" ticked. Each name is uploaded in its own
-job, under its own environment, so a name whose publisher is missing fails
-alone, and the run can be repeated for just that name. If PyPI limits how many
-pending publishers you can hold at once, register a few, run the workflow for
-those names, then the next few.
+Then run the workflow with "publish" ticked and the new name in its "names"
+box. Each name is uploaded in its own job, under its own environment, so a
+name whose publisher is missing or does not match fails alone
+("invalid-publisher"), and the run can be repeated for just that name. An
+account holds at most three pending publishers at a time, which is why the
+first eight went up in four rounds.
 
 ---
 
