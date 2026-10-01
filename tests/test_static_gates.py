@@ -958,6 +958,16 @@ _LOOP_STALL_HELPERS = frozenset({
     # profile, the window and the trim budget are settings reads, which the
     # context_info tool made on the loop.
     "thread_usage", "context_report",
+    # Switching the model or provider (2026-10-01): settings and vault
+    # writes, then the agent rebinds and the graph is compiled again. The
+    # Settings route, the chat's provider switch, setup and the /model menu
+    # ran it on the loop.
+    "switch_active_model", "switch_active_provider", "ensure_active_model",
+    "maybe_activate_provider_for_chat", "switch_model_from_chat",
+    # ... and the provider list writes around them: a provider's health after
+    # a Test, a saved entry (its key goes to the vault). The Test route wrote
+    # both on the loop.
+    "set_provider_health", "upsert_provider", "_activate_tested_provider",
 })
 
 

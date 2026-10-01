@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Switching the model no longer holds up every open chat (2026-10-01)
+
+- **Switching the model or provider, testing a provider and first-run setup
+  run off the event loop.** Each writes settings and secrets, then rebuilds
+  the agent's client and compiles its graph again -- work the Settings page,
+  the chat's provider switch, the provider Test, setup and the chat apps'
+  `/model` menu did on the loop that serves every open chat stream, where a
+  slow database or a long compile stalled them all. The functions are on the
+  loop-stall gate's list, so a new caller on the loop fails the build, and
+  twelve provider and setup routes that never awaited anything are plain
+  functions now.
+
 ## Chat apps' slash commands report what they measured (2026-10-01)
 
 - **`/status`, `/cost` and `/context` showed numbers nothing measured.** In

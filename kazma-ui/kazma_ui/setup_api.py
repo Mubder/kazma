@@ -73,11 +73,11 @@ def create_setup_router() -> APIRouter:
     router = APIRouter(tags=["setup"])
 
     @router.get("/api/setup/status")
-    async def setup_status() -> dict[str, Any]:
+    def setup_status() -> dict[str, Any]:
         return compute_setup_status()
 
     @router.post("/api/setup/bootstrap")
-    async def setup_bootstrap(body: BootstrapBody, request: Request) -> dict[str, Any]:
+    def setup_bootstrap(body: BootstrapBody, request: Request) -> dict[str, Any]:
         del request  # auth is middleware; CSRF is middleware
         pid = body.provider.strip().lower()
         preset = PROVIDER_PRESETS.get(pid)

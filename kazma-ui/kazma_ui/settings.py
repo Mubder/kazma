@@ -1814,7 +1814,10 @@ class SettingsRouterBuilder:
             try:
                 from kazma_core.runtime.model_switch import switch_active_model
 
-                result = switch_active_model(
+                # Off the loop: settings writes, then the agent rebinds and
+                # the graph is compiled again.
+                result = await asyncio.to_thread(
+                    switch_active_model,
                     model,
                     agent=getattr(self, "agent", None),
                 )
