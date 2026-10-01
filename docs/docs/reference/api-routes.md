@@ -44,16 +44,17 @@ description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway c
 |--------|------|------|-------------|
 | * | `/api/swarm/*` | Session / RBAC | Workers, dispatch, tasks, metrics |
 | POST | `/api/swarm/workers/{name}/circuit-breaker/reset` | Session | Close a worker's breaker now (the worker card's **Reset**, shown while the breaker is open or half-open) |
+| GET | `/api/swarm/tasks/export` | Session | Task history as JSON, or CSV with `?format=csv` (newest 1,000; filters `type`, `status`, `q` as the history list). Task History's **Export CSV** |
 | GET | SSE swarm events | Session | Live task stream (`swarm_sse`) |
 | GET | `/swarm` | Session | Swarm panel page |
 | * | `/api/replay/*` | Session | Time travel: threads, snapshots, restore, fork, compare, clear (`replay_routes.py`) |
 | GET | `/replay` | Session | Time Travel panel page |
-| * | `/api/research/*` | Session | Research: list, detail, compare, export, archive, unarchive (`research_panel/routes.py`) |
+| * | `/api/research/*` | Session | Research: list, detail, compare, export, archive, unarchive (`research_panel/routes.py`). A report a request names is a path inside a `research/reports` folder; nothing else is read |
 | POST | `/api/research/sessions` | Session | Start deep research session (background pipeline) |
 | GET | `/api/research/sessions` | Session | List durable research sessions |
 | GET | `/api/research/sessions/{id}` | Session | Session status / log / report path |
 | GET | `/api/research/sessions/{id}/stream` | Session | SSE progress (`snapshot` / `progress` / `done`) |
-| GET | `/api/research/eval` | Session | Structural rubric for `?path=` or `?session_id=` |
+| GET | `/api/research/eval` | Session | Structural rubric for `?path=research/reports/…` or `?session_id=` |
 | POST | `/api/memory/v2/eval/golden` | Session | Run golden memory recall cases (pass rate) |
 | GET | `/research` | Session | Research panel page (start form + live progress) |
 
@@ -91,7 +92,7 @@ on error (never a bare 500); non-numeric params yield a FastAPI 422.
 | GET | `/api/memory/v2/admin/summary` | Session | Counts for ops chips (live/invalidated beliefs, empty/isolated entities). |
 | GET/POST | `/api/memory/v2/hygiene/*` | Session | Preview + run empty purge / near-dup invalidate / archive. |
 | GET/POST | `/api/memory/v2/entity-merges*` | Session | Quarantine merge list + approve/reject. |
-| GET/POST/DELETE | `/api/memory/v2/graph/groups*` | Session | View-only groupings (list/create/delete/move/tier). Never mutates beliefs. Canvas poll uses `groups` on `GET /graph`; Ungroup is `DELETE …/groups/{id}`. |
+| GET/POST/DELETE | `/api/memory/v2/graph/groups*` | Session | View-only groupings (list/create/delete/move/tier). Never mutates beliefs. Create refuses a node that already has a parent (the answer names the move route); **Group under** on a grouped node moves it, and **Tier…** sets a grouped node's tier. Canvas poll uses `groups` on `GET /graph`; Ungroup is `DELETE …/groups/{id}`. |
 | GET | `/api/memory/v2/graph/export` | Session | On-demand JSON or GraphML (`?format=json\|graphml`). |
 | POST | `/api/memory/v2/probe` | Session | Recall dry-run (explain chips). |
 | POST | `/api/memory/v2/federated-search` | Session | Memory + KB labeled search. |

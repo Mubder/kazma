@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter
@@ -51,22 +52,44 @@ def _thread_items(threads: list[str], chats: dict[str, dict[str, Any]]) -> list[
 
 
 def create_replay_router(
-    recorder: Any,
-    engine: Any,
+    recorder: Any = None,
+    engine: Any = None,
     graph: Any = None,
+    *,
+    recorder_getter: Callable[[], Any] | None = None,
+    graph_getter: Callable[[], Any] | None = None,
 ) -> APIRouter:
     """Create the replay API router.
 
     Args:
         recorder: ``SnapshotRecorder`` instance (list/get/clear snapshots).
-        engine:   ``ReplayEngine`` instance (replay_from, compare_replays).
+        engine:   ``ReplayEngine`` instance (replay_from, compare_replays);
+                  built from the recorder when not given.
         graph:    Optional compiled LangGraph (needed for restore/fork which
                   call ``aupdate_state``). If None, restore/fork return 503.
+        recorder_getter / graph_getter: read on every request instead. The
+                  app mounts this router when it is built, before startup
+                  makes the recorder and the graph; and a model switch
+                  rebuilds the graph, which a router given one at mount time
+                  never saw.
 
     Returns:
         ``APIRouter`` with the ``/api/replay/*`` endpoints.
     """
     router = APIRouter(tags=["replay"])
+
+    def _recorder() -> Any:
+        return recorder_getter() if recorder_getter is not None else recorder
+
+    def _engine(rec: Any) -> Any:
+        if engine is not None and recorder_getter is None:
+            return engine
+        from kazma_core.time_travel import ReplayEngine
+
+        return ReplayEngine(rec)
+
+    def _graph() -> Any:
+        return graph_getter() if graph_getter is not None else graph
 
     def _unavailable() -> JSONResponse:
         return JSONResponse(
@@ -103,11 +126,12 @@ def create_replay_router(
         the chat store, newest activity first, threads no chat owns last.
         The page listed 131 bare uuids on the live install (2026-09-28).
         """
-        if recorder is None:
+        rec = _recorder()
+        if rec is None:
             return _unavailable()
         try:
             threads = await owned_threads_async(
-                await asyncio.to_thread(recorder.list_distinct_threads)
+                await asyncio.to_thread(rec.list_distinct_threads)
             )
             if threads is None:
                 return JSONResponse(
@@ -124,7 +148,8 @@ def create_replay_router(
     @router.get("/api/replay/snapshots/{thread_id}")
     async def list_snapshots(thread_id: str) -> JSONResponse:
         """List snapshots for a thread, ordered by iteration."""
-        if recorder is None:
+        rec = _recorder()
+        if rec is None:
             return _unavailable()
         if (denied := await _require_thread_owned(thread_id)) is not None:
             return denied
@@ -140,7 +165,7 @@ def create_replay_router(
                         "id": s.id,
                         "message_count": len(s.get_state().get("messages", [])),
                     }
-                    for s in recorder.list_snapshots(thread_id)
+                    for s in rec.list_snapshots(thread_id)
                 ]
 
             items = await asyncio.to_thread(_items)
@@ -152,12 +177,13 @@ def create_replay_router(
     @router.get("/api/replay/snapshots/{thread_id}/{iteration}")
     async def get_snapshot(thread_id: str, iteration: int) -> JSONResponse:
         """Get a single snapshot's detail (state + messages)."""
-        if recorder is None:
+        rec = _recorder()
+        if rec is None:
             return _unavailable()
         if (denied := await _require_thread_owned(thread_id)) is not None:
             return denied
         try:
-            state = await asyncio.to_thread(engine.replay_from, thread_id, iteration)
+            state = await asyncio.to_thread(_engine(rec).replay_from, thread_id, iteration)
             if state is None:
                 return JSONResponse({"error": "not found"}, status_code=404)
             messages = state.get("messages", [])
@@ -180,9 +206,11 @@ def create_replay_router(
 
         Body: ``{"thread_id": "...", "iteration": N}``
         """
-        if recorder is None:
+        rec = _recorder()
+        if rec is None:
             return _unavailable()
-        if graph is None:
+        live_graph = _graph()
+        if live_graph is None:
             return JSONResponse({"error": "graph not available"}, status_code=503)
         thread_id = body.get("thread_id", "")
         iteration = body.get("iteration")
@@ -191,12 +219,12 @@ def create_replay_router(
         if (denied := await _require_thread_owned(thread_id)) is not None:
             return denied
         try:
-            state = await asyncio.to_thread(engine.replay_from, thread_id, int(iteration))
+            state = await asyncio.to_thread(_engine(rec).replay_from, thread_id, int(iteration))
             if state is None:
                 return JSONResponse({"error": "snapshot not found"}, status_code=404)
             from kazma_core.time_travel import apply_snapshot_to_thread
 
-            payload = await apply_snapshot_to_thread(graph, state, thread_id)
+            payload = await apply_snapshot_to_thread(live_graph, state, thread_id)
             return JSONResponse({
                 "ok": True,
                 "thread_id": thread_id,
@@ -214,9 +242,11 @@ def create_replay_router(
         Body: ``{"thread_id": "...", "iteration": N}``
         Returns: ``{"new_thread_id": "...", "message_count": N}``
         """
-        if recorder is None:
+        rec = _recorder()
+        if rec is None:
             return _unavailable()
-        if graph is None:
+        live_graph = _graph()
+        if live_graph is None:
             return JSONResponse({"error": "graph not available"}, status_code=503)
         import uuid
 
@@ -227,27 +257,33 @@ def create_replay_router(
         if (denied := await _require_thread_owned(thread_id)) is not None:
             return denied
         try:
-            state = await asyncio.to_thread(engine.replay_from, thread_id, int(iteration))
+            state = await asyncio.to_thread(_engine(rec).replay_from, thread_id, int(iteration))
             if state is None:
                 return JSONResponse({"error": "snapshot not found"}, status_code=404)
             new_thread_id = f"fork-{uuid.uuid4().hex[:12]}"
             from kazma_core.time_travel import apply_snapshot_to_thread
 
-            state = await apply_snapshot_to_thread(graph, state, new_thread_id)
+            state = await apply_snapshot_to_thread(live_graph, state, new_thread_id)
 
-            # Create a Web UI session for the fork.
-            try:
-                from kazma_ui.session_manager import get_session_manager, ChatSession
+            # A chat for the fork, so it shows in the sidebar. The chat store
+            # is a database write: off the loop (AGENTS §35).
+            def _save_fork_chat() -> None:
+                from kazma_ui.session_manager import ChatSession, get_session_manager
 
-                web_store = get_session_manager()
-                web_store.put(ChatSession(
+                get_session_manager().put(ChatSession(
                     session_id=new_thread_id,
                     thread_id=new_thread_id,
                     title=f"Fork (iter {iteration})",
                     messages=state.get("messages", []),
                 ))
+
+            try:
+                await asyncio.to_thread(_save_fork_chat)
             except Exception:
-                logger.debug("[replay] fork: could not create Web UI session", exc_info=True)
+                logger.warning(
+                    "[replay] fork %s made, but its chat could not be saved: it will "
+                    "not show in the chat list", new_thread_id, exc_info=True,
+                )
 
             return JSONResponse({
                 "ok": True,
@@ -264,7 +300,8 @@ def create_replay_router(
 
         Body: ``{"thread_id": "...", "a": N, "b": M}``
         """
-        if recorder is None:
+        rec = _recorder()
+        if rec is None:
             return _unavailable()
         thread_id = body.get("thread_id", "")
         a = body.get("a")
@@ -274,11 +311,11 @@ def create_replay_router(
         if (denied := await _require_thread_owned(thread_id)) is not None:
             return denied
         try:
-            state_a = await asyncio.to_thread(engine.replay_from, thread_id, int(a))
-            state_b = await asyncio.to_thread(engine.replay_from, thread_id, int(b))
+            state_a = await asyncio.to_thread(_engine(rec).replay_from, thread_id, int(a))
+            state_b = await asyncio.to_thread(_engine(rec).replay_from, thread_id, int(b))
             if state_a is None or state_b is None:
                 return JSONResponse({"error": "one or both snapshots not found"}, status_code=404)
-            diff = await asyncio.to_thread(engine.compare_replays, state_a, state_b)
+            diff = await asyncio.to_thread(_engine(rec).compare_replays, state_a, state_b)
             return JSONResponse({"diff": diff})
         except Exception as exc:
             logger.exception("[replay] compare failed")
@@ -287,12 +324,13 @@ def create_replay_router(
     @router.delete("/api/replay/threads/{thread_id}")
     async def clear_snapshots(thread_id: str) -> JSONResponse:
         """Clear all snapshots for a thread."""
-        if recorder is None:
+        rec = _recorder()
+        if rec is None:
             return _unavailable()
         if (denied := await _require_thread_owned(thread_id)) is not None:
             return denied
         try:
-            count = await asyncio.to_thread(recorder.clear_snapshots, thread_id)
+            count = await asyncio.to_thread(rec.clear_snapshots, thread_id)
             return JSONResponse({"ok": True, "cleared": count})
         except Exception as exc:
             logger.exception("[replay] clear failed for %s", thread_id)

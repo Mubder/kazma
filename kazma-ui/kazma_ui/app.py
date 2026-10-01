@@ -90,6 +90,7 @@ class KazmaAppBuilder:
         self._graph_holder: dict[str, Any] = {"graph": None}  # mutable holder so SSE router sees post-startup recompiled graph+checkpointer+HITL (fixes C-3)
         self._checkpointer = None
         self._hitl_state: dict[str, Any] = {}
+        self._snapshot_recorder = None  # made at startup; the replay API reads it per request
         self._current_lang = None
         self._documents = None
         self._documents_maintenance = None
@@ -1471,6 +1472,34 @@ class KazmaAppBuilder:
             logger.warning("[Documents] API router failed to mount: %s", e)
             self._init_errors.append({"subsystem": "documents_api", "error": str(e)})
 
+        # ── Time Travel replay API + Research panel API ──
+        # Mounted here, never at startup: every route the server serves must
+        # exist when the app is built, or the gates that read the route table
+        # (callers, methods, load tests) cannot see it -- these two were
+        # mounted in _on_startup until 2026-10-01 and no gate saw /api/replay
+        # or /api/research. The replay API reads the recorder and the graph
+        # per request; before startup makes them it answers 503
+        # (time_travel_unavailable), as it did when the recorder failed.
+        try:
+            from kazma_ui.replay_routes import create_replay_router
+
+            self.app.include_router(create_replay_router(
+                recorder_getter=lambda: self._snapshot_recorder,
+                graph_getter=lambda: self._hitl_state.get("graph") or self._graph_holder.get("graph"),
+            ))
+            logger.info("[Replay] Time-travel API mounted at /api/replay/*")
+        except Exception as e:
+            logger.warning("[Replay] Failed to mount replay API: %s", e)
+            self._init_errors.append({"subsystem": "replay_api", "error": str(e)})
+        try:
+            from kazma_ui.research_panel import create_research_router
+
+            self.app.include_router(create_research_router())
+            logger.info("[Research] API mounted at /api/research/*")
+        except Exception as e:
+            logger.warning("[Research] Failed to mount research API: %s", e)
+            self._init_errors.append({"subsystem": "research_api", "error": str(e)})
+
         # ── Swarm Panel ──
         from kazma_ui.swarm_panel import create_swarm_router
 
@@ -1865,42 +1894,15 @@ class KazmaAppBuilder:
             except Exception as exc:
                 logger.warning("[turn-liveness] failed to start watchdog: %s", exc)
 
-            # ── Time Travel: mount replay API + page route ──────────
-            # ALWAYS mounted — even when the recorder failed to initialize.
-            # The router then serves a structured 503 (time_travel_unavailable)
-            # instead of a bare 404, so the UI can show a clear state and stop
-            # polling instead of spamming 404s every 10s forever.
-            try:
-                from kazma_core.time_travel import ReplayEngine
-                from kazma_ui.replay_routes import create_replay_router
-
-                _replay_engine = (
-                    ReplayEngine(self._snapshot_recorder)
-                    if self._snapshot_recorder is not None
-                    else None
+            # ── Time Travel ─────────────────────────────────────────
+            # The replay API is mounted when the app is built and reads the
+            # recorder per request: without one it answers a structured 503
+            # (time_travel_unavailable), so the page shows a clear state.
+            if self._snapshot_recorder is None:
+                logger.warning(
+                    "[Replay] no snapshot recorder (creation failed) -- "
+                    "/api/replay/* answers 503"
                 )
-                self.app.include_router(create_replay_router(
-                    recorder=self._snapshot_recorder,
-                    engine=_replay_engine,
-                    graph=self._hitl_state.get("graph") or self._graph_holder.get("graph"),
-                ))
-                if self._snapshot_recorder is not None:
-                    logger.info("[Replay] Time-travel API mounted at /api/replay/*")
-                else:
-                    logger.warning(
-                        "[Replay] Time-travel API mounted in UNAVAILABLE mode "
-                        "(recorder init failed) — /api/replay/* returns 503"
-                    )
-            except Exception as exc:
-                logger.warning("[Replay] Failed to mount replay API: %s", exc)
-
-            # ── Research panel API ────────────────────────────────
-            try:
-                from kazma_ui.research_panel import create_research_router
-                self.app.include_router(create_research_router())
-                logger.info("[Research] API mounted at /api/research/*")
-            except Exception as exc:
-                logger.warning("[Research] Failed to mount research API: %s", exc)
 
             if self.gateway is not None:
                 from kazma_gateway.agent_handler import create_graph_handler

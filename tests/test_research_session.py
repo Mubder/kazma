@@ -51,10 +51,11 @@ def test_create_get_list_session(session_db):
     assert any(x.id == s.id for x in listed)
 
 
-def test_update_session_broadcasts(session_db):
+@pytest.mark.asyncio
+async def test_update_session_broadcasts(session_db):
     rs = session_db
     s = rs.create_session("topic")
-    q = rs.subscribe_progress(s.id)
+    q = rs.subscribe_progress(s.id)  # a subscriber belongs to the running loop
     # snapshot already in queue
     snap = q.get_nowait()
     assert snap["type"] == "snapshot"

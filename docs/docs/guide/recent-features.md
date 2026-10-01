@@ -371,7 +371,7 @@ pipeline” nudge. Disable: `KAZMA_RESEARCH_ROUTE=0`.
 
 - Report + `rubric.json` under the paper folder  
 - Session stores `rubric_score` / `rubric_ok`  
-- Score any report: `GET /api/research/eval?path=…` or `?session_id=…`
+- Score a report: `GET /api/research/eval?path=research/reports/…` or `?session_id=…` (only a file inside a `research/reports` folder is read)
 
 **Deep dive:** [Web research](./web-research).
 

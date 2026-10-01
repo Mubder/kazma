@@ -14,6 +14,12 @@ Routes:
   POST /api/research/compare         — compare two research runs
   POST /api/research/{id}/export     — export to DOCX/PDF/Markdown
   GET  /api/research/download        — download an exported file
+
+Handlers that only read or write the stores are plain ``def`` (FastAPI runs
+them in its threadpool, AGENTS §35); the async ones hold the work that must
+await (the document generators, the progress stream), with their store
+reads in ``asyncio.to_thread``. A report a request names is read only
+through ``resolve_report_file`` -- inside a ``research/reports`` folder.
 """
 
 from __future__ import annotations
@@ -72,12 +78,10 @@ def _flatten(task: Any) -> dict[str, Any]:
     }
 
 
-async def _set_archived(task_id: str, archived: bool) -> JSONResponse:
-    """Toggle the archived flag on a research task's metadata.
+def _find_task(task_id: str) -> tuple[Any, Any]:
+    """(store, task): the TaskStore's row, else the engine's in-memory task.
 
-    Loads the task from the TaskStore (or in-memory engine), mutates
-    ``metadata["archived"]``, and re-persists. This respects the store's
-    locking and works for both SQLite and Postgres.
+    Blocking (a store read): call it from a thread or a plain-def handler.
     """
     store = _get_store()
     task = store.get_task(task_id) if store else None
@@ -88,7 +92,86 @@ async def _set_archived(task_id: str, archived: bool) -> JSONResponse:
             if engine:
                 task = engine.get_task(task_id) or engine.get_active_task(task_id)
         except Exception:
-            pass
+            logger.debug("[research] engine task lookup failed", exc_info=True)
+    return store, task
+
+
+def _report_sections(md: str) -> list[dict[str, str]]:
+    """Split a report's markdown into generator sections, one per heading."""
+    sections: list[dict[str, str]] = []
+    cur_h = "Report"
+    cur_b: list[str] = []
+    for line in md.splitlines():
+        if line.startswith("#"):
+            if cur_b or sections:
+                sections.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
+            cur_h = line
+            cur_b = []
+        else:
+            cur_b.append(line)
+    if cur_b or not sections:
+        sections.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
+    return sections
+
+
+def _session_markdown(sess: Any) -> str:
+    """A session's report.md when it resolves, else its summary and log. Blocking."""
+    from kazma_core.tools.research_pipeline import resolve_report_file
+
+    md = ""
+    target = resolve_report_file(sess.report_path, stored=True) if sess.report_path else None
+    if target is not None:
+        md = target.read_text(encoding="utf-8", errors="replace")
+    if not md:
+        md = (
+            f"# {(sess.topic or 'Research session')[:120]}\n\n"
+            f"{sess.summary or sess.message or ''}\n\n"
+            "## Log\n\n"
+            + "\n".join(f"- {entry}" for entry in (sess.log or []))
+        )
+    return md
+
+
+async def _generate(fmt: str, title: str, sections: list[dict[str, str]]) -> str:
+    """Render *sections* through the document generator in *fmt*."""
+    if fmt == "docx":
+        from kazma_skills.native.document_generator.tools import generate_docx
+
+        return await generate_docx(title, sections)
+    if fmt == "pdf":
+        from kazma_skills.native.document_generator.tools import generate_pdf
+
+        return await generate_pdf(title, sections)
+    from kazma_skills.native.document_generator.tools import generate_markdown_doc
+
+    return await generate_markdown_doc(title, sections)
+
+
+def _export_reply(fmt: str, msg: Any) -> JSONResponse:
+    path = ""
+    if isinstance(msg, str) and "Saved to:" in msg:
+        path = msg.split("Saved to:")[-1].strip()
+    filename = Path(path).name if path else ""
+    return JSONResponse(
+        {
+            "ok": True,
+            "format": fmt,
+            "message": msg,
+            "path": path,
+            "filename": filename,
+            "download_url": (f"/api/research/download?path={filename}" if filename else ""),
+        }
+    )
+
+
+def _set_archived(task_id: str, archived: bool) -> JSONResponse:
+    """Toggle the archived flag on a research task's metadata.
+
+    Loads the task from the TaskStore (or in-memory engine), mutates
+    ``metadata["archived"]``, and re-persists. This respects the store's
+    locking and works for both SQLite and Postgres. Blocking.
+    """
+    store, task = _find_task(task_id)
     if task is None:
         return JSONResponse({"error": "task not found"}, status_code=404)
 
@@ -114,7 +197,7 @@ def create_research_router() -> APIRouter:
     router = APIRouter(tags=["research"])
 
     @router.get("/api/research/papers")
-    async def list_papers(limit: int = 50) -> JSONResponse:
+    def list_papers(limit: int = 50) -> JSONResponse:
         """List deep research pipeline paper runs (report.md under research/reports/)."""
         try:
             from kazma_core.tools.research_pipeline import list_research_papers
@@ -126,48 +209,16 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": False, "error": safe_error(exc), "papers": []}, status_code=500)
 
     @router.get("/api/research/papers/file")
-    async def get_paper_file(path: str) -> Any:
-        """Serve a research report file (under research/reports/ in any known workspace)."""
-        from kazma_core.tools.research_pipeline import _candidate_report_roots
+    def get_paper_file(path: str) -> Any:
+        """Serve a research report file (under research/reports/ in any known workspace).
 
-        raw = (path or "").strip().replace("\\", "/")
-        if not raw or ".." in raw.split("/"):
-            return JSONResponse({"error": "invalid path"}, status_code=400)
-        # Reject absolute paths outright — only relative paths under a known
-        # reports tree are served. (Previously an absolute path whose string
-        # contained "/research/reports/" bypassed the relative_to containment
-        # check via the substring fallback → arbitrary file read.)
-        candidates: list[Path] = []
-        if Path(raw).is_absolute():
-            return JSONResponse({"error": "absolute paths are not allowed"}, status_code=400)
-        elif raw.startswith("research/reports/"):
-            for root in _candidate_report_roots():
-                candidates.append((root / raw).resolve())
-        else:
-            return JSONResponse(
-                {"error": "path must be under research/reports/"}, status_code=403
-            )
+        Only a relative path inside a reports folder: an absolute path once
+        bypassed the containment check through a substring fallback.
+        """
+        from kazma_core.tools.research_pipeline import resolve_report_file
 
-        target: Path | None = None
-        for cand in candidates:
-            try:
-                if not cand.is_file():
-                    continue
-                # Containment: must live under some root's research/reports.
-                # (Substring matching removed — it allowed sibling dirs whose
-                # name merely extends "reports" to pass.)
-                for root in _candidate_report_roots():
-                    try:
-                        cand.relative_to((root / "research" / "reports").resolve())
-                        target = cand
-                        break
-                    except ValueError:
-                        continue
-                if target is not None:
-                    break
-            except Exception:
-                continue
-        if target is None or not target.is_file():
+        target = resolve_report_file(path)
+        if target is None:
             return JSONResponse({"error": "not found"}, status_code=404)
         media = (
             "text/markdown; charset=utf-8"
@@ -179,7 +230,7 @@ def create_research_router() -> APIRouter:
     # ── Live deep-research sessions (R3) ──────────────────────────────
 
     @router.get("/api/research/ready", dependencies=[Depends(rate_limit("research", 10))])
-    async def research_ready(live: bool = False) -> JSONResponse:
+    def research_ready(live: bool = False) -> JSONResponse:
         """Industry preflight: search backends, proxy, optional live probe."""
         try:
             from kazma_core.tools.research_readiness import research_readiness
@@ -224,7 +275,7 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     @router.get("/api/research/sessions")
-    async def list_research_sessions(
+    def list_research_sessions(
         limit: int = 50, archived: bool = False
     ) -> JSONResponse:
         """List durable deep-research sessions (newest first).
@@ -250,7 +301,7 @@ def create_research_router() -> APIRouter:
             )
 
     @router.post("/api/research/sessions/{session_id}/archive")
-    async def archive_research_session(session_id: str) -> JSONResponse:
+    def archive_research_session(session_id: str) -> JSONResponse:
         """Soft-hide a session from the main Research list."""
         try:
             from kazma_core.tools.research_session import archive_session, get_session
@@ -264,7 +315,7 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     @router.post("/api/research/sessions/{session_id}/unarchive")
-    async def unarchive_research_session(session_id: str) -> JSONResponse:
+    def unarchive_research_session(session_id: str) -> JSONResponse:
         """Restore an archived session to the main Research list."""
         try:
             from kazma_core.tools.research_session import archive_session, get_session
@@ -278,7 +329,7 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     @router.delete("/api/research/sessions/{session_id}")
-    async def delete_research_session(session_id: str) -> JSONResponse:
+    def delete_research_session(session_id: str) -> JSONResponse:
         """Delete a session row (cancels first when still running)."""
         try:
             from kazma_core.tools.research_session import delete_session
@@ -292,7 +343,7 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     @router.get("/api/research/sessions/{session_id}")
-    async def get_research_session(session_id: str) -> JSONResponse:
+    def get_research_session(session_id: str) -> JSONResponse:
         """Get one research session (status, log, report path)."""
         try:
             from kazma_core.tools.research_session import get_session
@@ -306,7 +357,7 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     @router.post("/api/research/sessions/{session_id}/cancel")
-    async def cancel_research_session(session_id: str) -> JSONResponse:
+    def cancel_research_session(session_id: str) -> JSONResponse:
         """Cancel a running deep-research session (best-effort)."""
         try:
             from kazma_core.tools.research_session import cancel_session, get_session
@@ -336,102 +387,45 @@ def create_research_router() -> APIRouter:
         try:
             from kazma_core.tools.research_session import get_session
 
-            sess = get_session(session_id)
+            sess = await asyncio.to_thread(get_session, session_id)
         except Exception as exc:
             logger.exception("[research] session export lookup failed")
             return JSONResponse({"error": safe_error(exc)}, status_code=500)
         if sess is None:
             return JSONResponse({"error": "session not found"}, status_code=404)
 
-        md = ""
-        report_path = (sess.report_path or "").strip().replace("\\", "/")
-        if report_path:
-            from kazma_core.tools.research_pipeline import _candidate_report_roots
-
-            target: Path | None = None
-            if Path(report_path).is_absolute() and Path(report_path).is_file():
-                target = Path(report_path)
-            else:
-                for root in _candidate_report_roots():
-                    cand = (root / report_path).resolve()
-                    if cand.is_file():
-                        target = cand
-                        break
-            if target is not None:
-                try:
-                    md = target.read_text(encoding="utf-8", errors="replace")
-                except Exception as exc:
-                    return JSONResponse({"error": safe_error(exc)}, status_code=500)
-        if not md:
-            md = (
-                f"# {(sess.topic or 'Research session')[:120]}\n\n"
-                f"{sess.summary or sess.message or ''}\n\n"
-                "## Log\n\n"
-                + "\n".join(f"- {entry}" for entry in (sess.log or []))
-            )
-
-        # Build sections for document generator (same split as export_paper)
-        sections: list[dict[str, str]] = []
-        cur_h = "Report"
-        cur_b: list[str] = []
-        for line in md.splitlines():
-            if line.startswith("#"):
-                if cur_b or sections:
-                    sections.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
-                cur_h = line
-                cur_b = []
-            else:
-                cur_b.append(line)
-        if cur_b or not sections:
-            sections.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
+        try:
+            md = await asyncio.to_thread(_session_markdown, sess)
+        except Exception as exc:
+            logger.exception("[research] session report read failed")
+            return JSONResponse({"error": safe_error(exc)}, status_code=500)
 
         title = (sess.topic or "Research session")[:120]
         try:
-            if fmt == "docx":
-                from kazma_skills.native.document_generator.tools import generate_docx
-
-                msg = await generate_docx(title, sections)
-            elif fmt == "pdf":
-                from kazma_skills.native.document_generator.tools import generate_pdf
-
-                msg = await generate_pdf(title, sections)
-            else:
-                from kazma_skills.native.document_generator.tools import generate_markdown_doc
-
-                msg = await generate_markdown_doc(title, sections)
+            msg = await _generate(fmt, title, _report_sections(md))
         except Exception as exc:
             logger.exception("[research] session export failed")
             return JSONResponse({"error": safe_error(exc)}, status_code=500)
-
-        path = ""
-        if isinstance(msg, str) and "Saved to:" in msg:
-            path = msg.split("Saved to:")[-1].strip()
-        filename = Path(path).name if path else ""
-        return JSONResponse(
-            {
-                "ok": True,
-                "format": fmt,
-                "message": msg,
-                "path": path,
-                "filename": filename,
-                "download_url": (
-                    f"/api/research/download?path={filename}" if filename else ""
-                ),
-            }
-        )
+        return _export_reply(fmt, msg)
 
     @router.get("/api/research/eval")
-    async def eval_research_report(
+    def eval_research_report(
         path: str = "",
         session_id: str = "",
         min_sources: int = 4,
     ) -> JSONResponse:
-        """Score a report file (or a session's report) with the structural rubric."""
+        """Score a report file (or a session's report) with the structural rubric.
+
+        *path* names a report inside a ``research/reports`` folder, like every
+        route that reads one; it scored any file on disk until 2026-10-01
+        (its size, links and words: an oracle for files outside Kazma).
+        """
         try:
             from kazma_core.tools.research_eval import evaluate_report_path
-            from kazma_core.tools.research_pipeline import _candidate_report_roots
+            from kazma_core.tools.research_pipeline import resolve_report_file
 
-            report_path = (path or "").strip().replace("\\", "/")
+            report_path = (path or "").strip()
+            stored = False
             if session_id and not report_path:
                 from kazma_core.tools.research_session import get_session
 
@@ -441,24 +435,13 @@ def create_research_router() -> APIRouter:
                         {"ok": False, "error": "session not found"}, status_code=404
                     )
                 report_path = sess.report_path or ""
+                stored = True
             if not report_path:
                 return JSONResponse(
                     {"ok": False, "error": "path or session_id with report required"},
                     status_code=400,
                 )
-            if ".." in report_path.split("/"):
-                return JSONResponse({"ok": False, "error": "invalid path"}, status_code=400)
-
-            target: Path | None = None
-            cand = Path(report_path)
-            if cand.is_file():
-                target = cand
-            else:
-                for root in _candidate_report_roots():
-                    p = (root / report_path).resolve()
-                    if p.is_file():
-                        target = p
-                        break
+            target = resolve_report_file(report_path, stored=stored)
             if target is None:
                 return JSONResponse(
                     {"ok": False, "error": "report not found"}, status_code=404
@@ -484,14 +467,18 @@ def create_research_router() -> APIRouter:
             unsubscribe_progress,
         )
 
-        sess = get_session(session_id)
+        sess = await asyncio.to_thread(get_session, session_id)
         if sess is None:
             return JSONResponse(  # type: ignore[return-value]
                 {"ok": False, "error": "not found"}, status_code=404
             )
 
         async def event_gen() -> AsyncGenerator[str, None]:
-            q = subscribe_progress(session_id)
+            # Subscribed from a thread (it reads the session for the first
+            # snapshot); the events are read here, on this loop.
+            q = await asyncio.to_thread(
+                subscribe_progress, session_id, loop=asyncio.get_running_loop()
+            )
             try:
                 # Initial snapshot is already queued by subscribe_progress
                 while True:
@@ -500,7 +487,7 @@ def create_research_router() -> APIRouter:
                     try:
                         event = await asyncio.wait_for(q.get(), timeout=15.0)
                     except asyncio.TimeoutError:
-                        cur = get_session(session_id)
+                        cur = await asyncio.to_thread(get_session, session_id)
                         if cur and cur.status in ("done", "error", "cancelled"):
                             yield sse_frame(
                                 "done",
@@ -549,85 +536,38 @@ def create_research_router() -> APIRouter:
 
     @router.post("/api/research/papers/export")
     async def export_paper(body: dict[str, Any]) -> JSONResponse:
-        """Export a pipeline paper (report.md) to markdown / docx / pdf."""
+        """Export a pipeline paper (report.md) to markdown / docx / pdf.
+
+        *report_path* names a report inside a ``research/reports`` folder.
+        Until 2026-10-01 an absolute path (or ``..``) named any file the
+        server could read, which this exported and ``/download`` served.
+        """
+        from kazma_core.tools.research_pipeline import resolve_report_file
+
         fmt = str(body.get("format") or "markdown").strip().lower()
-        report_path = str(body.get("report_path") or "").strip().replace("\\", "/")
+        report_path = str(body.get("report_path") or "").strip()
         topic = str(body.get("topic") or "Research report").strip()
         if not report_path:
             return JSONResponse({"error": "report_path required"}, status_code=400)
 
-        # Resolve file via same logic as get_paper_file
-        from kazma_core.tools.research_pipeline import _candidate_report_roots
-
-        target: Path | None = None
-        if Path(report_path).is_absolute() and Path(report_path).is_file():
-            target = Path(report_path)
-        else:
-            for root in _candidate_report_roots():
-                cand = (root / report_path).resolve()
-                if cand.is_file():
-                    target = cand
-                    break
-        if target is None or not target.is_file():
+        target = await asyncio.to_thread(resolve_report_file, report_path)
+        if target is None:
             return JSONResponse({"error": "report not found"}, status_code=404)
-
         try:
-            md = target.read_text(encoding="utf-8", errors="replace")
+            md = await asyncio.to_thread(target.read_text, encoding="utf-8", errors="replace")
         except Exception as exc:
             return JSONResponse({"error": safe_error(exc)}, status_code=500)
-
-        # Build sections for document generator
-        sections: list[dict[str, str]] = []
-        cur_h = "Report"
-        cur_b: list[str] = []
-        for line in md.splitlines():
-            if line.startswith("#"):
-                if cur_b or sections:
-                    sections.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
-                cur_h = line
-                cur_b = []
-            else:
-                cur_b.append(line)
-        if cur_b or not sections:
-            sections.append({"heading": cur_h, "body": "\n".join(cur_b).strip()})
 
         title = topic.replace("[Paper] ", "")[:120] or "Research report"
         try:
-            if fmt == "docx":
-                from kazma_skills.native.document_generator.tools import generate_docx
-
-                msg = await generate_docx(title, sections)
-            elif fmt == "pdf":
-                from kazma_skills.native.document_generator.tools import generate_pdf
-
-                msg = await generate_pdf(title, sections)
-            else:
-                from kazma_skills.native.document_generator.tools import generate_markdown_doc
-
-                msg = await generate_markdown_doc(title, sections)
+            msg = await _generate(fmt, title, _report_sections(md))
         except Exception as exc:
             logger.exception("[research] paper export failed")
             return JSONResponse({"error": safe_error(exc)}, status_code=500)
-
-        path = ""
-        if isinstance(msg, str) and "Saved to:" in msg:
-            path = msg.split("Saved to:")[-1].strip()
-        filename = Path(path).name if path else ""
-        return JSONResponse(
-            {
-                "ok": True,
-                "format": fmt,
-                "message": msg,
-                "path": path,
-                "filename": filename,
-                "download_url": (
-                    f"/api/research/download?path={filename}" if filename else ""
-                ),
-            }
-        )
+        return _export_reply(fmt, msg)
 
     @router.get("/api/research/tasks")
-    async def list_research(
+    def list_research(
         page: int = 1,
         page_size: int = 20,
         q: str | None = None,
@@ -672,25 +612,15 @@ def create_research_router() -> APIRouter:
         })
 
     @router.get("/api/research/tasks/{task_id}")
-    async def research_detail(task_id: str) -> JSONResponse:
+    def research_detail(task_id: str) -> JSONResponse:
         """Get a single research result with full output."""
-        store = _get_store()
-        task = store.get_task(task_id) if store else None
-        if task is None:
-            # Fall back to the engine's in-memory tasks.
-            try:
-                from kazma_core.swarm import get_swarm_engine
-                engine = get_swarm_engine()
-                if engine:
-                    task = engine.get_task(task_id) or engine.get_active_task(task_id)
-            except Exception:
-                pass
+        _store, task = _find_task(task_id)
         if task is None:
             return JSONResponse({"error": "not found"}, status_code=404)
         return JSONResponse({"task": _flatten(task)})
 
     @router.post("/api/research/compare")
-    async def compare_research(body: dict[str, Any]) -> JSONResponse:
+    def compare_research(body: dict[str, Any]) -> JSONResponse:
         """Compare two research runs side-by-side.
 
         Body: ``{"a": "task-id-a", "b": "task-id-b"}``
@@ -723,18 +653,8 @@ def create_research_router() -> APIRouter:
 
         Body: ``{"format": "docx" | "pdf" | "markdown"}``
         """
-        # Try TaskStore first, then engine's in-memory active/completed tasks.
-        store = _get_store()
-        task = store.get_task(task_id) if store else None
-        if task is None:
-            # Fall back to the engine's in-memory tasks (not yet persisted).
-            try:
-                from kazma_core.swarm import get_swarm_engine
-                engine = get_swarm_engine()
-                if engine:
-                    task = engine.get_task(task_id) or engine.get_active_task(task_id)
-            except Exception:
-                pass
+        # TaskStore first, then the engine's in-memory tasks (not yet persisted).
+        _store, task = await asyncio.to_thread(_find_task, task_id)
         if task is None or task.result is None:
             return JSONResponse({"error": "task or result not found"}, status_code=404)
 
@@ -759,34 +679,14 @@ def create_research_router() -> APIRouter:
         title = (task.prompt or "Research Report")[:80]
 
         try:
-            if fmt == "docx":
-                from kazma_skills.native.document_generator.tools import generate_docx
-                msg = await generate_docx(title, sections)
-            elif fmt == "pdf":
-                from kazma_skills.native.document_generator.tools import generate_pdf
-                msg = await generate_pdf(title, sections)
-            else:
-                from kazma_skills.native.document_generator.tools import generate_markdown_doc
-                msg = await generate_markdown_doc(title, sections)
+            msg = await _generate(fmt, title, sections)
         except Exception as exc:
             logger.exception("[research] export failed")
             return JSONResponse({"error": safe_error(exc)}, status_code=500)
-
-        # Parse the file path from the success message.
-        path = ""
-        if "Saved to:" in msg:
-            path = msg.split("Saved to:")[-1].strip()
-
-        return JSONResponse({
-            "ok": True,
-            "format": fmt,
-            "message": msg,
-            "path": path,
-            "filename": Path(path).name if path else "",
-        })
+        return _export_reply(fmt, msg)
 
     @router.get("/api/research/download")
-    async def download_export(path: str) -> Any:
+    def download_export(path: str) -> Any:
         """Download an exported research file.
 
         Accepts both absolute paths and bare filenames (looked up in
@@ -819,14 +719,14 @@ def create_research_router() -> APIRouter:
         )
 
     @router.post("/api/research/tasks/{task_id}/archive")
-    async def archive_research(task_id: str) -> JSONResponse:
+    def archive_research(task_id: str) -> JSONResponse:
         """Archive a research task (sets metadata.archived = true)."""
-        return await _set_archived(task_id, archived=True)
+        return _set_archived(task_id, archived=True)
 
     @router.post("/api/research/tasks/{task_id}/unarchive")
-    async def unarchive_research(task_id: str) -> JSONResponse:
+    def unarchive_research(task_id: str) -> JSONResponse:
         """Restore an archived research task (sets metadata.archived = false)."""
-        return await _set_archived(task_id, archived=False)
+        return _set_archived(task_id, archived=False)
 
     @router.delete("/api/research/tasks/{task_id}")
     def delete_research(task_id: str) -> JSONResponse:

@@ -1520,6 +1520,42 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فُكّ تجميع {id} · للعرض فقط، الذاكرة لم تتغير",
         "en": "Ungrouped {id} · view-only, memory untouched",
     },
+    "memory.console.moved_group": {
+        "ar": "نُقلت {member} تحت {root} (المستوى {tier}، وأُعيد ترتيب {n} تحتها) · للعرض فقط، الذاكرة لم تتغير",
+        "en": "Moved {member} under {root} (tier {tier}; {n} below re-tiered) · view-only, memory untouched",
+    },
+    "memory.console.already_in_group": {
+        "ar": "{member} مُجمّعة تحت {root} أصلًا",
+        "en": "{member} is already grouped under {root}",
+    },
+    "memory.console.act_set_tier": {
+        "ar": "المستوى…",
+        "en": "Tier…",
+    },
+    "memory.console.act_set_tier_title": {
+        "ar": "حدد مستوى هذه العقدة في التجميع (0 = المحور … 4)",
+        "en": "Set this node's tier in its group (0 = hub … 4)",
+    },
+    "memory.console.tier_prompt_title": {
+        "ar": "مستوى العقدة",
+        "en": "Node tier",
+    },
+    "memory.console.tier_prompt_message": {
+        "ar": "مستوى {id}، من 0 إلى 4. تبقى مستويات العقد تحتها كما هي.",
+        "en": "Tier for {id}, from 0 to 4. Nodes below it keep their tiers.",
+    },
+    "memory.console.tier_invalid": {
+        "ar": "اكتب عددًا صحيحًا من 0 إلى 4",
+        "en": "Enter a whole number from 0 to 4",
+    },
+    "memory.console.tier_set": {
+        "ar": "صار مستوى {id} {tier} · للعرض فقط، الذاكرة لم تتغير",
+        "en": "{id} is now tier {tier} · view-only, memory untouched",
+    },
+    "memory.console.tier_failed": {
+        "ar": "تعذّر تغيير المستوى",
+        "en": "Setting the tier failed",
+    },
     "memory.console.cannot_delete_hub": {
         "ar": "لا يمكن حذف المحور المحمي",
         "en": "Cannot delete protected hub",

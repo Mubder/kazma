@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## Every route exists when the app is built; research reads only reports (2026-10-01)
+
+- **The research and replay APIs are mounted with the app.** Both were
+  mounted while the server started, so no check that reads the route table
+  had ever seen their 29 routes. A new check starts the real app and fails
+  if any route appears only after startup. The replay API now reads its
+  snapshot recorder and graph on each request. Before, restore and fork kept
+  using the graph from startup, even after a model switch.
+- **A research route reads a report, never another file.** The paper export
+  read any absolute path (or a `..` path) a request named, and the download
+  route then served the result: any file the server could read could be
+  fetched. The report scorer measured any file on disk. All four routes that
+  read a report a request names now share one rule: a path inside a
+  `research/reports` folder, resolved before it is checked.
+- **Live research progress respects asyncio's threads.** Progress updates and
+  Cancel run in worker threads; they now hand queue writes and task
+  cancels to the reader's own loop instead of doing them from the thread.
+- **Research handlers that only touch storage run off the event loop**, and
+  so do the Swarm task list, export and detail (18 handlers; the count of
+  async handlers that never await went from 115 to 97).
+- **Controls for routes that had none.** Swarm → Task History has
+  **Export CSV**, which uses the page's filters. On the Memory graph,
+  **Group under→** moves a node that already has a parent: it used to fail
+  every time on the table's primary key. **Tier…** sets a grouped node's
+  tier. The create route now refuses a second parent and names the move
+  route.
+- **Removed:** the DAG workflow validator (`POST /api/swarm/workflows/validate`
+  and its schema), which checked a format nothing in Kazma can run.
+- **The route check reads prefixes precisely.** A path built as
+  `'/api/research/' + id` now reaches only a route whose next segment is a
+  parameter, or a word its file or page quotes. Before, any route under the
+  prefix counted as called.
+
 ## More of what pages build follows the page language (2026-10-01)
 
 - **19 more English strings now come from the translation catalog.** All are
