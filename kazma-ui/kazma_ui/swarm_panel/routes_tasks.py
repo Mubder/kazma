@@ -557,7 +557,7 @@ def register_tasks_routes(
         return JSONResponse({"tasks": flat, "count": len(flat)})
 
     @router.get("/api/swarm/tasks")
-    async def swarm_tasks(
+    def swarm_tasks(
         task_type: str | None = Query(default=None, alias="type"),
         status: str | None = Query(default=None),
         worker: str | None = Query(default=None),
@@ -566,7 +566,10 @@ def register_tasks_routes(
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, alias="pageSize", ge=1, le=100),
     ) -> JSONResponse:
-        """Return completed swarm tasks with pagination, filtering, and search."""
+        """Return completed swarm tasks with pagination, filtering, and search.
+
+        A plain ``def`` (FastAPI's threadpool): every line is a TaskStore read.
+        """
         engine = _current_engine()
         svc = get_swarm_service()
         if not svc.has_swarm_core() or engine is None:
@@ -615,11 +618,17 @@ def register_tasks_routes(
         return JSONResponse({"tasks": tasks, "count": len(tasks)})
 
     @router.get("/api/swarm/tasks/export")
-    async def swarm_tasks_export(
+    def swarm_tasks_export(
         format: str = Query(default="json"),
+        task_type: str | None = Query(default=None, alias="type"),
         status: str | None = Query(default=None),
+        q: str | None = Query(default=None),
     ):
-        """Export task history as JSON or CSV."""
+        """Export task history as JSON or CSV (the newest 1,000 tasks).
+
+        Takes the history list's filters, so the Swarm page's Export CSV
+        downloads what the page shows. A plain ``def``: TaskStore reads.
+        """
         engine = _current_engine()
         svc = get_swarm_service()
         if not svc.has_swarm_core() or engine is None:
@@ -627,9 +636,18 @@ def register_tasks_routes(
 
         store = getattr(engine, "task_store", None) or getattr(engine, "_task_store", None)
         if store is not None:
-            tasks, _ = store.list_tasks(page=1, page_size=1000, status=status, include_count=True)
+            tasks, _ = store.list_tasks(
+                page=1,
+                page_size=1000,
+                status=status,
+                task_type=task_type,
+                include_count=True,
+            )
         else:
             tasks = []
+        if q:
+            q_lower = q.lower()
+            tasks = [t for t in tasks if q_lower in (t.prompt or "").lower()]
 
         flat = [_flatten_swarm_task(task) for task in tasks]
 
@@ -651,8 +669,8 @@ def register_tasks_routes(
         return JSONResponse({"tasks": flat, "count": len(flat)})
 
     @router.get("/api/swarm/tasks/{task_id}")
-    async def swarm_task_detail(task_id: str) -> JSONResponse:
-        """Return full detail for a single swarm task."""
+    def swarm_task_detail(task_id: str) -> JSONResponse:
+        """Return full detail for a single swarm task (a plain ``def``: store reads)."""
         engine = _current_engine()
         svc = get_swarm_service()
         if not svc.has_swarm_core() or engine is None:

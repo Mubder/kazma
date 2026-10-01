@@ -454,6 +454,14 @@ timeline, where restore and fork are buttons beside what each step holds.
 Before, the text reached the model, which searched the source for what
 "replay" means. `tests/test_web_time_travel_command.py`.
 
+**F. `/api/replay/*` is mounted when the app is built** (2026-10-01), and
+reads the recorder and the graph per request (`create_replay_router(
+recorder_getter=, graph_getter=)`): 503 `time_travel_unavailable` until
+startup makes a recorder. It was mounted in `_on_startup` with the graph of
+that moment, so a model switch left restore and fork writing through the old
+graph, and no route-table gate saw it. A fork's chat is saved in a thread, and
+a failure to save it is a WARNING. `tests/test_replay_router_getters.py`.
+
 ### 13. Proxy Provider Addon (`kazma-core/kazma_core/proxy/`)
 
 An opt-in, pluggable scraping proxy so `read_url` / `crawl_site` / `web_search`
@@ -1814,6 +1822,18 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
 - Chat-tool snapshots persist up to `_CHAT_RESULT_MAX` (200K — the old
   [:500] cap discarded full output at write time); a longer re-query
   refreshes the stored summary, a shorter one never clobbers it.
+- **asyncio objects are touched on their own loop only** (2026-10-01). The
+  pipeline writes progress through `asyncio.to_thread(update_session, ...)`
+  and the Research routes are plain `def`s, so `update_session`,
+  `cancel_session` and `delete_session` run in worker threads; they used to
+  `put_nowait` onto the SSE readers' `asyncio.Queue` and `cancel()` the run's
+  task right there (asyncio's debug mode refuses both). A subscriber is
+  registered with its loop (`_SUBS`, under `_SUBS_LOCK`); `_deliver` and
+  `_cancel_on_its_loop` hand over with `call_soon_threadsafe`.
+  `tests/test_research_session_threads.py` records the thread of every put
+  and cancel (the old calls as negative controls). Any sync function that may
+  run in a thread and holds an asyncio Queue, Event, Future or Task follows
+  the same rule.
 
 **E. Deep canary + CI gate.**
 - `GET /health/deep` (kazma_ui/health.py): one REAL roundtrip per critical
@@ -4038,7 +4058,25 @@ channel it booted with.
   `.delete(` / `_request(..., "DELETE", ...)`; a call it cannot read counts
   for every method), or a `"METHOD /path"` declaration. Matching paths only
   had let the delete-any-setting route and six other uncalled methods pass
-  because a page called the same path with another method.
+  because a page called the same path with another method. **A prefix built
+  by concatenation** (`'/api/research/' + id`) reaches only a route whose next
+  segment is a parameter or a word quoted in its file or in a template that
+  loads it (`'/api/x/reply/' + kind`, the page passing `'retry'`): any route
+  under the prefix used to count, and `/api/research/eval` passed that way.
+  **Every route exists when the app is built**
+  (`tests/test_routes_exist_when_built.py`, the real lifespan run, route
+  table compared): mount a router in `KazmaAppBuilder._setup_routers`, and
+  read what startup makes per request (the replay API's getters). The
+  research and replay APIs were mounted in `_on_startup` until 2026-10-01,
+  so none of these gates had ever seen their 29 routes. The first look
+  found a paper export that read any file the server could (served by
+  `/download`), a report scorer that measured any file on disk -- one rule
+  now, `research_pipeline.resolve_report_file` (a request names a path inside
+  a `research/reports` folder) -- a DAG workflow validator for workflows
+  nothing could run (removed), the task-history export and the memory
+  graph's move and tier with no control (Swarm → Task History **Export
+  CSV**; **Group under→** on a grouped node moves it, **Tier…**), and a
+  create route that failed on its primary key for a node with a parent.
 - **A panel lays out by its own width** (`@container`), not the window's:
   with the sidebar open a 918px window left the IDE editor ~40px and
   clipped the providers panel. `tests/e2e/test_layout_widths.py` (each with

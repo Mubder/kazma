@@ -1831,10 +1831,25 @@ def _graph_groups_create_sync(payload: Any) -> dict[str, Any]:
         if _group_creates_cycle(conn, member, root, tid):
             conn.close()
             return {"ok": False, "error": "cycle: member is an ancestor of group_root"}
-        # Existing membership? Update in place (move within same root / re-tier).
+        # Existing membership? Update in place (same root: re-tier, relabel).
         existing = conn.execute(
-            "SELECT id FROM graph_associations WHERE member=? AND tenant_id=?", (member, tid)
+            "SELECT id, group_root FROM graph_associations WHERE member=? AND tenant_id=?",
+            (member, tid),
         ).fetchone()
+        if existing and existing["group_root"] != root:
+            # A second parent is a move: the move route replaces the old edge
+            # and re-tiers the subtree. Reusing the old row's id here failed
+            # on the primary key, so "Group under" on a grouped node always
+            # failed (until 2026-10-01).
+            conn.close()
+            return {
+                "ok": False,
+                "error": (
+                    f"already grouped under {existing['group_root']}: move it "
+                    f"(POST /api/memory/v2/graph/groups/member/{member}/move)"
+                ),
+                "group_root": existing["group_root"],
+            }
         # Derive tier: explicit override > parent's tier + 1 > implicit.
         # The hub ('user') is always tier 0. An ungrouped root that is NOT the
         # hub is treated as an implicit tier-1 major (so grouping kazma_app

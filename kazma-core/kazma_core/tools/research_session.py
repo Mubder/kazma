@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -58,9 +59,63 @@ def suppress_chat_recording() -> Iterator[None]:
     finally:
         _chat_record_suppressed.reset(token)
 
-# session_id → list of asyncio.Queue for SSE subscribers
-_SUBS: dict[str, list[asyncio.Queue]] = {}
+# session_id → the SSE subscribers' queues, each with the loop that reads it.
+# asyncio objects are not thread-safe, and these are touched from worker
+# threads: the pipeline writes progress through asyncio.to_thread, and the
+# Research routes are plain defs (AGENTS §35). So a queue is only ever put to,
+# and a task only ever cancelled, on its own loop (_deliver,
+# _cancel_on_its_loop); the lock covers the registry itself.
+_SUBS: dict[str, list[tuple[asyncio.AbstractEventLoop, asyncio.Queue]]] = {}
+_SUBS_LOCK = threading.Lock()
 _RUNNING: dict[str, asyncio.Task] = {}
+
+
+def _on_loop(loop: asyncio.AbstractEventLoop) -> bool:
+    try:
+        return asyncio.get_running_loop() is loop
+    except RuntimeError:
+        return False
+
+
+def _offer(q: asyncio.Queue, event: dict[str, Any]) -> None:
+    """Queue *event*; a full queue (a reader 100 events behind) drops it."""
+    try:
+        q.put_nowait(event)
+    except asyncio.QueueFull:
+        logger.debug("[research_session] a slow progress reader missed an event")
+
+
+def _deliver(loop: asyncio.AbstractEventLoop, q: asyncio.Queue, event: dict[str, Any]) -> None:
+    """Hand *event* to *q* on *loop*, whichever thread this runs on."""
+    if _on_loop(loop):
+        _offer(q, event)
+        return
+    try:
+        loop.call_soon_threadsafe(_offer, q, event)
+    except RuntimeError:
+        # The loop has closed, and the reader with it.
+        logger.debug("[research_session] progress reader's loop is closed")
+
+
+def _publish(session_id: str, event: dict[str, Any]) -> None:
+    """Send *event* to every subscriber of *session_id*."""
+    with _SUBS_LOCK:
+        subs = list(_SUBS.get(session_id, ()))
+    for loop, q in subs:
+        _deliver(loop, q, event)
+
+
+def _cancel_on_its_loop(task: asyncio.Task) -> None:
+    """Cancel *task* from any thread (``Task.cancel`` belongs to its loop)."""
+    loop = task.get_loop()
+    if _on_loop(loop):
+        task.cancel()
+        return
+    try:
+        loop.call_soon_threadsafe(task.cancel)
+    except RuntimeError:
+        # A closed loop has already ended the task.
+        logger.debug("[research_session] run's loop is closed; nothing to cancel")
 
 
 @dataclass
@@ -306,7 +361,8 @@ def delete_session(session_id: str) -> bool:
             cancel_session(session_id)
         except Exception:
             logger.debug("[research_session] cancel-before-delete failed", exc_info=True)
-    _SUBS.pop(session_id, None)
+    with _SUBS_LOCK:
+        _SUBS.pop(session_id, None)
     _RUNNING.pop(session_id, None)
     c = _conn()
     try:
@@ -372,42 +428,43 @@ def update_session(session_id: str, **fields: Any) -> ResearchSession | None:
         "rubric_ok": sess.rubric_ok,
         "updated_at": sess.updated_at,
     }
-    for q in list(_SUBS.get(sess.id, [])):
-        try:
-            q.put_nowait(event)
-        except Exception:
-            pass
+    _publish(sess.id, event)
     return sess
 
 
-def subscribe_progress(session_id: str) -> asyncio.Queue:
+def subscribe_progress(
+    session_id: str, *, loop: asyncio.AbstractEventLoop | None = None
+) -> asyncio.Queue:
+    """A queue of *session_id*'s progress events, read on *loop*.
+
+    *loop* defaults to the running loop. Given explicitly, this may run in a
+    worker thread, which keeps the snapshot read (SQLite) off the loop. The
+    session as it stands is queued first, as a ``snapshot`` event.
+    """
+    loop = loop or asyncio.get_running_loop()
     q: asyncio.Queue = asyncio.Queue(maxsize=100)
-    _SUBS.setdefault(session_id, []).append(q)
-    # Seed current state
+    with _SUBS_LOCK:
+        _SUBS.setdefault(session_id, []).append((loop, q))
     s = get_session(session_id)
     if s:
-        try:
-            q.put_nowait(
-                {
-                    "type": "snapshot",
-                    "session": s.to_dict(),
-                }
-            )
-        except Exception:
-            pass
+        _deliver(loop, q, {"type": "snapshot", "session": s.to_dict()})
     return q
 
 
 def unsubscribe_progress(session_id: str, q: asyncio.Queue) -> None:
-    lst = _SUBS.get(session_id) or []
-    if q in lst:
-        lst.remove(q)
-    if not lst and session_id in _SUBS:
-        del _SUBS[session_id]
+    with _SUBS_LOCK:
+        kept = [(lp, qq) for lp, qq in _SUBS.get(session_id, ()) if qq is not q]
+        if kept:
+            _SUBS[session_id] = kept
+        else:
+            _SUBS.pop(session_id, None)
 
 
 def cancel_session(session_id: str) -> ResearchSession | None:
-    """Cancel a running session (best-effort). Returns updated session or None."""
+    """Cancel a running session (best-effort). Returns updated session or None.
+
+    Callable from any thread: the run is cancelled on its own loop.
+    """
     sess = get_session(session_id)
     if not sess:
         return None
@@ -415,7 +472,7 @@ def cancel_session(session_id: str) -> ResearchSession | None:
         return sess
     task = _RUNNING.get(session_id)
     if task is not None and not task.done():
-        task.cancel()
+        _cancel_on_its_loop(task)
     update_session(
         session_id,
         status="cancelled",
@@ -423,19 +480,17 @@ def cancel_session(session_id: str) -> ResearchSession | None:
         message="Cancelled by user",
         error="",
     )
-    for q in list(_SUBS.get(session_id, [])):
-        try:
-            q.put_nowait(
-                {
-                    "type": "done",
-                    "session_id": session_id,
-                    "status": "cancelled",
-                    "session": (get_session(session_id) or sess).to_dict(),
-                }
-            )
-        except Exception:
-            pass
-    return get_session(session_id)
+    final = get_session(session_id) or sess
+    _publish(
+        session_id,
+        {
+            "type": "done",
+            "session_id": session_id,
+            "status": "cancelled",
+            "session": final.to_dict(),
+        },
+    )
+    return final
 
 
 async def start_deep_research(
@@ -522,20 +577,14 @@ async def start_deep_research(
             if report_path:
                 try:
                     from kazma_core.tools.research_eval import score_report_file
-                    from kazma_core.tools.research_pipeline import (
-                        _candidate_report_roots,
-                    )
+                    from kazma_core.tools.research_pipeline import resolve_report_file
 
                     scored = None
-                    rp = Path(report_path)
-                    if rp.is_file():
-                        scored = await asyncio.to_thread(score_report_file, rp)
-                    else:
-                        for root in _candidate_report_roots():
-                            cand = (root / report_path).resolve()
-                            if cand.is_file():
-                                scored = await asyncio.to_thread(score_report_file, cand)
-                                break
+                    target = await asyncio.to_thread(
+                        resolve_report_file, report_path, stored=True
+                    )
+                    if target is not None:
+                        scored = await asyncio.to_thread(score_report_file, target)
                     if scored is not None:
                         rubric_score = float(scored.score)
                         rubric_ok = bool(scored.ok)
@@ -570,18 +619,15 @@ async def start_deep_research(
                     rubric_ok=rubric_ok,
                 )
             final = await asyncio.to_thread(get_session, sess.id)
-            for q in list(_SUBS.get(sess.id, [])):
-                try:
-                    q.put_nowait(
-                        {
-                            "type": "done",
-                            "session_id": sess.id,
-                            "status": final.status if final else "done",
-                            "session": final.to_dict() if final else None,
-                        }
-                    )
-                except Exception:
-                    pass
+            _publish(
+                sess.id,
+                {
+                    "type": "done",
+                    "session_id": sess.id,
+                    "status": final.status if final else "done",
+                    "session": final.to_dict() if final else None,
+                },
+            )
         except asyncio.CancelledError:
             cur = await asyncio.to_thread(get_session, sess.id)
             if cur and cur.status != "cancelled":
@@ -606,18 +652,15 @@ async def start_deep_research(
                 message=f"Failed: {brief}" if brief else "Pipeline failed",
             )
             err_sess = await asyncio.to_thread(get_session, sess.id)
-            for q in list(_SUBS.get(sess.id, [])):
-                try:
-                    q.put_nowait(
-                        {
-                            "type": "error",
-                            "session_id": sess.id,
-                            "error": str(exc)[:500],
-                            "session": err_sess.to_dict() if err_sess else None,
-                        }
-                    )
-                except Exception:
-                    pass
+            _publish(
+                sess.id,
+                {
+                    "type": "error",
+                    "session_id": sess.id,
+                    "error": str(exc)[:500],
+                    "session": err_sess.to_dict() if err_sess else None,
+                },
+            )
         finally:
             _RUNNING.pop(sess.id, None)
 

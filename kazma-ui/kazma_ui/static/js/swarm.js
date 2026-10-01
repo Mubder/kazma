@@ -1369,6 +1369,18 @@
     loadTaskHistory();
   }
 
+  // The history as a CSV file, with the filters the page shows.
+  function exportHistory() {
+    var typeFilter = ($('history-filter-type') || {}).value || '';
+    var statusFilter = ($('history-filter-status') || {}).value || '';
+    var searchQuery = ($('history-search') || {}).value || '';
+    var url = '/api/swarm/tasks/export?format=csv';
+    if (typeFilter) url += '&type=' + encodeURIComponent(typeFilter);
+    if (statusFilter) url += '&status=' + encodeURIComponent(statusFilter);
+    if (searchQuery) url += '&q=' + encodeURIComponent(searchQuery);
+    window.location.href = url;
+  }
+
   function historyPrev() {
     if (historyPage > 1) { historyPage--; loadTaskHistory(); }
   }
@@ -3085,6 +3097,7 @@
     closeTaskDetail: closeTaskDetail,
     loadTaskHistory: loadTaskHistory,
     filterHistory: filterHistory,
+    exportHistory: exportHistory,
     historyPrev: historyPrev,
     historyNext: historyNext,
     filterResults: filterResults,

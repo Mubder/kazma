@@ -3097,19 +3097,39 @@
   }
 
   async function _v2gDoGroup(memberId, rootId) {
+    // A node already in a group MOVES: the move route replaces its old
+    // parent and re-tiers the nodes below it. The create route refuses a
+    // second parent (it failed outright here until 2026-10-01).
+    var current = (_v2gGroups || []).find(function(g) { return g.member === memberId; });
+    if (current && current.group_root === rootId) {
+      _v2gToast(_mt('memory.console.already_in_group', '{member} is already grouped under {root}', {
+        member: _v2gShortId(memberId), root: _v2gShortId(rootId),
+      }), 'info');
+      return false;
+    }
     try {
-      var data = await _v2gApiJson('/api/memory/v2/graph/groups', {
-        method: 'POST',
-        body: JSON.stringify({ group_root: rootId, member: memberId }),
-      });
+      var data = current
+        ? await _v2gApiJson('/api/memory/v2/graph/groups/member/' + encodeURIComponent(memberId) + '/move', {
+          method: 'POST',
+          body: JSON.stringify({ new_root: rootId }),
+        })
+        : await _v2gApiJson('/api/memory/v2/graph/groups', {
+          method: 'POST',
+          body: JSON.stringify({ group_root: rootId, member: memberId }),
+        });
       if (!data.ok) {
         _v2gToast(data.error || _mt('memory.console.group_failed', 'Group failed'), 'error');
         return false;
       }
+      var tier = current ? data.new_tier : data.member_tier;
       _v2gToast(
-        _mt('memory.console.grouped', 'Grouped {member} under {root} (tier {tier}) · view-only, memory untouched', {
-          member: _v2gShortId(memberId), root: _v2gShortId(rootId), tier: data.member_tier,
-        }),
+        current
+          ? _mt('memory.console.moved_group', 'Moved {member} under {root} (tier {tier}; {n} below re-tiered) · view-only, memory untouched', {
+            member: _v2gShortId(memberId), root: _v2gShortId(rootId), tier: tier, n: data.subtree_retiered || 0,
+          })
+          : _mt('memory.console.grouped', 'Grouped {member} under {root} (tier {tier}) · view-only, memory untouched', {
+            member: _v2gShortId(memberId), root: _v2gShortId(rootId), tier: tier,
+          }),
         'success'
       );
       _v2gOps.mode = null;
@@ -3120,12 +3140,54 @@
       _v2gSelectEntity(memberId, { notify: false });
       try {
         window.dispatchEvent(new CustomEvent('kazma:memory-ops-done', {
-          detail: { op: 'group', member: memberId, root: rootId, tier: data.member_tier },
+          detail: { op: current ? 'move' : 'group', member: memberId, root: rootId, tier: tier },
         }));
       } catch (e) { /* ignore */ }
       return true;
     } catch (err) {
       _v2gToast(_mt('memory.console.group_failed', 'Group failed'), 'error');
+      return false;
+    }
+  }
+
+  // Override a grouped node's tier (when parent + 1 is the wrong depth).
+  async function _v2gSetTier(memberId) {
+    memberId = String(memberId || '').trim();
+    var row = (_v2gGroups || []).find(function(g) { return g.member === memberId; });
+    if (!row) {
+      _v2gToast(_mt('memory.console.not_grouped', 'Not grouped'), 'info');
+      return false;
+    }
+    var answer = await _v2gPrompt({
+      title: _mt('memory.console.tier_prompt_title', 'Node tier'),
+      message: _mt('memory.console.tier_prompt_message', 'Tier for {id}, from 0 to 4. Nodes below it keep their tiers.', {
+        id: _v2gShortId(memberId),
+      }),
+      defaultValue: String(row.member_tier != null ? row.member_tier : ''),
+    });
+    if (answer == null) return false;
+    var text = String(answer).trim();
+    if (!/^[0-4]$/.test(text)) {
+      _v2gToast(_mt('memory.console.tier_invalid', 'Enter a whole number from 0 to 4'), 'error');
+      return false;
+    }
+    try {
+      var data = await _v2gApiJson('/api/memory/v2/graph/groups/node/' + encodeURIComponent(memberId) + '/tier', {
+        method: 'POST',
+        body: JSON.stringify({ tier: Number(text) }),
+      });
+      if (!data.ok) {
+        _v2gToast(data.error || _mt('memory.console.tier_failed', 'Setting the tier failed'), 'error');
+        return false;
+      }
+      _v2gToast(_mt('memory.console.tier_set', '{id} is now tier {tier} · view-only, memory untouched', {
+        id: _v2gShortId(memberId), tier: data.member_tier,
+      }), 'success');
+      await _v2gReloadGraph();
+      _v2gSelectEntity(memberId, { notify: false });
+      return true;
+    } catch (err) {
+      _v2gToast(_mt('memory.console.tier_failed', 'Setting the tier failed'), 'error');
       return false;
     }
   }
@@ -3610,6 +3672,7 @@
         extra += _actBtn('group-under', 'btn-secondary', _mt('memory.console.act_group_under', 'Group under→'), _mt('memory.console.act_group_under_title', 'Group this node under a parent'));
         var grouped = (_v2gGroups || []).some(function(g) { return g.member === p.id; });
         if (grouped) {
+          extra += _actBtn('set-tier', 'btn-secondary', _mt('memory.console.act_set_tier', 'Tier…'), _mt('memory.console.act_set_tier_title', "Set this node's tier in its group (0 = hub … 4)"));
           extra += _actBtn('ungroup', 'btn-secondary', _mt('memory.console.act_ungroup', 'Ungroup'), _mt('memory.console.act_ungroup_title', 'Remove view-only grouping for this node'));
         }
       }
@@ -3754,6 +3817,8 @@
         } else if (act === 'group-under') {
           // F: view-only grouping — pick the parent next.
           _v2gGroupUnder(p.id);
+        } else if (act === 'set-tier') {
+          _v2gSetTier(p.id);
         } else if (act === 'ungroup') {
           _v2gUngroup(p.id);
         } else if (act === 'cut-hub') {

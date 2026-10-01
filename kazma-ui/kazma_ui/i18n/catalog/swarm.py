@@ -872,6 +872,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تحديث",
         "en": "Refresh",
     },
+    "swarm.export_csv": {
+        "ar": "تصدير CSV",
+        "en": "Export CSV",
+    },
+    "swarm.export_csv_title": {
+        "ar": "نزّل سجل المهام المعروض كملف CSV (حتى 1000 مهمة)",
+        "en": "Download the task history shown as a CSV file (up to 1,000 tasks)",
+    },
     "swarm.registered_workers": {
         "ar": "العمال المسجلون",
         "en": "Registered Workers",

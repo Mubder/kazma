@@ -10,12 +10,13 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 from urllib.parse import urlparse
 
 __all__ = [
     "list_research_papers",
+    "resolve_report_file",
     "run_research_pipeline",
 ]
 
@@ -77,6 +78,56 @@ def _candidate_report_roots() -> list[Path]:
     except Exception:
         pass
     return roots
+
+
+def _names_a_root(text: str) -> bool:
+    """True for a path that does not hang off a folder it is joined to.
+
+    ``/etc/x`` is not absolute on Windows, yet ``root / "/etc/x"`` drops
+    everything of *root* but its drive; ``C:x`` keeps only the drive.
+    """
+    return text.startswith("/") or bool(PureWindowsPath(text).anchor) or Path(text).is_absolute()
+
+
+def resolve_report_file(raw: str, *, stored: bool = False) -> Path | None:
+    """The file *raw* names inside a ``research/reports`` folder, or None.
+
+    The one rule for every route that reads a report a request names (open,
+    export, score). *raw* is relative to a workspace
+    (``research/reports/<run>/report.md``), the form the pipeline records.
+    An absolute path is accepted only when *stored* -- a path Kazma wrote
+    itself, such as a session's ``report_path`` -- and then only inside a
+    reports folder too: a request may name a report, never any other file.
+    Paths are resolved (``..``, symlinks) before the containment check.
+
+    Blocking (it reads the workspace list): call it from a thread.
+    """
+    text = (raw or "").strip().replace("\\", "/")
+    if not text or "\x00" in text:
+        return None
+    roots = _candidate_report_roots()
+    folders: list[Path] = []
+    for root in roots:
+        try:
+            folders.append((root / "research" / "reports").resolve())
+        except (OSError, RuntimeError):
+            continue
+    if _names_a_root(text):
+        if not stored:
+            return None
+        candidates = [Path(text)]
+    else:
+        if ".." in text.split("/"):
+            return None
+        candidates = [root / text for root in roots]
+    for cand in candidates:
+        try:
+            target = cand.resolve()
+            if target.is_file() and any(target.is_relative_to(f) for f in folders):
+                return target
+        except (OSError, RuntimeError, ValueError):
+            continue
+    return None
 
 
 def _workspace_research_dir(topic: str) -> Path:

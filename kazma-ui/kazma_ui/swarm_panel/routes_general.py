@@ -32,51 +32,6 @@ def _registry_options() -> dict[str, Any] | None:
         return None
 
 
-def _workflow_to_mermaid(workflow: Any) -> str:
-    """Generate a Mermaid.js diagram string from a DAGWorkflow."""
-    import html as _html
-
-    lines = ["graph TD"]
-    # Style definitions for luxury, enterprise feel
-    lines.append("    classDef agent fill:#1a1b26,stroke:#7aa2f7,stroke-width:2px,color:#c0caf5;")
-    lines.append("    classDef router fill:#1e1e2e,stroke:#f5c2e7,stroke-width:2px,color:#cdd6f4;")
-    lines.append("    classDef default fill:#15161e,stroke:#414868,stroke-width:1px,color:#a9b1d6;")
-
-    def _safe_id(name: str) -> str:
-        return "".join(c if c.isalnum() else "_" for c in name)
-
-    def _mermaid_escape(s: str) -> str:
-        """Escape HTML entities and Mermaid metacharacters for safe labels."""
-        return _html.escape(s, quote=True).replace("&#x27;", "'").replace("]", "&#93;").replace("|", "&#124;")
-
-    # Add nodes
-    for node_id, node in workflow.nodes.items():
-        node_type = getattr(node, "type", "dispatch")
-        label = f'"{_mermaid_escape(node_id)}<br/><small style=\'color:#565f89;\'>{_mermaid_escape(node_type)}</small>"'
-        safe_node_id = _safe_id(node_id)
-        lines.append(f"    {safe_node_id}[{label}]")
-        
-        # Apply style classes
-        if "router" in node_type.lower() or "dispatch" in node_type.lower() or "decision" in node_type.lower():
-            lines.append(f"    class {safe_node_id} router;")
-        else:
-            lines.append(f"    class {safe_node_id} agent;")
-
-    # Add edges with conditions
-    for edge in workflow.edges:
-        src = edge.from_node
-        tgt = edge.to_node
-        safe_src = _safe_id(src)
-        safe_tgt = _safe_id(tgt)
-        cond = getattr(edge, "condition", "")
-        if cond:
-            lines.append(f'    {safe_src} -->|"{_mermaid_escape(cond)}"| {safe_tgt}')
-        else:
-            lines.append(f"    {safe_src} --> {safe_tgt}")
-
-    return "\n".join(lines)
-
-
 def register_general_routes(
     router: APIRouter,
     templates: Any,
@@ -135,87 +90,6 @@ def register_general_routes(
         if not svc.has_swarm_core():
             result["setup_instructions"] = SWARM_CORE_MISSING
         return result
-
-    @router.post("/api/swarm/workflows/validate")
-    async def validate_workflow(request: Request) -> JSONResponse:
-        """Validate and parse a YAML/JSON DAG workflow definition."""
-        from pydantic import ValidationError
-        import yaml
-        
-        try:
-            from kazma_core.swarm.dag_schema import DAGWorkflow
-        except ImportError:
-            return JSONResponse(
-                content={"valid": False, "error": "DAGWorkflow schema is not available in kazma_core"},
-                status_code=400,
-            )
-
-        try:
-            body = await request.json()
-        except Exception as _e:
-            logger.debug("[Swarm] invalid JSON in DAG validate: %s", _e)
-            return JSONResponse(
-                content={"valid": False, "error": "Invalid request body; must be valid JSON"},
-                status_code=400,
-            )
-
-        definition_str = body.get("workflow_definition")
-        if not definition_str:
-            try:
-                workflow = DAGWorkflow(**body)
-                return JSONResponse(
-                    content={
-                        "valid": True,
-                        "workflow": workflow.model_dump(),
-                        "nodes": [n.model_dump() for n in workflow.nodes.values()],
-                        "edges": [e.model_dump() for e in workflow.edges],
-                        "mermaid": _workflow_to_mermaid(workflow),
-                    }
-                )
-            except ValidationError:
-                return JSONResponse(
-                    content={"valid": False, "error": "Workflow validation failed. Check node and edge definitions."},
-                    status_code=422,
-                )
-            except Exception:
-                return JSONResponse(
-                    content={"valid": False, "error": "Validation error. Check workflow definition syntax."},
-                    status_code=422,
-                )
-
-        try:
-            parsed_data = yaml.safe_load(definition_str)
-            if not isinstance(parsed_data, dict):
-                return JSONResponse(
-                    content={"valid": False, "error": "Parsed workflow must be a top-level JSON/YAML object/dictionary"},
-                    status_code=422,
-                )
-            
-            workflow = DAGWorkflow(**parsed_data)
-            return JSONResponse(
-                content={
-                    "valid": True,
-                    "workflow": workflow.model_dump(),
-                    "nodes": [n.model_dump() for n in workflow.nodes.values()],
-                    "edges": [e.model_dump() for e in workflow.edges],
-                    "mermaid": _workflow_to_mermaid(workflow),
-                }
-            )
-        except yaml.YAMLError:
-            return JSONResponse(
-                content={"valid": False, "error": "YAML/JSON syntax error. Check workflow definition format."},
-                status_code=422,
-            )
-        except ValidationError:
-            return JSONResponse(
-                content={"valid": False, "error": "Workflow validation failed. Check node and edge definitions."},
-                status_code=422,
-            )
-        except Exception:
-            return JSONResponse(
-                content={"valid": False, "error": "Validation error. Check workflow definition syntax."},
-                status_code=422,
-            )
 
     @router.get("/api/swarm/output-target")
     async def get_output_target() -> JSONResponse:

@@ -22,6 +22,12 @@ Since 2026-10-01 each METHOD of a route needs a caller with that method too
 ``DELETE /api/settings/{key:path}`` -- it deleted any setting by name --
 pass as "called" because the pages called other ``/api/settings/...`` paths,
 and six more uncalled methods hid the same way.
+
+Also since 2026-10-01, a prefix built by concatenation
+(``'/api/research/' + id``) reaches a route only where the route's next
+segment is a parameter, or a word the same file quotes (``'approve'`` for
+``'/api/x/reply/' + action``). Any route under the prefix used to count:
+``/api/research/eval`` looked called through ``'/api/research/' + id``.
 """
 
 from __future__ import annotations
@@ -47,6 +53,7 @@ NOT_CALLED_BY_A_PAGE: dict[str, str] = {
     "/api/email/oauth/gmail/callback": "Google's OAuth redirect lands here",
     "/api/email/oauth/microsoft/callback": "Microsoft's OAuth redirect lands here",
     "/api/github/oauth/callback": "GitHub's OAuth redirect lands here",
+    "/api/auth/oidc/callback": "the OIDC identity provider's sign-in redirect lands here",
     "/api/calendar/oauth/google/start": (
         "the sign-in as a link (302 to Google, listed in api-routes.md); the "
         "calendar card uses /oauth/google/start.json"
@@ -124,6 +131,10 @@ NOT_CALLED_BY_A_PAGE: dict[str, str] = {
         "one telemetry reading for monitors; the page streams /api/telemetry/stream"
     ),
     "/api/voice/status": "voice readiness for operators; Settings reads the voice settings",
+    "/api/research/eval": (
+        "the structural score of a report for API clients (guide/web-research.md, "
+        "Eval API); the Research page shows each run's score from its session"
+    ),
     "/api/agents": "the agent list as JSON; the Agents page reads /api/agents/status",
     "GET /api/kb/libraries/{library_id}": (
         "one library's record for API clients; the Knowledge page reads every "
@@ -193,7 +204,72 @@ def placeholders(text: str) -> str:
     return "".join(out)
 
 
-def calls_in(text: str) -> set[str]:
+_WORD = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
+
+
+class Calls(set):
+    """Call strings, and for each prefix ('/api/x/' + ...) the words quoted in
+    the files that build it: the values its concatenation can take."""
+
+    def __init__(self, items=(), words: dict[str, set[str]] | None = None) -> None:
+        super().__init__(items)
+        self.words: dict[str, set[str]] = words if words is not None else {}
+
+    def merge(self, other: Calls) -> Calls:
+        self |= other
+        for prefix, ws in other.words.items():
+            self.words.setdefault(prefix, set()).update(ws)
+        return self
+
+
+_QUOTED_WORD = re.compile(r"""(['"`])([A-Za-z][A-Za-z0-9_-]*)\1""")
+
+
+def quoted_words(text: str) -> set[str]:
+    """Every quoted single word in *text* ('approve', 'node'), also one
+    inside another literal: ``@click="convAction('retry', c)"``."""
+    return {m.group(2) for m in _QUOTED_WORD.finditer(text)}
+
+
+def _page_words(script: Path, templates: dict[Path, str]) -> set[str]:
+    """Words the templates that load *script* quote: a page's buttons pass
+    the values its script concatenates (x_studio.html's 'retry')."""
+    out: set[str] = set()
+    for text in templates.values():
+        if script.name in text:
+            out |= quoted_words(text)
+    return out
+
+
+def _collect(collect, python_too: bool) -> Calls:
+    """Merge *collect*(text[, python]) over every client file, each script's
+    prefixes also taking the words of the templates that load it."""
+    files = _client_files()
+    templates = {
+        f: f.read_text(encoding="utf-8", errors="replace") for f in files if f.suffix == ".html"
+    }
+    found = Calls()
+    for f in files:
+        text = templates.get(f) or f.read_text(encoding="utf-8", errors="replace")
+        got = collect(text, f.suffix == ".py") if python_too else collect(text)
+        if f.suffix == ".js" and got.words:
+            extra = _page_words(f, templates)
+            for prefix in got.words:
+                got.words[prefix] |= extra
+        found.merge(got)
+    return found
+
+
+def _prefix_words(found: set, text: str) -> dict[str, set[str]]:
+    paths = {p if isinstance(p, str) else p[1] for p in found}
+    prefixes = {p for p in paths if p.endswith("/")}
+    if not prefixes:
+        return {}
+    words = quoted_words(text)
+    return {p: set(words) for p in prefixes}
+
+
+def calls_in(text: str) -> Calls:
     """Every /api path a source file's string literals name."""
     found: set[str] = set()
     for m in _LITERAL.finditer(text):
@@ -201,7 +277,7 @@ def calls_in(text: str) -> set[str]:
         k = literal.find("/api/")
         if k >= 0:
             found.add(re.split(r"[?#\s'\"]", placeholders(literal[k:]))[0])
-    return found
+    return Calls(found, _prefix_words(found, text))
 
 
 def _client_files() -> list[Path]:
@@ -217,11 +293,8 @@ def _client_files() -> list[Path]:
 
 
 @pytest.fixture(scope="module")
-def calls() -> set[str]:
-    found: set[str] = set()
-    for f in _client_files():
-        found |= calls_in(f.read_text(encoding="utf-8", errors="replace"))
-    return found
+def calls() -> Calls:
+    return _collect(calls_in, python_too=False)
 
 
 # ── the routes ───────────────────────────────────────────────────────────
@@ -256,13 +329,21 @@ def _route_rx(path: str) -> re.Pattern:
 
 def is_called(path: str, calls: set[str]) -> bool:
     """A literal matches the route (X standing for a parameter), or is a
-    prefix it is built from by concatenation ('/api/x/reply/' + action)."""
+    prefix it is built from by concatenation ('/api/x/reply/' + action).
+
+    A prefix reaches the route only where the route's next segment is a
+    parameter or a word the prefix's files quote (when *calls* carries them,
+    as ``Calls`` does): ``'/api/research/' + id`` is not ``/api/research/eval``.
+    """
     rx = _route_rx(path)
+    words = getattr(calls, "words", None)
     for call in calls:
         if rx.match(call.rstrip("/") or "/"):
             return True
         if call.endswith("/") and len(call) > len("/api/") and path.startswith(call):
-            return True
+            nxt = path[len(call):].split("/", 1)[0]
+            if words is None or nxt.startswith("{") or nxt in words.get(call, ()):
+                return True
     return False
 
 
@@ -326,7 +407,7 @@ def literal_method(text: str, start: int, end: int, python: bool) -> str:
     return "ANY"
 
 
-def method_calls_in(text: str, python: bool = False) -> set[tuple[str, str]]:
+def method_calls_in(text: str, python: bool = False) -> Calls:
     """Every (method, /api path) a source file's string literals name."""
     found: set[tuple[str, str]] = set()
     for m in _LITERAL.finditer(text):
@@ -335,19 +416,18 @@ def method_calls_in(text: str, python: bool = False) -> set[tuple[str, str]]:
         if k >= 0:
             path = re.split(r"[?#\s'\"]", placeholders(literal[k:]))[0]
             found.add((literal_method(text, m.start(), m.end(), python), path))
-    return found
+    return Calls(found, _prefix_words(found, text))
 
 
 def is_called_with(method: str, path: str, calls: set[tuple[str, str]]) -> bool:
-    return is_called(path, {p for m, p in calls if m in (method, "ANY")})
+    paths = {p for m, p in calls if m in (method, "ANY")}
+    words = getattr(calls, "words", None)
+    return is_called(path, Calls(paths, words) if words is not None else paths)
 
 
 @pytest.fixture(scope="module")
-def method_calls() -> set[tuple[str, str]]:
-    found: set[tuple[str, str]] = set()
-    for f in _client_files():
-        found |= method_calls_in(f.read_text(encoding="utf-8", errors="replace"), python=f.suffix == ".py")
-    return found
+def method_calls() -> Calls:
+    return _collect(method_calls_in, python_too=True)
 
 
 @pytest.fixture(scope="module")
@@ -427,9 +507,26 @@ def test_a_template_expression_with_a_call_is_one_parameter() -> None:
 
 
 def test_a_concatenation_prefix_counts() -> None:
-    src = "fetch('/api/x/reply/' + action, {method: 'POST'})"
+    src = "const action = ok ? 'approve' : 'deny';" + chr(10) + "fetch('/api/x/reply/' + action, {method: 'POST'})"
     assert is_called("/api/x/reply/approve", calls_in(src))
+    assert is_called("/api/x/reply/{reply_id}/notes", calls_in(src))
     assert not is_called("/api/x/replies", calls_in(src))
+
+
+def test_a_word_inside_an_attribute_counts() -> None:
+    """x_studio.html passes 'retry' to the script that builds the path."""
+    assert quoted_words('@click="convAction(\'retry\', c)"') == {"retry"}
+
+
+def test_a_prefix_reaches_a_word_only_its_file_quotes() -> None:
+    """Negative control: /api/research/eval looked called through
+    '/api/research/' + id, which can only reach /api/research/{task_id}."""
+    src = "fetch('/api/research/' + encodeURIComponent(id) + '/export', {method: 'POST'})"
+    assert not is_called("/api/research/eval", calls_in(src))
+    assert is_called("/api/research/{task_id}/export", calls_in(src))
+    assert not is_called_with("GET", "/api/research/eval", method_calls_in(src))
+    # Without the words, the old reading: everything under the prefix.
+    assert is_called("/api/research/eval", set(calls_in(src)))
 
 
 def test_a_method_nothing_calls_is_flagged() -> None:
