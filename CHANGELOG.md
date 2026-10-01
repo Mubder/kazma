@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## The check for routes nothing calls reads the method (2026-10-01)
+
+- **A route is "called" only when something calls it with its own method.**
+  The check that every `/api` route has a caller compared addresses only. A
+  route that deleted any setting by name passed because pages called other
+  `/api/settings/...` addresses with other methods, and six more unused
+  routes hid the same way (all removed in the two changes below). The check
+  now reads each call's method from the code around it: `fetch`'s `method:`,
+  `hx-post`, and a Python client's `.delete(`. Each method of each route
+  needs its own caller or a stated reason.
+- `DELETE /api/documents/{id}`, the REST spelling of archiving a document,
+  is now listed in the API reference beside `POST …/delete`. Both run the
+  same code.
+
 ## A database outage no longer freezes every chat at the end of a turn (2026-10-01)
 
 - **Saving a reply happens beside the event loop.** The end of every chat

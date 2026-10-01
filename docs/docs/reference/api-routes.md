@@ -152,6 +152,7 @@ Security: [Document security](../security/document-security).
 | POST | `/api/documents/jobs/{job_id}/cancel` | Session | Cooperative cancel |
 | POST | `/api/documents/jobs/{job_id}/retry` | Session | Re-enqueue dead-letter/rejected job |
 | POST | `/api/documents/{document_id}/delete` | Session | Tombstone / delete document |
+| DELETE | `/api/documents/{document_id}` | Session | The same tombstone as `POST …/delete` (one implementation); the reason goes in `?reason=` |
 
 ### Operations (`/api/documents/ops/*`)
 

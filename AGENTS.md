@@ -4027,7 +4027,13 @@ channel it booted with.
   (the typing-telemetry stubs and `/api/system/flush`, which reset live
   registry singletons) and found the Settings backup had no restore control;
   it has one since 2026-10-01 (§47), with runtime state and credentials kept
-  out of both the file and the restore.
+  out of both the file and the restore. **Since 2026-10-01 it reads methods**:
+  each method of a route needs a caller WITH that method (read from the call
+  around the literal -- `fetch`'s `method:`, `hx-post`, a Python client's
+  `.delete(` / `_request(..., "DELETE", ...)`; a call it cannot read counts
+  for every method), or a `"METHOD /path"` declaration. Matching paths only
+  had let the delete-any-setting route and six other uncalled methods pass
+  because a page called the same path with another method.
 - **A panel lays out by its own width** (`@container`), not the window's:
   with the sidebar open a 918px window left the IDE editor ~40px and
   clipped the providers panel. `tests/e2e/test_layout_widths.py` (each with
