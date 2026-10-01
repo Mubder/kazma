@@ -172,7 +172,7 @@
     {# i18n: inject translations + language for client-side (Alpine) use #}
     <script>
         window.KAZMA_I18N = {{ translations_json|safe }};
-        window.KAZMA_LANG = '{{ lang()|default("en") }}';
+        window.KAZMA_LANG = {{ lang()|default("en") | tojson }};
         // Client-side t() — mirrors the Python t() for Alpine x-text expressions.
         window.t = function(key) {
             var entry = window.KAZMA_I18N ? window.KAZMA_I18N[key] : null;

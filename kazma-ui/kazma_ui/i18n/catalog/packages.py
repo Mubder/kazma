@@ -364,4 +364,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشل إلغاء التثبيت: {error}",
         "en": "Failed to uninstall: {error}",
     },
+    "skills.ui.enabled": {
+        "ar": "شُغّلت المهارة",
+        "en": "Skill enabled",
+    },
+    "skills.ui.disabled": {
+        "ar": "أُوقفت المهارة",
+        "en": "Skill disabled",
+    },
 }

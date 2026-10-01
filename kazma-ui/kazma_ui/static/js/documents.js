@@ -622,21 +622,22 @@ function documentsPage() {
     async deleteDocument(documentId, title) {
       if (!documentId || this.acting) return;
       const label = (title || documentId).toString().slice(0, 80);
+      const question = kazmaT('documents.js.archive_confirm', 'Archive "{label}"?\n\nThe document leaves your library (soft-delete). Any search index entries are removed. Original bytes stay until garbage collection reclaims unreferenced storage — this cannot be undone from the UI.', { label: label });
       let proceed = false;
       try {
         if (typeof window.kazmaConfirm === "function") {
           proceed = !!(await window.kazmaConfirm({
             title: kazmaT('documents.js.delete_archive_document', "Delete / archive document?"),
-            message: kazmaT('documents.js.archive_confirm', 'Archive "{label}"?\n\nThe document leaves your library (soft-delete). Any search index entries are removed. Original bytes stay until garbage collection reclaims unreferenced storage — this cannot be undone from the UI.', { label: label }),
+            message: question,
             confirmText: kazmaT('documents.delete_archive', "Delete / Archive"),
             cancelText: kazmaT('common.cancel', "Cancel"),
             danger: true,
           }));
         } else {
-          proceed = await window.confirm(`Archive "${label}"?`);
+          proceed = await window.confirm(question);
         }
       } catch (e) {
-        proceed = await window.confirm(`Archive "${label}"?`);
+        proceed = await window.confirm(question);
       }
       if (!proceed) return;
       this.acting = true;

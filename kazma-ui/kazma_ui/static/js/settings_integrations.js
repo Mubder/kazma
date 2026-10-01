@@ -60,7 +60,7 @@
                 const resp = await fetch(`/api/settings/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' });
                 const body = await resp.json().catch(function() { return {}; });
                 if (!resp.ok || body.status === 'error') {
-                    showToast(body.message || ('Delete failed (HTTP ' + resp.status + ')'), 'error');
+                    showToast(body.message || _k('settings.int.delete_failed_http', 'Delete failed (HTTP {status})', { status: resp.status }), 'error');
                     return;
                 }
                 await this.loadMcpServers();
@@ -105,29 +105,43 @@
             }
         },
 
-        async toggleSkill(skillId, enabled) {
+        // The Skills page's own routes, by the skill's id. This tab used
+        // /api/settings/skills/*, which wrote skills.<name>.enabled -- a key
+        // nothing reads -- and "uninstalled" a skill by writing it, built-in
+        // ones included (2026-10-01).
+        async toggleSkill(skill, enabled) {
             try {
-                await window.kazmaSave(`/api/settings/skills/${encodeURIComponent(skillId)}/toggle`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ enabled }),
+                await window.kazmaSave('/api/skills/toggle', {
+                    method: 'POST',
+                    body: { skill_id: skill.id, enabled: !!enabled },
                 });
+                showToast(enabled
+                    ? _k('skills.ui.enabled', 'Skill enabled')
+                    : _k('skills.ui.disabled', 'Skill disabled'), 'success');
             } catch (e) {
                 showToast(_k('settings.int.toggle_failed', 'Toggle failed: ') + e.message, 'error');
             }
             await this.loadSkills();
         },
 
-        async uninstallSkill(skillId) {
+        async uninstallSkill(skill) {
             if (!(await window.kazmaConfirm({
                 title: _k('settings.int.uninstall_skill', 'Uninstall skill'),
-                message: _k('settings.int.uninstall_skill_message', 'Uninstall skill "{name}"? This cannot be undone.', { name: skillId }),
+                message: _k('settings.int.uninstall_skill_message', 'Uninstall skill "{name}"? This cannot be undone.', { name: skill.name }),
                 confirmText: _k('settings.int.uninstall', 'Uninstall'),
                 danger: true,
             }))) return;
             try {
-                await window.kazmaSave(`/api/settings/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' });
-                showToast(_k('settings.int.skill_uninstalled', 'Skill uninstalled'), 'success');
+                const body = await window.kazmaSave('/api/skills/uninstall', {
+                    method: 'POST',
+                    body: { skill_id: skill.id },
+                });
+                // Only "ok" removed something ("not_found" removed nothing).
+                if (!body || body.status !== 'ok') {
+                    showToast(_k('skills.ui.nothing_uninstalled', 'Nothing was uninstalled: {reason}', { reason: (body && (body.error || body.status)) || _k('skills.ui.no_answer', 'no answer') }), 'error');
+                } else {
+                    showToast(_k('settings.int.skill_uninstalled', 'Skill uninstalled'), 'success');
+                }
             } catch (e) {
                 showToast(_k('settings.int.uninstall_failed', 'Uninstall failed: ') + e.message, 'error');
             }
@@ -621,7 +635,7 @@
                 if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
                 this.emailGmail.app_password = '';
                 this.emailGmailMode = protocol === 'pop' ? 'pop' : 'imap';
-                showToast(data.message || ('Gmail ' + protocol.toUpperCase() + ' connected'), 'success');
+                showToast(data.message || _k('settings.int.gmail_protocol_connected', 'Gmail {protocol} connected', { protocol: protocol.toUpperCase() }), 'success');
                 await this.loadEmailStatus();
             } catch (e) {
                 showToast(_k('settings.int.protocol_failed', '{provider} {protocol} failed: {error}', { provider: 'Gmail', protocol: protocol, error: e.message }), 'error');
@@ -654,7 +668,7 @@
                 if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
                 this.emailMsProtocol.password = '';
                 this.emailMsMode = protocol === 'pop' ? 'pop' : 'imap';
-                showToast(data.message || ('Microsoft ' + protocol.toUpperCase() + ' connected'), 'success');
+                showToast(data.message || _k('settings.int.microsoft_protocol_connected', 'Microsoft {protocol} connected', { protocol: protocol.toUpperCase() }), 'success');
                 await this.loadEmailStatus();
             } catch (e) {
                 showToast(_k('settings.int.protocol_failed', '{provider} {protocol} failed: {error}', { provider: 'Microsoft', protocol: protocol, error: e.message }), 'error');

@@ -178,6 +178,34 @@ class TestDiscoveryAndInstall:
         assert result.success
         assert not (dest / "improve").exists()
 
+    def test_uninstall_from_a_named_folder_touches_no_other(self, tmp_path: Path, monkeypatch):
+        """A named folder is the only one an uninstall removes from. It also
+        removed the same name from the legacy ~/.kazma/agent-skills, so this
+        very test deleted a developer's real skill of that name (2026-10-01)."""
+        from kazma_core.agent_skills.discovery import user_skill_folders
+
+        monkeypatch.setenv("KAZMA_SKILLS_HOME", str(tmp_path / "home"))
+        legacy = user_skill_folders()[-1]
+        _write_skill(legacy)
+        dest = tmp_path / "dest"
+        _write_skill(dest)
+        result = uninstall_skill("improve", target_dir=dest)
+        assert result.success
+        assert not (dest / "improve").exists()
+        assert (legacy / "improve" / "SKILL.md").is_file(), "the legacy folder's skill was removed too"
+
+    def test_uninstall_without_a_folder_removes_from_every_user_folder(self, tmp_path: Path, monkeypatch):
+        from kazma_core.agent_skills.discovery import user_skill_folders
+
+        monkeypatch.setenv("KAZMA_SKILLS_HOME", str(tmp_path / "home"))
+        folders = user_skill_folders()
+        for folder in (folders[0], folders[-1]):
+            _write_skill(folder)
+        result = uninstall_skill("improve")
+        assert result.success
+        assert len(result.installed) == 2
+        assert not any((folder / "improve").exists() for folder in folders)
+
     def test_catalog_prompt(self, tmp_path: Path):
         _write_skill(tmp_path / ".agents" / "skills")
         prompt = build_catalog_prompt(project_root=tmp_path)

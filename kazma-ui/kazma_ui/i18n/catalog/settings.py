@@ -3972,6 +3972,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "أُزيل الخادم",
         "en": "Server removed",
     },
+    "settings.int.delete_failed_http": {
+        "ar": "فشل الحذف (HTTP {status})",
+        "en": "Delete failed (HTTP {status})",
+    },
     "settings.int.delete_failed": {
         "ar": "فشل الحذف: ",
         "en": "Delete failed: ",
@@ -4039,6 +4043,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.int.gmail_connected": {
         "ar": "تم ربط Gmail",
         "en": "Gmail connected",
+    },
+    "settings.int.gmail_protocol_connected": {
+        "ar": "تم ربط Gmail عبر {protocol}",
+        "en": "Gmail {protocol} connected",
+    },
+    "settings.int.microsoft_protocol_connected": {
+        "ar": "تم ربط Microsoft عبر {protocol}",
+        "en": "Microsoft {protocol} connected",
     },
     "settings.int.gmail_connect_failed": {
         "ar": "فشل ربط Gmail: ",
@@ -4195,6 +4207,23 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.hub.model_not_in_list": {
         "ar": "{model} ليس في القائمة",
         "en": "{model} is not in the list",
+    },
+    # Toasts settings_hub.js wrote in English in every language (2026-10-01).
+    "settings.hub.models_found": {
+        "ar": "النماذج التي عُثر عليها: {n}",
+        "en": "Models found: {n}",
+    },
+    "settings.hub.profile_saved": {
+        "ar": "حُفظ الملف الشخصي «{name}»",
+        "en": "Profile \"{name}\" saved",
+    },
+    "settings.hub.profile_deleted": {
+        "ar": "حُذف الملف الشخصي «{name}»",
+        "en": "Profile \"{name}\" deleted",
+    },
+    "settings.hub.model_removed": {
+        "ar": "أُزيل {model}",
+        "en": "Removed {model}",
     },
     "settings.hub.clear_models_message": {
         "ar": "مسح النماذج المكتشفة لـ «{name}»؟ ستُمسح أيضًا النماذج التي اخترتها لهذا المزوّد.",
@@ -4452,6 +4481,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشلت إعادة البناء",
         "en": "Rebuild failed",
     },
+    "settings.agentjs.rebuild_started": {
+        "ar": "بدأت إعادة البناء",
+        "en": "Rebuild started",
+    },
+    "settings.agentjs.synced_rows_postgres": {
+        "ar": "الصفوف المُزامنة إلى Postgres: {n}",
+        "en": "Synced {n} rows to Postgres",
+    },
     "settings.agentjs.logging_settings_saved_restart_for": {
         "ar": "حُفظت إعدادات السجلات (أعد التشغيل لتطبيق تغييرات التدوير)",
         "en": "Logging settings saved (restart for rotation changes)",
@@ -4527,6 +4564,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.ops.install_extra_native": {
         "ar": "تثبيت الحزمة الإضافية الاختيارية «{name}»؟",
         "en": "Install optional extra \"{name}\"?",
+    },
+    "settings.ops.delete_user_confirm": {
+        "ar": "حذف المستخدم {name}؟",
+        "en": "Delete user {name}?",
     },
     "settings.ops.install_failed_to_start": {
         "ar": "تعذّر بدء التثبيت",

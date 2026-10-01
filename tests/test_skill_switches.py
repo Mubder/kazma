@@ -108,3 +108,26 @@ def test_a_builtin_skill_cannot_be_uninstalled(client):
     resp = client.post("/api/skills/uninstall", json={"skill_id": "native:browser_automation"})
     assert resp.status_code == 400
     assert "switch the skill off" in resp.json()["error"]
+
+
+@pytest.mark.parametrize(("decision", "status"), [("unauthorized", 401), ("forbidden", 403)])
+def test_the_toggle_is_for_admins(client, monkeypatch, decision, status):
+    """Like install and uninstall: a switched-off skill's tools leave the
+    agent for every chat. It was open to any operator (2026-10-01)."""
+    monkeypatch.setattr("kazma_ui.auth.admin_decision", lambda request: decision)
+    before = switches.load_switches()
+    resp = client.post("/api/skills/toggle", json={"skill_id": "native:browser_automation", "enabled": False})
+    assert resp.status_code == status
+    assert switches.load_switches() == before
+
+
+def test_a_failed_toggle_says_so(client, monkeypatch):
+    """A toggle that failed answered 200 (with ``"status": "error"``)."""
+
+    def broken(skill_id, enabled):
+        raise RuntimeError("settings store unavailable")
+
+    monkeypatch.setattr(switches, "set_skill_enabled", broken)
+    resp = client.post("/api/skills/toggle", json={"skill_id": "native:browser_automation", "enabled": False})
+    assert resp.status_code == 500
+    assert resp.json()["status"] == "error"

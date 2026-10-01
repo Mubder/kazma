@@ -16,13 +16,16 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from kazma_core.agent_skills.parser import ParsedSkill, parse_skill_md
+from kazma_core.paths import agent_skills_dir
 
 __all__ = [
     "AgentSkill",
     "discover_skills",
     "get_skill",
     "skill_base_dirs",
+    "skills_home",
     "user_agent_skills_dir",
+    "user_skill_folders",
 ]
 
 logger = logging.getLogger(__name__)
@@ -87,22 +90,41 @@ class AgentSkill:
         }
 
 
+def skills_home() -> Path:
+    """The home folder whose skill folders Kazma reads and installs to:
+    ``.agents/skills`` (the agentskills.io convention), Claude's and Cursor's
+    folders, and Kazma's legacy ``.kazma/agent-skills``.
+
+    ``KAZMA_SKILLS_HOME`` names another folder: a service account reading the
+    operator's skills, or a test run. A test run must never use the real one
+    -- the live install runs as the same user and reads it, and an uninstall
+    removes from it (the root conftest pins it, 2026-10-01).
+    """
+    override = (os.environ.get("KAZMA_SKILLS_HOME") or "").strip()
+    return Path(override).expanduser() if override else Path.home()
+
+
+def _cross_client_dir() -> Path:
+    return skills_home() / ".agents" / "skills"
+
+
 def user_agent_skills_dir() -> Path:
-    """Primary install target for Agent Skills (cross-client convention)."""
-    # Prefer ~/.agents/skills for agentskills.io interoperability.
-    agents = Path.home() / ".agents" / "skills"
-    try:
-        from kazma_core.paths import agent_skills_dir
-
-        kazma = agent_skills_dir()
-    except Exception:
-        from kazma_core.paths import user_home
-
-        kazma = user_home() / "agent-skills"
-        kazma.mkdir(parents=True, exist_ok=True)
-    # Create primary target on first use.
+    """Primary install target for Agent Skills (``.agents/skills``, shared
+    with other agentskills.io clients), created on first use."""
+    agents = _cross_client_dir()
     agents.mkdir(parents=True, exist_ok=True)
     return agents
+
+
+def user_skill_folders() -> list[Path]:
+    """Every user-level folder Kazma installs Agent Skills to, or once did:
+    the shared ``.agents/skills``, Kazma's own folder, and the legacy
+    ``.kazma/agent-skills`` (read and removed from, never written)."""
+    return [
+        _cross_client_dir(),
+        agent_skills_dir(),
+        skills_home() / ".kazma" / "agent-skills",
+    ]
 
 
 def skill_base_dirs(
@@ -121,19 +143,11 @@ def skill_base_dirs(
     # bundled/checksums.json at activation, not via install-time signing.
     dirs.append(("bundled", Path(__file__).resolve().parent / "bundled"))
 
-    # User-level
-    dirs.append(("user", Path.home() / ".agents" / "skills"))
-    try:
-        from kazma_core.paths import agent_skills_dir, legacy_user_home
-
-        dirs.append(("user", agent_skills_dir()))
-        # Legacy read fallback only (pre-project-local layout)
-        dirs.append(("user", legacy_user_home() / "agent-skills"))
-    except Exception:
-        dirs.append(("user", Path.home() / ".kazma" / "agent-skills"))
-    # Claude/Cursor pragmatic compatibility
-    dirs.append(("user", Path.home() / ".claude" / "skills"))
-    dirs.append(("user", Path.home() / ".cursor" / "skills"))
+    # User-level: the folders Kazma installs to (and the legacy one), then
+    # Claude's and Cursor's, for compatibility.
+    dirs.extend(("user", folder) for folder in user_skill_folders())
+    dirs.append(("user", skills_home() / ".claude" / "skills"))
+    dirs.append(("user", skills_home() / ".cursor" / "skills"))
 
     roots: list[Path] = []
     if project_root is not None:

@@ -493,6 +493,7 @@ whole.
 |----------|---------|---------|
 | `KAZMA_DATA_DIR` | `<install>/kazma-data` | Every store, attachment and backup. |
 | `KAZMA_USER_HOME` | `<install>/.kazma` | Logs, guard state, the hub registry, the restic passphrase. A legacy `~/.kazma` is moved here once at startup. |
+| `KAZMA_SKILLS_HOME` | the user's home folder | The folder whose skill folders Kazma reads and installs Agent Skills to: `.agents/skills` (shared with other agentskills.io clients), `.claude/skills`, `.cursor/skills` and the legacy `.kazma/agent-skills`. Set it when Kazma runs as a service account that should read another user's skills; the test suite sets it so a test run never reads or changes the real ones. |
 | `KAZMA_PROJECT_ROOT` | found by walking up to `pyproject.toml` | Install root, used only when that walk finds nothing (the working directory is the last resort). `kazma mcp` pins it when set. |
 | `KAZMA_LOG_FILE` | `<.kazma>/kazma.log` | Application log file. |
 | `KAZMA_BACKUPS_DIR` | `<data>/backups` | Universal backups. |

@@ -664,6 +664,108 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مسودة",
         "en": "DRAFT",
     },
+    # The pull-request viewer, the GitHub OAuth and disconnect dialogs and the
+    # App-config toasts (2026-10-01): written in English in every language.
+    "workspace.pr_modal_title": {
+        "ar": "طلب السحب #{number}",
+        "en": "Pull Request #{number}",
+    },
+    "workspace.pr_no_description": {
+        "ar": "(بلا وصف)",
+        "en": "(no description)",
+    },
+    "workspace.pr_diff_stats": {
+        "ar": "الإضافات: {additions} · الحذف: {deletions} · الملفات: {files}",
+        "en": "{additions} additions / {deletions} deletions across {files} files",
+    },
+    "workspace.pr_state_line": {
+        "ar": "الحالة: {state}",
+        "en": "State: {state}",
+    },
+    "workspace.pr_state_merged": {
+        "ar": "مدموج",
+        "en": "merged",
+    },
+    "workspace.pr_state_open": {
+        "ar": "مفتوح",
+        "en": "open",
+    },
+    "workspace.pr_state_closed": {
+        "ar": "مغلق",
+        "en": "closed",
+    },
+    "workspace.pr_reviews_line": {
+        "ar": "المراجعات: {reviews}",
+        "en": "Reviews: {reviews}",
+    },
+    "workspace.pr_open_github": {
+        "ar": "افتح في GitHub",
+        "en": "Open on GitHub",
+    },
+    "workspace.pr_merge": {
+        "ar": "دمج طلب السحب",
+        "en": "Merge PR",
+    },
+    "workspace.pr_merge_title": {
+        "ar": "دمج طلب السحب",
+        "en": "Merge pull request",
+    },
+    "workspace.pr_merge_confirm": {
+        "ar": "دمج طلب السحب #{number} ({title})؟",
+        "en": "Merge PR #{number} ({title})?",
+    },
+    "workspace.pr_merge_btn": {
+        "ar": "دمج",
+        "en": "Merge",
+    },
+    "workspace.pr_merged": {
+        "ar": "دُمج طلب السحب #{number} بنجاح!",
+        "en": "PR #{number} merged successfully!",
+    },
+    "workspace.pr_merge_failed": {
+        "ar": "فشل دمج طلب السحب",
+        "en": "Failed to merge PR",
+    },
+    "workspace.oauth_missing_title": {
+        "ar": "لم يُعدّ OAuth لـGitHub",
+        "en": "GitHub OAuth not configured",
+    },
+    "workspace.oauth_missing_message": {
+        "ar": "أنشئ تطبيق GitHub OAuth واضبط GITHUB_OAUTH_CLIENT_ID و GITHUB_OAUTH_CLIENT_SECRET في ملف .env ثم أعد تشغيل كاظمه. أو استخدم رمز وصول شخصيًا (PAT) في هذه الصفحة بدلًا من ذلك.",
+        "en": "Create a GitHub OAuth App and set GITHUB_OAUTH_CLIENT_ID / GITHUB_OAUTH_CLIENT_SECRET in .env, then restart Kazma. Or use a Personal Access Token (PAT) on this page instead.",
+    },
+    "workspace.oauth_open_guide": {
+        "ar": "افتح دليل الإعداد",
+        "en": "Open setup guide",
+    },
+    "workspace.oauth_use_pat": {
+        "ar": "استخدم PAT بدلًا من ذلك",
+        "en": "Use PAT instead",
+    },
+    "workspace.oauth_missing_native": {
+        "ar": "لم يُعدّ OAuth لـGitHub. «موافق» يفتح دليل الإعداد، و«إلغاء» يبقيك هنا لاستخدام PAT.",
+        "en": "GitHub OAuth is not configured. OK opens the setup guide; Cancel stays here for a PAT.",
+    },
+    "workspace.disconnect_title": {
+        "ar": "قطع اتصال GitHub",
+        "en": "Disconnect GitHub",
+    },
+    "workspace.disconnect_btn": {
+        "ar": "قطع الاتصال",
+        "en": "Disconnect",
+    },
+    "workspace.app_configured": {
+        "ar": "أُعدّ تطبيق GitHub بنجاح!",
+        "en": "GitHub App configured successfully!",
+    },
+    "workspace.app_config_failed": {
+        "ar": "فشل حفظ إعدادات التطبيق",
+        "en": "Failed to save App config",
+    },
+    "workspace.app_config_error": {
+        "ar": "خطأ في حفظ إعدادات التطبيق: {error}",
+        "en": "Error saving App config: {error}",
+    },
     "workspace.extra_roots_title": {
         "ar": "مجلدات خارج مساحة العمل",
         "en": "Folders outside the workspace",

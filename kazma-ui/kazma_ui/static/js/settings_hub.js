@@ -32,7 +32,7 @@
                     showToast(data.error, 'error');
                 } else if (data.models && data.models.length) {
                     this.availableModels = data.models;
-                    showToast(data.models.length + ' models found', 'success');
+                    showToast(_k('settings.hub.models_found', 'Models found: {n}', { n: data.models.length }), 'success');
                 } else {
                     showToast(_k('settings.hub.no_models_returned_check_your', 'No models returned. Check your API key.'), 'error');
                 }
@@ -136,7 +136,7 @@
                 }
                 this.profileName = '';
                 await this.loadSavedModels();
-                showToast(`Profile "${name}" saved`, 'success');
+                showToast(_k('settings.hub.profile_saved', 'Profile "{name}" saved', { name: name }), 'success');
             } catch (e) {
                 showToast(_k('settings.hub.failed_to_save_profile', 'Failed to save profile: ') + e.message, 'error');
             }
@@ -152,7 +152,7 @@
             try {
                 await window.kazmaSave(`/api/models/saved/${encodeURIComponent(name)}`, { method: 'DELETE' });
                 await this.loadSavedModels();
-                showToast(`Profile "${name}" deleted`, 'success');
+                showToast(_k('settings.hub.profile_deleted', 'Profile "{name}" deleted', { name: name }), 'success');
             } catch (e) {
                 showToast(_k('settings.hub.failed_to_delete_profile', 'Failed to delete profile: ') + e.message, 'error');
             }
@@ -975,7 +975,7 @@
                 });
                 const result = resp.ok ? await resp.json() : null;
                 if (result && result.status === 'ok') {
-                    showToast(`Removed ${model}`, 'success');
+                    showToast(_k('settings.hub.model_removed', 'Removed {model}', { model: model }), 'success');
                 } else if (result && result.status === 'not_found') {
                     showToast(_k('settings.hub.model_not_in_list', '{model} is not in the list', { model: model }), 'info');
                 } else {
@@ -1198,7 +1198,7 @@
                 } else {
                     this.hubProfileModal = false;
                     await this.loadHubProfiles();
-                    showToast(`Profile "${name}" saved`, 'success');
+                    showToast(_k('settings.hub.profile_saved', 'Profile "{name}" saved', { name: name }), 'success');
                 }
             } catch (e) {
                 showToast(_k('settings.hub.failed_to_save_profile', 'Failed to save profile: ') + e.message, 'error');
@@ -1216,7 +1216,7 @@
             try {
                 await window.kazmaSave(`/api/models/profiles/${encodeURIComponent(name)}`, { method: 'DELETE' });
                 await this.loadHubProfiles();
-                showToast(`Profile "${name}" deleted`, 'success');
+                showToast(_k('settings.hub.profile_deleted', 'Profile "{name}" deleted', { name: name }), 'success');
             } catch (e) {
                 showToast(_k('settings.hub.failed_to_delete_profile', 'Failed to delete profile: ') + e.message, 'error');
             }

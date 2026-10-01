@@ -3929,9 +3929,9 @@
         hiddenEdges = Math.max(0, Number(stats.total_links) - Number(stats.links));
       }
       if (hiddenEdges > 0) {
-        msg += ' · ' + hiddenEdges + ' connection' + (hiddenEdges === 1 ? '' : 's') + ' hidden';
+        msg += ' · ' + _mt('memory.console.hidden_connections', 'connections hidden: {n}', { n: hiddenEdges });
       }
-      el.textContent = msg + ' — filter to narrow the view.';
+      el.textContent = _mt('memory.console.graph_trunc_notice', '{summary} — filter to narrow the view.', { summary: msg });
       el.style.display = 'block';
     } else {
       el.style.display = 'none';
@@ -4326,7 +4326,7 @@
   function _v2gStopPlay() {
     if (_v2gPlayTimer) { clearInterval(_v2gPlayTimer); _v2gPlayTimer = null; }
     var playBtn = document.getElementById('v2g-time-play');
-    if (playBtn) playBtn.textContent = playBtn.getAttribute('data-play-label') || 'Play';
+    if (playBtn) playBtn.textContent = playBtn.getAttribute('data-play-label') || _mt('dashboard.memory_play', 'Play');
   }
 
   var _v2gPathIds = {};
@@ -4359,7 +4359,9 @@
       else ed.pathHot = false;
     }
     if (window.showToast) {
-      window.showToast(matched ? ('Path: highlighted ' + matched + ' nodes') : 'No matching nodes for query path', matched ? 'success' : 'info');
+      window.showToast(matched
+        ? _mt('memory.console.path_highlighted', 'Path: {n} nodes highlighted', { n: matched })
+        : _mt('memory.console.path_no_match', 'No matching nodes for the query path'), matched ? 'success' : 'info');
     }
     // Zoom to first path node
     for (var j = 0; j < _v2gPts.length; j++) {

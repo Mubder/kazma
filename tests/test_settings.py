@@ -467,10 +467,10 @@ class TestSettingsAPI:
         removed, no caller. The documented surface is /api/providers.
 
         Checked against the route table rather than by status code: these
-        paths sit under the generic `/api/settings/{key}` routes, so a request
-        to one answers 405 or even 200 (for a config key it just invented)
-        without any provider route existing. A status code cannot answer this
-        question; the routing table can."""
+        paths sat under the generic `/api/settings/{key}` DELETE route (gone
+        since 2026-10-01), so a request to one answered 405 or even 200 (for a
+        config key it just invented) without any provider route existing. A
+        status code cannot answer this question; the routing table can."""
         paths = {getattr(r, "path", "") for r in client.kazma_app.routes}
         offenders = {p for p in paths if p.startswith("/api/settings/providers")}
         assert not offenders, f"the duplicate provider routes are back: {offenders}"
@@ -555,6 +555,28 @@ class TestSettingsAPI:
         assert client.post("/api/settings/connectors/test", json={
             "platform": "telegram",
         }).status_code in (404, 405)
+
+    def test_skills_routes_are_gone(self, client):
+        """``/api/settings/skills`` (GET, PUT .../toggle, DELETE) is gone: the
+        Settings tab and the Skills page both use ``/api/skills/toggle`` and
+        ``/api/skills/uninstall`` (tests/test_skill_switches.py,
+        tests/js/test_settings_skill_controls.js). These wrote
+        ``skills.<name>.enabled``, which nothing reads, and "uninstalled" a
+        skill by writing it; removed 2026-10-01."""
+        assert client.get("/api/settings/skills").status_code in (404, 405)
+        assert client.put("/api/settings/skills/browser-automation/toggle", json={
+            "enabled": False,
+        }).status_code in (404, 405)
+        assert client.delete("/api/settings/skills/browser-automation").status_code in (404, 405)
+
+    def test_no_route_deletes_any_setting_by_path(self, client):
+        """``DELETE /api/settings/{key:path}`` is gone: nothing called it, and
+        it deleted whatever key the path named with no check -- here the
+        provider list (2026-10-01)."""
+        store = client.kazma_config_store
+        store.set("providers.list", [{"name": "kept"}], category="providers")
+        assert client.delete("/api/settings/providers.list").status_code in (404, 405)
+        assert store.get("providers.list") == [{"name": "kept"}]
 
     def test_appearance_get(self, client):
         """GET /api/settings/appearance returns appearance."""

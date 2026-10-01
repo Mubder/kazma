@@ -440,4 +440,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "حذف",
         "en": "Delete",
     },
+    "research.ui.delete_confirm": {
+        "ar": "حذف نتيجة البحث هذه؟",
+        "en": "Delete this research result?",
+    },
 }

@@ -1678,7 +1678,27 @@ read once per settings store (weak reference, not `id()`) and updated by the
 page's toggle, so no model call reads settings. Built-in skills cannot be
 uninstalled (400; the page shows the switch only). Marketplace ("hub")
 skills install but register no tools with the agent -- not built.
-`tests/test_skill_switches.py`.
+`tests/test_skill_switches.py`. **Settings → Skills uses the same routes**
+(2026-10-01): it posted to `/api/settings/skills/*`, which wrote
+`skills.<name>.enabled` (read by nothing) and "uninstalled" any skill,
+built-in ones included, by writing it; those routes are gone, the tab posts
+the skill's id to `/api/skills/toggle` and `/api/skills/uninstall` and shows
+Uninstall only for a skill that is not built in
+(`tests/js/test_settings_skill_controls.js`). The toggle is admin-only, like
+install and uninstall, and a failure answers 500.
+
+**H. The skill folders in the home come from one place**
+(`discovery.skills_home()`, 2026-10-01): `.agents/skills`, Claude's and
+Cursor's folders and the legacy `.kazma/agent-skills` are all under it, and
+`KAZMA_SKILLS_HOME` moves it (a service account reading the operator's
+skills). The root conftest pins it, as it pins the data dir: the live install
+runs as the same user and reads those folders, an install writes there and an
+uninstall removes from there. `uninstall_skill(target_dir=...)` removes from
+that folder only -- it also removed the name from the real `~/.kazma`, so
+the uninstall test could delete a developer's skill. Gates:
+`tests/test_install_data_shield.py` (every skill folder under the test temp
+folders; only `skills_home()` reads the home; negative control without the
+pin), `tests/test_agent_skills.py`.
 
 ### 23. Windows asyncio.subprocess trap (`SelectorEventLoop`)
 
@@ -3854,6 +3874,28 @@ channel it booted with.
   (no English literal in a template), `tests/e2e/test_pages_read_in_arabic.py`
   (every page, and a chat turn, rendered in Arabic). Names that are the same
   in every language live in `tests/_ui_names.py`.
+  **Scripts are gated too** (`tests/test_scripts_have_no_english.py`,
+  2026-10-01): a toast, a dialog, a modal or a title a script sets after a
+  click is on no page the browser tour reads, and 57 were English in every
+  language (the chat's steer messages, "Read aloud", pinned/unpinned,
+  "Rebuild started", the Workspace's pull-request viewer...). The gate lexes
+  every script and every template's inline script and fails on English words
+  at those sinks outside a translation helper (found from the source: a
+  function whose first parameter is the key and whose body reads the
+  catalog). In the same file: every option a page passes to
+  `kazmaConfirm`/`kazmaPrompt`/`kazmaAlert` is one `stores.js` reads (the
+  Workspace passed `confirmLabel`, so "Delete files too" read "Confirm"); no
+  template quotes `{{ ... }}` inside a script -- write `{{ value | tojson }}`
+  (Jinja's HTML escaping is not JavaScript escaping: a newline in a value
+  ended the script, `&` arrived as `&amp;`); and the strings tables
+  `__KB_STRINGS`/`__MEM_STRINGS` hold every `S.<key>` their scripts read.
+- **A modal's body is HTML; what came from outside goes in escaped.**
+  `$store.modal.body` is rendered with `x-html`. The Workspace's pull-request
+  viewer put the PR's title, the reviewers' names and GitHub's merge state in
+  as they came, so a PR titled `<img src=x onerror=...>` ran script in the
+  operator's page when it was opened (fixed 2026-10-01,
+  `tests/js/test_workspace_pr_modal.js`). `kazmaConfirm`/`kazmaPrompt`/
+  `kazmaAlert` escape their message themselves; `showModal({body})` does not.
 - **A script's table of labels is catalog keys, not words** (2026-09-29):
   chat.js named every step's tool in English ("Read file") on Arabic pages.
   A table read as `ti(pair[0], pair[1])` (`_HEADER_PHASE_LABELS`,
@@ -3940,7 +3982,12 @@ channel it booted with.
   page said "Stopped" over an agent answering chats. It now shows whether the
   server is serving and says how a reply or the server is stopped;
   `POST /api/agents/stop` answers 409 with that text. Built-in skills'
-  "Uninstall" and the skill switch were the same shape (§22G).
+  "Uninstall" and the skill switch were the same shape (§22G), and so was
+  Settings → Skills until 2026-10-01. `DELETE /api/settings/{key:path}` is
+  gone the same day: nothing called it, and it deleted whatever key the path
+  named -- the provider list, the platform users, a secret's vault pointer --
+  with no check; the route inventory missed it because a page called other
+  `/api/settings/...` paths and the inventory matches paths, not methods.
 - **A button reaches what it names** (2026-09-28). The calendar card
   ("Google / Outlook") had one "Connect Calendar" that only started Google's
   sign-in. `tests/test_button_label_matches_action.py` follows every
@@ -4065,7 +4112,9 @@ new *guard* (its own code, or other OS-level variables) still needs the
   agent tests its own workspace) wrote test gates, a test chat store and
   test swarm tasks into the live stores. A test that needs a folder of its
   own still sets the variable. Gate: `tests/test_install_data_shield.py`
-  (every location `paths.py` resolves, from its source).
+  (every location `paths.py` resolves, from its source). Since 2026-10-01 it
+  pins `KAZMA_SKILLS_HOME` too: the skill folders in the user's home, which
+  the live install, running as the same user, reads (§22H).
 - **Compile check (Python):** `& '.venv\Scripts\python.exe' -c "import py_compile; py_compile.compile(r'<file>', doraise=True); print('OK')"`
 - **Syntax check (JS):** `node --check "<file>"`
 - **Run tests (single file):** `& '.venv\Scripts\python.exe' -m pytest <path> -v`

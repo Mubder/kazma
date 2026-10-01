@@ -393,9 +393,17 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
             logger.exception("Skill uninstall failed")
             return JSONResponse({"status": "error", "error": safe_error(exc)}, status_code=500)
 
-    @router.post("/api/skills/toggle")
-    def api_toggle_skill(req: SkillToggleRequest) -> dict[str, str]:
-        """Enable or disable a skill."""
+    @router.post("/api/skills/toggle", response_model=None)
+    def api_toggle_skill(req: SkillToggleRequest, request: Request) -> dict[str, str] | JSONResponse:
+        """Enable or disable a skill.
+
+        Admin only, like install and uninstall: a switched-off skill's tools
+        leave the agent for every chat. A failure answers 500 -- it answered
+        200 with ``"status": "error"``.
+        """
+        auth_err = _require_admin(request)
+        if auth_err:
+            return auth_err
         try:
             from kazma_core.config_store import get_config_store
 
@@ -417,8 +425,9 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
 
                 set_skill_enabled(skill_id, bool(req.enabled))
             return {"status": "ok", "enabled": str(req.enabled)}
-        except Exception:
-            return {"status": "error", "error": "Internal error"}
+        except Exception as exc:
+            logger.exception("Skill toggle failed for %s", req.skill_id)
+            return JSONResponse({"status": "error", "error": safe_error(exc)}, status_code=500)
 
     @router.post("/api/skills/validate")
     async def api_validate_skill(request: Request) -> dict[str, Any]:

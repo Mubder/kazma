@@ -639,11 +639,11 @@ function ideApp() {
         ? await window.kazmaPrompt({
             title: this._tx('ide.dlg.new_file_title', 'New file'),
             message: this._tx('ide.dlg.new_file_message', 'Path (relative to workspace root)'),
-            placeholder: 'e.g. src/new_module.py',
+            placeholder: this._tx('ide.dlg.new_file_placeholder', 'e.g. src/new_module.py'),
             defaultValue: 'new_file.py',
             confirmText: this._tx('ide.dlg.create', 'Create'),
           })
-        : window.prompt('New file path:', 'new_file.py');
+        : window.prompt(this._tx('ide.dlg.new_file_message', 'Path (relative to workspace root)'), 'new_file.py');
       if (!name || !name.trim()) return;
       name = name.trim();
       this._captureToTab();

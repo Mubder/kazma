@@ -284,7 +284,7 @@
                 if (data.ok) {
                     this.memoryStateSyncOk = true;
                     this.memoryStateSyncStatus = data.detail || _k('settings.agentjs.st_synced_rows', 'Synced {n} rows', { n: data.synced || 0 });
-                    showToast(data.detail || ('Synced ' + (data.synced || 0) + ' rows to Postgres'), 'success');
+                    showToast(data.detail || _k('settings.agentjs.synced_rows_postgres', 'Synced {n} rows to Postgres', { n: data.synced || 0 }), 'success');
                 } else {
                     this.memoryStateSyncStatus = data.error || _k('settings.agentjs.st_sync_failed', 'Sync failed');
                     showToast(_k('settings.agentjs.postgres_sync_failed', 'Postgres sync failed'), 'error');
@@ -366,7 +366,7 @@
                     title: _k('settings.agentjs.rebuild_embeddings', 'Rebuild embeddings?'),
                     message: _k('settings.agentjs.re_embed_episodes_beliefs_for', 'Re-embed episodes/beliefs for the current model. May take minutes.'),
                 })
-                : await window.confirm('Rebuild embeddings?');
+                : await window.confirm(_k('settings.agentjs.rebuild_embeddings', 'Rebuild embeddings?'));
             if (!ok) return;
             try {
                 const resp = await fetch('/api/settings/memory/backends/rebuild', {
@@ -375,7 +375,9 @@
                 });
                 const data = await resp.json();
                 this.memoryBackendsStatus = data.ok ? _k('settings.agentjs.rebuild_started_status', 'Rebuild started (see status on Embedder page)') : (data.error || _k('settings.agentjs.status_failed', 'Failed'));
-                showToast(data.ok ? 'Rebuild started' : 'Rebuild failed', data.ok ? 'success' : 'error');
+                showToast(data.ok
+                    ? _k('settings.agentjs.rebuild_started', 'Rebuild started')
+                    : _k('settings.agentjs.rebuild_failed', 'Rebuild failed'), data.ok ? 'success' : 'error');
             } catch (e) {
                 showToast(_k('settings.agentjs.rebuild_failed', 'Rebuild failed'), 'error');
             }
