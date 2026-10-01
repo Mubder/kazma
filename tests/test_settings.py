@@ -613,11 +613,12 @@ class TestSettingsAPI:
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
 
-    def test_mcp_get(self, client):
-        """GET /api/settings/mcp returns a list."""
-        resp = client.get("/api/settings/mcp")
-        assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
+    def test_mcp_list_is_the_mcp_routes(self, client):
+        """GET /api/settings/mcp is gone: the servers are listed by
+        GET /api/mcp/servers (mcp_ui.py), which Settings and the MCP page both
+        read (tests/test_mcp_secrets.py). Nothing called this copy; removed
+        2026-10-01."""
+        assert client.get("/api/settings/mcp").status_code in (404, 405)
 
     def test_mcp_add(self, client):
         """POST /api/settings/mcp adds a server."""

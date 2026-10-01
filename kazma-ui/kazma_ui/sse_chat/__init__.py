@@ -1241,7 +1241,8 @@ def create_sse_chat_router(
                             activity=activity_log or None,
                         )
                     )
-                    _persist_reply(
+                    await asyncio.to_thread(
+                        _persist_reply,
                         session_id,
                         _reply_turn,
                         text_of(parts) or done_body,
@@ -2124,7 +2125,7 @@ def create_sse_chat_router(
         )
 
         resume_input = build_resume_command(action="apply")
-        _steer_turn = _resolve_steer_turn(thread_id, session_id)
+        _steer_turn = await asyncio.to_thread(_resolve_steer_turn, thread_id, session_id)
         _steer_task = asyncio.create_task(
             _drive_graph_to_journal(
                 graph_inst,

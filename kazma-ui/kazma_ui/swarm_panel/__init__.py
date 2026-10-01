@@ -13,7 +13,6 @@ from typing import Any
 from fastapi import APIRouter
 
 from .routes_general import register_general_routes
-from .routes_metrics import register_metrics_routes
 from .routes_tasks import register_tasks_routes
 from .routes_workers import register_workers_routes
 
@@ -125,9 +124,6 @@ class SwarmRouterBuilder:
         )
         register_tasks_routes(
             self.tasks_router, self.templates, self.swarm_manager, self.config_store
-        )
-        register_metrics_routes(
-            self.general_router, self.templates, self.swarm_manager, self.config_store
         )
         register_general_routes(
             self.general_router, self.templates, self.swarm_manager, self.config_store

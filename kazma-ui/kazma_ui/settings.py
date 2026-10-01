@@ -1803,14 +1803,10 @@ class SettingsRouterBuilder:
     def _build_mcp_routes(self) -> None:
         router = self.mcp_router
         _get_sm = self._get_sm
-        config_store = self.config_store
 
-        @router.get("/api/settings/mcp")
-        def api_get_mcp() -> list[dict[str, Any]]:
-            """List all MCP servers, every secret masked (kazma_core.mcp.secrets)."""
-            from kazma_core.mcp.secrets import masked
-
-            return [masked(s) for s in _get_sm().get_mcp_servers()]
+        # The servers are listed by GET /api/mcp/servers (mcp_ui.py), which
+        # Settings and the MCP page both read, every secret masked. A second
+        # list here was called by nothing (removed 2026-10-01).
 
         @router.post("/api/settings/mcp")
         def api_add_mcp(req: MCPServerAddRequest) -> dict[str, Any]:

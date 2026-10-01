@@ -9,6 +9,7 @@ why Settings Test reported "Server not found" for servers added via
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -172,7 +173,8 @@ class MCPSettingsService:
 
     async def test_mcp_server(self, name: str) -> dict[str, Any]:
         """Test an MCP server connection using the unified merged store."""
-        servers = self.get_mcp_servers()
+        # kazma.yaml, the agent's config and the settings store: off the loop.
+        servers = await asyncio.to_thread(self.get_mcp_servers)
         server = None
         for s in servers:
             if s.get("name") == name:

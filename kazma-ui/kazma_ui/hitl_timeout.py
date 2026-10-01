@@ -97,23 +97,18 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
     try:
         from kazma_ui.active_turns import register_turn
         from kazma_ui.reply_sink import resolve_reply_turn
-        from kazma_ui.session_manager import get_session_manager
         from kazma_ui.sse_chat._streaming import (
             _drive_graph_to_journal,
             mark_thread_unpaused,
         )
-        from kazma_ui.turn_runtime import ensure_session_for_thread
+        from kazma_ui.turn_runtime import ensure_session_for_thread, resolve_session_id
 
-        session_id = ""
-        try:
-            owner = get_session_manager().get_by_thread_id(thread_id)
-            if owner is not None:
-                session_id = str(owner.session_id or "")
-        except Exception:
-            session_id = ""
+        # Chat-store reads and a write: off the loop (Postgres when the
+        # session is not cached). resolve_session_id never raises.
+        session_id = await asyncio.to_thread(resolve_session_id, thread_id)
         if not session_id:
-            session_id = ensure_session_for_thread(thread_id)
-        turn_id = resolve_reply_turn(thread_id, session_id)
+            session_id = await asyncio.to_thread(ensure_session_for_thread, thread_id)
+        turn_id = await asyncio.to_thread(resolve_reply_turn, thread_id, session_id)
 
         # The decision, written down everywhere it is read -- the registry
         # (the row stayed `pending` forever after an auto-deny until

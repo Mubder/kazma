@@ -132,7 +132,13 @@ def test_streamer_persists_before_announcing_completion():
     from kazma_ui import sse_chat
 
     src = inspect.getsource(sse_chat._stream_langgraph_events)
-    persist_at = src.index("persist_reply(")
+    # The write runs in a thread (it takes the session's lock and writes
+    # Postgres, 2026-10-01) and is AWAITED there, so it still completes
+    # before the frame below is sent.
+    persist_at = src.index("_turn_runtime.persist_reply")
+    assert "await asyncio.to_thread(" in src[max(0, persist_at - 60):persist_at], (
+        "the reply's write must be awaited, or done can overtake it"
+    )
     done_at = src.index('emit_j("done"')
     assert persist_at < done_at, (
         "the reply must be stored before the client is told the turn is over"

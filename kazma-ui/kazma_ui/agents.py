@@ -126,35 +126,10 @@ def create_agents_router(agent: Any, templates: Jinja2Templates) -> APIRouter:
             }
         )
 
-    @router.post("/api/agents/{action}")
-    async def agent_control(action: str) -> JSONResponse:
-        """The agent serves while the server runs; there is nothing to toggle.
-
-        "stop" used to flip a flag that nothing read and answer "stopped"
-        while the agent kept answering every chat (2026-09-28). It now says
-        what does stop things. "start" answers the truth: it is running.
-        """
-        if action == "start":
-            try:
-                agent.set_running(True)
-            except Exception as e:
-                logger.debug("Agent start failed: %s", e)
-                return JSONResponse({"status": "error", "message": "Internal error"}, status_code=500)
-            return JSONResponse({"status": "ok", "running": _serving()})
-        if action == "stop":
-            return JSONResponse(
-                {
-                    "status": "error",
-                    "running": _serving(),
-                    "message": (
-                        "The agent answers whenever the server runs. Stop a reply "
-                        "from the chat (Stop generation, /abort); stop or restart "
-                        "the server with its supervisor (kazma_guard --reload)."
-                    ),
-                },
-                status_code=409,
-            )
-        return JSONResponse({"status": "error", "message": f"Unknown action: {action}"}, status_code=400)
+    # No POST /api/agents/{start,stop}: the agent serves whenever the server
+    # runs. "stop" flipped a flag nothing read (2026-09-28), then answered 409
+    # with what does stop things; the page has shown that text itself since,
+    # and nothing called the route (removed 2026-10-01).
 
     return router
 

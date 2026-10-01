@@ -299,31 +299,14 @@ class TestAgentsEndpoints:
         assert "steps" in data
         assert isinstance(data["steps"], list)
 
-    def test_agent_start_control(self, client, mock_agent: Any):
-        """POST /api/agents/start starts the agent."""
-        assert mock_agent.is_running is False
-        resp = client.post("/api/agents/start")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "ok"
-        assert data["running"] is True
-        assert mock_agent.is_running is True
-
-    def test_agent_stop_control(self, client, mock_agent: Any):
-        """POST /api/agents/stop says what stops things instead of flipping a
-        flag nothing read (the page said "Stopped" over a working agent)."""
+    def test_no_route_starts_or_stops_the_agent(self, client, mock_agent: Any):
+        """The page says how a reply or the server is stopped (it said
+        "Stopped" over a working agent until 2026-09-28); the start/stop
+        route nothing called is gone (2026-10-01), and nothing is toggled."""
         mock_agent.set_running(True)
-        resp = client.post("/api/agents/stop")
-        assert resp.status_code == 409
-        data = resp.json()
-        assert data["status"] == "error"
-        assert data["running"] is True
-        assert mock_agent.is_running is True  # nothing was toggled
-
-    def test_agent_invalid_action(self, client):
-        """POST /api/agents/{invalid} returns 400."""
-        resp = client.post("/api/agents/jump")
-        assert resp.status_code == 400
+        for action in ("start", "stop", "jump"):
+            assert client.post(f"/api/agents/{action}").status_code in (404, 405)
+        assert mock_agent.is_running is True
 
 
 # ══════════════════════════════════════════════════════════════════════════

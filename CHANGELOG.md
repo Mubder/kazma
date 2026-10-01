@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## A database outage no longer freezes every chat at the end of a turn (2026-10-01)
+
+- **Saving a reply happens beside the event loop.** The end of every chat
+  turn (`close_turn`), the web stream's final and crash saves, approving or
+  clearing a paused tool call, the approval timeout, a hard steer and a
+  reminder's delivery looked up or wrote the chat in the chat store on the
+  loop that serves every open stream. Normally that takes milliseconds, but
+  with Postgres away each call waited up to 5 seconds for a connection. Every
+  one now runs in a thread, and the loop-stall gate names each function, so a
+  new caller on the loop fails the build.
+- **The MCP server list is read beside the loop too** (the `/mcp` page,
+  `/api/mcp/servers`, and a server's OAuth badge).
+- **Six routes nothing called are gone.** These are GET and PATCH on a single
+  bookmark, a DELETE twin of "clear paused approvals", a second MCP server
+  list in Settings, an empty swarm "metrics" stub, and the Agents page's old
+  start/stop. The bookmark routes that remain run beside the loop as well.
+- The CI lint gate is green again (an unused variable left by the previous
+  change).
+
 ## Settings' skill controls work; the pull-request viewer shows titles as text; scripts speak Arabic (2026-10-01)
 
 - **The pull-request viewer could run a PR title as code.** Workspace →

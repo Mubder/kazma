@@ -2866,7 +2866,19 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   (`set_provider_health`, `upsert_provider`) ran on the loop from the
   Settings route, the chat's provider switch, setup, the provider Test and
   the `/model` menu. Twelve provider and setup routes that never awaited are
-  plain `def`s now.
+  plain `def`s now. Fifth (2026-10-01): the chat store on the turn's own
+  path. `get_by_thread_id` is a Postgres round trip under the store's lock
+  when the session is not cached, and `persist_reply` (-> `upsert_reply` ->
+  `store.transact`) takes the session's thread lock and writes the whole
+  session before releasing it -- `close_turn`, the SSE stream's terminal and
+  crash writes, the approve and clear-approvals routes, the approval timeout,
+  hard steer and reminder delivery ran them on the loop, each up to the pool's
+  5 s while the database is away. With them: the sync helpers that wrap the
+  lookup (`resolve_session_id`, `ensure_session_for_thread`,
+  `resolve_reply_turn`, `persisted_hitl_for_thread`), and the MCP server list
+  behind `/mcp` and `/api/mcp/servers` (`get_mcp_servers`, `oauth_status`).
+  No stall dump had caught them: a normal write takes milliseconds; an
+  outage is when they stall.
 - **The settings store is never used on the loop** (2026-09-30,
   `test_the_settings_store_is_not_used_on_the_loop`, negative control beside
   it). On Postgres a settings read that misses the cache, and every write, is a
@@ -3980,14 +3992,19 @@ channel it booted with.
 - **A control changes something, or is not shown** (2026-09-28). The Agents
   page's Start/Stop flipped `agent.is_running`, which nothing else read: the
   page said "Stopped" over an agent answering chats. It now shows whether the
-  server is serving and says how a reply or the server is stopped;
-  `POST /api/agents/stop` answers 409 with that text. Built-in skills'
+  server is serving and says how a reply or the server is stopped; the
+  `POST /api/agents/{start,stop}` route that answered 409 with that text is
+  gone since 2026-10-01 (nothing called it). Built-in skills'
   "Uninstall" and the skill switch were the same shape (§22G), and so was
   Settings → Skills until 2026-10-01. `DELETE /api/settings/{key:path}` is
   gone the same day: nothing called it, and it deleted whatever key the path
   named -- the provider list, the platform users, a secret's vault pointer --
   with no check; the route inventory missed it because a page called other
-  `/api/settings/...` paths and the inventory matches paths, not methods.
+  `/api/settings/...` paths and the inventory matched paths, not methods.
+  So did six more a method-level reading found the same day: a DELETE twin
+  of the clear-approvals POST, GET and PATCH of one bookmark, a second MCP
+  server list (`GET /api/settings/mcp`), a swarm "metrics" stub and the
+  Agents start/stop -- all removed.
 - **A button reaches what it names** (2026-09-28). The calendar card
   ("Google / Outlook") had one "Connect Calendar" that only started Google's
   sign-in. `tests/test_button_label_matches_action.py` follows every

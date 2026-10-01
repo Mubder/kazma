@@ -476,7 +476,12 @@ def register_misc_routes(self: Any) -> None:
         try:
             from kazma_ui.session_manager import get_session_manager
 
-            if get_session_manager().get_by_thread_id(thread_id) is None:
+            # A chat-store read (Postgres when the session is not cached),
+            # off the loop; an error still reaches the fail-closed except.
+            _owner_session = await asyncio.to_thread(
+                lambda: get_session_manager().get_by_thread_id(thread_id)
+            )
+            if _owner_session is None:
                 logger.warning(
                     "[HITL] Approval denied for thread not owned by current tenant: %s",
                     thread_id,
@@ -713,12 +718,11 @@ def register_misc_routes(self: Any) -> None:
             # journal attach the chat client already holds (or re-opens).
             from kazma_ui.active_turns import is_turn_running, register_turn
             from kazma_ui.reply_sink import resolve_reply_turn
-            from kazma_ui.session_manager import get_session_manager as _gsm_resume
             from kazma_ui.sse_chat._streaming import (
                 _drive_graph_to_journal,
                 mark_thread_unpaused,
             )
-            from kazma_ui.turn_runtime import ensure_session_for_thread
+            from kazma_ui.turn_runtime import ensure_session_for_thread, resolve_session_id
 
             async with _approve_lock_for(thread_id):
                 if is_turn_running(thread_id) or thread_id in _resume_inflight:
@@ -733,12 +737,12 @@ def register_misc_routes(self: Any) -> None:
                         # the reply's, the client saw the identity change,
                         # and every gate decided under the old id was
                         # orphaned on screen (2026-09-20).
-                        _claimed_sid = ensure_session_for_thread(thread_id)
+                        _claimed_sid = await asyncio.to_thread(ensure_session_for_thread, thread_id)
                     except Exception:
                         _claimed_sid = ""
                     try:
-                        _claimed_turn = resolve_reply_turn(
-                            thread_id, _claimed_sid
+                        _claimed_turn = await asyncio.to_thread(
+                            resolve_reply_turn, thread_id, _claimed_sid
                         ) or ""
                     except Exception:
                         _claimed_turn = ""
@@ -746,7 +750,7 @@ def register_misc_routes(self: Any) -> None:
                     try:
                         from kazma_ui.hitl_status import persisted_hitl_for_thread
 
-                        _part = persisted_hitl_for_thread(thread_id)
+                        _part = await asyncio.to_thread(persisted_hitl_for_thread, thread_id)
                         if isinstance(_part, dict):
                             _claimed_iid = str(
                                 _part.get("interrupt_id")
@@ -805,16 +809,13 @@ def register_misc_routes(self: Any) -> None:
                     except Exception:
                         logger.exception("[HITL] failed to apply tool grant")
 
-                _resume_session_id = ""
-                try:
-                    _owner = _gsm_resume().get_by_thread_id(thread_id)
-                    if _owner is not None:
-                        _resume_session_id = str(_owner.session_id or "")
-                except Exception:
-                    logger.debug("[HITL] could not resolve session for resume", exc_info=True)
+                # Chat-store reads and a write: off the loop (Postgres when
+                # the session is not cached). resolve_session_id logs and
+                # answers "" on a failure, as this block did.
+                _resume_session_id = await asyncio.to_thread(resolve_session_id, thread_id)
                 if not _resume_session_id:
-                    _resume_session_id = ensure_session_for_thread(thread_id)
-                _resume_turn = resolve_reply_turn(thread_id, _resume_session_id)
+                    _resume_session_id = await asyncio.to_thread(ensure_session_for_thread, thread_id)
+                _resume_turn = await asyncio.to_thread(resolve_reply_turn, thread_id, _resume_session_id)
                 if not _resume_session_id:
                     logger.warning(
                         "[HITL] Resume mint failed for thread=%s — persist_reply "
@@ -833,7 +834,7 @@ def register_misc_routes(self: Any) -> None:
                 try:
                     from kazma_ui.hitl_status import persisted_hitl_for_thread
 
-                    _part = persisted_hitl_for_thread(thread_id)
+                    _part = await asyncio.to_thread(persisted_hitl_for_thread, thread_id)
                     if isinstance(_part, dict):
                         _stored_state = str(_part.get("state") or "")
                         _stored_iid = str(
@@ -998,8 +999,10 @@ def register_misc_routes(self: Any) -> None:
         except Exception:
             logger.exception("[HITL] Failed to list pending approvals")
             return _JSONResponse({"pending": [], "count": 0, "error": "Internal error"}, status_code=500)
+    # One route clears the paused approvals: the page's POST. A DELETE on
+    # /api/pending-approvals did the same through the same handler, called
+    # by nothing (removed 2026-10-01).
     @self.app.post("/api/pending-approvals/clear")
-    @self.app.delete("/api/pending-approvals")
     async def clear_pending_approvals_route(request: Request) -> _JSONResponse:
         from kazma_ui.auth import get_kazma_secret, is_authenticated
 
@@ -1018,10 +1021,19 @@ def register_misc_routes(self: Any) -> None:
             return _JSONResponse({"error": "Checkpointer not available"}, status_code=503)
         try:
             pending = await _get_pending_approvals(graph, checkpointer)
+            # Only this tenant's chats: one chat-store read per paused
+            # thread (Postgres when not cached), all of them off the loop.
+            owned = await asyncio.to_thread(
+                lambda: {
+                    str(item["thread_id"])
+                    for item in pending
+                    if get_session_manager().get_by_thread_id(str(item["thread_id"])) is not None
+                }
+            )
             cleared = 0
             for item in pending:
                 thread_id = str(item["thread_id"])
-                if get_session_manager().get_by_thread_id(thread_id) is None:
+                if thread_id not in owned:
                     continue
                 if hasattr(checkpointer, "adelete_thread"):
                     await checkpointer.adelete_thread(thread_id)

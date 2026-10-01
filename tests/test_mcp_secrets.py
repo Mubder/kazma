@@ -268,11 +268,45 @@ def settings_client(tmp_path):
     return TestClient(app)
 
 
-def test_the_settings_api_never_returns_a_key(vault, settings_client):
+class _AgentView:
+    """What ``KazmaAgent.get_mcp_servers`` reads: its config, its kazma.yaml
+    and its tools -- with the agent's own two methods, so the listing is the
+    product's."""
+
+    def __init__(self) -> None:
+        from types import SimpleNamespace
+
+        self.config = SimpleNamespace(raw={})
+        self.tools = SimpleNamespace(
+            is_server_connected=lambda name: False,
+            get_mcp_tools_for_server=lambda name: [],
+            _mcp=None,
+        )
+
+    def _mcp_yaml_path(self):
+        return None
+
+    from kazma_core.agent_runner import KazmaAgent as _KA
+
+    get_mcp_servers_config = _KA.get_mcp_servers_config
+    get_mcp_servers = _KA.get_mcp_servers
+    del _KA
+
+
+def test_the_settings_api_never_returns_a_key(vault, settings_client, tmp_path):
+    """Saved through Settings, listed by the route Settings and the MCP page
+    read (GET /api/mcp/servers; Settings' own list was removed 2026-10-01)."""
+    from fastapi import FastAPI
+    from fastapi.templating import Jinja2Templates
+    from fastapi.testclient import TestClient
+    from kazma_ui.mcp_ui import create_mcp_router
+
     body = _server()
     added = settings_client.post("/api/settings/mcp", json=body)
     assert added.status_code == 200
-    listed = settings_client.get("/api/settings/mcp")
+    app = FastAPI()
+    app.include_router(create_mcp_router(_AgentView(), Jinja2Templates(directory=str(tmp_path / "templates"))))
+    listed = TestClient(app).get("/api/mcp/servers")
     assert listed.status_code == 200
     for response in (added, listed):
         for secret in (BRAVE, TOKEN, STRIPE):
