@@ -29,9 +29,8 @@ import logging
 import os
 import subprocess
 from pathlib import Path
-from typing import Any
 
-__all__ = ["build_env_context", "detect_branch", "detect_repo_slug", "env_context_for_dispatch"]
+__all__ = ["build_env_context", "detect_branch", "detect_repo_slug"]
 
 logger = logging.getLogger(__name__)
 
@@ -418,18 +417,3 @@ async def build_env_context(workspace_id: str | None = None) -> str:
     git probes within one dispatch fan-out.
     """
     return await asyncio.to_thread(_build_env_context_sync, workspace_id=workspace_id)
-
-
-def env_context_for_dispatch(task: Any) -> str:
-    """Build env context for a dispatched swarm task, honoring task.workspace_id.
-
-    Convenience wrapper used by the worker prompt-assembly path. Sync by
-    design (historical API); delegates to the blocking builder directly.
-    Prefer ``await build_env_context(workspace_id=...)`` in async code.
-    """
-    wid = None
-    try:
-        wid = getattr(task, "workspace_id", None)
-    except Exception:  # pragma: no cover - defensive
-        pass
-    return _build_env_context_sync(workspace_id=wid)

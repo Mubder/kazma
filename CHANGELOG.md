@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Sending a task to the swarm from the IDE no longer freezes the chats (2026-10-02)
+
+- **The IDE's "send to swarm" builds its workspace block in a thread.** The
+  web IDE's dispatch and the chat `/ide` commands described the workspace to
+  the task (two `git` probes of up to 4 seconds each, and a store read) on
+  the loop that serves every open chat, by a choice made on 2026-08-27. They
+  now use the same threaded builder as every chat turn. The builder is on
+  the loop-stall gate's list, so no async code can call the blocking version
+  again. An unused helper that called it is gone.
+- **Gate:** `tests/test_ide_send_to_swarm.py` (the block is built off the
+  loop's thread and still reaches the task).
+
 ## A shell command keeps its own files out of the workspace (2026-10-02)
 
 - **Tool caches and temp files no longer land in your repository.** A

@@ -350,7 +350,11 @@ workspace. Three new modules; understanding their interaction is essential.
   (`worker.py`). The IDE chat's open file is its own turn note
   (`source="ide_context"`), never glued to the question.
 - `IdeService.send_to_swarm()` attaches the env block to the task `context` —
-  never drop this or workers lose workspace awareness.
+  never drop this or workers lose workspace awareness. It awaits the
+  threaded `build_env_context` (2026-10-02): it ran the blocking builder (two
+  git probes of up to 4 s, a store read) on the event loop "on purpose" from
+  2026-08-27. `_build_env_context_sync` is a loop-stall helper now, so no
+  async code calls it again (`tests/test_ide_send_to_swarm.py`).
 
 **D. Per-task workspace targeting — `ide/workspace_scope.py`**
 - `workspace_scope(workspace_id)` is an async context manager backed by a

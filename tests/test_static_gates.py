@@ -884,6 +884,9 @@ def test_dns_gate_catches_the_redirect_hop_shape():
 # names one; a call in an async body must go through asyncio.to_thread.
 
 _LOOP_STALL_HELPERS = frozenset({
+    # Two git probes of up to 4 s each plus a workspace-store read; the IDE's
+    # swarm dispatch ran it on the loop until 2026-10-02.
+    "_build_env_context_sync",
     "get_hitl_config", "record_watcher", "get_reply_config", "get_x_config",
     "list_due", "perform_native_backups", "perform_document_backup",
     "export_nightly_snapshots", "run_gc_cycle", "gc_sweep", "log_x_event",
