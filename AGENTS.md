@@ -382,6 +382,20 @@ workspace. Three new modules; understanding their interaction is essential.
   #20 (2026-09-28). Pull requests are dropped BEFORE the list is cut.
   `tests/test_github_list_issues.py`.
 
+**E2. A project's files are what its repository keeps**
+(`workspace/project_files.git_project_files`, 2026-10-02): tracked files
+plus untracked ones `.gitignore` does not exclude, for the agent's
+`file_search`, the code index and the Workspace page's recent files. Git
+runs with `tool_child_env()` and `core.fsmonitor` off. `None` = walk: no
+work tree, git missing, or the folder itself ignored and named as the path
+(the default sandbox inside the install's checkout). The search and the
+index walked every folder off a skip list: on the live install (workspace =
+install folder) a 4.7 GB clone, ignored by `.gitignore`, took one search
+13.9 s and could take the code index's whole 4,000-file budget. The three
+walks also share ONE skip list (`GENERATED_DIRS`; they kept three), and the
+repository ignores `AppData/`. `tests/test_project_files.py` (the old walk
+as the negative control; the lists compared by identity).
+
 **F. Transports**
 - Web: `/ide` page + `/api/ide/*` router (`ide_api.py`); file-aware AI chat
   reuses `/api/chat/stream` (no parallel path).

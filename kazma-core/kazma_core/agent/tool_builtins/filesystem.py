@@ -17,6 +17,7 @@ from typing import Any
 
 from kazma_core.agent.tool_scope import _workspace_scope_error
 from kazma_core.workspace.binding import resolve_tool_path
+from kazma_core.workspace.project_files import GENERATED_DIRS
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +29,8 @@ logger = logging.getLogger(__name__)
 # during the walk now, and only BELOW the root being walked: the old test
 # looked at the absolute path, so a search inside kazma-data, or in any repo
 # that sits under a folder named "build" or "dist", always found nothing.
-_WALK_SKIP_DIRS = frozenset({
-    ".venv", "venv", ".git", "node_modules", "__pycache__",
-    ".kazma", "kazma-data", ".pytest_cache", ".mypy_cache",
-    ".ruff_cache", "build", "dist", ".tox", ".eggs",
-    "vector_memory", "site-packages",
-})
+#: The folders no project walk enters (``workspace.project_files``, the one list).
+_WALK_SKIP_DIRS = GENERATED_DIRS
 _SEARCH_MAX_FILES = 5000  # hard cap so a huge tree can't run for minutes
 _SEARCH_MAX_FILE_BYTES = 500_000
 _LIST_MAX_ENTRIES = 200
@@ -153,6 +150,35 @@ def _walk(root: Path, *, max_depth: int | None = None) -> Iterator[tuple[Path, b
         ]
         for name in sorted(filenames):
             yield Path(dirpath, name), False
+
+
+def _search_candidates(root: Path, matcher: _Glob) -> Iterator[Path]:
+    """The files under *root* a search reads, in a stable order.
+
+    The project's own files when git knows the folder
+    (``workspace.project_files``): a repository's ignored trees are not part
+    of the project -- on the live install a 4.7 GB clone inside the workspace
+    took a search 13.9 s and returned its matches. A folder git cannot
+    answer for (none, or the folder itself is ignored and was asked for by
+    name) is walked. Skipped folders are skipped either way.
+    """
+    from kazma_core.workspace import project_files
+
+    listed = project_files.git_project_files(root)
+    if listed is None:
+        for entry, is_dir in _walk(root):
+            if not is_dir and matcher.matches(entry.relative_to(root).parts):
+                yield entry
+        return
+    for entry in sorted(listed):
+        try:
+            parts = entry.relative_to(root).parts
+        except ValueError:
+            continue
+        if any(part in _WALK_SKIP_DIRS for part in parts[:-1]) or not matcher.matches(parts):
+            continue
+        if entry.is_file():
+            yield entry
 
 
 def _searchable_text(path: Path, root: Path) -> str | None:
@@ -562,11 +588,7 @@ def register_filesystem_tools(registry: Any) -> None:
                 candidates: Iterator[Path] = iter([root])
                 base = root.parent
             else:
-                candidates = (
-                    entry
-                    for entry, is_dir in _walk(root)
-                    if not is_dir and matcher.matches(entry.relative_to(root).parts)
-                )
+                candidates = _search_candidates(root, matcher)
                 base = root
             for file_path in candidates:
                 if searched >= _SEARCH_MAX_FILES:

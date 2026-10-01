@@ -147,6 +147,9 @@ out/
 # Vendored tree carrying its own .git -- `git add -A` turns it into a
 # broken gitlink rather than files (the vendor report's R5 `core/`).
 core/
+# Windows user data a command left in the checkout with HOME pointed at
+# the workspace (fixed 2026-10-02); never part of the project.
+AppData/
 
 # pytest scratch. The second pattern catches a tmp root whose path
 # separators were stripped, so it lands in the repo root as one name.

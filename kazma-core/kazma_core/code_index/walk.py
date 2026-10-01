@@ -6,18 +6,7 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
-SKIP_DIRS: frozenset[str] = frozenset({
-    ".venv", "venv", ".git", "node_modules", "__pycache__",
-    ".kazma", "kazma-data", ".pytest_cache", ".mypy_cache",
-    ".ruff_cache", "build", "dist", ".tox", ".eggs",
-    "vector_memory", "site-packages", ".idea", ".vs",
-    "target", "coverage", ".next", ".turbo",
-    # Windows user-data trees. These should never sit inside a project, but
-    # they do when a tool runs with APPDATA/HOME pointed at the workspace --
-    # the operator's install had `AppData/Local/uv/cache` with 2,453 indexable
-    # files in it (2026-09-12), which alone ate more than half the walk budget.
-    "AppData", "Application Data", "Local Settings",
-})
+from kazma_core.workspace.project_files import GENERATED_DIRS as SKIP_DIRS
 
 INDEX_EXTS: frozenset[str] = frozenset({
     ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
@@ -34,25 +23,52 @@ def should_skip_dir(name: str) -> bool:
     return name in SKIP_DIRS or name.startswith(".")
 
 
+def _walked(root: Path) -> Iterator[Path]:
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [d for d in dirnames if not should_skip_dir(d)]
+        for name in filenames:
+            yield Path(dirpath) / name
+
+
+def _candidates(root: Path) -> Iterator[Path]:
+    """The project's own files when git knows *root*, else the pruned walk.
+
+    The walk entered every folder not on the skip list, a repository's
+    ignored ones included: on the live install (the workspace is the install
+    folder) a 4.7 GB clone sorted before Kazma's own packages and could take
+    the whole 4,000-file budget (2026-10-02).
+    """
+    from kazma_core.workspace import project_files
+
+    listed = project_files.git_project_files(root)
+    if listed is None:
+        yield from _walked(root)
+        return
+    for p in sorted(listed):
+        try:
+            parts = p.relative_to(root).parts
+        except ValueError:
+            continue
+        if not any(should_skip_dir(part) for part in parts[:-1]):
+            yield p
+
+
 def iter_source_files(root: Path, *, limit: int = MAX_FILES) -> Iterator[Path]:
     """Yield source files under *root*, skipping junk directories."""
     root = root.resolve()
     n = 0
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        dirnames[:] = [d for d in dirnames if not should_skip_dir(d)]
-        for name in filenames:
-            if n >= limit:
-                return
-            p = Path(dirpath) / name
-            if p.suffix.lower() not in INDEX_EXTS:
+    for p in _candidates(root):
+        if n >= limit:
+            return
+        if p.suffix.lower() not in INDEX_EXTS:
+            continue
+        try:
+            if not p.is_file() or p.stat().st_size > MAX_FILE_BYTES:
                 continue
-            try:
-                if p.stat().st_size > MAX_FILE_BYTES:
-                    continue
-            except OSError:
-                continue
-            n += 1
-            yield p
+        except OSError:
+            continue
+        n += 1
+        yield p
 
 
 def lang_for_path(path: Path) -> str:

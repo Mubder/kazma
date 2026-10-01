@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## The agent's search and the code index read the project's own files (2026-10-02)
+
+- **A search skips what the repository ignores.** The agent's `file_search`
+  and the code index walked every folder that was not on a skip list. On the
+  live install (the agent's workspace is the install folder) that included
+  a 4.7 GB repository cloned into it and excluded by its `.gitignore`. One
+  search took 13.9 seconds there and returned the clone's matches, and the
+  clone could fill the code index's 4,000-file budget before it reached
+  Kazma's own code. In a git repository both now read what the repository
+  keeps: tracked files, plus untracked ones `.gitignore` does not exclude.
+  An ignored folder is still searched when you name it as the path. A folder
+  outside any repository is walked as before.
+- **One list of folders no walk enters.** The search, the code index and
+  the Workspace page kept three different lists (only the code index skipped
+  Windows `AppData` trees or `target` build output); they share one now. The
+  repository also ignores `AppData/`, which a command had left in the live
+  install folder.
+- **Gate:** `tests/test_project_files.py`: a real repository with an
+  ignored clone; the old walk as the negative control; the three lists
+  compared by identity.
+
 ## Sending a task to the swarm from the IDE no longer freezes the chats (2026-10-02)
 
 - **The IDE's "send to swarm" builds its workspace block in a thread.** The
