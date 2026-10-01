@@ -120,23 +120,42 @@ message uses. It resolves nothing by hand, and it does not write.
 
 ## 3. SSE event contract {#sse-event-contract}
 
-`POST /api/chat/stream` returns a stream of Server-Sent Events. Each event has a typed `event:` line and a JSON `data:` payload (`sse_chat/__init__.py`).
+`POST /api/chat/stream` answers with Server-Sent Events: an `event:` line naming the frame and one `data:` line holding a JSON object. Source: `kazma-ui/kazma_ui/sse_chat/` (the route and the turn streamer `_streaming.py`) and the turn journal `kazma-ui/kazma_ui/delivery.py`; the browser reads it with `dispatch` in `static/js/streaming.js`.
 
-| `event:` | Meaning | Key payload fields |
+**The turn's frames are journaled first.** Each one is written to the thread's journal before it is sent, so it also carries an `id:` line, and its data carries `seq` (the same number) and `turn_id`. A client that loses the stream sends the request again with `last_event_id` (or `last_seq`) in the body instead of a message: it gets a `resumed` frame, then every frame it missed, then the live turn. A frame replayed as history carries `replay: true`; a pending approval in it is shown only after the gate registry confirms it is still open. `error`, `capacity` and `user_message` frames, and any frame whose data says `capacity: true`, are never replayed. During a silence the stream sends `: keepalive` comment lines.
+
+| `event:` | When | `data` fields |
 |---|---|---|
-| `token` | An LLM streaming chunk. | `content` |
-| `tool_call` | A tool is starting. | `tool`, `args` |
-| `tool_result` | A tool finished. | `tool`, `result`, `is_error` |
-| `approval_required` | A HITL pause surfaced — frontend should call `POST /api/approve/\{thread_id\}`. (line 199-207) | `thread_id`, `tool`, `args` |
-| `done` | Turn complete. | `tokens`, `cost_usd`, `duration_ms` |
-| `error` | Fatal error. | `message` |
+| `resumed` | The first frame of every stream that follows a turn: a new prompt, a reconnect, and the wait after an approval. Not journaled. | `from`, `to` (the journal's newest `seq`), `count` (frames replayed), `gap`, `running`, `session_id`, `thread_id` |
+| `token` | A piece of the answer, appended in order: a streamed chunk, a paragraph break between two model calls, the final text read from the checkpoint when nothing streamed, or a notice (the turn paused without an approval card, ended with no text, or failed before replying). | `content` |
+| `tool_call` | A tool starts. | `tool_name`, `tool_call_id` (the same on its `tool_result`), `inputs` (JSON text, at most 2,000 characters) |
+| `tool_result` | The tool finished. | `tool_name`, `tool_call_id`, `result` (at most 5,000 characters) |
+| `memory_explain` | The supervisor was given memories for this question; the turn stores the same record. | `query`, `empty`, `detail`, `beliefs`, `episodes`, `weekly_summaries`, `knowledge` (each item: `id`, `kind`, `content`, `score`, `sources`), `summary` (the counts) |
+| `turn_heartbeat` | About every 10 seconds with no other frame (every 8 while a turn resumes after an approval). | `phase` (`llm`, `supervisor`, `tool` or `resuming`), `current` (the tool), `detail`, `step`, `elapsed_s` |
+| `status_update` | The graph reached its end and the answer is being written (`status: "synthesizing"`, `active_node: "Respond"`). Or the client's cursor is older than the journal keeps (`status: "resync"`, `seq`): the stream ends there, and the client reloads the chat from the store. | `status`, then `active_node` or `seq` |
+| `status` | A second resume reached a turn that is already running; this stream follows that turn. | `content`, `status` (`thinking`) |
+| `context_compacted` | This turn trimmed the model's context or collapsed old tool output. | `detail`, with counts such as `stubbed_segments`, `dropped_user`, `dropped_assistant` |
+| `approval_required` | The graph paused for an approval. No `done` follows: the stream stays open, and the turn continues in it after `POST /api/approve/{thread_id}`. | `thread_id`, `interrupt_id`, `kind`, `tool`, `args`, `tools`, `items`, `message`, `yolo_allowed`, `approval_deadline`, and the gate registry's `view` and `gate_views` |
+| `hitl` | An approval was decided, in this tab, another tab or a chat app. | `state` (`approved`, `denied` or `timeout`), `interrupt_id`, `tool`, `thread_id`, `turn_id`, `actor`, `view`, `gate_views` |
+| `approval_timeout` | Nobody answered in time: the tool is skipped and the turn goes on. | `thread_id`, `interrupt_id`, `tool`, `turn_id`, `message` |
+| `capacity` | `/long`, `/plan` or `/yolo`, answered without the model; a `done` with `capacity: true` follows. | `action`, `reply`, and `long_active` and `yolo_active`, or `plan_active` |
+| `error` | The request or the turn failed. Before a turn starts (a body that is not JSON, a message over 512,000 characters, an empty message, no API key for a cloud provider, the session budget used up) it is the only frame. | `content` (internals removed) |
+| `done` | The turn ended. `content` is the answer and replaces what the `token` frames built. | `content`, `tokens`, `cost`, `duration_ms`, `interrupted`, `empty`, `model`, `turn_id`, `session_tokens`, `session_cost`, `gate_views` |
+| `turn_complete` | Right after `done`, with the same data. | as `done` |
+| `snapshot` | After `done`, when Time Travel saved this step. | `snapshot_id`, `iteration`, `model` |
+| `user_message` | Another tab started a turn on this thread. Only on streams already attached to the thread, never on the sender's own and never replayed; the chat page takes it from its WebSocket, which carries the same journal. | `content`, `turn_id`, `client_msg_id`, `session_id`, `ts` |
+
+**Replies without the model.** `/reset`, `/compact` and the bare `/swarm` usage answer with a `token` and a `done` carrying `content`, `tokens`, `cost` and `duration_ms`; they are not journaled. The `/research` usage, `/replay` and `/fork` send the same two frames with `capacity: true`, journaled so the thread's other tabs see them. An attached stream ends after `done` or `turn_complete` (unless `interrupted`), or after `error`.
 
 **HITL approval expiry**: if the user clicks Approve/Deny on a card that
 has already timed out or been resumed, `POST /api/approve/{thread_id}`
 returns **HTTP 409** with `{"status": "expired", "error": "No pending
 approval for this thread (already resumed or expired)."}`. The frontend
 (`hitl_approval.js`) detects this and transitions the card to
-"Expired or already resumed" then removes it.
+"Expired or already resumed" then removes it. A decision that names a gate
+(`interrupt_id`) already decided, or a gate of another thread, is also a
+409: `reason: "not_pending"`, with `hitl_state` (`inflight`, `settled` or
+`foreign`), `registry_state` and the gate's `interrupt_id`.
 
 ### 3.1 Client-side example (JavaScript)
 
@@ -170,12 +189,12 @@ while (true) {
 
 function handleEvent(type, data) {
   switch (type) {
-    case 'token':            appendToken(data.content); break;
-    case 'tool_call':        showToolCall(data.tool, data.args); break;
-    case 'tool_result':      showToolResult(data.tool, data.result); break;
-    case 'approval_required': promptApproval(data.thread_id, data.tool); break;
-    case 'done':             finishTurn(data.tokens, data.cost_usd); break;
-    case 'error':            showError(data.message); break;
+    case 'token':             appendToken(data.content); break;
+    case 'tool_call':         showToolCall(data.tool_name, data.inputs); break;
+    case 'tool_result':       showToolResult(data.tool_name, data.result); break;
+    case 'approval_required': promptApproval(data.thread_id, data.interrupt_id, data.tool); break;
+    case 'done':              finishTurn(data.content, data.tokens, data.cost); break;
+    case 'error':             showError(data.content); break;
   }
 }
 ```

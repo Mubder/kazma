@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## The chat stream's events are documented as they are sent (2026-10-01)
+
+- **API & Extension Points → SSE event contract lists all eighteen frames.**
+  The table named six, with fields the stream no longer sent (`tool`,
+  `args`, `is_error`, `cost_usd`, an error `message`). It now gives every
+  `event:` `POST /api/chat/stream` sends, when, and its fields as built:
+  the journaled turn frames with their `seq` and `turn_id`, the reconnect
+  (`last_event_id`, `resumed`, `resync`), the approval frames, the
+  slash-command replies and other tabs' turns. The package docstring lists
+  the same, and a test holds both to the code.
+
 ## Settings can be restored from a backup, and your keys stay yours (2026-10-01)
 
 - **Settings → System → Restore settings backup…** The backup file had no

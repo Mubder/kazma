@@ -5,12 +5,40 @@ Provides POST /api/chat/stream which:
   2. Feeds it through the compiled Supervisor graph.
   3. Streams LangGraph events as SSE text/event-stream frames.
 
-Event contract (matches what the Alpine.js frontend expects):
-  event: token       data: {"content": "..."}               — LLM streaming chunk
-  event: tool_call   data: {"tool_name": "...", "inputs": "..."}  — tool starting
-  event: tool_result data: {"tool_name": "...", "result": "..."}  — tool finished
-  event: done        data: {"tokens": N, "cost": 0.xxxx}    — turn complete
-  event: error       data: {"content": "..."}                — fatal error
+Event contract -- every frame is ``event: <name>`` and one ``data:`` JSON
+object. The turn's frames are journaled first (``kazma_ui.delivery``), so
+they carry an ``id:`` line, ``seq`` and ``turn_id``; a request with
+``last_event_id`` instead of a message reattaches. When, and every field:
+docs/docs/guide/api-and-extension-points.md, "SSE event contract"
+(``tests/test_sse_event_contract.py`` holds this list, that table and the
+code to one another).
+
+  resumed            from, to, count, gap, running, session_id, thread_id
+                     (first frame of a turn's stream; not journaled)
+  token              content (a piece of the answer, appended)
+  tool_call          tool_name, tool_call_id, inputs
+  tool_result        tool_name, tool_call_id, result
+  memory_explain     query, empty, detail, beliefs, episodes,
+                     weekly_summaries, knowledge, summary
+  turn_heartbeat     phase, current, detail, step, elapsed_s
+  status_update      status ("synthesizing" + active_node, or "resync" + seq)
+  status             content, status (joined a turn already running)
+  context_compacted  detail, and counts
+  approval_required  thread_id, interrupt_id, kind, tool, args, tools, items,
+                     message, yolo_allowed, approval_deadline, view,
+                     gate_views (paused for approval; no done follows)
+  hitl               state, interrupt_id, tool, thread_id, turn_id, actor,
+                     view, gate_views (an approval decided)
+  approval_timeout   thread_id, interrupt_id, tool, turn_id, message
+  capacity           action, reply, long_active, yolo_active, plan_active
+                     (/long, /plan, /yolo)
+  error              content (the request or the turn failed)
+  done               content, tokens, cost, duration_ms, interrupted, empty,
+                     model, turn_id, session_tokens, session_cost, gate_views
+  turn_complete      the same data, right after done
+  snapshot           snapshot_id, iteration, model (Time Travel saved a step)
+  user_message       content, turn_id, client_msg_id, session_id, ts
+                     (another tab's turn; streams attached to the thread)
 """
 
 from __future__ import annotations
