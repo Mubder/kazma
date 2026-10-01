@@ -310,6 +310,40 @@ def test_an_arabic_page_that_leads_to_an_english_one_is_flagged(repos):
     }, flagged  # an English page may link English; beta has no Arabic page to go to
 
 
+PROSE_EN = "\nKazma answers in the chat and keeps what it learns for the next question. " * 3
+PROSE_AR = "\nيجيب كازما في المحادثة ويحتفظ بما يتعلمه للسؤال التالي دون أن ينسى شيئا. " * 3
+
+
+def test_an_arabic_page_that_is_the_english_one_is_untranslated(repos):
+    """Eight Arabic pages on kazma.ai were the English page, copied: built
+    the same, so no drift check saw them (2026-10-01)."""
+    fw, site, first = repos
+    _add_beta(site)
+    _write(site, "src/content/docs/alpha.md", PAGE + PROSE_EN)
+    _write(site, "src/content/docs/ar/alpha.md", PAGE.replace("# Alpha", "# ألفا") + PROSE_EN)
+    _write(site, "src/content/docs/ops/beta.md", PAGE.replace("Alpha", "Beta") + PROSE_EN)
+    _write(site, "src/content/docs/ar/ops/beta.md", PAGE.replace("# Alpha", "# بيتا") + PROSE_AR)
+
+    plan = _plan(fw, site, assume_at=first)
+    assert [(u["site"], round(u["share"], 2)) for u in plan.arabic_untranslated] == [("alpha", 0.02)]
+    assert "ARABIC UNTRANSLATED" in wsp.render(plan, fw, site)
+    with pytest.raises(wsp.PlanError, match=r"alpha: the Arabic page is 2% Arabic"):
+        wsp.mark_synced(fw, site, ["alpha"])
+    wsp.mark_synced(fw, site, ["ops/beta"])  # the translated one is recorded
+
+
+def test_arabic_share_reads_prose_only():
+    """Code, inline code, link targets and tags are English on every page."""
+    page = (
+        "---\ntitle: English title in the frontmatter\n---\n\n" + PROSE_AR
+        + "\n\n```bash\n" + "kazma serve --host 0.0.0.0 " * 20 + "\n```\n"
+        + "\n`an inline code span in English` [رابط](/docs/a-long-english-page-path/) <br />\n"
+    )
+    assert wsp.arabic_share(page) == 1.0
+    assert wsp.arabic_share(PAGE) is None  # too little prose to judge
+    assert wsp.untranslated(page) is None and wsp.untranslated(PAGE + PROSE_EN) == 0.0
+
+
 def test_inline_code_opening_a_line_is_not_a_fence():
     """``` ```` ```plan ```` ``` opening a line is inline code: the naive rule
     took it for a fence and skipped the rest of the page (task-ledger's links

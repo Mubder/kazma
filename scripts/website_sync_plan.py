@@ -21,7 +21,8 @@ done; ``--mark-synced-all`` does it for every page present in both languages.
 Recording refuses, all or nothing, a page whose English is built differently
 from its source or whose Arabic is built differently from its English
 (headings, code blocks, table rows, asides, and the code itself, which is
-copied exactly): a record claims the page holds its source. A page marked ``adapted`` in the map is written for the site, not
+copied exactly), or whose Arabic prose is mostly English (a copy, never
+translated): a record claims the page holds its source. A page marked ``adapted`` in the map is written for the site, not
 copied, and is compared with its other language only.
 The procedure around it: docs/docs/ops/website-sync.md.
 """
@@ -32,6 +33,7 @@ import json
 import re
 import subprocess
 import sys
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -44,6 +46,14 @@ RECORD_SCHEMA = 1
 _LINK = re.compile(r"\]\(([^)\s]+)")
 _SIDEBAR_SLUG = re.compile(r"""slug:\s*['"]([^'"]+)['"]""")
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+
+#: An Arabic page whose prose letters are less than half Arabic is the English
+#: page, copied. Measured 2026-10-01: translated pages 66 % and up, the eight
+#: copies 0-38 % (their structure matched, so the drift checks passed them).
+ARABIC_MIN_SHARE = 0.5
+#: Below this many letters of prose, a page is too short to judge.
+_ARABIC_MIN_LETTERS = 100
+_NOT_PROSE = re.compile(r"`[^`\n]*`|\]\([^)]*\)|<[^>\n]*>|\{#[^}]*\}")
 
 
 class PlanError(RuntimeError):
@@ -159,6 +169,33 @@ def _lines(text: str):
             yield line, "code"
 
 
+def arabic_share(text: str) -> float | None:
+    """The share of right-to-left letters among the letters of a page's prose
+    (code, inline code, link targets, tags and heading ids left out), by the
+    Unicode bidi class, as ``kazma_core.documents.arabic`` decides direction.
+    ``None`` for a page with too little prose to judge."""
+    rtl = ltr = 0
+    for line, kind in _lines(text):
+        if kind != "prose":
+            continue
+        for ch in _NOT_PROSE.sub(" ", line):
+            if ch.isalpha():
+                bidi = unicodedata.bidirectional(ch)
+                if bidi in ("R", "AL"):
+                    rtl += 1
+                elif bidi == "L":
+                    ltr += 1
+    if rtl + ltr < _ARABIC_MIN_LETTERS:
+        return None
+    return rtl / (rtl + ltr)
+
+
+def untranslated(text: str) -> float | None:
+    """The Arabic share of an Arabic page that is mostly not Arabic, else None."""
+    share = arabic_share(text)
+    return share if share is not None and share < ARABIC_MIN_SHARE else None
+
+
 def structure(text: str) -> dict[str, int]:
     """Headings, code blocks, table rows and asides: a translation keeps them."""
     counts = {"headings": 0, "code blocks": 0, "table rows": 0, "asides": 0}
@@ -241,6 +278,7 @@ class Plan:
     arabic_missing: list[str] = field(default_factory=list)
     arabic_orphans: list[str] = field(default_factory=list)
     arabic_drift: list[dict] = field(default_factory=list)
+    arabic_untranslated: list[dict] = field(default_factory=list)
     english_drift: list[dict] = field(default_factory=list)
     sidebar_missing: list[str] = field(default_factory=list)
     sidebar_dead: list[str] = field(default_factory=list)
@@ -304,9 +342,13 @@ def make_plan(framework: Path, site: Path, assume_at: str | None = None) -> Plan
                 if differs:
                     plan.english_drift.append({"site": slug, "differs": differs})
             if en is not None and ar is not None:
-                differs = compare(en.read_text(encoding="utf-8"), ar.read_text(encoding="utf-8"), "en", "ar")
+                ar_text = ar.read_text(encoding="utf-8")
+                differs = compare(en.read_text(encoding="utf-8"), ar_text, "en", "ar")
                 if differs:
                     plan.arabic_drift.append({"site": slug, "differs": differs})
+                share = untranslated(ar_text)
+                if share is not None:
+                    plan.arabic_untranslated.append({"site": slug, "share": share})
             wanted = "docs" if slug == "index" else f"docs/{slug}"
             if en is not None and wanted not in sidebar:
                 plan.sidebar_missing.append(wanted)
@@ -414,6 +456,8 @@ def render(plan: Plan, framework: Path, site: Path) -> str:
             [counts_line(d["site"], d["differs"]) for d in plan.english_drift])
     section("ARABIC DRIFT: the Arabic page is built differently from the English one",
             [counts_line(d["site"], d["differs"]) for d in plan.arabic_drift])
+    section("ARABIC UNTRANSLATED: the Arabic page's prose is mostly English; translate it",
+            [f"{u['site']}  ({u['share']:.0%} Arabic)" for u in plan.arabic_untranslated])
     section("SIDEBAR MISSING (astro.config.mjs)", plan.sidebar_missing)
     section("SIDEBAR DEAD: points at no page", plan.sidebar_dead)
     section("LINKS", [f"{l['page']}: {l['link']}  ({l['problem']})" for l in plan.links])
@@ -485,10 +529,14 @@ def mark_synced(
         for differs in checks:
             if differs:
                 refused.append(counts_line(slug, differs))
+        share = untranslated(ar_text)
+        if share is not None:
+            refused.append(f"{slug}: the Arabic page is {share:.0%} Arabic -- translate it")
     if refused:
         raise PlanError(
             "not recorded -- these pages do not match yet (headings, code blocks, "
-            "table rows, asides, code):\n  " + "\n  ".join(refused)
+            "table rows, asides, code, an untranslated Arabic page):\n  "
+            + "\n  ".join(refused)
         )
     today = date.today().isoformat()
     for entry in chosen:

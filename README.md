@@ -10,9 +10,9 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
     <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+"></a>
     <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Mubder/kazma/ci.yml?branch=main&style=flat-square&label=CI&logo=githubactions&logoColor=white" alt="CI status"></a>
-    <a href="https://github.com/Mubder/kazma/actions"><img src="https://img.shields.io/badge/Tests-12%2C114-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
+    <a href="https://github.com/Mubder/kazma/actions"><img src="https://img.shields.io/badge/Tests-12%2C135-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
     <a href="docs/INJECTION.md"><img src="https://img.shields.io/badge/Prompt_injection-measured-EF4444.svg?style=flat-square" alt="Prompt injection benchmark"></a>
-    <a href="https://github.com/Mubder/kazma/commits/main"><img src="https://img.shields.io/badge/Commits-4%2C085%2B-6366F1.svg?style=flat-square&logo=git&logoColor=white" alt="Commits"></a>
+    <a href="https://github.com/Mubder/kazma/commits/main"><img src="https://img.shields.io/badge/Commits-4%2C086%2B-6366F1.svg?style=flat-square&logo=git&logoColor=white" alt="Commits"></a>
     <a href="https://kazma.ai"><img src="https://img.shields.io/badge/Website-kazma.ai-06B6D4.svg?style=flat-square" alt="Website"></a>
   </p>
 
@@ -46,7 +46,7 @@ and not people who share an install from each other. See
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase Volume | Test Suite | Engineering Depth | Platforms Supported |
 |---|---|---|---|
-| **~539K LOC** (428K Python code + 41K JS) | **12,114 tests** (869 test files) | **4,085+ commits** across 6 packages | **Web, TUI, CLI, Telegram, Discord, Slack** |
+| **~540K LOC** (429K Python code + 41K JS) | **12,135 tests** (873 test files) | **4,086+ commits** across 6 packages | **Web, TUI, CLI, Telegram, Discord, Slack** |
 
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="Kazma observability dashboard" width="100%">

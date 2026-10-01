@@ -1,49 +1,8 @@
-"""Runtime orchestration helpers (model rebind, process-wide live state)."""
+"""Runtime orchestration helpers (model rebind, process-wide live state).
 
-from __future__ import annotations
-
-from kazma_core.runtime.live_llm import (
-    coerce_api_key,
-    key_is_usable,
-    resolve_live_client,
-    url_is_cloud,
-    url_is_local,
-)
-from kazma_core.runtime.model_switch import (
-    SwitchResult,
-    bind_live_agent,
-    ensure_active_model,
-    maybe_activate_provider_for_chat,
-    notify_credentials_changed,
-    register_rebind_hook,
-    switch_active_model,
-    switch_active_provider,
-    unregister_rebind_hook,
-)
-from kazma_core.runtime.turn_model import (
-    current_turn_model,
-    pin_turn_model,
-    reset_turn_model,
-    resolve_turn_client,
-)
-
-__all__ = [
-    "SwitchResult",
-    "bind_live_agent",
-    "coerce_api_key",
-    "current_turn_model",
-    "ensure_active_model",
-    "key_is_usable",
-    "maybe_activate_provider_for_chat",
-    "notify_credentials_changed",
-    "pin_turn_model",
-    "register_rebind_hook",
-    "reset_turn_model",
-    "resolve_live_client",
-    "resolve_turn_client",
-    "switch_active_model",
-    "switch_active_provider",
-    "unregister_rebind_hook",
-    "url_is_cloud",
-    "url_is_local",
-]
+Import from the module that defines a name -- ``kazma_core.runtime.model_switch``,
+``.live_llm``, ``.turn_model`` -- never from this package: a re-export is a
+second copy of the value, which a test's patch of the module does not reach
+(AGENTS.md section 45). The package re-exported all of them until 2026-10-01;
+nothing imported them from here.
+"""

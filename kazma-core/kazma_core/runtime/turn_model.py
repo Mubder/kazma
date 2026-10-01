@@ -12,18 +12,13 @@ the only process-wide switch.
 
 from __future__ import annotations
 
-import logging
 from contextvars import ContextVar
-from typing import Any
 
 __all__ = [
     "current_turn_model",
     "pin_turn_model",
     "reset_turn_model",
-    "resolve_turn_client",
 ]
-
-logger = logging.getLogger(__name__)
 
 _turn_model: ContextVar[str | None] = ContextVar("kazma_turn_model", default=None)
 
@@ -54,20 +49,3 @@ def reset_turn_model(token) -> None:
     except Exception:
         pass
 
-
-def resolve_turn_client(default_llm: Any) -> tuple[Any, str | None]:
-    """One-off client for the pinned turn model (no registry persist).
-
-    Returns ``(client, pinned_model)``. When nothing is pinned, returns
-    ``(default_llm, None)``.
-    """
-    pinned = current_turn_model()
-    if not pinned:
-        return default_llm, None
-    try:
-        from kazma_core.model_registry import get_model_registry
-
-        return get_model_registry().get_client(pinned), pinned
-    except Exception:
-        logger.debug("[turn_model] get_client(%s) failed", pinned, exc_info=True)
-        return default_llm, pinned

@@ -1,6 +1,8 @@
-"""Context Window Indicator — /context slash command.
+"""Context Window Indicator — the ``context_info`` tool and ``/context``.
 
-Reports token usage, role breakdown, and summarization threshold.
+Reports token usage, role breakdown, and summarization threshold. One report
+for both: the tool (``context_cmd``) and a chat app's ``/context``
+(``context_report``, which the gateway's resolver runs in a thread).
 
 Usage:
     from kazma_core.tools.context_cmd import context_cmd
@@ -13,7 +15,7 @@ import asyncio
 import logging
 from typing import Any
 
-__all__ = ["context_cmd"]
+__all__ = ["context_cmd", "context_report"]
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,10 @@ def _count_by_role(messages: list[dict[str, Any]]) -> dict[str, int]:
 
 
 async def context_cmd(messages: list[dict[str, Any]], detailed: bool = False) -> str:
-    """Report context window usage.
+    """Report context window usage (the ``context_info`` tool).
+
+    Off the event loop: the model, its window and the trim budget are
+    settings reads, a round trip each on Postgres.
 
     Args:
         messages: Current session messages.
@@ -46,6 +51,12 @@ async def context_cmd(messages: list[dict[str, Any]], detailed: bool = False) ->
     Returns:
         Formatted context report.
     """
+    return await asyncio.to_thread(context_report, messages, detailed)
+
+
+def context_report(messages: list[dict[str, Any]], detailed: bool = False) -> str:
+    """The context report, built where blocking reads are allowed: a thread,
+    or a chat app's ``/context`` (the gateway runs its resolver in one)."""
     from kazma_core.summarizer import estimate_tokens
 
     total_tokens = estimate_tokens(messages)
@@ -96,7 +107,7 @@ async def context_cmd(messages: list[dict[str, Any]], detailed: bool = False) ->
     try:
         from kazma_core.workspace.binding import resolve_active_root
 
-        workspace = str(await asyncio.to_thread(resolve_active_root))
+        workspace = str(resolve_active_root())
     except Exception:
         logger.debug("[context_cmd] workspace root unavailable", exc_info=True)
     lines.append(f"Workspace: {workspace}")

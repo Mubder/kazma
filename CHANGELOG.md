@@ -1,5 +1,48 @@
 # CHANGELOG
 
+## Chat apps' slash commands report what they measured (2026-10-01)
+
+- **`/status`, `/cost` and `/context` showed numbers nothing measured.** In
+  Telegram, Discord and Slack, `/status` always said the gateway was running
+  with the asking platform as its only adapter, a queue of 0 and one thread;
+  `/cost` said `$0.0000 (0 tokens)` in every chat; `/context` measured the
+  `/context` message itself against a fixed 128,000, so every chat sat near
+  0 %. Now `/status` lists each chat app with what its connection says, the
+  queue and the other messages being handled; `/cost` sums this chat's model
+  calls from the per-call ledger (and says so when the ledger is off or
+  unreadable, or no price is known); `/context` measures the chat's saved
+  conversation against the model's window, with the same report as the
+  agent's `context_info` tool. A test fails on a fact a command shows that
+  nothing measured.
+- **`/config` changes one setting at a time, and never reports a failure as
+  a success.** `/config model` wrote a legacy model key without its provider
+  -- the running agent kept its model -- and said "Switched" even when the
+  write failed; it now switches model and provider the way the `/model` menu
+  does. `/config tools toggle` wrote a setting nothing reads; it now switches
+  the MCP server as Settings → MCP does (from the next start). Each of them,
+  and `/config memory`, used to save the whole configuration back to change
+  one value.
+- **Every change a chat makes to Kazma for everyone is admin-only.** Switching
+  the model and installing a skill were; with an empty allowlist any chat
+  member could still switch the personality (every reply, web chats
+  included), uninstall a skill, switch or clone the active workspace
+  (`/ide repo`) and re-route the swarm's output (`/swarm config`). One rule
+  now decides it for every slash command; showing and listing stay open.
+- **`/memory off` never writes under another person's memory.** When whose
+  memory it is could not be read, it fell back to the install's own and
+  wrote the "forget" record there; it now changes nothing and says so.
+- **`/help`, Telegram's "/" menu and the Slash Commands page list the same
+  commands.** `/help` gained `/kb`, `/ide`, `/hitl`, `/undo`, `/edit` and
+  `/mission`; the menu gained `/plan`. The page is rewritten against the code
+  -- seasons, `/yolo`, `/unrestricted`, `/hitl`, `/context`, how a command
+  is handled, and who may change what; its `/reset`, `/undo` and `/edit`
+  described an older implementation (other replies, deleting the chat app's
+  message) -- and the CLI reference no longer calls `/undo` and `/edit`
+  unimplemented.
+- **The website's sync plan finds an Arabic page that is the English one,
+  copied** (ARABIC UNTRANSLATED), and refuses to record it. Eight such pages
+  on kazma.ai are now translated.
+
 ## The docs name only files that exist, and say what the code does (2026-10-01)
 
 - **The security guide described a protection Kazma does not have.** Its

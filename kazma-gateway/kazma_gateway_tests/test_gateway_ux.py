@@ -16,15 +16,22 @@ from kazma_gateway.slash_commands import (
 
 
 def _mock_context(**overrides: dict) -> dict:
+    """The keys _build_slash_ctx fills (agent_handler/commands.py)."""
     return {
         "started": True,
-        "adapters": "telegram, discord",
+        "adapters": [
+            {"name": "Telegram", "state": "connected", "detail": ""},
+            {"name": "Discord", "state": "connecting", "detail": "Discord closed the connection"},
+        ],
         "queue_depth": 3,
-        "active_threads": 2,
+        "in_progress": 2,
         "model": "gpt-4o-mini",
+        "memory_tenant": "default",
         "memory_count": 12,
+        "cost_tracking": True,
         "total_tokens": 4520,
         "total_cost": 0.0231,
+        "total_calls": 7,
         **overrides,
     }
 
@@ -50,12 +57,14 @@ class TestSlashCommands:
 
     def test_status_returns_health(self):
         """/status returns gateway health with adapter info."""
-        ctx = _mock_context(adapters="telegram", queue_depth=5)
+        ctx = _mock_context(queue_depth=5)
         result = resolve_slash_command("/status", ctx)
         assert result is not None
-        assert "telegram" in result
+        assert "Telegram: `connected`" in result
+        assert "Discord: `connecting` — Discord closed the connection" in result
         assert "running" in result
-        assert "5" in result
+        assert "Queue depth: `5`" in result
+        assert "Messages in progress: `2`" in result
 
     def test_model_command(self):
         """/model returns None (handled by agent_handler - interactive selector)."""
@@ -65,11 +74,12 @@ class TestSlashCommands:
 
     def test_cost_command(self):
         """/cost returns token spend."""
-        ctx = _mock_context(total_tokens=5000, total_cost=0.05)
+        ctx = _mock_context(total_tokens=5000, total_cost=0.05, total_calls=3)
         result = resolve_slash_command("/cost", ctx)
         assert result is not None
-        assert "5000" in result
-        assert "0.05" in result
+        assert "5,000 tokens" in result
+        assert "$0.0500" in result
+        assert "3 model calls" in result
 
     def test_memory_command(self):
         """/memory returns memory stats."""

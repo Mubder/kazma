@@ -4,7 +4,10 @@ title: Slash Commands
 sidebar_label: Slash Commands
 description: Gateway slash commands reference (instant, no LLM)
 ---
-Kazma's gateway intercepts slash commands and resolves them **instantly (&lt;50ms)** without any LLM call. Commands that involve `kazma_core` tools (marked `[core]`) are processed by the agent's tool layer with minimal overhead.
+Kazma's gateway handles slash commands in Telegram, Discord and Slack before a
+message reaches the agent. Most answer at once, without a model call;
+`/research`, `/swarm` and `/ide skill` start work that uses one. The order
+they are tried in is under [Command Lifecycle](#command-lifecycle).
 
 > **Web research:** deep research also has gateway/UI entry points (`/research deep …`, Web `/research` panel). Prefer normal chat or those entry points rather than inventing ad-hoc slash variants. See [Web research](../guide/web-research) and [Recent features](../guide/recent-features).
 
@@ -55,15 +58,28 @@ Kill-switch: `KAZMA_PLAN_MODE=0`. Web: Plan pill on the composer bar.
 
 ## 🔄 Session Commands
 
-### `/new`
+### `/sessions`, `/session` and `/new` {#new}
 
-Creates a brand-new session/season. Unlike `/reset` (which clears the current
-thread), `/new` mints a fresh thread so you keep the old conversation reachable
-in the Web UI sidebar while starting clean.
+A **season** is one conversation, and the same season list is on every
+platform: the Web UI's chat list and each chat app share it, so a
+conversation begun on Telegram can be continued on the Web or in Slack.
+
+| Command | Description |
+|:---|:---|
+| `/sessions` (`/seasons`) | List every season — Web, Telegram, Discord, Slack (the 40 most recent; archived ones left out) |
+| `/session <#, id or name>` (`/season`, `/switch`) | Take a season over: this chat continues it (your own seasons only) |
+| `/session all` | The list with archived seasons |
+| `/session here` | Which season this chat is on, with its Web link |
+| `/session new [name]` | Start a fresh season, named or not; `/new` does the same |
+
+A new season keeps the old one: it stays in the list and in the Web UI
+sidebar, and what it held in working memory moves to long-term memory.
 
 **Usage:**
 ```
-/new
+/sessions
+/session 2
+/session new release notes
 ```
 
 **Required permissions:** None.
@@ -72,7 +88,8 @@ in the Web UI sidebar while starting clean.
 
 ### `/reset`
 
-Clears the current conversation history. The agent forgets everything and starts fresh.
+Clears this chat's conversation and starts fresh: the saved conversation (its
+checkpoints) is deleted and the Web UI's copy of the season is emptied.
 
 **Usage:**
 ```
@@ -81,27 +98,32 @@ Clears the current conversation history. The agent forgets everything and starts
 
 **Response:**
 ```
-🔄 Conversation has been reset. Starting fresh.
+🔄 Conversation cleared and reset to default. Starting fresh!
 ```
 
 **Side effects:**
-- All messages in the current thread are cleared from the agent's context.
-- Memory items (RAG) are NOT cleared — only conversation history.
-- Snapshot history is preserved (use `/replay clear` to purge snapshots).
+- What Kazma learned is not forgotten: memory keeps it (`/memory off` keeps
+  a chat out of memory and forgets what it left).
+- Snapshot history is kept (`/replay clear` purges it).
 
-**Required permissions:** None. Available to all users.
+**Required permissions:** None.
 
 ---
 
 ### `/compact`
 
-Manually triggers context-window compaction. The `ContextAuthority` summarizes
-older messages so the conversation continues without hitting the token ceiling.
-Useful before a long task or when `/context` shows utilization climbing.
+Summarizes the chat's older messages now, as Kazma does by itself when the
+conversation nears the model's window. Useful before a long task, or when
+`/context` shows the conversation filling up.
 
 **Usage:**
 ```
 /compact
+```
+
+**Response:**
+```
+🗜️ Context compaction completed successfully! Your conversation history has been summarized and compressed.
 ```
 
 **Required permissions:** None.
@@ -110,7 +132,9 @@ Useful before a long task or when `/context` shows utilization climbing.
 
 ### `/undo`
 
-Removes the last agent response from the chat. Pops the last user–bot exchange from the message tracker.
+Removes the last reply from the chat's saved conversation, with the tool calls
+and results that produced it, so the next message continues as if it had not
+been given.
 
 **Usage:**
 ```
@@ -119,17 +143,17 @@ Removes the last agent response from the chat. Pops the last user–bot exchange
 
 **Response (success):**
 ```
-🔄 Last response removed.
+✅ Removed last assistant response. You can continue the conversation.
 ```
 
 **Response (nothing to undo):**
 ```
-📭 Nothing to undo — no recent responses.
+↩️ No assistant response to undo.
 ```
 
 **Side effects:**
-- The dispatch tracker's last entry is popped — `/undo` on the same response twice returns "Nothing to undo."
-- The platform-level message deletion depends on adapter support (Telegram: `deleteMessage`).
+- The reply already sent stays in the chat app; only the conversation Kazma
+  keeps changes.
 
 **Required permissions:** None.
 
@@ -137,7 +161,8 @@ Removes the last agent response from the chat. Pops the last user–bot exchange
 
 ### `/edit`
 
-Replaces the last agent response with corrected text. Pops the old response and stores the new text.
+Replaces the last reply in the chat's saved conversation with your corrected
+text, so the next turns build on it.
 
 **Usage:**
 ```
@@ -146,24 +171,23 @@ Replaces the last agent response with corrected text. Pops the old response and 
 
 **Response (success):**
 ```
-✏️ Last response edited to:
-
-The corrected response text goes here.
+✅ Replaced last response. You can continue the conversation.
 ```
 
 **Response (missing text):**
 ```
-✏️ Usage: `/edit <corrected text>` — provide the new text.
+✏️ *Usage:* `/edit <corrected text>`
+
+Replaces the last assistant message in conversation history.
 ```
 
 **Response (nothing to edit):**
 ```
-📭 Nothing to edit — no recent responses.
+✏️ No conversation history to edit.
 ```
 
 **Side effects:**
-- The message tracker pops the last entry.
-- On Telegram, uses `editMessageText` for in-place editing if the adapter supports it.
+- The reply already sent in the chat app is not edited.
 
 **Required permissions:** None.
 
@@ -303,12 +327,59 @@ the behavior that matters in chat:
 - A Partial **pauses** the long task (baseline budgets, no mission
   framing) until you `/long` again or the TTL lapses; `/long off` clears
   it immediately.
+- `/mission` is `/long mission`. A task written after `/long mission` (or
+  `/mission`) runs under the new budget straight away.
+
+### `/yolo`
+
+Skips the approval card for danger tools **in this chat only**, for an hour
+(`KAZMA_YOLO_TTL_SECONDS`) or until `/yolo off`; turning it on and off is
+logged. X posts and git writes still ask, and the exec denylist still
+refuses catastrophic commands. It does not raise the tool-round budget —
+`/long` does. Refused where `KAZMA_ALLOW_YOLO=0`, and in production unless
+`KAZMA_ALLOW_YOLO=1`, with the reason.
+
+**Usage:**
+```
+/yolo
+/yolo status
+/yolo off
+```
+
+### `/long yolo` and `/unrestricted`
+
+`/long yolo` is the research budget **and** YOLO. `/unrestricted` is the
+mission budget and YOLO — full power for this chat — until
+`/unrestricted off`.
+
+**Usage:**
+```
+/long yolo
+/unrestricted
+/unrestricted off
+```
+
+### `/hitl`
+
+Answers a paused danger-tool approval from the chat, as its buttons do.
+
+| Command | Description |
+|:---|:---|
+| `/hitl approve [thread_id]` | Approve (also `yes`, `y`, `allow`) |
+| `/hitl deny [thread_id]` | Deny |
+| `/hitl approve_task [thread_id]` | Approve every danger tool of this task, until your next message (at most 10 minutes, `KAZMA_TASK_GRANT_TTL_SECONDS`) |
+| `/hitl opt <thread_id> <option>` | Choose an option on a clarify / confirm card |
+
+The thread defaults to this chat's. Only the person who started the paused
+task can answer it, and a card whose turn has moved on says it expired
+instead of approving anything.
 
 ---
 
 ## 🔧 Tool Commands [core]
 
-These commands are processed through the agent's tool layer (`kazma_core.tools`) rather than the gateway slash router. They still resolve quickly but involve the core.
+The gateway answers these itself, from Kazma's settings and the agent's own
+reports, without a model call.
 
 ### `/personality`
 
@@ -359,15 +430,19 @@ Available: code_reviewer, concise, creative_partner, default, friendly_expert, g
 Use `/personality list` to see descriptions.
 ```
 
-**Priority chain:** Runtime override > `kazma.yaml: agent.personality` > `KAZMA_PERSONALITY` env var > `default`.
+**Priority chain:** Runtime override > the `agent.personality` setting > `KAZMA_PERSONALITY` env var > `default`.
 
-**Required permissions:** None.
+**Required permissions:** None to show or list. Switching changes every
+reply, web chats included: admin-only (see [Permissions](#permissions)).
 
 ---
 
 ### `/context`
 
-Shows current context window usage: token count, percentage, and summarization threshold status. Optionally shows a breakdown by message role.
+Shows how much of the model's context window this chat's saved conversation
+fills, the threshold at which older turns are trimmed and summarized, and the
+active workspace, model and provider. `/context detailed` adds a breakdown by
+message role. It is the same report as the agent's `context_info` tool.
 
 **Usage:**
 ```
@@ -378,19 +453,20 @@ Shows current context window usage: token count, percentage, and summarization t
 **Response:**
 ```
 📊 Context Window
-Tokens: 2,481 / 16,000 (16%)
-Summarization threshold: 4,000 tokens (62% utilized)
+Tokens: 9,214 / 128,000 (7%)
+Summarization threshold: 24,000 tokens (38% utilized)
+Workspace: /home/you/kazma/kazma-data/workspace
+Model: deepseek-chat  Provider: deepseek
 ```
 
-**Response (`/context detailed`):**
+**Response (`/context detailed`)** adds a line after the token count:
 ```
-📊 Context Window
-Tokens: 2,481 / 16,000 (16%)
-Role breakdown: user=1,250, assistant=980, tool=251
-Summarization threshold: 4,000 tokens (62% utilized)
+Role breakdown: assistant=5,902, system=1,840, tool=911, user=561
 ```
 
-**Threshold:** Auto-summarization triggers when token count exceeds 4,000 tokens (`TOKEN_THRESHOLD` in `kazma_core.summarizer`).
+**Window:** the active model's context window (`context.max_context_tokens`,
+or the model's known window). **Threshold:** the trim budget — 60% of the
+window, at most 24,000 tokens unless `agent.trim.token_budget` sets it.
 
 **Required permissions:** None.
 
@@ -398,22 +474,25 @@ Summarization threshold: 4,000 tokens (62% utilized)
 
 ### `/config`
 
-An interactive configuration wizard. Show the current config, switch model or
-personality, toggle memory and tools, and export — all without editing YAML.
+An interactive configuration wizard. Show the current config, switch the
+model or personality, turn memory on or off, switch MCP servers, and export
+-- all without editing YAML. Each change writes the one setting it changes.
 
 **Usage:**
 ```
 /config                        # show current configuration
 /config show                   # same as above
-/config model <name>           # switch the active model
+/config model <name>           # switch the active model and its provider
 /config personality <name>     # switch personality (alias of /personality)
-/config memory on|off          # toggle chat memory
-/config tools list             # show configured tools
-/config tools toggle <name>    # enable/disable a tool
+/config memory on|off          # turn memory on or off
+/config tools list             # show the MCP servers
+/config tools toggle <name>    # turn an MCP server on or off (from the next start)
 /config export                 # export config as JSON
 ```
 
-**Required permissions:** None.
+**Required permissions:** None to show or export. `model`, `memory`, `tools`
+and a personality switch change Kazma for every user and platform:
+admin-only (see [Permissions](#permissions)).
 
 ---
 
@@ -425,7 +504,7 @@ are published to the agentskills.io hub and installed from GitHub.
 **Usage:**
 ```
 /skill list                    # list installed Agent Skills
-/skill install <owner repo>    # install from GitHub (agentskills.io)
+/skill install <owner/repo>    # install from GitHub (agentskills.io)
 /skill activate <name>         # arm a skill for this chat
 /skill deactivate              # clear the active skill
 /skill uninstall <name>        # remove an Agent Skill
@@ -434,7 +513,8 @@ are published to the agentskills.io hub and installed from GitHub.
 **Deep dive:** [Skill development](../skill-development/creating-skills) ·
 [Kazma Hub](../kazma-hub/overview).
 
-**Required permissions:** None.
+**Required permissions:** `install` and `uninstall` add or remove a skill
+for everyone: admin-only (see [Permissions](#permissions)). The rest: none.
 
 ---
 
@@ -454,9 +534,15 @@ Lists all available commands grouped by category.
 *Available commands:*
 
 🔄 *Session*
-• `/new` — Create a brand new session/season
-• `/reset` — Clear conversation history and starting fresh
+• `/sessions` (`/seasons`) — List every season (Web + Telegram + Discord + Slack)
+• `/session 2` (`/season`, `/switch`) — Continue that season here (take over)
+• `/session new [name]` — Start a fresh season (`/new` still works)
+• `/research deep <topic>` — deep research via the same agent
+• `/swarm <task>` — dispatch workers via the same agent
+• `/reset` — Clear the conversation history and start fresh
 • `/compact` — Manually trigger context window compaction
+• `/undo` — Remove the last reply from the conversation
+• `/edit <text>` — Replace the last reply with your corrected text
 • `/replay list` — Show available snapshots
 • `/replay <iteration>` — Restore from iteration (rewinds in-place)
 • `/replay compare <a> <b>` — Compare two snapshots
@@ -466,21 +552,36 @@ Lists all available commands grouped by category.
 🧭 *Running task*
 • `/steer <text>` — Add context to the running task (applies next step)
 • `/steer! <text>` — Pause the task, inject a requirement, then resume
-• `/abort` — Stop and abandon the running task
+• `/abort` — Stop and abandon the running task (won't continue unless re-asked)
+• `/hitl approve` · `/hitl deny` — Answer a pending approval (`/hitl approve_task` — every approval of this task)
+
+⚡ *Capacity & YOLO*
+• `/long on` · `/long mission` (`/mission`) — raise tool-round budget (HITL stays on)
+• `/yolo` — skip danger-tool approvals (does **not** raise the budget)
+• `/long yolo` — research budget **and** YOLO
+• `/unrestricted` — mission + YOLO (full power this chat)
+• `/long off` · `/yolo off` · `/unrestricted off`
+
+📋 *Plan mode*
+• `/plan on` · `/plan <task>` — inspect and propose (write/exec blocked)
+• `/plan go` · **Proceed** — approve and execute (HITL still on)
+• `/plan off` · `/plan status`
 
 🔧 *Tools*
 • `/personality` — Show current personality
 • `/personality list` — List all available personalities
 • `/personality <name>` — Switch personality
 • `/context` — Show context window usage
+• `/ide` — Workspace files, git and coding skills (`/ide help`)
+• `/kb` — Knowledge libraries: list, crawl, search (`/kb help`)
 • `/skill list` — List installed Agent Skills
-• `/skill install <owner repo>` — Install from GitHub (agentskills.io)
+• `/skill install <owner/repo>` — Install from GitHub (agentskills.io)
 • `/skill activate <name>` — Arm a skill for this chat
 • `/skill deactivate` — Clear the active skill
 • `/skill uninstall <name>` — Remove an Agent Skill
 
 📄 *Documents*
-• `/documents list` — List processed documents
+• `/documents list` (`/docs`) — List processed documents
 • `/documents status <id>` — Durable job state
 • `/documents read <id>` — Read a ready document
 • `/documents search <library> <query>` — Search indexed docs
@@ -490,16 +591,16 @@ Lists all available commands grouped by category.
 • `/config model <name>` — Switch model
 • `/config personality <name>` — Switch personality
 • `/config memory on|off` — Toggle memory
-• `/config tools list` — Show configured tools
-• `/config tools toggle <name>` — Enable/disable a tool
+• `/config tools list` — Show the MCP servers
+• `/config tools toggle <name>` — Turn an MCP server on or off (from the next start)
 • `/config export` — Export config as JSON
 
 ℹ️ *Info*
 • `/help` — Show this list
 • `/status` — Gateway health overview
-• `/model` — Show active model
-• `/memory` — Report memory usage
-• `/cost` — Token spend this session
+• `/model` (`/models`) — Show and switch the model
+• `/memory` — Report memory usage; `/memory off` / `/memory on` — keep this chat out of memory, or let it back in
+• `/cost` — Tokens and cost of this chat
 
 For anything else, just ask the agent directly!
 ```
@@ -510,7 +611,10 @@ For anything else, just ask the agent directly!
 
 ### `/status`
 
-Returns the gateway's current health overview.
+Returns the gateway's current health: each chat app with what its
+connection says (`connected`, `connecting`, `down`, or `running` when it
+keeps no record), then the messages waiting in the gateway's queue and the
+other messages being handled now. What it cannot read it shows as `?`.
 
 **Usage:**
 ```
@@ -521,14 +625,16 @@ Returns the gateway's current health overview.
 ```
 *Gateway Status*
 ● Gateway: **running**
-• Adapters: `telegram`
+• Telegram: `connected`
+• Slack: `connecting` — Slack refused the Socket Mode connection (invalid_auth)
 • Queue depth: `0`
-• Active threads: `1`
+• Messages in progress: `1`
 ```
 
-The first character is a unicode circle: `●` (U+25CF) for running, `○` (U+25CB) for stopped.
+The first character is `●` (U+25CF) for running, `○` (U+25CB) for stopped,
+and `?` when the gateway could not be read.
 
-**Context keys:** `started`, `adapters`, `queue_depth`, `active_threads` — all populated by the `GatewayManager`.
+**Context keys:** `started`, `adapters`, `queue_depth`, `in_progress` — read from the `GatewayManager` (its stats, connection report and message handlers).
 
 **Required permissions:** None.
 
@@ -536,19 +642,26 @@ The first character is a unicode circle: `●` (U+25CF) for running, `○` (U+25
 
 ### `/model`
 
-Shows the currently active model.
+Shows the providers and their models, and switches the active model. On
+Telegram it opens a picker: tap a provider, then a model. Elsewhere it lists
+each provider with up to five of its models, the active one marked; switch
+with `/config model <name>`. `/models` is the same.
 
 **Usage:**
 ```
 /model
 ```
 
-**Response:**
+**Response (outside Telegram):**
 ```
-🧠 Active model: **deepseek-chat**
-```
+Available providers:
 
-**Context key:** `model` — set by the gateway at dispatch time from the active `ModelRouter` configuration.
+  DeepSeek — 2 models
+    deepseek-chat *(active)*
+    deepseek-reasoner
+
+Use `/config model <model_name>` to switch.
+```
 
 **Required permissions:** None.
 
@@ -556,19 +669,24 @@ Shows the currently active model.
 
 ### `/memory`
 
-Reports the number of facts stored in the agent's vector memory (RAG).
+Reports how many facts Kazma holds for you and whether it remembers this
+chat. `/memory off` keeps this chat out of memory from now on and forgets
+what it left there; `/memory on` lets new messages back in (what was
+forgotten stays forgotten).
 
 **Usage:**
 ```
 /memory
+/memory off
+/memory on
 ```
 
 **Response:**
 ```
-💾 Memory: `42` stored facts.
+💾 Memory: `42` stored facts. This chat is remembered (`/memory off` to stop).
 ```
 
-**Context key:** `memory_count` — populated from `VectorMemory.count()`.
+**Context key:** `memory_count` — the current facts of your memory tenant.
 
 **Required permissions:** None.
 
@@ -576,7 +694,8 @@ Reports the number of facts stored in the agent's vector memory (RAG).
 
 ### `/cost`
 
-Shows the accumulated token spend and cost for the current session.
+Shows the tokens and cost of this chat's model calls, from the per-call
+ledger (`llm_calls.db`).
 
 **Usage:**
 ```
@@ -585,10 +704,10 @@ Shows the accumulated token spend and cost for the current session.
 
 **Response:**
 ```
-💰 Session cost: $0.0234 (2,481 tokens)
+💰 Session cost: `$0.0234` (2,481 tokens, 12 model calls)
 ```
 
-**Context keys:** `total_tokens`, `total_cost` — tracked by the gateway's cost accounting layer.
+**Context keys:** `total_tokens`, `total_cost`, `total_calls` — summed from the ledger for this chat's thread.
 
 **Required permissions:** None.
 
@@ -633,6 +752,8 @@ All `/ide` commands drive the transport-neutral `IdeService` in
 
 **Danger-tier operations** (`edit`, `delete`, `run`, `git`) require HITL
 approval — the same gate as the agent and swarm. See AGENTS.md §7.
+`/ide repo switch`, `/ide repo clone` and `/ide repo <owner/repo>` change
+the active workspace for everyone: admin-only (see [Permissions](#permissions)).
 
 **Available on:** Telegram, Discord, Slack, Web (chat), TUI.
 
@@ -665,6 +786,9 @@ dispatches still go through the [swarm bus HITL gate](../guide/security-and-safe
 /swarm pipeline researcher,builder,validator "Build a CLI tool"
 /swarm summarize today's AI news        # auto-routed
 ```
+
+`/swarm config group` and `/swarm config clear` are admin-only (see
+[Permissions](#permissions)).
 
 **Deep dive:** [Swarm orchestration](../guide/swarm-orchestration) ·
 [CLI reference](../guide/cli-reference).
@@ -719,22 +843,58 @@ request as deep research in normal chat. Disable routing with
 
 ## Command Lifecycle
 
-1. User sends text starting with `/`.
-2. `MessageDispatcher.resolve()` calls `is_slash_command()`.
-3. For gateway-handled commands: `resolve_slash_command()` returns the response instantly (&lt;50ms).
-4. For core-tool commands (`/personality`, `/context`): the dispatcher returns `None`, the message flows to the agent graph, and the tool layer processes it.
-5. If no command matches, the text is passed to the LLM as normal.
+A chat-app message that starts with `/` reaches the gateway's handler
+(`kazma_gateway/agent_handler/graph.py`), which tries, in this order:
+
+1. The commands that act on the chat's saved conversation or on a running
+   turn: `/model`, `/hitl`, the session commands, `/reset`, `/compact`,
+   `/long` / `/mission` / `/yolo` / `/unrestricted`, `/plan`, `/undo`,
+   `/edit`, `/replay <n>`, `/fork`, `/steer`, `/abort`.
+2. The resolver. `_build_slash_ctx()` (`agent_handler/commands.py`) reads
+   what the command reports from where it lives, and `resolve_slash_command()`
+   (`kazma_gateway/slash_commands.py`) answers `/help`, `/status`, `/memory`,
+   `/cost`, `/context`, `/personality`, `/config` and `/replay list|compare|clear`
+   without a model call.
+3. `/swarm`, `/ide`, `/kb`, `/documents`, `/research`, `/x` and `/skill`.
+
+Anything else goes to the agent as a normal message.
 
 ## Adding a New Slash Command
 
-1. **Gateway-level** (no LLM call needed): Add a handler in `kazma_gateway/slash_commands.py`:
-   - Add a `_cmd_<name>()` function.
-   - Register it in `resolve_slash_command()`.
-   - Add it to `_cmd_help()` output.
-2. **Core-level** (needs tool access): Add a handler in `kazma_core/tools/` and register it in the tool registry.
+1. **Answered without the model:** a `_cmd_<name>()` in
+   `kazma_gateway/slash_commands.py` and a branch in
+   `resolve_slash_command()`. A fact it reports is filled in
+   `_build_slash_ctx()` from where it lives, never with a constant:
+   `tests/test_gateway_slash_facts.py` fails on a key a command reads that
+   nothing fills, or fills with a literal.
+2. **Needs the chat's conversation or running turn:** an intercept in
+   `agent_handler/graph.py`, before the resolver.
+3. **Changes Kazma for everyone** (code, the model, configuration): add it
+   to `changes_global_config()` in `slash_commands.py`, the admin gate's one
+   rule (`tests/test_slash_admin_gate.py`).
+4. **Either way:** a line in `_cmd_help()`, an entry in
+   `BOT_MENU_COMMANDS` (the "/" menu Telegram shows) and a section on this
+   page. `tests/test_slash_help_and_menu.py` fails when the three disagree,
+   and when the `/help` block above is not what the code sends.
 
 ## Permissions
 
-All slash commands listed here require **no special permissions**. They are available to every user in every chat. For tool-level access control (HITL gated tools), see `kazma_core/permissions.py`.
+A chat app takes messages from the users its allowlist admits; an empty
+allowlist admits everyone in the chat. Within that:
+
+- A change that applies to every user and platform is admin-only: the
+  model (`/config model`, or a pick in the `/model` menu), `/config memory`,
+  `/config tools`, a personality switch, `/skill install` and `uninstall`,
+  switching or cloning the active workspace (`/ide repo`), and the swarm's
+  output routing (`/swarm config`). An admin is a user named in
+  `KAZMA_GATEWAY_ADMINS` (user ids, or `platform:id` for one platform), which
+  decides alone when it is set; otherwise a user on the platform's allowlist.
+  With an empty allowlist and no `KAZMA_GATEWAY_ADMINS`, no one is.
+- `/hitl` answers only a task you started, and `/session` takes over only
+  your own seasons.
+- `/yolo` and `/unrestricted` are refused where policy forbids them
+  (`KAZMA_ALLOW_YOLO=0`, production).
+- A danger tool a command runs (`/ide run`, `/ide edit`, …) still stops at
+  the approval card.
 
 

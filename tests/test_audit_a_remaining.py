@@ -10,7 +10,6 @@ from kazma_core.runtime.turn_model import (
     current_turn_model,
     pin_turn_model,
     reset_turn_model,
-    resolve_turn_client,
 )
 from kazma_core.safety.prompt_fence import filter_injection
 
@@ -58,13 +57,6 @@ def test_pin_turn_model_does_not_mutate_active_profile(config_store):
         reset_turn_model(tok)
     after = registry.get_client()
     assert after.config.model == "gpt-4o"
-
-
-def test_resolve_turn_client_passthrough():
-    sentinel = object()
-    client, pinned = resolve_turn_client(sentinel)
-    assert client is sentinel
-    assert pinned is None
 
 
 def test_stream_chat_turn_sends_model_and_workspace():

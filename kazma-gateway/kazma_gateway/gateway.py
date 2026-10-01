@@ -609,6 +609,12 @@ class GatewayManager:
             })
         return report
 
+    def messages_in_progress(self, *, exclude: asyncio.Task[Any] | None = None) -> int:
+        """Messages taken off the queue whose handling has not finished: a
+        turn running, or one waiting for its chat's lock. ``exclude`` leaves
+        out the caller's own message (``/status`` is one while it answers)."""
+        return sum(1 for task in self._handler_tasks if not task.done() and task is not exclude)
+
     def set_rate_feedback(self, rate_feedback: Any) -> None:
         """Register a RateFeedbackManager for inbound rate limiting."""
         self._rate_feedback = rate_feedback

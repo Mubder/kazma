@@ -19,7 +19,7 @@ import threading
 from datetime import UTC, datetime
 from typing import Any
 
-__all__ = ["close_llm_ledger", "query_recent", "record_llm_call", "turn_usage"]
+__all__ = ["close_llm_ledger", "query_recent", "record_llm_call", "thread_usage", "turn_usage"]
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +183,29 @@ def turn_usage(turn_id: str, *, since: str = "") -> dict[str, Any]:
     except sqlite3.Error as exc:
         logger.debug("[llm-ledger] turn usage unreadable: %s", exc)
         return empty
+    return {"calls": int(calls or 0), "tokens": int(tokens or 0), "cost": float(cost or 0.0)}
+
+
+def thread_usage(thread_id: str) -> dict[str, Any] | None:
+    """Tokens, cost and call count of every LLM call one chat has made.
+
+    What a chat app's ``/cost`` shows (it showed a hard-coded zero until
+    2026-10-01). ``None`` when the ledger cannot be read, so an unreadable
+    ledger is never reported as nothing spent.
+    """
+    if not thread_id:
+        return {"calls": 0, "tokens": 0, "cost": 0.0}
+    try:
+        with _lock:
+            conn = _get_conn()
+            calls, tokens, cost = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(total_tokens), 0), "
+                "COALESCE(SUM(cost_usd), 0.0) FROM llm_calls WHERE thread_id = ?",
+                (thread_id,),
+            ).fetchone()
+    except (sqlite3.Error, OSError) as exc:
+        logger.warning("[llm-ledger] a chat's usage is unreadable: %s", exc)
+        return None
     return {"calls": int(calls or 0), "tokens": int(tokens or 0), "cost": float(cost or 0.0)}
 
 
