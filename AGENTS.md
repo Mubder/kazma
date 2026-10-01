@@ -2155,6 +2155,16 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   covers those folders, sees `asyncio.to_thread(subprocess.run, ...)`, and a
   dict that unpacks another is not minimal. Settings' server restart is the
   one exemption (it starts the server itself).
+- **A shell command's home and temp folder are its own**
+  (`post_hitl._tool_home_for`, 2026-10-02): one folder per workspace under
+  the system temp folder (`kazma-tool-home/<hash>`, kept between commands so
+  caches work), for HOME, USERPROFILE, APPDATA, LOCALAPPDATA and the temp
+  variables. They were the workspace itself, so every tool a command ran
+  kept its user-level files in the repository the agent was working in: the
+  live install folder (its workspace) held 143 MB of uv cache and temp files
+  where `git add -A` would commit them. Still never the operator's own home.
+  `tests/test_shell_child_home.py` (a real child; the old environment as the
+  negative control).
 
 
 

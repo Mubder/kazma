@@ -13,6 +13,7 @@ from kazma_core.safety.post_hitl import (
     restricted_child_env,
     shell_strict_mode,
     system_path_dirs,
+    _tool_home_for,
 )
 
 
@@ -32,9 +33,15 @@ def test_restricted_env_no_api_keys(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     monkeypatch.setenv("KAZMA_SHELL_STRICT", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret")
     env = restricted_child_env(cwd=str(tmp_path))
-    assert "OPENAI_API_KEY" not in env
-    assert env.get("HOME") == str(tmp_path)
-    assert env.get("PATH")
+    try:
+        assert "OPENAI_API_KEY" not in env
+        # A private home per workspace, outside it (tests/test_shell_child_home.py).
+        assert env.get("HOME") == str(_tool_home_for(str(tmp_path)))
+        assert env.get("PATH")
+    finally:
+        import shutil
+
+        shutil.rmtree(_tool_home_for(str(tmp_path)), ignore_errors=True)
 
 
 def test_resolve_rejects_outside_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

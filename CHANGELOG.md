@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## A shell command keeps its own files out of the workspace (2026-10-02)
+
+- **Tool caches and temp files no longer land in your repository.** A
+  command the agent runs got the workspace itself as its home and temp
+  folder, so every tool it ran kept its user-level files there. The live
+  install folder (the agent's workspace) held 143 MB of `uv` cache under
+  `AppData/Local/uv`, plus temp files, where a `git add -A` would commit
+  them. Each workspace now gets a private home under the system temp folder.
+  It is kept between commands, so caches still work, and it is still not
+  your own home, which a command must not read.
+- **Gate:** `tests/test_shell_child_home.py` runs a real command that writes
+  a temp file and a home-folder cache, and checks the workspace stays empty.
+  The negative control runs the old environment and finds both in the
+  workspace.
+
 ## The Swarm page settles finished tasks and shows running ones (2026-10-02)
 
 - **A finished task's card settles.** The page opens a task's live stream
