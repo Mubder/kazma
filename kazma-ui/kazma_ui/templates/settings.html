@@ -303,7 +303,6 @@
                         </p>
                     </div>
                     <div style="display:flex;align-items:center;gap:10px">
-                        <span x-show="adapterRoutingApplying" x-cloak class="text-muted" style="font-size:0.75rem">{{ t('settings.hub.applying') }}</span>
                         <button class="btn btn-primary btn-sm" @click="saveAdapterRouting()" :disabled="adapterRoutingSaving">
                             <span x-text="adapterRoutingSaving ? t('settings.hub.saving') : t('settings.save')"></span>
                         </button>

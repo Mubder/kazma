@@ -416,6 +416,23 @@ class BaseAdapter(ABC):
         self._running = False
         logger.info("[%s] Adapter stopped", self.name)
 
+    async def halt(self) -> None:
+        """Stop this adapter now, while the gateway keeps running.
+
+        ``stop`` waits for the listen loop to see the gateway's shutdown event,
+        and a replacement never sets it: each stop sat out its full 5 s grace
+        before cancelling, three of them in a row on every Refresh. Cancel the
+        loop at once (leaving its ``async with`` closes the platform socket),
+        then run ``stop`` for the rest of its bookkeeping.
+        """
+        task = self._task
+        if task is not None and not task.done():
+            task.cancel()
+            # wait() never re-raises the task's ending; the done callback logs
+            # a crash, and a cancelled task is the expected end here.
+            await asyncio.wait({task}, timeout=5.0)
+        await self.stop()
+
     @property
     def uptime(self) -> float:
         """Seconds since the adapter was started. 0 if not started."""
@@ -593,6 +610,37 @@ class GatewayManager:
         """Register a platform adapter."""
         self.adapters.append(adapter)
         logger.info("Registered adapter: %s", adapter.name)
+
+    def adapter_named(self, name: str) -> BaseAdapter | None:
+        """The running adapter of one platform, or None."""
+        for adapter in self.adapters:
+            if adapter.name == name:
+                return adapter
+        return None
+
+    async def replace_adapter(self, name: str, new: BaseAdapter | None) -> None:
+        """Put *new* in place of the platform's adapter, or remove it (None).
+
+        The old adapter is halted first -- two connections on one token would
+        each take some of the messages -- and the new one keeps the old one's
+        place in the list. A gateway that has not started (or is stopping)
+        only swaps the list: ``start`` starts what is there.
+        """
+        old = self.adapter_named(name)
+        if old is not None:
+            await old.halt()
+            index = self.adapters.index(old)
+            if new is None:
+                del self.adapters[index]
+            else:
+                self.adapters[index] = new
+        elif new is not None:
+            self.adapters.append(new)
+        if new is not None:
+            logger.info("Registered adapter: %s", new.name)
+            # Not once shutdown has begun: stop() would never wait for it.
+            if self._started and not self._shutdown.is_set():
+                await new.start(self.queue, self._shutdown)
 
     def connection_report(self) -> list[dict[str, str]]:
         """Each adapter's connection now, for the start card:

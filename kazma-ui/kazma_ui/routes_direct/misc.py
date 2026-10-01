@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import Any
 
 from fastapi import Depends, Request, WebSocket
@@ -353,92 +352,18 @@ def register_misc_routes(self: Any) -> None:
         )
     @self.app.post("/api/gateway/refresh-adapters")
     async def refresh_gateway_adapters() -> dict[str, Any]:
-        if self.gateway is None:
+        """Rebuild every chat adapter from the saved settings now (Settings'
+        Refresh Gateway): the "reconnect everything" button.
+
+        A saved setting reaches the running adapters on its own; this builds
+        through the same code as boot and the saved-setting path
+        (``kazma_gateway.chat_adapters``), so a platform switched off stays
+        off and the access posture and webhook secret are kept.
+        """
+        if self.gateway is None or self.chat_adapters is None:
             return {"status": "error", "message": "Gateway not initialized"}
-        logger.info("[Gateway] Refreshing adapters — stopping old adapters")
-
-        for old_adapter in self.gateway.adapters:
-            try:
-                await old_adapter.stop()
-            except Exception:
-                logger.warning("[Gateway] Error stopping adapter %s during refresh", old_adapter.name, exc_info=True)
-
-        self.gateway.adapters.clear()
-
-        def _connector_settings() -> dict[str, Any]:
-            return {key: self.config_store.get(key, "") or "" for key in (
-                "connectors.telegram.token", "connectors.discord.token",
-                "connectors.slack.token", "connectors.slack.app_token",
-                "connectors.slack.allowed_users", "connectors.slack.allowed_teams",
-                "connectors.slack.allowed_channels",
-            )}
-
-        # Settings reads (and the allowlists below) are database round trips:
-        # off the loop that every adapter and chat stream shares.
-        conf = await asyncio.to_thread(_connector_settings)
-        telegram_token = (
-            conf["connectors.telegram.token"]
-            or self.config.raw.get("connectors", {}).get("telegram", {}).get("token", "")
-        )
-        if not telegram_token:
-            telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-
-        if telegram_token:
-            from kazma_gateway.adapters.telegram import TelegramAdapter
-
-            voice_cfg = self.config.raw.get("gateway", {}).get("voice", {})
-            tg_adapter = TelegramAdapter(
-                token=telegram_token,
-                voice_enabled=voice_cfg.get("enabled", False),
-                voice_provider=voice_cfg.get("stt_provider", "openai"),
-                stt_api_key=None,
-                tts_provider=voice_cfg.get("tts_provider", "edgetts"),
-                tts_voice=voice_cfg.get("tts_voice", "default"),
-                tts_output_format=voice_cfg.get("tts_output_format", "mp3"),
-                stt_language=voice_cfg.get("stt_language", "auto"),
-            )
-            from kazma_gateway.allowlists import apply_adapter_allowlists
-
-            await asyncio.to_thread(apply_adapter_allowlists, tg_adapter, self.config_store)
-            self.gateway.add_adapter(tg_adapter)
-            logger.info("[Gateway] Telegram adapter re-registered via refresh")
-
-        discord_token = conf["connectors.discord.token"] or os.environ.get("DISCORD_BOT_TOKEN", "")
-        if discord_token:
-            from kazma_gateway.adapters.discord import DiscordAdapter
-            from kazma_gateway.allowlists import apply_adapter_allowlists
-
-            discord_adapter = DiscordAdapter(token=discord_token)
-            await asyncio.to_thread(apply_adapter_allowlists, discord_adapter, self.config_store)
-            self.gateway.add_adapter(discord_adapter)
-            logger.info("[Gateway] Discord adapter re-registered via refresh")
-
-        _cs_slack_bot2 = str(conf["connectors.slack.token"])
-        _cs_slack_app2 = str(conf["connectors.slack.app_token"])
-        slack_bot_token = (_cs_slack_bot2 if _cs_slack_bot2.startswith("xoxb-") else "") or os.environ.get("SLACK_BOT_TOKEN", "")
-        slack_app_token = (_cs_slack_app2 if _cs_slack_app2.startswith("xapp-") else "") or os.environ.get("SLACK_APP_TOKEN", "")
-        if slack_bot_token:
-            from kazma_gateway.adapters.slack import SlackAdapter
-            from kazma_gateway.allowlists import apply_adapter_allowlists, split_ids
-
-            slack_adapter = SlackAdapter(
-                bot_token=slack_bot_token,
-                app_token=slack_app_token or None,
-                allowed_users=split_ids(conf["connectors.slack.allowed_users"]) or None,
-                allowed_teams=split_ids(conf["connectors.slack.allowed_teams"]) or None,
-                allowed_channels=split_ids(conf["connectors.slack.allowed_channels"]) or None,
-            )
-            await asyncio.to_thread(apply_adapter_allowlists, slack_adapter, self.config_store)
-            self.gateway.add_adapter(slack_adapter)
-            logger.info("[Gateway] Slack adapter re-registered via refresh")
-
-        for new_adapter in self.gateway.adapters:
-            try:
-                await new_adapter.start(self.gateway.queue, self.gateway._shutdown)
-                logger.info("[Gateway] Adapter %s started via refresh", new_adapter.name)
-            except Exception:
-                logger.warning("[Gateway] Failed to start adapter %s during refresh", new_adapter.name, exc_info=True)
-
+        logger.info("[Gateway] Refreshing adapters from the saved settings")
+        await self.chat_adapters.apply(force=True)
         logger.info("[Gateway] Adapter refresh complete — %d adapter(s) running", len(self.gateway.adapters))
         return {
             "status": "ok",

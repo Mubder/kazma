@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## A chat app's token takes effect when you save it (2026-10-01)
+
+- **Saving a new Telegram, Discord or Slack token now applies it.** You
+  revoked the old Slack app-level tokens and saved a new one. Kazma kept the
+  revoked token until you pressed Refresh, and the Test said "Kazma's Slack
+  connection is down" for a token that worked. Now the settings store tells
+  the gateway about every saved setting, whoever saved it: the card, a
+  restore, the terminal app, the agent. Within a second Kazma rebuilds that
+  platform's connection and leaves the others connected. An allowlist change
+  is applied in place.
+- **The Test checks the connection made with what you saved.** It applies
+  the saved settings first, then waits up to ten seconds for the new
+  connection's first attempt before it reports.
+- **The on/off switch works.** Switching a platform off in Settings did
+  nothing, because boot read the switch from kazma.yaml. It is read from your
+  settings now, at boot and on every rebuild.
+- **Refresh Gateway builds what boot builds.** It used its own copy of the
+  boot code, which had drifted. It started a platform you had switched off,
+  dropped Telegram's webhook secret, and left adapters with no allowlist
+  taking no messages. It also waited 5 seconds per adapter. Boot, Refresh
+  and a saved setting now share one builder.
+- **The swarm bus follows too.** A changed bot token or destination channel
+  rebuilds that platform's sender for swarm results and approvals. It used
+  to keep what it booted with.
+- **Slack's `link_disabled` says what it can mean.** Slack sends it when an
+  app-level token is revoked, not only when Socket Mode is switched off. The
+  message told you to switch Socket Mode back on; it now names both causes.
+
 ## The chat stream's events are documented as they are sent (2026-10-01)
 
 - **API & Extension Points → SSE event contract lists all eighteen frames.**

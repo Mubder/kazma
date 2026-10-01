@@ -13,8 +13,6 @@ __all__ = [
     "ChatEvent",
     "ChatMessage",
     "ChatRequest",
-    "ConnectorConfigUpdate",
-    "ConnectorTestRequest",
     "ConnectorTestResponse",
     "ConnectorUpdateRequest",
     "ContextSettingsUpdate",
@@ -288,22 +286,6 @@ class ContextSettingsUpdate(BaseModel):
     max_context_tokens: int = 128000
     context_strategy: str = "sliding_window"
     summarization_threshold: float = 0.8
-
-
-# ── Connector Models ──────────────────────────────────────────────────
-
-
-class ConnectorConfigUpdate(BaseModel):
-    """Update a connector's configuration."""
-
-    platform: str
-    settings: dict[str, Any] = Field(default_factory=dict)
-
-
-class ConnectorTestRequest(BaseModel):
-    """Test a connector connection."""
-
-    platform: str
 
 
 # ── Skill Models ──────────────────────────────────────────────────────

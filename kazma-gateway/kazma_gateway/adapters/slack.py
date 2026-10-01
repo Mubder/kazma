@@ -174,14 +174,18 @@ class SlackAdapter(BaseAdapter):
         """Slack asked for a new connection: ``warning`` (this one closes in
         about 10 s), ``refresh_requested`` (routine, every few hours) or
         ``link_disabled`` (Socket Mode was switched off in the app's
-        settings). The reason was not logged until 2026-09-30, when one
-        boot reconnected ten times in 30 s and the log could not say why."""
+        settings, or the app-level token this connection used was revoked:
+        live 2026-10-01 a revoke sent it, and the reconnect then failed with
+        ``invalid_auth``). The reason was not logged until 2026-09-30, when
+        one boot reconnected ten times in 30 s and the log could not say why."""
         reason = str(msg.get("reason") or "no reason given")
         host = str((msg.get("debug_info") or {}).get("host") or "?")
         if reason == "link_disabled":
             problem = (
-                "Socket Mode was turned off for this Slack app (link_disabled): turn it on "
-                "again at api.slack.com/apps → the app → Socket Mode"
+                "Slack closed the connection (link_disabled): Socket Mode was turned off for "
+                "this Slack app, or its app-level token was revoked. Check Socket Mode at "
+                "api.slack.com/apps → the app; if it is on, generate an app-level token "
+                "(connections:write) there and save it in Settings → Adapters & Routes → Slack"
             )
             logger.warning("[Slack] %s", problem)
             self._socket_ended(problem)

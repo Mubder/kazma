@@ -1690,10 +1690,13 @@ def test_platform_adapters_is_the_single_token_ui() -> None:
     assert "_routingDiffable" in hub
     assert "adapterRoutingSnapshot" in hub
     assert "if (puts.length === 0)" in hub
-    # The slow adapter restart is gated on platform changes and runs in the
-    # background (after the Saved toast), never blocking the button.
-    assert "if (platformChanged)" in hub
-    assert "adapterRoutingApplying = true" in hub
+    # The server applies a saved token, switch or channel to the running
+    # adapter itself (kazma_gateway.chat_adapters, 2026-10-01): the Save
+    # never asks for a refresh -- that restarted every adapter a second time
+    # -- and Refresh Gateway stays as the manual button.
+    save = hub[hub.index("async saveAdapterRouting()"):hub.index("async testRoute(name)")]
+    assert "refresh-adapters" not in save
+    assert "adapterRoutingApplying" not in hub
     # Group route saves through the output-target API; the mask is never
     # sent back over a stored secret.
     assert "tok !== '***'" in hub

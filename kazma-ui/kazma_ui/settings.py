@@ -38,8 +38,6 @@ from kazma_core.swarm.task_store import (
 from kazma_ui.models import (
     AgentConfigUpdate,
     AppearanceUpdate,
-    ConnectorConfigUpdate,
-    ConnectorTestRequest,
     MCPServerAddRequest,
     MCPServerToggleRequest,
     ModelCompareRequest,
@@ -1315,22 +1313,6 @@ class SettingsRouterBuilder:
             return await list_stt_models(provider=provider)
 
 
-
-        @router.get("/api/settings/connectors")
-        def api_get_connectors() -> dict[str, Any]:
-            """Get all connector configurations."""
-            return _get_sm().get_connectors()
-
-        @router.put("/api/settings/connectors")
-        def api_save_connector(req: ConnectorConfigUpdate) -> dict[str, str]:
-            """Save a connector's configuration."""
-            _get_sm().save_connector(req.platform, req.settings)
-            return {"status": "ok"}
-
-        @router.post("/api/settings/connectors/test")
-        async def api_test_connector(req: ConnectorTestRequest) -> dict[str, Any]:
-            """Test a connector connection."""
-            return await _get_sm().test_connector(req.platform)
 
         @router.get("/api/settings/skills")
         def api_get_skills() -> list[dict[str, Any]]:

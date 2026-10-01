@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -54,6 +55,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "TelegramAdapter",
+    "telegram_webhook_router",
 ]
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
@@ -847,108 +849,14 @@ class TelegramAdapter(BaseAdapter):
         return parse_text_update(update)
 
     def create_webhook_router(self) -> Any:
-        """Create a FastAPI router for optional webhook ingress.
+        """A FastAPI router for optional webhook ingress into THIS adapter.
 
-        This is NOT the primary message path — polling is. The webhook
-        endpoint exists for testing (curl) and deployments with a public URL.
-        Both paths feed into the same asyncio.Queue.
-
-        Returns:
-            FastAPI APIRouter with POST /telegram endpoint.
-
-        Usage:
-            adapter = TelegramAdapter(token="...")
-            router = adapter.create_webhook_router()
-            app.include_router(router, prefix="/api/webhooks/telegram")
+        The app mounts ``telegram_webhook_router`` instead, which asks the
+        gateway for its current Telegram adapter on every request: a router
+        bound to one instance kept the boot adapter's allowlist and secret
+        after Settings replaced it (2026-10-01).
         """
-        router = APIRouter(tags=["telegram-webhook"])
-
-        @router.post("")
-        async def handle_update(request: Request) -> JSONResponse:
-            """Accept a Telegram update via webhook POST.
-
-            Parses the update using the same _parse_update() as polling,
-            and enqueues it on the unified message bus.
-
-            When a webhook_secret is configured, validates the
-            X-Telegram-Bot-Api-Secret-Token header to prevent
-            unauthorized webhook posts.
-            """
-            # Always require a webhook secret when this route is mounted (audit H2).
-            # Polling mode never hits this path.
-            import hmac
-
-            if not self._webhook_secret:
-                # No secret configured → Telegram never sends the
-                # X-Telegram-Bot-Api-Secret-Token header, so the webhook mount
-                # is INERT (every request would 401). Fail closed explicitly
-                # and say so: previously an ephemeral secret was generated
-                # that Telegram could never know, which made the mount dead
-                # while the warning implied it was gated (audit finding).
-                # To activate: set TELEGRAM_WEBHOOK_SECRET (or connector
-                # webhook_secret) AND pass the same value to setWebhook.
-                logger.warning(
-                    "[telegram-webhook] No webhook_secret configured — webhook "
-                    "mount is inactive (all requests rejected). Set "
-                    "TELEGRAM_WEBHOOK_SECRET and pass it to setWebhook."
-                )
-                return JSONResponse(
-                    {"error": "Webhook secret not configured"}, status_code=503
-                )
-            provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-            if not provided or not hmac.compare_digest(provided, self._webhook_secret):
-                logger.warning("[telegram-webhook] Invalid or missing secret token")
-                return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-            try:
-                update = await request.json()
-            except Exception:
-                return JSONResponse({"error": "Invalid JSON"}, status_code=400)
-
-            msg = self._parse_update(update)
-            if msg is None:
-                return JSONResponse({"status": "ignored", "reason": "no_text"})
-
-            # User whitelist (fail-closed, same as polling / callbacks)
-            if not self.actor_allowed(msg.context_metadata.get("user_id", 0)):
-                return JSONResponse({"status": "ignored", "reason": "not_whitelisted"})
-
-            if self._queue is None:
-                logger.error("[telegram-webhook] Queue not initialized — adapter not started")
-                return JSONResponse({"error": "Gateway not ready"}, status_code=503)
-
-            try:
-                self._queue.put_nowait(msg)
-                logger.info(
-                    "[telegram-webhook] Enqueued from %s (chat=%d): %.80s",
-                    msg.context_metadata.get("username", "?"),
-                    msg.context_metadata.get("chat_id", 0),
-                    msg.text,
-                )
-                return JSONResponse(
-                    {
-                        "status": "accepted",
-                        "sender_id": msg.sender_id,
-                    }
-                )
-            except asyncio.QueueFull:
-                logger.warning("[telegram-webhook] Queue full — dropping message")
-                return JSONResponse({"error": "Queue full"}, status_code=503)
-
-        @router.get("/health")
-        async def webhook_health() -> dict[str, Any]:
-            """Health check for the webhook endpoint."""
-            from kazma_core.diagnostic_scope import read_only_diagnostic
-
-            with read_only_diagnostic("telegram webhook /health"):
-                return {
-                    "status": "ok",
-                    "adapter": self.name,
-                    "queue_initialized": self._queue is not None,
-                    "queue_size": self._queue.qsize() if self._queue else 0,
-                }
-
-        return router
+        return telegram_webhook_router(lambda: self)
 
     # --- Voice message transcription ---------------------------------
 
@@ -1930,3 +1838,105 @@ class TelegramAdapter(BaseAdapter):
                     scope_label,
                     exc,
                 )
+
+
+def telegram_webhook_router(resolve: Callable[[], TelegramAdapter | None]) -> Any:
+    """A FastAPI router for optional webhook ingress (POST, plus ``/health``).
+
+    Not the primary message path -- polling is. The endpoint is for
+    deployments with a public URL (and curl). *resolve* answers which adapter
+    takes the update NOW: the gateway's current Telegram adapter, which a
+    saved token or switch replaces at run time; None answers 503.
+
+    Usage::
+
+        router = telegram_webhook_router(lambda: gateway.adapter_named("telegram"))
+        app.include_router(router, prefix="/api/webhooks/telegram")
+    """
+    router = APIRouter(tags=["telegram-webhook"])
+
+    @router.post("")
+    async def handle_update(request: Request) -> JSONResponse:
+        """Accept a Telegram update via webhook POST.
+
+        Parses the update with the same ``_parse_update()`` as polling and
+        enqueues it on the unified message bus. The
+        X-Telegram-Bot-Api-Secret-Token header must match the adapter's
+        webhook secret.
+        """
+        import hmac
+
+        adapter = resolve()
+        if adapter is None:
+            return JSONResponse({"error": "Telegram is not connected"}, status_code=503)
+        # Always require a webhook secret when this route is mounted (audit H2).
+        # Polling mode never hits this path.
+        if not adapter._webhook_secret:
+            # No secret configured: Telegram never sends the header, so every
+            # request would 401 -- the mount is inactive, and says so. To
+            # activate: set TELEGRAM_WEBHOOK_SECRET (or the connector's
+            # webhook_secret) AND pass the same value to setWebhook.
+            logger.warning(
+                "[telegram-webhook] No webhook_secret configured -- webhook "
+                "mount is inactive (all requests rejected). Set "
+                "TELEGRAM_WEBHOOK_SECRET and pass it to setWebhook."
+            )
+            return JSONResponse(
+                {"error": "Webhook secret not configured"}, status_code=503
+            )
+        provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not provided or not hmac.compare_digest(provided, adapter._webhook_secret):
+            logger.warning("[telegram-webhook] Invalid or missing secret token")
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+        try:
+            update = await request.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+        msg = adapter._parse_update(update)
+        if msg is None:
+            return JSONResponse({"status": "ignored", "reason": "no_text"})
+
+        # User whitelist (fail-closed, same as polling / callbacks)
+        if not adapter.actor_allowed(msg.context_metadata.get("user_id", 0)):
+            return JSONResponse({"status": "ignored", "reason": "not_whitelisted"})
+
+        if adapter._queue is None:
+            logger.error("[telegram-webhook] Queue not initialized -- adapter not started")
+            return JSONResponse({"error": "Gateway not ready"}, status_code=503)
+
+        try:
+            adapter._queue.put_nowait(msg)
+            logger.info(
+                "[telegram-webhook] Enqueued from %s (chat=%d): %.80s",
+                msg.context_metadata.get("username", "?"),
+                msg.context_metadata.get("chat_id", 0),
+                msg.text,
+            )
+            return JSONResponse(
+                {
+                    "status": "accepted",
+                    "sender_id": msg.sender_id,
+                }
+            )
+        except asyncio.QueueFull:
+            logger.warning("[telegram-webhook] Queue full -- dropping message")
+            return JSONResponse({"error": "Queue full"}, status_code=503)
+
+    @router.get("/health")
+    async def webhook_health() -> dict[str, Any]:
+        """Health check for the webhook endpoint."""
+        from kazma_core.diagnostic_scope import read_only_diagnostic
+
+        with read_only_diagnostic("telegram webhook /health"):
+            adapter = resolve()
+            queue = adapter._queue if adapter is not None else None
+            return {
+                "status": "ok" if adapter is not None else "not_connected",
+                "adapter": adapter.name if adapter is not None else "telegram",
+                "queue_initialized": queue is not None,
+                "queue_size": queue.qsize() if queue else 0,
+            }
+
+    return router

@@ -971,6 +971,10 @@ _LOOP_STALL_HELPERS = frozenset({
     # A settings backup, its restore and the undo (2026-10-01): every stored
     # row read, vault references opened, one batch written.
     "create_backup", "restore_backup", "undo_restore", "backup_text",
+    # A chat app's adapter from the saved settings (2026-10-01): settings and
+    # vault reads for each platform, and the allowlists applied from them.
+    "_read_platform_settings", "_build_chat_adapter", "_build_swarm_sender",
+    "apply_adapter_allowlists", "apply_gateway_allowlists",
 })
 
 

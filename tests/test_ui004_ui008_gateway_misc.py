@@ -48,13 +48,20 @@ def _settings_js_family() -> str:
 
 
 class TestGatewayRefreshOnSave:
-    """saveConnector must call /api/gateway/refresh-adapters after saving."""
+    """A saved connector reaches the running adapters with no manual step.
+
+    Since 2026-10-01 the server applies it itself (kazma_gateway.chat_adapters,
+    on the settings store's change notice, whoever saved it); the page keeps
+    its Refresh Gateway button. Behaviour: tests/test_chat_adapters_follow_settings.py.
+    """
 
     def test_save_connector_calls_refresh(self) -> None:
-        js = _settings_js_family()
-        assert "refresh-adapters" in js, (
-            "saveConnector must call POST /api/gateway/refresh-adapters"
+        app_source = module_source(_UI_DIR / "app.py")
+        assert "self.chat_adapters.start_watching()" in app_source, (
+            "the server must apply saved chat-app settings to the running adapters"
         )
+        js = _settings_js_family()
+        assert "refresh-adapters" in js, "the Refresh Gateway button must remain"
 
     def test_refresh_gateway_button_exists(self) -> None:
         html = (_TEMPLATES_DIR / "settings.html").read_text(encoding="utf-8")
@@ -74,18 +81,29 @@ class TestGatewayRefreshOnSave:
         assert "/api/gateway/refresh-adapters" in app_source
         assert "refresh_gateway_adapters" in app_source
 
-    def test_refresh_adapters_reads_config_store_for_telegram(self) -> None:
-        """The refresh endpoint must re-read tokens from config_store (not env only)."""
+    def test_refresh_adapters_reads_config_store_for_telegram(self, monkeypatch) -> None:
+        """Refresh rebuilds through the one builder (kazma_gateway.chat_adapters,
+        2026-10-01), which reads each token from the settings store -- the
+        environment only when the store has none."""
         app_source = module_source(_UI_DIR / "routes_direct.py")
-        # Find the refresh_gateway_adapters function body
         fn_start = app_source.find("async def refresh_gateway_adapters")
         assert fn_start != -1, "refresh_gateway_adapters function not found"
-        # Look at the ~1500 chars of the function body
         fn_body = app_source[fn_start : fn_start + 1800]
-        assert "config_store.get" in fn_body, (
-            "refresh-adapters must re-read connector tokens from config_store"
-        )
-        assert "connectors.telegram.token" in fn_body
+        assert "self.chat_adapters.apply(force=True)" in fn_body
+
+        from kazma_gateway.chat_adapters import _read_platform_settings
+
+        class _Store:
+            def __init__(self, values: dict[str, str]) -> None:
+                self.values = values
+
+            def get(self, key: str, default: object = None) -> object:
+                return self.values.get(key, default)
+
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:env-token")
+        stored = _Store({"connectors.telegram.token": "123:store-token"})
+        assert _read_platform_settings(stored, "telegram").token == "123:store-token"
+        assert _read_platform_settings(_Store({}), "telegram").token == "123:env-token"
 
     def test_refresh_adapters_no_syntax_error_star(self) -> None:
         """The old 'telegram_token *' typo (should be '=') must be gone."""

@@ -3200,10 +3200,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "بيانات الاعتماد والوجهات والتوجيه لكل منصة توصيل — في مكان واحد. الرموز مشفّرة في الخزنة؛ اترك النقاط المقنّعة للإبقاء على القيمة المحفوظة.",
         "en": "Credentials, destinations and routing for every delivery platform — all in one place. Tokens are vault-encrypted; leave the masked dots to keep the saved value.",
     },
-    "settings.hub.applying": {
-        "ar": "جارٍ التطبيق على المحوّلات…",
-        "en": "Applying to adapters…",
-    },
     "settings.hub.saving": {
         "ar": "جارٍ الحفظ…",
         "en": "Saving…",
@@ -4184,14 +4180,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "حُمّل الملف الشخصي «{name}»",
         "en": "Loaded profile \"{name}\"",
     },
-    "settings.hub.platform_saved_refreshed": {
-        "ar": "حُفظت إعدادات {platform}. حُدّثت البوابة ({n} محوّلات).",
-        "en": "{platform} settings saved. Gateway refreshed ({n} adapters).",
-    },
-    "settings.hub.platform_saved_refresh_failed": {
-        "ar": "حُفظت إعدادات {platform}، لكن فشل تحديث البوابة. استخدم زر «تحديث البوابة».",
-        "en": "{platform} settings saved, but gateway refresh failed. Use \"Refresh Gateway\" button.",
-    },
     "settings.hub.gateway_refreshed": {
         "ar": "حُدّثت البوابة — {n} محوّلات: {names}",
         "en": "Gateway refreshed — {n} adapter(s): {names}",
@@ -4279,14 +4267,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.hub.saved": {
         "ar": "حُفظ.",
         "en": "Saved.",
-    },
-    "settings.hub.adapters_refreshed": {
-        "ar": "حُدّثت المحوّلات.",
-        "en": "Adapters refreshed.",
-    },
-    "settings.hub.saved_but_adapter_refresh_failed": {
-        "ar": "حُفظ، لكن فشل تحديث المحوّلات — استخدم «تحديث المحوّلات».",
-        "en": "Saved, but adapter refresh failed — use Refresh Adapters.",
     },
     "settings.hub.save_failed_2": {
         "ar": "فشل الحفظ: ",

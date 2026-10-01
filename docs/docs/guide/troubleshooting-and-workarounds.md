@@ -502,12 +502,7 @@ To trace into the graph/swarm, add it to the graph state or `SwarmTask.metadata`
 
 **Cause:** token not saved; token revoked; Slack needs a **Bot Token** (`xoxb-...`) for the polling Web API adapter (no Socket Mode); Discord expects `Authorization: Bot &lt;TOKEN&gt;`.
 
-**Fix:** the backend runs a non-destructive health check:
-- Telegram → `GET https://api.telegram.org/bot&lt;TOKEN&gt;/getMe`
-- Discord → `GET https://discord.com/api/v10/users/@me` with `Authorization: Bot &lt;TOKEN&gt;`
-- Slack → `POST https://slack.com/api/auth.test` with the bot token
-
-Save stays disabled until the test passes. After saving, click **Refresh Gateway** (or restart the server) so the new token is picked up.
+**Fix:** the platform's **Test** saves the card, then checks each step from the token to the last message that reached Kazma, and says which one failed ([what each Test checks](./gateways-and-platforms.md#connector-test)). A token you save is used straight away: the running adapter is rebuilt with it within a second, with no Refresh or restart ([how](./gateways-and-platforms.md#saved-settings-apply)). If the Test says the connection is down with `invalid_auth`, the platform refused the token you saved: generate a new one and save it.
 
 ### 11.3 Masked-secret placeholder overwrites the real key
 

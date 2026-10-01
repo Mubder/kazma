@@ -265,6 +265,25 @@ def _live_adapter_diagnostics(platform: str) -> dict[str, Any] | None:
     return None
 
 
+async def _adapter_from_saved_settings(platform: str) -> None:
+    """Before a chat app's Test: the running adapter built from the saved
+    settings, and its first connection attempt made.
+
+    The card saves, then tests. A token saved while the adapter ran reached
+    no running adapter until a separate Refresh, and the Test reported the
+    revoked token's ``invalid_auth`` for a token that worked (2026-10-01).
+    """
+    from kazma_core.service_container import get_container
+    from kazma_gateway.chat_adapters import ChatAdapters
+
+    container = get_container()
+    if not container.has(ChatAdapters):
+        return
+    adapters = container.get(ChatAdapters)
+    await adapters.apply([platform])
+    await adapters.first_outcome(platform)
+
+
 def create_providers_router(config_store: ConfigStore) -> APIRouter:
     """Create the unified providers & connectors router."""
     router = APIRouter(tags=["providers"])
@@ -779,8 +798,9 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                 continue
             config_store.set(f"connectors.{name}.{key}", value, category="connectors")
 
-        # Live-apply allowlists onto running adapters (token changes still
-        # need refresh-adapters; ids do not).
+        # Allowlists onto the running adapters now. The rest of a saved
+        # connector (token, switch, swarm channel) reaches them through the
+        # settings store's change notice (kazma_gateway.chat_adapters).
         try:
             from kazma_core.service_container import get_container
             from kazma_gateway.allowlists import apply_gateway_allowlists
@@ -855,6 +875,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             token = _normalize_telegram_bot_token(token)
             settings = await asyncio.to_thread(_telegram_test_settings, config_store)
             try:
+                await _adapter_from_saved_settings("telegram")
                 return await diagnose_telegram(token, live=_live_adapter_diagnostics("telegram"), **settings)
             except Exception:
                 logger.warning("[connectors] Telegram test failed", exc_info=True)
@@ -868,6 +889,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
 
             settings = await asyncio.to_thread(_discord_test_settings, config_store)
             try:
+                await _adapter_from_saved_settings("discord")
                 return await diagnose(token, live=_live_adapter_diagnostics("discord"), **settings)
             except Exception:
                 logger.warning("[connectors] Discord test failed", exc_info=True)
@@ -878,6 +900,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
 
             settings = await asyncio.to_thread(_slack_test_settings, config_store)
             try:
+                await _adapter_from_saved_settings("slack")
                 return await diagnose_slack(token, live=_live_adapter_diagnostics("slack"), **settings)
             except Exception:
                 logger.warning("[connectors] Slack test failed", exc_info=True)

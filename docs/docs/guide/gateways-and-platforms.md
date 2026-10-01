@@ -83,7 +83,7 @@ Telegram is the **most feature-complete** adapter.
 
 **Tables:** an answer's markdown tables are rewritten as lines before they go to Telegram, Discord or Slack (`kazma_gateway/chat_tables.py`), so they read on a phone. Code blocks are left as they are.
 
-### 2.4 Every message accounted for, and a Test that diagnoses
+### 2.4 Every message accounted for, and a Test that diagnoses {#connector-test}
 
 Each adapter keeps a record of what its connection received (`kazma_gateway/receive_log.py`): the connection's state and its last problem, and what became of each message — handed to Kazma, or left with a reason (the sender is not an allowed user, the message came from a bot, it carried nothing Kazma can read, the queue was full). A message left for a reason you can fix, such as an empty allowed-users list, is a WARNING in the log, at most every ten minutes per reason; a bot's message is logged at DEBUG, the rest at INFO.
 
@@ -95,9 +95,19 @@ Each adapter keeps a record of what its connection received (`kazma_gateway/rece
 | Discord | The bot token; the Message Content intent; the servers the bot is in; the delivery channel; the newest message a person wrote there; each allowed user's direct messages to the bot, with a link that opens the conversation; allowed users; the connection |
 | Slack | The bot token; the app-level token (Socket Mode); the permissions the token carries; the delivery channel and whether the bot is in it; the newest message there and in each allowed user's direct messages, with a link; allowed users; the connection |
 
-The Test writes nothing, except that on Discord and Slack it opens the direct-message channel with each allowed user, which sends no message.
+The Test writes nothing, except that on Discord and Slack it opens the direct-message channel with each allowed user, which sends no message. The card saves its fields before it tests, and the Test checks the connection made with what was saved: if the running adapter was built from other settings, it is rebuilt first, and the Test waits up to ten seconds for the new connection's first attempt.
 
-**Slack's Socket Mode connection.** Slack asks for a new connection from time to time: `refresh_requested` every few hours, `warning` about ten seconds before a server goes away, and `link_disabled` when Socket Mode is switched off in the app's settings. Kazma logs each request with its reason and Slack's server, and reconnects at once. `link_disabled` is a WARNING, and the Test shows it with the fix. When the connection opens, Slack says how many connections the app has open. It hands each event to only one of them, so a second program using the same app-level token (a second Kazma, an old test bot) quietly takes some of Kazma's messages. When Slack counts more than one, the log gets a WARNING and the Test's connection check says so. A count taken within 15 seconds of Kazma's own reconnect is ignored, since Kazma's previous connection may still be in it.
+**Slack's Socket Mode connection.** Slack asks for a new connection from time to time: `refresh_requested` every few hours, `warning` about ten seconds before a server goes away, and `link_disabled` when Socket Mode is switched off in the app's settings or the app-level token the connection used is revoked. Kazma logs each request with its reason and Slack's server, and reconnects at once. `link_disabled` is a WARNING, and the Test shows it with the fix. When the connection opens, Slack says how many connections the app has open. It hands each event to only one of them, so a second program connected to the same Slack app (a second Kazma, an old test bot) quietly takes some of Kazma's messages. When Slack counts more than one, the log gets a WARNING and the Test's connection check says so. A count taken within 15 seconds of Kazma's own reconnect is ignored, since Kazma's previous connection may still be in it.
+
+### 2.5 A saved setting reaches the running adapter {#saved-settings-apply}
+
+A chat app's settings take effect when they are saved, wherever they are saved: the Platform Adapters card, a settings restore, the terminal app, or the agent. Within a second Kazma:
+
+- rebuilds that platform's adapter when its token, app-level token (Slack), webhook secret (Telegram) or on/off switch changed, and leaves the other platforms connected;
+- applies a changed allowlist to the running adapter in place;
+- rebuilds a platform's swarm sender when its bot token, switch or destination channel changed. An unchanged sender is kept, with the approvals it is waiting for.
+
+A platform switched off in Settings stays off at boot and on every rebuild. **Refresh Gateway** (and `kazma gateway refresh`) rebuilds every adapter through the same code as boot, for when you want everything to reconnect. Until 2026-10-01 a saved token reached no running adapter until a Refresh. That Refresh used its own copy of the boot code, which started a platform switched off, dropped Telegram's webhook secret, and left adapters with no allowlist taking no messages. The code is `kazma_gateway/chat_adapters.py`, and the settings store tells it about every write.
 
 ---
 

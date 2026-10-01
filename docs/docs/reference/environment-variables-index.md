@@ -91,7 +91,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_FIRECRAWL_URL` | (none) | `kazma_core.stores.knowledge_ingest`, `kazma_core.tools.read_url` | yes |
 | `KAZMA_FTS5_PATH` | (none) | `kazma_core.paths` | yes |
 | `KAZMA_GATEWAY_ADMINS` | (none) | `kazma_gateway.allowlists` | yes |
-| `KAZMA_GATEWAY_STRICT_ALLOWLIST` | `""` | `kazma_ui.app` | yes |
+| `KAZMA_GATEWAY_STRICT_ALLOWLIST` | (none) | `kazma_gateway.chat_adapters` | yes |
 | `KAZMA_GATE_REGISTRY` | (none) | `kazma_core.safety.hitl_gates` | yes |
 | `KAZMA_GITHUB_APP_ID` | (none) | `kazma_core.git_identity` | yes |
 | `KAZMA_GITHUB_APP_INSTALLATION_ID` | (none) | `kazma_core.git_identity` | yes |

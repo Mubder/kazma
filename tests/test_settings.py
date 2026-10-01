@@ -537,18 +537,24 @@ class TestSettingsAPI:
         assert resp.status_code == 200
 
     def test_connectors_get(self, client):
-        """GET /api/settings/connectors returns connectors."""
-        resp = client.get("/api/settings/connectors")
-        assert resp.status_code == 200
-        assert isinstance(resp.json(), dict)
+        """``GET /api/settings/connectors`` is gone: connectors are listed by
+        ``GET /api/connectors`` (TestUnifiedProvidersRouterAPI).
+
+        ``/api/settings/connectors`` (GET, PUT, /test) was a third copy of the
+        connector save and Test, reached only by page functions no template
+        called; removed 2026-10-01.
+        """
+        assert client.get("/api/settings/connectors").status_code in (404, 405)
 
     def test_connectors_save(self, client):
-        """PUT /api/settings/connectors saves connector config."""
-        resp = client.put("/api/settings/connectors", json={
+        """``PUT /api/settings/connectors`` and its ``/test`` are gone: saves and
+        Tests go through ``/api/connectors`` (TestUnifiedProvidersRouterAPI)."""
+        assert client.put("/api/settings/connectors", json={
+            "platform": "telegram", "settings": {"token": "x"},
+        }).status_code in (404, 405)
+        assert client.post("/api/settings/connectors/test", json={
             "platform": "telegram",
-            "settings": {"token": "test-token"},
-        })
-        assert resp.status_code == 200
+        }).status_code in (404, 405)
 
     def test_appearance_get(self, client):
         """GET /api/settings/appearance returns appearance."""
