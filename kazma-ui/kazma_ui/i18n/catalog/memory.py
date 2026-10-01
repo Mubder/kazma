@@ -2150,6 +2150,39 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لا عُقد تطابق مسار الاستعلام",
         "en": "No matching nodes for the query path",
     },
+    # The graph's hover tips (2026-10-01).
+    "memory.console.tip_link_pick": {
+        "ar": "اختيار للربط",
+        "en": "link pick",
+    },
+    "memory.console.tip_merge_pick": {
+        "ar": "اختيار للدمج",
+        "en": "merge pick",
+    },
+    "memory.console.tip_you": {
+        "ar": "أنت · مركز الذاكرة",
+        "en": "you · center of memory",
+    },
+    "memory.console.tip_type": {
+        "ar": "النوع: {type}",
+        "en": "type: {type}",
+    },
+    "memory.console.tip_high_stakes": {
+        "ar": "عالي الأهمية",
+        "en": "high-stakes",
+    },
+    "memory.console.tip_fact": {
+        "ar": "حقيقة",
+        "en": "fact",
+    },
+    "memory.console.tip_edge": {
+        "ar": "رابط",
+        "en": "edge",
+    },
+    "memory.console.tip_edge_click": {
+        "ar": "انقر للتعديل أو فك الربط",
+        "en": "click to edit / unlink",
+    },
     "memory.console.snapshots_deleted_one": {
         "ar": "لقطة واحدة أقدم من {days} يوم",
         "en": "1 snapshot older than {days}d",

@@ -346,6 +346,80 @@ _TEXT_PROPS = {"title", "textContent", "innerText", "placeholder", "ariaLabel", 
 _TEXT_ATTRS = {"title", "aria-label", "placeholder", "alt"}
 
 
+_HTML_TEXT_ATTRS = {"title", "aria-label", "placeholder", "alt"}
+
+
+def _is_english_text(text: str) -> bool:
+    text = re.sub(r"\{[A-Za-z_]+\}", " ", text)  # {name} placeholders
+    text = re.sub(r"&#?\w+;", " ", text).strip()  # entities
+    words = [w for w in _WORD.findall(text) if w not in UI_NAMES and not w.isupper()]
+    if not any(len(w) >= 3 for w in words):
+        return False
+    return " " in text or bool(re.match(r"[A-Z][a-z]", text))
+
+
+def english_in_html(toks: list[Tok], lo: int, hi: int, helpers: set[str]) -> list[Tok]:
+    """English a person reads in HTML built from ``toks[lo:hi]``.
+
+    The literals are joined in order (anything else -- a helper's call, a
+    variable, an escaped value -- stands as one opaque character), and only
+    what the browser shows as text is read: text between tags, and the
+    values of ``title``/``aria-label``/``placeholder``/``alt``. Tags, styles,
+    classes and data attributes are not text, so a fragment such as
+    ``'" data-id="'`` is not counted.
+    """
+    pieces: list[tuple[str, Tok | None]] = []
+    j = lo
+    while j < hi:
+        t = toks[j]
+        if t.kind == "id" and t.text in helpers and j + 1 < hi and toks[j + 1].text == "(":
+            pieces.append(("\x00", None))
+            j = matching(toks, j + 1) + 1
+            continue
+        if t.kind in ("str", "tpl") and not (
+            _is_catalog_fallback(toks, j, helpers) or _is_language_branch(toks, j)
+        ):
+            body = t.text[1:-1]
+            if t.kind == "tpl":
+                body = re.sub(r"\$\{[^}]*\}", "\x00", body)
+            body = body.replace("\\n", "\n").replace("\\'", "'").replace('\\"', '"')
+            pieces.append((body, t))
+        else:
+            pieces.append(("\x00", None))
+        j += 1
+    text: dict[int, list[str]] = {}
+    owner: dict[int, Tok] = {}
+    state, quote, attr = "text", "", ""
+    for body, tok in pieces:
+        for i, ch in enumerate(body):
+            if state == "text":
+                if ch == "<" and (i + 1 >= len(body) or body[i + 1].isalpha() or body[i + 1] in "/!"):
+                    state, attr = "tag", ""
+                elif tok is not None:
+                    text.setdefault(id(tok), []).append(ch)
+                    owner[id(tok)] = tok
+            elif state == "tag":
+                if ch == ">":
+                    state = "text"
+                elif ch in "\"'":
+                    state, quote = ("attr_text" if attr.lower() in _HTML_TEXT_ATTRS else "attr_skip"), ch
+                elif ch == "=":
+                    pass
+                elif ch.isalnum() or ch in "-_:":
+                    attr = attr + ch if attr and not attr.endswith(" ") else ch
+                else:
+                    attr = attr + " " if attr else attr
+            elif state in ("attr_text", "attr_skip"):
+                if ch == quote:
+                    state, attr = "tag", ""
+                elif state == "attr_text" and tok is not None:
+                    text.setdefault(id(tok), []).append(ch)
+                    owner[id(tok)] = tok
+        if tok is not None and state == "text":
+            text.setdefault(id(tok), []).append(" ")
+    return [owner[k] for k, chars in text.items() if _is_english_text("".join(chars))]
+
+
 def english_at_sinks(src: str, helpers: set[str]) -> list[Tok]:
     toks = lex(src)
     found: list[Tok] = []
@@ -353,6 +427,19 @@ def english_at_sinks(src: str, helpers: set[str]) -> list[Tok]:
         span = None
         nxt = toks[k + 1].text if k + 1 < len(toks) else ""
         prv = toks[k - 1].text if k else ""
+        # HTML a script builds: the text in it, not its markup.
+        if t.kind == "id" and t.text in ("innerHTML", "outerHTML") and prv == ".":
+            j = k + 1
+            if j < len(toks) and toks[j].text == "+":
+                j += 1
+            if j < len(toks) and toks[j].text == "=" and (j + 1 >= len(toks) or toks[j + 1].text != "="):
+                found.extend(english_in_html(toks, j + 1, value_end(toks, j + 1), helpers))
+            continue
+        if t.kind == "id" and t.text == "insertAdjacentHTML" and nxt == "(":
+            first_end = value_end(toks, k + 2)
+            if first_end < len(toks) and toks[first_end].text == ",":
+                found.extend(english_in_html(toks, first_end + 1, matching(toks, k + 1), helpers))
+            continue
         if t.kind == "id" and t.text in _CALL_SINKS and nxt == "(":
             if prv == "." and t.text in ("alert", "confirm", "prompt") and toks[k - 2].text != "window":
                 continue
@@ -419,6 +506,29 @@ def test_no_script_writes_english_a_person_reads(sources, helpers) -> None:
 ])
 def test_negative_control_english_is_caught(snippet, helpers) -> None:
     assert english_at_sinks(snippet, helpers), snippet
+
+
+@pytest.mark.parametrize("snippet", [
+    "el.innerHTML = '<span>Cost: <strong>$' + x + '</strong></span>';",
+    "el.innerHTML = '<div class=\"x\" data-id=\"' + id + '\" title=\"Copy link\">' + y + '</div>';",
+    "act.innerHTML = '<span class=\"hitl-status\">Resolving\\u2026</span>';",
+    "list.insertAdjacentHTML('beforeend', '<li>' + n + ' items selected</li>');",
+    "box.innerHTML += '<p>Loading messages</p>';",
+])
+def test_negative_control_english_in_built_html_is_caught(snippet, helpers) -> None:
+    assert english_at_sinks(snippet, helpers), snippet
+
+
+@pytest.mark.parametrize("snippet", [
+    "act.innerHTML = '<span class=\"hitl-status\">' + escapeHtml(ti('gate_resolving', 'Resolving')) + '</span>';",
+    "el.innerHTML = '<button class=\"btn btn-sm\" data-act=\"' + a + '\" data-tool=\"' + t1 + '\" "
+    "style=\"padding:2px 6px;border-radius:4px\">' + esc(label) + '</button>';",
+    "el.innerHTML = '<span style=\"color:var(--text-muted);\">' + _mt('k', 'click to edit') + '</span>';",
+    "el.innerHTML = '';",
+    "el.innerHTML = '<option value=\"\">' + escapeHtml(ti('model_default_option', 'default')) + '</option>';",
+])
+def test_negative_control_markup_alone_passes(snippet, helpers) -> None:
+    assert not english_at_sinks(snippet, helpers), snippet
 
 
 @pytest.mark.parametrize("snippet", [
