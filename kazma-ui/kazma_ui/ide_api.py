@@ -114,8 +114,12 @@ def create_ide_router() -> APIRouter:
             logger.warning("[ide_api] apply_patch_set failed: %s", exc)
             return {"ok": False, "error": safe_error(exc)}
 
+    # The checkpoint routes read and write files and the checkpoint store:
+    # plain defs, in FastAPI's threadpool (AGENTS §35). A restore writes only
+    # a file the checkpoint holds, through the store (check_path_access, the
+    # file's own line endings).
     @router.get("/checkpoints")
-    async def list_checkpoints() -> dict[str, Any]:
+    def list_checkpoints() -> dict[str, Any]:
         from kazma_core.ide.file_checkpoints import get_file_checkpoint_store
 
         try:
@@ -125,10 +129,12 @@ def create_ide_router() -> APIRouter:
             return {"ok": False, "error": safe_error(exc)}
 
     @router.get("/checkpoints/{checkpoint_id}/review")
-    async def checkpoint_review(checkpoint_id: str) -> dict[str, Any]:
+    def checkpoint_review(checkpoint_id: str) -> dict[str, Any]:
         from pathlib import Path as _Path
 
         from kazma_core.ide.file_checkpoints import get_file_checkpoint_store
+        from kazma_core.ide.hunks import file_diff, split_hunks
+        from kazma_core.tools.text_newlines import read_exact
 
         rec = get_file_checkpoint_store().get(checkpoint_id)
         if rec is None:
@@ -138,25 +144,18 @@ def create_ide_router() -> APIRouter:
             path = str(item.get("path") or "")
             before = str(item.get("content") or "")
             after = ""
-            if not item.get("missing"):
-                try:
-                    p = _Path(path)
-                    if p.is_file():
-                        after = p.read_text(encoding="utf-8")
-                except Exception:
-                    after = ""
-            import difflib
-
-            hunks = list(difflib.unified_diff(
-                before.splitlines(),
-                after.splitlines(),
-                fromfile="a/" + _Path(path).name,
-                tofile="b/" + _Path(path).name,
-                lineterm="",
-            ))
-            diff_text = "\n".join(hunks[:400])
-            from kazma_core.ide.hunks import split_hunks
-
+            # A file the checkpoint saw as missing and that exists now was
+            # created after it: it is a change too (it used to be skipped).
+            try:
+                p = _Path(path)
+                if p.is_file():
+                    after = read_exact(p)
+            except (OSError, UnicodeDecodeError):
+                after = ""
+            # Exact text on both sides: a text-mode read turned CRLF into LF
+            # and an unchanged CRLF file was listed as changed.
+            lines = file_diff(before, after, _Path(path).name).splitlines()
+            diff_text = "\n".join(lines[:400])
             files.append({
                 "path": path,
                 "before": before,
@@ -173,11 +172,12 @@ def create_ide_router() -> APIRouter:
         }
 
     @router.post("/checkpoints/{checkpoint_id}/restore-hunk")
-    async def restore_hunk(checkpoint_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-        from pathlib import Path as _Path
+    def restore_hunk(checkpoint_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """Undo one hunk of a file the checkpoint holds.
 
+        It wrote any path the request named, in text mode, until 2026-10-01.
+        """
         from kazma_core.ide.file_checkpoints import get_file_checkpoint_store
-        from kazma_core.ide.hunks import apply_reverse_hunk, split_hunks
 
         path = str(payload.get("path") or "").strip()
         try:
@@ -186,41 +186,14 @@ def create_ide_router() -> APIRouter:
             return {"ok": False, "error": "Missing hunk_index"}
         if not path:
             return {"ok": False, "error": "Missing 'path'"}
-        rec = get_file_checkpoint_store().get(checkpoint_id)
-        if rec is None:
-            return {"ok": False, "error": "unknown checkpoint"}
-        before = ""
-        for item in rec.get("files") or []:
-            if str(item.get("path") or "") == path:
-                before = str(item.get("content") or "")
-                break
         try:
-            after = _Path(path).read_text(encoding="utf-8")
-        except OSError as exc:
+            restored = get_file_checkpoint_store().restore_hunk(checkpoint_id, path, idx)
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
-        import difflib
-
-        diff_text = "\n".join(difflib.unified_diff(
-            before.splitlines(),
-            after.splitlines(),
-            fromfile="a",
-            tofile="b",
-            lineterm="",
-        ))
-        hunks = split_hunks(diff_text)
-        if idx < 0 or idx >= len(hunks):
-            return {"ok": False, "error": "hunk_index out of range"}
-        header = str(hunks[idx].get("header") or "")
-        body = str(hunks[idx].get("diff") or "").splitlines()[1:]
-        try:
-            rewritten = apply_reverse_hunk(after, header, body)
-            _Path(path).write_text(rewritten, encoding="utf-8")
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-        return {"ok": True, "path": path, "hunk_index": idx}
+        return {"ok": True, "path": restored, "hunk_index": idx}
 
     @router.post("/checkpoints/{checkpoint_id}/restore-path")
-    async def restore_one_path(checkpoint_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    def restore_one_path(checkpoint_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         from kazma_core.ide.file_checkpoints import get_file_checkpoint_store
 
         path = str(payload.get("path") or "").strip()
@@ -282,8 +255,10 @@ def create_ide_router() -> APIRouter:
             return {"ok": False, "error": safe_error(exc), "output": ""}
 
     # ── GET /api/ide/lsp ───────────────────────────────────────────────
+    # LSP answers read the workspace's files (a definition search walks it):
+    # plain defs, off the event loop.
     @router.get("/lsp")
-    async def lsp_status() -> dict[str, Any]:
+    def lsp_status() -> dict[str, Any]:
         from kazma_core.ide.lsp import handle_lsp
 
         try:
@@ -293,7 +268,7 @@ def create_ide_router() -> APIRouter:
             return {"ok": False, "enabled": False, "error": safe_error(exc)}
 
     @router.post("/lsp")
-    async def lsp_request(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    def lsp_request(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         from kazma_core.ide.lsp import handle_lsp
 
         method = str(payload.get("method") or payload.get("op") or "").strip()
@@ -409,7 +384,7 @@ def create_ide_router() -> APIRouter:
 
     # ── GET /api/ide/skills ────────────────────────────────────────────
     @router.get("/skills")
-    async def list_skills() -> dict[str, Any]:
+    def list_skills() -> dict[str, Any]:
         """List the swarm-native coding skills (refactor/write-tests/...)."""
         try:
             from kazma_skills.coding_skills import list_coding_skills

@@ -311,6 +311,15 @@ workspace. Three new modules; understanding their interaction is essential.
   every patched LF file into CRLF on Windows, and the checkpoint rollback
   wrote CRLF files back as `\r\r\n`. Tests: `tests/test_text_newlines.py`
   (bytes, both styles).
+- **A checkpoint restore writes only a file the checkpoint holds**
+  (`FileCheckpointStore._held_file`, 2026-10-01): the whole-file and the
+  per-hunk reject (`restore_one`, `restore_hunk`) both take the file through
+  the checkpoint's own list and `check_path_access(..., "write")`, and keep
+  its line endings. `POST /api/ide/checkpoints/{id}/restore-hunk` wrote any
+  path the request named, itself, in text mode. The review diffs exact text
+  (`hunks.file_diff`, the one diff for review and restore, so a hunk index
+  means the same hunk in both) and lists a file created after the checkpoint.
+  `tests/test_ide_checkpoint_hunks.py`.
 
 **B. HITL routing — no parallel write/exec path**
 - All mutating/exec IDE operations (`write_file`, `apply_patch`, `delete_file`,
@@ -501,6 +510,16 @@ swarm works with zero pre-registered workers.
 - **`swarm_templates.json` ships production templates** (coder/researcher/generalist)
   with `model`/`provider` left EMPTY so best-model selection (`models/selection.py`)
   fires at dispatch. Do not assume `swarm_registry.json` is the only worker source.
+- **The worker registry is a data-dir store** (`registry.default_registry_path()`:
+  `<data dir>/swarm_registry.json`, 2026-10-01). It was
+  `Path("swarm_registry.json").resolve()` at import -- the process's working
+  directory: no backup copied it, and a test run inside an install wrote the
+  install's. An older build's file there (or at the install root) is moved in
+  once and renamed `.migrated`; writes are atomic; every change and every
+  read of the entries holds the registry's lock (route threads write while
+  the swarm reads on the loop). `tests/test_worker_registry_store.py`. The
+  migration bundle does not carry it yet (it carries databases and asset
+  folders).
 - **`matches_task` uses word-boundary token matching** (not raw substring). When
   adding expertise tags to a template, pick whole words — the tag `code` would
   not match "barcode" (intentional). Templates are first-match-wins by file order
@@ -3128,7 +3147,15 @@ Read the named test before changing the code it guards.
   Arabic stays substring because of clitics), so three-letter heads are safe
   (`tests/test_date_guard_word_match.py`).
 - **Async routes that never await are plain `def`s** (§35); the debt ratchet
-  counts the rest (`async_route_never_awaits`), and it only goes down.
+  counts the rest (`async_route_never_awaits`), and it only goes down. On
+  2026-10-01 it went from 115 to 52: every handler that reads or writes a
+  store, a file or the network became a `def`, or awaits `to_thread` around
+  that work where it must stay on the loop (it spawns a task, or changes the
+  swarm engine's state, which the loop owns). Among them: the backup
+  archive and delete (a whole backup zipped or removed on the loop), the
+  research, IDE checkpoint and LSP routes, the email status and settings
+  saves (vault reads and writes), the Agents and Swarm pages' polls (the model registry and
+  the worker registry file), and the gateway's workspace routes.
 - **A reload adopts the PATH the OS settings have now**
   (`kazma_core/path_refresh.py`). Windows gives a process its parent's
   environment, and the guard lives from boot to boot, so the operator fixed

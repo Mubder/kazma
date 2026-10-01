@@ -134,7 +134,7 @@ def create_workspaces_router() -> APIRouter:
     # ------------------------------------------------------------------
 
     @router.get("")
-    async def list_workspaces() -> JSONResponse:
+    def list_workspaces() -> JSONResponse:
         """Return all workspaces and indicate which one is currently active."""
         from kazma_core.stores import get_workspace_store
 
@@ -158,7 +158,7 @@ def create_workspaces_router() -> APIRouter:
     # ------------------------------------------------------------------
 
     @router.post("/create", status_code=201)
-    async def create_workspace(body: WorkspaceCreateRequest) -> JSONResponse:
+    def create_workspace(body: WorkspaceCreateRequest) -> JSONResponse:
         """Create a new workspace directory structure and register it in settings.db.
 
         Request body::

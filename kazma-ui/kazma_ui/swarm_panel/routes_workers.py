@@ -86,7 +86,7 @@ def register_workers_routes(
     """Register all worker-related routes on the given router."""
 
     @router.get("/api/swarm/workers/{name}/metrics")
-    async def swarm_worker_metrics(name: str) -> JSONResponse:
+    def swarm_worker_metrics(name: str) -> JSONResponse:
         """Return daily metrics for a specific worker."""
         svc = get_swarm_service()
         engine = svc._get_engine() if hasattr(svc, "_get_engine") else None
@@ -101,7 +101,7 @@ def register_workers_routes(
         return JSONResponse({"metrics": metrics, "worker": name})
 
     @router.get("/api/swarm/workers/metrics/all")
-    async def swarm_all_worker_metrics() -> JSONResponse:
+    def swarm_all_worker_metrics() -> JSONResponse:
         """Return aggregated metrics for all workers."""
         svc = get_swarm_service()
         engine = svc._get_engine() if hasattr(svc, "_get_engine") else None
@@ -168,8 +168,7 @@ def register_workers_routes(
         # Sync to persistent WorkerRegistry
         try:
             from kazma_core.swarm.registry import WorkerEntry, get_worker_registry
-            registry = get_worker_registry()
-            registry.register(WorkerEntry(
+            entry = WorkerEntry(
                 name=name,
                 expertise=[role] if role else ["general"],
                 roles=["leaf"],
@@ -177,7 +176,9 @@ def register_workers_routes(
                 provider=provider,
                 worker_type=worker_type,
                 system_prompt=payload.get("system_prompt", ""),
-            ))
+            )
+            # The registry is a JSON file: written off the event loop.
+            await asyncio.to_thread(lambda: get_worker_registry().register(entry))
             logger.info("[Swarm] WorkerRegistry synced (spawn): %s", name)
         except Exception as exc:
             logger.warning("[Swarm] WorkerRegistry sync failed (spawn): %s", exc)
@@ -227,8 +228,7 @@ def register_workers_routes(
         try:
             from kazma_core.swarm.registry import WorkerEntry, get_worker_registry
             reg_caps = payload.get("capabilities") or {}
-            registry = get_worker_registry()
-            registry.register(WorkerEntry(
+            entry = WorkerEntry(
                 name=name,
                 expertise=(reg_caps.get("expertise") if reg_caps else None) or [payload.get("role", "leaf")],
                 roles=[payload.get("role", "leaf")] if payload.get("role") else ["leaf"],
@@ -236,7 +236,9 @@ def register_workers_routes(
                 provider=getattr(worker, 'provider', '') if worker else '',
                 worker_type=getattr(worker_config, 'type', 'in_process') if hasattr(worker_config, 'type') else "in_process",
                 system_prompt=payload.get("system_prompt", ""),
-            ))
+            )
+            # The registry is a JSON file: written off the event loop.
+            await asyncio.to_thread(lambda: get_worker_registry().register(entry))
             logger.info("[Swarm] WorkerRegistry synced: %s", name)
         except Exception as exc:
             logger.warning("[Swarm] WorkerRegistry sync failed: %s", exc)
@@ -262,8 +264,7 @@ def register_workers_routes(
         # Sync to persistent WorkerRegistry
         try:
             from kazma_core.swarm.registry import get_worker_registry
-            registry = get_worker_registry()
-            registry.delete(name)
+            await asyncio.to_thread(lambda: get_worker_registry().delete(name))
             logger.info("[Swarm] WorkerRegistry removed: %s", name)
         except Exception as exc:
             logger.warning("[Swarm] WorkerRegistry sync failed: %s", exc)
@@ -294,7 +295,6 @@ def register_workers_routes(
         # Sync to persistent WorkerRegistry
         try:
             from kazma_core.swarm.registry import get_worker_registry
-            registry = get_worker_registry()
             update_kwargs = {}
             if "model" in payload:
                 update_kwargs["model"] = payload["model"]
@@ -307,7 +307,7 @@ def register_workers_routes(
             if "expertise" in payload:
                 update_kwargs["expertise"] = payload["expertise"]
             if update_kwargs:
-                registry.update(name, **update_kwargs)
+                await asyncio.to_thread(lambda: get_worker_registry().update(name, **update_kwargs))
                 logger.info("[Swarm] WorkerRegistry updated: %s", name)
         except Exception as exc:
             logger.warning("[Swarm] WorkerRegistry sync failed: %s", exc)

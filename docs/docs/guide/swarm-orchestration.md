@@ -270,11 +270,11 @@ existed with nothing calling it, so history was never pruned.
 
 ## 7. Worker registry & phonebook
 
-- **`WorkerRegistry`** (`swarm/registry.py`) — JSON-backed registry, loaded from `swarm_registry.json` (root) at singleton construction. Each `WorkerEntry` has: `name, expertise, roles, model, provider, worker_type, system_prompt, enabled, tools, metadata`.
+- **`WorkerRegistry`** (`swarm/registry.py`) — JSON-backed registry in the data dir (`<data dir>/swarm_registry.json`, so the backup copies it), loaded at singleton construction; an older build's file in the working directory is moved there once and renamed `.migrated`. Writes are atomic, and every change and read holds the registry's lock. Each `WorkerEntry` has: `name, expertise, roles, model, provider, worker_type, system_prompt, enabled, tools, metadata`.
 - **`WorkerPhonebook`** (`swarm/phonebook.py`) — bypasses the reliability layer for direct summon-and-dispatch from topology/DAG executors. `summon(name)` returns an `InProcessWorker` (legacy TelegramWorker subprocess path removed). `dispatch_by_name` injects V2 `recall.search` hits (strategies + evolution), **prompt-fenced**, off the event loop.
 - **`worker_factory._IN_PROCESS_TYPES`** = `\{"in_process", "telegram_bot"\}` — both resolve to `InProcessWorker`.
 
-> **No predefined role/preset catalog.** Roles are free-form strings. `swarm_registry.json` ships ~57 entries (mostly test fixtures like `a`/`b`/`c` for handoff-cycle tests, plus `primary`/`fallback-alpha`/`fallback-beta` for fallback-chain tests). All have empty `system_prompt`, so `is_generalist` (`registry.py:67-74`) treats them as generalists despite expertise tags.
+> **No predefined role/preset catalog.** Roles are free-form strings. The registry starts empty (nothing ships in it): it holds the workers added from the Swarm page or the API. A worker with an empty `system_prompt` counts as a generalist (`WorkerEntry.is_generalist`) whatever its expertise tags.
 
 ---
 
@@ -428,7 +428,7 @@ so the swarm works with zero pre-registered workers.
 
 - **`reliability_registry.py` is config-only.** The half-open `_probe_in_flight` logic lives on the `CircuitBreaker` dataclass in `reliability.py`. Anyone modifying breaker semantics must edit `reliability.py`, not the registry.
 - **Symbol `_MAX_VISITS` vs `MAX_VISITS`:** the engine docstring uses the underscored form, but the exported constant is `MAX_VISITS`. Same value (2).
-- **`swarm_registry.json` is mostly test fixtures.** Do not assume the shipped workers are production-grade — they have empty `system_prompt` fields. Production templates are `swarm_templates.json` (autoscaler).
+- **The registry holds only the workers you add.** It ships empty; the production worker definitions are the templates in `swarm_templates.json`, from which the autoscaler spawns workers on demand.
 - **Prometheus exists on the app** (`GET /metrics`). Swarm `MetricsCollector` is a separate SQLite snapshot — not a second Prom registry.
 - **Soul is ConfigStore / WorkerRegistry**, never `agent_evolution.json` and never a markdown `SOUL.md`.
 - Binding HITL rules: AGENTS.md §7 (tri-state FanOut), §30 (registry), collision H-8/H-9/H-12/T-2.

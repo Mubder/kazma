@@ -169,7 +169,7 @@ def create_models_router(config_store: Any = None) -> APIRouter:
     # ── Saved Model Profiles ───────────────────────────────────────
 
     @r.get("/api/models/saved")
-    async def list_saved_models() -> list[dict[str, Any]]:
+    def list_saved_models() -> list[dict[str, Any]]:
         """List all saved model profiles.
 
         Returns:
@@ -181,7 +181,7 @@ def create_models_router(config_store: Any = None) -> APIRouter:
         return sm.get_saved_model_profiles()
 
     @r.post("/api/models/saved", status_code=201)
-    async def save_model_profile(req: SaveModelProfileRequest) -> dict[str, Any]:
+    def save_model_profile(req: SaveModelProfileRequest) -> dict[str, Any]:
         """Save a named model profile.
 
         Request body:
@@ -198,7 +198,7 @@ def create_models_router(config_store: Any = None) -> APIRouter:
         return result
 
     @r.delete("/api/models/saved/{name}")
-    async def delete_model_profile(name: str) -> dict[str, str]:
+    def delete_model_profile(name: str) -> dict[str, str]:
         """Delete a saved model profile by name."""
         sm = _get_sm()
         if sm is None:

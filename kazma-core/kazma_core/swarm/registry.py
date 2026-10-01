@@ -1,8 +1,8 @@
 """Persistent Swarm Worker Registry.
 
-Single source of truth for all workers. Backed by a JSON file at the
-project root so workers survive reboots with no dependency on ChromaDB
-or SQLite.  The SwarmEngine uses this as a "phonebook": query by
+Single source of truth for all workers. Backed by a JSON file in the data
+dir (``<data dir>/swarm_registry.json``) so workers survive reboots with no
+dependency on ChromaDB or SQLite.  The SwarmEngine uses this as a "phonebook": query by
 expertise, fetch the worker's "Soul" (system prompt), apply the
 configured model/provider, and instantiate the worker for the task.
 
@@ -14,19 +14,97 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-__all__ = ["WorkerEntry", "WorkerRegistry", "get_worker_registry"]
+__all__ = ["WorkerEntry", "WorkerRegistry", "default_registry_path", "get_worker_registry"]
 
 logger = logging.getLogger(__name__)
 
-# Default registry file lives alongside kazma.yaml (project root or CWD).
-# We resolve to an absolute path at import time so workers are not lost
-# when the app is started from a different working directory.
-_DEFAULT_PATH = Path("swarm_registry.json").resolve()
+_FILE = "swarm_registry.json"
+
+#: The registry file when set (tests pin it); None means the data dir's.
+_DEFAULT_PATH: Path | None = None
+
+
+def default_registry_path() -> Path:
+    """``<data dir>/swarm_registry.json``: where the worker registry lives.
+
+    It was ``Path("swarm_registry.json").resolve()`` at import -- the process's
+    working directory, outside the data dir: no backup copied it, and a test
+    run inside an install wrote the install's (2026-10-01).
+    """
+    if _DEFAULT_PATH is not None:
+        return Path(_DEFAULT_PATH)
+    from kazma_core.paths import data_dir
+
+    return data_dir() / _FILE
+
+
+def _legacy_registry_paths() -> list[Path]:
+    """Where older builds kept the registry: the working directory, and the
+    install root (the same folder for a server the guard starts)."""
+    out = [Path.cwd() / _FILE]
+    try:
+        from kazma_core.paths import get_project_root, installed_project_root
+
+        out.append((installed_project_root() or get_project_root()) / _FILE)
+    except Exception:  # noqa: BLE001 -- no install root: the CWD is all there is
+        logger.debug("[WorkerRegistry] no install root for the legacy lookup", exc_info=True)
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for p in out:
+        key = str(p.resolve()).lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(p)
+    return unique
+
+
+def _write_atomic(path: Path, data: list[dict[str, Any]]) -> None:
+    """Write *data* as the registry file whole, or not at all."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def _adopt_legacy_registry(target: Path) -> None:
+    """Move an older build's registry into the data dir, once.
+
+    The old file is renamed ``.migrated`` (as the Soul's JSON file was) so
+    nothing reads two registries.
+    """
+    if target.exists():
+        return
+    for legacy in _legacy_registry_paths():
+        try:
+            if not legacy.is_file() or legacy.resolve() == target.resolve():
+                continue
+            raw = json.loads(legacy.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            logger.warning("[WorkerRegistry] could not read the old registry %s: %s", legacy, exc)
+            continue
+        if not isinstance(raw, list):
+            logger.warning("[WorkerRegistry] the old registry %s is not a list; left as it is", legacy)
+            continue
+        _write_atomic(target, raw)
+        try:
+            legacy.replace(legacy.with_name(legacy.name + ".migrated"))
+        except OSError as exc:
+            logger.warning(
+                "[WorkerRegistry] moved %s but could not rename it (%s); it is no longer read",
+                legacy, exc,
+            )
+        logger.info("[WorkerRegistry] moved %d worker(s) from %s to %s", len(raw), legacy, target)
+        return
 
 # Module-level singleton cache
 _REGISTRY_SINGLETON: WorkerRegistry | None = None
@@ -100,8 +178,10 @@ class WorkerRegistry:
     this as a phonebook — query by expertise, fetch the Soul, apply
     model/provider, and instantiate.
 
-    Thread-safe: all mutations hold a threading.Lock.  The registry is
-    a module-level singleton — all callers share the same instance.
+    Thread-safe: every change and every read of the entries holds a
+    threading.Lock (route handlers run in FastAPI's threadpool while the
+    swarm reads on the loop). The registry is a module-level singleton —
+    all callers share the same instance.
 
     Usage::
 
@@ -115,11 +195,18 @@ class WorkerRegistry:
         workers = registry.find_by_expertise("code")
     """
 
-    def __init__(self, path: str | Path = _DEFAULT_PATH) -> None:
-        self._path = Path(path)
+    def __init__(self, path: str | Path | None = None) -> None:
+        self._path = Path(path) if path is not None else default_registry_path()
         self._entries: dict[str, WorkerEntry] = {}
         self._lock = threading.Lock()
+        if path is None and _DEFAULT_PATH is None:
+            _adopt_legacy_registry(self._path)
         self._load()
+
+    def _snapshot(self) -> list[WorkerEntry]:
+        """The entries now, read under the lock."""
+        with self._lock:
+            return list(self._entries.values())
 
     # ── Persistence ─────────────────────────────────────────────────────
 
@@ -144,10 +231,9 @@ class WorkerRegistry:
                 logger.warning("[WorkerRegistry] Failed to load: %s — starting empty", exc)
 
     def _save_unlocked(self) -> None:
-        """Persist workers (caller must hold lock)."""
-        data = [e.to_dict() for e in self._entries.values()]
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        """Persist workers (caller must hold lock), atomically: a crash
+        mid-write used to leave a truncated file that loaded as empty."""
+        _write_atomic(self._path, [e.to_dict() for e in self._entries.values()])
 
     def _save(self) -> None:
         """Persist all workers to the JSON file."""
@@ -160,8 +246,9 @@ class WorkerRegistry:
         """Register a new worker (or overwrite existing by name)."""
         if not entry.name.strip():
             raise ValueError("Worker name is required")
-        self._entries[entry.name] = entry
-        self._save()
+        with self._lock:
+            self._entries[entry.name] = entry
+            self._save_unlocked()
         logger.info("[WorkerRegistry] Registered worker: %s (expertise=%s)", entry.name, entry.expertise)
         return entry
 
@@ -171,28 +258,30 @@ class WorkerRegistry:
         Accepted kwargs: expertise, roles, model, provider, worker_type,
         system_prompt, enabled, metadata.
         """
-        entry = self._entries.get(name)
-        if entry is None:
-            logger.warning("[WorkerRegistry] Update failed — no worker named '%s'", name)
-            return None
-        for field_name in (
-            "expertise", "roles", "model", "provider",
-            "worker_type", "system_prompt", "enabled", "metadata",
-        ):
-            if field_name in kwargs:
-                setattr(entry, field_name, kwargs[field_name])
-        self._save()
+        with self._lock:
+            entry = self._entries.get(name)
+            if entry is None:
+                logger.warning("[WorkerRegistry] Update failed — no worker named '%s'", name)
+                return None
+            for field_name in (
+                "expertise", "roles", "model", "provider",
+                "worker_type", "system_prompt", "enabled", "metadata",
+            ):
+                if field_name in kwargs:
+                    setattr(entry, field_name, kwargs[field_name])
+            self._save_unlocked()
         logger.info("[WorkerRegistry] Updated worker: %s", name)
         return entry
 
     def delete(self, name: str) -> bool:
         """Remove a worker by name. Returns True if deleted."""
-        if name in self._entries:
+        with self._lock:
+            if name not in self._entries:
+                return False
             del self._entries[name]
-            self._save()
-            logger.info("[WorkerRegistry] Deleted worker: %s", name)
-            return True
-        return False
+            self._save_unlocked()
+        logger.info("[WorkerRegistry] Deleted worker: %s", name)
+        return True
 
     def get(self, name: str) -> WorkerEntry | None:
         """Retrieve a single worker by name."""
@@ -200,7 +289,7 @@ class WorkerRegistry:
 
     def list_all(self) -> list[WorkerEntry]:
         """Return all registered workers."""
-        return list(self._entries.values())
+        return self._snapshot()
 
     # ── Query by expertise / role ────────────────────────────────────────
 
@@ -208,7 +297,7 @@ class WorkerRegistry:
         """Find all workers matching a given expertise tag (case-insensitive)."""
         tag = expertise.lower()
         return [
-            e for e in self._entries.values()
+            e for e in self._snapshot()
             if e.enabled and tag in (t.lower() for t in e.expertise)
         ]
 
@@ -216,13 +305,13 @@ class WorkerRegistry:
         """Find all workers matching a given role (case-insensitive)."""
         r = role.lower()
         return [
-            e for e in self._entries.values()
+            e for e in self._snapshot()
             if e.enabled and r in (t.lower() for t in e.roles)
         ]
 
     def find_generalists(self) -> list[WorkerEntry]:
         """Return all enabled generalist workers (no expertise / no Soul)."""
-        return [e for e in self._entries.values() if e.enabled and e.is_generalist]
+        return [e for e in self._snapshot() if e.enabled and e.is_generalist]
 
     def find_best(self, task_description: str) -> list[WorkerEntry]:
         """Route a task to the best workers by expertise match.
@@ -241,7 +330,7 @@ class WorkerRegistry:
             task = SwarmTask(prompt=task_description, workers=["auto"])
 
             available_workers = []
-            for e in self._entries.values():
+            for e in self._snapshot():
                 if e.enabled:
                     caps = WorkerCapabilities(
                         role=e.roles[0] if e.roles else "leaf",
@@ -298,7 +387,7 @@ class WorkerRegistry:
             return generalists
 
         # Last resort fallback: return ALL enabled workers
-        all_enabled = [e for e in self._entries.values() if e.enabled]
+        all_enabled = [e for e in self._snapshot() if e.enabled]
         if all_enabled:
             logger.info("[WorkerRegistry] No generalist — returning all %d workers as last resort", len(all_enabled))
             return all_enabled
@@ -310,7 +399,7 @@ class WorkerRegistry:
     def expertise_map(self) -> dict[str, list[str]]:
         """Return a map of expertise → list of worker names."""
         result: dict[str, list[str]] = {}
-        for entry in self._entries.values():
+        for entry in self._snapshot():
             if not entry.enabled:
                 continue
             for tag in entry.expertise:
@@ -337,5 +426,5 @@ def get_worker_registry(path: str | Path | None = None) -> WorkerRegistry:
     global _REGISTRY_SINGLETON
     with _REGISTRY_SINGLETON_LOCK:
         if _REGISTRY_SINGLETON is None:
-            _REGISTRY_SINGLETON = WorkerRegistry(path or _DEFAULT_PATH)
+            _REGISTRY_SINGLETON = WorkerRegistry(path)
         return _REGISTRY_SINGLETON

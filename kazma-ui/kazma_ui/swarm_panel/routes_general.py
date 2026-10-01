@@ -41,7 +41,7 @@ def register_general_routes(
     """Register all general-purpose routes."""
 
     @router.get("/swarm", response_class=HTMLResponse)
-    async def swarm_page(request: Request) -> HTMLResponse:
+    def swarm_page(request: Request) -> HTMLResponse:
         """Render the Swarm panel."""
         svc = get_swarm_service()
         # Resolve engine at request time using the services facade
@@ -71,7 +71,7 @@ def register_general_routes(
         return HTMLResponse(_fallback_html(svc.has_swarm_core(), workers))
 
     @router.get("/api/swarm/status")
-    async def swarm_status() -> dict[str, Any]:
+    def swarm_status() -> dict[str, Any]:
         """Return current worker status."""
         svc = get_swarm_service()
         svc.resolve_engine(swarm_manager)
@@ -92,7 +92,7 @@ def register_general_routes(
         return result
 
     @router.get("/api/swarm/output-target")
-    async def get_output_target() -> JSONResponse:
+    def get_output_target() -> JSONResponse:
         """Return the current swarm output-routing target."""
         svc = get_swarm_service()
         if svc.get_config_store() is None:
@@ -111,7 +111,7 @@ def register_general_routes(
         return JSONResponse({"output_target": target})
 
     @router.put("/api/swarm/output-target")
-    async def set_output_target(payload: dict[str, Any]) -> JSONResponse:
+    def set_output_target(payload: dict[str, Any]) -> JSONResponse:
         """Set or clear the swarm output-routing target."""
         svc = get_swarm_service()
         if svc.get_config_store() is None:

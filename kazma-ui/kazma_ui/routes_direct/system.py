@@ -16,20 +16,6 @@ from kazma_core.errors import safe_error
 
 logger = logging.getLogger(__name__)
 
-def _paths_data_dir():
-    """``paths.data_dir()``, imported lazily (honours KAZMA_DATA_DIR)."""
-    from kazma_core.paths import data_dir
-
-    return data_dir()
-
-
-def _paths_snapshots_db():
-    """``paths.snapshots_db()``, imported lazily."""
-    from kazma_core.paths import snapshots_db
-
-    return snapshots_db()
-
-
 __all__ = ["register_system_routes"]
 
 
@@ -69,31 +55,28 @@ def register_system_routes(self: Any) -> None:
     # registries -- with a fallback that derived paths from the process CWD
     # (AGENTS §38). tests/test_api_route_callers.py.
     @self.app.get("/api/system/config-paths")
-    async def _system_config_paths():
+    def _system_config_paths():
+        """Where this install's settings, stores and worker registry live.
+
+        A plain ``def``: it stats files. It used to fall back to paths made
+        from the process's working directory, and looked for the worker
+        registry there -- a diagnostic naming places Kazma does not use.
+        """
         import os as _osp
 
-        try:
-            from kazma_core.paths import data_dir, settings_db, snapshots_db, user_home
+        from kazma_core.paths import data_dir, settings_db, snapshots_db, user_home
+        from kazma_core.swarm.registry import default_registry_path
 
-            home = str(user_home())
-            cfg = settings_db()
-            kg = str(data_dir() / "knowledge_graph.db")
-            snap = snapshots_db()
-            pending = str(user_home() / "pending_evolution.json")
-        except Exception:
-            home = _osp.path.join(_osp.getcwd(), ".kazma")
-            cfg = _osp.path.join(home, "config.db")
-            kg = str(_paths_data_dir() / "knowledge_graph.json")
-            snap = str(_paths_snapshots_db())
-            pending = _osp.path.join(home, "pending_evolution.json")
+        home = str(user_home())
+        cfg = settings_db()
+        kg = str(data_dir() / "knowledge_graph.db")
+        snap = snapshots_db()
+        pending = str(user_home() / "pending_evolution.json")
+        registry = str(default_registry_path())
         return {
             "kazma_home": home,
             "config_db": cfg if _osp.path.exists(cfg) else "NOT FOUND",
-            "swarm_registry": (
-                _osp.path.expanduser("swarm_registry.json")
-                if _osp.path.exists(_osp.path.expanduser("swarm_registry.json"))
-                else "NOT FOUND"
-            ),
+            "swarm_registry": registry if _osp.path.exists(registry) else "NOT FOUND",
             "pending_evolution": pending if _osp.path.exists(pending) else "NOT FOUND",
             "knowledge_graph": kg if _osp.path.exists(kg) else "NOT FOUND",
             "snapshots_db": snap if _osp.path.exists(snap) else "NOT FOUND",
@@ -308,7 +291,7 @@ def register_system_routes(self: Any) -> None:
             "memory_status": store.get("system.memory.status", ""),
         }
     @self.app.get("/api/system/memory/backups")
-    async def _list_memory_backups():
+    def _list_memory_backups():
         """List V2 native backup files (memory_state_<ts>.db / memory_ops_<ts>.db)."""
         from pathlib import Path
 

@@ -189,7 +189,7 @@ async def _verify_same_origin(request: Request) -> None:
 
 
 @router.get("/status")
-async def email_status() -> JSONResponse:
+def email_status() -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.credentials import status_summary
         from kazma_skills.native.email_manager.router import detect_available_provider
@@ -216,7 +216,7 @@ async def email_status() -> JSONResponse:
 
 
 @protected_router.post("/gmail/connect", dependencies=[Depends(_verify_same_origin)])
-async def gmail_connect(body: GmailConnectBody) -> JSONResponse:
+def gmail_connect(body: GmailConnectBody) -> JSONResponse:
     address = body.address.strip()
     password = body.app_password.strip().replace(" ", "")
     if "@" not in address:
@@ -245,7 +245,7 @@ async def gmail_connect(body: GmailConnectBody) -> JSONResponse:
 
 
 @protected_router.post("/gmail/disconnect", dependencies=[Depends(_verify_same_origin)])
-async def gmail_disconnect() -> JSONResponse:
+def gmail_disconnect() -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.protocol_connect import disconnect_protocol
 
@@ -312,7 +312,7 @@ def _gmail_client_format_error(client_id: str, client_secret: str) -> str:
 
 
 @protected_router.post("/oauth/gmail/client", dependencies=[Depends(_verify_same_origin)])
-async def gmail_set_oauth_client(body: GmailOAuthClientBody) -> JSONResponse:
+def gmail_set_oauth_client(body: GmailOAuthClientBody) -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.credentials import vault_store
 
@@ -431,7 +431,7 @@ async def gmail_oauth_callback(
 
 
 @protected_router.post("/oauth/microsoft/client", dependencies=[Depends(_verify_same_origin)])
-async def ms_set_client(body: MsClientBody) -> JSONResponse:
+def ms_set_client(body: MsClientBody) -> JSONResponse:
     cid = body.client_id.strip()
     tenant = (body.tenant_id or "common").strip() or "common"
     if not cid:
@@ -547,7 +547,7 @@ async def ms_device_poll(body: DevicePollBody) -> JSONResponse:
 
 
 @protected_router.post("/oauth/microsoft/disconnect", dependencies=[Depends(_verify_same_origin)])
-async def ms_disconnect() -> JSONResponse:
+def ms_disconnect() -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.oauth_ms import clear_microsoft_tokens
 
@@ -687,7 +687,7 @@ async def email_account_remove(alias: str) -> JSONResponse:
 
 
 @router.get("/presets")
-async def email_presets() -> JSONResponse:
+def email_presets() -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.presets import list_presets
 
@@ -697,7 +697,7 @@ async def email_presets() -> JSONResponse:
 
 
 @protected_router.post("/protocol/connect", dependencies=[Depends(_verify_same_origin)])
-async def protocol_connect(body: ProtocolConnectBody) -> JSONResponse:
+def protocol_connect(body: ProtocolConnectBody) -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.protocol_connect import connect_protocol
 
@@ -720,7 +720,7 @@ async def protocol_connect(body: ProtocolConnectBody) -> JSONResponse:
 
 
 @protected_router.post("/protocol/disconnect", dependencies=[Depends(_verify_same_origin)])
-async def protocol_disconnect(body: ProtocolDisconnectBody) -> JSONResponse:
+def protocol_disconnect(body: ProtocolDisconnectBody) -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.protocol_connect import disconnect_protocol
 

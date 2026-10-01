@@ -192,7 +192,7 @@ def create_workspace_router() -> APIRouter:
     # ------------------------------------------------------------------
 
     @router.get("/files")
-    async def list_files(
+    def list_files(
         path: str = Query("", description="Sub-directory within the workspace root"),
     ) -> dict[str, Any]:
         """List the contents of a directory inside the workspace.

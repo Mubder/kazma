@@ -303,4 +303,4 @@ A swarm execution unit (`SwarmWorker`). Registered in `_workers`; resolved via t
 A `\{role, expertise, tools, model_specialty\}` object describing what a worker can do; used by `UnifiedRouter` and the AutoScaler to match tasks to workers.
 
 **WorkerRegistry**
-JSON-backed worker registry (`swarm/registry.py`), loaded from `swarm_registry.json`.
+JSON-backed worker registry (`swarm/registry.py`), kept at `<data dir>/swarm_registry.json`.
