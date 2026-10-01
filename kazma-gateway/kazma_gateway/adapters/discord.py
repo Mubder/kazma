@@ -478,6 +478,9 @@ class DiscordAdapter(BaseAdapter):
         try:
             msg = await self._maybe_transcribe_audio(msg)
             try:
+                # The record's id for it, so a message the gateway leaves (its
+                # flood guard) is recorded under the same id.
+                msg.context_metadata["receive_key"] = meta.get("message_id")
                 queue.put_nowait(msg)
                 self._receive.note_passed_on(meta.get("message_id"))
                 logger.info(

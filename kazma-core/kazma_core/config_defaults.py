@@ -66,6 +66,24 @@ RETIRED_DEFAULTS: tuple[RetiredDefault, ...] = (
             "Kazma was down and whether each chat app connected"
         ),
     ),
+    RetiredDefault(
+        key="gateway.rate_limits.discord",
+        old=(5,),
+        since="2026-10-01",
+        why=(
+            "the inbound flood guard (messages per person per minute) shipped "
+            "Discord's own send limit; 30, like Telegram"
+        ),
+    ),
+    RetiredDefault(
+        key="gateway.rate_limits.slack",
+        old=(1,),
+        since="2026-10-01",
+        why=(
+            "the inbound flood guard shipped Slack's own send limit: one Slack "
+            "message a minute, the rest left unanswered; 30, like Telegram"
+        ),
+    ),
 )
 
 #: Settings keys whose new shipped value applies to new installs only: key

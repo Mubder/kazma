@@ -1,0 +1,88 @@
+# Holds Kazma's names on PyPI with empty reservation packages (no code), so no
+# one else can publish under them. Kazma itself installs from its GitHub
+# releases only (AGENTS.md section 45, AUD-029).
+#
+# Run by hand: Actions -> Reserve PyPI names -> Run workflow. Without
+# "publish" it builds and checks the packages and uploads nothing. With it,
+# each name is uploaded through PyPI Trusted Publishing -- no token, no secret
+# -- and each name needs its pending publisher on pypi.org first (owner Mubder,
+# repository kazma, workflow pypi-reserve.yml, environment pypi). See
+# docs/docs/security/supply-chain.md.
+name: Reserve PyPI names
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Upload to PyPI (each name needs its pending publisher on pypi.org)"
+        type: boolean
+        default: false
+      names:
+        description: "Comma-separated names (empty: all of them)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the reservation packages
+    runs-on: ubuntu-latest
+    outputs:
+      names: ${{ steps.names.outputs.names }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+      - name: Choose the names
+        id: names
+        env:
+          WANTED: ${{ inputs.names }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, sys
+          sys.path.insert(0, "scripts")
+          from pypi_reserve import NAMES
+          wanted = [n.strip() for n in os.environ.get("WANTED", "").split(",") if n.strip()]
+          unknown = sorted(set(wanted) - set(NAMES))
+          if unknown:
+              raise SystemExit(f"not names the project holds: {unknown}")
+          print("names=" + json.dumps(wanted or list(NAMES)))
+          PY
+      - name: Build
+        env:
+          WANTED: ${{ inputs.names }}
+        run: python scripts/pypi_reserve.py --out dist ${WANTED:+--names "$WANTED"}
+      - name: Check the metadata
+        run: uvx twine check --strict dist/*/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi-reserve
+          path: dist/
+          retention-days: 7
+
+  publish:
+    name: Upload ${{ matrix.name }}
+    needs: build
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        name: ${{ fromJSON(needs.build.outputs.names) }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pypi-reserve
+          path: dist/
+      - name: Upload through Trusted Publishing
+        # Pinned to a commit (v1.14.2): this step holds the publishing identity.
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
+        with:
+          packages-dir: dist/${{ matrix.name }}/

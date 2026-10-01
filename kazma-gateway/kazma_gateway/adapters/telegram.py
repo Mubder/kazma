@@ -683,6 +683,9 @@ class TelegramAdapter(BaseAdapter):
                 return
 
             try:
+                # The record's id for it, so a message the gateway leaves (its
+                # flood guard) is recorded under the same id.
+                msg.context_metadata["receive_key"] = msg_key
                 queue.put_nowait(msg)
                 self._receive.note_passed_on(msg_key)
                 logger.info(

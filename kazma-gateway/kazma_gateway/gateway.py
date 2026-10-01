@@ -416,6 +416,25 @@ class BaseAdapter(ABC):
         self._running = False
         logger.info("[%s] Adapter stopped", self.name)
 
+    def note_left_unanswered(self, msg: IncomingMessage, reason: str) -> None:
+        """A message this adapter handed on that the gateway then left (its
+        flood guard): counted in the adapter's record under the id the adapter
+        gave it (``receive_key``), so the Test says what became of it, and
+        logged by the record's rule. Until 2026-10-01 such a message vanished
+        unrecorded: of eight Slack messages sent in a minute, seven were left,
+        five of them without even a "Slow down"."""
+        receive = self._receive
+        if receive is None:
+            return
+        meta = msg.context_metadata or {}
+        record = receive.drop(
+            reason,
+            message_id=meta.get("receive_key"),
+            author_id=meta.get("user_id") or msg.sender_id,
+            channel_id=meta.get("channel_id") or meta.get("chat_id"),
+        )
+        receive.log_drop(logger, self.name, record, warn=frozenset({reason}))
+
     async def halt(self) -> None:
         """Stop this adapter now, while the gateway keeps running.
 
@@ -836,6 +855,9 @@ class GatewayManager:
                 # ── Rate feedback check ────────────────────────────
                 if self._rate_feedback is not None:
                     if self._rate_feedback.is_limited(msg.sender_id):
+                        source = self.adapter_named(msg.platform)
+                        if source is not None:
+                            source.note_left_unanswered(msg, "rate_limited")
                         if self._rate_feedback.should_send_feedback(msg.sender_id):
                             feedback_text = self._rate_feedback.get_feedback_message(msg.sender_id)
                             # should_send_feedback already updates last_feedback timestamp

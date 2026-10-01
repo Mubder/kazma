@@ -142,11 +142,15 @@ class SlackAdapter(BaseAdapter):
         """Slack's handshake: the connection is up.
 
         ``num_connections`` counts the app's open connections, this one
-        included, and Slack hands each event to ONE of them: with another
-        program on the same app-level token (a second Kazma, an old test
-        bot), that program silently takes some of Kazma's messages. Only a
-        count taken at least ``_SETTLED_AFTER_S`` after Kazma's previous
-        connection ended is kept -- sooner, that one may still be counted.
+        included, and Slack hands each event to ONE of them: another program
+        connected to the app (a second Kazma, an old test bot) silently takes
+        some of Kazma's messages. The count also includes a connection that
+        ended without closing, until Slack notices -- live 2026-10-01 it said
+        2 for hours on a token used nowhere else, and every message arrived --
+        so the warning names both, and the Test tells them apart by whether
+        the messages it checks reached Kazma. Only a count taken at least
+        ``_SETTLED_AFTER_S`` after Kazma's previous connection ended is kept
+        -- sooner, that one may still be counted.
         """
         self._receive.connected_now(new_session=True)
         host = str((msg.get("debug_info") or {}).get("host") or "?")
@@ -165,8 +169,11 @@ class SlackAdapter(BaseAdapter):
         if count > 1:
             logger.warning(
                 "[Slack] Slack counts %d open Socket Mode connections for this app and hands each "
-                "event to one of them: another program using this app-level token (a second "
-                "Kazma?) takes some of Kazma's messages. Stop it, or give it its own Slack app.",
+                "message to one of them. Either another program connected to this app is taking "
+                "some of Kazma's messages (stop it, or give it its own Slack app), or Slack is "
+                "still counting a connection that ended without closing (it drops those within "
+                "hours). Settings -> the Slack Test says which: it checks whether your latest "
+                "messages reached Kazma.",
                 count,
             )
 
@@ -465,6 +472,9 @@ class SlackAdapter(BaseAdapter):
             msg = await self._prefetch_private_files(msg)
             msg = await self._maybe_transcribe_audio(msg)
             try:
+                # The record's id for it, so a message the gateway leaves (its
+                # flood guard) is recorded under the same id.
+                msg.context_metadata["receive_key"] = event_key(event)
                 self._queue.put_nowait(msg)
                 self._receive.note_passed_on(event_key(event))
                 # INFO like Telegram's and Discord's: a Slack message Kazma
@@ -1185,6 +1195,7 @@ class SlackAdapter(BaseAdapter):
         incoming = await self._prefetch_private_files(incoming)
         # Voice: transcribe any audio attachment (polling path).
         incoming = await self._maybe_transcribe_audio(incoming)
+        incoming.context_metadata["receive_key"] = event_key(event)
         try:
             self._queue.put_nowait(incoming)
         except asyncio.QueueFull:

@@ -3376,8 +3376,25 @@ Test on every adapter; Telegram and Slack had the same blind spots.
   is logged, and kept
   for the Test when taken 15 s or more after Kazma's previous connection
   ended (`_SETTLED_AFTER_S`): Slack hands each event to ONE connection, so
-  a second program on the app-level token silently takes some of Kazma's
-  messages -- a WARNING, and the Test's `listening` check turns yellow.
+  a second program connected to the app silently takes some of Kazma's
+  messages -- a WARNING. But the count also includes a connection that ended
+  without closing, until Slack notices (live 2026-10-01: 2 for hours on a
+  token used nowhere else, every message arriving), so the warning names
+  both, and the Test's `listening` check decides from the messages it
+  checked (`slack_diagnose._reached`): one that never reached Kazma, yellow
+  with "another program"; all reached, green, "a connection that ended
+  without closing".
+- **The gateway's flood guard accounts for what it leaves**
+  (`BaseAdapter.note_left_unanswered`, 2026-10-01). Past
+  `gateway.rate_limits` (messages per person per minute, from the settings
+  store; 30 on every platform -- the old Discord 5 and Slack 1 were the
+  platforms' own send limits and held the owner to one Slack message a
+  minute, retired in `config_defaults`) the message is recorded
+  `rate_limited` under the id its adapter gave it (`context_metadata
+  ["receive_key"]`, set where the adapter hands it on) and logged by the
+  record's rule; it used to vanish with nothing recorded.
+  `tests/test_chat_adapters_follow_settings.py` (a floor on the shipped
+  limits, with the old values as the negative control).
 
 - **A socket whose session will be resumed closes with 4000**
   (`_close_for_resume`, after op 7 and a resumable op 9). Leaving
@@ -3631,6 +3648,15 @@ and the sibling suites):**
   Gate: `tests/test_no_pypi_kazma.py` -- every tracked product, script and doc
   file (history, plans and tests excepted), a PyPI URL for a Kazma name, and
   every install argv by AST; negative controls are the 27 old forms.
+  **The names are held on PyPI** (2026-10-01, the owner's decision):
+  `scripts/pypi_reserve.py` builds a reservation per name (0.0.1, no code, a
+  page pointing at the GitHub releases) and `.github/workflows/pypi-reserve.yml`
+  uploads them by hand through Trusted Publishing -- no PyPI token exists; each
+  name needs its pending publisher (owner `Mubder`, repo `kazma`, workflow
+  `pypi-reserve.yml`, environment `pypi`; `docs/SUPPLY_CHAIN.md`). Kazma still
+  installs only from GitHub, so the rules above stand. The gate holds its
+  `KAZMA_DISTS` equal to the reservation list: a new package name is reserved
+  with the rest.
 - **An MCP server's secrets live in the vault** (`kazma_core/mcp/secrets.py`,
   AUD-030). An `env` entry named like a credential, `auth.value`/`auth.token`,
   a credential header, the value of a `--api-key=...`-style command flag and a

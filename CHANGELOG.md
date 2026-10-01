@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## Kazma's names can be held on PyPI (2026-10-01)
+
+- **Ready to reserve `kazma` and the names around it.** Nothing Kazma
+  published was on PyPI, so `kazma`, `kazma-core` and six more names were
+  anyone's to register. A stranger's upload under them would have run on any
+  machine that asked pip for Kazma by name. Each name now has a reservation:
+  version 0.0.1, no code, only a page pointing at the GitHub releases.
+  Installing one installs nothing.
+- **Uploaded by a workflow, with no PyPI token.** Actions → Reserve PyPI
+  names builds and checks the eight reservations, and with "publish" ticked
+  uploads each through PyPI Trusted Publishing. Each name first needs its
+  pending publisher on pypi.org; the supply-chain guide lists what to enter.
+  Kazma itself still installs only from its GitHub releases.
+
+## Slack no longer holds you to one message a minute (2026-10-01)
+
+- **The flood guard lets a person type.** `gateway.rate_limits` shipped
+  Telegram 30, Discord 5 and Slack 1. Those are close to the platforms' own
+  send limits, but Kazma used them as how many messages one person may send
+  it per minute. On Slack, eight messages sent in a minute got one answer
+  and two "Slow down" replies; the other five went unanswered without a
+  word. Every platform now allows 30 a minute. An install still holding the
+  old 5 or 1 moves to 30 at its next start, and a value you chose yourself
+  stays.
+- **A message the guard leaves is accounted for.** Each one is logged
+  (a WARNING at most every ten minutes, then INFO). It is also recorded as
+  `rate_limited` in the platform's record, so the Test says what became of
+  it instead of "handed on".
+- **Slack's connection count no longer accuses a second program.** Slack
+  also counts a connection that ended without closing, for hours: it said 2
+  on a token used nowhere else while every message arrived. The warning names
+  both explanations. The Test works out which one applies from whether the
+  messages it checks reached Kazma, and shows green when they did.
+
 ## A chat app's token takes effect when you save it (2026-10-01)
 
 - **Saving a new Telegram, Discord or Slack token now applies it.** You

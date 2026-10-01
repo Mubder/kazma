@@ -87,6 +87,24 @@ def _newest_person(messages: Any) -> dict[str, Any] | None:
     )
 
 
+def _reached(msg: dict[str, Any], channel: str, live: dict[str, Any] | None) -> bool | None:
+    """Whether Kazma's connection got this message at all (whatever became of
+    it): True, False (newer than the session and not in the record), or None
+    (no record, or older than the session)."""
+    if live is None:
+        return None
+    if f"{channel}:{msg.get('ts')}" in (live.get("recent") or {}):
+        return True
+    session_since = when(live.get("session_since"))
+    try:
+        stamp = when(float(msg.get("ts") or 0) or None)
+    except (TypeError, ValueError):
+        stamp = None
+    if session_since and stamp and stamp < session_since:
+        return None
+    return False
+
+
 def _judge(msg: dict[str, Any], channel: str, live, allowed, *, place: str) -> tuple[bool | None, str]:
     try:
         stamp = when(float(msg.get("ts") or 0) or None)
@@ -106,6 +124,46 @@ def _judge(msg: dict[str, Any], channel: str, live, allowed, *, place: str) -> t
     )
 
 
+def _with_connection_count(
+    ok: bool | None, said: str, live: dict[str, Any] | None, reached: list[bool | None]
+) -> tuple[bool | None, str]:
+    """The listening check, with what Slack's open-connection count means.
+
+    Slack hands each event to ONE of the app's connections, but the count
+    alone cannot say whether another program takes some: it also counts a
+    connection that ended without closing, until it notices (hours). Live
+    2026-10-01 eight messages in a minute all arrived while Slack counted 2
+    on a token used nowhere else. *reached* -- whether each message the Test
+    checked got to Kazma's connection -- says which it is.
+    """
+    shared = (live or {}).get("slack_open_connections")
+    if not (ok and live is not None and isinstance(shared, int) and shared > 1):
+        return ok, said
+    seen = show(when(live.get("slack_open_connections_at")))
+    if False in reached:
+        return None, (
+            f"{said} But when Kazma connected ({seen}) Slack counted {shared} open connections "
+            "for this app, and a message checked above never reached Kazma: Slack hands each "
+            "message to one connection, so another program connected to this app is taking some "
+            "of Kazma's messages. Stop it, or give it its own Slack app."
+        )
+    if True in reached:
+        return ok, (
+            f"{said} When Kazma connected ({seen}) Slack counted {shared} open connections for "
+            "this app. The messages checked above reached Kazma, so the extra one is most likely "
+            "a connection that ended without closing, which Slack counts until it notices (that "
+            "can take hours). If a message ever fails to reach Kazma, another program connected "
+            "to this app is taking it."
+        )
+    return None, (
+        f"{said} When Kazma connected ({seen}) Slack counted {shared} open connections for "
+        "this app, and it hands each message to one of them. Send the bot a few messages and "
+        "Test again: if one never reaches Kazma, another program connected to this app is "
+        "taking it (stop it, or give it its own Slack app); if all arrive, the extra one is a "
+        "connection that ended without closing, which Slack counts until it notices."
+    )
+
+
 async def diagnose(
     token: str,
     *,
@@ -118,6 +176,8 @@ async def diagnose(
     """Run every check; ``{"success", "bot_name", "error", "checks"}``."""
     checks = Checks()
     add = checks.add
+    #: Whether each message checked below reached Kazma's connection.
+    reached: list[bool | None] = []
     allowed = [str(a) for a in (allowed_users or []) if str(a).strip()]
     bot_name: str | None = None
     team_id = ""
@@ -188,6 +248,7 @@ async def diagnose(
                         if person is None:
                             add("latest", None, f"No message from a person among the latest {_HISTORY} there.")
                         else:
+                            reached.append(_reached(person, channel_id, live))
                             add("latest", *_judge(person, channel_id, live, allowed,
                                                   place="The latest message a person wrote there"))
                     else:
@@ -228,6 +289,7 @@ async def diagnose(
                         "Open the conversation with the link to write there."
                     ), link)
                 else:
+                    reached.append(_reached(person, dm, live))
                     add("direct_message", *_judge(
                         person, dm, live, allowed,
                         place=f"The latest direct message user {user_id} wrote to the bot",
@@ -246,15 +308,5 @@ async def diagnose(
     ok, said = listening(live, "Slack", not_running=(
         "Kazma's Slack connection is not running: turn Slack on above and Save, or check the tokens."
     ))
-    shared = (live or {}).get("slack_open_connections")
-    if ok and isinstance(shared, int) and shared > 1:
-        # Slack hands each event to ONE of the app's connections: another
-        # program on this app-level token takes some of Kazma's messages.
-        ok, said = None, (
-            f"{said} But when Kazma connected ({show(when(live.get('slack_open_connections_at')))}) "
-            f"Slack counted {shared} open connections for this app, and it hands each event to one "
-            "of them: another program using this app-level token (a second Kazma, an old test bot) "
-            "takes some of Kazma's messages. Stop it, or give it its own Slack app."
-        )
-    add("listening", ok, said)
+    add("listening", *_with_connection_count(ok, said, live, reached))
     return checks.result(bot_name)
