@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Slack says when its app is full (2026-10-03)
+
+After the two reloads of 2026-10-02 evening, Slack refused Kazma's Socket
+Mode connection 4 and then 9 times in a row (`too_many_websockets`: the app
+already held its limit of 10 connections). Each time it then let Kazma in
+with a count of 10. Slack hands each message to one of an app's connections,
+so while nine other connections hold slots, a message can go to whichever
+program holds them. The log said this only at INFO, and the count was taken
+too soon after the previous connection ended to be kept, so the Slack Test
+never showed it.
+
+The first refusal of a run is now a WARNING and the connection's problem, and
+the connection that follows says how many refusals came first. A count taken
+right after a reconnect is kept when it shows a connection besides Kazma's own
+two, so the Test reports the 10 and checks whether your latest messages
+reached Kazma (`tests/test_telegram_slack_receive_and_test.py`, with the old
+adapter as the negative control).
+
 ## Counts in the terminal, the CLI and the chat apps (2026-10-03)
 
 The English-only surfaces printed a count beside a plural whatever the

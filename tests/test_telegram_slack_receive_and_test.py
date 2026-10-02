@@ -486,6 +486,37 @@ def test_a_second_program_on_the_app_token_is_warned_once_the_count_is_settled(c
     assert len(warned) == 1 and "2 open Socket Mode connections" in warned[0]
 
 
+def test_a_full_app_is_said_once_per_run_of_refusals_and_its_count_is_kept(caplog) -> None:
+    """Live 2026-10-02, two reloads: Slack refused Kazma's connection four and
+    nine times in a row (``too_many_websockets``: the app already held its
+    limit of 10) and then let it in with a hello counting 10 -- inside the
+    settle window, so no count was kept, and nothing was said above INFO."""
+    caplog.set_level(logging.INFO, logger="kazma_gateway.adapters.slack")
+    adapter = _slack_adapter()
+
+    for host in ("applink-0", "applink-5", "applink-8"):
+        adapter._on_disconnect({"type": "disconnect", "reason": "too_many_websockets",
+                                "debug_info": {"host": host}})
+    warned = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warned) == 1, "one warning per run of refusals, not one per retry"
+    assert "too_many_websockets" in warned[0] and "limit of 10" in warned[0]
+    assert adapter._receive.connected is False
+    assert "limit of 10" in adapter._receive.last_problem["what"]
+
+    caplog.clear()
+    adapter._on_hello({"type": "hello", "num_connections": 10})    # 2-3 s after the last refusal
+    live = adapter.diagnostics()
+    assert live["slack_open_connections"] == 10 and live["slack_open_connections_at"]
+    said = [r.getMessage() for r in caplog.records]
+    assert "[Slack] Connected after Slack refused 3 connections in a row (too_many_websockets)" in said
+    warned = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warned) == 1 and "10 open Socket Mode connections" in warned[0]
+
+    caplog.clear()                                                 # a new run warns again
+    adapter._on_disconnect({"type": "disconnect", "reason": "too_many_websockets"})
+    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
+
+
 # ── the route and the card, for every adapter ───────────────────────────
 
 

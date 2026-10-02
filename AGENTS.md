@@ -3680,7 +3680,14 @@ Test on every adapter; Telegram and Slack had the same blind spots.
   both, and the Test's `listening` check decides from the messages it
   checked (`slack_diagnose._reached`): one that never reached Kazma, yellow
   with "another program"; all reached, green, "a connection that ended
-  without closing".
+  without closing". **`too_many_websockets` is a refusal** (2026-10-03):
+  the app already holds Slack's limit of 10 connections, so Kazma is not
+  connected until a slot frees. The first refusal of a run is a WARNING and
+  the connection's problem, and the hello that ends the run says how many
+  there were. A count taken inside the settle window is kept when it shows a
+  connection besides Kazma's own two. Two reloads on 2026-10-02 were refused
+  4 and 9 times and then counted 10, and that rule kept nothing, so nothing
+  showed above INFO.
 - **The gateway's flood guard accounts for what it leaves**
   (`BaseAdapter.note_left_unanswered`, 2026-10-01). Past
   `gateway.rate_limits` (messages per person per minute, from the settings
