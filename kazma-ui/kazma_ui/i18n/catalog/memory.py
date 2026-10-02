@@ -928,6 +928,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "المحاولات: {n}",
         "en": "{n} attempts",
     },
+    # A memory queue task's status (the queue's pending/processing/completed/failed).
+    "memory.console.queue_pending": {"ar": "بانتظار التنفيذ", "en": "pending"},
+    "memory.console.queue_processing": {"ar": "قيد التنفيذ", "en": "running"},
+    "memory.console.queue_completed": {"ar": "اكتمل", "en": "completed"},
+    "memory.console.queue_failed": {"ar": "فشل", "en": "failed"},
     "memory.console.retry_failed": {
         "ar": "فشلت إعادة المحاولة",
         "en": "Retry failed",

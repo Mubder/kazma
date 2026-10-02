@@ -25,7 +25,10 @@ The chat page went from 119 mismatches to none. These were left:
   content rule and its first letter's direction: "RAG لكل دورة" ran left to
   right. It is an isolate in the page's direction now. The Memory page's
   list of conversation memories puts each memory on its own line, in its own
-  language (an English memory sat on the right in the Arabic UI).
+  language (an English memory sat on the right in the Arabic UI), and so do
+  the weekly summaries' titles. The memory queue's task statuses (pending,
+  running, completed, failed) are in the page's language; they were the
+  queue's own English words.
 - **Arabic technical writing counts as Arabic.** A paragraph's language is
   the language of most of its words; "توليد مستندات PDF وDOCX وXLSX
   وMarkdown." counted as English (four Latin words to two Arabic ones). A
