@@ -194,15 +194,9 @@
     setMetric('metric-tools', String(Math.round(toolCalls)));
     // Sub-lines under tokens / tools cards — preserve SSR labels when possible
     var llmEl = $('metric-llm-calls');
-    if (llmEl) {
-      var llmLabel = (llmEl.textContent || '').replace(/^[\d,.\s]+/, '').trim() || 'LLM calls';
-      llmEl.textContent = Math.round(llmCalls) + ' ' + llmLabel;
-    }
+    if (llmEl) llmEl.textContent = dashCount('llmCalls', Math.round(llmCalls), '{n} LLM calls');
     var tracesEl = $('metric-traces');
-    if (tracesEl) {
-      var trLabel = (tracesEl.textContent || '').replace(/^[\d,.\s]+/, '').trim() || 'traces';
-      tracesEl.textContent = Math.round(traces) + ' ' + trLabel;
-    }
+    if (tracesEl) tracesEl.textContent = dashCount('traces', Math.round(traces), '{n} traces');
 
     if (metrics.uptime) {
       setMetric('metric-uptime', metrics.uptime);
@@ -491,6 +485,14 @@
     var text = DASH_I18N[key] || fallback;
     return n === undefined ? text : text.replace('{n}', n);
   }
+  // A count with its noun, in the page's language: the catalog's plural
+  // forms (plural_forms in the template), chosen with t_plural's rule.
+  // "{n} sessions" in one form read "1 sessions" and "5 جلسة" (2026-10-02).
+  function dashCount(key, n, fallback) {
+    var forms = DASH_I18N[key];
+    if (forms && typeof forms === 'object' && window.KazmaFormat) return window.KazmaFormat.count(forms, n, fallback);
+    return String(fallback).replace('{n}', n);
+  }
   // Labels shared with the mobile cards (dash_lists.js loads first).
   var LISTS = window.KazmaDashLists || {};
   function label(key, fallback, vars) {
@@ -605,7 +607,7 @@
             var hidden = list.length - SESSION_PREVIEW;
             expandBtn.textContent = _sessionsExpanded
               ? dashT('showLess', 'Show less')
-              : dashT('showMore', 'Show {n} more sessions', hidden);
+              : dashCount('moreSessions', hidden, 'Show {n} more sessions');
           }
         } else {
           expandWrap.style.display = 'none';
@@ -613,7 +615,7 @@
       }
       if (summaryEl) {
         summaryEl.textContent = list.length
-          ? (dashT('sessionsCount', '{n} sessions', list.length)
+          ? (dashCount('sessions', list.length, '{n} sessions')
             + (list.length > SESSION_PREVIEW && !_sessionsExpanded
               ? ' · ' + dashT('showingFirst', 'showing first {n}', SESSION_PREVIEW)
               : ''))

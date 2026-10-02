@@ -15,7 +15,7 @@
                 <div class="status-dot status-{{ server.status }}"></div>
                 <h3 translate="no">{{ server.name }}</h3>
                 <span class="badge badge-{{ server.transport }}" translate="no">{{ server.transport }}</span>
-                <span class="tool-count">{{ server.tool_count }} {{ t('mcp.tools_suffix') }}</span>
+                <span class="tool-count">{{ t_plural('mcp.tool_count', server.tool_count) }}</span>
             </div>
             <div class="mcp-card-body">
                 {% if server.transport == 'stdio' %}

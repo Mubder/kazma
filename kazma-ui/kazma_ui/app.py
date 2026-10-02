@@ -608,6 +608,7 @@ class KazmaAppBuilder:
         import contextvars
         from kazma_ui.i18n import make_translator as _make_translator, TRANSLATIONS
         from kazma_ui.i18n import plural_forms as _plural_forms
+        from kazma_ui.i18n import t_plural as _t_plural
 
         _startup_lang = _lang
         self._current_lang = contextvars.ContextVar("_current_lang", default=_startup_lang)
@@ -704,6 +705,13 @@ class KazmaAppBuilder:
         # chat.js tiCount picks one with t_plural's CLDR rule.
         self.templates.env.globals["plural_forms"] = (
             lambda key: _plural_forms(key, self._current_lang.get())
+        )
+        # A count in the request's language, chosen server-side. The default
+        # the i18n patch registers is English-bound; until 2026-10-02 nothing
+        # replaced it, so a template using it would have read English in
+        # Arabic (none did yet -- the MCP card's count is the first).
+        self.templates.env.globals["t_plural"] = (
+            lambda key, count, **kw: _t_plural(key, count, lang=self._current_lang.get(), **kw)
         )
         self.templates.env.globals["lang"] = _dynamic_lang
         self.templates.env.globals["dir"] = _dynamic_dir

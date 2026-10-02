@@ -31,6 +31,14 @@ certified preset.
   shows the folder the server runs on. The check for old sandbox spellings
   missed the bare `kazma-data/workspace`, and on Windows its absolute form
   never matched.
+- **Counts read right in Arabic.** The MCP card said "1 أدوات" and the
+  Dashboard "5 تتبع" and "1 sessions": a number beside a word in one form.
+  Both now use the catalog's plural forms (six in Arabic). The template
+  helper for that, `t_plural`, was registered for English only, so any
+  template using it would have read English in Arabic; the app now binds it
+  to the request's language like `t`. A gate stops a count being glued to a
+  word in a template again, and a ratchet counts the 37 catalog labels still
+  written in one form ("{n} sessions"); it may only go down.
 - **Gates.** `tests/test_alpine_templates.py`: every `$name` a template's
   directives use (and every `this.$name` in a script) is a magic Alpine 3
   has, with the shipped `$parent` card as the negative control.

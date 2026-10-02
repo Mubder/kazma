@@ -433,10 +433,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "سليم",
         "en": "OK",
     },
-    "dashboard.llm_calls": {
-        "ar": "استدعاءات النماذج",
-        "en": "LLM calls",
-    },
     "dashboard.loading_backups": {
         "ar": "جارٍ تحميل النسخ الاحتياطية...",
         "en": "Loading backups...",
@@ -753,10 +749,30 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "إدارة الجلسات",
         "en": "Session Management",
     },
-    "dashboard.sessions_count": {
-        "ar": "{n} جلسة",
-        "en": "{n} sessions",
-    },
+    "dashboard.count_sessions.zero": {"ar": "لا جلسات", "en": "0 sessions"},
+    "dashboard.count_sessions.one": {"ar": "جلسة واحدة", "en": "1 session"},
+    "dashboard.count_sessions.two": {"ar": "جلستان", "en": "2 sessions"},
+    "dashboard.count_sessions.few": {"ar": "{n} جلسات", "en": "{n} sessions"},
+    "dashboard.count_sessions.many": {"ar": "{n} جلسة", "en": "{n} sessions"},
+    "dashboard.count_sessions.other": {"ar": "{n} جلسة", "en": "{n} sessions"},
+    "dashboard.count_more_sessions.zero": {"ar": "لا جلسات أخرى", "en": "No more sessions"},
+    "dashboard.count_more_sessions.one": {"ar": "عرض جلسة أخرى", "en": "Show 1 more session"},
+    "dashboard.count_more_sessions.two": {"ar": "عرض جلستين أخريين", "en": "Show 2 more sessions"},
+    "dashboard.count_more_sessions.few": {"ar": "عرض {n} جلسات أخرى", "en": "Show {n} more sessions"},
+    "dashboard.count_more_sessions.many": {"ar": "عرض {n} جلسة أخرى", "en": "Show {n} more sessions"},
+    "dashboard.count_more_sessions.other": {"ar": "عرض {n} جلسة أخرى", "en": "Show {n} more sessions"},
+    "dashboard.count_llm_calls.zero": {"ar": "لا استدعاءات للنماذج", "en": "0 LLM calls"},
+    "dashboard.count_llm_calls.one": {"ar": "استدعاء واحد للنماذج", "en": "1 LLM call"},
+    "dashboard.count_llm_calls.two": {"ar": "استدعاءان للنماذج", "en": "2 LLM calls"},
+    "dashboard.count_llm_calls.few": {"ar": "{n} استدعاءات للنماذج", "en": "{n} LLM calls"},
+    "dashboard.count_llm_calls.many": {"ar": "{n} استدعاءً للنماذج", "en": "{n} LLM calls"},
+    "dashboard.count_llm_calls.other": {"ar": "{n} استدعاء للنماذج", "en": "{n} LLM calls"},
+    "dashboard.count_traces.zero": {"ar": "لا تتبعات", "en": "0 traces"},
+    "dashboard.count_traces.one": {"ar": "تتبع واحد", "en": "1 trace"},
+    "dashboard.count_traces.two": {"ar": "تتبعان", "en": "2 traces"},
+    "dashboard.count_traces.few": {"ar": "{n} تتبعات", "en": "{n} traces"},
+    "dashboard.count_traces.many": {"ar": "{n} تتبعًا", "en": "{n} traces"},
+    "dashboard.count_traces.other": {"ar": "{n} تتبع", "en": "{n} traces"},
     "dashboard.sessions_hint": {
         "ar": "تظهر الجلسات هنا عندما يبدأ المستخدمون بالمحادثة",
         "en": "Sessions appear here when users start chatting",
@@ -772,10 +788,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.show_more_sessions": {
         "ar": "عرض المزيد من الجلسات",
         "en": "Show more sessions",
-    },
-    "dashboard.show_n_more_sessions": {
-        "ar": "عرض {n} جلسة أخرى",
-        "en": "Show {n} more sessions",
     },
     "dashboard.snapshot_maintain": {
         "ar": "تنظيف اللقطات",
@@ -821,10 +833,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.total_tokens": {
         "ar": "إجمالي الرموز",
         "en": "Total Tokens",
-    },
-    "dashboard.traces_count": {
-        "ar": "تتبع",
-        "en": "traces",
     },
     "dashboard.uptime": {
         "ar": "وقت التشغيل",
