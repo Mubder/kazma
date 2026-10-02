@@ -1082,13 +1082,24 @@
       const data = await resp.json();
       const tasks = data.tasks || [];
       if (!tasks.length) { el.textContent = _mt('memory.console.queue_empty', 'Queue empty.'); return; }
+      // A task's status is an interface word, in the page's language; it was
+      // the queue's own English word in every language (2026-10-02). A status
+      // the page does not know is shown as data.
+      const QUEUE_STATUS = {
+        pending: ['memory.console.queue_pending', 'pending'],
+        processing: ['memory.console.queue_processing', 'running'],
+        completed: ['memory.console.queue_completed', 'completed'],
+        failed: ['memory.console.queue_failed', 'failed'],
+      };
       el.innerHTML = tasks.map(function(t) {
         const st = t.status || '';
+        const label = QUEUE_STATUS[st];
+        const stHtml = label ? _esc(_mt(label[0], label[1])) : '<span translate="no">' + _esc(st) + '</span>';
         const retry = st === 'failed'
           ? ' <button type="button" data-retry="' + _esc(t.id) + '" class="v2-queue-retry" style="font-size:0.65rem;padding:1px 6px;cursor:pointer;">' + _esc(_mt('memory.console.retry', 'retry')) + '</button>'
           : '';
         return '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
-          '<span translate="no">' + _esc(t.task_type) + ' · ' + _esc(st) + '</span> · ' +
+          '<span translate="no">' + _esc(t.task_type) + '</span> · ' + stHtml + ' · ' +
           _esc(_mt('memory.console.attempts', '{n} attempts', { n: t.attempts || 0 })) + retry + '</div>';
       }).join('');
       el.querySelectorAll('.v2-queue-retry').forEach(function(btn) {
