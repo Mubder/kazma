@@ -1,5 +1,50 @@
 # CHANGELOG
 
+## Three small fixes found by testing on the live install (2026-10-02)
+
+- **The SQL tools' refusal names the SQL tools.** Asked to query one of
+  Kazma's own databases, `sqlite_query` answered "file tools may not open
+  it": the workspace check ran before the store check and answered in the
+  file tools' words. The store check runs first now.
+- **No "v—" on the Skills page.** Agent skills rarely declare a version (the
+  spec makes it optional), and the page printed "v—" under each one. A
+  skill with no version now shows none.
+- **The update commands name the install's own Python.** `kazma update`'s
+  refusal and the boot check's alert said `python scripts/service/kazma_guard.py`;
+  a bare `python` may be another interpreter, or none on Windows. They now
+  name the interpreter Kazma runs on, relative in the install folder
+  (`.venv\Scripts\python.exe` on Windows), and the refusal prints each
+  command on one line: Rich wrapped them, and a pasted half-command runs.
+- **Gates:** `tests/test_store_registry.py` (each refusal names its own
+  door), `tests/test_skill_integrity_shown.py`,
+  `tests/test_package_update_on_a_guarded_install.py`.
+
+## Settings can send a test alert (2026-10-02)
+
+- **You can check that alerts reach you.** Settings -> Adapters & Routes has
+  **Send a test alert** under "Alerts go to". It sends one message along the
+  saved alert routes, the way a real alert travels: from a background
+  thread onto the server's loop, through each chat app, with the Telegram
+  fallback. The page then names each route that took it and each that did
+  not. Until now a real failure was the only proof, and the one failure
+  that happened (2026-10-02) reached nobody. A test alert is not throttled,
+  and the weekly report does not count it as an alert.
+- **Gate:** `tests/test_ops_alert_delivery.py`.
+
+## A chat kept out of memory from its first message stays out (2026-10-02)
+
+- **"Don't remember this chat" holds from the start.** A web chat is
+  stored under two ids, a session id and a thread id, and the thread id is
+  saved with the first message. Memory switched off before that put the
+  chat's ledger row under the session id alone, while the catch-up sweep
+  (turn reconcile) writes a chat's turns under its thread id. On the live
+  install a test chat kept out from the start reached memory: two turns
+  and two facts. The episode writer now checks the ledger under every id
+  the chat has when it writes, so a row under either id keeps the chat
+  out. The lookup reads the two ids only, never the conversation.
+- **Gate:** `tests/test_memory_forget.py` (a chat kept out before its
+  first message; the old one-id check as the negative control).
+
 ## A refused agent skill is logged when it is used, not on every turn (2026-10-02)
 
 - Showing a skill's verdict (the model's skill catalog, which is built on

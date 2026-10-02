@@ -94,7 +94,7 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
             entries.append({
                 "id": skill_id,
                 "name": name,
-                "version": manifest.get("version", "1.0.0"),
+                "version": manifest.get("version", ""),
                 "description": _localize_skill_desc(name, manifest.get("description", ""), lang),
                 "author": manifest.get("author", "kazma"),
                 # The saved switch (it read True whatever was saved).
@@ -123,7 +123,9 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
             entries.append({
                 "id": f"agent-skill:{skill.name}",
                 "name": skill.name,
-                "version": skill.version or "—",
+                # None declared: shown as no version, never "v—" (most agent
+                # skills declare none; the spec makes it optional).
+                "version": skill.version or "",
                 "description": _localize_skill_desc(skill.name, skill.description or "", lang),
                 "author": skill.author or skill.source or "agent-skills",
                 "enabled": skill.enabled,

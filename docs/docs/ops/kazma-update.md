@@ -60,6 +60,8 @@ kazma update --reinstall -y
 python scripts/service/kazma_guard.py --resume
 ```
 
+`python` here is the install's own: `.venv\Scripts\python.exe` on Windows, `.venv/bin/python` elsewhere. A bare `python` may be another interpreter, or none; the refusal prints the commands with the right one.
+
 The first command waits until no chat turn is running; then the guard stops the server gracefully and keeps it stopped. If you forget the third command, the pause lifts itself after two hours. Without the guard: stop the server, run `kazma update --reinstall -y`, and start the server again.
 
 `--reinstall` is the packages-only path: it keeps your optional extras and touches no git state.

@@ -572,6 +572,49 @@
             this.adapterRoutingTesting = '';
         },
 
+        async sendTestAlert() {
+            // One alert along the SAVED routes (the server reads them), sent
+            // the way an alert raised by a background job is. Until
+            // 2026-10-02 a real failure was the only proof alerts arrived.
+            if (this.opsTestAlert.sending) return;
+            this.opsTestAlert = { sending: true, result: null };
+            let result;
+            try {
+                const resp = await fetch('/api/settings/notifications/test-alert', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                result = resp.ok
+                    ? await resp.json()
+                    : { ok: false, sent: [], failed: [], error: 'HTTP ' + resp.status };
+            } catch (e) {
+                result = { ok: false, sent: [], failed: [], error: e.message };
+            }
+            this.opsTestAlert = { sending: false, result };
+        },
+
+        testAlertSummary() {
+            const res = this.opsTestAlert.result;
+            if (!res) return '';
+            const label = (route) => ({
+                telegram: 'Telegram',
+                'telegram-group': _k('settings.hub.route_tg_group', 'Telegram (group)'),
+                discord: 'Discord',
+                slack: 'Slack',
+            })[route] || route;
+            const sent = (res.sent || []).map(label).join(', ');
+            const failed = (res.failed || []).map(label).join(', ');
+            const parts = [];
+            if (sent) parts.push(_k('settings.hub.test_alert_sent', 'Delivered to {routes}.', { routes: sent }));
+            if (failed) parts.push(_k('settings.hub.test_alert_failed', 'Not delivered to {routes}: its Test button above says why.', { routes: failed }));
+            if (res.error) {
+                parts.push(_k('settings.hub.test_alert_error', 'The test alert was not sent: {error}', { error: res.error }));
+            } else if (!sent && !failed) {
+                parts.push(_k('settings.hub.test_alert_nowhere', 'No alert route sends anywhere. Tick a channel and save, or set up a chat app above.'));
+            }
+            return parts.join(' ');
+        },
+
         connectorCheckTitle(key) {
             // The title of one check a platform Test made (its detail is the
             // server's own words, shown as written).

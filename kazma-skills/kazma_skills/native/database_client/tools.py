@@ -155,12 +155,15 @@ def _checked_sqlite_file(db_uri: str) -> tuple[str, str | None]:
         return db_uri, None
     p = resolve_tool_path(db_uri)
     resolved = str(p)
-    scope_err = _workspace_scope_error(p, db_uri, "reads")
-    if scope_err:
-        return resolved, scope_err
+    # One of Kazma's own stores first: the workspace check refuses it too,
+    # in the file tools' words ("file tools may not open it"), which is not
+    # the door the model just tried (live 2026-10-02).
     denied = _deny_internal(resolved)
     if denied:
         return resolved, denied
+    scope_err = _workspace_scope_error(p, db_uri, "reads")
+    if scope_err:
+        return resolved, scope_err
     if not _is_path_allowed(resolved):
         return resolved, f"Error: Database access denied for path: {db_uri}"
     if not p.exists():

@@ -34,7 +34,7 @@
                 {% set _dk = 'skill.desc.' ~ skill.name %}{% set _dv = t(_dk) %}
                 {% if _dv != _dk %}<p class="skill-desc" dir="auto">{{ _dv }}</p>{% else %}<p class="skill-desc" dir="auto" translate="no">{{ skill.description }}</p>{% endif %}
                 <div class="skill-meta">
-                    <span>v{{ skill.version }}</span>
+                    {% if skill.version %}<span>v{{ skill.version }}</span>{% endif %}
                     {% if skill.security_score is not none %}<span class="security-score">{{ skill.security_score }}/100</span>{% endif %}
                     {% if skill.integrity %}
                     {% set _ib = {'verified': 'badge-success', 'unsigned': 'badge-warning', 'refused': 'badge-danger'} %}
@@ -101,7 +101,7 @@
                     </div>
                     <p class="skill-desc" translate="no" x-text="skill.description"></p>
                     <div class="skill-meta">
-                        <span x-text="'v' + skill.version"></span>
+                        <span x-show="skill.version" x-cloak x-text="'v' + skill.version"></span>
                         <span class="text-muted" translate="no" x-text="skill.author"></span>
                     </div>
                     <div class="skill-actions">

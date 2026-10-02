@@ -45,6 +45,9 @@ def test_reinstall_refuses_while_the_server_runs(running: bool, monkeypatch, cap
         assert installs == []
         assert "--pause --stop --when-idle" in out and "--resume" in out
         assert "kazma update --reinstall -y" in out
+        # Each command on one line, as pasted: Rich wrapped them at 80 columns.
+        assert any(line.strip().endswith('--when-idle --reason "package update"')
+                   and "kazma_guard.py --pause" in line for line in out.splitlines()), out
     else:
         update.run(["--reinstall", "-y"])
         assert len(installs) == 1  # negative control: a stopped server is reinstalled
@@ -146,3 +149,47 @@ def test_without_when_idle_the_stop_does_not_wait(monkeypatch) -> None:
     monkeypatch.setattr(guard, "_wait_until_down", lambda url, timeout: True)
     assert guard._cmd_pause("diagnosis", 60, stop_now=True) == 0
     assert asked == []
+
+
+# ── the commands name the install's own Python ───────────────────────────
+
+
+@pytest.mark.parametrize("module", ["kazma_cli.update", "kazma_core.install_requirements"])
+def test_the_guard_command_runs_the_installs_own_python(module, tmp_path, monkeypatch) -> None:
+    """A bare ``python`` may be another interpreter, or none at all on Windows
+    (the live refusal said ``python scripts/...``). The command names the
+    interpreter running Kazma: relative inside the install folder, which cmd,
+    PowerShell and a POSIX shell all run as typed."""
+    import importlib
+    import os
+    import sys
+
+    mod = importlib.import_module(module)
+    root = tmp_path / "kazma"
+    exe = root / ".venv" / "Scripts" / "python.exe"
+    monkeypatch.setattr(sys, "executable", str(exe))
+    assert mod._install_python(root) == os.path.join(".venv", "Scripts", "python.exe")
+    # Outside the install folder: in full, quoted when it holds a space.
+    elsewhere = tmp_path / "other dir" / "python.exe"
+    monkeypatch.setattr(sys, "executable", str(elsewhere))
+    assert mod._install_python(root) == f'"{elsewhere}"'
+
+
+def test_the_alert_and_the_refusal_carry_that_python(tmp_path, monkeypatch, capsys) -> None:
+    import os
+    import sys
+
+    from kazma_cli import update
+    from kazma_core import install_requirements as ir
+
+    monkeypatch.setattr(sys, "executable", str(tmp_path / ".venv" / "Scripts" / "python.exe"))
+    python = os.path.join(".venv", "Scripts", "python.exe")
+    monkeypatch.setenv("KAZMA_GUARD_STATE_FILE", "x")
+    text = ir._update_instructions(tmp_path)
+    assert f"{python} {os.path.join('scripts', 'service', 'kazma_guard.py')} --pause" in text
+    assert "python scripts" not in text  # negative: the bare name is gone
+
+    monkeypatch.setattr(update, "_find_git_root", lambda: tmp_path)
+    monkeypatch.setattr(update, "_is_server_running", lambda port=9090: True)
+    refusal = update._server_running_refusal("kazma update --reinstall -y")
+    assert f"{python} {os.path.join('scripts', 'service', 'kazma_guard.py')} --resume" in refusal

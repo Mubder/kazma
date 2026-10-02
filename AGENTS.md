@@ -952,6 +952,10 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   store). `dual_write.mirror_episode` asks it FIRST (`refuses_write`) -- it
   embeds, upserts the remote index and mirrors to Postgres even when its
   insert is ignored -- and so do the swarm bridge and the legacy restore.
+  It asks under every id the chat has WHEN IT WRITES (2026-10-02): a web
+  chat's thread id is saved with its first message, so a chat kept out
+  before that has its row under the session id alone, and turn reconcile
+  writes under the thread id; a test chat on live reached memory that way.
   Every product site that inserts an episode is declared in
   `tests/test_memory_forget.py`, and the live writers must ask the ledger.
 - The facts a forgotten turn produced (`source_session`/`source_turn`) are
@@ -2799,9 +2803,16 @@ Model fallbacks (§38) ride the second row plus the web banner
   "routing choice". Every sender used to answer `None`, so a finished
   `gather` counted as a delivery and a failed send never reached the
   fallback. The lifecycle card had the same blind spot.
+- **The operator can prove it** (Settings -> Adapters & Routes -> Send a
+  test alert, `POST /api/settings/notifications/test-alert`,
+  `ops_alerts.send_test_alert`): one message along the saved routes, from a
+  worker thread onto the server's loop like a background job's alert, and
+  the routes that took it and those that did not (`_deliver(outcome=)`).
+  Never throttled, and logged as `[ops_alerts] test alert ...`, which the
+  weekly report does not count. It blocks, so it is a loop-stall helper.
 - Gate: `tests/test_ops_alert_delivery.py` (the loop a worker-thread alert
   is delivered on, with the unbound path as the negative control; a refusing
-  bus; each platform sender's answer).
+  bus; each platform sender's answer; the test alert's routes and its route).
 
 **The guard's credentials come from a child process.** `Notifier` reads
 env first, then Kazma's settings — through `_NOTIFY_LOOKUP`, run with the

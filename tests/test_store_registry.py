@@ -379,11 +379,14 @@ def _doors(path: Path) -> dict[str, object]:
         control_plane_store_targeted,
         denied_message,
     )
-    from kazma_skills.native.database_client.tools import _deny_internal
+    from kazma_skills.native.database_client.tools import _checked_sqlite_file
 
     read = check_path_access(path, "read")
     return {
-        "sql": _deny_internal(str(path)),
+        # The whole check the SQL tools run: the store check alone passed
+        # while the workspace check before it answered in the file tools'
+        # words (live 2026-10-02).
+        "sql": _checked_sqlite_file(str(path))[1],
         "file_read": None if read.allowed else denied_message(str(path), "read", result=read),
         "file_write": None if check_path_access(path, "write").allowed else "refused",
         "python_exec": code_mentions_control_plane(f"open({str(path)!r}, 'rb')"),
@@ -410,6 +413,21 @@ def test_every_door_refuses_every_store_and_names_its_reader(data):
         assert "request_path_access" not in str(doors["file_read"]), (
             f"{name}: offered a path grant, which cannot open a store"
         )
+        # Each refusal names the door the model tried.
+        assert "the SQL tools may not open it" in str(doors["sql"]), f"{name}: {doors['sql']}"
+        assert "file tools may not open it" in str(doors["file_read"]), f"{name}: {doors['file_read']}"
+
+
+def test_the_workspace_check_alone_names_the_file_tools(data):
+    """Negative control: the check the SQL tools ran first until 2026-10-02
+    refuses a store in the file tools' words, the door the model had not
+    tried."""
+    from kazma_core.agent.tool_scope import _workspace_scope_error
+
+    path = data / "cron.db"
+    path.write_bytes(b"")
+    text = str(_workspace_scope_error(path, str(path), "reads"))
+    assert "file tools may not open it" in text and "the SQL tools" not in text
 
 
 def test_the_users_own_sandbox_database_passes_every_door(data):

@@ -3356,6 +3356,34 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تنبيهات التشغيل وانقطاعات MCP وبدء الخادم وإيقافه. اترك الكل دون تحديد للتوصيل إلى كل منصة مُعدّة.",
         "en": "Ops pages, MCP outages, and server start/stop. Leave ALL unchecked to deliver to every configured platform.",
     },
+    "settings.hub.test_alert": {
+        "ar": "إرسال تنبيه تجريبي",
+        "en": "Send a test alert",
+    },
+    "settings.hub.test_alert_sending": {
+        "ar": "جارٍ الإرسال…",
+        "en": "Sending…",
+    },
+    "settings.hub.test_alert_hint": {
+        "ar": "يرسل رسالة واحدة عبر مسارات التنبيهات المحفوظة، بالطريقة نفسها التي يُرسَل بها أي تنبيه حقيقي. احفظ تغييراتك أولًا.",
+        "en": "Sends one message along the saved alert routes, the way a real alert travels. Save your changes first.",
+    },
+    "settings.hub.test_alert_sent": {
+        "ar": "وصل إلى {routes}.",
+        "en": "Delivered to {routes}.",
+    },
+    "settings.hub.test_alert_failed": {
+        "ar": "لم يصل إلى {routes}: زر «اختبار» الخاص به أعلاه يوضح السبب.",
+        "en": "Not delivered to {routes}: its Test button above says why.",
+    },
+    "settings.hub.test_alert_nowhere": {
+        "ar": "لا يرسل أي مسار تنبيهات إلى أي مكان. اختر قناة واحفظ، أو أعِدّ تطبيق محادثة أعلاه.",
+        "en": "No alert route sends anywhere. Tick a channel and save, or set up a chat app above.",
+    },
+    "settings.hub.test_alert_error": {
+        "ar": "لم يُرسَل التنبيه التجريبي: {error}",
+        "en": "The test alert was not sent: {error}",
+    },
     "settings.hub.swarm_goes_to": {
         "ar": "تذهب مخرجات السرب إلى",
         "en": "Swarm output goes to",

@@ -133,5 +133,5 @@ Also run document rows in the [Smoke matrix](./smoke-matrix).
 - [ ] With Postgres, the weekly deep drill's **restore rehearsal** is on (default since 2026-09-27) and the database role has `CREATEDB`; the drill log names `postgres:restore`
 - [ ] **Chat step history** retention is what you want (Settings → System; default 30 days, 0 keeps every checkpoint). An install upgrading with years of history: set it before the upgrade if you want to keep them
 - [ ] Universal backup **checks** PG dump freshness — a missing/stale dump is not `"ok": true`
-- [ ] `ops_alerts` reach Telegram (and FanOut if Discord/Slack configured); kill-switch `KAZMA_OPS_ALERTS=0` only during a noisy incident
+- [ ] `ops_alerts` reach Telegram (and FanOut if Discord/Slack configured): Settings → Adapters & Routes → **Send a test alert** names each route that took it; kill-switch `KAZMA_OPS_ALERTS=0` only during a noisy incident
 - [ ] Guard Telegram is separate (child-down). 503 cause-quality (`database: …` vs `Service Unavailable`) is **deferred**: [`GUARD_OPS_ALERTING_CAUSE_QUALITY.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md)

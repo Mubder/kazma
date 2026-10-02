@@ -307,6 +307,8 @@ Model: deepseek-flash
 
 The card waits until every chat app has connected or failed (up to 45 s; they usually connect within a few seconds) and marks each one with what its connection said. It is green when everything connected and the last run stopped cleanly, yellow otherwise. "Down for" runs from the stop to the moment Kazma was serving again; the wait for the chat apps is not counted. Until 2026-09-30 it ran to the card's send, so one slow chat app turned a 35-second reload into "started".
 
+To check the routes without waiting for a restart, press **Send a test alert** under **Alerts go to**: one message goes along the saved routes the way a real alert does, and the page names each route that took it.
+
 ### Messages
 
 | Message | On by default | When | What it tells you |

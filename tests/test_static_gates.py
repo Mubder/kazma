@@ -884,6 +884,9 @@ def test_dns_gate_catches_the_redirect_hop_shape():
 # names one; a call in an async body must go through asyncio.to_thread.
 
 _LOOP_STALL_HELPERS = frozenset({
+    # Waits up to 45 s for a test alert's delivery ON the loop: called on the
+    # loop it would wait for itself (it refuses, but no async code may try).
+    "send_test_alert",
     # Two git probes of up to 4 s each plus a workspace-store read; the IDE's
     # swarm dispatch ran it on the loop until 2026-10-02.
     "_build_env_context_sync",

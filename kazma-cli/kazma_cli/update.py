@@ -1490,21 +1490,43 @@ def _server_running_refusal(command: str) -> str | None:
     did not check at all until 2026-10-02, and the git update told the
     operator to kill the server by hand, which the guard undoes within
     seconds. A guarded install is stopped through the guard, when no chat
-    turn is running.
+    turn is running. Print it with ``soft_wrap=True``: Rich breaks a long
+    line with a real newline, and a pasted command split in two runs half
+    of it.
     """
     port = _resolve_server_port()
     if not _is_server_running(port):
         return None
+    script = os.path.join("scripts", "service", "kazma_guard.py")
+    guard = f"{_install_python(_find_git_root())} {script}"
     return (
         f"[red]Kazma's server is running (port {port}); its packages cannot be "
         "replaced while it has them loaded.[/red]\n"
         "With the guard (the KazmaAgent task), from the install folder:\n"
-        '  [cyan]python scripts/service/kazma_guard.py --pause --stop --when-idle '
-        '--reason "package update"[/cyan]\n'
+        f'  [cyan]{guard} --pause --stop --when-idle --reason "package update"[/cyan]\n'
         f"  [cyan]{command}[/cyan]\n"
-        "  [cyan]python scripts/service/kazma_guard.py --resume[/cyan]\n"
+        f"  [cyan]{guard} --resume[/cyan]\n"
         "Without the guard: stop the server, run the command above, start it again."
     )
+
+
+def _install_python(root: Path | None) -> str:
+    """This install's Python, as typed in the install folder.
+
+    A bare ``python`` may be another interpreter, or none at all on Windows.
+    ``sys.executable`` is the one running ``kazma`` -- the install's own.
+    Inside the install folder it is given relative (``.venv\\Scripts\\python.exe``
+    runs as typed in cmd, PowerShell and a POSIX shell), in full elsewhere.
+    """
+    exe = sys.executable or "python"
+    if root is not None:
+        try:
+            rel = os.path.relpath(exe, root)
+        except ValueError:  # on another drive
+            rel = ""
+        if rel and not rel.startswith(".."):
+            exe = rel
+    return f'"{exe}"' if " " in exe else exe
 
 
 def do_git_update(
@@ -1530,7 +1552,7 @@ def do_git_update(
     # (git updated but package not reinstalled — a broken state).
     refusal = _server_running_refusal("kazma update -y")
     if refusal:
-        console.print(refusal)
+        console.print(refusal, soft_wrap=True)
         return False
 
     cwd = str(git_root)
@@ -2001,7 +2023,7 @@ def run(args: list[str]) -> None:
     if reinstall_only:
         refusal = _server_running_refusal("kazma update --reinstall -y")
         if refusal:
-            console.print(refusal)
+            console.print(refusal, soft_wrap=True)
             sys.exit(1)
         git_root = _find_git_root()
         if git_root is None:

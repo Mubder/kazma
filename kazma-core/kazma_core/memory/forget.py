@@ -73,16 +73,13 @@ def chat_keys(key: str) -> list[str]:
 
     Writers use either (the live path the session's, turn reconcile the
     thread's), so the ledger names both. The key alone when the chat store has
-    no copy -- a deleted chat, or one the store cannot read.
+    no copy -- a deleted chat, a chat before its first message, or one the
+    store cannot read. Reads the ids only, never the messages: the episode
+    writer asks on every write.
     """
-    from kazma_core.memory.chat_history import conversations_for
+    from kazma_core.memory.chat_history import ids_of
 
-    keys = [key] if key else []
-    for conv in conversations_for(key):
-        for k in (conv.get("session_id"), conv.get("thread_id")):
-            if k and str(k) not in keys:
-                keys.append(str(k))
-    return keys
+    return ids_of(key)
 
 
 _schema_ready: set[str] = set()
@@ -126,18 +123,30 @@ def refuses_write(
     session_id: str,
     turn_number: int,
     user_text: str | None,
+    keys: Iterable[str] | None = None,
 ) -> bool:
     """True when the ledger keeps this turn out of memory: the user forgot it,
-    or keeps its whole chat out."""
+    or keeps its whole chat out -- under ANY id the chat is stored under.
+
+    A web chat has two ids, and before its first message the store knows only
+    the session id, so a chat kept out of memory then has its ledger row under
+    that id alone; turn reconcile writes under the thread id. Asking for the
+    one key a writer holds let a chat kept out from the start reach memory,
+    facts and all (live 2026-10-02). *keys* when the caller has them
+    (``chat_keys``, a store read it should make outside its own locks);
+    resolved here otherwise.
+    """
     if not session_id:
         return False
+    names = list(dict.fromkeys([session_id, *(chat_keys(session_id) if keys is None else keys)]))
+    marks = ",".join("?" for _ in names)
     return bool(
         _ledger_rows(
             conn,
-            "SELECT 1 FROM memory_forgotten WHERE tenant_id = ? AND session_key = ? "
+            f"SELECT 1 FROM memory_forgotten WHERE tenant_id = ? AND session_key IN ({marks}) "
             "AND ((turn_number = 0 AND question_sha = '') "
             "OR (turn_number = ? AND question_sha = ?)) LIMIT 1",
-            (tenant_id or "default", session_id, int(turn_number or 0), question_sha(user_text)),
+            (tenant_id or "default", *names, int(turn_number or 0), question_sha(user_text)),
         )
     )
 

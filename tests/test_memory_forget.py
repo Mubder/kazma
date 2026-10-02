@@ -300,6 +300,30 @@ def test_a_chat_kept_out_is_neither_written_nor_searched(mem):
     assert search_transcripts(COLOUR_Q, tenant_id="default")
 
 
+def test_a_chat_kept_out_before_its_first_message_stays_out(mem):
+    """Kept out while the chat store holds no copy of the chat -- a web
+    chat's thread id does not exist before its first message -- the ledger
+    row names the session id alone, and the live path and turn reconcile
+    write under the thread id. Live 2026-10-02 such a chat reached memory,
+    facts and all."""
+    out = forget.set_chat_remembered("s1", False, tenant_id="default")
+    assert out["chat_keys"] == ["s1"]  # nothing stored yet: the session id alone
+    _chat(mem)  # the first message: the chat now has its thread id too
+    assert _live_turn() is None  # the thread key
+    assert _reconcile(mem)["turns_written"] == 0
+    assert mem.db.execute("SELECT COUNT(*) FROM episodes").fetchone()[0] == 0
+    assert mem.db.execute("SELECT COUNT(*) FROM beliefs").fetchone()[0] == 0
+
+
+def test_asking_the_ledger_for_the_writers_key_alone_let_it_in(mem, monkeypatch):
+    """Negative control: the ledger asked for the key the writer held (the
+    code until 2026-10-02) -- the kept-out chat reaches memory."""
+    forget.set_chat_remembered("s1", False, tenant_id="default")
+    _chat(mem)
+    monkeypatch.setattr(forget, "chat_keys", lambda key: [key] if key else [])
+    assert _reconcile(mem)["turns_written"] == 3
+
+
 def test_a_chat_kept_out_gives_the_post_turn_worker_nothing(mem):
     from kazma_core.memory import consolidator
 

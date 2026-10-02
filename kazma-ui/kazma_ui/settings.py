@@ -810,6 +810,19 @@ class SettingsRouterBuilder:
             """Health-check the active proxy (returns exit IP)."""
             return await _get_sm().test_proxy()
 
+        @router.post("/api/settings/notifications/test-alert")
+        def api_send_test_alert() -> dict[str, Any]:
+            """Send one test alert through the saved alert routes and say
+            which took it (Settings -> Adapters & Routes).
+
+            A plain ``def`` on purpose: it runs in a worker thread, the place
+            an alert raised by a background job is delivered from (on the
+            server's loop). Admin-only through the ``/api/settings`` prefix.
+            """
+            from kazma_core.observability.ops_alerts import send_test_alert
+
+            return send_test_alert()
+
         # ══════════════════════════════════════════════════════════════
         # EMBEDDER — memory vector model (Web UI Embedder settings page)
         # ══════════════════════════════════════════════════════════════
