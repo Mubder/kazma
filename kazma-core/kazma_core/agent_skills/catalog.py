@@ -14,6 +14,7 @@ from kazma_core.agent_skills.discovery import AgentSkill, discover_skills
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "activation_integrity",
     "build_catalog_prompt",
     "format_skill_activation",
     "list_skill_summaries",
@@ -100,15 +101,7 @@ def format_skill_activation(skill: AgentSkill, *, max_resources: int = 40) -> st
     # Integrity gate (fail-closed on tamper, warn on unsigned).
     vr = None  # stays None if the integrity check itself errors below
     try:
-        from kazma_core.agent_skills.integrity import verify_skill
-
-        if skill.scope == "bundled":
-            # Bundled skills ship with the distribution: integrity is a
-            # SHA-256 comparison against the committed bundled/checksums.json
-            # (there is no install-time signing event for them).
-            vr = _verify_bundled_skill(skill)
-        else:
-            vr = verify_skill(skill.location)
+        vr = activation_integrity(skill)
         if not vr.ok:
             return (
                 f"[Kazma] Skill '{skill.name}' failed integrity verification — "
@@ -151,6 +144,23 @@ def format_skill_activation(skill: AgentSkill, *, max_resources: int = 40) -> st
         )
     parts.append("</skill_content>")
     return "\n".join(parts)
+
+
+def activation_integrity(skill: AgentSkill, *, warn: bool = True) -> VerifyResult:
+    """Whether *skill* may be activated: the check activation makes.
+
+    Bundled skills ship with the distribution: their integrity is a SHA-256
+    comparison against the committed ``bundled/checksums.json`` (there is no
+    install-time signing event for them). Any other skill is checked against
+    the checksum and signature written when it was installed. *warn* False
+    keeps an unsigned skill's warning out of the log (the security report
+    asks about every skill each time it runs).
+    """
+    if skill.scope == "bundled":
+        return _verify_bundled_skill(skill)
+    from kazma_core.agent_skills.integrity import verify_skill
+
+    return verify_skill(skill.location) if warn else verify_skill(skill.location, warn=False)
 
 
 def _verify_bundled_skill(skill: AgentSkill) -> VerifyResult:

@@ -140,7 +140,10 @@ STORES: dict[str, Store] = {
         ambiguous_name=True),
     "rbac.db": Store("roles and permissions", "bundle"),
     "audit.db": Store("the audit log", "bundle", ambiguous_name=True),
-    "security_audit.db": Store("the security audit trail", "bundle"),
+    "security_audit.db": Store(
+        "the retired security audit trail", "legacy",
+        reason="nothing ever wrote to it; removed 2026-10-02 (the security report reads "
+               "the approval registry); a leftover file is not carried"),
     "disclosure.db": Store("security disclosure reports", "bundle"),
     "certifications.db": Store("skill certifications", "bundle"),
     "llm_calls.db": Store(
@@ -161,7 +164,9 @@ STORES: dict[str, Store] = {
         reason="removed 2026-09-30 (audit AUD-001: it replayed one turn's answer and "
                "tool calls for later requests); a leftover file is not carried"),
     "security_scan.db": Store(
-        "dependency scan results", "rebuilt", reason="re-scanned on demand"),
+        "the retired dependency scan history", "legacy",
+        reason="nothing read it; the scanner keeps no history since 2026-10-02, a "
+               "leftover file is not carried"),
     "file_checkpoints.db": Store(
         "IDE undo checkpoints of edited files", "machine",
         reason="undo history names this machine's absolute file paths"),
@@ -272,7 +277,9 @@ DATA_DIR_ENTRIES: dict[str, DataDirEntry] = {
     "code-index": DataDirEntry(
         "codebase search indexes", "rebuilt", reason="re-indexed from the workspace"),
     "vuln_cache.json": DataDirEntry(
-        "cached vulnerability lookups", "rebuilt", reason="fetched again by the next scan"),
+        "the retired cache of vulnerability lookups", "legacy",
+        reason="answers were kept forever and hid new advisories; the scanner asks OSV "
+               "each time since 2026-10-02"),
     "backups": DataDirEntry(
         "this machine's backups", "machine",
         reason="the target keeps its own; the source's history stays in its restic repository"),

@@ -261,7 +261,7 @@ the code.
 
 ### 6.3 HITL endpoint secret
 
-`POST /api/approve/{thread_id}` is protected by session / `KAZMA_SECRET` (`secrets.compare_digest`). `get_kazma_secret()` resolves env → `KAZMA_AUTH_DISABLED` → pytest skip → DB `security.secret` → auto-generate. Off localhost, always set `KAZMA_SECRET`.
+`POST /api/approve/{thread_id}` is protected by session / `KAZMA_SECRET` (`secrets.compare_digest`). `get_kazma_secret()` resolves env → `KAZMA_AUTH_DISABLED` → pytest skip → DB `security.secret` → auto-generate. Off localhost, always set `KAZMA_SECRET`. `KAZMA_AUTH_DISABLED` is for one machine: the boot guard refuses it on a non-loopback bind or behind a declared proxy (`KAZMA_TRUSTED_PROXIES`: a tunnel on the same machine makes a loopback bind public), and while it is set a request that came through a proxy is answered 503.
 
 ---
 
@@ -287,32 +287,37 @@ the code.
 
 ### 8.1 Hardening report (`security/hardening.py`)
 
-`SecurityHardeningRunner` is an **on-demand operator report**, not a gate: `GET /api/security/hardening` runs it over the install's source tree (the install's own folder, never the working directory) and returns the findings. The scans skip virtualenvs, `.git`, caches, the data folder and task worktrees, and take about five seconds on a checkout. The report runs in a worker thread, so the server keeps answering while it does. It does not run at startup, and no page calls it yet. The file's `run_on_startup` / `fail_on_critical` keys are not read. Each check it implements:
+`SecurityHardeningRunner` is an **on-demand operator report**, not a gate. `GET /api/security/hardening` runs it over the install (the folder Kazma runs from, never the working directory) as a read-only diagnostic, and returns the findings. Each check runs in a worker thread, so the server keeps answering. A whole run takes about 10 seconds, most of it the OSV query. It does not run at startup, and no page calls it yet. The `run_on_startup` / `fail_on_critical` keys in `kazma-security.yaml` are not read.
 
-| Check (yaml label) | Implemented method | Severity |
+Each check measures the property it names, using the same answer the rest of Kazma uses:
+
+| Check | What it reads | Severity |
 |---|---|---|
-| `secrets_in_logs` | `check_no_hardcoded_secrets` (regex scan for `api_key`/`secret`/`token`/`password`/`AWS`/`PRIVATE_KEY`) | critical |
-| `tls_required` | `check_encrypted_communications` (TLS/SSL/HTTPS/mTLS scan) | high |
-| `rbac_enforcement` | `check_rbac_enforcement` | high |
-| `dependency_audit` | `check_dependency_vulnerabilities` → `DependencyScanner` | critical |
-| (MCP sandboxing) | `check_mcp_sandboxing` | high |
-| (Skill manifests) | `check_skill_manifest_validity` | medium |
-| (Audit logging) | `check_audit_logging` | high |
-| (Escalation) | `check_permission_escalation` (`os.system`, `subprocess(...shell=True)`, `eval`, `exec`, `__import__`, `setattr(...__...)`) | critical |
-| `least_privilege`, `config_integrity` | ⚠ roadmap (no dedicated implementation) | — |
+| `check_no_hardcoded_secrets` | The install's product files, as its git repository lists them. Tests, docs, generated folders and `.env` are left out. The values are judged by `security/secret_scan.py`: issuer formats (private key blocks, AWS, GitHub, Slack, Google, Stripe, OpenAI, Anthropic, Telegram, JWT), random-looking values assigned to credential names, and URL passwords. Placeholders, templates, vault pointers and environment-variable names are not counted. Findings name the file and line, never the value. | critical |
+| `check_mcp_sandboxing` | MCP servers that keep a secret as typed rather than as a vault pointer (`mcp_servers_store.servers_with_plaintext_secrets`), and the per-task workspace guard (`KAZMA_MCP_SCOPE_GUARD`). | high |
+| `check_rbac_enforcement` | Who reaches the API: the boot guard's answer (bind, declared proxy, `KAZMA_AUTH_DISABLED` / `KAZMA_DEV_WS_BYPASS` / `KAZMA_DEMO_MODE`), plus a hand-set `KAZMA_SECRET` shorter than 20 characters. | high |
+| `check_dependency_vulnerabilities` | OSV advisories for the versions actually installed (8.2). An OSV failure fails the check; it is never reported as clean. | critical |
+| `check_skill_manifest_validity` | Built-in skills, checked the way the loader loads them: the manifest parses and every tool it names exists. Agent skills, checked the way activation does: a usable `SKILL.md`, and the integrity check activation applies (a tampered skill fails; an unsigned one is counted). | medium |
+| `check_encrypted_communications` | Whether traffic from other machines arrives over TLS. Reachable only locally passes. If Kazma is exposed (a non-loopback bind, or a declared proxy), `KAZMA_PUBLIC_URL` must be an `https://` address. | high |
+| `check_audit_logging` | The approval registry (`hitl_gates.db`): it is on (`KAZMA_GATE_REGISTRY`) and readable. The message gives the number of decisions it holds. | high |
+| `check_permission_escalation` | Calls in product code that run a shell or evaluate code: `subprocess` with `shell=` true or decided at run time, `os.system`, `os.popen`, `subprocess.getoutput`, `create_subprocess_shell`, `eval`, `exec`. Import aliases are resolved. Each call is checked against `_REVIEWED_SITES`, which records why the site is safe. Today it has one entry: operator tool hooks. | critical |
 
-`fix_issues(auto_fix)` can create a `.env` and amend `.gitignore` for the secrets check.
+A check that cannot run is reported as failed, with its reason; the other checks still run. Until 2026-10-02, four checks passed on a keyword found anywhere, and four failed on findings that were not true (a package cache inside the install, requirement minimums sent to OSV, the wrong manifest file name). `fix_issues`, which wrote a `.env` into the install and was never called, was removed.
 
 ### 8.2 Dependency scanning (`security/dependency_scanner.py`)
 
-| Scanner | Sources | Cache / history |
-|---|---|---|
-| `DependencyScanner` | **OSV** (`api.osv.dev`) | JSON cache `kazma-data/vuln_cache.json` |
-| `DependabotStyleScanner` | **OSV + GitHub Advisories + NVD** | SQLite `kazma-data/security_scan.db`; dedupes by `(package, vuln_id)` |
+`audit_installed()` reads the environment's installed distributions (PEP 503 names, local version labels dropped). It asks OSV's batch API about each exact `(name, version)`, following page tokens, then reads each advisory's summary and fixed version. OSV lists most PyPI advisories under two ids, a GHSA id and a PYSEC id. They name each other as aliases, and the report counts each advisory once. A failure to reach OSV raises `DependencyQueryError`. Nothing is cached.
 
-Both parse `requirements.txt` and `pyproject.toml`. `DependabotStyleScanner` additionally runs `scan_skill_manifests()` (flags suspicious MCP configs: `eval`/`exec`/`system` in command, env `TOKEN`/`SECRET`/`KEY`, `--privileged`, `network: host`; escalation patterns like `sudo`/`chmod 777`/`setuid`), `create_github_issue()` via the `gh` CLI, `generate_advisory()`, and `check_for_updates()`.
+`GET /api/security/deps` runs `scan_skill_manifests()` over the skills installed from the hub. For each skill it reports:
 
-Neither scanner is scheduled: `GET /api/security/deps` runs one on demand. The `scanning` section of `kazma-security.yaml` (interval 24 h, `auto_create_issues`) is not read. What does run on a schedule is GitHub's: Dependabot's weekly pip update PRs (`.github/dependabot.yml`), and bandit's HIGH gate on every CI run.
+- a credential written into the manifest (by the same `secret_scan`);
+- a `command:` that runs through a shell with `-c`, `/c` or `-Command`;
+- `--privileged`, a host network, `sudo`, `chmod 777` or set-ID bits;
+- OSV advisories for the installed versions of the skill's `requirements.txt`. A requirement that is not installed is named.
+
+An OSV failure answers `{"status": "error"}`, never an empty list.
+
+Neither scan is scheduled. The `scanning` section of `kazma-security.yaml` (interval 24 h, `auto_create_issues`) is not read. What does run on a schedule is GitHub's: Dependabot's weekly pip update PRs (`.github/dependabot.yml`), and bandit's HIGH gate on every CI run.
 
 ### 8.3 Disclosure workflow (`security/disclosure.py`)
 

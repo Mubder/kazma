@@ -1,5 +1,58 @@
 # CHANGELOG
 
+## The security report measures what it names; sign-in off is refused behind a proxy (2026-10-02)
+
+- **The report's failures were not true, and its passes measured nothing.**
+  On the live install `GET /api/security/hardening` said 4 of 8 checks
+  failed, 3 of them critical. The 48 "hardcoded secrets" and 576 "privilege
+  escalation vectors" came from a package cache inside the install folder.
+  The 202 "vulnerable dependencies" came from asking OSV about each
+  requirement's minimum version. "No skill manifests" came from looking for
+  the wrong file name. The checks that passed did so on a keyword found
+  anywhere. Each check now reads the answer the rest of Kazma uses:
+  - the install's product files, as its repository lists them;
+  - the MCP servers still holding a typed secret;
+  - the boot guard's exposure;
+  - the versions actually installed;
+  - the skill loader's and activation's checks;
+  - the approval registry;
+  - shell and eval calls against a reviewed list.
+
+  On live, the secrets and escalation checks now find nothing in the
+  install's 1,056 product files.
+- **One credential detector.** `security/secret_scan.py` recognises
+  credentials in their issuers' formats, random-looking values assigned to
+  credential names, and passwords in URLs. Placeholders, templates, vault
+  pointers and environment-variable names are not counted. It reports a
+  line and a kind, never the value.
+- **The dependency scan asks about what is installed, and never reports a
+  scan that failed as clean.** Installed versions go to OSV's batch API.
+  Each advisory is counted once, though OSV lists most under two ids. A
+  failure to reach OSV is reported as an error. A run against this
+  environment found 56 advisories in 14 installed packages (PyJWT, pypdf,
+  urllib3, aiohttp, cryptography and others).
+- **Sign-in switched off is refused behind a proxy.** `KAZMA_AUTH_DISABLED`
+  was refused only on a non-loopback bind. Behind a tunnel on the same
+  machine the bind is loopback, so it started with every `/api` route open
+  to the internet. A proxy declared in `KAZMA_TRUSTED_PROXIES` now counts as
+  exposure at boot (for `KAZMA_DEV_WS_BYPASS` too). While the switch is on,
+  a request that came through a proxy is answered 503.
+- **Removed:** the security audit trail nothing wrote to, the scanner's
+  unreachable parts (version-less GitHub and NVD queries, a scan history,
+  `gh issue create`, a permanent cache), the report's `fix_issues` (it
+  wrote a `.env` into the install and nothing called it), and the security
+  package's unused re-exports.
+- **Gates:**
+  - `tests/test_hardening.py`
+  - `tests/test_secret_scan.py`
+  - `tests/test_dependency_scanner.py`
+  - `tests/test_security_report_sources.py`
+  - `tests/test_auth_disabled_behind_proxy.py`
+
+  Each has a negative control: the old keyword patterns, a scanner that
+  goes silent when OSV fails, the bind-only exposure rule, and a proxy check
+  that always says no.
+
 ## The agent's search and the code index read the project's own files (2026-10-02)
 
 - **A search skips what the repository ignores.** The agent's `file_search`

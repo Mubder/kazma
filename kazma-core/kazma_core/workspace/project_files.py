@@ -23,10 +23,12 @@ programs, AGENTS.md §26I) and with ``core.fsmonitor`` off, so none starts.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
-__all__ = ["GENERATED_DIRS", "git_project_files"]
+__all__ = ["GENERATED_DIRS", "git_project_files", "iter_project_files", "skipped_dir"]
 
 logger = logging.getLogger(__name__)
 
@@ -96,3 +98,39 @@ def git_project_files(root: Path) -> list[Path] | None:
     if res is None or res.returncode != 0:
         return None
     return [root / name for name in res.stdout.decode("utf-8", "replace").split("\0") if name]
+
+
+def skipped_dir(name: str) -> bool:
+    """True for a folder a walk of the project's files never enters.
+
+    A generated folder, or tool state: a name starting with a dot (task
+    worktrees under ``.claude``, editor and cache folders).
+    """
+    return name in GENERATED_DIRS or name.startswith(".")
+
+
+def iter_project_files(root: Path) -> Iterator[Path]:
+    """The project's own files under *root*, never inside a skipped folder.
+
+    Git's list when git knows the folder (:func:`git_project_files`), in a
+    stable order; otherwise a walk that never descends into a skipped
+    folder. Git also lists a tracked file the disk no longer holds, so a
+    reader handles ``OSError``. The code index and the security report read
+    this; the agent's ``file_search`` keeps its own walk (it searches dot
+    folders such as ``.github``).
+    """
+    root = Path(root)
+    listed = git_project_files(root)
+    if listed is None:
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            dirnames[:] = sorted(d for d in dirnames if not skipped_dir(d))
+            for name in sorted(filenames):
+                yield Path(dirpath) / name
+        return
+    for path in sorted(listed):
+        try:
+            parts = path.relative_to(root).parts
+        except ValueError:
+            continue
+        if not any(skipped_dir(part) for part in parts[:-1]):
+            yield path

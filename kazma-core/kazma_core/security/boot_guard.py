@@ -47,13 +47,20 @@ import os
 
 __all__ = [
     "LOOPBACK_HOSTS",
+    "WEAK_SECRET_CHARS",
     "env_flag",
+    "exposure",
     "is_loopback",
     "check_exposure_posture",
 ]
 
 #: Hosts that are not reachable from another machine.
 LOOPBACK_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost"})
+
+#: Shorter than this, a ``KAZMA_SECRET`` set by hand is guessable at scale. A
+#: generated one is 32 hex characters (128 bits). ``kazma_ui.auth`` warns at
+#: boot, and the security report fails its access check below it.
+WEAK_SECRET_CHARS = 20
 
 
 def env_flag(name: str) -> bool:
@@ -69,6 +76,25 @@ def is_loopback(host: str) -> bool:
     return str(host or "").strip().lower() in LOOPBACK_HOSTS
 
 
+def exposure(host: str) -> str:
+    """How another machine reaches Kazma on *host*; ``""`` when nothing can.
+
+    A loopback bind is not private when a reverse proxy on the same machine
+    fronts it (a Cloudflare tunnel, nginx, Caddy): every visitor arrives
+    from ``127.0.0.1``. ``KAZMA_TRUSTED_PROXIES`` is how an operator says one
+    does, so a declared proxy is exposure -- any entry, even the ``*`` that
+    ``kazma_ui.auth`` refuses to trust: it still says a proxy is there.
+    Until 2026-10-02 only the bind counted, and ``KAZMA_AUTH_DISABLED``
+    behind a tunnel started cleanly with every ``/api`` route open to the
+    internet.
+    """
+    if not is_loopback(host):
+        return f"a non-loopback bind ({host})"
+    if any(p.strip() for p in os.environ.get("KAZMA_TRUSTED_PROXIES", "").split(",")):
+        return "a declared reverse proxy (KAZMA_TRUSTED_PROXIES)"
+    return ""
+
+
 def check_exposure_posture(host: str) -> tuple[bool, str]:
     """Decide whether this bind + auth-switch combination may start.
 
@@ -77,27 +103,28 @@ def check_exposure_posture(host: str) -> tuple[bool, str]:
     and carry on. Pure — the caller owns the exit, so this is testable
     without spawning a server.
     """
-    if is_loopback(host):
+    reached = exposure(host)
+    if not reached:
         return True, ""
 
     if env_flag("KAZMA_AUTH_DISABLED"):
         return False, (
-            "\n  [SECURITY] KAZMA_AUTH_DISABLED with a non-loopback bind "
-            f"({host}) — refusing to start.\n"
+            f"\n  [SECURITY] KAZMA_AUTH_DISABLED with {reached} — "
+            "refusing to start.\n"
             "  Every /api endpoint would be open to the network. A secret "
             "does not help:\n"
             "  the switch disables the gate that checks it.\n\n"
             "  Fix one of:\n"
             "    unset KAZMA_AUTH_DISABLED         (use the secret you set)\n"
-            "    KAZMA_HOST=127.0.0.1              (keep it local)\n"
+            "    KAZMA_HOST=127.0.0.1, no proxy    (keep it local)\n"
             "    KAZMA_DEMO_MODE=1                 (a PUBLIC throwaway demo, "
             "no real data)\n"
         )
 
     if env_flag("KAZMA_DEV_WS_BYPASS"):
         return False, (
-            "\n  [SECURITY] KAZMA_DEV_WS_BYPASS with a non-loopback bind "
-            f"({host}) — refusing to start.\n"
+            f"\n  [SECURITY] KAZMA_DEV_WS_BYPASS with {reached} — "
+            "refusing to start.\n"
             "  Every WebSocket handshake would skip authentication, including "
             "the chat socket\n"
             "  that carries the turn stream. KAZMA_PRODUCTION blocks this "
@@ -107,13 +134,12 @@ def check_exposure_posture(host: str) -> tuple[bool, str]:
             "  KAZMA_AUTH_DISABLED through before this guard existed.\n\n"
             "  Fix one of:\n"
             "    unset KAZMA_DEV_WS_BYPASS         (use the secret you set)\n"
-            "    KAZMA_HOST=127.0.0.1              (keep it local)\n"
+            "    KAZMA_HOST=127.0.0.1, no proxy    (keep it local)\n"
         )
 
     if env_flag("KAZMA_DEMO_MODE"):
         return True, (
-            "\n  [SECURITY] KAZMA_DEMO_MODE with a non-loopback bind "
-            f"({host}).\n"
+            f"\n  [SECURITY] KAZMA_DEMO_MODE with {reached}.\n"
             "  The ENTIRE auth gate is disabled and every /api endpoint is "
             "open to the network.\n"
             "  This is what demo mode is for — only run it on a throwaway "

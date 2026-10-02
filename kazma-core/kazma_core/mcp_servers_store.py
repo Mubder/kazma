@@ -35,6 +35,7 @@ __all__ = [
     "list_mcp_servers",
     "move_plaintext_secrets",
     "persist_mcp_yaml",
+    "servers_with_plaintext_secrets",
     "set_mcp_server_enabled",
     "sync_mcp_servers",
     "upsert_mcp_server",
@@ -299,6 +300,24 @@ def sync_mcp_servers(
     )[1]
 
 
+def servers_with_plaintext_secrets(
+    *,
+    config_raw: dict[str, Any] | None = None,
+    yaml_path: str | Path | None = None,
+) -> list[str]:
+    """The MCP servers whose secrets are stored as typed, not as vault pointers.
+
+    Read from the settings database, ``kazma.yaml`` and, when given, the
+    agent's in-memory ``config.raw``. :func:`move_plaintext_secrets` empties
+    this list; the security report shows what it still holds.
+    """
+    from kazma_core.mcp.secrets import has_plaintext_secret
+
+    yaml_in_mem = (config_raw.get("mcp") or {}).get("servers", []) if config_raw else None
+    sources = [*_cs_get(), *_read_yaml_servers(yaml_path), *_normalize_list(yaml_in_mem)]
+    return sorted({str(s.get("name")) for s in sources if has_plaintext_secret(s)})
+
+
 def move_plaintext_secrets(
     *,
     config_raw: dict[str, Any] | None = None,
@@ -311,11 +330,9 @@ def move_plaintext_secrets(
     written when no secret is left or when there is no vault to put it in.
     """
     from kazma_core.config_store import _try_get_vault
-    from kazma_core.mcp.secrets import has_plaintext_secret
 
     yaml_in_mem = (config_raw.get("mcp") or {}).get("servers", []) if config_raw else None
-    sources = [*_cs_get(), *_read_yaml_servers(yaml_path), *_normalize_list(yaml_in_mem)]
-    holders = sorted({str(s.get("name")) for s in sources if has_plaintext_secret(s)})
+    holders = servers_with_plaintext_secrets(config_raw=config_raw, yaml_path=yaml_path)
     if not holders:
         return 0
     if _try_get_vault() is None:
@@ -327,11 +344,7 @@ def move_plaintext_secrets(
         return 0
     current = list_mcp_servers(yaml_servers=yaml_in_mem, yaml_path=yaml_path)
     _written, err = _write_everywhere(current, before=current, config_raw=config_raw, yaml_path=yaml_path)
-    left = sorted({
-        str(s.get("name"))
-        for s in [*_cs_get(), *_read_yaml_servers(yaml_path)]
-        if has_plaintext_secret(s)
-    })
+    left = servers_with_plaintext_secrets(yaml_path=yaml_path)
     logger.info(
         "[mcp_servers_store] Moved the secrets of %d MCP server(s) into the vault: %s%s",
         len(holders), ", ".join(holders),

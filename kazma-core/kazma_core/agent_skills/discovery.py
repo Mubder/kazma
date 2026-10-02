@@ -23,6 +23,7 @@ __all__ = [
     "discover_skills",
     "get_skill",
     "skill_base_dirs",
+    "skill_files",
     "skills_home",
     "user_agent_skills_dir",
     "user_skill_folders",
@@ -240,6 +241,23 @@ def _read_install_meta(skill_dir: Path) -> dict[str, Any]:
         return {}
 
 
+def skill_files(
+    *,
+    project_root: Path | None = None,
+    workspace_root: Path | None = None,
+) -> list[tuple[str, Path]]:
+    """``(scope, SKILL.md path)`` for every skill file discovery reads, in precedence order.
+
+    :func:`discover_skills` parses these; the security report also lists the
+    ones it cannot use.
+    """
+    files: list[tuple[str, Path]] = []
+    for scope, base in skill_base_dirs(project_root=project_root, workspace_root=workspace_root):
+        if base.is_dir():
+            files.extend((scope, skill_md) for skill_md in _iter_skill_md_files(base))
+    return files
+
+
 def discover_skills(
     *,
     project_root: Path | None = None,
@@ -249,55 +267,49 @@ def discover_skills(
     """Discover all Agent Skills. Project skills override user skills by name."""
     found: dict[str, AgentSkill] = {}
 
-    for scope, base in skill_base_dirs(
-        project_root=project_root,
-        workspace_root=workspace_root,
-    ):
-        if not base.is_dir():
+    for scope, skill_md in skill_files(project_root=project_root, workspace_root=workspace_root):
+        try:
+            text = skill_md.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.debug("Cannot read %s: %s", skill_md, exc)
             continue
-        for skill_md in _iter_skill_md_files(base):
-            try:
-                text = skill_md.read_text(encoding="utf-8")
-            except OSError as exc:
-                logger.debug("Cannot read %s: %s", skill_md, exc)
-                continue
 
-            parsed = parse_skill_md(
-                text,
-                path=skill_md.resolve(),
-                directory_name=skill_md.parent.name,
+        parsed = parse_skill_md(
+            text,
+            path=skill_md.resolve(),
+            directory_name=skill_md.parent.name,
+        )
+        if parsed is None:
+            continue
+
+        enabled = _is_enabled(parsed.name)
+        if not enabled and not include_disabled:
+            continue
+
+        _meta = _read_install_meta(skill_md.parent)
+        skill = AgentSkill(
+            name=parsed.name,
+            description=parsed.description,
+            location=skill_md.resolve(),
+            scope=scope,
+            parsed=parsed,
+            enabled=enabled,
+            source=str(_meta.get("source") or ""),
+            checksum=str(_meta.get("checksum") or ""),
+            signature=str(_meta.get("signature") or ""),
+            warnings=list(parsed.warnings),
+        )
+
+        if skill.name in found:
+            prev = found[skill.name]
+            logger.info(
+                "Skill name collision: %s (%s) overrides %s (%s)",
+                skill.name,
+                skill.location,
+                prev.name,
+                prev.location,
             )
-            if parsed is None:
-                continue
-
-            enabled = _is_enabled(parsed.name)
-            if not enabled and not include_disabled:
-                continue
-
-            _meta = _read_install_meta(skill_md.parent)
-            skill = AgentSkill(
-                name=parsed.name,
-                description=parsed.description,
-                location=skill_md.resolve(),
-                scope=scope,
-                parsed=parsed,
-                enabled=enabled,
-                source=str(_meta.get("source") or ""),
-                checksum=str(_meta.get("checksum") or ""),
-                signature=str(_meta.get("signature") or ""),
-                warnings=list(parsed.warnings),
-            )
-
-            if skill.name in found:
-                prev = found[skill.name]
-                logger.info(
-                    "Skill name collision: %s (%s) overrides %s (%s)",
-                    skill.name,
-                    skill.location,
-                    prev.name,
-                    prev.location,
-                )
-            found[skill.name] = skill
+        found[skill.name] = skill
 
     return found
 

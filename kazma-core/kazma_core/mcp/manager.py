@@ -63,6 +63,7 @@ __all__ = [
     "MCPServerHandle",
     "UnifiedToolExecutor",
     "classify_mcp_tool",
+    "mcp_scope_guard_enabled",
     "get_active_mcp_manager",
     "set_active_mcp_manager",
 ]
@@ -375,6 +376,17 @@ def _jsonrpc_parse(text: str) -> dict[str, Any]:
     if "error" in data:
         raise MCPBridgeError(data["error"].get("message", str(data["error"])))
     return data.get("result", {})
+
+
+def mcp_scope_guard_enabled() -> bool:
+    """Live check of ``KAZMA_MCP_SCOPE_GUARD`` (default on).
+
+    On: a task scoped to another workspace never reaches an MCP server bound
+    to the active one (a scoped clone or a refusal). The security report
+    reads the same answer.
+    """
+    raw = os.environ.get("KAZMA_MCP_SCOPE_GUARD", "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -965,9 +977,7 @@ class AsyncMCPManager:
         servers skip. Spawn failure (or missing template) fail-closes.
         """
         try:
-            if os.environ.get("KAZMA_MCP_SCOPE_GUARD", "1").strip().lower() in (
-                "0", "false", "no", "off",
-            ):
+            if not mcp_scope_guard_enabled():
                 return handle, None
 
             from kazma_core.ide.workspace_scope import resolve_workspace_root
