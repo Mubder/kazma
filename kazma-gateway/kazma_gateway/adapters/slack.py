@@ -34,6 +34,7 @@ from typing import Any
 import httpx
 
 from kazma_core.background import spawn_background
+from kazma_core.english_count import count_noun
 from kazma_gateway.adapters.slack_receive import SLACK_REASONS, drop_reason, event_key, where_of
 from kazma_gateway.gateway import (
     Attachment,
@@ -59,6 +60,9 @@ _SOCKET_MAX_RECONNECT_DELAY = 30.0
 #: A connection count Slack's hello gives this soon after Kazma's previous
 #: connection ended may still include that one.
 _SETTLED_AFTER_S = 15.0
+#: Socket Mode connections Slack allows one app at once; past it Slack
+#: refuses a new one with ``too_many_websockets``.
+_SLACK_CONNECTION_LIMIT = 10
 
 
 class SlackAdapter(BaseAdapter):
@@ -119,6 +123,9 @@ class SlackAdapter(BaseAdapter):
         self._receive = ReceiveLog(SLACK_REASONS)
         #: When Kazma's last Socket Mode connection ended (monotonic).
         self._socket_ended_at: float | None = None
+        #: Connections Slack has refused in a row because the app was full
+        #: (``too_many_websockets``); the next hello ends the run.
+        self._refused_in_a_row = 0
 
     def diagnostics(self) -> dict[str, Any]:
         """The live receive record for the connector Test (plain data)."""
@@ -148,9 +155,13 @@ class SlackAdapter(BaseAdapter):
         ended without closing, until Slack notices -- live 2026-10-01 it said
         2 for hours on a token used nowhere else, and every message arrived --
         so the warning names both, and the Test tells them apart by whether
-        the messages it checks reached Kazma. Only a count taken at least
-        ``_SETTLED_AFTER_S`` after Kazma's previous connection ended is kept
-        -- sooner, that one may still be counted.
+        the messages it checks reached Kazma. A count taken sooner than
+        ``_SETTLED_AFTER_S`` after Kazma's previous connection ended may still
+        include that one, so it is kept only when it shows another connection
+        besides both. Two reloads on 2026-10-02 each ended a run of
+        ``too_many_websockets`` refusals in a hello at Slack's limit of 10
+        inside that window; the old rule kept no count taken there, and the
+        log said nothing above INFO.
         """
         self._receive.connected_now(new_session=True)
         host = str((msg.get("debug_info") or {}).get("host") or "?")
@@ -161,12 +172,24 @@ class SlackAdapter(BaseAdapter):
             "[Slack] Socket Mode handshake confirmed (host %s; connections open for this app: %s)",
             host, "?" if count is None else count,
         )
+        if self._refused_in_a_row:
+            logger.info(
+                "[Slack] Connected after Slack refused %s in a row (too_many_websockets)",
+                count_noun(self._refused_in_a_row, "connection"),
+            )
+            self._refused_in_a_row = 0
+        if count is None:
+            return
         ended = self._socket_ended_at
-        if count is None or (ended is not None and time.monotonic() - ended < _SETTLED_AFTER_S):
+        unsettled = ended is not None and time.monotonic() - ended < _SETTLED_AFTER_S
+        # Connections other than this one -- and, so soon after Kazma's
+        # previous connection ended, other than that one too.
+        others = count - 1 - (1 if unsettled else 0)
+        if unsettled and others < 1:
             return
         self._receive.extra["slack_open_connections"] = count
         self._receive.extra["slack_open_connections_at"] = iso(time.time())
-        if count > 1:
+        if others >= 1:
             logger.warning(
                 "[Slack] Slack counts %d open Socket Mode connections for this app and hands each "
                 "message to one of them. Either another program connected to this app is taking "
@@ -183,8 +206,11 @@ class SlackAdapter(BaseAdapter):
         ``link_disabled`` (Socket Mode was switched off in the app's
         settings, or the app-level token this connection used was revoked:
         live 2026-10-01 a revoke sent it, and the reconnect then failed with
-        ``invalid_auth``). The reason was not logged until 2026-09-30, when
-        one boot reconnected ten times in 30 s and the log could not say why."""
+        ``invalid_auth``). ``too_many_websockets`` is a refusal, not a
+        request: the app already holds Slack's limit of connections, so
+        Kazma is not connected until a slot frees. The reason was not logged
+        until 2026-09-30, when one boot reconnected ten times in 30 s and the
+        log could not say why."""
         reason = str(msg.get("reason") or "no reason given")
         host = str((msg.get("debug_info") or {}).get("host") or "?")
         if reason == "link_disabled":
@@ -195,6 +221,28 @@ class SlackAdapter(BaseAdapter):
                 "(connections:write) there and save it in Settings → Adapters & Routes → Slack"
             )
             logger.warning("[Slack] %s", problem)
+            self._socket_ended(problem)
+            return
+        if reason == "too_many_websockets":
+            # Slack refused this connection: the app already holds its limit.
+            # Kazma retries until a slot frees; the first refusal of a run is
+            # the news, the rest are its retries.
+            self._refused_in_a_row += 1
+            problem = (
+                "Slack refused the connection (too_many_websockets): this Slack app already has "
+                f"its limit of {count_noun(_SLACK_CONNECTION_LIMIT, 'Socket Mode connection')} open. Another "
+                "program connected with this app's token holds them, or connections that ended "
+                "without closing, which Slack counts until it notices (that can take hours). "
+                "Kazma keeps retrying; Slack hands each message to one connection, so a message "
+                "may go to another program until Kazma gets in"
+            )
+            if self._refused_in_a_row == 1:
+                logger.warning("[Slack] %s.", problem)
+            else:
+                logger.info(
+                    "[Slack] Slack refused the connection again (too_many_websockets, host %s, %d in a row) — retrying",
+                    host, self._refused_in_a_row,
+                )
             self._socket_ended(problem)
             return
         logger.info("[Slack] Slack asked for a new connection (%s, host %s) — reconnecting", reason, host)
