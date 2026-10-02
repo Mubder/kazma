@@ -563,6 +563,7 @@ def register_system_routes(self: Any) -> None:
             "click", "rich", "google-cloud-aiplatform", "python-dotenv",
             "arabic-reshaper", "python-bidi", "reportlab", "python-docx",
             "openpyxl", "pypdf", "pdfplumber", "python-pptx",
+            "packaging", "urllib3", "anyio", "pyasn1",
             # Workspace packages (editable hatch install is one dist: kazma)
             "kazma", "kazma-core", "kazma-ui", "kazma-gateway", "kazma-cli",
             "kazma-tui", "kazma-skills",
@@ -604,6 +605,10 @@ def register_system_routes(self: Any) -> None:
             "pypdf": "PDF read/write",
             "pdfplumber": "PDF table/text extract",
             "python-pptx": "PowerPoint generation",
+            "packaging": "Reads requirements and versions: the boot check that installed packages meet this build",
+            "urllib3": "HTTP under requests, held at a release without known advisories",
+            "anyio": "Async I/O under Starlette and httpx, held at a release without known advisories",
+            "pyasn1": "ASN.1 under Google sign-in, held at a release without known advisories",
             "kazma": "Monorepo wheel (core + UI + gateway + CLI + TUI + skills)",
             "kazma-core": "Agent brain, LLM providers, swarm, V2 memory, IDE",
             "kazma-ui": "FastAPI web app + Settings + Dashboard",

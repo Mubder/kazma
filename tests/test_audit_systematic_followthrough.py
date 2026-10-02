@@ -143,7 +143,10 @@ def test_document_and_tui_extras_are_base_aliases() -> None:
 def test_shipped_install_job_uses_the_lockfile_and_the_wheel() -> None:
     text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     job = text.split("shipped-install:", 1)[1].split("\n  tests:", 1)[0]
-    assert "uv export --frozen" in job
+    # --locked, not --frozen: the export must refuse a uv.lock that no longer
+    # matches pyproject.toml (it held kazma 0.10.0 and a removed dependency).
+    export = [line for line in job.splitlines() if line.strip().startswith("run: uv export")]
+    assert export and all("--locked" in line and "--frozen" not in line for line in export), export
     assert "uv build --wheel" in job
     assert "dist/*.whl" in job
     assert "import kazma_core, kazma_gateway, kazma_ui, kazma_cli, kazma_tui, kazma_skills" in job

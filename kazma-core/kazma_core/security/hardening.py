@@ -42,6 +42,10 @@ import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kazma_core.security.dependency_scanner import DependencyReport
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +119,20 @@ def _is_product(parts: tuple[str, ...]) -> bool:
 
 def _is_config(path: Path) -> bool:
     return path.suffix.lower() in _CONFIG_SUFFIXES or path.name.lower().endswith(".env.example")
+
+
+def _reviewed_note(report: DependencyReport) -> str:
+    """``" (2 reviewed as out of reach: chromadb GHSA-...: why)"``, or ``""``."""
+    from kazma_core.security.dependency_scanner import review_of
+
+    notes = []
+    for vuln in report.vulnerabilities:
+        review = review_of(vuln)
+        if review is not None:
+            notes.append(f"{vuln.package} {vuln.vuln_id}: {review.why}")
+    if not notes:
+        return ""
+    return f" ({len(notes)} reviewed as out of Kazma's reach: " + "; ".join(notes) + ")"
 
 
 def _upgrade_note(package: str, fixed_in: str | None, unfixed: int) -> str:
@@ -472,20 +490,30 @@ class SecurityHardeningRunner:
         )
 
     async def check_dependency_vulnerabilities(self) -> HardeningCheck:
-        """OSV advisories for the installed versions."""
+        """OSV advisories for the installed versions, and this build's own minimums."""
+        from kazma_core.install_requirements import unmet_requirements
         from kazma_core.security.dependency_scanner import DependencyQueryError, audit_installed
 
+        unmet = await asyncio.to_thread(unmet_requirements, self.project_root)
+        behind = (
+            f"{len(unmet)} installed package(s) are older than this build requires: "
+            + "; ".join(u.describe() for u in unmet) + ". "
+        ) if unmet else ""
+        update = "Run `kazma update` on the server: it installs this build's minimums. "
         try:
             report = await audit_installed()
         except DependencyQueryError as exc:
             return HardeningCheck(
                 name="check_dependency_vulnerabilities",
                 passed=False,
-                severity="medium",
-                message=f"The installed packages could not be checked: {exc}",
-                recommendation="Run the report again when api.osv.dev is reachable.",
+                severity="high" if unmet else "medium",
+                message=f"The installed packages could not be checked against OSV: {exc}",
+                recommendation=behind + (update if unmet else "")
+                + "Run the report again when api.osv.dev is reachable.",
             )
-        if report.vulnerabilities:
+        reviewed = _reviewed_note(report)
+        open_vulns = report.open_vulnerabilities
+        if open_vulns:
             upgrades = report.upgrades()
             packages = report.vulnerable_packages
             return HardeningCheck(
@@ -494,17 +522,28 @@ class SecurityHardeningRunner:
                 severity="critical",
                 message=(
                     f"{len(packages)} of {report.total} installed packages have "
-                    f"{len(report.vulnerabilities)} known advisories"
+                    f"{len(open_vulns)} known advisories" + reviewed
                 ),
-                recommendation="Upgrade: " + ", ".join(
+                recommendation=behind + update + "Fixed releases: " + ", ".join(
                     _upgrade_note(pkg, *upgrades[pkg]) for pkg in packages
                 ),
+            )
+        if unmet:
+            return HardeningCheck(
+                name="check_dependency_vulnerabilities",
+                passed=False,
+                severity="high",
+                message=behind.strip() + reviewed,
+                recommendation=update.strip(),
             )
         return HardeningCheck(
             name="check_dependency_vulnerabilities",
             passed=True,
             severity="critical",
-            message=f"No known advisory affects the {report.total} installed packages",
+            message=(
+                f"No open advisory affects the {report.total} installed packages, and they "
+                f"meet this build's minimums" + reviewed
+            ),
             recommendation="Run the report after each upgrade",
         )
 

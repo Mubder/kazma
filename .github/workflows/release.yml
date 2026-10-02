@@ -107,10 +107,13 @@ jobs:
           # From the lockfile, not the build environment: the lock is the exact
           # pinned set a `uv sync` installs, so the SBOM describes what the user
           # actually runs rather than whatever the runner happened to resolve.
-          # --frozen is load-bearing. Without it `uv export` re-resolves and can
+          # --locked is load-bearing. Without it `uv export` re-resolves and can
           # rewrite uv.lock mid-release, which would mean the SBOM described a
-          # dependency set that was never committed or reviewed.
-          uv export --frozen --no-dev --no-emit-project --format requirements-txt \
+          # dependency set that was never committed or reviewed; and unlike
+          # --frozen it refuses a lock that no longer matches pyproject.toml
+          # (by 2026-10-02 the lock still pinned kazma 0.10.0, a removed
+          # dependency, and versions pyproject's minimums now refuse).
+          uv export --locked --no-dev --no-emit-project --format requirements-txt \
             -o requirements.lock.txt
           uvx --from cyclonedx-bom cyclonedx-py requirements requirements.lock.txt \
             --of JSON -o "dist/kazma-${{ steps.ver.outputs.base }}.cdx.json" \

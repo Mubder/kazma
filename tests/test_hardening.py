@@ -35,6 +35,7 @@ def _offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         return dependency_scanner.DependencyReport(total=0)
 
     monkeypatch.setattr(dependency_scanner, "audit_installed", nothing_installed)
+    monkeypatch.setattr("kazma_core.install_requirements.unmet_requirements", lambda root=None: [])
     from kazma_core.safety import hitl_gates
 
     hitl_gates.set_db_path_for_tests(str(tmp_path / "gates.db"))
@@ -273,6 +274,19 @@ def test_tls_is_judged_from_exposure_and_the_public_address(
         monkeypatch.setenv(name, value)
     check = _run(tmp_path, "check_encrypted_communications")
     assert (check.passed, check.severity) == (passed, severity), check.message
+
+
+def test_packages_behind_this_build_fail_the_dependency_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A deploy is a pull: the environment can lag the build's minimums even
+    when OSV knows no advisory for what is installed."""
+    from kazma_core.install_requirements import UnmetRequirement
+
+    behind = [UnmetRequirement("pyjwt", ">=2.15.0", "2.13.0", ("base",))]
+    monkeypatch.setattr("kazma_core.install_requirements.unmet_requirements", lambda root=None: behind)
+    check = _run(tmp_path, "check_dependency_vulnerabilities")
+    assert check.passed is False and check.severity == "high"
+    assert "pyjwt >=2.15.0: 2.13.0 installed" in check.message
+    assert "kazma update" in check.recommendation
 
 
 # ── approvals are recorded ──────────────────────────────────────────────

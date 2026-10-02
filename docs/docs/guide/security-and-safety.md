@@ -285,7 +285,7 @@ the code.
 
 `kazma-security.yaml` declares posture across `scanning`, `disclosure`, `bug_bounty` (**disabled** — no paid program), and `hardening`. **No Kazma code reads that file** (checked 2026-09-27): it records the security program for people, and nothing below runs because of it. Its `hardening` section lists 8 checks ( `secrets_in_logs`, `input_validation`, `rbac_enforcement`, `tls_required`, `dependency_audit`, `least_privilege`, `audit_trail`, `config_integrity`). See [Configuration → security config](configuration#7-security-config-files) and root [`SECURITY.md`](https://github.com/Mubder/kazma/blob/main/SECURITY.md). `kazma-permissions.yaml` defines division-based MCP allow/deny lists (the ALMuhalab divisions) with cross-division rules (`require_explicit_approval`, `max_approval_duration_hours: 24`, `audit_all_access`).
 
-### 8.1 Hardening report (`security/hardening.py`)
+### 8.1 Hardening report (`security/hardening.py`) {#hardening-report}
 
 `SecurityHardeningRunner` is an **on-demand operator report**, not a gate. `GET /api/security/hardening` runs it over the install (the folder Kazma runs from, never the working directory) as a read-only diagnostic, and returns the findings. Each check runs in a worker thread, so the server keeps answering. A whole run takes about 10 seconds, most of it the OSV query. It does not run at startup, and no page calls it yet. The `run_on_startup` / `fail_on_critical` keys in `kazma-security.yaml` are not read.
 
@@ -308,6 +308,10 @@ A check that cannot run is reported as failed, with its reason; the other checks
 
 `audit_installed()` reads the environment's installed distributions (PEP 503 names, local version labels dropped). It asks OSV's batch API about each exact `(name, version)`, following page tokens, then reads each advisory's summary and fixed version. OSV lists most PyPI advisories under two ids, a GHSA id and a PYSEC id. They name each other as aliases, and the report counts each advisory once. A failure to reach OSV raises `DependencyQueryError`. Nothing is cached.
 
+Some advisories have no fixed release and cannot be reached through Kazma's use of the package. `REVIEWED_ADVISORIES` lists them, each with the reason and the code that would make it reachable: four `chromadb` advisories against the Chroma HTTP server (Kazma embeds Chroma in its own process and runs no Chroma server), and one `accelerate` advisory in `load_checkpoint_in_model` (Kazma never calls it). The report names them as reviewed, never as clean, and a test fails if product code starts using a Chroma server or that loader.
+
+**Minimums are security floors.** `pyproject.toml` raises a package's minimum to the release that fixes an advisory, including packages Kazma runs on without importing them by name (urllib3, anyio, pyasn1, and per extra aiohttp, oauthlib, torch, transformers, setuptools, virtualenv). `kazma update` installs additively (`uv pip install -e`), so a minimum is what makes it upgrade an install that holds an affected version. The lock alone changes only fresh installs. A deploy by `git pull` installs nothing, so at boot the server compares the installed packages with what this build declares (`kazma_core/install_requirements.py`: a checkout's own `pyproject.toml`, because the installed metadata goes stale with every pull). When the install is behind, it logs a WARNING naming each package and raises the ops alert `install.requirements_unmet`. `kazma update --reinstall -y` installs the missing minimums. The report's dependency check shows the same list, and it works without OSV.
+
 `GET /api/security/deps` runs `scan_skill_manifests()` over the skills installed from the hub. For each skill it reports:
 
 - a credential written into the manifest (by the same `secret_scan`);
@@ -317,7 +321,7 @@ A check that cannot run is reported as failed, with its reason; the other checks
 
 An OSV failure answers `{"status": "error"}`, never an empty list.
 
-Neither scan is scheduled. The `scanning` section of `kazma-security.yaml` (interval 24 h, `auto_create_issues`) is not read. What does run on a schedule is GitHub's: Dependabot's weekly pip update PRs (`.github/dependabot.yml`), and bandit's HIGH gate on every CI run.
+Neither scan is scheduled. The `scanning` section of `kazma-security.yaml` (interval 24 h, `auto_create_issues`) is not read. What does run on a schedule is GitHub's: Dependabot's weekly `uv` lockfile update PRs (`.github/dependabot.yml`; until 2026-10-02 it watched the `pip` ecosystem, which never touched `uv.lock`), and bandit's HIGH gate on every CI run. CI's `uv export --locked` and the release's SBOM step fail when `uv.lock` no longer matches `pyproject.toml`.
 
 ### 8.3 Disclosure workflow (`security/disclosure.py`)
 

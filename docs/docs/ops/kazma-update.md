@@ -48,6 +48,16 @@ kazma update --accept-discard-local-commits
 | Detached HEAD / index.lock | **Refuse** with recovery hints |
 | Reinstall leaves CLI broken | Update **fails** with repair commands |
 
+## When the server says its packages are behind
+
+A `git pull` brings new code but installs nothing. When a commit raises a minimum version in `pyproject.toml` (a security floor, or a release a new feature needs), the server checks at boot and logs a WARNING naming each package and the version the build requires. It also raises the ops alert `install.requirements_unmet`, and the security report's dependency check lists the same packages. Install them with:
+
+```bash
+kazma update --reinstall -y
+```
+
+That is the packages-only path: it keeps your optional extras and touches no git state. Then reload the server.
+
 ## Repair after a broken reinstall
 
 ```powershell
