@@ -119,7 +119,7 @@ web = [
 ]
 # Multi-replica / SaaS shared state (Phase 4.3)
 postgres = [
-    "psycopg[binary,pool]>=3.1.0",
+    "psycopg[binary,pool]>=3.3.6",
     "langgraph-checkpoint-postgres>=3.1.1",
 ]
 # Compatibility alias. These libraries are already base dependencies.
@@ -179,7 +179,7 @@ durable = [
 ]
 # Database drivers beyond SQLite (database_client skill)
 database = [
-    "psycopg[binary]>=3.1.0",
+    "psycopg[binary]>=3.3.6",
     "pymysql>=1.1.0",
     "pymongo>=4.7.0",
 ]
