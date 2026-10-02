@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -89,7 +90,7 @@ async def synthesize_from_digests(
     used = 0
     loaded = 0
     for i, pth in enumerate(path_list[:20], 1):
-        body = _load_body(pth)
+        body = await asyncio.to_thread(_load_body, pth)
         if body is None:
             blocks.append(f"### Source {i}: {pth}\n_(failed to load)_\n")
             continue

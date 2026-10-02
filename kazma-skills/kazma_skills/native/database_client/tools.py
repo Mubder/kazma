@@ -11,8 +11,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-from kazma_core.agent.tool_registry import _workspace_scope_error
+from kazma_core.agent.tool_scope import _workspace_scope_error
 from kazma_core.tools.file_write import _get_workspace
+from kazma_core.workspace.binding import resolve_tool_path
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +61,11 @@ def _is_internal_kazma_db(path: Path) -> bool:
     return is_kazma_store(path)
 
 
-def _deny_internal(db_uri: str) -> str | None:
-    if db_uri == ":memory:":
+def _deny_internal(resolved: str) -> str | None:
+    if resolved == ":memory:":
         return None
     try:
-        p = Path(db_uri).expanduser().resolve()
+        p = Path(resolved).expanduser().resolve()
     except Exception:
         return None
     if _is_internal_kazma_db(p):
@@ -124,9 +125,9 @@ def _fence_result(text: str, source: str) -> str:
         return text
 
 
-def _connect_sqlite(db_uri: str) -> sqlite3.Connection:
+def _connect_sqlite(resolved: str) -> sqlite3.Connection:
     """Connect to SQLite and attempt to load sqlite_vec extension if available."""
-    conn = sqlite3.connect(db_uri)
+    conn = sqlite3.connect(resolved)
     try:
         import sqlite_vec
 
@@ -141,6 +142,32 @@ def _connect_sqlite(db_uri: str) -> sqlite3.Connection:
     return conn
 
 
+def _checked_sqlite_file(db_uri: str) -> tuple[str, str | None]:
+    """The SQLite file *db_uri* names, and the refusal to answer with (None: allowed).
+
+    A relative path means the active workspace (``resolve_tool_path``), as in
+    every file tool; it meant the server's working directory until
+    2026-10-02, so ``sqlite_query(db_path="app.db")`` opened a file there,
+    not the project's. The workspace, the grants and the store registry are
+    read here: the tools run this in a worker thread.
+    """
+    if db_uri == ":memory:":
+        return db_uri, None
+    p = resolve_tool_path(db_uri)
+    resolved = str(p)
+    scope_err = _workspace_scope_error(p, db_uri, "reads")
+    if scope_err:
+        return resolved, scope_err
+    denied = _deny_internal(resolved)
+    if denied:
+        return resolved, denied
+    if not _is_path_allowed(resolved):
+        return resolved, f"Error: Database access denied for path: {db_uri}"
+    if not p.exists():
+        return resolved, f"Error: Database file not found: {db_uri}"
+    return resolved, None
+
+
 async def inspect_db_schema(db_uri: str) -> str:
     """Extract list of tables, column names, data types, primary/foreign keys, and indexes from SQLite databases.
 
@@ -150,21 +177,12 @@ async def inspect_db_schema(db_uri: str) -> str:
     Returns:
         Markdown description of the schema structure.
     """
-    if db_uri != ":memory:":
-        p = Path(db_uri).expanduser().resolve()
-        scope_err = _workspace_scope_error(p, db_uri, "reads")
-        if scope_err:
-            return scope_err
-        denied = _deny_internal(db_uri)
-        if denied:
-            return denied
-        if not _is_path_allowed(db_uri):
-            return f"Error: Database access denied for path: {db_uri}"
-        if not p.exists():
-            return f"Error: Database file not found: {db_uri}"
+    db_file, refusal = await asyncio.to_thread(_checked_sqlite_file, db_uri)
+    if refusal:
+        return refusal
 
     def _inspect() -> str:
-        conn = _connect_sqlite(db_uri)
+        conn = _connect_sqlite(db_file)
         try:
             _install_readonly_authorizer(conn)
             cursor = conn.cursor()
@@ -262,21 +280,12 @@ async def execute_db_query(
     if forbidden_keywords.search(query):
         return "Error: Write operations or administrative commands are not allowed."
 
-    if db_uri != ":memory:":
-        p = Path(db_uri).expanduser().resolve()
-        scope_err = _workspace_scope_error(p, db_uri, "reads")
-        if scope_err:
-            return scope_err
-        denied = _deny_internal(db_uri)
-        if denied:
-            return denied
-        if not _is_path_allowed(db_uri):
-            return f"Error: Database access denied for path: {db_uri}"
-        if not p.exists():
-            return f"Error: Database file not found: {db_uri}"
+    db_file, refusal = await asyncio.to_thread(_checked_sqlite_file, db_uri)
+    if refusal:
+        return refusal
 
     def _query() -> str:
-        conn = _connect_sqlite(db_uri)
+        conn = _connect_sqlite(db_file)
         try:
             conn.row_factory = sqlite3.Row
             _install_readonly_authorizer(conn)

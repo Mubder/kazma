@@ -39,8 +39,9 @@ def sent(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     class _Telegram:
         name = "telegram"
 
-        async def send(self, message: Any) -> None:
+        async def send(self, message: Any) -> bool:
             out.append(message.content)
+            return True  # the platform took it (BusAdapter.send's contract)
 
     class _Bus:
         adapter = bus_mod.FanOutBusAdapter([_Telegram()])

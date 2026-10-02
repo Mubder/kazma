@@ -115,7 +115,7 @@ async def test_fanout_stamps_expected_voters(monkeypatch: pytest.MonkeyPatch) ->
 
     class _A:
         async def send(self, message):
-            return None
+            return True  # the platform took it (BusAdapter.send's contract)
 
         async def send_report(self, report):
             return None

@@ -6,6 +6,7 @@ and validating skills from the Kazma Hub.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -59,125 +60,142 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
             pass
         return description or ""
 
-    async def _get_installed_skills(lang: str = "en") -> list[dict[str, Any]]:
-        """Get list of installed skills from native skills dir + hub.
+    def _native_skill_entries(lang: str) -> list[dict[str, Any]]:
+        """The built-in skills (kazma_skills/native/*), from their manifests."""
+        from pathlib import Path
 
-        Only real skill bundles are shown — low-level built-in tools
-        (file_read, shell_exec, etc.) are implementation details that
-        belong to the agent's base toolset, not user-facing skills.
-        """
+        import yaml
+
         from kazma_core.skills.switches import is_skill_enabled
+
+        entries: list[dict[str, Any]] = []
+        try:
+            import kazma_skills.native_loader as _nsm
+
+            native_dir = Path(_nsm.__file__).resolve().parent / "native"
+        except ImportError:
+            logger.warning("Native skills package missing", exc_info=True)
+            return entries
+        if not native_dir.is_dir():
+            return entries
+        for skill_dir in sorted(native_dir.iterdir()):
+            if not skill_dir.is_dir() or skill_dir.name.startswith("_"):
+                continue
+            manifest_path = skill_dir / "skill_manifest.yaml"
+            if not manifest_path.exists():
+                continue
+            try:
+                manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+            except (OSError, yaml.YAMLError):
+                logger.warning("Native skill manifest unreadable: %s", manifest_path, exc_info=True)
+                continue
+            name = manifest.get("name", skill_dir.name)
+            skill_id = f"native:{skill_dir.name}"
+            entries.append({
+                "id": skill_id,
+                "name": name,
+                "version": manifest.get("version", "1.0.0"),
+                "description": _localize_skill_desc(name, manifest.get("description", ""), lang),
+                "author": manifest.get("author", "kazma"),
+                # The saved switch (it read True whatever was saved).
+                "enabled": is_skill_enabled(skill_id),
+                # Ships with Kazma: switched off, never uninstalled.
+                "builtin": True,
+                # A score only where a manifest declares one: none does, and
+                # the page showed an invented "100/100" on every skill.
+                "security_score": manifest.get("security_score"),
+                "certification_level": manifest.get("certification_level", "native"),
+                "capabilities": manifest.get("capabilities", []),
+                "tags": manifest.get("tags", ["native"]),
+                "icon": manifest.get("icon", ""),
+                "arabic_name": manifest.get("arabic_name", ""),
+            })
+        return entries
+
+    def _agent_skill_entries(lang: str) -> list[dict[str, Any]]:
+        """Agent Skills (agentskills.io SKILL.md) with what activation does with each."""
+        from kazma_core.agent_skills.catalog import skill_integrity
+        from kazma_core.agent_skills.discovery import discover_skills
+
+        entries: list[dict[str, Any]] = []
+        for skill in discover_skills(include_disabled=True).values():
+            integrity, reason = skill_integrity(skill)
+            entries.append({
+                "id": f"agent-skill:{skill.name}",
+                "name": skill.name,
+                "version": skill.version or "—",
+                "description": _localize_skill_desc(skill.name, skill.description or "", lang),
+                "author": skill.author or skill.source or "agent-skills",
+                "enabled": skill.enabled,
+                # Verified, unsigned or refused: what activation does with it.
+                "integrity": integrity,
+                "integrity_reason": reason,
+                "security_score": None,
+                "certification_level": "agent-skills",
+                "capabilities": [],
+                "tags": ["agent-skills", skill.scope],
+                "location": str(skill.location),
+                "source": skill.source,
+            })
+        return entries
+
+    async def _hub_skill_entries(lang: str) -> list[dict[str, Any]]:
+        """Skills installed from the Kazma Hub (remote marketplace installs)."""
+        from kazma_core.hub.registry import KazmaHub
+
+        hub = KazmaHub()
+        try:
+            manifests = await hub.list_installed()
+        finally:
+            await hub.close()
+        return [
+            {
+                "id": f"kazma-hub://{m.data.get('author', '')}/{m.data.get('name', '')}@{m.data.get('version', '')}",
+                "name": m.data.get("name", ""),
+                "version": m.data.get("version", ""),
+                "description": _localize_skill_desc(m.data.get("name", ""), m.data.get("description", ""), lang),
+                "author": m.data.get("author", ""),
+                "enabled": True,
+                "security_score": m.data.get("security_score"),
+                "certification_level": "basic",
+                "capabilities": m.data.get("capabilities", []),
+                "tags": m.data.get("tags", ["hub"]),
+            }
+            for m in manifests
+        ]
+
+    async def _get_installed_skills(lang: str = "en") -> list[dict[str, Any]]:
+        """Get list of installed skills: built-in, from the hub, Agent Skills.
+
+        Only real skill bundles are shown -- low-level built-in tools
+        (file_read, shell_exec, etc.) are implementation details that belong
+        to the agent's base toolset, not user-facing skills. A name already
+        shown by an earlier source is not repeated. The manifests, the
+        switches and the integrity checks read files and settings: in threads
+        (they ran on the server's loop until 2026-10-02).
+        """
+        sources: list[list[dict[str, Any]]] = []
+        try:
+            sources.append(await asyncio.to_thread(_native_skill_entries, lang))
+        except Exception as exc:
+            logger.warning("Native skills scan failed: %s", exc)
+        try:
+            sources.append(await _hub_skill_entries(lang))
+        except Exception as exc:
+            logger.debug("Hub skills load failed: %s", exc)
+        try:
+            sources.append(await asyncio.to_thread(_agent_skill_entries, lang))
+        except Exception as exc:
+            logger.warning("Agent Skills scan failed: %s", exc)
 
         skills: list[dict[str, Any]] = []
         seen_names: set[str] = set()
-
-        # ── 1. Native skills (kazma_skills/native/*) — the primary skill source.
-        # Each skill has a skill_manifest.yaml with rich metadata.
-        try:
-            import yaml
-            from pathlib import Path
-
-            try:
-                import kazma_skills.native_loader as _nsm
-                native_dir = Path(_nsm.__file__).resolve().parent / "native"
-            except Exception:
-                native_dir = None
-
-            if native_dir and native_dir.is_dir():
-                for skill_dir in sorted(native_dir.iterdir()):
-                    if not skill_dir.is_dir() or skill_dir.name.startswith("_"):
-                        continue
-                    manifest_path = skill_dir / "skill_manifest.yaml"
-                    if not manifest_path.exists():
-                        continue
-                    try:
-                        manifest = yaml.safe_load(
-                            manifest_path.read_text(encoding="utf-8")
-                        ) or {}
-                    except Exception:
-                        continue
-                    name = manifest.get("name", skill_dir.name)
-                    if name in seen_names:
-                        continue
-                    seen_names.add(name)
-                    raw_desc = manifest.get("description", "")
-                    skill_id = f"native:{skill_dir.name}"
-                    skills.append({
-                        "id": skill_id,
-                        "name": name,
-                        "version": manifest.get("version", "1.0.0"),
-                        "description": _localize_skill_desc(name, raw_desc, lang),
-                        "author": manifest.get("author", "kazma"),
-                        # The saved switch (it read True whatever was saved).
-                        "enabled": is_skill_enabled(skill_id),
-                        # Ships with Kazma: switched off, never uninstalled.
-                        "builtin": True,
-                        "security_score": manifest.get("security_score", 100),
-                        "certification_level": manifest.get("certification_level", "native"),
-                        "capabilities": manifest.get("capabilities", []),
-                        "tags": manifest.get("tags", ["native"]),
-                        "icon": manifest.get("icon", ""),
-                        "arabic_name": manifest.get("arabic_name", ""),
-                    })
-        except Exception as exc:
-            logger.warning("Native skills scan failed: %s", exc)
-
-        # ── 2. Hub-registered skills (remote marketplace installs)
-        try:
-            from kazma_core.hub.registry import KazmaHub
-
-            hub = KazmaHub()
-            manifests = await hub.list_installed()
-            await hub.close()
-            for m in manifests:
-                name = m.data.get("name", "")
-                if name in seen_names:
+        for entries in sources:
+            for entry in entries:
+                if entry["name"] in seen_names:
                     continue
-                seen_names.add(name)
-                skills.append({
-                    "id": f"kazma-hub://{m.data.get('author', '')}/{name}@{m.data.get('version', '')}",
-                    "name": name,
-                    "version": m.data.get("version", ""),
-                    "description": _localize_skill_desc(
-                        name, m.data.get("description", ""), lang
-                    ),
-                    "author": m.data.get("author", ""),
-                    "enabled": True,
-                    "security_score": 100,
-                    "certification_level": "basic",
-                    "capabilities": m.data.get("capabilities", []),
-                    "tags": m.data.get("tags", ["hub"]),
-                })
-        except Exception as exc:
-            logger.debug("Hub skills load failed: %s", exc)
-
-        # ── 3. Agent Skills (agentskills.io / SKILL.md)
-        try:
-            from kazma_core.agent_skills.discovery import discover_skills
-
-            for skill in discover_skills(include_disabled=True).values():
-                if skill.name in seen_names:
-                    continue
-                seen_names.add(skill.name)
-                skills.append({
-                    "id": f"agent-skill:{skill.name}",
-                    "name": skill.name,
-                    "version": skill.version or "—",
-                    "description": _localize_skill_desc(
-                        skill.name, skill.description or "", lang
-                    ),
-                    "author": skill.author or skill.source or "agent-skills",
-                    "enabled": skill.enabled,
-                    "security_score": 100,
-                    "certification_level": "agent-skills",
-                    "capabilities": [],
-                    "tags": ["agent-skills", skill.scope],
-                    "location": str(skill.location),
-                    "source": skill.source,
-                })
-        except Exception as exc:
-            logger.debug("Agent Skills scan failed: %s", exc)
-
+                seen_names.add(entry["name"])
+                skills.append(entry)
         return skills
 
     async def _search_hub(query: str = "") -> list[dict[str, Any]]:

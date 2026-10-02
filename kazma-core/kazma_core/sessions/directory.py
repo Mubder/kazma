@@ -11,6 +11,7 @@ records — only ``platform`` labels and titles.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import uuid
@@ -581,7 +582,8 @@ async def bind_sender_to_thread(
     if entry is not None:
         return entry
     title = (delivery_ctx or {}).get("username") or thread_id[:8]
-    _ensure_web_row(
+    await asyncio.to_thread(
+        _ensure_web_row,
         session_id=thread_id,
         thread_id=thread_id,
         title=str(title),

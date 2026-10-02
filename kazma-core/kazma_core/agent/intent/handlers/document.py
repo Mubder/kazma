@@ -14,6 +14,7 @@ off, YOLO is on, or the approval ContextVar is already true.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from pathlib import Path
@@ -78,7 +79,7 @@ async def run_document(decision: TurnDecision, state: dict[str, Any], **ctx: Any
 
     # HITL check: if we can't safely execute (graph interrupt can't fire
     # from supervisor_node), escalate so the loop performs the writes
-    if not _can_auto_execute(tool_executor):
+    if not (await asyncio.to_thread(_can_auto_execute, tool_executor)):
         return HandlerResult(
             ok=False,
             escalate=True,
@@ -139,8 +140,6 @@ async def run_document(decision: TurnDecision, state: dict[str, Any], **ctx: Any
     # Optional LLM enhancement (preserve, not condense)
     if llm is not None and len(source_content) > 500:
         try:
-            import asyncio
-
             prompt = (
                 "Organize this content into markdown with headings and lists. "
                 "PRESERVE all information and the original language. "

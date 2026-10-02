@@ -24,8 +24,9 @@ class _RecordingAdapter(BusAdapter):
         self.reports: list[str] = []
         self.approvals = 0
 
-    async def send(self, message: BusMessage) -> None:
+    async def send(self, message: BusMessage) -> bool:
         self.sends.append(message.content)
+        return True  # the platform took it (BusAdapter.send's contract)
 
     async def send_report(self, report: SwarmReport) -> None:
         self.reports.append(report.status)

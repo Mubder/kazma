@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from kazma_core.tools.send_message import send_failed
 from kazma_core.tools.send_message import send_message as _core_send_message
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,8 @@ async def dispatch_notification(channel: str, recipient_id: str, text: str) -> s
 
     try:
         res = await _core_send_message(target_id=recipient_id, text=text, backend=chan)
+        if send_failed(res):
+            return res  # "Error: ...": a failed call, never "dispatch status"
         return f"Message dispatch status: {res}"
     except Exception as e:
         logger.error("Error dispatching message to %s: %s", recipient_id, e)
@@ -99,6 +102,9 @@ async def send_approval_request(
                 "actions": list(actions),
             },
         )
+        if send_failed(res):
+            # It said "dispatched" before the status that said it was not.
+            return res
         return f"Approval request dispatched. Status: {res}"
     except Exception as e:
         logger.error("Error sending approval request card: %s", e)

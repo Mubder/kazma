@@ -16,6 +16,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 from collections.abc import Callable
 from typing import Any
@@ -23,6 +24,7 @@ from typing import Any
 __all__ = [
     "register_message_backend",
     "send_message",
+    "send_failed",
     "get_current_delivery_target",
     "set_current_delivery_target",
     "reset_current_delivery_target",
@@ -213,12 +215,57 @@ async def send_message(target_id: str, text: str, *, backend: str = "telegram", 
         **kwargs:  Passed through to the backend handler (e.g. attachments=).
 
     Returns:
-        Backend response string, or error message if backend not found.
+        ``sent:<target>`` when the platform took the message, else an
+        ``Error: ...`` string (no backend, or the platform did not take it).
+        Read it with :func:`send_failed`.
     """
     handler = _message_backends.get(backend)
     if handler is None:
         return f"Error: no backend '{backend}'"
     return await handler(target_id, text, **kwargs)
+
+
+def send_failed(result: object) -> bool:
+    """Whether a send's answer means the message was NOT delivered.
+
+    Backends answer ``sent:<target>`` or ``Error: ...``. The gateway's backend
+    answered "sent" whatever the platform said until 2026-10-02, and the
+    reminder delivery, the scheduled-post notice and the cron denial notice
+    did not read the answer at all: a refused send was logged as delivered.
+    Every caller reads it now (``tests/test_send_results_read.py``).
+    """
+    return not isinstance(result, str) or result.startswith("Error")
+
+
+#: Telegram's limit for a document a bot sends.
+_MAX_FILE_BYTES = 50 * 1024 * 1024
+
+
+def _file_attachment(file_path: str) -> dict[str, Any] | str:
+    """The attachment for *file_path*, or the error to answer with.
+
+    Resolves the path against the active workspace (a store read) and reads
+    up to 50 MB: run in a thread.
+    """
+    import mimetypes
+
+    from kazma_core.workspace.binding import resolve_tool_path
+
+    p = resolve_tool_path(file_path)
+    if not p.exists():
+        return f"Error: file not found: {file_path}"
+    if not p.is_file():
+        return f"Error: not a file: {file_path}"
+    size = p.stat().st_size
+    if size > _MAX_FILE_BYTES:
+        return f"Error: file too large ({size // 1024 // 1024} MB; max 50 MB)"
+    mime, _ = mimetypes.guess_type(str(p))
+    return {
+        "kind": "file",
+        "filename": p.name,
+        "mime": mime or "application/octet-stream",
+        "data": p.read_bytes(),
+    }
 
 
 async def send_file_message(
@@ -243,24 +290,9 @@ async def send_file_message(
     Returns:
         Backend response string, or error message.
     """
-    import mimetypes
-
-    from kazma_core.workspace.binding import resolve_tool_path
-
-    p = resolve_tool_path(file_path)
-    if not p.exists():
-        return f"Error: file not found: {file_path}"
-    if not p.is_file():
-        return f"Error: not a file: {file_path}"
-    if p.stat().st_size > 50 * 1024 * 1024:  # 50 MB Telegram limit
-        return f"Error: file too large ({p.stat().st_size // 1024 // 1024} MB; max 50 MB)"
-
-    data = p.read_bytes()
-    mime, _ = mimetypes.guess_type(str(p))
-    attachment = {
-        "kind": "file",
-        "filename": p.name,
-        "mime": mime or "application/octet-stream",
-        "data": data,
-    }
+    # The workspace lookup and the file read ran on the event loop until
+    # 2026-10-02 -- up to 50 MB read on the loop that serves every chat.
+    attachment = await asyncio.to_thread(_file_attachment, file_path)
+    if isinstance(attachment, str):
+        return attachment
     return await send_message(target_id, text, backend=backend, attachments=[attachment])

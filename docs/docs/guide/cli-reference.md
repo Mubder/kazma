@@ -28,12 +28,14 @@ Defined in `pyproject.toml:73-76`:
 kazma
 ├── (no args)              # banner + status + help hint
 ├── status                 # probe running server, print versions
+├── doctor                 # which model and provider will be used, and will it work
 ├── serve [port]           # launch Web UI (uvicorn)
 ├── ask [options] <prompt> # in-process agent (no uvicorn)
 ├── acp                    # ACP JSON-RPC on stdio (Zed / JetBrains)
 ├── mcp                    # MCP server on stdio — the whole tool registry, behind the HITL gate
 ├── wizard                 # interactive skill-install wizard
 ├── hub ...                # skill hub (Click group)
+├── agent-skills ...       # list, verify and sign installed Agent Skills
 ├── docs <build|serve>     # build/serve the Docusaurus docs site
 ├── completion ...         # shell tab-completion
 ├── project ...            # .kazma/ project config
@@ -165,6 +167,42 @@ the same gate the chat window uses — that is the difference from
 
 Tiers map onto MCP's own `destructiveHint` / `readOnlyHint`, so danger tools
 render as destructive in the client's approval UI without reading our docs.
+
+### 2.9 `kazma doctor`
+
+Answers "which model will this install use, and will it work?"
+(`kazma_cli/doctor.py`). It prints the active provider and model, the
+endpoint each request goes to, whether a usable key is there, and whether the
+model registry would switch to another provider. Exit code 1 when a check
+fails, 0 otherwise. It is read-only: it writes no settings and opens no
+connection.
+
+```bash
+kazma doctor
+```
+
+### 2.10 `kazma agent-skills` {#kazma-agent-skills}
+
+Agent Skills (`SKILL.md`, the agentskills.io format) installed in the skill
+folders Kazma reads. A skill is checked when the model activates it, and every
+list shows the result of that check:
+
+| State | Meaning |
+|---|---|
+| `verified` | Signed by this install's key and unchanged since. Loads. |
+| `unsigned` | Never signed. Loads, with a warning in the log. |
+| `refused` | Its content changed since it was signed, or another key signed it: `KAZMA_SECRET` changed, another Kazma install signed it (the user-level folder is shared), or someone re-signed it. Not loaded, and left out of the skill list the model sees. |
+
+| Subcommand | Description |
+|---|---|
+| `kazma agent-skills list` | Every installed skill with its scope, state and source. A refused skill is followed by the reason and its folder. |
+| `kazma agent-skills verify <folder>` | Check one skill. Exit code 1 when it would be refused. |
+| `kazma agent-skills sign <folder>...` | Sign skills with this install's key (writes `.kazma-install.json` beside each `SKILL.md`). Takes several folders; a folder without a skill is named and the rest are still signed. Sign only a skill you trust: signing is how you vouch for it. |
+
+```bash
+kazma agent-skills list
+kazma agent-skills sign ~/.agents/skills/my-skill ~/.agents/skills/other-skill
+```
 
 ---
 

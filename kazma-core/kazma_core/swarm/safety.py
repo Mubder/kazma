@@ -47,16 +47,18 @@ async def _notify_cron_denial(tool_name: str, reason: str) -> None:
         target = str(parent.get("delivery_target") or "").strip()
         if not target or ":" not in target:
             return
-        from kazma_core.tools.send_message import send_message
+        from kazma_core.tools.send_message import send_failed, send_message
 
-        await send_message(
+        result = await send_message(
             target,
             f"⚠️ Scheduled job {parent.get('job_id', '')}: '{tool_name}' was "
             f"{reason} — the action was NOT executed.",
             backend=target.split(":", 1)[0],
         )
+        if send_failed(result):
+            logger.warning("[Safety] could not tell %s that %s was %s: %s", target, tool_name, reason, result)
     except Exception:
-        logger.debug("[Safety] cron denial notification failed", exc_info=True)
+        logger.warning("[Safety] cron denial notification failed", exc_info=True)
 
 # Single source of truth — see kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS.
 # Alias kept so existing imports of _EXTENDED_DANGER keep working.

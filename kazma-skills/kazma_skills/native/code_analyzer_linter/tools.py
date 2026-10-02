@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
 import subprocess
 
-from kazma_core.agent.tool_registry import _workspace_scope_error
+from kazma_core.agent.tool_scope import resolve_in_scope
 from kazma_core.tools.file_write import _get_workspace
-from kazma_core.workspace.binding import resolve_tool_path
 
 # `subprocess` stays imported for TimeoutExpired / PIPE; every RUN goes
 # through run_off_loop so a 60s pytest does not freeze the whole server
@@ -27,8 +27,7 @@ async def lint_code(path: str) -> str:
     Returns:
         Structured linter warnings or success messages.
     """
-    p = resolve_tool_path(path)
-    scope_err = _workspace_scope_error(p, path, "searches")
+    p, scope_err = await resolve_in_scope(path, "searches")
     if scope_err:
         return scope_err
 
@@ -69,8 +68,7 @@ async def format_code(path: str) -> str:
     Returns:
         Success or failure message.
     """
-    p = resolve_tool_path(path)
-    scope_err = _workspace_scope_error(p, path, "writes")
+    p, scope_err = await resolve_in_scope(path, "writes")
     if scope_err:
         return scope_err
 
@@ -102,8 +100,7 @@ async def run_unit_tests(test_path: str) -> str:
     Returns:
         pytest execution summary.
     """
-    p = resolve_tool_path(test_path)
-    scope_err = _workspace_scope_error(p, test_path, "searches")
+    p, scope_err = await resolve_in_scope(test_path, "searches")
     if scope_err:
         return scope_err
 
@@ -128,7 +125,7 @@ async def run_unit_tests(test_path: str) -> str:
         # directory is the Kazma install, and relative imports, fixtures and
         # --basetemp belong to the project being tested.
         res = await run_off_loop(
-            cmd, cwd=str(_get_workspace()), capture_output=True, text=True, timeout=60
+            cmd, cwd=str((await asyncio.to_thread(_get_workspace))), capture_output=True, text=True, timeout=60
         )
         output = res.stdout.strip()
         err = res.stderr.strip()

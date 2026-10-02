@@ -1547,6 +1547,11 @@ class KazmaAppBuilder:
         from kazma_core.http_tls import prewarm as _prewarm_tls
 
         await asyncio.to_thread(_prewarm_tls)
+        # An ops alert raised in a worker thread is delivered on this loop,
+        # where the chat-app senders' HTTP clients live (2026-10-02).
+        from kazma_core.observability.ops_alerts import bind_server_loop
+
+        bind_server_loop(asyncio.get_running_loop())
         # ── Volatile settings store alarm (2026-09-04) ────────────────
         # The init-time CRITICAL for the in-memory fallback fires BEFORE
         # file logging is up, so the reason lands on an unread console.
@@ -2437,7 +2442,10 @@ class KazmaAppBuilder:
 
         # (VectorMemory close removed with the V1 stack.)
 
+        from kazma_core.observability.ops_alerts import bind_server_loop
+
         if self.gateway is None:
+            bind_server_loop(None)
             return
         if self.chat_adapters is not None:
             # No rebuild may start while the gateway goes down.
@@ -2463,6 +2471,8 @@ class KazmaAppBuilder:
             logger.info("[SwarmBus] Adapters closed cleanly")
         except Exception as e:
             logger.debug("[SwarmBus] adapter close: %s", e)
+        # Alerts from now on go the thread way: the senders are closed.
+        bind_server_loop(None)
 
     def _setup_lifecycle_and_errors(self) -> None:
         """Register lifespan (replaces deprecated on_event) and exception handlers."""

@@ -29,7 +29,7 @@ _GIT_PUSH_PULL_WARNED = False
 
 async def git_status() -> str:
     """Get the current git repository status, branch, and staged/unstaged changes."""
-    cwd = _get_workspace()
+    cwd = await asyncio.to_thread(_get_workspace)
     try:
         res = await run_off_loop(
             ["git", "status", "--porcelain"],
@@ -68,7 +68,7 @@ async def git_commit(message: str, files: list[str] | None = None) -> str:
     ``GIT_AUTHOR_*`` / ``GIT_COMMITTER_*`` env vars — without mutating the
     repo's ``.git/config``.
     """
-    cwd = _get_workspace()
+    cwd = await asyncio.to_thread(_get_workspace)
     try:
         # Resolve bot identity env (no-op when disabled).
         from kazma_core.git_identity import get_commit_env
@@ -103,7 +103,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
     :param branch: Branch name to push or pull (e.g. 'main'). Auto-detected if omitted.
     :param remote: Remote name (default 'origin').
     """
-    cwd = _get_workspace()
+    cwd = await asyncio.to_thread(_get_workspace)
     if action not in ("push", "pull"):
         return "Invalid action. Use 'push' or 'pull'."
 
@@ -502,7 +502,7 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
 
 async def git_checkout(branch: str, create: bool = False) -> str:
     """Switch branches or create a new branch locally."""
-    cwd = _get_workspace()
+    cwd = await asyncio.to_thread(_get_workspace)
     cmd = ["git", "checkout", "-b", branch] if create else ["git", "checkout", branch]
     try:
         res = await run_off_loop(cmd, cwd=cwd, capture_output=True, text=True, timeout=10)
@@ -513,7 +513,7 @@ async def git_checkout(branch: str, create: bool = False) -> str:
 
 async def git_merge(source_branch: str) -> str:
     """Merge a branch into the currently active local branch."""
-    cwd = _get_workspace()
+    cwd = await asyncio.to_thread(_get_workspace)
     try:
         res = await run_off_loop(["git", "merge", source_branch], cwd=cwd, capture_output=True, text=True, timeout=15)
         return res.stdout.strip() or res.stderr.strip()
@@ -810,7 +810,7 @@ async def _resolve_owner_repo() -> tuple[str, str] | str:
     except Exception:
         pass
     # Fallback: parse locally.
-    cwd = _get_workspace()
+    cwd = await asyncio.to_thread(_get_workspace)
     try:
         res = await run_off_loop(
             ["git", "remote", "get-url", "origin"],

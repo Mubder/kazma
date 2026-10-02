@@ -204,7 +204,7 @@ class TelegramBusAdapter(BusAdapter):
 
     # ── BusAdapter interface ────────────────────────────────────────
 
-    async def send(self, message: BusMessage) -> None:
+    async def send(self, message: BusMessage) -> bool:
         # Operator cards are finished copy. Do not clip at 300 chars and
         # do not wrap them in a second worker header. Bold the header
         # line and the source line (Guard / Ops / System).
@@ -215,11 +215,12 @@ class TelegramBusAdapter(BusAdapter):
             text = _format_operator_card_md(raw)
         else:
             text = _escape_md(raw[:3500])
-        await self._post({
+        result = await self._post({
             "chat_id": self._chat_id,
             "text": _safe_slice_md(text, 4096),
             "parse_mode": "MarkdownV2",
         })
+        return bool(result and result.get("ok"))
 
     async def send_report(self, report: SwarmReport) -> None:
         """Send a formatted Swarm Report card."""

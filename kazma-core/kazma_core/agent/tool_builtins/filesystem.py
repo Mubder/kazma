@@ -7,6 +7,7 @@ within this group is preserved.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -15,7 +16,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path, PurePath
 from typing import Any
 
-from kazma_core.agent.tool_scope import _workspace_scope_error
+from kazma_core.agent.tool_scope import resolve_in_scope
 from kazma_core.workspace.binding import resolve_tool_path
 from kazma_core.workspace.project_files import GENERATED_DIRS
 
@@ -228,6 +229,84 @@ def _fallback_telegram_target() -> str:
     return f"telegram:{tg_id}" if tg_id else ""
 
 
+def _request_path_access_sync(path: str, mode: str, scope: str, label: str) -> str:
+    """``request_path_access``'s body: stores read and written, so it runs in a thread."""
+    from kazma_core.safety.hitl import get_current_thread_id
+    from kazma_core.workspace.path_grants import (
+        grant_session_path,
+        list_durable_roots,
+        set_durable_roots,
+    )
+    from kazma_core.workspace.path_policy import check_path_access
+
+    if not path or not str(path).strip():
+        return "Error: path is required."
+    mode_n = "write" if str(mode).lower() in ("write", "rw", "readwrite") else "read"
+    scope_n = "durable" if str(scope).lower() in ("durable", "permanent", "always") else "session"
+    # Resolved once, here, the way every file tool resolves it -- so the
+    # folder granted is the folder the retried tool will ask about.
+    try:
+        path = str(resolve_tool_path(path))
+    except OSError as exc:
+        return f"Error: invalid path: {exc}"
+
+    # Already allowed?
+    existing = check_path_access(path, mode_n)
+    if existing.via == "store":
+        # No grant opens a Kazma store; granting one would change nothing.
+        return f"Error: {existing.reason}"
+    if existing.allowed and existing.via != "absolute":
+        return (
+            f"Already allowed via {existing.via}: {existing.grant_path or existing.resolved} "
+            f"(mode ≥ {mode_n}). Retry your file tool."
+        )
+
+    if scope_n == "durable":
+        roots = [g.to_dict() for g in list_durable_roots()]
+        resolved = path
+        p = Path(resolved)
+        root = resolved if p.is_dir() or not p.suffix else str(p.parent)
+        # Upsert
+        roots = [r for r in roots if r.get("path") != root]
+        roots.append(
+            {
+                "path": root,
+                "mode": mode_n,
+                "label": label or Path(root).name,
+            }
+        )
+        try:
+            set_durable_roots(roots)
+        except ValueError as exc:
+            return f"Error: {exc}"
+        return (
+            f"Durable extra root granted: {root} (mode={mode_n}). "
+            "Retry file_read / file_list / file_write as needed."
+        )
+
+    tid = get_current_thread_id()
+    if not tid:
+        return (
+            "Error: no active chat thread for a session grant. "
+            "Use scope='durable' or open this from a chat turn."
+        )
+    try:
+        grant = grant_session_path(
+            tid,
+            path,
+            mode=mode_n,
+            label=label,
+            actor="hitl",
+        )
+    except ValueError as exc:
+        return f"Error: {exc}"
+    return (
+        f"Session path grant active: {grant.path} (mode={grant.mode}, "
+        f"id={grant.grant_id}). Retry the file tool now. "
+        "Grant expires in ~1 hour or when the process clears safety keys."
+    )
+
+
 def register_filesystem_tools(registry: Any) -> None:
     """Register the filesystem tools onto *registry*."""
 
@@ -318,10 +397,7 @@ def register_filesystem_tools(registry: Any) -> None:
         category="filesystem",
     )
     async def file_append(path: str, content: str, encoding: str = "utf-8") -> str:
-        import asyncio
-
-        p = resolve_tool_path(path)
-        scope_err = _workspace_scope_error(p, path, "writes")
+        p, scope_err = await resolve_in_scope(path, "writes")
         if scope_err:
             return scope_err
 
@@ -358,11 +434,9 @@ def register_filesystem_tools(registry: Any) -> None:
         category="filesystem",
     )
     async def file_delete(path: str) -> str:
-        import asyncio
         import shutil as _shutil
 
-        p = resolve_tool_path(path)
-        scope_err = _workspace_scope_error(p, path, "deletions")
+        p, scope_err = await resolve_in_scope(path, "deletions")
         if scope_err:
             return scope_err
         # "." is the workspace root now that relative paths mean the
@@ -402,11 +476,8 @@ def register_filesystem_tools(registry: Any) -> None:
         category="filesystem",
     )
     async def file_list(path: str = ".", pattern: str = "*") -> str:
-        import asyncio
-
-        p = resolve_tool_path(path)
         # Workspace scoping — block listing outside workspace (fail-closed)
-        scope_err = _workspace_scope_error(p, path, "listings")
+        p, scope_err = await resolve_in_scope(path, "listings")
         if scope_err:
             return scope_err
         if not p.exists():
@@ -461,80 +532,10 @@ def register_filesystem_tools(registry: Any) -> None:
         label: str = "",
     ) -> str:
         """HITL-gated path grant for external folders/files."""
-        from kazma_core.safety.hitl import get_current_thread_id
-        from kazma_core.workspace.path_grants import (
-            grant_session_path,
-            list_durable_roots,
-            set_durable_roots,
-        )
-        from kazma_core.workspace.path_policy import check_path_access
-
-        if not path or not str(path).strip():
-            return "Error: path is required."
-        mode_n = "write" if str(mode).lower() in ("write", "rw", "readwrite") else "read"
-        scope_n = "durable" if str(scope).lower() in ("durable", "permanent", "always") else "session"
-        # Resolved once, here, the way every file tool resolves it -- so the
-        # folder granted is the folder the retried tool will ask about.
-        try:
-            path = str(resolve_tool_path(path))
-        except OSError as exc:
-            return f"Error: invalid path: {exc}"
-
-        # Already allowed?
-        existing = check_path_access(path, mode_n)
-        if existing.via == "store":
-            # No grant opens a Kazma store; granting one would change nothing.
-            return f"Error: {existing.reason}"
-        if existing.allowed and existing.via != "absolute":
-            return (
-                f"Already allowed via {existing.via}: {existing.grant_path or existing.resolved} "
-                f"(mode ≥ {mode_n}). Retry your file tool."
-            )
-
-        if scope_n == "durable":
-            roots = [g.to_dict() for g in list_durable_roots()]
-            resolved = path
-            p = Path(resolved)
-            root = resolved if p.is_dir() or not p.suffix else str(p.parent)
-            # Upsert
-            roots = [r for r in roots if r.get("path") != root]
-            roots.append(
-                {
-                    "path": root,
-                    "mode": mode_n,
-                    "label": label or Path(root).name,
-                }
-            )
-            try:
-                set_durable_roots(roots)
-            except ValueError as exc:
-                return f"Error: {exc}"
-            return (
-                f"Durable extra root granted: {root} (mode={mode_n}). "
-                "Retry file_read / file_list / file_write as needed."
-            )
-
-        tid = get_current_thread_id()
-        if not tid:
-            return (
-                "Error: no active chat thread for a session grant. "
-                "Use scope='durable' or open this from a chat turn."
-            )
-        try:
-            grant = grant_session_path(
-                tid,
-                path,
-                mode=mode_n,
-                label=label,
-                actor="hitl",
-            )
-        except ValueError as exc:
-            return f"Error: {exc}"
-        return (
-            f"Session path grant active: {grant.path} (mode={grant.mode}, "
-            f"id={grant.grant_id}). Retry the file tool now. "
-            "Grant expires in ~1 hour or when the process clears safety keys."
-        )
+        # Settings and grant stores, read and written: in a worker thread (it
+        # ran on the event loop until 2026-10-02). The thread carries the
+        # turn's context, so the chat's thread id reaches the session grant.
+        return await asyncio.to_thread(_request_path_access_sync, path, mode, scope, label)
     @registry.register(
         description=(
             "Search for text inside files using regex. Returns matching lines with file paths and line numbers."
@@ -547,8 +548,6 @@ def register_filesystem_tools(registry: Any) -> None:
         glob: str = "*.py",
         limit: int = 20,
     ) -> str:
-        import asyncio
-
         # Topic-shift / audit quarantine: block broad documents/ gold corpus
         try:
             from kazma_core.agent.turn_input import filter_file_search_path
@@ -559,11 +558,10 @@ def register_filesystem_tools(registry: Any) -> None:
         except Exception:
             pass
 
-        root = resolve_tool_path(path)
         # Workspace scoping FIRST — block searches outside workspace
         # (fail-closed), and never answer "not found" about a path the
         # tool may not look at.
-        scope_err = _workspace_scope_error(root, path, "searches")
+        root, scope_err = await resolve_in_scope(path, "searches")
         if scope_err:
             return scope_err
         if not root.exists():
@@ -636,8 +634,6 @@ def register_filesystem_tools(registry: Any) -> None:
         glob: str = "",
         limit: int = 20,
     ) -> str:
-        import asyncio
-
         from kazma_core.code_index.search import format_search, search_codebase
 
         def _run() -> str:
@@ -654,7 +650,6 @@ def register_filesystem_tools(registry: Any) -> None:
         category="filesystem",
     )
     async def codebase_status() -> str:
-        import asyncio
         import json
 
         from kazma_core.code_index.indexer import ensure_index, status
@@ -681,11 +676,10 @@ def register_filesystem_tools(registry: Any) -> None:
         file_path: str,
         caption: str = "",
     ) -> str:
-        p = resolve_tool_path(file_path)
         # Workspace scoping FIRST — block sends outside workspace
         # (fail-closed); "not found" about an out-of-scope path told the
         # model which files exist there.
-        scope_err = _workspace_scope_error(p, file_path, "file sends")
+        p, scope_err = await resolve_in_scope(file_path, "file sends")
         if scope_err:
             return scope_err
         if not p.exists():
@@ -702,8 +696,6 @@ def register_filesystem_tools(registry: Any) -> None:
         from kazma_core.tools.send_message import get_current_platform
 
         if get_current_platform() == "web":
-            import asyncio
-
             from kazma_core.chat_files import share_file, web_chat_thread
 
             thread = web_chat_thread()
@@ -721,10 +713,7 @@ def register_filesystem_tools(registry: Any) -> None:
 
         # Resolve the target chat from the gateway ContextVar (set by the
         # agent handler on every turn from the inbound message's sender).
-        try:
-            from kazma_core.tools.send_message import get_current_delivery_target, send_file_message
-        except ImportError:
-            return "Error: send_file requires the chat-platform dispatcher (not available in CLI mode)"
+        from kazma_core.tools.send_message import get_current_delivery_target, send_failed, send_file_message
 
         target_id = get_current_delivery_target()
         backend = "telegram"
@@ -742,7 +731,9 @@ def register_filesystem_tools(registry: Any) -> None:
             try:
                 target_id = await asyncio.to_thread(_fallback_telegram_target)
             except Exception as exc:
-                logger.debug("[ToolRegistry] Telegram chat target fallback failed: %s", exc)
+                # DEBUG until 2026-10-02, which hid an UnboundLocalError here
+                # for two days: every send_file without a bound chat failed.
+                logger.warning("[ToolRegistry] Telegram chat target fallback failed: %s", exc)
 
         if not target_id:
             return f"File saved in workspace at {p}. (No active Telegram/chat channel configured)"
@@ -754,7 +745,12 @@ def register_filesystem_tools(registry: Any) -> None:
                 file_path=str(p),
                 backend=backend,
             )
-            return f"File sent: {p.name} ({p.stat().st_size // 1024} KB) → {result}"
+            if send_failed(result):
+                # "File sent: ... -> Error: ..." until 2026-10-02: the model
+                # told the user a file went out that never did.
+                return f"Error: {p.name} was not sent: {result}"
+            size = (await asyncio.to_thread(p.stat)).st_size
+            return f"File sent: {p.name} ({size // 1024} KB) → {result}"
         except Exception as exc:
             logger.warning("[ToolRegistry] send_file failed: %s", exc)
             return f"Error sending file: {exc}"

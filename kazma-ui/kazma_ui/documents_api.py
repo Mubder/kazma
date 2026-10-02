@@ -292,7 +292,7 @@ def create_documents_router() -> APIRouter:
             return JSONResponse(
                 status_code=400, content={"ok": False, "error": "Missing 'path'"}
             )
-        resolved = _resolve_workspace_file(rel)
+        resolved = await asyncio.to_thread(_resolve_workspace_file, rel)
         if resolved is None:
             return JSONResponse(
                 status_code=400,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shutil
@@ -32,7 +33,7 @@ async def install_python_packages(packages: list[str]) -> str:
         if not pkg or any(char in pkg for char in ";|&<>`$()"):
             return f"Error: Invalid package name: {pkg}"
 
-    cwd = _get_workspace()
+    cwd = await asyncio.to_thread(_get_workspace)
 
     # Try uv first
     uv_path = shutil.which("uv")
@@ -74,7 +75,7 @@ async def install_npm_packages(packages: list[str]) -> str:
         if not pkg or any(char in pkg for char in ";|&<>`$()"):
             return f"Error: Invalid package name: {pkg}"
 
-    cwd = _get_workspace()
+    cwd = await asyncio.to_thread(_get_workspace)
     npm_path = shutil.which("npm")
     if not npm_path:
         return "Error: npm command not found on PATH."
@@ -108,7 +109,7 @@ async def check_environment() -> str:
     for bin_name in binaries:
         binary_paths[bin_name] = shutil.which(bin_name) or "Not Found"
 
-    cwd = _get_workspace()
+    cwd = await asyncio.to_thread(_get_workspace)
 
     report = [
         "=== Kazma Environment Diagnostic Report ===",

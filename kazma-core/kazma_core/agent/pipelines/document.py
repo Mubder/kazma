@@ -322,6 +322,7 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
             if output_path:
                 from kazma_core.tools.send_message import (
                     get_current_delivery_target,
+                    send_failed,
                     send_file_message,
                 )
 
@@ -342,7 +343,12 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
                         ),
                         timeout=60.0,
                     )
-                    steps_log.append(f"✓ Delivered via {deliver_to}: {send_result[:100]}")
+                    if send_failed(send_result):
+                        # It said "Delivered" whatever the send answered
+                        # until 2026-10-02.
+                        steps_log.append(f"⚠ Not delivered via {deliver_to}: {send_result[:200]}")
+                    else:
+                        steps_log.append(f"✓ Delivered via {deliver_to}: {send_result[:100]}")
                 elif target.endswith(":"):
                     steps_log.append(
                         f"⚠ Could not resolve {deliver_to} chat ID — "

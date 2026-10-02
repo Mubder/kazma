@@ -13,6 +13,7 @@ Two input shapes (one required):
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from kazma_core.tools.text_newlines import in_newline_style, newline_of, read_exact
@@ -169,7 +170,24 @@ async def file_apply_patch(
     patch: str = "",
     replace_all: bool = False,
 ) -> str:
-    """Apply a surgical edit to ``path``. Workspace + path-policy gated."""
+    """Apply a surgical edit to ``path``. Workspace + path-policy gated.
+
+    The workspace lookup, the access check (store reads) and the file's read
+    and write all ran on the event loop until 2026-10-02: in a worker thread,
+    which carries the turn's context.
+    """
+    return await asyncio.to_thread(
+        _file_apply_patch_sync, path, old_string, new_string, patch, replace_all,
+    )
+
+
+def _file_apply_patch_sync(
+    path: str,
+    old_string: str,
+    new_string: str,
+    patch: str,
+    replace_all: bool,
+) -> str:
     if not path or not path.strip():
         return "Error: No path provided."
 
@@ -341,10 +359,9 @@ async def file_apply_patch_set(
     summary = "\n".join(lines) + f"\ncheckpoint={checkpoint_id}"
     if not verify:
         return summary + "\nverify=skipped"
-    tests = _nearby_tests(paths)
+    tests = await asyncio.to_thread(_nearby_tests, paths)
     if not tests:
         return summary + "\nverify: no test_*.py next to patched files"
-    import asyncio
 
     from kazma_core.workspace.binding import resolve_active_root
 

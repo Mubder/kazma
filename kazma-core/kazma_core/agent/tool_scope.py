@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 def _is_under_agent_skill_dir(resolved_p: Path) -> bool:
@@ -54,3 +55,19 @@ def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
     if op in ("reads", "listings", "searches") and _is_under_agent_skill_dir(resolved_p):
         return None
     return denied_message(path, mode, result=access)  # type: ignore[arg-type]
+
+
+async def resolve_in_scope(path: str, op: str) -> tuple[Path, str | None]:
+    """``(resolved path, refusal or None)`` for a file tool, in a worker thread.
+
+    The workspace lookup and the access check behind ``_workspace_scope_error``
+    read stores; the async file tools ran both on the event loop until
+    2026-10-02. The thread carries the turn's context (``asyncio.to_thread``).
+    """
+    from kazma_core.workspace.binding import resolve_tool_path
+
+    def _run() -> tuple[Path, str | None]:
+        resolved = resolve_tool_path(path)
+        return resolved, _workspace_scope_error(resolved, path, op)
+
+    return await asyncio.to_thread(_run)

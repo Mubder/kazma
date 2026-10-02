@@ -1270,14 +1270,24 @@ class CronScheduler:
             )
             return
         try:
-            from kazma_core.tools.send_message import send_message
+            from kazma_core.tools.send_message import send_failed, send_message
 
             platform = target_id.split(":", 1)[0]
             body = compose_cron_delivery(text, job.prompt)
             logger.info("[CronScheduler] delivering %s -> %s", job.job_id, target_id)
-            await send_message(target_id, body, backend=platform)
+            result = await send_message(target_id, body, backend=platform)
         except Exception as exc:
             logger.critical(
                 "[CronScheduler] delivery FAILED for %s -> %s: %s",
                 job.job_id, target_id, exc,
             )
+            return
+        if send_failed(result):
+            # The platform refused it or no chat app is connected for it.
+            # Logged as delivered until 2026-10-02.
+            logger.critical(
+                "[CronScheduler] delivery FAILED for %s -> %s: %s",
+                job.job_id, target_id, result,
+            )
+            return
+        logger.info("[CronScheduler] delivered %s -> %s", job.job_id, target_id)

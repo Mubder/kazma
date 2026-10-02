@@ -384,7 +384,7 @@ async def x_test() -> JSONResponse:
             )
         me = await XClient(cfg.credentials).verify_credentials()
         username = str(me.get("username") or "")
-        payload = _status_payload()
+        payload = await asyncio.to_thread(_status_payload)
         payload["ok"] = True
         payload["verified_username"] = username
         payload["verified"] = True

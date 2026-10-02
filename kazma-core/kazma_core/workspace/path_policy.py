@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
@@ -38,6 +39,7 @@ __all__ = [
     "control_plane_store_targeted",
     "denied_message",
     "is_path_allowed",
+    "resolve_and_check",
 ]
 
 logger = logging.getLogger(__name__)
@@ -249,6 +251,28 @@ def denied_message(
         "Or add a durable extra folder in Settings → Workspace → Extra folders.\n"
         "After grant, retry the same file tool."
     )
+
+
+async def resolve_and_check(
+    path: str | Path,
+    mode: AccessMode | str = "read",
+) -> tuple[Path, PathAccessResult]:
+    """Where *path* points and whether a tool may use it, in a worker thread.
+
+    ``resolve_tool_path`` reads the active workspace, and
+    ``check_path_access`` the workspace, the durable roots and the session
+    grants: store reads (settings on Postgres), which the async file tools
+    made on the event loop until 2026-10-02. ``asyncio.to_thread`` copies the
+    turn's context, so the per-task workspace scope and the thread id reach
+    the check. Async code calls this, never the two directly
+    (``tests/test_static_gates.py``).
+    """
+
+    def _run() -> tuple[Path, PathAccessResult]:
+        resolved = resolve_tool_path(path)
+        return resolved, check_path_access(resolved, mode)
+
+    return await asyncio.to_thread(_run)
 
 
 def check_path_access(

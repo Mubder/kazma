@@ -180,12 +180,24 @@ def verify_skill(
             )
         expected_sig = compute_signature(actual_checksum, secret)
         if not _hmac.compare_digest(stored_signature, expected_sig):
+            # The content matches its recorded checksum, so this is a key that
+            # differs: KAZMA_SECRET changed since the install, another install
+            # signed it (the user-level folder is shared), or someone re-signed
+            # it. Kazma cannot tell which, so it refuses -- and says how to
+            # vouch for the skill (2026-10-02: nine live skills were refused
+            # under a reason that named only the attacker).
             logger.warning(
-                "[AgentSkill] '%s' signature MISMATCH — possible tampering. Refusing.",
-                skill_md_path.parent.name,
+                "[AgentSkill] '%s' is signed with another key; refusing it. If you "
+                "trust it, re-sign it: kazma agent-skills sign %s",
+                skill_md_path.parent.name, skill_md_path.parent,
             )
             return VerifyResult(
-                ok=False, reason="signature mismatch (skill may have been re-signed by an attacker)",
+                ok=False,
+                reason=(
+                    "signed with another key: KAZMA_SECRET changed since it was "
+                    "installed, another Kazma install signed it, or someone re-signed "
+                    "it. If you trust it: kazma agent-skills sign <its folder>"
+                ),
                 signed=True,
             )
     else:

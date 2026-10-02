@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any
@@ -33,7 +34,9 @@ async def list_agent_skills() -> str:
     """List installed Agent Skills (agentskills.io / SKILL.md format)."""
     from kazma_core.agent_skills.catalog import list_skill_summaries
 
-    summaries = list_skill_summaries(workspace_root=_workspace_root())
+    # Resolves the workspace, reads every SKILL.md and verifies its
+    # signature: off the loop.
+    summaries = await asyncio.to_thread(lambda: list_skill_summaries(workspace_root=_workspace_root()))
     if not summaries:
         return (
             "No Agent Skills installed.\n\n"
@@ -46,9 +49,12 @@ async def list_agent_skills() -> str:
     for s in summaries:
         ver = f" v{s['version']}" if s.get("version") else ""
         auth = f" by {s['author']}" if s.get("author") else ""
-        lines.append(f"- **{s['name']}**{ver}{auth} [{s['scope']}]")
+        state = s.get("integrity", "unsigned")
+        lines.append(f"- **{s['name']}**{ver}{auth} [{s['scope']}, {state}]")
         lines.append(f"  {s['description'][:200]}")
         lines.append(f"  `{s['location']}`")
+        if state == "refused":
+            lines.append(f"  Refused at activation: {s.get('integrity_reason', '')}")
     lines.append("\nActivate with `activate_skill(name=\"…\")`.")
     return "\n".join(lines)
 
@@ -58,6 +64,12 @@ async def activate_skill(name: str) -> str:
 
     Call this when a user task matches a skill's description.
     """
+    # Discovery, the workspace lookup and the integrity check read files and
+    # settings: off the loop.
+    return await asyncio.to_thread(_activate_skill_sync, name)
+
+
+def _activate_skill_sync(name: str) -> str:
     from kazma_core.agent_skills.catalog import format_skill_activation
     from kazma_core.agent_skills.discovery import get_skill
 
@@ -125,7 +137,7 @@ async def uninstall_agent_skill(name: str) -> str:
     skill_name = (name or "").strip()
     if not skill_name:
         return "Error: skill name is required."
-    result = uninstall_skill(skill_name)
+    result = await asyncio.to_thread(uninstall_skill, skill_name)
     return result.to_user_message()
 
 
