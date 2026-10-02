@@ -140,9 +140,12 @@ def test_content_takes_its_direction_from_its_own_text() -> None:
     plaintext = [sel for sel, body in rules(css) if re.search(r"unicode-bidi:\s*plaintext", body)]
     joined = " , ".join(plaintext)
     assert '[translate="no"]:not([dir="ltr"], [dir="rtl"], pre, code, kbd, samp)' in joined
-    assert ('[translate="no"] :not([dir="ltr"], [dir="rtl"], pre, code, kbd, samp, pre *, code *)'
-            in joined)
+    assert ('[translate="no"] :not([dir="ltr"], [dir="rtl"], [translate="yes"], [translate="yes"] *, '
+            'pre, code, kbd, samp, pre *, code *)' in joined)
     assert 'input[type="text"]' in joined and "textarea" in joined
+    # Interface words inside content follow the page, as an isolate.
+    isolates = [sel for sel, body in rules(css) if re.search(r"unicode-bidi:\s*isolate", body)]
+    assert '[translate="no"] [translate="yes"]' in isolates
 
 
 def test_the_plan_text_is_not_forced_right_to_left() -> None:

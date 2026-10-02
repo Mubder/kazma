@@ -1642,7 +1642,7 @@ tbody tr:last-child td {
    lay "PDF ..." out by its first letter.
    Gate: tests/test_text_follows_its_language.py. */
 [translate="no"]:not([dir="ltr"], [dir="rtl"], pre, code, kbd, samp),
-[translate="no"] :not([dir="ltr"], [dir="rtl"], pre, code, kbd, samp, pre *, code *),
+[translate="no"] :not([dir="ltr"], [dir="rtl"], [translate="yes"], [translate="yes"] *, pre, code, kbd, samp, pre *, code *),
 input:not([type]),
 input[type="text"],
 input[type="search"],
@@ -1650,6 +1650,13 @@ input[type="url"],
 input[type="email"],
 textarea {
   unicode-bidi: plaintext;
+}
+/* Interface words inside content (translate="yes", the i18n mark for them):
+   an isolate in the page's direction, so they neither take the content's
+   direction nor decide it. Under the rule above the Memory page's chip
+   label "RAG لكل دورة" ran left to right by its first letter (2026-10-02). */
+[translate="no"] [translate="yes"] {
+  unicode-bidi: isolate;
 }
 
 /* Global bidi helpers — apply to any surface that shows user/model text */

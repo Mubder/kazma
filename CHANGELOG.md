@@ -20,6 +20,12 @@ The chat page went from 119 mismatches to none. These were left:
   ran right to left in the Arabic UI. The tag is set apart now.
 - **The Documents page's audit lines are data**, laid out left to right
   ("delete·tombstone" read backwards in the Arabic UI).
+- **Interface words inside content follow the page.** A label marked
+  `translate="yes"` inside content (the Memory page's chips) took the
+  content rule and its first letter's direction: "RAG لكل دورة" ran left to
+  right. It is an isolate in the page's direction now. The Memory page's
+  list of conversation memories puts each memory on its own line, in its own
+  language (an English memory sat on the right in the Arabic UI).
 - **Arabic technical writing counts as Arabic.** A paragraph's language is
   the language of most of its words; "توليد مستندات PDF وDOCX وXLSX
   وMarkdown." counted as English (four Latin words to two Arabic ones). A

@@ -138,7 +138,16 @@ _MEASURE_JS = r"""() => {
     .map(shape);
   const content = [...document.querySelectorAll('[data-probe="content"]')].map(shape);
   const decided = [...document.querySelectorAll('[data-probe="decided"]')].map(shape);
-  return {page: document.documentElement.dir, blocks, tools, content, decided};
+  const label = document.querySelector('[data-probe="ui-label"]');
+  let uiLabel = null;
+  if (label && label.firstChild) {
+    const t = label.firstChild, rag = document.createRange(), ar = document.createRange();
+    rag.setStart(t, 0); rag.setEnd(t, 3);
+    ar.setStart(t, 4); ar.setEnd(t, t.length);
+    uiLabel = {rag: Math.round(rag.getBoundingClientRect().left),
+               arabic: Math.round(ar.getBoundingClientRect().left)};
+  }
+  return {page: document.documentElement.dir, blocks, tools, content, decided, uiLabel};
 }"""
 
 #: Two blocks of content (translate="no", the i18n rules' mark) in the page's
@@ -159,6 +168,11 @@ _ADD_CONTENT_JS = r"""() => {
   decided.style.width = '100%';
   decided.innerHTML = '<p data-probe="decided" dir="rtl">PDF الملف جاهز للتنزيل الآن.<br>تم.</p>';
   host.appendChild(decided);
+  // An interface label inside content (the Memory page's chips): it follows
+  // the page, so in the Arabic UI "RAG" sits to the right of the Arabic.
+  const chip = document.createElement('div');
+  chip.innerHTML = '<span translate="no" title="detail"><span translate="yes" data-probe="ui-label">RAG لكل دورة</span></span>';
+  host.appendChild(chip);
 }"""
 
 #: Opens each finished turn's activity panel, as a reader does (the fold is
@@ -302,6 +316,9 @@ def _check(shot: dict, lang: str) -> None:
     assert _sits(content["lines"], "ltr"), (lang, content)
     (decided,) = shot["decided"]
     assert decided["dir"] == "rtl" and _sits(decided["lines"], "rtl"), (lang, decided)
+    if lang == "ar":  # an Arabic interface label occurs in the Arabic UI
+        label = shot["uiLabel"]
+        assert label and label["rag"] > label["arabic"], label  # right to left
 
 
 def _same_layout(a: dict, b: dict) -> bool:
@@ -360,6 +377,9 @@ def test_a_content_rule_without_the_exemption_overrode_a_decided_direction(harne
     # ("PDF ...") goes left; "تم." after it stays right.
     first = decided["lines"][0]
     assert first[0] <= 3 and first[1] > 20, decided
+    # And an interface label inside content took its first letter's way.
+    label = shot["uiLabel"]
+    assert label and label["rag"] < label["arabic"], label
 
 
 def test_without_a_direction_per_paragraph_arabic_ran_left_to_right(harness: Harness) -> None:

@@ -106,7 +106,8 @@ reply laid its Arabic paragraphs out left to right in both UIs.
   and every block inside it its direction from its own text
   (`unicode-bidi: plaintext`), except an element whose `dir` a script has
   already set, such as a renderer's paragraph or a tool call kept left to
-  right. The same rule covers what you type into a field. Numbers are not
+  right. Interface words inside content (`translate="yes"`) follow the
+  page instead. The same rule covers what you type into a field. Numbers are not
   marked, because a value with no letters is laid out
   left to right.
 - **A line that mixes a label and content is split.** In the activity
