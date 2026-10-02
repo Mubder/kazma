@@ -22,8 +22,17 @@ _ALNUM = string.ascii_letters + string.digits
 
 
 def _random(n: int, chars: str = _ALNUM) -> str:
+    """A random value that unmistakably looks random: *n* distinct characters.
+
+    Drawn with repeats, a 12-character password sometimes fell below the
+    detector's entropy floor (3.0 bits a character) -- a value the detector
+    rightly ignores -- and the test failed at random (CI, 2026-10-02).
+    Distinct characters give the most entropy a value of that length can have.
+    """
+    assert n <= len(chars)
+    rng = secrets.SystemRandom()
     while True:
-        value = "".join(secrets.choice(chars) for _ in range(n))
+        value = "".join(rng.sample(chars, n))
         if any(c.isdigit() for c in value) and any(c.isalpha() for c in value):
             return value
 
