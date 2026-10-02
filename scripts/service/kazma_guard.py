@@ -427,11 +427,15 @@ class GuardLog:
     """Tiny append-only JSONL logger with stderr mirroring.
 
     Uses no third-party logging config so it cannot be silenced by the
-    application's own logging setup.
+    application's own logging setup. ``echo=False`` keeps the record and
+    skips the mirror: another program (``kazma update``) prints its own
+    account of what it asked the guard, and the raw events read as noise
+    there.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, echo: bool = True) -> None:
         self.path = path
+        self.echo = echo
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
         except Exception:
@@ -450,6 +454,8 @@ class GuardLog:
                 fh.write(line + "\n")
         except Exception:
             pass
+        if not self.echo:
+            return
         # A logger must never raise: under the scheduled task stderr is a
         # console nobody reads, and a failed write to it would otherwise end
         # the guard from inside the line meant to explain why.
@@ -2428,7 +2434,7 @@ def stop_for_maintenance(reason: str, *, ttl_s: float = DEFAULT_PAUSE_TTL_S,
         return "paused"
     if not _guard_alive():
         return "no_guard"
-    log = GuardLog(_default_log_path())
+    log = GuardLog(_default_log_path(), echo=False)  # the caller prints its own account
     health = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
     if current is None and probe(health, 5.0).answered and not _wait_until_idle(
         health, idle_timeout_s, log, action="stopping", event="maintenance",
@@ -2505,7 +2511,7 @@ def resume_after_maintenance(reason: str, *, wait: bool = True) -> str:
         return "not_paused"
     if current.get("reason") != reason:
         return "not_ours"
-    log = GuardLog(_default_log_path())
+    log = GuardLog(_default_log_path(), echo=False)
     health = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
     resumed_at = time.time()
     clear_pause()
