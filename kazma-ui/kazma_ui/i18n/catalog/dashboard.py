@@ -525,9 +525,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الكيانات",
         "en": "Entities",
     },
-    "dashboard.memory_graph_truncated": {
-        "ar": "عرض أول {n} من {total} عقدة",
-        "en": "showing first {n} of {total} nodes",
+    "dashboard.memory_graph_truncated.zero": {
+        "ar": "عرض أول {shown} من {n} عقدة",
+        "en": "showing first {shown} of {n} nodes",
+    },
+    "dashboard.memory_graph_truncated.one": {
+        "ar": "عرض أول {shown} من عقدة واحدة",
+        "en": "showing first {shown} of 1 node",
+    },
+    "dashboard.memory_graph_truncated.two": {
+        "ar": "عرض أول {shown} من عقدتين",
+        "en": "showing first {shown} of {n} nodes",
+    },
+    "dashboard.memory_graph_truncated.few": {
+        "ar": "عرض أول {shown} من {n} عقد",
+        "en": "showing first {shown} of {n} nodes",
+    },
+    "dashboard.memory_graph_truncated.many": {
+        "ar": "عرض أول {shown} من {n} عقدة",
+        "en": "showing first {shown} of {n} nodes",
+    },
+    "dashboard.memory_graph_truncated.other": {
+        "ar": "عرض أول {shown} من {n} عقدة",
+        "en": "showing first {shown} of {n} nodes",
     },
     "dashboard.memory_group_features": {
         "ar": "الميزات",

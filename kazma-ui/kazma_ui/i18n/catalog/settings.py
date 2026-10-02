@@ -2858,9 +2858,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "اكتمل",
         "en": "done",
     },
-    "settings.bk.done_summary": {
-        "ar": "{dbs} قاعدة بيانات، {mb} ميغابايت",
-        "en": "{dbs} databases, {mb} MB",
+    "settings.bk.done_summary.zero": {
+        "ar": "لا قواعد بيانات، {mb} ميغابايت",
+        "en": "{n} databases, {mb} MB",
+    },
+    "settings.bk.done_summary.one": {
+        "ar": "قاعدة بيانات واحدة، {mb} ميغابايت",
+        "en": "1 database, {mb} MB",
+    },
+    "settings.bk.done_summary.two": {
+        "ar": "قاعدتا بيانات، {mb} ميغابايت",
+        "en": "{n} databases, {mb} MB",
+    },
+    "settings.bk.done_summary.few": {
+        "ar": "{n} قواعد بيانات، {mb} ميغابايت",
+        "en": "{n} databases, {mb} MB",
+    },
+    "settings.bk.done_summary.many": {
+        "ar": "{n} قاعدة بيانات، {mb} ميغابايت",
+        "en": "{n} databases, {mb} MB",
+    },
+    "settings.bk.done_summary.other": {
+        "ar": "{n} قاعدة بيانات، {mb} ميغابايت",
+        "en": "{n} databases, {mb} MB",
     },
     "settings.bk.synced_to": {
         "ar": "☁ نُسخت إلى {remote}",
@@ -2894,9 +2914,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "محلية فقط",
         "en": "local only",
     },
-    "settings.bk.row_summary": {
-        "ar": "{dbs} قاعدة بيانات · {mb} ميغابايت",
-        "en": "{dbs} databases · {mb} MB",
+    "settings.bk.row_summary.zero": {
+        "ar": "لا قواعد بيانات · {mb} ميغابايت",
+        "en": "{n} databases · {mb} MB",
+    },
+    "settings.bk.row_summary.one": {
+        "ar": "قاعدة بيانات واحدة · {mb} ميغابايت",
+        "en": "1 database · {mb} MB",
+    },
+    "settings.bk.row_summary.two": {
+        "ar": "قاعدتا بيانات · {mb} ميغابايت",
+        "en": "{n} databases · {mb} MB",
+    },
+    "settings.bk.row_summary.few": {
+        "ar": "{n} قواعد بيانات · {mb} ميغابايت",
+        "en": "{n} databases · {mb} MB",
+    },
+    "settings.bk.row_summary.many": {
+        "ar": "{n} قاعدة بيانات · {mb} ميغابايت",
+        "en": "{n} databases · {mb} MB",
+    },
+    "settings.bk.row_summary.other": {
+        "ar": "{n} قاعدة بيانات · {mb} ميغابايت",
+        "en": "{n} databases · {mb} MB",
     },
     "settings.bk.incomplete": {
         "ar": "غير مكتملة",
@@ -3237,6 +3277,54 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.hub.search_models_n.other": {
         "ar": "ابحث في {n} نموذج…",
         "en": "Search {n} models…",
+    },
+    "settings.hub.models_discovered.zero": {
+        "ar": "لم يُكتشف أي نموذج محادثة",
+        "en": "{n} chat models discovered",
+    },
+    "settings.hub.models_discovered.one": {
+        "ar": "اكتُشف نموذج محادثة واحد",
+        "en": "1 chat model discovered",
+    },
+    "settings.hub.models_discovered.two": {
+        "ar": "اكتُشف نموذجا محادثة",
+        "en": "{n} chat models discovered",
+    },
+    "settings.hub.models_discovered.few": {
+        "ar": "اكتُشفت {n} نماذج محادثة",
+        "en": "{n} chat models discovered",
+    },
+    "settings.hub.models_discovered.many": {
+        "ar": "اكتُشف {n} نموذج محادثة",
+        "en": "{n} chat models discovered",
+    },
+    "settings.hub.models_discovered.other": {
+        "ar": "اكتُشف {n} نموذج محادثة",
+        "en": "{n} chat models discovered",
+    },
+    "settings.hub.speech_models_hidden.zero": {
+        "ar": " (تحويل الكلام إلى نص في الإعدادات ← الصوت)",
+        "en": " ({n} speech models hidden — speech-to-text is in Settings → Voice)",
+    },
+    "settings.hub.speech_models_hidden.one": {
+        "ar": " (أُخفي نموذج كلام واحد؛ تحويل الكلام إلى نص في الإعدادات ← الصوت)",
+        "en": " (1 speech model hidden — speech-to-text is in Settings → Voice)",
+    },
+    "settings.hub.speech_models_hidden.two": {
+        "ar": " (أُخفي نموذجا كلام؛ تحويل الكلام إلى نص في الإعدادات ← الصوت)",
+        "en": " ({n} speech models hidden — speech-to-text is in Settings → Voice)",
+    },
+    "settings.hub.speech_models_hidden.few": {
+        "ar": " (أُخفيت {n} نماذج كلام؛ تحويل الكلام إلى نص في الإعدادات ← الصوت)",
+        "en": " ({n} speech models hidden — speech-to-text is in Settings → Voice)",
+    },
+    "settings.hub.speech_models_hidden.many": {
+        "ar": " (أُخفي {n} نموذج كلام؛ تحويل الكلام إلى نص في الإعدادات ← الصوت)",
+        "en": " ({n} speech models hidden — speech-to-text is in Settings → Voice)",
+    },
+    "settings.hub.speech_models_hidden.other": {
+        "ar": " (أُخفي {n} نموذج كلام؛ تحويل الكلام إلى نص في الإعدادات ← الصوت)",
+        "en": " ({n} speech models hidden — speech-to-text is in Settings → Voice)",
     },
     "settings.hub.no_models_match": {
         "ar": "لا توجد نماذج مطابقة لبحثك",

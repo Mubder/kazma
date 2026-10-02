@@ -936,10 +936,10 @@
                 const data = await resp.json();
                 const count = data.count || 0;
                 const speech = data.speech_omitted || 0;
-                var msg = count + ' chat models discovered';
-                if (speech) {
-                    msg += ' (' + speech + ' speech models hidden — STT is Settings → Voice)';
-                }
+                // Counts in their plural forms, in the page's language
+                // (it was English on every page, 2026-10-02).
+                var msg = window.kazmaCount('settings.hub.models_discovered', count);
+                if (speech) msg += window.kazmaCount('settings.hub.speech_models_hidden', speech);
                 showToast(msg, count > 0 ? 'success' : 'warning');
                 await this.loadHubProviders();
             } catch (e) {

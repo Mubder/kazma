@@ -652,6 +652,54 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "{n} معتقد",
         "en": "{n} beliefs",
     },
+    "memory.console.nodes_n.zero": {
+        "ar": "لا عقد",
+        "en": "{n} nodes",
+    },
+    "memory.console.nodes_n.one": {
+        "ar": "عقدة واحدة",
+        "en": "1 node",
+    },
+    "memory.console.nodes_n.two": {
+        "ar": "عقدتان",
+        "en": "{n} nodes",
+    },
+    "memory.console.nodes_n.few": {
+        "ar": "{n} عقد",
+        "en": "{n} nodes",
+    },
+    "memory.console.nodes_n.many": {
+        "ar": "{n} عقدة",
+        "en": "{n} nodes",
+    },
+    "memory.console.nodes_n.other": {
+        "ar": "{n} عقدة",
+        "en": "{n} nodes",
+    },
+    "memory.console.edges_n.zero": {
+        "ar": "لا حواف",
+        "en": "{n} edges",
+    },
+    "memory.console.edges_n.one": {
+        "ar": "حافة واحدة",
+        "en": "1 edge",
+    },
+    "memory.console.edges_n.two": {
+        "ar": "حافتان",
+        "en": "{n} edges",
+    },
+    "memory.console.edges_n.few": {
+        "ar": "{n} حواف",
+        "en": "{n} edges",
+    },
+    "memory.console.edges_n.many": {
+        "ar": "{n} حافة",
+        "en": "{n} edges",
+    },
+    "memory.console.edges_n.other": {
+        "ar": "{n} حافة",
+        "en": "{n} edges",
+    },
     "memory.console.entities_n.zero": {
         "ar": "لا كيانات",
         "en": "{n} entities",
@@ -744,9 +792,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "{active} نشطة · {quarantined} معزولة",
         "en": "{active} active · {quarantined} quarantined",
     },
-    "memory.console.queue_meta": {
-        "ar": "{failed} فاشلة · {audits} تدقيقات/24 ساعة",
-        "en": "{failed} failed · {audits} audits/24h",
+    "memory.console.queue_meta.zero": {
+        "ar": "{failed} فاشلة · لا تدقيقات/24 ساعة",
+        "en": "{failed} failed · {n} audits/24h",
+    },
+    "memory.console.queue_meta.one": {
+        "ar": "{failed} فاشلة · تدقيق واحد/24 ساعة",
+        "en": "{failed} failed · 1 audit/24h",
+    },
+    "memory.console.queue_meta.two": {
+        "ar": "{failed} فاشلة · تدقيقان/24 ساعة",
+        "en": "{failed} failed · {n} audits/24h",
+    },
+    "memory.console.queue_meta.few": {
+        "ar": "{failed} فاشلة · {n} تدقيقات/24 ساعة",
+        "en": "{failed} failed · {n} audits/24h",
+    },
+    "memory.console.queue_meta.many": {
+        "ar": "{failed} فاشلة · {n} تدقيقًا/24 ساعة",
+        "en": "{failed} failed · {n} audits/24h",
+    },
+    "memory.console.queue_meta.other": {
+        "ar": "{failed} فاشلة · {n} تدقيق/24 ساعة",
+        "en": "{failed} failed · {n} audits/24h",
     },
     "memory.console.queue_admins_only": {
         "ar": "طابور التثبيت: للمشرفين فقط",
@@ -1137,9 +1205,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشل تحميل المهارات",
         "en": "Skills load failed",
     },
-    "memory.console.quality_checks": {
-        "ar": "{passed}/{total} فحوص",
-        "en": "{passed}/{total} checks",
+    "memory.console.quality_checks.zero": {
+        "ar": "الفحوص الناجحة: {passed} من {n}",
+        "en": "{passed}/{n} checks",
+    },
+    "memory.console.quality_checks.one": {
+        "ar": "الفحوص الناجحة: {passed} من {n}",
+        "en": "{passed}/1 check",
+    },
+    "memory.console.quality_checks.two": {
+        "ar": "الفحوص الناجحة: {passed} من {n}",
+        "en": "{passed}/{n} checks",
+    },
+    "memory.console.quality_checks.few": {
+        "ar": "الفحوص الناجحة: {passed} من {n}",
+        "en": "{passed}/{n} checks",
+    },
+    "memory.console.quality_checks.many": {
+        "ar": "الفحوص الناجحة: {passed} من {n}",
+        "en": "{passed}/{n} checks",
+    },
+    "memory.console.quality_checks.other": {
+        "ar": "الفحوص الناجحة: {passed} من {n}",
+        "en": "{passed}/{n} checks",
     },
     "memory.console.all_green": {
         "ar": "كلها سليمة",
@@ -2058,16 +2146,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "· site accent",
     },
     "memory.console.aria_showing": {
-        "ar": "المعروض حاليًا: {nodes} عقد و{links} حواف.",
-        "en": "Currently showing {nodes} nodes and {links} edges.",
+        "ar": "المعروض حاليًا: {nodes} و{links}.",
+        "en": "Currently showing {nodes} and {links}.",
     },
     "memory.console.aria_focused": {
         "ar": "التركيز على {id}.",
         "en": "Focused on {id}.",
-    },
-    "memory.console.stats_nodes": {
-        "ar": "{nodes} عقد · {links} معتقدات",
-        "en": "{nodes} nodes · {links} beliefs",
     },
     "memory.console.stats_isolated": {
         "ar": "{n} معزولة",

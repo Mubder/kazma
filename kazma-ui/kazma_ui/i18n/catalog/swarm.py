@@ -1448,10 +1448,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "استخدام الرموز",
         "en": "Token Usage",
     },
-    "swarm.tokens_count": {
-        "ar": "{tokens} رمز",
-        "en": "{tokens} tokens",
-    },
     "swarm.tokens_inline.zero": {
         "ar": "لا رموز",
         "en": "{n} tokens",

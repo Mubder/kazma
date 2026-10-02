@@ -159,15 +159,19 @@ def test_negative_control_the_shipped_settings_row_is_caught():
 #: morning of 2026-10-02, the last 34 converted that evening and two dead ones
 #: removed. A count label is written as <key>.zero ... <key>.other and read
 #: through t_plural, plural_forms + KazmaFormat.count, window.kazmaCount, or
-#: chat.js tiCount.
-_SINGLE_FORM = re.compile(r"\{(?:n|count)\}\s+(?:more\s+)?[a-z]+s\b")
+#: chat.js tiCount. Any placeholder name counts: "{nodes} nodes · {links}
+#: beliefs" read "200 عقد · 295 معتقدات" on the live memory page after the
+#: first pass, which looked only for {n} and {count}.
+_SINGLE_FORM = re.compile(r"\{[a-z_]+\}\s+(?:more\s+)?([a-z]+s)\b")
+#: Words after a placeholder that are not a counted noun ("{name} is off").
+_NOT_A_NOUN = frozenset({"is", "was", "as", "has", "does", "its", "this", "us"})
 
 
 def single_form_count_labels() -> list[str]:
     return sorted(
         key for key, entry in TRANSLATIONS.items()
         if key.rsplit(".", 1)[-1] not in PLURAL_CATEGORIES
-        and _SINGLE_FORM.search((entry or {}).get("en") or "")
+        and any(m.group(1) not in _NOT_A_NOUN for m in _SINGLE_FORM.finditer((entry or {}).get("en") or ""))
     )
 
 
@@ -185,3 +189,51 @@ def test_negative_control_a_single_form_label_is_counted(monkeypatch):
     assert "x.n_widgets" in single_form_count_labels()
     monkeypatch.setitem(TRANSLATIONS, "x.widgets.other", {"en": "{n} widgets", "ar": "{n} أداة"})
     assert "x.widgets.other" not in single_form_count_labels()
+    # The shipped memory-graph header, under other placeholder names.
+    monkeypatch.setitem(TRANSLATIONS, "x.stats", {"en": "{nodes} nodes · {links} beliefs", "ar": "{nodes} عقد"})
+    assert "x.stats" in single_form_count_labels()
+    monkeypatch.setitem(TRANSLATIONS, "x.verb", {"en": "{name} is off", "ar": "{name} مُعطَّل"})
+    assert "x.verb" not in single_form_count_labels()
+
+
+# ── Gate: no script glues an English word after a value (2026-10-02) ──────
+
+STATIC_JS = ROOT / "kazma-ui" / "kazma_ui" / "static" / "js"
+#: ``+ ' chat models discovered'``: an English word appended to a value, out
+#: of reach of the catalog (settings_hub.js said it on Arabic pages, and
+#: kb.js's crawl toast " · 3 unchanged"). Lines that build markup, classes or
+#: log text are not interface words.
+_GLUED_WORD = re.compile(r"""\+\s*(['"])\s[a-z]{3,}[a-z ]*\1""")
+_NOT_INTERFACE = ("console.", "logger.", "className", "class=", "querySelector", "addEventListener")
+
+
+def glued_script_words(src: str) -> list[str]:
+    return [
+        line.strip() for line in src.splitlines()
+        if _GLUED_WORD.search(line) and not any(skip in line for skip in _NOT_INTERFACE)
+    ]
+
+
+def test_no_script_glues_an_english_word_to_a_value():
+    found = [
+        f"{path.relative_to(ROOT).as_posix()}: {hit}"
+        for path in sorted(STATIC_JS.rglob("*.js"))
+        if not (path.name.endswith(".min.js") or "vendor" in path.parts or "codemirror" in path.parts)
+        for hit in glued_script_words(path.read_text(encoding="utf-8"))
+    ]
+    assert not found, (
+        "A value glued to an English word is English on every page and in one "
+        "form; use window.kazmaCount('<key>', n) or kazmaT:\n  " + "\n  ".join(found)
+    )
+
+
+def test_negative_control_the_shipped_glued_words_are_caught():
+    shipped = (
+        "var msg = count + ' chat models discovered';\n"
+        "(unchanged ? \" · \" + unchanged + \" unchanged\" : \"\") +\n"
+        "console.log('x' + ' count');\n"
+    )
+    assert glued_script_words(shipped) == [
+        "var msg = count + ' chat models discovered';",
+        "(unchanged ? \" · \" + unchanged + \" unchanged\" : \"\") +",
+    ]

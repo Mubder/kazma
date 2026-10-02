@@ -769,7 +769,7 @@
       const q = h.queue || null;
       setEl('v2-kpi-queue', q ? fmtNum((q.pending||0) + (q.processing||0)) : '–');
       setEl('v2-kpi-queue-meta', q
-        ? _mt('memory.console.queue_meta', '{failed} failed · {audits} audits/24h', { failed: q.failed || 0, audits: h.recent_audits || 0 })
+        ? window.kazmaCount('memory.console.queue_meta', h.recent_audits || 0, { failed: q.failed || 0 })
         : _mt('memory.console.queue_admins_only', 'install queue: admins only'));
       // Post-turn / embedder strip
       const pt = h.post_turn || {};
@@ -1311,7 +1311,7 @@
       scoreEl.textContent = (data.grade || '') + ' ' + (data.score != null ? data.score + '%' : '');
       if (detEl) {
         const failing = (data.checks || []).filter(function(c) { return !c.ok; }).map(function(c) { return c.name; });
-        detEl.innerHTML = _esc(_mt('memory.console.quality_checks', '{passed}/{total} checks', { passed: data.passed || 0, total: data.total || 0 })) + ' · ' +
+        detEl.innerHTML = _esc(window.kazmaCount('memory.console.quality_checks', data.total || 0, { passed: data.passed || 0 })) + ' · ' +
           (failing.length ? '<span translate="no">' + _esc(failing.join(', ')) + '</span>' : _esc(_mt('memory.console.all_green', 'all green')));
       }
     } catch (e) { if (scoreEl) scoreEl.textContent = '–'; }
@@ -3989,11 +3989,8 @@
   function _v2gRenderTruncation(stats) {
     var el = document.getElementById('v2g-trunc-banner');
     if (!el) return;
-    var truncI18n = (window.__DASH_MEM_I18N && window.__DASH_MEM_I18N.graphTrunc) || 'showing first {n} of {total} nodes';
     if (stats && stats.truncated && stats.total_nodes > (stats.nodes || 0)) {
-      var msg = String(truncI18n)
-        .replace('{n}', stats.nodes || 0)
-        .replace('{total}', stats.total_nodes);
+      var msg = window.kazmaCount('dashboard.memory_graph_truncated', stats.total_nodes, { shown: stats.nodes || 0 });
       // M-08 honesty: slicing also amputates edges — surface the delta so
       // operators know missing connections are a view limit, not lost data.
       var hiddenEdges = 0;
@@ -4020,7 +4017,10 @@
     var focus = _v2gSelectedId || '';
     var base = _mt('memory.mc.v2_belief_topology_graph_arrow', 'V2 belief topology graph. Arrow keys pan, plus minus zoom, Home resets. Click edges to edit or unlink beliefs.');
     canvas.setAttribute('aria-label', base + ' ' +
-      _mt('memory.console.aria_showing', 'Currently showing {nodes} nodes and {links} edges.', { nodes: nodes, links: links }) +
+      _mt('memory.console.aria_showing', 'Currently showing {nodes} and {links}.', {
+        nodes: window.kazmaCount('memory.console.nodes_n', nodes),
+        links: window.kazmaCount('memory.console.edges_n', links),
+      }) +
       (focus ? ' ' + _mt('memory.console.aria_focused', 'Focused on {id}.', { id: focus }) : ''));
   }
 
@@ -4199,7 +4199,8 @@
       var st = _v2gLastStats || {};
       var paint = st.paint_source || st.source || 'sqlite';
       var gprov = st.graph_provider || paint;
-      var parts = [_mt('memory.console.stats_nodes', '{nodes} nodes · {links} beliefs', { nodes: nodes.length, links: links.length })];
+      var parts = [window.kazmaCount('memory.console.nodes_n', nodes.length) + ' · ' +
+        window.kazmaCount('memory.console.beliefs_n', links.length)];
       if (isolatedCount > 0) parts.push(_mt('memory.console.stats_isolated', '{n} isolated', { n: isolatedCount }));
       parts.push(_mt('memory.console.stats_paint', 'paint {source}', { source: paint }));
       if (gprov === 'neo4j') {
