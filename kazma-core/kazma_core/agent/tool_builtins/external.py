@@ -197,7 +197,8 @@ def register_external_tools(registry: Any) -> None:
             list_agent_skills,
             description=(
                 "List installed Agent Skills (SKILL.md / agentskills.io format). "
-                "Shows name, description, and location for each skill."
+                "Shows name, description, location and integrity for each skill: "
+                "verified, unsigned (loads with a warning) or refused at activation."
             ),
             category="skills",
         )

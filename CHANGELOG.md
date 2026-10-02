@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Every list of agent skills shows what activation will do with each (2026-10-02)
+
+- **A refused skill is no longer offered as verified.** An installed Agent
+  Skill is checked when the model activates it: verified (signed by this
+  install), unsigned (loads with a warning), or refused (its signature was
+  made with another key, or its content changed since it was signed). The
+  catalog the model reads, `list_agent_skills`, `kazma agent-skills list` and
+  the Skills page called a skill "verified" whenever it had a recorded
+  checksum. On the live install nine skills in `~/.agents/skills`, signed by
+  another key, were offered to the model as verified and refused when it
+  tried to use them.
+- **Now every surface shows activation's verdict.** The model's catalog leaves
+  a refused skill out and names it. The list tool, the CLI and the Skills page
+  show the state, with the reason. If you trust a refused skill, sign it again
+  with `kazma agent-skills sign <its folder>`; `sign` takes several folders at
+  once.
+- **No invented score.** The Skills page showed "100/100" on every skill, a
+  score no code computes. It now shows a score only where a skill's manifest
+  declares one.
+- **Gate:** `tests/test_skill_integrity_shown.py`.
+
 ## An ops alert raised from a worker thread reaches you (2026-10-02)
 
 - **Alerts from background work were not delivered.** Backups, the boot

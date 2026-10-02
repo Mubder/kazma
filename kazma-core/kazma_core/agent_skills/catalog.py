@@ -18,6 +18,7 @@ __all__ = [
     "build_catalog_prompt",
     "format_skill_activation",
     "list_skill_summaries",
+    "skill_integrity",
 ]
 
 
@@ -26,12 +27,39 @@ def list_skill_summaries(
     project_root: Path | None = None,
     workspace_root: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Return summary dicts for all enabled skills (for UI / tools)."""
+    """Return summary dicts for all enabled skills (for UI / tools).
+
+    Each carries ``integrity`` -- verified, unsigned or refused, the answer
+    activation gives -- and ``integrity_reason``.
+    """
     skills = discover_skills(
         project_root=project_root,
         workspace_root=workspace_root,
     )
-    return [s.to_summary() for s in sorted(skills.values(), key=lambda s: s.name)]
+    out = []
+    for skill in sorted(skills.values(), key=lambda s: s.name):
+        state, reason = skill_integrity(skill)
+        out.append({**skill.to_summary(), "integrity": state, "integrity_reason": reason})
+    return out
+
+
+def skill_integrity(skill: AgentSkill) -> tuple[str, str]:
+    """``("verified" | "unsigned" | "refused", reason)``: what activation would do.
+
+    The catalog, the list tool, ``kazma agent-skills list`` and the Skills
+    page show this. They showed "verified" whenever a checksum was recorded,
+    so nine live skills activation refused (another key had signed them)
+    were offered to the model as verified (2026-10-02). An error inside the
+    check is "unsigned", because activation then loads the body with the
+    unsigned note.
+    """
+    try:
+        verdict = activation_integrity(skill, warn=False)
+    except Exception as exc:  # activation degrades the same way (format_skill_activation)
+        return "unsigned", f"the integrity check failed: {exc}"
+    if not verdict.ok:
+        return "refused", verdict.reason
+    return ("verified" if verdict.signed else "unsigned"), verdict.reason
 
 
 def build_catalog_prompt(
@@ -52,7 +80,10 @@ def build_catalog_prompt(
     if not skills:
         return ""
 
-    items = sorted(skills.values(), key=lambda s: s.name)[:max_skills]
+    states = {name: skill_integrity(skill) for name, skill in skills.items()}
+    refused = sorted(name for name, (state, _why) in states.items() if state == "refused")
+    usable = sorted((s for s in skills.values() if s.name not in refused), key=lambda s: s.name)
+    items = usable[:max_skills]
     lines = [
         "## Available Agent Skills",
         "",
@@ -70,8 +101,7 @@ def build_catalog_prompt(
         "<available_skills>",
     ]
     for skill in items:
-        verified_attr = ' integrity="verified"' if skill.checksum else ' integrity="unsigned"'
-        lines.append(f"  <skill{verified_attr}>")
+        lines.append(f'  <skill integrity="{states[skill.name][0]}">')
         lines.append(f"    <name>{_xml_escape(skill.name)}</name>")
         lines.append(
             f"    <description>{_xml_escape(skill.description)}</description>"
@@ -80,10 +110,16 @@ def build_catalog_prompt(
         lines.append("  </skill>")
     lines.append("</available_skills>")
 
-    if len(skills) > max_skills:
+    if len(usable) > max_skills:
         lines.append(
-            f"\n({len(skills) - max_skills} more skills omitted; "
+            f"\n({len(usable) - max_skills} more skills omitted; "
             "use `list_agent_skills` to see all.)"
+        )
+    if refused:
+        lines.append(
+            f"\n(Installed but refused at activation, so not listed: {', '.join(refused)}. "
+            "Their signatures do not match this install's key. If the user trusts one, "
+            "they can re-sign it on the server: `kazma agent-skills sign <its folder>`.)"
         )
 
     return "\n".join(lines)

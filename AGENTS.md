@@ -1732,6 +1732,15 @@ scope is `kazma_core/agent_skills/bundled/` — 3 Kazma-native starter skills.
   listed in the manifest fails closed. Adding a bundled skill ⇒ regenerate
   `checksums.json` (see the generator at the bottom of the bundled dir's git
   history) or it won't activate.
+- **Every surface shows activation's verdict** (`catalog.skill_integrity`,
+  2026-10-02): `verified`, `unsigned` (loads with a warning) or `refused`
+  (with the reason, which names `kazma agent-skills sign <folder>`). The
+  model's catalog leaves a refused skill out and says so; the list tool, the
+  CLI's `list` and the Skills page show the state. They used to call any
+  recorded checksum "verified": live, nine skills another key had signed were
+  offered to the model and refused at activation. The page shows a security
+  score only where a manifest declares one (none does; it showed an invented
+  "100/100"). `sign` takes several folders. `tests/test_skill_integrity_shown.py`.
 
 **D. Activation always fences the body** (`catalog.format_skill_activation`):
 the SKILL.md body is wrapped in `format_untrusted_block(source="agent_skill:…")`

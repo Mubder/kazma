@@ -1248,6 +1248,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الدرجة: {n}/100",
         "en": "Score: {n}/100",
     },
+    "skills.integrity_verified": {
+        "ar": "التوقيع موثّق",
+        "en": "Signature verified",
+    },
+    "skills.integrity_unsigned": {
+        "ar": "غير موقّعة: تُحمَّل مع تحذير",
+        "en": "Unsigned: loads with a warning",
+    },
+    "skills.integrity_refused": {
+        "ar": "يُرفض تفعيلها",
+        "en": "Refused at activation",
+    },
     "ide.new_file_title": {
         "ar": "إنشاء ملف جديد",
         "en": "Create a new file",

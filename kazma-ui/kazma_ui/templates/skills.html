@@ -35,7 +35,11 @@
                 {% if _dv != _dk %}<p class="skill-desc" dir="auto">{{ _dv }}</p>{% else %}<p class="skill-desc" dir="auto" translate="no">{{ skill.description }}</p>{% endif %}
                 <div class="skill-meta">
                     <span>v{{ skill.version }}</span>
-                    <span class="security-score">{{ skill.security_score }}/100</span>
+                    {% if skill.security_score is not none %}<span class="security-score">{{ skill.security_score }}/100</span>{% endif %}
+                    {% if skill.integrity %}
+                    {% set _ib = {'verified': 'badge-success', 'unsigned': 'badge-warning', 'refused': 'badge-danger'} %}
+                    <span class="badge {{ _ib.get(skill.integrity, 'badge-warning') }}" title="{{ skill.integrity_reason }}">{{ t('skills.integrity_' ~ skill.integrity) }}</span>
+                    {% endif %}
                     <span class="text-muted" translate="no">{{ skill.author }}</span>
                 </div>
                 <div class="skill-actions">

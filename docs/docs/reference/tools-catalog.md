@@ -87,7 +87,7 @@ description: Complete catalog of built-in agent tools and native skill tools
 | `analyze_image` | media | safe/read | Analyze an image using LLM vision. Provide a local path or URL and an optional question. |
 | `export_session` | utility | safe/read | Export the current conversation session to a file (JSON or Markdown format). |
 | `search_agent_skills` | skills | safe/read | Search the open Agent Skills marketplace (GitHub topic:agent-skills) for installable skills matching a query. Returns repos with stars, descriptions, and the install_agent_skill command for each. |
-| `list_agent_skills` | skills | safe/read | List installed Agent Skills (SKILL.md / agentskills.io format). Shows name, description, and location for each skill. |
+| `list_agent_skills` | skills | safe/read | List installed Agent Skills (SKILL.md / agentskills.io format). Shows name, description, location and integrity for each skill: verified, unsigned (loads with a warning) or refused at activation. |
 | `activate_skill` | skills | safe/read | Load full instructions for an installed Agent Skill into context. Call this when a task matches a skill's description before proceeding. Pass the skill name from list_agent_skills / the available_skills catalog. |
 | `install_agent_skill` | skills | **danger** | Install an Agent Skill from GitHub or a local path. Preferred over npx/npm (node is not in the shell allowlist). Accepts owner/repo (e.g. 'shadcn/improve'), a GitHub URL, or a local path with SKILL.md. One approval covers the whole install. Hub: https://agentskills.io/ |
 | `uninstall_agent_skill` | skills | **danger** | Uninstall a user-level Agent Skill by name. |

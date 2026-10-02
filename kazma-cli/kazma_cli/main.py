@@ -325,8 +325,8 @@ def _run_agent_skills(args: list[str]) -> None:
     if not args or args[0] in ("--help", "-h", "help"):
         print("Usage: kazma agent-skills <command> [args]")
         print("Commands:")
-        print("  sign <dir>   Sign an Agent Skill (writes checksum + HMAC signature")
-        print("               to .kazma-install.json next to SKILL.md)")
+        print("  sign <dir>... Sign Agent Skills (writes checksum + HMAC signature")
+        print("               to .kazma-install.json next to each SKILL.md)")
         print("  verify <dir> Verify an Agent Skill's integrity")
         print("  list         List discovered Agent Skills with integrity status")
         return
@@ -334,9 +334,14 @@ def _run_agent_skills(args: list[str]) -> None:
     sub = args[0]
     if sub == "sign":
         if len(args) < 2:
-            print("Usage: kazma agent-skills sign <skill-dir>")
+            print("Usage: kazma agent-skills sign <skill-dir> [<skill-dir> ...]")
             sys.exit(1)
-        _agent_skills_sign(args[1])
+        # Each folder is signed or named as failed; one bad path does not
+        # leave the folders after it unsigned.
+        failed = [d for d in args[1:] if not _agent_skills_sign(d)]
+        if failed:
+            print(f"Not signed: {', '.join(failed)}")
+            sys.exit(1)
     elif sub == "verify":
         if len(args) < 2:
             print("Usage: kazma agent-skills verify <skill-dir>")
@@ -350,15 +355,19 @@ def _run_agent_skills(args: list[str]) -> None:
         sys.exit(1)
 
 
-def _agent_skills_sign(skill_dir: str) -> None:
-    """Sign an Agent Skill directory (writes .kazma-install.json)."""
+def _agent_skills_sign(skill_dir: str) -> bool:
+    """Sign an Agent Skill directory (writes .kazma-install.json).
+
+    False when the folder holds no SKILL.md. With no signing secret nothing
+    can be signed, so that exits at once.
+    """
     from pathlib import Path
 
     d = Path(skill_dir).expanduser().resolve()
     skill_md = d / "SKILL.md"
     if not skill_md.is_file():
         print(f"Error: SKILL.md not found in {d}")
-        sys.exit(1)
+        return False
 
     from kazma_core.agent_skills.integrity import (
         compute_skill_signature,
@@ -376,6 +385,7 @@ def _agent_skills_sign(skill_dir: str) -> None:
     meta.update(sig_fields)
     write_install_meta(d, meta)
     print(f"Signed '{d.name}': checksum={sig_fields['checksum'][:16]}… signature=present")
+    return True
 
 
 def _agent_skills_verify(skill_dir: str) -> None:
@@ -400,7 +410,12 @@ def _agent_skills_verify(skill_dir: str) -> None:
 
 
 def _agent_skills_list() -> None:
-    """List discovered Agent Skills with integrity status."""
+    """List discovered Agent Skills with what activation would do with each.
+
+    INTEGRITY said "verified" whenever a checksum was recorded; a skill
+    activation refuses (another key signed it) read as verified (2026-10-02).
+    """
+    from kazma_core.agent_skills.catalog import skill_integrity
     from kazma_core.agent_skills.discovery import discover_skills
 
     skills = discover_skills(include_disabled=True)
@@ -409,9 +424,16 @@ def _agent_skills_list() -> None:
         return
     print(f"{'NAME':<28} {'SCOPE':<10} {'INTEGRITY':<12} SOURCE")
     print("-" * 80)
+    refused = []
     for s in sorted(skills.values(), key=lambda x: x.name):
-        integrity = "verified" if s.checksum else "unsigned"
+        integrity, reason = skill_integrity(s)
         print(f"{s.name:<28} {s.scope:<10} {integrity:<12} {s.source or '-'}")
+        if integrity == "refused":
+            refused.append((s, reason))
+    for s, reason in refused:
+        print()
+        print(f"{s.name}: refused at activation: {reason}")
+        print(f"  folder: {s.base_dir}")
 
 
 def _run_docs(args: list[str]) -> None:

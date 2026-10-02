@@ -113,6 +113,24 @@ kazma hub validate kazma-skills/manifests/my-skill
 
 4. Restart the server (or rely on `skills.auto_discover`). The loader verifies the signature with `KAZMA_SECRET` and refuses to load on mismatch.
 
+### 3.5 Agent Skills (`SKILL.md`) {#agent-skills}
+
+Agent Skills are instructions, not code: a `SKILL.md` in the agentskills.io
+format that the model reads when a task matches the skill's description.
+Kazma reads them from its bundled folder, from the skill folders in your home
+(`~/.agents/skills`, shared with other agentskills.io clients, and
+`.claude/skills`, `.cursor/skills`, `.kazma/agent-skills`) and from the
+project's own folders. Installing a skill signs it with this install's key
+(HMAC-SHA256 of the file, keyed by `KAZMA_SECRET`, stored in
+`.kazma-install.json` beside it).
+
+Activation checks that signature. The skill list the model sees, the
+`list_agent_skills` tool, `kazma agent-skills list` and the Skills page all
+show the result: verified, unsigned (loads with a warning) or refused. A
+refused skill is never offered to the model. If you trust it, sign it again
+with this install's key: see
+[CLI Reference → `kazma agent-skills`](cli-reference#kazma-agent-skills).
+
 ---
 
 ## 4. The Hub (`kazma hub`)
