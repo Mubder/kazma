@@ -290,7 +290,7 @@
     <template x-for="file in review.files" :key="file.path">
       <div class="ide-review-file" x-show="file.changed" x-cloak>
         <div class="ide-review-path">
-          <span x-text="file.path"></span>
+          <span translate="no" x-text="file.path"></span>
           <button class="btn btn-xs btn-danger" @click="rejectFile(file.path)" :disabled="busy">{{ t('ide.review_reject_file') }}</button>
         </div>
         <template x-for="hunk in file.hunks" :key="hunk.index">
@@ -423,7 +423,7 @@
               <div class="chat-bubble" :class="m.role">
                 <span x-show="m.role === 'user'" style="font-weight:600;font-size:0.7rem;color:var(--accent);">{{ t('ide.you') }}</span>
                 <span x-show="m.role === 'assistant' && m.content" style="font-weight:600;font-size:0.7rem;color:var(--success);">Kazma</span>
-                <div x-html="_renderMd(m.content)"></div>
+                <div translate="no" x-html="_renderMd(m.content)"></div>
                 <span x-show="m.role === 'assistant' && chatBusy && i === chatMessages.length - 1 && !m.content"
                       style="color:var(--text-muted);font-size:0.75rem;">{{ t('ide.thinking') }}</span>
               </div>
@@ -446,7 +446,7 @@
             <template x-if="m.role === 'approval'">
               <div class="chat-bubble" style="background:var(--warning-bg, #fef3c7);border:1px solid var(--warning);">
                 <span style="font-weight:600;"><span class="ki" data-icon="alert" aria-hidden="true"></span> {{ t('ide.approval_required') }}</span>
-                <div x-text="m.message || t('ide.tool').replace('{tool}', m.tool)" style="font-size:0.78rem;margin-top:4px;"></div>
+                <div translate="no" x-text="m.message || t('ide.tool').replace('{tool}', m.tool)" style="font-size:0.78rem;margin-top:4px;"></div>
                 <div style="margin-top:6px;font-size:0.72rem;color:var(--text-muted);">{{ t('ide.approve_hint') }}</div>
               </div>
             </template>

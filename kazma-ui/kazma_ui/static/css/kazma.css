@@ -787,7 +787,7 @@ button { cursor: pointer; font-family: inherit; }
   border: none;
   background: none;
   width: 100%;
-  text-align: left;
+  text-align: start;
 }
 .dropdown-item:hover {
   background: var(--bg-hover);
@@ -1259,7 +1259,7 @@ table {
   border-collapse: collapse;
 }
 thead th {
-  text-align: left;
+  text-align: start;
   padding: var(--sp-2) var(--sp-3);
   font-size: 0.75rem;
   font-weight: 600;
@@ -1625,6 +1625,30 @@ tbody tr:last-child td {
   word-wrap: break-word;
   text-align: justify;
   text-align-last: start;
+  unicode-bidi: plaintext;
+}
+
+/* Text follows its own language, whatever the UI's (owner's rule,
+   2026-10-02): English left-to-right and left-aligned, Arabic right-to-left
+   and right-aligned, in the Arabic UI and the English UI alike. Content --
+   what the i18n rules mark translate="no" (the user's and the model's words,
+   names, data), what a script marks dir="auto", and what is typed into a
+   field -- takes each paragraph's direction from its first strong letter.
+   Alignment is logical everywhere (start), never right/left chosen by the
+   page's dir, so each paragraph aligns to its own start; the UI language
+   still lays out the page and its own labels. Code stays left-to-right, and
+   an element whose dir a script decided keeps it (the markdown renderer's
+   per-paragraph dir, a <bdi dir="ltr"> around a tool call): plaintext would
+   lay "PDF ..." out by its first letter.
+   Gate: tests/test_text_follows_its_language.py. */
+[translate="no"]:not([dir="ltr"], [dir="rtl"], pre, code, kbd, samp),
+[translate="no"] :not([dir="ltr"], [dir="rtl"], pre, code, kbd, samp, pre *, code *),
+input:not([type]),
+input[type="text"],
+input[type="search"],
+input[type="url"],
+input[type="email"],
+textarea {
   unicode-bidi: plaintext;
 }
 
@@ -4080,23 +4104,21 @@ details.kazma-working > summary {
 [dir="rtl"] .message-assistant {
   flex-direction: row-reverse;
 }
+/* No alignment here: a reply is laid out the same in either UI -- each
+   paragraph by its own language (the renderer's per-block dir). */
 [dir="rtl"] .message-user .message-text {
   border-radius: var(--radius);
   border-top-right-radius: 0;
   border-top-left-radius: var(--radius);
-  text-align: right;
-}
-[dir="rtl"] .message-assistant .message-text {
-  text-align: right;
 }
 [dir="rtl"] .message-meta {
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] .tool-call-box,
 [dir="rtl"] .tool-result-box {
   border-left: none;
   border-right: 3px solid var(--warning);
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] .tool-result-box {
   border-right-color: var(--success);
@@ -4107,7 +4129,7 @@ details.kazma-working > summary {
 [dir="rtl"] .agent-plan,
 .agent-plan.is-rtl,
 .agent-plan[dir="rtl"] {
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] .agent-plan-head,
 .agent-plan.is-rtl .agent-plan-head,
@@ -4118,13 +4140,12 @@ details.kazma-working > summary {
 .agent-plan.is-rtl .agent-plan-item,
 .agent-plan[dir="rtl"] .agent-plan-item {
   flex-direction: row; /* check then text; dir=rtl puts check on the right */
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] .agent-plan-item .plan-text,
 .agent-plan.is-rtl .agent-plan-item .plan-text,
 .agent-plan[dir="rtl"] .agent-plan-item .plan-text {
-  text-align: right;
-  direction: rtl;
+  text-align: start;
   flex: 1;
   min-width: 0;
 }
@@ -4137,10 +4158,10 @@ details.kazma-working > summary {
 }
 [dir="rtl"] .agent-activity-label,
 [dir="rtl"] .agent-plan-label {
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] .agent-progress-step {
-  text-align: right;
+  text-align: start;
 }
 
 /* RTL Overrides for Plan Blocks, Workbenches, and Checklists */
@@ -4151,7 +4172,7 @@ details.kazma-working > summary {
 .chat-message[data-lang="ar"] .plan-block,
 .chat-message[data-lang="ar"] .agent-plan {
   direction: rtl !important;
-  text-align: right !important;
+  text-align: start !important;
   unicode-bidi: isolate !important;
 }
 
@@ -4179,7 +4200,7 @@ details.kazma-working > summary {
 }
 [dir="rtl"] .agent-progress-step .step-title,
 [dir="rtl"] .agent-progress-step .step-detail {
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] .agent-progress-header {
   /* pulse | title | meta — natural RTL order */
@@ -4197,13 +4218,13 @@ details.kazma-working > summary {
 
 /* ── RTL: Chat sessions list ── */
 [dir="rtl"] .session-item {
-  text-align: right;
+  text-align: start;
 }
 
 /* ── RTL: Tables ── */
 [dir="rtl"] thead th,
 [dir="rtl"] tbody td {
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] tbody td:first-child,
 [dir="rtl"] thead th:first-child {
@@ -4217,13 +4238,13 @@ details.kazma-working > summary {
   direction: ltr; /* chart canvases render correctly LTR internally */
 }
 [dir="rtl"] .chart-title {
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] .metric-card {
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] .metric-sub {
-  text-align: right;
+  text-align: start;
 }
 
 /* ── RTL: Modals ── */
@@ -4231,7 +4252,7 @@ details.kazma-working > summary {
   flex-direction: row-reverse;
 }
 [dir="rtl"] .modal-header h2 {
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] .modal-close {
   margin-left: 0;
@@ -4245,28 +4266,28 @@ details.kazma-working > summary {
 [dir="rtl"] .settings-group,
 [dir="rtl"] .settings-nav,
 [dir="rtl"] .settings-tab {
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] .form-row {
   flex-direction: row-reverse;
 }
 [dir="rtl"] .form-group label {
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] .form-input,
 [dir="rtl"] .form-select,
 [dir="rtl"] .form-textarea,
 [dir="rtl"] .form-control {
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] .form-hint,
 [dir="rtl"] .form-help {
-  text-align: right;
+  text-align: start;
 }
 
 /* ── RTL: Swarm panel ── */
 [dir="rtl"] .swarm-container {
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] .swarm-container .metrics-grid {
   direction: rtl;
@@ -4274,7 +4295,7 @@ details.kazma-working > summary {
 
 /* ── RTL: Cards ── */
 [dir="rtl"] .card {
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] .card-header {
   flex-direction: row-reverse;
@@ -4317,7 +4338,7 @@ details.kazma-working > summary {
 
 /* ── RTL: Agents page ── */
 [dir="rtl"] .agents-container {
-  text-align: right;
+  text-align: start;
 }
 
 
@@ -4965,10 +4986,10 @@ canvas { display: block; border-radius: 4px; }
 [dir="rtl"] .session-menu {
   right: auto;
   left: 0;
-  text-align: right;
+  text-align: start;
 }
 [dir="rtl"] .session-menu-item {
-  text-align: right;
+  text-align: start;
 }
 .session-menu.drop-up {
   top: auto;
@@ -4979,7 +5000,7 @@ canvas { display: block; border-radius: 4px; }
 .session-menu-item {
   display: block;
   width: 100%;
-  text-align: left;
+  text-align: start;
   background: none;
   border: none;
   color: var(--text-primary, #e8eaf2);
@@ -6471,7 +6492,7 @@ html.kazma-soft-nav #main-content {
   line-height: 1.45;
   color: var(--text-primary, #dbe4f0);
   white-space: normal;
-  text-align: left;
+  text-align: start;
 }
 .context-compacted-chip:hover .context-compacted-chip-detail,
 .context-compacted-chip:focus-within .context-compacted-chip-detail {

@@ -73,11 +73,11 @@
     return (
       '<article class="dash-mobile-card">' +
         '<div class="dash-mobile-card-top">' +
-          '<span class="badge badge-basic">' + escapeHtml(t.trace_type || t.type || "") + "</span>" +
+          '<span class="badge badge-basic" translate="no">' + escapeHtml(t.trace_type || t.type || "") + "</span>" +
           '<span class="badge ' + escapeHtml(t.badge_class || "") + '">' +
             escapeHtml(t.status || "") + "</span>" +
         "</div>" +
-        '<div class="dash-mobile-card-name">' + escapeHtml(t.label || "") + "</div>" +
+        '<div class="dash-mobile-card-name" translate="no">' + escapeHtml(t.label || "") + "</div>" +
         '<div class="dash-mobile-card-meta">' +
           escapeHtml(t.time || "") + " · " +
           escapeHtml(String(t.duration_ms != null ? t.duration_ms + "ms" : "")) +

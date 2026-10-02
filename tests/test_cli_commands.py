@@ -1152,6 +1152,19 @@ class TestUpdateRouting:
 class TestUpdateRunDispatch:
     """Verify the update run() entry point dispatches correctly."""
 
+    @pytest.fixture(autouse=True)
+    def _no_server_and_no_launcher(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The dispatch is under test, not this machine. A Kazma server on
+        port 9090 (a developer's own install, running beside the suite)
+        refused the update here and nowhere in CI; a running kazma.exe would
+        do the same. The refusals have their own tests
+        (test_package_update_on_a_guarded_install.py,
+        test_update_not_from_its_launcher.py)."""
+        import kazma_cli.update as upd
+
+        monkeypatch.setattr(upd, "_is_server_running", lambda port=9090: False)
+        monkeypatch.setattr(upd, "_launchers_in_use", lambda *a, **k: [])
+
     def test_update_run_help_no_exit(self, capsys: pytest.CaptureFixture[str]) -> None:
         from kazma_cli.update import run
 

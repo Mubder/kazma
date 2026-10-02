@@ -1403,9 +1403,9 @@ class SettingsRouterBuilder:
         def api_get_tools(request: Request) -> list[dict[str, Any]]:
             """List all registered tools with UI-language descriptions."""
             tools = _get_sm().get_tool_registry()
-            lang = request.cookies.get("kazma-lang") or "en"
-            if lang not in ("ar", "en"):
-                lang = "en"
+            from kazma_ui.i18n import current_language
+
+            lang = current_language()
             try:
                 from kazma_ui.i18n import t as i18n_t
 

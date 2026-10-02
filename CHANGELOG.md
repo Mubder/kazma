@@ -1,5 +1,68 @@
 # CHANGELOG
 
+## Text follows its own language, whatever the UI's (2026-10-02)
+
+- **English runs left to right and Arabic right to left, in either UI.**
+  The owner found English text right-aligned in the Arabic UI: a quoted
+  refusal in a chat, and much more. The Arabic UI aligned replies, tool
+  output, tables, cards, menus and form fields to the right because the page
+  is right to left. Each now aligns to the start of its own text.
+- **Arabic paragraphs in mostly English replies are right to left again.**
+  Measuring real turns found the opposite fault, in both UIs. The bidi
+  helper isolated an Arabic paragraph's words against the message's
+  direction, which left the paragraph's `dir="auto"` with only its one
+  English word to go by. Each markdown block now takes its direction from
+  its own words, so an Arabic sentence that opens with "PDF" stays right to
+  left, and isolation follows the paragraph.
+- **Data on every page follows its own text.** The names, titles, model
+  output, errors and paths that pages show are marked as content (59
+  bindings across 13 templates, and the rows that scripts build). Content
+  takes its direction from its own text, paragraph by paragraph. So does
+  what you type into a field.
+- **Tool rows, the memory row and the chat list.** A tool's output in the
+  activity panel takes its own direction. In the "Memory used" row, each
+  memory is on its own line in its own language; before, the Arabic label
+  decided the direction of English memories. The line under each chat's
+  title ("Telegram · 34 messages · 2 hours ago") is interface text, so it
+  follows the page with the platform's name set apart; the name had turned
+  the Arabic line left to right.
+- **A reply looks the same in both UIs.** The Arabic UI aligned replies to
+  the start while the English UI justified them, so wrapped lines sat
+  differently. One rule now applies to both.
+- **Arabic installs show Arabic where they showed English.** Four routes
+  read the language cookie and fell back to English, so an Arabic install
+  with no cookie showed the Dashboard's budget line, the packages list, the
+  tools list and the Skills page's labels in English. They now ask
+  `current_language()`, which falls back to the install's language. The
+  activity panel's list count ("3 results") and two skill badges were in
+  English in every language.
+- **Gates:** `tests/test_text_follows_its_language.py` (the stylesheets,
+  every template binding, the cookie, each with a negative control),
+  `tests/e2e/test_text_follows_its_language.py` (real turns in both UIs,
+  live and after a reload, the two UIs compared line by line; the old rules
+  put back as the negative controls), `tests/js/test_block_direction.js`.
+
+## `kazma update` runs from the install's Python on Windows (2026-10-02)
+
+- **The launcher fix did not hold on the live install.** This morning's
+  fix renamed `kazma.exe` aside so a reinstall could replace it; its test
+  used a running copy of `ping.exe`, which Windows does let you rename. A
+  uv launcher cannot be renamed while it runs (Python keeps the zip
+  appended to it open), and the guarded update run on the live install
+  that afternoon met exactly that: the rename failed, the first install
+  attempt failed on `kazma.exe`, and only a fallback that did not need to
+  replace it kept the install whole.
+- **Now the update refuses to run from a launcher it must replace**,
+  before it installs or pulls anything, and prints the command to use:
+  `.venv\Scripts\python.exe -m kazma_cli update ...` (pip does the same
+  from `pip.exe`). A running `kazma-tui` is named too. `python -m
+  kazma_cli` is new: it is the `kazma` command without its launcher.
+- **Every instruction names that command**: the refusal, the boot alert
+  about packages behind, the guard's "Resume with" hints (which now also
+  name the install's Python), the update guide and the CLI reference.
+- **Gate:** `tests/test_update_not_from_its_launcher.py` (a copy of a real
+  uv launcher held by a running test).
+
 ## Three small fixes found by testing on the live install (2026-10-02)
 
 - **The SQL tools' refusal names the SQL tools.** Asked to query one of

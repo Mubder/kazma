@@ -53,8 +53,8 @@
                 </template>
                 <template x-for="item in $store.notifications.items" :key="item.id">
                     <div class="dropdown-item" style="cursor:default;flex-direction:column;align-items:flex-start;gap:2px">
-                        <span x-text="(item.severity || '') + ' · ' + (item.subsystem || item.title || t('common.alert'))"></span>
-                        <span style="font-size:0.75rem;opacity:0.7" x-text="item.reason || item.status || ''"></span>
+                        <span translate="no" x-text="(item.severity || '') + ' · ' + (item.subsystem || item.title || t('common.alert'))"></span>
+                        <span translate="no" style="font-size:0.75rem;opacity:0.7" x-text="item.reason || item.status || ''"></span>
                     </div>
                 </template>
             </div>
@@ -89,7 +89,7 @@
               .catch(() => {})
           " @click.outside="open = false">
             <button class="user-menu-btn" @click="open = !open" :title="(me && me.username) ? (me.username + ' · ' + (me.role ? tOr('common.role_' + me.role, me.role) : '')) : t('common.account')">
-                <div class="user-avatar" style="width:24px;height:24px;font-size:0.65rem"
+                <div translate="no" class="user-avatar" style="width:24px;height:24px;font-size:0.65rem"
                      x-text="(me && me.username) ? me.username.slice(0,1).toUpperCase() : 'K'"></div>
                 <span class="sidebar-collapsed-hide" style="font-size:0.75rem;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
                       translate="no" x-text="me && me.username ? me.username : ''"></span>

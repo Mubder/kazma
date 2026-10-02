@@ -29,7 +29,7 @@ Every line below describes that setup.
 | An MCP server: other agents can use Kazma's tools, with the same approval gate (`kazma mcp`) | Shipped | `kazma_core/mcp/server.py` |
 | Spoken replies (text-to-speech) and speech input; click-to-play in web chat | Shipped | Settings → Voice |
 | Live two-way voice in the browser through LiveKit | Opt-in | `LIVEKIT_URL` + keys |
-| English and Arabic interface, full right-to-left layout; your words, the model's replies, names and server diagnostics are shown as written | Shipped | every page, the login page included |
+| English and Arabic interface, full right-to-left layout; your words, the model's replies, names and server diagnostics are shown as written, each paragraph in its own language's direction (English left to right, Arabic right to left) in either interface | Shipped | every page, the login page included |
 
 ## Models
 

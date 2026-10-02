@@ -185,7 +185,7 @@
                                                         <span x-text="chk.key === 'models' ? '{{ t('settings.check_model_list') }}' : '{{ t('settings.check_completion') }}'"></span>
                                                         <code x-text="chk.key === 'models' ? 'GET /models' : 'POST /chat/completions'"></code>
                                                     </span>
-                                                    <span class="pc-pmeta" x-text="chk.detail || '{{ t('settings.not_run_yet') }}'"></span>
+                                                    <span translate="no" class="pc-pmeta" x-text="chk.detail || '{{ t('settings.not_run_yet') }}'"></span>
                                                 </div>
                                             </template>
                                         </div>
@@ -255,7 +255,7 @@
                         <span class="text-success">{{ t('settings.connected_latency') }} <span x-text="hubTestResult.latency_ms"></span>ms</span>
                     </template>
                     <template x-if="hubTestResult && !hubTestResult.success">
-                        <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="hubTestResult.error"></span></span>
+                        <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span translate="no" x-text="hubTestResult.error"></span></span>
                     </template>
                 </div>
             </div>
@@ -271,8 +271,8 @@
                 <template x-for="p in hubProfiles" :key="p.name">
                     <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px">
                         <div style="flex:1">
-                            <div style="font-weight:600;font-size:0.9rem" x-text="p.name"></div>
-                            <div style="font-size:0.8rem;color:var(--text-muted)" x-text="(p.provider || 'custom') + ' / ' + (p.model || '?')"></div>
+                            <div translate="no" style="font-weight:600;font-size:0.9rem" x-text="p.name"></div>
+                            <div translate="no" style="font-size:0.8rem;color:var(--text-muted)" x-text="(p.provider || 'custom') + ' / ' + (p.model || '?')"></div>
                             <div style="font-size:0.75rem;color:var(--text-tertiary)" x-text="p.base_url || ''"></div>
                         </div>
                         <button class="btn btn-secondary btn-sm" @click="loadHubProfile(p.name)">{{ t('settings.load') }}</button>
@@ -296,7 +296,7 @@
                      telegram/discord/slack (Email/Webhook integrations
                      keep the legacy card list below). -->
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-                    <div style="text-align:left;">
+                    <div style="text-align:start;">
                         <h3 style="margin:0">{{ t('settings.hub.platform_adapters') }}</h3>
                         <p class="text-muted" style="font-size:0.8rem;margin:4px 0 0">
                             {{ t('settings.hub.adapters_blurb') }}
@@ -348,7 +348,7 @@
                                 title="{{ t('settings.hub.telegram_test_title') }}"
                                 x-text="adapterRoutingTesting === 'telegram' ? t('settings.hub.testing') : t('settings.test')"></button>
                         <template x-if="adapterRoutingTest && adapterRoutingTest.name === 'telegram' && !adapterRoutingTest.checks">
-                            <span style="font-size:0.75rem" :class="adapterRoutingTest.success ? 'text-success' : 'text-error'"
+                            <span translate="no" style="font-size:0.75rem" :class="adapterRoutingTest.success ? 'text-success' : 'text-error'"
                                   x-text="adapterRoutingTest.success ? (t('settings.bk.connected') + (adapterRoutingTest.bot_name ? ' (@' + adapterRoutingTest.bot_name + ')' : '')) : ('✗ ' + adapterRoutingTest.error)"></span>
                         </template>
                     </div>
@@ -432,7 +432,7 @@
                                 title="{{ t('settings.hub.discord_test_title') }}"
                                 x-text="adapterRoutingTesting === 'discord' ? t('settings.hub.testing') : t('settings.test')"></button>
                         <template x-if="adapterRoutingTest && adapterRoutingTest.name === 'discord' && !adapterRoutingTest.checks">
-                            <span style="font-size:0.75rem" :class="adapterRoutingTest.success ? 'text-success' : 'text-error'"
+                            <span translate="no" style="font-size:0.75rem" :class="adapterRoutingTest.success ? 'text-success' : 'text-error'"
                                   x-text="adapterRoutingTest.success ? (t('settings.bk.connected') + (adapterRoutingTest.bot_name ? ' (@' + adapterRoutingTest.bot_name + ')' : '')) : ('✗ ' + adapterRoutingTest.error)"></span>
                         </template>
                     </div>
@@ -488,7 +488,7 @@
                                 title="{{ t('settings.hub.slack_test_title') }}"
                                 x-text="adapterRoutingTesting === 'slack' ? t('settings.hub.testing') : t('settings.test')"></button>
                         <template x-if="adapterRoutingTest && adapterRoutingTest.name === 'slack' && !adapterRoutingTest.checks">
-                            <span style="font-size:0.75rem" :class="adapterRoutingTest.success ? 'text-success' : 'text-error'"
+                            <span translate="no" style="font-size:0.75rem" :class="adapterRoutingTest.success ? 'text-success' : 'text-error'"
                                   x-text="adapterRoutingTest.success ? (t('settings.bk.connected') + (adapterRoutingTest.bot_name ? ' (@' + adapterRoutingTest.bot_name + ')' : '')) : ('✗ ' + adapterRoutingTest.error)"></span>
                         </template>
                     </div>
@@ -588,7 +588,7 @@
 
                 <!-- Gateway runtime refresh -->
                 <div style="padding:12px 16px;background:rgba(34,211,238,0.06);border:1px solid rgba(34,211,238,0.22);border-radius:var(--radius-card);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-                    <div style="text-align:left;">
+                    <div style="text-align:start;">
                         <strong>{{ t('settings.gateway_adapters') }}</strong>
                         <p class="text-muted" style="font-size:0.8rem;margin:4px 0 0">{{ t('settings.hub.restart_hint') }}</p>
                     </div>
@@ -635,10 +635,10 @@
                     </div>
                     <div x-show="hubTestResult && hubTestResult.type === 'connector'" class="validation-result" style="margin-top:12px" x-cloak>
                         <template x-if="hubTestResult?.success">
-                            <span class="text-success">{{ t('settings.connected') }} <span x-text="hubTestResult.bot_name ? '(' + hubTestResult.bot_name + ')' : ''"></span></span>
+                            <span class="text-success">{{ t('settings.connected') }} <span translate="no" x-text="hubTestResult.bot_name ? '(' + hubTestResult.bot_name + ')' : ''"></span></span>
                         </template>
                         <template x-if="hubTestResult && !hubTestResult.success">
-                            <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="hubTestResult.error"></span></span>
+                            <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span translate="no" x-text="hubTestResult.error"></span></span>
                         </template>
                     </div>
                 </div>
@@ -1026,8 +1026,8 @@
                 <template x-for="p in personalities" :key="p.name">
                     <div @click="setPersonality(p.name)" class="personality-card" :class="{ 'is-selected': agent.personality === p.name }" style="padding:14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:all 0.15s" :style="agent.personality === p.name ? 'border-color:var(--border-strong);background:var(--bg-hover)' : ''">
                         <div class="personality-card-icon" style="margin-bottom:8px;color:var(--text-secondary)" x-html="(window.KazmaIcons && KazmaIcons.fromEmoji(p.emoji)) || ''"></div>
-                        <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px" x-text="p.display_name_ar && window.KAZMA_LANG === 'ar' ? p.display_name_ar : p.name"></div>
-                        <div style="font-size:0.8rem;color:var(--text-tertiary)" x-text="p.description_ar && window.KAZMA_LANG === 'ar' ? p.description_ar : p.description"></div>
+                        <div translate="no" style="font-weight:600;font-size:0.9rem;margin-bottom:4px" x-text="p.display_name_ar && window.KAZMA_LANG === 'ar' ? p.display_name_ar : p.name"></div>
+                        <div translate="no" style="font-size:0.8rem;color:var(--text-tertiary)" x-text="p.description_ar && window.KAZMA_LANG === 'ar' ? p.description_ar : p.description"></div>
                     </div>
                 </template>
             </div>
@@ -1089,7 +1089,7 @@
                 <template x-for="row in soulPending" :key="row.commitment_id">
                     <div class="card" style="padding:10px 12px;margin:8px 0;display:flex;gap:8px;align-items:flex-start;justify-content:space-between">
                         <div style="min-width:0">
-                            <div style="font-size:0.8rem;color:var(--text-muted)" x-text="row.agent_id || row.worker_name || row.commitment_id"></div>
+                            <div translate="no" style="font-size:0.8rem;color:var(--text-muted)" x-text="row.agent_id || row.worker_name || row.commitment_id"></div>
                             <div style="font-size:0.85rem;white-space:pre-wrap" x-text="row.delta_preview || row.goal_text || ''"></div>
                         </div>
                         <div style="display:flex;gap:6px;flex-shrink:0">
@@ -1227,7 +1227,7 @@
                           placeholder="{{ t('settings.about_me_placeholder') }}"></textarea>
                 <p style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;"
                    x-text="(aboutMe || '').length + ' / ' + aboutMeMax"></p>
-                <p class="form-error" x-show="aboutMeError" x-cloak x-text="aboutMeError"></p>
+                <p translate="no" class="form-error" x-show="aboutMeError" x-cloak x-text="aboutMeError"></p>
             </div>
             <button class="btn btn-primary" @click="saveAboutMe()"
                     :disabled="aboutMeSaving || (aboutMe || '') === (aboutMeSaved || '')">
@@ -1252,30 +1252,30 @@
         </div>
 
         <!-- Knowledge merge + recall UX (left-aligned toggles) -->
-        <div class="settings-group" id="memory-kb-merge-section" style="text-align:left;">
+        <div class="settings-group" id="memory-kb-merge-section" style="text-align:start;">
             <h3 style="justify-content:flex-start;">{{ t('settings.memory_kb_merge_title') }}</h3>
-            <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px;text-align:left;">
+            <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px;text-align:start;">
                 {{ t('settings.memory_kb_merge_hint') }}
             </p>
             <div style="display:flex;flex-direction:column;align-items:flex-start;gap:12px;width:100%;">
-                <label for="mem-merge-kb" style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;cursor:pointer;margin:0;width:100%;max-width:520px;text-align:left;">
+                <label for="mem-merge-kb" style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;cursor:pointer;margin:0;width:100%;max-width:520px;text-align:start;">
                     <input type="checkbox" id="mem-merge-kb" x-model="memoryMergeKb" @change="saveMemoryKbMerge()" style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;margin:0;">
                     <span style="color:var(--text-secondary);font-size:0.9rem;line-height:1.35;">{{ t('settings.memory_kb_inject') }}</span>
                 </label>
-                <label for="mem-promote-kb" style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;cursor:pointer;margin:0;width:100%;max-width:520px;text-align:left;">
+                <label for="mem-promote-kb" style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;cursor:pointer;margin:0;width:100%;max-width:520px;text-align:start;">
                     <input type="checkbox" id="mem-promote-kb" x-model="memoryPromoteKb" @change="saveMemoryKbMerge()" style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;margin:0;">
                     <span style="color:var(--text-secondary);font-size:0.9rem;line-height:1.35;">{{ t('settings.memory_kb_promote') }}</span>
                 </label>
-                <label for="mem-smart-search" style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;cursor:pointer;margin:0;width:100%;max-width:520px;text-align:left;">
+                <label for="mem-smart-search" style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;cursor:pointer;margin:0;width:100%;max-width:520px;text-align:start;">
                     <input type="checkbox" id="mem-smart-search" x-model="memorySmartSearch" @change="saveMemoryKbMerge()" style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;margin:0;">
                     <span style="color:var(--text-secondary);font-size:0.9rem;line-height:1.35;">{{ t('settings.memory_kb_smart_search') }}</span>
                 </label>
-                <label for="mem-explain-recall" style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;cursor:pointer;margin:0;width:100%;max-width:520px;text-align:left;">
+                <label for="mem-explain-recall" style="display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;cursor:pointer;margin:0;width:100%;max-width:520px;text-align:start;">
                     <input type="checkbox" id="mem-explain-recall" x-model="memoryExplainRecall" @change="saveMemoryKbMerge()" style="accent-color:var(--accent);width:16px;height:16px;flex-shrink:0;margin:0;">
                     <span style="color:var(--text-secondary);font-size:0.9rem;line-height:1.35;">{{ t('settings.memory_explain_recall') }}</span>
                 </label>
             </div>
-            <p style="font-size:0.72rem;color:var(--text-muted);margin-top:10px;text-align:left;">
+            <p style="font-size:0.72rem;color:var(--text-muted);margin-top:10px;text-align:start;">
                 {{ t('settings.memory_kb_smart_search_hint') }}
             </p>
         </div>
@@ -1351,7 +1351,7 @@
                 <div style="display:flex;flex-wrap:wrap;gap:8px;">
                     <button type="button" class="btn btn-sm" @click="syncMemoryState()" x-text="t('settings.memory_sync_postgres')"></button>
                 </div>
-                <p style="font-size:0.75rem;margin-top:8px;" x-text="memoryStateSyncStatus" :style="memoryStateSyncOk ? 'color:#2ed573' : 'color:var(--text-muted)'"></p>
+                <p translate="no" style="font-size:0.75rem;margin-top:8px;" x-text="memoryStateSyncStatus" :style="memoryStateSyncOk ? 'color:#2ed573' : 'color:var(--text-muted)'"></p>
             </div>
 
             <!-- Neo4j — always visible (not only after dropdown pick) -->
@@ -1379,7 +1379,7 @@
                     <label>{{ t('settings.memory_neo4j_password') }}</label>
                     <input type="password" class="form-input" x-model="memoryBackends.graph.password" placeholder="{{ t('settings.mem.leave_blank') }}">
                 </div>
-                <p style="font-size:0.72rem;color:var(--text-muted);margin:0;"
+                <p translate="no" style="font-size:0.72rem;color:var(--text-muted);margin:0;"
                    :translate="memoryBackendsGraphCap.status === 'local' ? null : 'no'"
                    x-text="memoryBackendsGraphCap.status === 'local' ? t('settings.cap_graph_local') : (memoryBackendsGraphCap.detail || '')"></p>
                 <p style="font-size:0.72rem;color:var(--text-muted);margin:8px 0 0;">
@@ -1395,7 +1395,7 @@
                     <button type="button" class="btn btn-sm btn-primary" @click="testMemoryNeo4j()" x-text="t('settings.memory_test_neo4j')"></button>
                     <button type="button" class="btn btn-sm" @click="syncMemoryNeo4j()" x-text="t('settings.memory_sync_neo4j')"></button>
                 </div>
-                <p style="font-size:0.75rem;margin-top:8px;" x-text="memoryNeo4jStatus" :style="memoryNeo4jOk ? 'color:#2ed573' : 'color:var(--text-muted)'"></p>
+                <p translate="no" style="font-size:0.75rem;margin-top:8px;" x-text="memoryNeo4jStatus" :style="memoryNeo4jOk ? 'color:#2ed573' : 'color:var(--text-muted)'"></p>
             </div>
 
             <div class="form-group" style="margin-top:14px;">
@@ -1420,7 +1420,7 @@
                 <button class="btn" @click="resetMemoryBackendsLocal()" x-text="t('settings.memory_reset_local')"></button>
                 <button class="btn" @click="rebuildMemoryEmbeddings()" x-text="t('settings.memory_rebuild')"></button>
             </div>
-            <p style="font-size:0.75rem;color:var(--text-muted);margin-top:8px;" x-text="memoryBackendsStatus"></p>
+            <p translate="no" style="font-size:0.75rem;color:var(--text-muted);margin-top:8px;" x-text="memoryBackendsStatus"></p>
             <p style="font-size:0.75rem;color:var(--text-muted);margin-top:10px;">
                 {{ t('settings.memory_embedder_crosslink') }}
                 <button type="button" class="btn btn-sm" style="margin-left:6px;" @click="document.getElementById('memory-embedder-section')?.scrollIntoView({behavior:'smooth'})">{{ t('settings.tab_embedder') }} ↓</button>
@@ -1432,7 +1432,7 @@
         <!-- Active embedder status -->
         <div class="settings-group">
             <h3>{{ t('settings.embedder_title') }}</h3>
-            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(34,211,238,0.06);border:1px solid rgba(34,211,238,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:left;">
+            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(34,211,238,0.06);border:1px solid rgba(34,211,238,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:start;">
                 <span class="ki" data-icon="info" aria-hidden="true"></span>
                 {{ t('settings.embedder_hint') }}
             </div>
@@ -1456,7 +1456,7 @@
             </div>
         </div>
 
-        <div x-show="embedderRestartNeeded()" x-cloak style="margin-bottom:16px;padding:12px 14px;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.35);border-radius:var(--radius);font-size:0.85rem;text-align:left;">
+        <div x-show="embedderRestartNeeded()" x-cloak style="margin-bottom:16px;padding:12px 14px;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.35);border-radius:var(--radius);font-size:0.85rem;text-align:start;">
             <span class="ki" data-icon="alert-triangle" aria-hidden="true"></span>
             <strong style="color:var(--warning)">{{ t('settings.embedder_restart_needed') }}</strong>
             <div style="color:var(--text-muted);margin-top:4px">{{ t('settings.embedder_restart_needed_hint') }}</div>
@@ -1512,7 +1512,7 @@
 
         <div class="settings-group">
             <h3>{{ t('settings.time_travel_title') }}</h3>
-            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:left;">
+            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:start;">
                 <span class="ki" data-icon="info" aria-hidden="true"></span>
                 {{ t('settings.time_travel_hint') }}
             </div>
@@ -1533,7 +1533,7 @@
                 </label>
                 <div class="form-hint">{{ t('settings.time_travel_auto_maintain_hint') }}</div>
             </div>
-            <div x-show="timeTravelRestartNeeded()" x-cloak style="margin-top:12px;padding:12px 14px;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.35);border-radius:var(--radius);font-size:0.85rem;text-align:left;">
+            <div x-show="timeTravelRestartNeeded()" x-cloak style="margin-top:12px;padding:12px 14px;background:rgba(255,193,7,0.08);border:1px solid rgba(255,193,7,0.35);border-radius:var(--radius);font-size:0.85rem;text-align:start;">
                 <span class="ki" data-icon="alert-triangle" aria-hidden="true"></span>
                 <strong style="color:var(--warning)">{{ t('settings.time_travel_restart_needed') }}</strong>
                 <div style="color:var(--text-muted);margin-top:4px">{{ t('settings.time_travel_restart_needed_hint') }}</div>
@@ -1552,7 +1552,7 @@
 
         <div class="settings-group">
             <h3>{{ t('settings.turn_notify_title') }}</h3>
-            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:left;">
+            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:start;">
                 <span class="ki" data-icon="info" aria-hidden="true"></span>
                 {{ t('settings.turn_notify_hint') }}
             </div>
@@ -1571,7 +1571,7 @@
             <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:10px">{{ t('settings.embedder_db_hint') }}</div>
             <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
                 <thead>
-                    <tr style="color:var(--text-muted);text-align:left;border-bottom:1px solid var(--border)">
+                    <tr style="color:var(--text-muted);text-align:start;border-bottom:1px solid var(--border)">
                         <th style="padding:6px 8px">{{ t('settings.embedder_db_version') }}</th>
                         <th style="padding:6px 8px">{{ t('settings.embedder_db_episodes') }}</th>
                         <th style="padding:6px 8px">{{ t('settings.embedder_db_beliefs') }}</th>
@@ -1590,7 +1590,7 @@
                     </tr>
                 </tbody>
             </table>
-            <div style="margin-top:12px;padding:10px 12px;background:rgba(255,193,7,0.06);border:1px solid rgba(255,193,7,0.25);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:left;">
+            <div style="margin-top:12px;padding:10px 12px;background:rgba(255,193,7,0.06);border:1px solid rgba(255,193,7,0.25);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:start;">
                 <span class="ki" data-icon="info" aria-hidden="true"></span>
                 {{ t('settings.embedder_rebuild_hint') }}
             </div>
@@ -1604,19 +1604,19 @@
                 <div x-show="embedderRebuildStatus.state !== 'idle'" x-cloak style="margin-top:10px">
                     <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">
                         <span x-text="embedderRebuildStatus.state === 'done' ? t('settings.embedder_rebuild_done') : (embedderRebuildStatus.state === 'error' ? t('settings.embedder_rebuild_error') : (embedderRebuildStatus.done + ' / ' + (embedderRebuildStatus.total || '…')))"></span>
-                        <span x-show="embedderRebuildStatus.model" x-text="embedderRebuildStatus.model" x-cloak></span>
+                        <span translate="no" x-show="embedderRebuildStatus.model" x-text="embedderRebuildStatus.model" x-cloak></span>
                     </div>
                     <div style="background:var(--bg-deep);border:1px solid var(--border);border-radius:999px;height:10px;overflow:hidden">
                         <div style="height:100%;background:var(--accent,#22d3ee);transition:width .5s;width:0%" :style="{ width: rebuildPercent() + '%' }"></div>
                     </div>
-                    <div x-show="embedderRebuildStatus.error" x-cloak style="margin-top:6px;color:var(--danger);font-size:0.8rem" x-text="embedderRebuildStatus.error"></div>
+                    <div translate="no" x-show="embedderRebuildStatus.error" x-cloak style="margin-top:6px;color:var(--danger);font-size:0.8rem" x-text="embedderRebuildStatus.error"></div>
                 </div>
             </div>
         </div>
 
         <div class="settings-group">
             <h3>{{ t('settings.embedder_manual_title') }}</h3>
-            <div style="font-size:0.8rem;color:var(--text-muted);text-align:left;">
+            <div style="font-size:0.8rem;color:var(--text-muted);text-align:start;">
                 {{ t('settings.embedder_manual_hint') }}
             </div>
             <div style="background:var(--bg-deep);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-family:var(--font-mono);font-size:0.78rem;margin-top:8px;text-align:left;">
@@ -1954,7 +1954,7 @@
               </div>
               <template x-for="u in platformUsers" :key="u.user_id || u.username">
                 <div class="account-list-row">
-                  <span class="account-list-name" x-text="u.username"></span>
+                  <span translate="no" class="account-list-name" x-text="u.username"></span>
                   <span>
                     <select class="form-input" style="width:auto;padding:4px 8px;font-size:0.8rem"
                             :value="u.role"
@@ -2208,7 +2208,7 @@
                     </label>
                 </label>
             </div>
-            <div x-show="proxyTestResult" style="padding:8px 12px;border-radius:var(--radius);font-size:0.82rem;" :style="proxyTestResult?.success ? 'background:rgba(34,197,94,0.1);color:var(--success)' : 'background:rgba(220,80,80,0.1);color:var(--danger)'" x-cloak><span style="display:inline-flex;align-items:center;gap:6px"><span class="ki" :data-icon="proxyTestResult?.success ? 'check-circle' : 'x'" x-html="KazmaIcons.get(proxyTestResult?.success ? 'check-circle' : 'x')" aria-hidden="true"></span><span x-text="proxyTestResult?.success ? ((window.t('settings.proxy_exit_ip') || 'Exit IP') + ': ' + proxyTestResult.exit_ip) : (proxyTestResult?.error || t('settings.sys.proxy_test_failed'))"></span></span></div>
+            <div x-show="proxyTestResult" style="padding:8px 12px;border-radius:var(--radius);font-size:0.82rem;" :style="proxyTestResult?.success ? 'background:rgba(34,197,94,0.1);color:var(--success)' : 'background:rgba(220,80,80,0.1);color:var(--danger)'" x-cloak><span style="display:inline-flex;align-items:center;gap:6px"><span class="ki" :data-icon="proxyTestResult?.success ? 'check-circle' : 'x'" x-html="KazmaIcons.get(proxyTestResult?.success ? 'check-circle' : 'x')" aria-hidden="true"></span><span translate="no" x-text="proxyTestResult?.success ? ((window.t('settings.proxy_exit_ip') || 'Exit IP') + ': ' + proxyTestResult.exit_ip) : (proxyTestResult?.error || t('settings.sys.proxy_test_failed'))"></span></span></div>
             <div style="display:flex;gap:8px;">
                 <button class="btn btn-primary" @click="saveProxy()">{{ t('settings.proxy_save') }}</button>
                 <button class="btn btn-secondary" @click="testProxy()" :disabled="proxyTesting">{{ t('settings.proxy_test') }}</button>
@@ -2323,7 +2323,7 @@
                            'pkg-layer-err': !row.ok && row.status !== 'warn' && row.status !== 'off'
                          }">
                         <div class="pkg-layer-top">
-                            <span class="pkg-layer-name" :translate="row.isName ? 'no' : null" x-text="row.name"></span>
+                            <span translate="no" class="pkg-layer-name" :translate="row.isName ? 'no' : null" x-text="row.name"></span>
                             <span class="pkg-layer-dot" aria-hidden="true"></span>
                         </div>
                         <div class="pkg-layer-detail" translate="no" x-text="row.detail || '—'"></div>
@@ -2563,7 +2563,7 @@
             <button class="btn btn-primary" @click="saveDocuments()" :disabled="documentsSaving">
                 {{ t('settings.documents_save') }}
             </button>
-            <span class="form-hint" style="margin-left:8px;" x-text="documentsStatus"></span>
+            <span translate="no" class="form-hint" style="margin-left:8px;" x-text="documentsStatus"></span>
         </div>
     </div>
 
@@ -3389,7 +3389,7 @@
                                         · <span x-text="(xReplyPreview.result.draft || '').length"></span>/280
                                         <span x-show="xReplyPreview.result.knowledge && xReplyPreview.result.knowledge.used" x-cloak>
                                             · <span x-text="t('settings.xt.kb_hits').replace('{n}', xReplyPreview.result.knowledge.hits)"></span>
-                                            <span x-show="(xReplyPreview.result.knowledge.libraries || []).length" x-cloak
+                                            <span translate="no" x-show="(xReplyPreview.result.knowledge.libraries || []).length" x-cloak
                                                   x-text="' ' + t('settings.xt.kb_from').replace('{libs}', (xReplyPreview.result.knowledge.libraries || []).join(', '))"></span>
                                         </span>
                                         <span x-show="xReplyPreview.result.knowledge && !xReplyPreview.result.knowledge.used" x-cloak>
@@ -3400,7 +3400,7 @@
                                          translate="no" x-text="xReplyPreview.result.draft"></div>
                                 </div>
                             </template>
-                            <p x-show="xReplyPreview.result.reason"
+                            <p translate="no" x-show="xReplyPreview.result.reason"
                                style="margin-top:8px;font-size:0.82rem;"
                                :style="xReplyPreview.result.ok ? 'color:var(--text-tertiary)' : 'color:var(--warning,#c80)'"
                                x-text="xReplyPreview.result.reason" x-cloak></p>
@@ -3415,7 +3415,7 @@
                             <template x-for="r in xReplyRecent" :key="r.summon_id">
                                 <div style="padding:6px 0;border-bottom:1px solid var(--border);">
                                     <strong x-text="tOr('x_studio.status_' + r.status, r.status)"></strong>
-                                    <span style="color:var(--text-tertiary);" x-text="r.subject ? ' · ' + r.subject : ''"></span>
+                                    <span translate="no" style="color:var(--text-tertiary);" x-text="r.subject ? ' · ' + r.subject : ''"></span>
                                     <div style="color:var(--text-secondary);" translate="no" x-text="r.draft || r.reason"></div>
                                 </div>
                             </template>
@@ -3726,7 +3726,7 @@
             </div>
             <!-- Result message -->
             <div x-show="backupResult && !backupRunning" x-cloak style="margin-bottom:1.25rem">
-                <span style="font-size:0.85rem"
+                <span translate="no" style="font-size:0.85rem"
                       :class="backupResult?.ok ? 'text-success' : 'text-error'"
                       x-text="backupResult?.ok
                           ? (t('settings.backup_done') + ' ' + t('settings.bk.done_summary').replace('{dbs}', backupResult.databases_ok).replace('{mb}', backupResult.total_size_mb)
@@ -3923,7 +3923,7 @@
                  :style="offsiteTestResult?.ok
                      ? 'background:rgba(46,213,115,0.08);border:1px solid rgba(46,213,115,0.3)'
                      : 'background:rgba(255,71,87,0.08);border:1px solid rgba(255,71,87,0.3)'">
-                <span :class="offsiteTestResult?.ok ? 'text-success' : 'text-error'"
+                <span translate="no" :class="offsiteTestResult?.ok ? 'text-success' : 'text-error'"
                       x-text="offsiteTestResult?.ok ? '✓ ' + (offsiteTestResult.message || t('settings.bk.test_ok')) : '✗ ' + (offsiteTestResult?.error || t('settings.bk.test_failed'))"></span>
             </div>
 

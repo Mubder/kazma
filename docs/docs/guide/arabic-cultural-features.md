@@ -59,7 +59,7 @@ API:
 
 **Jinja2 patching:** `_patch_jinja2_templates()` monkey-patches `Jinja2Templates.__init__` to always inject default i18n globals (`t`, `lang="en"`, `dir="ltr"`) so templates never raise `UndefinedError`. Called at module load.
 
-**Server-side wiring** (`app.py`): the builder injects `t`, `lang`, `dir`, and `translations_json` (full dict as JSON for client-side Alpine.js) into Jinja2 globals. A `language_middleware` reads the `kazma-lang` cookie and sets `lang`/`dir` per request.
+**Server-side wiring** (`app.py`): the builder injects `t`, `lang`, `dir`, and `translations_json` (full dict as JSON for client-side Alpine.js) into Jinja2 globals. A `language_middleware` reads the `kazma-lang` cookie and sets `lang`/`dir` per request. With no cookie the page is in the install's language (`agent.language`). Python code that needs the request's language calls `i18n.current_language()`; only the middleware reads the cookie. Four routes used to read it themselves with English as the default, so an Arabic install showed parts of the Dashboard in English.
 
 ### 3.2 Coverage
 
@@ -70,6 +70,54 @@ The translation dict is extensive — keys span nav, header, chat, dashboard, se
 - **Template:** `templates/base.html` — `&lt;html lang="\{\{ lang()|default('en') \}\}" dir="\{\{ dir()|default('ltr') \}\}">`.
 - **`dir`** is `"rtl"` for Arabic, set per request by the language middleware.
 - **Client-side:** `base.html` injects `window.KAZMA_LANG` and a client-side `t()` lookup for Alpine expressions.
+
+#### Text follows its own language
+
+The UI language decides the page's layout and its own labels. It does not
+decide how text is laid out: English text runs left to right and is aligned
+left, and Arabic text runs right to left and is aligned right, in the Arabic
+UI and the English UI alike. The rule was set on 2026-10-02. Before then, the
+Arabic UI right-aligned English replies and tool output, and a mostly English
+reply laid its Arabic paragraphs out left to right in both UIs.
+
+- **Alignment is logical.** Stylesheets use `text-align: start`, which each
+  paragraph resolves against its own direction. No rule picks `left` or
+  `right` from the page's `dir`, unless it is declared with a reason (code,
+  numbers, chart canvases).
+- **Each paragraph takes its own direction.** The markdown renderer
+  (`streaming.js`) gives every paragraph, heading, quote, list, list item and
+  table cell a `dir` from its own words, using `KazmaBidi.blockDir`
+  (`bidi.js`). A paragraph takes the script that most of its words are in. A
+  URL, a path or an identifier counts as one word. On a tie, the first letter
+  decides. A block with no letters, such as a number, takes its container's
+  direction, so a number column in an Arabic table stays on the right. The
+  browser's own `dir="auto"` looks only at the first letter, which put "PDF
+  الملف جاهز" left to right.
+- **Isolation follows the paragraph.** The bidi helper isolates the words
+  that differ from their paragraph's direction (Latin in Arabic, Arabic in
+  English), never from the message's direction.
+- **Content is marked.** Data a page shows (names, titles, model output,
+  errors, paths) carries `translate="no"`. A global rule gives that element
+  and every block inside it its direction from its own text
+  (`unicode-bidi: plaintext`), except an element whose `dir` a script has
+  already set, such as a renderer's paragraph or a tool call kept left to
+  right. The same rule covers what you type into a field. Numbers are not
+  marked, because a value with no letters is laid out
+  left to right.
+- **A line that mixes a label and content is split.** In the activity
+  panel's "Memory used" row, each memory is its own line in its own
+  language, with the kind label isolated from it. In the Arabic UI the label
+  had decided the direction of the whole line.
+- **A reply looks the same in both UIs.** No stylesheet rule keyed to the
+  page's direction aligns a chat bubble.
+
+Gates: `tests/test_text_follows_its_language.py` (the stylesheets, the
+template bindings, the cookie) and
+`tests/e2e/test_text_follows_its_language.py`. The browser test sends real
+turns through the chat page in both UIs, measures where each line of each
+paragraph and tool output sits, live and after a reload, and requires the
+two UIs to lay every paragraph out the same way. `tests/js/test_block_direction.js`
+covers the paragraph rule and the renderer.
 
 ### 3.4 Arabic font policy (IBM Plex, equal EN/AR size)
 

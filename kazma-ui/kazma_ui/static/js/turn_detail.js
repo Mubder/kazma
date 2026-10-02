@@ -72,15 +72,17 @@ var KazmaTurnDetail = window.KazmaTurnDetail = (function () {
         return '';
     }
 
-    /** One-line gist of a tool's RESULT. */
-    function resultSummary(result) {
+    /** One-line gist of a tool's RESULT. *countLabel(n)* prints a list's
+     *  size in the page's language (chat.js passes tiCount); it printed
+     *  "3 results" in English in every language. */
+    function resultSummary(result, countLabel) {
         var s = String(result == null ? '' : result).trim();
         if (!s) return '';
         if (s.charAt(0) === '{' || s.charAt(0) === '[') {
             try {
                 var obj = JSON.parse(s);
                 if (Array.isArray(obj)) {
-                    return obj.length + ' result' + (obj.length === 1 ? '' : 's');
+                    return countLabel ? countLabel(obj.length) : String(obj.length);
                 }
                 var inner = argSummary(obj);
                 if (inner) return inner;

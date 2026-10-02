@@ -693,7 +693,7 @@
     card.innerHTML =
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
         '<div style="display:flex;align-items:center;gap:8px;">' +
-          '<span style="font-weight:600;font-size:0.9rem;">' + esc(taskId.slice(0, 16)) + '…</span>' +
+          '<span translate="no" style="font-weight:600;font-size:0.9rem;">' + esc(taskId.slice(0, 16)) + '…</span>' +
           '<span class="badge badge-warning" id="status-' + taskId + '">' + esc(t('swarm.running_lower')) + '</span>' +
         '</div>' +
         '<span style="font-size:0.75rem;color:var(--text-muted);" id="timer-' + taskId + '">0s</span>' +
@@ -822,7 +822,7 @@
         cpEl.style.display = 'block';
         cpEl.innerHTML =
           '<div style="font-weight:600;margin-bottom:8px;color:var(--warning);">' + esc(t('swarm.checkpoint_step', {step: (Number(data.step) || 0)})) + '</div>' +
-          '<div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:8px;max-height:100px;overflow-y:auto;">' + esc(data.output_preview || t('swarm.no_preview')) + '</div>' +
+          '<div translate="no" style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:8px;max-height:100px;overflow-y:auto;">' + esc(data.output_preview || t('swarm.no_preview')) + '</div>' +
           '<div style="display:flex;gap:8px;">' +
             '<button class="btn btn-primary btn-sm" data-action="approve" data-task-id="' + esc(taskId) + '">' + esc(t('swarm.approve')) + '</button>' +
             '<button class="btn btn-danger btn-sm" data-action="reject" data-task-id="' + esc(taskId) + '">' + esc(t('swarm.reject')) + '</button>' +
@@ -839,7 +839,7 @@
         // Cap the chain at 8 badges — innerHTML += used to grow unboundedly
         // within a card's lifetime.
         while (hfEl.children.length >= 8) hfEl.removeChild(hfEl.firstChild);
-        hfEl.innerHTML += '<span class="badge badge-info" style="margin-right:4px;">' + esc(data.from) + ' -> ' + esc(data.to) + '</span>';
+        hfEl.innerHTML += '<span class="badge badge-info" translate="no" style="margin-right:4px;">' + esc(data.from) + ' -> ' + esc(data.to) + '</span>';
       }
     });
 
@@ -1507,7 +1507,7 @@
       html += '</div>';
 
       html += '<div style="overflow-x:auto;">';
-      html += '<table style="width:100%;border-collapse:collapse;font-size:0.8rem;text-align:left;">';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.8rem;text-align:start;">';
       html += '<thead>';
       html += '<tr style="border-bottom:2px solid var(--border);">';
       html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">' + esc(t('swarm.diag_worker')) + '</th>';
@@ -1534,7 +1534,7 @@
         var isRouted = routedWorkers.indexOf(wName) !== -1;
         var rowBg = isRouted ? 'rgba(var(--accent-rgb), 0.05)' : 'transparent';
         html += '<tr style="border-bottom:1px solid var(--border-subtle);background:' + rowBg + ';">';
-        html += '<td style="padding:8px;font-weight:500;">' + esc(wName) + '</td>';
+        html += '<td translate="no" style="padding:8px;font-weight:500;">' + esc(wName) + '</td>';
         
         if (isRouted) {
           html += '<td style="padding:8px;"><span class="badge badge-accent" style="font-weight:600;font-size:0.7rem;padding:2px 6px;">' + esc(t('swarm.diag_yes')) + '</span></td>';
@@ -1663,7 +1663,7 @@
         if (!contentEl) return;
         var lines = data.logs || [];
         contentEl.innerHTML = lines.length
-          ? lines.map(function(l) { return '<div style="font-family:var(--font-mono);font-size:0.75rem;padding:2px 0;border-bottom:1px solid var(--border-subtle);">' + esc(String(l)) + '</div>'; }).join('')
+          ? lines.map(function(l) { return '<div translate="no" style="font-family:var(--font-mono);font-size:0.75rem;padding:2px 0;border-bottom:1px solid var(--border-subtle);">' + esc(String(l)) + '</div>'; }).join('')
           : '<div style="text-align:center;padding:40px;color:var(--text-muted);">' + esc(t('swarm.no_logs_yet')) + '</div>';
       })
       .catch(function() {
@@ -2011,7 +2011,7 @@
           '</div>' +
           (errors.length > 0 ? 
             '<ul style="margin: 6px 0 0 0; padding-left: 18px; font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">' +
-              errors.map(function(err) { return '<li>' + esc(err) + '</li>'; }).join('') +
+              errors.map(function(err) { return '<li translate="no">' + esc(err) + '</li>'; }).join('') +
             '</ul>' : 
             '<div style="margin-top: 4px; font-size: 0.75rem; color: var(--text-secondary);">' + esc(t('swarm.verified_desc')) + '</div>'
           ) +
@@ -2023,7 +2023,7 @@
       panel.innerHTML = 
         '<div style="padding: 10px 14px; border-radius: var(--radius); border: 1px solid var(--danger); background: var(--danger-subtle);">' +
           '<div style="font-weight: 600; font-size: 0.8rem; color: var(--danger);">' + icon('alert') + ' ' + esc(t('swarm.validation_api_error')) + '</div>' +
-          '<div style="margin-top: 4px; font-size: 0.75rem; color: var(--text-secondary);">' + esc(err.message || err) + '</div>' +
+          '<div translate="no" style="margin-top: 4px; font-size: 0.75rem; color: var(--text-secondary);">' + esc(err.message || err) + '</div>' +
         '</div>';
     });
   }
@@ -2455,13 +2455,13 @@
 
     source.addEventListener('worker_started', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addPipelineTerminalLine('', esc(t('swarm.worker_prefix')) + '<strong style="color:var(--accent);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.activated_step')) + (Number(d.step) || 0) + ')');
+      addPipelineTerminalLine('', esc(t('swarm.worker_prefix')) + '<strong translate="no" style="color:var(--accent);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.activated_step')) + (Number(d.step) || 0) + ')');
     });
 
     source.addEventListener('worker_progress', function(e) {
       var d = parseSseData(e); if (!d) return;
       var tokens = Number(d.tokens) || 0;
-      addPipelineTerminalLine('', '<strong style="color:var(--text-secondary);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.working_processed')) + tokens + ' ' + esc(t('swarm.tokens_word')) + ')');
+      addPipelineTerminalLine('', '<strong translate="no" style="color:var(--text-secondary);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.working_processed')) + tokens + ' ' + esc(t('swarm.tokens_word')) + ')');
     });
 
     source.addEventListener('worker_completed', function(e) {
@@ -2486,7 +2486,7 @@
 
     source.addEventListener('handoff', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addPipelineTerminalLine((window.KazmaIcons ? '-> ' : ''), esc(t('swarm.handoff_label')) + '<span class="badge badge-info">' + esc(d.from) + '</span>  <span class="badge badge-accent">' + esc(d.to) + '</span>');
+      addPipelineTerminalLine((window.KazmaIcons ? '-> ' : ''), esc(t('swarm.handoff_label')) + '<span class="badge badge-info" translate="no">' + esc(d.from) + '</span>  <span class="badge badge-accent" translate="no">' + esc(d.to) + '</span>');
     });
 
     source.addEventListener('task_completed', function(e) {
@@ -2725,7 +2725,7 @@
 
     source.addEventListener('worker_started', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addTerminalLine('', esc(t('swarm.worker_prefix')) + '<strong style="color:var(--accent);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.activated_step')) + (Number(d.step) || 0) + ')');
+      addTerminalLine('', esc(t('swarm.worker_prefix')) + '<strong translate="no" style="color:var(--accent);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.activated_step')) + (Number(d.step) || 0) + ')');
       setText('play-state-node', esc(d.worker));
     });
 
@@ -2738,7 +2738,7 @@
       var estCost = playgroundTotalTokens * 0.0000015;
       setText('play-state-cost', '$' + estCost.toFixed(4));
 
-      addTerminalLine('', '<strong style="color:var(--text-secondary);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.working_processed')) + tokens + ' ' + esc(t('swarm.tokens_word')) + ')');
+      addTerminalLine('', '<strong translate="no" style="color:var(--text-secondary);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.working_processed')) + tokens + ' ' + esc(t('swarm.tokens_word')) + ')');
     });
 
     source.addEventListener('worker_completed', function(e) {
@@ -2766,7 +2766,7 @@
 
     source.addEventListener('handoff', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addTerminalLine('', esc(t('swarm.handoff_label')) + '<span class="badge badge-info">' + esc(d.from) + '</span>  <span class="badge badge-accent">' + esc(d.to) + '</span>');
+      addTerminalLine('', esc(t('swarm.handoff_label')) + '<span class="badge badge-info" translate="no">' + esc(d.from) + '</span>  <span class="badge badge-accent" translate="no">' + esc(d.to) + '</span>');
     });
 
     source.addEventListener('task_completed', function(e) {

@@ -22,7 +22,7 @@ from kazma_ui.i18n import PLURAL_CATEGORIES, TRANSLATIONS, plural_forms, t_plura
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = json.loads((ROOT / "tests" / "fixtures" / "i18n" / "count_labels.json").read_text(encoding="utf-8"))
 CHAT_JS = ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
-BASES = ("count_tools", "count_steps", "count_approvals", "count_requests")
+BASES = ("count_tools", "count_steps", "count_approvals", "count_requests", "count_results")
 
 
 @pytest.mark.parametrize("base", BASES)

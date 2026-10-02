@@ -163,8 +163,8 @@ def test_a_thought_renders_as_markdown_not_as_source() -> None:
     chat = (
         ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
     ).read_text(encoding="utf-8")
-    body = chat.split("function _detailHtml(detail, forceExpanded, kind)", 1)
-    assert len(body) > 1, "_detailHtml no longer takes the row kind"
+    body = chat.split("function _detailHtml(detail, forceExpanded, kind, html)", 1)
+    assert len(body) > 1, "_detailHtml no longer takes the row kind (and its prepared html)"
     body = body[1].split("\n  /**", 1)[0]
     assert "kind === 'thought'" in body
     assert "KS.markdown" in body, "a thought is escaped again"
@@ -195,7 +195,7 @@ def test_a_thought_is_never_truncated() -> None:
     chat = (
         ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
     ).read_text(encoding="utf-8")
-    body = chat.split("function _detailHtml(detail, forceExpanded, kind)", 1)[1]
+    body = chat.split("function _detailHtml(detail, forceExpanded, kind, html)", 1)[1]
     body = body.split(chr(10) + "  /**", 1)[0]
 
     flat = " ".join(body.split())

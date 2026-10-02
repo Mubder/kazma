@@ -2298,8 +2298,24 @@ def _cmd_pause(
             else:
                 print("  no running server; nothing to stop.")
     print("")
-    print("Resume with:  python scripts/service/kazma_guard.py --resume")
+    print(f"Resume with:  {_command_here()} --resume")
     return 0
+
+
+def _command_here(script: str = "kazma_guard.py") -> str:
+    """A guard command as typed in the install folder, with the Python running
+    this one: a bare ``python`` may be another interpreter, or none at all on
+    Windows. Relative inside the install, in full elsewhere."""
+    exe = sys.executable or "python"
+    try:
+        rel = os.path.relpath(exe, REPO_ROOT)
+    except ValueError:  # on another drive
+        rel = ""
+    if rel and not rel.startswith(".."):
+        exe = rel
+    if " " in exe:
+        exe = f'"{exe}"'
+    return f"{exe} {os.path.join('scripts', 'service', script)}"
 
 
 def _cmd_resume() -> int:
@@ -2505,9 +2521,9 @@ def _wait_for_new_boot(health_url: str, requested_at: float, before: str,
         time.sleep(2.0)
 
     print("Server did not come back within the start budget.")
-    print("  python scripts/service/kazma_guard.py --status")
-    print("  python scripts/service/install_service.py --status")
-    print("  python scripts/service/kazma_guard.py          # start supervision in this terminal")
+    print(f"  {_command_here()} --status")
+    print(f"  {_command_here('install_service.py')} --status")
+    print(f"  {_command_here()}          # start supervision in this terminal")
     log("error", "reload.not_ready")
     return 2
 

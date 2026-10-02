@@ -611,6 +611,9 @@ class KazmaAppBuilder:
 
         _startup_lang = _lang
         self._current_lang = contextvars.ContextVar("_current_lang", default=_startup_lang)
+        from kazma_ui.i18n import set_install_language
+
+        set_install_language(_startup_lang)
 
         def _dynamic_translate(key: str, **kwargs) -> str:
             return _make_translator(self._current_lang.get())(key, **kwargs)
@@ -772,6 +775,8 @@ class KazmaAppBuilder:
                 "production deployments."
             )
 
+        from kazma_ui.i18n import set_request_language
+
         @self.app.middleware("http")
         async def language_middleware(request: Request, call_next):
             cookie_lang = request.cookies.get("kazma-lang")
@@ -780,6 +785,9 @@ class KazmaAppBuilder:
             else:
                 req_lang = _startup_lang
             self._current_lang.set(req_lang)
+            # The one answer routes ask (``i18n.current_language``); they used
+            # to read the cookie themselves with an English fallback.
+            set_request_language(req_lang)
             return await call_next(request)
 
         @self.app.middleware("http")

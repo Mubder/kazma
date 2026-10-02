@@ -128,8 +128,8 @@ def test_boot_says_so_with_the_fix(
     with caplog.at_level(logging.WARNING, logger="kazma_core.install_requirements"):
         unmet = ir.report_unmet_requirements(root)
     assert [u.name for u in unmet] == ["pyjwt"]
-    assert any("kazma update" in r.getMessage() and "pyjwt" in r.getMessage() for r in caplog.records)
-    assert sent and sent[0][0] == "install.requirements_unmet" and "kazma update" in sent[0][2]
+    assert any("-m kazma_cli update --reinstall -y" in r.getMessage() and "pyjwt" in r.getMessage() for r in caplog.records)
+    assert sent and sent[0][0] == "install.requirements_unmet" and "-m kazma_cli update --reinstall -y" in sent[0][2]
 
     # Nothing behind: no warning, no page.
     sent.clear()

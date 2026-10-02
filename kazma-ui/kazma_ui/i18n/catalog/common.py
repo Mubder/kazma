@@ -1244,6 +1244,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "غير موثّقة",
         "en": "unverified",
     },
+    "skills.cert_agent-skills": {
+        "ar": "مهارة وكيل",
+        "en": "agent skill",
+    },
+    "skills.cert_basic": {
+        "ar": "أساسية",
+        "en": "basic",
+    },
     "skills.score": {
         "ar": "الدرجة: {n}/100",
         "en": "Score: {n}/100",

@@ -435,7 +435,7 @@
     </div>
 
     <div x-show="loading" role="status" aria-live="polite" style="padding:0.5rem;color:var(--text-muted);font-size:0.85rem;">{{ t('common.loading') }}</div>
-    <div x-show="error" role="alert" aria-live="assertive" style="padding:0.5rem;color:#ef4444;font-size:0.85rem;" x-text="error"></div>
+    <div translate="no" x-show="error" role="alert" aria-live="assertive" style="padding:0.5rem;color:#ef4444;font-size:0.85rem;" x-text="error"></div>
   </div>
 </div>
 {% endblock %}

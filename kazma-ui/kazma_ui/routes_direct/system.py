@@ -321,9 +321,9 @@ def register_system_routes(self: Any) -> None:
         """List installed Python packages with metadata and extras status."""
         import importlib.metadata as ilm
 
-        lang = request.cookies.get("kazma-lang") or "en"
-        if lang not in ("ar", "en"):
-            lang = "en"
+        from kazma_ui.i18n import current_language
+
+        lang = current_language()
 
         def _i18n(key: str, fallback: str) -> str:
             try:

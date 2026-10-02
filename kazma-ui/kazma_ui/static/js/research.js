@@ -739,7 +739,7 @@
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-          if (data.error) { $('research-cmp-result').innerHTML = '<div style="color:var(--error);">' + esc(data.error) + '</div>'; return; }
+          if (data.error) { $('research-cmp-result').innerHTML = '<div translate="no" style="color:var(--error);">' + esc(data.error) + '</div>'; return; }
           var d = data.diff;
           function arrow(v) { return v > 0 ? '+' + v : String(v); }
           function row(label, a, b, delta) {
@@ -749,7 +749,7 @@
               '<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);font-weight:600;">' + esc(delta) + '</td></tr>';
           }
           var html = '<table class="data-table" style="width:100%;border-collapse:collapse;font-size:0.9rem;">' +
-            '<thead><tr><th style="text-align:left;padding:8px;">' + esc(i18n('research.metric')) + '</th>' +
+            '<thead><tr><th style="text-align:start;padding:8px;">' + esc(i18n('research.metric')) + '</th>' +
             '<th style="text-align:right;padding:8px;">' + esc(i18n('research.run_a')) + '</th>' +
             '<th style="text-align:right;padding:8px;">' + esc(i18n('research.run_b')) + '</th>' +
             '<th style="text-align:right;padding:8px;">' + esc(i18n('research.delta')) + '</th></tr></thead><tbody>' +
@@ -1000,7 +1000,7 @@
       return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;" data-act="view-detail" data-task-id="' + esc(t.id) + '">' +
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
           '<div style="flex:1;min-width:0;overflow:hidden;">' +
-            '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + titleHtml(t) + '</div>' +
+            '<div dir="auto" style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + titleHtml(t) + '</div>' +
             '<div style="font-size:0.85rem;color:var(--text-muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
               meta +
             '</div>' +
@@ -1023,7 +1023,7 @@
       return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;opacity:0.7;" data-act="view-detail" data-task-id="' + esc(t.id) + '">' +
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
           '<div style="flex:1;min-width:0;overflow:hidden;">' +
-            '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + titleHtml(t) + '</div>' +
+            '<div dir="auto" style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + titleHtml(t) + '</div>' +
             '<div style="font-size:0.85rem;color:var(--text-muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
               '<span translate="no">' + esc((t.workers || []).join(', ')) + '</span> · ' +
               '<span>$' + (t.cost || 0).toFixed(4) + '</span> · ' +

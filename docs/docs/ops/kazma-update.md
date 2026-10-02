@@ -52,23 +52,23 @@ kazma update --accept-discard-local-commits
 
 A `git pull` brings new code but installs nothing. When a commit raises a minimum version in `pyproject.toml` (a security floor, or a release a new feature needs), the server checks at boot and logs a WARNING naming each package and the version the build requires. It also raises the ops alert `install.requirements_unmet`, and the security report's dependency check lists the same packages. The packages cannot be replaced while the server has them loaded: on Windows the reinstall would fail half way and leave some packages new and some old. So `kazma update` refuses while the server answers, and says what to run instead.
 
-On an install the guard supervises (the `KazmaAgent` task), run these from the install folder, with the install's own `kazma`:
+On an install the guard supervises (the `KazmaAgent` task), run these from the install folder, with the install's own Python:
 
 ```bash
 python scripts/service/kazma_guard.py --pause --stop --when-idle --reason "package update"
-kazma update --reinstall -y
+python -m kazma_cli update --reinstall -y
 python scripts/service/kazma_guard.py --resume
 ```
 
-`python` here is the install's own: `.venv\Scripts\python.exe` on Windows, `.venv/bin/python` elsewhere. A bare `python` may be another interpreter, or none; the refusal prints the commands with the right one.
+`python` here is the install's own: `.venv\Scripts\python.exe` on Windows, `.venv/bin/python` elsewhere. A bare `python` may be another interpreter, or none; the refusal prints the commands with the right one. The update runs as `python -m kazma_cli update`, not `kazma update`: on Windows a reinstall must replace `kazma.exe`, and Windows lets nothing replace (or even rename) a launcher while it runs. Started from `kazma.exe` (or while the TUI runs), the update refuses before it installs anything and names the command to use.
 
-The first command waits until no chat turn is running; then the guard stops the server gracefully and keeps it stopped. If you forget the third command, the pause lifts itself after two hours. Without the guard: stop the server, run `kazma update --reinstall -y`, and start the server again.
+The first command waits until no chat turn is running; then the guard stops the server gracefully and keeps it stopped. If you forget the third command, the pause lifts itself after two hours. Without the guard: stop the server, run `python -m kazma_cli update --reinstall -y`, and start the server again.
 
 `--reinstall` is the packages-only path: it keeps your optional extras and touches no git state.
 
 ## Repair after a broken reinstall
 
-A reinstall that fails half way can leave Kazma's own package half removed: `~azma*` folders in `site-packages`, and `import kazma_cli` fails, so the server cannot start. Until 2026-10-02 every reinstall run from `kazma.exe` on Windows ended this way ("failed to remove file ... kazma.exe"): the update has to replace the launcher it runs from, and Windows locks a running program. The update now renames its launchers aside first and puts back any it did not replace.
+A reinstall that fails half way can leave Kazma's own package half removed: `~azma*` folders in `site-packages`, and `import kazma_cli` fails, so the server cannot start. Until 2026-10-02 every reinstall run from `kazma.exe` on Windows ended this way ("failed to remove file ... kazma.exe"): the update has to replace the launcher it runs from, and Windows locks a running launcher. The update now refuses to run from a launcher it must replace, before installing anything, and names the `python -m kazma_cli update` command to use instead.
 
 To repair, with the server stopped, in the install folder:
 
@@ -81,7 +81,7 @@ uv pip install --python .\.venv\Scripts\python.exe -e ".[rag,tui,document-platfo
 
 Put your install's own extras in the brackets: the ones `kazma update` prints under "Preserving optional extras". Then start the server again: on a guarded install `python scripts/service/kazma_guard.py --resume`, otherwise `kazma serve`.
 
-Or: `kazma update --reinstall -y` once the CLI is importable enough to run, or
+Or: `python -m kazma_cli update --reinstall -y` once the CLI is importable enough to run, or
 after fixing the venv with `uv pip install` as above.
 
 ## Developer clones

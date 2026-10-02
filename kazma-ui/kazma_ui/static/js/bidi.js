@@ -29,6 +29,52 @@
     return ar >= en || (ar > 20 && ar >= en * 0.4);
   }
 
+  // Letters of the right-to-left scripts (Hebrew, Arabic, Syriac, Thaana,
+  // N'Ko, Samaritan, Mandaic, and the presentation forms). Every other
+  // letter is left-to-right; digits and punctuation are neither.
+  var RTL_LETTER_RE = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+  var LETTER_RE = /\p{L}/u;
+
+  /**
+   * The direction of one paragraph: the script most of its words are in --
+   * a URL, a path or an identifier is one word -- and on a tie its first
+   * letter's. '' when it has no letters (a number, a rule).
+   *
+   * Text follows its own language, whatever the UI's (the owner's rule,
+   * 2026-10-02). dir="auto" asks only the first letter, so "PDF \u0627\u0644\u0645\u0644\u0641
+   * \u062C\u0627\u0647\u0632" came out left-to-right; counting letters lays an Arabic sentence
+   * holding one long path out left-to-right. Inline code and a link's
+   * target are not the paragraph's words.
+   */
+  function blockDir(text) {
+    var s = String(text || '').replace(/`[^`]*`/g, ' ').replace(/\]\([^)]*\)/g, '] ');
+    var words = s.split(/\s+/);
+    var rtl = 0, ltr = 0, first = '';
+    for (var i = 0; i < words.length; i++) {
+      var r = 0, l = 0, lead = '';
+      for (var ch of words[i]) {
+        if (!LETTER_RE.test(ch)) continue;
+        if (RTL_LETTER_RE.test(ch)) { r++; if (!lead) lead = 'rtl'; }
+        else { l++; if (!lead) lead = 'ltr'; }
+      }
+      if (!lead) continue;
+      if (!first) first = lead;
+      if (r > l || (r === l && lead === 'rtl')) rtl++; else ltr++;
+    }
+    if (!rtl && !ltr) return '';
+    if (rtl !== ltr) return rtl > ltr ? 'rtl' : 'ltr';
+    return first;
+  }
+
+  /** The direction a run stands against: its nearest block's own, else *fallback*. */
+  function runBase(node, root, fallback) {
+    for (var n = node; n && n !== root; n = n.parentNode) {
+      var d = n.getAttribute ? n.getAttribute('dir') : null;
+      if (d === 'rtl' || d === 'ltr') return d;
+    }
+    return fallback;
+  }
+
   /**
    * Walk text nodes under el and wrap Latin-only runs in dir=ltr isolate
    * when the base direction is RTL (and vice-versa for Arabic runs).
@@ -45,14 +91,19 @@
       // Skip script/style/code (code already LTR)
       var tag = (parent.tagName || '').toLowerCase();
       if (tag === 'script' || tag === 'style' || tag === 'code' || tag === 'pre') continue;
-      // Skip elements that already have explicit dir set (li, ul, ol with dir="auto")
-      if (parent.getAttribute && parent.getAttribute('dir') === 'ltr' && parent.classList && parent.classList.contains('bidi-isolate')) continue;
+      // A run this pass or an earlier one already isolated.
+      if (parent.classList && parent.classList.contains('bidi-isolate')) continue;
       // Don't re-process text inside list items that already have dir="auto"
       // — the browser handles their directionality natively
       if ((tag === 'li' || tag === 'ul' || tag === 'ol') && parent.getAttribute && parent.getAttribute('dir') === 'auto') continue;
 
+      // A run stands out against its own paragraph, never the message: the
+      // renderer gives each block its direction (blockDir). Isolated against
+      // the message, an English-first reply's Arabic paragraph had its own
+      // words hidden from its dir="auto" and came out left-to-right.
+      var dir = runBase(parent, el, baseDir);
       var text = node.nodeValue;
-      if (baseDir === 'rtl') {
+      if (dir === 'rtl') {
         if (!LATIN_RE.test(text) || !ARABIC_RE.test(text) && !/[A-Za-z]{2,}/.test(text)) {
           // pure Arabic or no multi-letter Latin — leave alone unless pure Latin acronym line
           if (/^[A-Za-z0-9][A-Za-z0-9 .,\-_/()%+]{1,}$/.test(text.trim()) && /[A-Za-z]{2,}/.test(text)) {
@@ -62,7 +113,7 @@
         }
         // Split mixed text into Arabic vs Latin chunks
         splitAndWrap(node, 'rtl');
-      } else if (baseDir === 'ltr' && ARABIC_RE.test(text)) {
+      } else if (dir === 'ltr' && ARABIC_RE.test(text)) {
         splitAndWrap(node, 'ltr');
       }
     }
@@ -282,6 +333,7 @@
   window.KazmaBidi = {
     hasArabic: hasArabic,
     isArabicDominant: isArabicDominant,
+    blockDir: blockDir,
     apply: apply,
     applyAll: applyAll,
     isolateRuns: isolateRuns,

@@ -4179,15 +4179,22 @@ no Python update ever arrived.
   compiled files open on Windows, so a reinstall fails half way, and the
   `--reinstall` path did not check until 2026-10-02 (the git path told the
   operator to kill the server by hand, which the guard undoes).
-  `tests/test_package_update_on_a_guarded_install.py`. **A reinstall run from
-  `kazma.exe` can replace it** (`update._launchers_moved_aside`, Windows):
-  Windows refuses to delete or overwrite a running .exe but lets it be
-  renamed, so the launchers are renamed to `<name>.exe.<pid>.old` before the
-  installer runs and any it did not rewrite are renamed back; old copies go
-  once nothing runs them. Live 2026-10-02 every attempt failed on the locked
-  `kazma.exe` and left Kazma's own install half removed.
-  `tests/test_update_replaces_its_own_launcher.py` (a running copy of
-  `ping.exe` as the launcher; deleting it is the negative control). The report's dependency check lists the same
+  `tests/test_package_update_on_a_guarded_install.py`. **The update runs as
+  `python -m kazma_cli update`, never from a launcher it must replace**
+  (Windows): a reinstall replaces `kazma.exe`, and Windows lets nothing
+  replace -- or rename -- a running uv launcher (Python keeps the zip
+  appended to it open). Live 2026-10-02 every reinstall from `kazma.exe`
+  failed half way and left Kazma's own package half removed; renaming the
+  launchers aside, tried that morning with a running `ping.exe` as its test,
+  failed on the real launcher the same afternoon. So the update checks
+  first (`update._launchers_in_use`: opening a launcher for writing fails
+  while it runs, and writes nothing), refuses before it installs or pulls
+  anything (pip does the same from `pip.exe`), and names the command;
+  every instruction (the refusal, the boot alert, the guard's hints, the
+  docs) names `<install python> -m kazma_cli update`.
+  `tests/test_update_not_from_its_launcher.py` (a copy of a real uv launcher
+  held by a running test; the rename it cannot do is the negative control
+  of the old fix). The report's dependency check lists the same
   packages, without OSV. `packaging` is a declared dependency for this.
 - **Advisories with no fix that Kazma cannot reach are reviewed, never
   hidden** (`dependency_scanner.REVIEWED_ADVISORIES`). Each entry has its
@@ -4292,6 +4299,30 @@ sent: ... -> Error: ...", and the document pipeline logged "✓ Delivered".
   `ti()` key. **Mixed-direction content sits in a `<bdi>`** -- a tool call, an
   id, a date inside Arabic text is reordered by the bidi algorithm otherwise
   (`dir="ltr"` for code-like content, automatic for a date).
+- **Text follows its own language, whatever the UI's** (the owner's rule,
+  2026-10-02): the UI language lays out the page and its own labels; English
+  text runs and aligns left-to-right and Arabic right-to-left in BOTH UIs.
+  Alignment is logical (`text-align: start`); a `left`/`right` keyed to the
+  page's `dir` is declared with its reason (`DECLARED` in
+  `tests/test_text_follows_its_language.py`) -- the Arabic UI right-aligned
+  English replies, tool output, tables and cards. Markdown blocks get their
+  direction from their own words (`KazmaBidi.blockDir`: the script most of
+  the words are in, a URL/path/identifier one word, a tie to the first
+  letter; no letters -> the container's, so a number column stays put),
+  never from `dir="auto"`'s first letter; the bidi helper isolates a run
+  against ITS paragraph, never the message (an English-first reply's Arabic
+  paragraph ran left-to-right in both UIs). Data a page shows is content
+  (`translate="no"`; the global `unicode-bidi: plaintext` rule gives it and
+  its blocks their text's direction, except an element whose `dir` a script
+  set -- the renderer's paragraph, a `<bdi dir="ltr">` tool call; never mark
+  a number, which then reads left-to-right). A line mixing a page label and content is split (the
+  memory row). No page-`dir` rule aligns a chat bubble: a reply looks the
+  same in either UI. Python asks `i18n.current_language()`; only the
+  middleware reads the `kazma-lang` cookie (four routes defaulted to English
+  on an Arabic install). Gates: `tests/test_text_follows_its_language.py`,
+  `tests/e2e/test_text_follows_its_language.py` (real turns in both UIs,
+  live and reloaded, the two compared line for line; old rules as the
+  negative controls), `tests/js/test_block_direction.js`.
 - **The TUI names its pages from one table, in the web UI's words**
   (`kazma_tui/nav_rail.py` `TAB_LABELS`, 2026-10-01): the tabs and the
   navigation rail read it. The tabs' Arabic labels were never applied --

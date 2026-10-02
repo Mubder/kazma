@@ -1279,7 +1279,7 @@
         insertAttr + ' ' +
         'style="display:flex;flex-direction:column;align-items:flex-start;width:100%;' +
         'padding:8px 12px;border:0;background:transparent;color:var(--text-primary);' +
-        'cursor:pointer;text-align:left;border-bottom:1px solid var(--border-subtle);">' +
+        'cursor:pointer;text-align:start;border-bottom:1px solid var(--border-subtle);">' +
         '<code style="font-size:0.85rem;color:var(--accent);">' + escapeHtml(c.cmd) + '</code>' +
         '<span style="font-size:0.72rem;color:var(--text-muted);">' + escapeHtml(c.desc) + '</span>' +
         '</button>';
@@ -1840,7 +1840,9 @@
    */
   function _toolResultSummary(result) {
     var M = window.KazmaTurnDetail;
-    return M ? M.resultSummary(result) : '';
+    return M ? M.resultSummary(result, function (n) {
+      return tiCount('count_results', n, '{n} result', '{n} results');
+    }) : '';
   }
   function _toolDetailWithGist(gist, raw) {
     var M = window.KazmaTurnDetail;
@@ -3599,6 +3601,19 @@
       var src = (h.sources && h.sources.length) ? ' [' + h.sources.join(', ') + ']' : '';
       return _memoryKindLabel(h.kind) + ' · ' + String(h.text || '') + src;
     });
+    // One line per memory, laid out in the memory's language: the kind label
+    // (the page's) came first, so in the Arabic UI an English memory ran
+    // right-to-left behind it, as one paragraph with the rest.
+    var html = (row.hits || []).map(function(h) {
+      var text = String(h.text || '');
+      var dir = (window.KazmaBidi && KazmaBidi.blockDir && KazmaBidi.blockDir(text)) || 'auto';
+      return '<div class="step-detail-line" dir="' + dir + '">' +
+        '<bdi>' + escapeHtml(_memoryKindLabel(h.kind)) + '</bdi> · ' +
+        '<bdi translate="no">' + escapeHtml(text) + '</bdi>' +
+        ((h.sources && h.sources.length)
+          ? ' <bdi translate="no">[' + escapeHtml(h.sources.join(', ')) + ']</bdi>' : '') +
+        '</div>';
+    }).join('');
     return '<li class="agent-progress-step step-memory state-info" data-kind="memory">' +
       _stepRowHtml({
         kind: 'status',
@@ -3606,6 +3621,7 @@
         title: title,
         rawTitle: 'Memory used',
         detail: lines.join('\n'),
+        detailHtml: html,
         tsIso: null,
       }) +
       '</li>';
@@ -4109,7 +4125,7 @@
    * block, not three literal backticks (reported from the installed
    * build, 2026-09-20).
    */
-  function _detailHtml(detail, forceExpanded, kind) {
+  function _detailHtml(detail, forceExpanded, kind, html) {
     if (!detail) return '';
     var isThought = kind === 'thought';
     // A thought is NOT truncated.
@@ -4136,7 +4152,7 @@
       var openIt = forceExpanded || t.length <= STEP_DETAIL_CLAMP_AT;
       return '<div class="step-detail step-detail-md' +
         (openIt ? ' is-expanded' : ' is-clamped') + '">' +
-        '<div class="step-detail-text">' + KS.markdown(_scrubDsml(t)) + '</div></div>' +
+        '<div class="step-detail-text" dir="auto">' + KS.markdown(_scrubDsml(t)) + '</div></div>' +
         (openIt ? '' :
           '<button type="button" class="step-show-more" data-open="0">' +
           escapeHtml(ti('show_more', 'Show more \u25BE')) + '</button>');
@@ -4156,11 +4172,11 @@
     // padded box itself let the next line show through the bottom padding
     // (2026-09-24, the half-drawn "Show more" rows).
     if (forceExpanded || (!hasGist && t.length <= STEP_DETAIL_CLAMP_AT)) {
-      return '<div class="step-detail is-expanded"><div class="step-detail-text">' +
-        escapeHtml(t) + '</div></div>';
+      return '<div class="step-detail is-expanded"><div class="step-detail-text" dir="auto">' +
+        (html || escapeHtml(t)) + '</div></div>';
     }
     return '<div class="step-detail is-clamped' + (hasGist ? ' has-gist' : '') +
-      '"><div class="step-detail-text">' + escapeHtml(t) + '</div></div>' +
+      '"><div class="step-detail-text" dir="auto">' + (html || escapeHtml(t)) + '</div></div>' +
       '<button type="button" class="step-show-more" data-open="0">' +
       escapeHtml(ti('show_more', 'Show more \u25BE')) + '</button>';
   }
@@ -4204,14 +4220,14 @@
       '</span>' +
       '<div class="step-body">' +
         '<div class="step-line">' +
-          '<span class="step-title">' + escapeHtml(title) + '</span>' +
+          '<span class="step-title" dir="auto">' + escapeHtml(title) + '</span>' +
           (kind === 'tool'
             ? ' <span class="step-state">' + escapeHtml(_stepStateLabel(state)) + '</span>'
             : '') +
           '<span class="step-time">' + escapeHtml(timeText) + '</span>' +
         '</div>' +
         fileChip +
-        _detailHtml(o.detail, o.forceExpanded, kind) +
+        _detailHtml(o.detail, o.forceExpanded, kind, o.detailHtml) +
       '</div>'
     );
   }
@@ -4544,16 +4560,16 @@
       if ((m = t.match(/^(#{1,4})\s+(.*)$/))) {
         closeList();
         var lvl = Math.min(m[1].length + 2, 4);   // # → h3, ## → h4
-        html += '<h' + lvl + '>' + escapeHtml(m[2]) + '</h' + lvl + '>';
+        html += '<h' + lvl + ' dir="auto">' + escapeHtml(m[2]) + '</h' + lvl + '>';
       } else if ((m = t.match(/^[-*\u2022]\s+(.*)$/))) {
-        if (list !== 'ul') { closeList(); html += '<ul>'; list = 'ul'; }
-        html += '<li>' + escapeHtml(m[1]) + '</li>';
+        if (list !== 'ul') { closeList(); html += '<ul dir="auto">'; list = 'ul'; }
+        html += '<li dir="auto">' + escapeHtml(m[1]) + '</li>';
       } else if ((m = t.match(/^(\d+)[.)]\s+(.*)$/))) {
-        if (list !== 'ol') { closeList(); html += '<ol>'; list = 'ol'; }
-        html += '<li>' + escapeHtml(m[2]) + '</li>';
+        if (list !== 'ol') { closeList(); html += '<ol dir="auto">'; list = 'ol'; }
+        html += '<li dir="auto">' + escapeHtml(m[2]) + '</li>';
       } else {
         closeList();
-        html += '<p>' + escapeHtml(t) + '</p>';
+        html += '<p dir="auto">' + escapeHtml(t) + '</p>';
       }
     });
     closeList();
@@ -5666,7 +5682,7 @@
       _semCard.innerHTML =
         '<div class="hitl-approval-header">\u2754 ' + escapeHtml(ti('clarification_needed', 'Clarification Needed')) + '</div>' +
         '<div class="hitl-approval-body">' +
-          '<p class="hitl-message">' + escapeHtml(truncateStr(_semQ, 500)) + '</p>' +
+          '<p class="hitl-message" dir="auto">' + escapeHtml(truncateStr(_semQ, 500)) + '</p>' +
         '</div>' +
         '<div class="hitl-approval-actions" style="flex-wrap:wrap;gap:6px;">' +
           _semOpts.map(function(opt) {
@@ -5815,9 +5831,9 @@
           : toolsHtml) +
         proposalHtml +
         (data.jail_note
-          ? '<p class="hitl-jail-note">' + escapeHtml(String(data.jail_note)) + '</p>'
+          ? '<p class="hitl-jail-note" dir="auto">' + escapeHtml(String(data.jail_note)) + '</p>'
           : '') +
-        '<p class="hitl-message">' + _hitlMessageHtml(truncateStr(data.message || '', 400)) + '</p>' +
+        '<p class="hitl-message" dir="auto">' + _hitlMessageHtml(truncateStr(data.message || '', 400)) + '</p>' +
         '<p class="hitl-scope-hint" style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;">' +
           (yoloOk
             ? ti('hitl_tip_yolo', 'Tip: <strong>Allow tool</strong> stops repeat prompts for this tool only. ' +
@@ -6345,13 +6361,17 @@
         : new Date(s.updated_at || s.created_at).toLocaleString();
     } catch (e) {}
     var lastPlat = s.last_platform || s.platform || 'web';
-    var meta = _platformName(lastPlat) + ' \u00B7 ' + tiFmt('session_msgs', '{n} msgs', { n: s.message_count }) +
-      ' \u00B7 ' + relativeTime(s.updated_at || s.created_at);
+    // Interface text in the page's language, so it takes the page's
+    // direction; the platform's name is isolated. With dir="auto" its first
+    // letter decided: "Telegram \u00B7 \u0627\u0644\u0631\u0633\u0627\u0626\u0644: 34 \u00B7 \u0642\u0628\u0644 \u0633\u0627\u0639\u062A\u064A\u0646" ran left-to-right.
+    var meta = '<bdi>' + escapeHtml(_platformName(lastPlat)) + '</bdi> \u00B7 ' +
+      escapeHtml(tiFmt('session_msgs', '{n} msgs', { n: s.message_count })) +
+      ' \u00B7 ' + escapeHtml(relativeTime(s.updated_at || s.created_at));
     var html = '<div class="session-item' + (isActive ? ' active' : '') + (s.pinned ? ' pinned' : '') + (isMenuOpen ? ' menu-open' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '" data-platform="' + escapeHtml(plat) + '">' +
       '<span class="session-platform-dot dot-' + escapeHtml(plat) + '" title="' + escapeHtml(_platformName(plat)) + '"></span>' +
       '<div class="session-info">' +
         '<span class="session-title" dir="auto" translate="no" title="' + escapeHtml(title) + (absTime ? ' \u00B7 ' + absTime : '') + '">' + highlightTitle(title, q) + '</span>' +
-        '<span class="session-meta" dir="auto">' + escapeHtml(meta) + '</span>' +
+        '<span class="session-meta">' + meta + '</span>' +
       '</div>';
     if (showArchived) {
       html += '<div class="session-actions">' +

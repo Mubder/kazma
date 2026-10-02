@@ -32,7 +32,7 @@
     <label class="setup-wall-label" for="setup-model">{{ t('chat.setup_model') }}</label>
     <input id="setup-model" class="form-input" type="text" x-model="model" required
            placeholder="gpt-4.1, claude-sonnet-4-5, …">
-    <p class="setup-wall-error" x-cloak x-show="error" x-text="error"></p>
+    <p translate="no" class="setup-wall-error" x-cloak x-show="error" x-text="error"></p>
     <button type="button" class="btn btn-primary" @click="submit()" :disabled="busy || !(model && String(model).trim())">
       {{ t('chat.setup_start') }}
     </button>
@@ -277,7 +277,8 @@ function setupWall() {
       count_facts: {{ plural_forms('chat.count_facts') | tojson }},
       count_memories: {{ plural_forms('chat.count_memories') | tojson }},
       count_weekly: {{ plural_forms('chat.count_weekly') | tojson }},
-      count_passages: {{ plural_forms('chat.count_passages') | tojson }}
+      count_passages: {{ plural_forms('chat.count_passages') | tojson }},
+      count_results: {{ plural_forms('chat.count_results') | tojson }}
     },
     // The turn's memory row, and keys chat.js used with no entry here (they
     // showed in English in every language; tests/test_chat_i18n_bridge.py).

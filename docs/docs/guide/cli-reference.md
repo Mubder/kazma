@@ -353,6 +353,13 @@ kazma update --yes       # apply without prompting
 kazma update --reinstall -y   # repair packages after a broken reinstall
 ```
 
+**On Windows, run the installing forms with the install's Python:**
+`.venv\Scripts\python.exe -m kazma_cli update --yes` (or `--reinstall -y`).
+A reinstall must replace `kazma.exe`, and Windows lets nothing replace, or
+even rename, a launcher while it runs. Started from `kazma.exe`, or while
+`kazma-tui` runs, the update refuses before it installs anything and prints
+the command to use. `--check` installs nothing and runs anywhere.
+
 ---
 
 ## 8. `kazma migrate` — cross-machine migration

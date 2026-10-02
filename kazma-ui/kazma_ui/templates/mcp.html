@@ -169,7 +169,7 @@
                 </select>
             </div>
             <template x-if="addError">
-                <div style="background:rgba(229,57,53,0.1);border-left:3px solid var(--danger,#e53935);padding:8px 12px;margin:6px 0;border-radius:4px;font-size:0.82rem;color:var(--text-primary);white-space:pre-wrap;font-family:var(--font-mono,monospace);" x-text="addError"></div>
+                <div translate="no" style="background:rgba(229,57,53,0.1);border-left:3px solid var(--danger,#e53935);padding:8px 12px;margin:6px 0;border-radius:4px;font-size:0.82rem;color:var(--text-primary);white-space:pre-wrap;font-family:var(--font-mono,monospace);" x-text="addError"></div>
             </template>
             <div class="modal-actions">
                 <button class="btn btn-secondary" @click="showAddModal = false" :disabled="adding">{{ t('mcp.cancel') }}</button>

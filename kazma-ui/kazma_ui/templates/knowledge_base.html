@@ -105,7 +105,7 @@
         <span class="spinner-inline" x-show="!jobDone()" x-cloak></span>
         <strong style="display:inline-flex;align-items:center;gap:6px;"><span class="ki" x-html="KazmaIcons.get(jobIcon())" aria-hidden="true"></span><span x-text="jobTitle()"></span></strong>
       </div>
-      <div style="font-size:0.88rem;color:var(--text-secondary);" x-text="activeJob.message || ''"></div>
+      <div translate="no" style="font-size:0.88rem;color:var(--text-secondary);" x-text="activeJob.message || ''"></div>
       <div style="margin-top:6px;font-size:0.8rem;color:var(--text-secondary);">
         {{ t('knowledge.job_discovered') }}: <span x-text="activeJob.discovered || 0"></span> ·
         {{ t('knowledge.job_fetched') }}: <span x-text="activeJob.fetched || 0"></span> ·
@@ -222,7 +222,7 @@
                 <div style="margin-bottom:0.5rem;border-left:2px solid var(--primary);padding-left:8px;">
                   <div style="font-size:0.75rem;color:var(--text-secondary);word-break:break-all;">
                     [<span x-text="i + 1"></span>] {{ t('knowledge.hit_score') }} <span x-text="h.score.toFixed(4)"></span> ·
-                    <a :href="h.source_url" target="_blank" rel="noopener" x-text="h.source_url"></a>
+                    <a translate="no" :href="h.source_url" target="_blank" rel="noopener" x-text="h.source_url"></a>
                     <span x-show="h.section_header" x-cloak> — <span translate="no" x-text="h.section_header"></span></span>
                   </div>
                   <pre style="margin:4px 0 0 0;font-size:0.78rem;white-space:pre-wrap;background:var(--bg-accent,#1e1e2a);padding:6px;border-radius:4px;max-height:240px;overflow:auto;" x-text="h.content"></pre>
@@ -241,7 +241,7 @@
                   <code x-text="'#' + c.chunk_index"></code>
                   <span :translate="(c.section_header || c.document_title) ? 'no' : null" x-text="c.section_header || c.document_title || {{ t('knowledge.untitled') | tojson | forceescape }}"></span>
                   <span x-show="c.has_code" style="color:var(--primary);" x-cloak>⌗</span>
-                  <div style="color:var(--text-secondary);font-size:0.74rem;word-break:break-all;">
+                  <div translate="no" style="color:var(--text-secondary);font-size:0.74rem;word-break:break-all;">
                     <a :href="c.source_url" target="_blank" rel="noopener" x-text="c.source_url"></a>
                   </div>
                   <pre style="margin:2px 0;font-size:0.74rem;color:var(--text-secondary);white-space:pre-wrap;" x-text="c.preview + '…'"></pre>

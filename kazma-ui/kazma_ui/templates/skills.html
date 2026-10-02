@@ -167,7 +167,7 @@
                 <template x-if="validateResult?.errors?.length">
                     <ul class="error-list">
                         <template x-for="err in validateResult.errors" :key="err">
-                            <li class="text-error" x-text="err"></li>
+                            <li translate="no" class="text-error" x-text="err"></li>
                         </template>
                     </ul>
                 </template>

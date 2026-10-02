@@ -95,6 +95,39 @@ const through = activityRowsHtml([row]);
 ok("the activity writer draws it through the memory renderer",
   /step-memory/.test(through) && steps[0] && /2 facts/.test(steps[0].title), through);
 
+// Each memory on its own line, in its own language (2026-10-02). The kind
+// label is the page's, and it led each line of one text block, so in the
+// Arabic UI the label's letter decided the line: an English memory ran
+// right-to-left behind it.
+global.document = {
+  readyState: "loading",
+  addEventListener() {},
+  documentElement: { getAttribute: () => "rtl" },
+};
+require(path.join(ROOT, "kazma-ui", "kazma_ui", "static", "js", "bidi.js"));
+const AR_LABELS = {
+  memory_kind_fact: "حقيقة", memory_kind_turn: "ذكرى",
+  memory_kind_weekly: "ملخص أسبوعي", memory_kind_knowledge: "مكتبة",
+};
+const arStubs = Object.assign({}, stubs, { ti: (key, fallback) => AR_LABELS[key] || fallback });
+// eslint-disable-next-line no-new-func
+const arMemoryRowHtml = new Function(...Object.keys(arStubs), memoryFns + "\nreturn _memoryRowHtml;")(
+  ...Object.values(arStubs));
+steps.length = 0;
+arMemoryRowHtml(row);
+const lineHtml = String((steps[0] || {}).detailHtml || "");
+const lineDirs = [...lineHtml.matchAll(/<div class="step-detail-line" dir="(\w+)">/g)].map((m) => m[1]);
+ok("each memory is its own line, in its own language",
+  JSON.stringify(lineDirs) === JSON.stringify(["ltr", "rtl", "ltr", "ltr"]), lineHtml);
+ok("the label and the memory are isolated from each other",
+  lineHtml.includes('<bdi>ذكرى</bdi> · <bdi translate="no">User: what phase is ShipX on?'), lineHtml);
+// Negative control: the plain line drawn before -- its first letter, which
+// decides dir="auto", is the label's.
+const oldLine = String((steps[0] || {}).detail || "").split("\n")[2] || "";
+const firstLetter = [...oldLine].find((ch) => /\p{L}/u.test(ch)) || "";
+ok("the old line's first letter was the Arabic label's",
+  /^ذكرى · User:/.test(oldLine) && /[؀-ۿ]/.test(firstLetter), oldLine);
+
 // Negative control: the same writer with its memory branch taken out.
 const withoutBranch = rowsFn.replace(/\n\s*if \(row\.kind === 'memory'\)[^\n]*\n/, "\n");
 ok("the negative control removed the branch", withoutBranch !== rowsFn);
