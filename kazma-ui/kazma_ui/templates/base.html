@@ -201,6 +201,22 @@
             if (vars) for (var k in vars) text = text.split('{' + k + '}').join(String(vars[k]));
             return text;
         };
+        // The one call for a count a page script builds: the catalog's forms
+        // of *key* (<key>.zero ... <key>.other, i18n.t_plural's convention),
+        // the one KazmaFormat.pluralCategory picks -- six in Arabic -- with
+        // {n} and *vars* filled. A number glued to one form read "1 أدوات".
+        window.kazmaCount = function(key, n, vars) {
+            var lang = window.KAZMA_LANG || 'en';
+            var cat = window.KazmaFormat ? window.KazmaFormat.pluralCategory(n)
+                : (Math.abs(Number(n)) === 1 ? 'one' : 'other');
+            var form = function(c) {
+                var entry = window.KAZMA_I18N ? window.KAZMA_I18N[key + '.' + c] : null;
+                return entry ? (entry[lang] || entry.en || '') : '';
+            };
+            var text = (form(cat) || form('other') || '{n}').split('{n}').join(String(n));
+            if (vars) for (var k in vars) text = text.split('{' + k + '}').join(String(vars[k]));
+            return text;
+        };
         // Uncaught fetch/rejection surface (UI audit P1-8): ~70 load calls
         // across settings_hub/mcp/kb/models/providers/skills/ide have no
         // .catch — failures cleared `loading` and rendered empty-states as

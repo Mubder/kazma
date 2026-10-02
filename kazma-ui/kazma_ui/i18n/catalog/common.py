@@ -340,9 +340,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "خوادم MCP",
         "en": "MCP Servers",
     },
-    "mcp.tools_suffix": {
-        "ar": "أدوات",
-        "en": "tools",
+    "mcp.tool_count.zero": {
+        "ar": "لا أدوات",
+        "en": "0 tools",
+    },
+    "mcp.tool_count.one": {
+        "ar": "أداة واحدة",
+        "en": "1 tool",
+    },
+    "mcp.tool_count.two": {
+        "ar": "أداتان",
+        "en": "2 tools",
+    },
+    "mcp.tool_count.few": {
+        "ar": "{n} أدوات",
+        "en": "{n} tools",
+    },
+    "mcp.tool_count.many": {
+        "ar": "{n} أداة",
+        "en": "{n} tools",
+    },
+    "mcp.tool_count.other": {
+        "ar": "{n} أداة",
+        "en": "{n} tools",
     },
     "mcp.transport_sse": {
         "ar": "SSE (HTTP)",

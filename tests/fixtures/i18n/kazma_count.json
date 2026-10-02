@@ -1,0 +1,471 @@
+{
+  "_doc": "A count a page script builds goes through window.kazmaCount (base.html): the catalog's forms of the key, the one KazmaFormat.pluralCategory picks. Settings -> MCP printed \"1 أدوات\" (a number glued to one form) on 2026-10-02. Python checks this file against the catalog and t_plural (tests/test_kazma_count.py); node runs the real function over it (tests/js/test_kazma_count.js).",
+  "catalog": {
+    "mcp.tool_count.zero": {
+      "en": "0 tools",
+      "ar": "لا أدوات"
+    },
+    "mcp.tool_count.one": {
+      "en": "1 tool",
+      "ar": "أداة واحدة"
+    },
+    "mcp.tool_count.two": {
+      "en": "2 tools",
+      "ar": "أداتان"
+    },
+    "mcp.tool_count.few": {
+      "en": "{n} tools",
+      "ar": "{n} أدوات"
+    },
+    "mcp.tool_count.many": {
+      "en": "{n} tools",
+      "ar": "{n} أداة"
+    },
+    "mcp.tool_count.other": {
+      "en": "{n} tools",
+      "ar": "{n} أداة"
+    },
+    "settings.int.mcp_tools_found.zero": {
+      "en": "{name}: 0 tools found",
+      "ar": "{name}: لم يُعثر على أدوات"
+    },
+    "settings.int.mcp_tools_found.one": {
+      "en": "{name}: 1 tool found",
+      "ar": "{name}: عُثر على أداة واحدة"
+    },
+    "settings.int.mcp_tools_found.two": {
+      "en": "{name}: 2 tools found",
+      "ar": "{name}: عُثر على أداتين"
+    },
+    "settings.int.mcp_tools_found.few": {
+      "en": "{name}: {n} tools found",
+      "ar": "{name}: عُثر على {n} أدوات"
+    },
+    "settings.int.mcp_tools_found.many": {
+      "en": "{name}: {n} tools found",
+      "ar": "{name}: عُثر على {n} أداة"
+    },
+    "settings.int.mcp_tools_found.other": {
+      "en": "{name}: {n} tools found",
+      "ar": "{name}: عُثر على {n} أداة"
+    }
+  },
+  "cases": [
+    {
+      "key": "mcp.tool_count",
+      "lang": "en",
+      "n": 0,
+      "vars": {},
+      "expect": "0 tools"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "en",
+      "n": 1,
+      "vars": {},
+      "expect": "1 tool"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "en",
+      "n": 2,
+      "vars": {},
+      "expect": "2 tools"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "en",
+      "n": 3,
+      "vars": {},
+      "expect": "3 tools"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "en",
+      "n": 10,
+      "vars": {},
+      "expect": "10 tools"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "en",
+      "n": 11,
+      "vars": {},
+      "expect": "11 tools"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "en",
+      "n": 14,
+      "vars": {},
+      "expect": "14 tools"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "en",
+      "n": 99,
+      "vars": {},
+      "expect": "99 tools"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "en",
+      "n": 100,
+      "vars": {},
+      "expect": "100 tools"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "en",
+      "n": 101,
+      "vars": {},
+      "expect": "101 tools"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "en",
+      "n": 102,
+      "vars": {},
+      "expect": "102 tools"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "en",
+      "n": 103,
+      "vars": {},
+      "expect": "103 tools"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "en",
+      "n": 111,
+      "vars": {},
+      "expect": "111 tools"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "ar",
+      "n": 0,
+      "vars": {},
+      "expect": "لا أدوات"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "ar",
+      "n": 1,
+      "vars": {},
+      "expect": "أداة واحدة"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "ar",
+      "n": 2,
+      "vars": {},
+      "expect": "أداتان"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "ar",
+      "n": 3,
+      "vars": {},
+      "expect": "3 أدوات"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "ar",
+      "n": 10,
+      "vars": {},
+      "expect": "10 أدوات"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "ar",
+      "n": 11,
+      "vars": {},
+      "expect": "11 أداة"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "ar",
+      "n": 14,
+      "vars": {},
+      "expect": "14 أداة"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "ar",
+      "n": 99,
+      "vars": {},
+      "expect": "99 أداة"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "ar",
+      "n": 100,
+      "vars": {},
+      "expect": "100 أداة"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "ar",
+      "n": 101,
+      "vars": {},
+      "expect": "101 أداة"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "ar",
+      "n": 102,
+      "vars": {},
+      "expect": "102 أداة"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "ar",
+      "n": 103,
+      "vars": {},
+      "expect": "103 أدوات"
+    },
+    {
+      "key": "mcp.tool_count",
+      "lang": "ar",
+      "n": 111,
+      "vars": {},
+      "expect": "111 أداة"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "en",
+      "n": 0,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: 0 tools found"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "en",
+      "n": 1,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: 1 tool found"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "en",
+      "n": 2,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: 2 tools found"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "en",
+      "n": 3,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: 3 tools found"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "en",
+      "n": 10,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: 10 tools found"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "en",
+      "n": 11,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: 11 tools found"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "en",
+      "n": 14,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: 14 tools found"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "en",
+      "n": 99,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: 99 tools found"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "en",
+      "n": 100,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: 100 tools found"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "en",
+      "n": 101,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: 101 tools found"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "en",
+      "n": 102,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: 102 tools found"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "en",
+      "n": 103,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: 103 tools found"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "en",
+      "n": 111,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: 111 tools found"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "ar",
+      "n": 0,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: لم يُعثر على أدوات"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "ar",
+      "n": 1,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: عُثر على أداة واحدة"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "ar",
+      "n": 2,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: عُثر على أداتين"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "ar",
+      "n": 3,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: عُثر على 3 أدوات"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "ar",
+      "n": 10,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: عُثر على 10 أدوات"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "ar",
+      "n": 11,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: عُثر على 11 أداة"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "ar",
+      "n": 14,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: عُثر على 14 أداة"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "ar",
+      "n": 99,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: عُثر على 99 أداة"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "ar",
+      "n": 100,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: عُثر على 100 أداة"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "ar",
+      "n": 101,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: عُثر على 101 أداة"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "ar",
+      "n": 102,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: عُثر على 102 أداة"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "ar",
+      "n": 103,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: عُثر على 103 أدوات"
+    },
+    {
+      "key": "settings.int.mcp_tools_found",
+      "lang": "ar",
+      "n": 111,
+      "vars": {
+        "name": "filesystem"
+      },
+      "expect": "filesystem: عُثر على 111 أداة"
+    }
+  ]
+}

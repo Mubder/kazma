@@ -541,11 +541,13 @@ class KazmaAgent:
         # Secrets still stored as typed (before 2026-09-30) move to the vault
         # first; a no-op once none is left. Store I/O, so off the loop.
         await asyncio.to_thread(self._move_mcp_secrets_to_vault)
+        from kazma_core.mcp_servers_store import server_enabled
+
         # A settings read plus a YAML file: off the loop (loop-stall dumps).
         servers = await asyncio.to_thread(self.get_mcp_servers_config)
         total = 0
         for server_cfg in servers:
-            if not server_cfg.get("enabled", True):
+            if not server_enabled(server_cfg):
                 logger.info(
                     "MCP server '%s' disabled in configuration; skipping startup",
                     server_cfg.get("name", "unnamed"),
@@ -639,6 +641,7 @@ class KazmaAgent:
         Reads from the unified YAML + ConfigStore SoT.
         """
         from kazma_core.mcp.secrets import masked
+        from kazma_core.mcp_servers_store import server_enabled
         from kazma_core.workspace.mcp_rebind import (
             apply_workspace_to_server_config,
             is_workspace_bound_server,
@@ -666,12 +669,57 @@ class KazmaAgent:
                     "url": shown.get("url", ""),
                     "env": shown.get("env", {}),
                     "working_dir": s.get("working_dir"),
+                    # Settings' switch shows it; without it the switch read
+                    # every server as on, and "off, then on" sent off twice.
+                    "enabled": server_enabled(s),
                     "status": "running" if is_connected else "stopped",
                     "tool_count": len(tools),
                     "tools": tools,
                 }
             )
         return result
+
+    async def start_mcp_server(self, name: str) -> dict[str, Any]:
+        """Connect the configured server *name* now, for the MCP page's Start
+        and Settings' switch.
+
+        ``{"status": "ok", "tool_count": n}``, or ``{"status": "error",
+        "error": ...}`` with the reason the connection recorded: the connect
+        keeps a spawn or handshake failure in ``connection_errors`` and
+        returns 0, which Start used to report as "ok".
+        """
+        servers = await asyncio.to_thread(self.get_mcp_servers_config)
+        server_cfg = next((s for s in servers if s.get("name") == name), None)
+        if server_cfg is None:
+            return {"status": "error", "error": f"Server '{name}' not found in config"}
+        try:
+            count = await self.tools.connect_server(server_cfg)
+        except Exception as exc:  # noqa: BLE001 -- reported to the page that asked
+            from kazma_core.errors import redact_secrets
+
+            logger.exception("[MCP] Failed to start MCP server %s", name)
+            return {"status": "error", "error": f"Failed to start server: {redact_secrets(str(exc))}"}
+        if not self.tools.is_server_connected(name):
+            manager = getattr(self.tools, "_mcp", None)
+            errors = getattr(manager, "connection_errors", None) or {}
+            detail = errors.get(name, "") if isinstance(errors, dict) else ""
+            return {
+                "status": "error",
+                "error": f"Failed to start server: {detail or 'connection failed (0 tools, not connected)'}",
+            }
+        return {"status": "ok", "tool_count": count}
+
+    async def stop_mcp_server(self, name: str) -> dict[str, Any]:
+        """Disconnect *name* if it runs: its tools leave the agent now."""
+        if self.tools.is_server_connected(name):
+            try:
+                await self.tools.disconnect_server(name)
+            except Exception as exc:  # noqa: BLE001 -- reported to the page that asked
+                from kazma_core.errors import redact_secrets
+
+                logger.exception("[MCP] Failed to stop MCP server %s", name)
+                return {"status": "error", "error": f"Failed to stop server: {redact_secrets(str(exc))}"}
+        return {"status": "ok"}
 
     def get_config_section(self, section: str) -> dict[str, Any]:
         """Return a top-level section from the agent config.

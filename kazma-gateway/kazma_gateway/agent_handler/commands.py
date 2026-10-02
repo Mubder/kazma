@@ -2187,6 +2187,10 @@ async def _build_slash_ctx(
             model = await asyncio.to_thread(_active_model_name)
             if model:
                 ctx["model"] = model
+            if head_cmd == "/config":
+                switcher = _mcp_switcher(asyncio.get_running_loop())
+                if switcher is not None:
+                    ctx["apply_mcp_server"] = switcher
     except Exception as exc:  # the fact stays out; the command says it could not read it
         logger.warning(
             "[agent-handler] %s could not read what it reports (thread=%s): %s",
@@ -2205,6 +2209,33 @@ def _chat_cost(thread_id: str) -> dict[str, Any] | None:
     if not get_nonstop_config().ledger_enabled:
         return None
     return thread_usage(thread_id) or {}
+
+
+#: How long ``/config tools toggle`` waits for a server to start (an ``npx``
+#: server may download its package first).
+_MCP_SWITCH_TIMEOUT_S = 120.0
+
+
+def _mcp_switcher(loop: asyncio.AbstractEventLoop) -> Any:
+    """``(name, on) -> outcome`` for ``/config tools toggle``: the running
+    agent's ``start_mcp_server`` / ``stop_mcp_server`` (the MCP page's Start
+    and Stop, Settings' switch), run on *loop* from the resolver's thread.
+    None when no agent runs in this process; the command then says the change
+    applies at the next start.
+    """
+    try:
+        from kazma_core.agent_runner import KazmaAgent
+        from kazma_core.service_container import get_container
+
+        agent = get_container().get(KazmaAgent)
+    except (ImportError, KeyError):
+        return None
+
+    def switch(name: str, on: bool) -> dict[str, Any]:
+        coro = agent.start_mcp_server(name) if on else agent.stop_mcp_server(name)
+        return asyncio.run_coroutine_threadsafe(coro, loop).result(timeout=_MCP_SWITCH_TIMEOUT_S)
+
+    return switch
 
 
 def _active_model_name() -> str:

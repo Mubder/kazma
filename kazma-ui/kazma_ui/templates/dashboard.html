@@ -67,13 +67,13 @@
       <div class="metric-icon"><span class="ki" data-icon="hash" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('dashboard.total_tokens') }}</div>
       <div class="metric-value" id="metric-tokens">{{ metrics.total_tokens }}</div>
-      <div class="metric-sub" id="metric-llm-calls">{{ metrics.total_llm_calls }} {{ t('dashboard.llm_calls') }}</div>
+      <div class="metric-sub" id="metric-llm-calls">{{ t_plural('dashboard.count_llm_calls', metrics.total_llm_calls) }}</div>
     </div>
     <div class="metric-card">
       <div class="metric-icon"><span class="ki" data-icon="wrench" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('dashboard.tool_calls') }}</div>
       <div class="metric-value" id="metric-tools">{{ metrics.total_tool_calls }}</div>
-      <div class="metric-sub" id="metric-traces">{{ metrics.total_traces }} {{ t('dashboard.traces_count') }}</div>
+      <div class="metric-sub" id="metric-traces">{{ t_plural('dashboard.count_traces', metrics.total_traces) }}</div>
     </div>
     <div class="metric-card">
       <div class="metric-icon"><span class="ki" data-icon="plug" aria-hidden="true"></span></div>
@@ -240,7 +240,7 @@
       <h2 style="font-size:0.8rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;margin:0;">
         {{ t('dashboard.recent_traces') }}
       </h2>
-      <span id="trace-count" style="font-size:0.8rem;color:var(--text-muted);">{{ traces|length }} {{ t('dashboard.traces_count') }}</span>
+      <span id="trace-count" style="font-size:0.8rem;color:var(--text-muted);">{{ t_plural('dashboard.count_traces', traces|length) }}</span>
     </div>
     <div id="traces-cards" class="dash-card-list">
       {% for trace in traces %}
@@ -317,10 +317,12 @@
   // Strings dashboard.js renders client-side (translated server-side)
   window.__DASH_I18N = {
     noSessions: {{ t('dashboard.no_sessions') | tojson }},
-    sessionsCount: {{ t('dashboard.sessions_count', n='{n}') | tojson }},
+    sessions: {{ plural_forms('dashboard.count_sessions') | tojson }},
     showingFirst: {{ t('dashboard.sessions_showing_first', n='{n}') | tojson }},
     showLess: {{ t('dashboard.show_less_sessions') | tojson }},
-    showMore: {{ t('dashboard.show_n_more_sessions', n='{n}') | tojson }},
+    moreSessions: {{ plural_forms('dashboard.count_more_sessions') | tojson }},
+    llmCalls: {{ plural_forms('dashboard.count_llm_calls') | tojson }},
+    traces: {{ plural_forms('dashboard.count_traces') | tojson }},
     breakerOk: {{ t('dashboard.breaker_ok') | tojson }},
     breakerHalted: {{ t('dashboard.breaker_halted') | tojson }},
     breakerWarning: {{ t('dashboard.breaker_warning') | tojson }}

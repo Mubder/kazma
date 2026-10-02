@@ -306,7 +306,23 @@ workspace. Three new modules; understanding their interaction is essential.
   copy that won over kazma.yaml's by name, the MCP page showed it, and the
   next MCP edit wrote it over kazma.yaml. The page shows the command as it
   runs (`KazmaAgent.get_mcp_servers`). `tests/test_mcp_servers_store.py`
-  (identity canonicalizer as the negative control).
+  (identity canonicalizer as the negative control). Storage holds
+  configuration only: `_canonical_server` drops the runtime fields
+  (`_RUNTIME_FIELDS`: status, connected, tool counts...), which `upsert`
+  wrote into kazma.yaml for every server.
+- **The manager's connect pins, and keeps failures per server**
+  (`AsyncMCPManager.connect_from_config`, 2026-10-02). A workspace-bound
+  config no caller pinned (no `_resolved_workspace`) starts on the active
+  workspace, read off the loop; the reconnect sweeper and Settings' Test
+  passed the stored config and started the filesystem server on the literal
+  placeholder. A call changes `connection_errors` only for its own servers:
+  boot connects one server per call, each call cleared them all, and the
+  sweeper -- which retries what is named there -- never retried an early
+  failure. A stop drops the server's entry; the text is `redact_secrets`'d.
+  One Start/Stop: `KazmaAgent.start_mcp_server` / `stop_mcp_server`, for
+  the MCP page, Settings' switch (saved AND applied now) and `/config tools
+  toggle` (run on the server loop from the resolver's thread). One "is it
+  on": `mcp_servers_store.server_enabled`. `tests/test_mcp_servers_live.py`.
 - **Per-task scope guard (deep-audit 2026-08-19):** MCP rebind is
   PROCESS-GLOBAL — a per-task `workspace_scope` does NOT rebind servers.
   `mcp/manager.py:execute_mcp_tool` fail-closes with an actionable error
@@ -4502,6 +4518,13 @@ sent: ... -> Error: ...", and the document pipeline logged "✓ Delivered".
   language (`<html lang>`), Latin digits in Arabic like every other number
   the interface shows. Pages used the browser's own locale and wrote "ago"
   by hand, so Arabic pages showed English dates (`tests/js/test_locale_format.js`).
+  **A count is said in its plural form**: `{{ t_plural('key', n) }}` in a
+  template, `window.kazmaCount('key', n, vars)` in a script (`base.html`: the
+  catalog's `<key>.zero` ... `<key>.other`, six in Arabic), never a number
+  beside a word in one form -- "1 أدوات" on the MCP card and in Settings.
+  Gates: `tests/test_count_labels.py` (no glued count in a template or an
+  Alpine expression; a ratchet on one-form catalog labels),
+  `tests/test_kazma_count.py` (every `kazmaCount` key has every form).
   A page-level helper for catalog strings must not be named after an
   element tag: the Dashboard's `tr()` was shadowed by `var tr =
   createElement('tr')` in its row loop and rendered no rows (caught by

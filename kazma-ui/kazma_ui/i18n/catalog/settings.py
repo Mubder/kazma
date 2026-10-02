@@ -2144,9 +2144,19 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "سجل الأدوات",
         "en": "Tool Registry",
     },
-    "settings.tools_count": {
-        "ar": "أدوات",
-        "en": "tools",
+    # Settings -> MCP, a server's state dot (its title and spoken label).
+    "settings.mcp_state_running": {
+        "ar": "يعمل",
+        "en": "Running",
+    },
+    "settings.mcp_state_stopped": {
+        "ar": "متوقف",
+        "en": "Stopped",
+    },
+    # Settings -> MCP, the switch's spoken label.
+    "settings.mcp_switch_label": {
+        "ar": "تشغيل {name} أو إيقافه",
+        "en": "Turn {name} on or off",
     },
     "settings.tools_requiring_approval": {
         "ar": "الأدوات التي تتطلب موافقة (مفصولة بفواصل)",
@@ -4196,9 +4206,47 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "إزالة خادم MCP «{name}»؟ لا يمكن التراجع عن ذلك.",
         "en": "Remove MCP server \"{name}\"? This cannot be undone.",
     },
-    "settings.int.mcp_tools_found": {
+    # Settings -> MCP, Test: a count in each of its forms (kazmaCount).
+    "settings.int.mcp_tools_found.zero": {
+        "ar": "{name}: لم يُعثر على أدوات",
+        "en": "{name}: 0 tools found",
+    },
+    "settings.int.mcp_tools_found.one": {
+        "ar": "{name}: عُثر على أداة واحدة",
+        "en": "{name}: 1 tool found",
+    },
+    "settings.int.mcp_tools_found.two": {
+        "ar": "{name}: عُثر على أداتين",
+        "en": "{name}: 2 tools found",
+    },
+    "settings.int.mcp_tools_found.few": {
         "ar": "{name}: عُثر على {n} أدوات",
         "en": "{name}: {n} tools found",
+    },
+    "settings.int.mcp_tools_found.many": {
+        "ar": "{name}: عُثر على {n} أداة",
+        "en": "{name}: {n} tools found",
+    },
+    "settings.int.mcp_tools_found.other": {
+        "ar": "{name}: عُثر على {n} أداة",
+        "en": "{name}: {n} tools found",
+    },
+    # Settings -> MCP, the switch: saved and applied to the running server.
+    "settings.int.mcp_on_running": {
+        "ar": "{name} مُفعَّل ويعمل الآن",
+        "en": "{name} is on and running",
+    },
+    "settings.int.mcp_off_stopped": {
+        "ar": "{name} مُعطَّل وأُوقف",
+        "en": "{name} is off and stopped",
+    },
+    "settings.int.mcp_on_not_running": {
+        "ar": "{name} مُفعَّل، لكنه لم يبدأ: {error}",
+        "en": "{name} is on, but it did not start: {error}",
+    },
+    "settings.int.mcp_off_still_running": {
+        "ar": "{name} مُعطَّل، لكنه ما زال يعمل: {error}",
+        "en": "{name} is off, but it is still running: {error}",
     },
     "settings.int.test_failed": {
         "ar": "فشل الاختبار: {error}",

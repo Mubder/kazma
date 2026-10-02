@@ -282,17 +282,24 @@ class CheckpointManager:
         (``restore_paused_tasks`` runs in the sync constructor path) there is
         no loop yet, so the arm is deferred to ``_pending_timeout_arms`` and
         drained by :meth:`arm_pending_checkpoint_timeouts` from the async
-        startup. This fixes the "coroutine was never awaited" /
-        "no running event loop" boot warning.
+        startup.
+
+        The loop is checked BEFORE the coroutine is made: ``create_task``
+        raised only after ``_checkpoint_timeout_reject(...)`` existed, so each
+        deferral left an orphaned coroutine and a "coroutine ... was never
+        awaited" warning at every boot that restored a paused pipeline
+        (2026-10-02, seen in the test suite's warnings).
         """
         try:
-            timeout_task = asyncio.create_task(
-                self._checkpoint_timeout_reject(task_id, timeout_seconds)
-            )
-            self._checkpoint_handler.set_timeout_task(task_id, timeout_task)
+            asyncio.get_running_loop()
         except RuntimeError:
             # No running event loop (sync boot path) — defer.
             self._pending_timeout_arms.append((task_id, timeout_seconds))
+            return
+        timeout_task = asyncio.create_task(
+            self._checkpoint_timeout_reject(task_id, timeout_seconds)
+        )
+        self._checkpoint_handler.set_timeout_task(task_id, timeout_task)
 
     async def arm_pending_checkpoint_timeouts(self) -> int:
         """Arm checkpoint timeouts deferred during sync-boot restore.

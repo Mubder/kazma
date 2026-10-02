@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,7 @@ _REBIND_DEBOUNCE_S = 0.35
 _last_rebind_at: float = 0.0
 _rebind_lock: asyncio.Lock | None = None
 _installed = False
+_install_lock = threading.Lock()
 _executor_ref: Any = None  # UnifiedToolExecutor or object with connect/disconnect
 
 
@@ -298,14 +300,17 @@ def _on_root_changed(root: Path, reason: str) -> Any:
 def install_mcp_workspace_rebind(executor: Any) -> None:
     """Register *executor* for rebinds and subscribe to workspace changes.
 
-    Idempotent: safe to call on every agent/MCP connect.
+    Idempotent: safe to call on every agent/MCP connect. The connect calls
+    it in a worker thread (the root read below is a workspace-store read),
+    so the subscription is made under a lock.
     """
     global _executor_ref, _installed
-    _executor_ref = executor
-    if not _installed:
-        subscribe_root_changed(_on_root_changed)
-        _installed = True
-        logger.info("[MCP-Rebind] workspace rebind installed")
+    with _install_lock:
+        _executor_ref = executor
+        if not _installed:
+            subscribe_root_changed(_on_root_changed)
+            _installed = True
+            logger.info("[MCP-Rebind] workspace rebind installed")
     # Record current root for health
     try:
         set_bound_mcp_root(resolve_active_root())

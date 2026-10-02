@@ -95,3 +95,93 @@ def test_the_count_gate_catches_the_old_labels():
         "bits.push(c.gates + ' ' + ti('approvals', 'approvals'));\n"
     )
     assert len(_retired_count_labels(old)) >= 3
+
+
+# ── Gate: a count is said in its plural form, in templates too (2026-10-02) ──
+
+TEMPLATES = ROOT / "kazma-ui" / "kazma_ui" / "templates"
+#: ``{{ <a count> }} {{ t('<a noun>') }}``: the number and a word glued in one
+#: form. The MCP card read "1 أدوات" and the Dashboard "5 تتبع" that way.
+_GLUED = re.compile(
+    r"\{\{\s*(?P<expr>[^{}]*?(?:count|total|length|size|num)[^{}]*?)\s*\}\}"
+    r"\s*\{\{\s*t\('(?P<key>[\w.]+)'\)\s*\}\}"
+)
+
+
+#: The same inside an Alpine expression: ``(s.tool_count || 0) + ' {{ t('<a
+#: noun>') }}'``. Settings -> MCP read "1 أدوات" that way (2026-10-02); a
+#: script says a count through ``kazmaCount`` (tests/test_kazma_count.py).
+_GLUED_IN_EXPRESSION = re.compile(
+    r"(?P<expr>[\w.()|\s]*?(?:count|total|length|size|num)[\w.()|\s]*?)\+\s*'\s*"
+    r"\{\{\s*t\('(?P<key>[\w.]+)'\)\s*\}\}\s*'"
+)
+
+
+def glued_counts(html: str) -> list[str]:
+    found = [f"{m.group('expr')} {m.group('key')}" for m in _GLUED.finditer(html)]
+    found += [f"{m.group('expr').strip()} {m.group('key')}" for m in _GLUED_IN_EXPRESSION.finditer(html)]
+    return found
+
+
+def test_no_template_glues_a_count_to_a_word():
+    found = [
+        f"{path.relative_to(ROOT).as_posix()}: {hit}"
+        for path in sorted(TEMPLATES.rglob("*.html"))
+        for hit in glued_counts(path.read_text(encoding="utf-8"))
+    ]
+    assert not found, (
+        "A count printed beside a translated word is right in one form only. "
+        "Use t_plural('<key>', n) with <key>.zero/one/two/few/many/other in "
+        "the catalog:\n  " + "\n  ".join(found)
+    )
+
+
+def test_negative_control_the_shipped_card_is_caught():
+    shipped = "<span class=\"tool-count\">{{ server.tool_count }} {{ t('mcp.tools_suffix') }}</span>"
+    assert glued_counts(shipped) == ["server.tool_count mcp.tools_suffix"]
+    assert glued_counts("{{ t_plural('mcp.tool_count', server.tool_count) }}") == []
+
+
+def test_negative_control_the_shipped_settings_row_is_caught():
+    """Settings -> MCP's count before 2026-10-02, inside an Alpine expression."""
+    shipped = (
+        "<span x-text=\"(s.tool_count || 0) + ' {{ t('settings.tools_count') }}'\"></span>"
+    )
+    assert glued_counts(shipped) == ["(s.tool_count || 0) settings.tools_count"]
+    assert glued_counts("<span x-text=\"kazmaCount('mcp.tool_count', s.tool_count || 0)\"></span>") == []
+
+
+#: Catalog entries that are a count label in one form ("{n} sessions"): right
+#: in English from 2 up and in Arabic from 11 up. A ratchet: the number may
+#: only go down (convert an entry to <key>.<category> forms, read through
+#: t_plural / plural_forms + KazmaFormat.count / kazmaCount, and lower this).
+#: 39 on 2026-10-02; the Dashboard's two and Settings -> MCP's Test went that
+#: day.
+SINGLE_FORM_COUNT_LABELS = 36
+_SINGLE_FORM = re.compile(r"\{(?:n|count)\}\s+(?:more\s+)?[a-z]+s\b")
+
+
+def single_form_count_labels() -> list[str]:
+    return sorted(
+        key for key, entry in TRANSLATIONS.items()
+        if key.rsplit(".", 1)[-1] not in PLURAL_CATEGORIES
+        and _SINGLE_FORM.search((entry or {}).get("en") or "")
+    )
+
+
+def test_single_form_count_labels_only_go_down():
+    found = single_form_count_labels()
+    assert len(found) <= SINGLE_FORM_COUNT_LABELS, (
+        f"New count label in one form ({len(found)} > {SINGLE_FORM_COUNT_LABELS}); "
+        "write it as plural forms:\n  " + "\n  ".join(found)
+    )
+    assert len(found) == SINGLE_FORM_COUNT_LABELS, (
+        f"Down to {len(found)}: lower SINGLE_FORM_COUNT_LABELS to lock it in."
+    )
+
+
+def test_negative_control_a_single_form_label_is_counted(monkeypatch):
+    monkeypatch.setitem(TRANSLATIONS, "x.n_widgets", {"en": "{n} widgets", "ar": "{n} أداة"})
+    assert "x.n_widgets" in single_form_count_labels()
+    monkeypatch.setitem(TRANSLATIONS, "x.widgets.other", {"en": "{n} widgets", "ar": "{n} أداة"})
+    assert "x.widgets.other" not in single_form_count_labels()

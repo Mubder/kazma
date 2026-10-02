@@ -825,17 +825,9 @@ class SettingsManager:
         """Remove an MCP server. Returns the service result dict ({"status": ...})."""
         return self.mcp_service.delete_mcp_server(name)
 
-    def toggle_mcp_server(self, name: str, enabled: bool) -> None:
-        """Enable/disable an MCP server."""
-        self.mcp_service.toggle_mcp_server(name, enabled)
-
-    async def test_mcp_server(self, name: str) -> dict[str, Any]:
-        """Test an MCP server connection."""
-        return await self.mcp_service.test_mcp_server(name)
-
-    def get_mcp_tools(self, server_name: str) -> list[dict[str, Any]]:
-        """List tools for an MCP server."""
-        return self.mcp_service.get_mcp_tools(server_name)
+    def toggle_mcp_server(self, name: str, enabled: bool) -> bool:
+        """Switch an MCP server on or off; False when there is no such server."""
+        return self.mcp_service.toggle_mcp_server(name, enabled)
 
     # ══════════════════════════════════════════════════════════════════
     # APPEARANCE

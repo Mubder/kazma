@@ -352,7 +352,7 @@ def _cmd_help() -> str:
         "• `/config personality <name>` — Switch personality\n"
         "• `/config memory on|off` — Toggle memory\n"
         "• `/config tools list` — Show the MCP servers\n"
-        "• `/config tools toggle <name>` — Turn an MCP server on or off (from the next start)\n"
+        "• `/config tools toggle <name>` — Turn an MCP server on or off (now and at every start)\n"
         "• `/config export` — Export config as JSON\n\n"
         "ℹ️ *Info*\n"
         "• `/help` — Show this list\n"
@@ -727,14 +727,18 @@ def _mcp_servers() -> list[dict[str, Any]]:
 
 def _config_tools(parts: list, ctx: dict[str, Any]) -> str:
     """``/config tools list|toggle``: the MCP servers, switched the way
-    Settings -> MCP switches them (``set_mcp_server_enabled``). The toggle
-    used to write ``mcp.disabled_servers``, which nothing reads, and report
-    the server disabled."""
+    Settings -> MCP switches them: saved (``set_mcp_server_enabled``) and
+    applied now -- the server started or stopped through the running agent
+    (``ctx["apply_mcp_server"]``, which the gateway fills). The toggle used
+    to write ``mcp.disabled_servers``, which nothing reads, and report the
+    server disabled; until 2026-10-02 it then applied at the next start."""
     if len(parts) < 3:
         return _config_usage()
 
     action = parts[2].lower()
     servers = _mcp_servers()
+
+    from kazma_core.mcp_servers_store import server_enabled
 
     if action == "list":
         if not servers:
@@ -742,7 +746,7 @@ def _config_tools(parts: list, ctx: dict[str, Any]) -> str:
         lines = ["🔧 *MCP servers:*", ""]
         for server in servers:
             line = f"• `{server['name']}`"
-            if not server.get("enabled", True):
+            if not server_enabled(server):
                 line += " _(disabled)_"
             lines.append(line)
         return "\n".join(lines)
@@ -755,14 +759,28 @@ def _config_tools(parts: list, ctx: dict[str, Any]) -> str:
             return f"❌ Unknown MCP server: `{parts[3]}`\n\nAvailable: {available}"
         from kazma_core.mcp_servers_store import set_mcp_server_enabled
 
-        name, enable = str(match["name"]), not match.get("enabled", True)
+        name, enable = str(match["name"]), not server_enabled(match)
         try:
             set_mcp_server_enabled(name, enable)
         except Exception as exc:
             logger.warning("[slash] /config tools toggle could not be saved: %s", exc)
             return f"⚠️ `{name}` was not changed: {exc}"
         state = "enabled" if enable else "disabled"
-        return f"🔧 MCP server `{name}` **{state}**. It applies when Kazma next starts."
+        switch = ctx.get("apply_mcp_server")
+        if switch is None:
+            return f"🔧 MCP server `{name}` **{state}**. It applies when Kazma next starts."
+        verb = "start" if enable else "stop"
+        try:
+            outcome = switch(name, enable)
+        except Exception as exc:  # noqa: BLE001 -- a timeout or a loop shutting down; said, not raised
+            logger.warning("[slash] /config tools toggle could not %s %s now: %s", verb, name, exc)
+            outcome = {"status": "error", "error": str(exc) or type(exc).__name__}
+        if outcome.get("status") != "ok":
+            return (
+                f"🔧 MCP server `{name}` **{state}**, but it could not {verb} now: "
+                f"{outcome.get('error') or 'no reason given'}. The setting applies when Kazma next starts."
+            )
+        return f"🔧 MCP server `{name}` **{state}**: {'running' if enable else 'stopped'} now."
 
     return "Usage: `/config tools list` or `/config tools toggle <name>`"
 
@@ -808,7 +826,7 @@ def _config_usage() -> str:
         "• `/config personality <name>` — Switch personality\n"
         "• `/config memory on|off` — Toggle memory\n"
         "• `/config tools list` — Show the MCP servers\n"
-        "• `/config tools toggle <name>` — Turn an MCP server on or off (from the next start)\n"
+        "• `/config tools toggle <name>` — Turn an MCP server on or off (now and at every start)\n"
         "• `/config export` — Export config as JSON"
     )
 

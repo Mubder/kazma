@@ -330,7 +330,7 @@ def test_a_folder_the_operator_chose_stays_and_other_servers_are_untouched() -> 
 @pytest.mark.parametrize("arg, old", [
     ("kazma-data/workspace", True),
     ("./kazma-data/workspace", True),
-    ("kazma-data\workspace\\", True),
+    (r"kazma-data\workspace" + "\\", True),
     ("data/workspace", True),
     ("D:/photos", False),
     ("kazma-data/workspace/sub", False),
