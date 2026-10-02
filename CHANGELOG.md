@@ -1,5 +1,40 @@
 # CHANGELOG
 
+## `kazma update` stops and restarts a supervised Kazma itself (2026-10-02)
+
+Earlier the same day, the update refused while the server ran and printed
+three guard commands to type around it. The owner ran the update and got
+the refusal.
+
+- **One command.** On an install the guard supervises, `kazma update` (and
+  `--reinstall`) waits until no chat turn is running, has the guard stop
+  Kazma and keep it stopped while the packages install, then starts Kazma
+  again and waits until it answers. The question before the update says so.
+  If a turn is still running after 15 minutes, nothing is stopped or
+  installed. The git update stops Kazma for the reinstall alone; if it
+  cannot, it puts the checkout back.
+- **A failed install keeps Kazma stopped.** Its packages may be half
+  replaced, and the guard would keep restarting a server that may not boot.
+  The repair is the same command. It takes over the pause and starts Kazma
+  when it succeeds. The pause still lifts itself after two hours.
+- **The guard confirms that it is holding.** The update installs nothing
+  until the guard has recorded that it holds the update's pause: no server
+  is running and none will start. A guard started before this change is
+  judged by what it leaves (no server process, nothing answering). A pause
+  now also stops a server that is still booting, where the boot used to run
+  to the end first. It also cuts short a restart backoff or a crash-loop
+  cooldown.
+- **Every installer checks for a running server.** The wheel update and the
+  repair of missing extras had no check at all, and `--check` could still
+  run that repair. Each function that runs an installer now refuses while
+  the server answers, so no path can replace packages under it.
+- **The "packages are behind" alert names the one command.**
+- **Gates:** `tests/test_package_update_on_a_guarded_install.py` (each
+  outcome, the git update, every installer found from the source, with a
+  negative control) and `tests/test_guard_integration.py` (the real guard
+  and a stand-in server: stop, hold, install, restart; busy; a failed install
+  and its repair; a pause during a boot).
+
 ## Text direction: what the live install still showed (2026-10-02)
 
 A sweep of every page of the live install in Arabic, after the change below,

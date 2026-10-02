@@ -388,6 +388,12 @@ class FakeGitHub:
 def github(monkeypatch):
     import httpx
 
+    from kazma_cli import update
+
+    # Never this machine's server: the installers refuse while one answers on
+    # the port, and a live install may (as on the owner's machine).
+    monkeypatch.setattr(update, "_is_server_running", lambda port=9090: False)
+
     def install(fake: FakeGitHub) -> FakeGitHub:
         monkeypatch.setattr(httpx, "Client", fake)
         return fake
@@ -553,8 +559,6 @@ def test_reinstall_on_a_wheel_install_uses_its_own_release(github, monkeypatch):
     monkeypatch.setattr(update, "get_current_version", lambda: "0.12.0")
     monkeypatch.setattr(update, "detect_active_extras", lambda cwd=None: [])
     monkeypatch.setattr(update, "_reinstall_local", lambda cwd: pytest.fail(f"editable install of {cwd}"))
-    # Never this machine's server: a live install answering on 9090 would refuse.
-    monkeypatch.setattr(update, "_is_server_running", lambda port=9090: False)
     seen: list[tuple[Any, Any, Any]] = []
     monkeypatch.setattr(
         update, "do_pip_update", lambda rel, extras=(), reinstall=False: seen.append((rel, extras, reinstall)) or True,

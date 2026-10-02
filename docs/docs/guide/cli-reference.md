@@ -353,6 +353,14 @@ kazma update --yes       # apply without prompting
 kazma update --reinstall -y   # repair packages after a broken reinstall
 ```
 
+**A running server is stopped and started for you.** The packages cannot be
+replaced while the server has them loaded. On an install the guard
+supervises, the update waits until no chat turn is running, has the guard
+stop Kazma and keep it stopped while the packages install, then starts it
+again. A failed install leaves Kazma stopped, and running the same command
+again is the repair. Without a guard, a running server is refused: stop it
+first. See [Kazma update](../ops/kazma-update#the-server-is-stopped-and-started-for-you).
+
 **On Windows, run the installing forms with the install's Python:**
 `.venv\Scripts\python.exe -m kazma_cli update --yes` (or `--reinstall -y`).
 A reinstall must replace `kazma.exe`, and Windows lets nothing replace, or

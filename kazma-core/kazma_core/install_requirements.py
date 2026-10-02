@@ -146,11 +146,12 @@ def _update_instructions(project_root: Path | None = None) -> str:
     """How to bring this install's packages up to date, in the owner's words.
 
     The packages cannot be replaced while the server has them loaded (on
-    Windows the reinstall fails half way), and a guarded server killed by
-    hand is back within seconds: the guard stops it. The guard hands the
-    server its state file's path, so the server knows it is guarded. The
-    update runs as ``python -m kazma_cli``: on Windows it cannot replace the
-    ``kazma.exe`` it would otherwise run from (``kazma_cli.update``).
+    Windows the reinstall fails half way). On a guarded install the update
+    has the guard stop Kazma, once no chat turn runs, and start it again
+    (``kazma_cli.update._ServerHold``); the guard hands the server its state
+    file's path, so the server knows it is guarded. Unguarded, the operator
+    stops and starts it. The update runs as ``python -m kazma_cli``: on
+    Windows it cannot replace the ``kazma.exe`` it would otherwise run from.
     """
     if project_root is None:
         from kazma_core.paths import installed_project_root
@@ -159,11 +160,9 @@ def _update_instructions(project_root: Path | None = None) -> str:
     python = _install_python(project_root)
     update = f"{python} -m kazma_cli update --reinstall -y"
     if os.environ.get("KAZMA_GUARD_STATE_FILE"):
-        guard = f"{python} {os.path.join('scripts', 'service', 'kazma_guard.py')}"
         return (
-            f"To fix, in the install folder: {guard} "
-            '--pause --stop --when-idle --reason "package update", then '
-            f"{update}, then {guard} --resume."
+            f"To fix, in the install folder: {update} -- it stops Kazma through "
+            "its guard once no chat turn is running, and starts it again."
         )
     return (
         f"To fix: stop the server, run {update} in the install folder, and "

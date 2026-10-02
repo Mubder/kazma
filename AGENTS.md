@@ -4171,15 +4171,30 @@ no Python update ever arrived.
   means its `pyproject.toml`, because the installed metadata goes stale with
   every pull (the dev venv's still named `aiogram`). On a finding it logs a
   WARNING and raises the ops alert `install.requirements_unmet`. The fix is
-  `kazma update --reinstall -y` with the server stopped
-  (`install_requirements._update_instructions`, guard-aware: under the guard
-  `kazma_guard.py --pause --stop --when-idle`, the update, `--resume`).
-  `kazma update` refuses while the server answers
-  (`update._server_running_refusal`): the running server holds its packages'
-  compiled files open on Windows, so a reinstall fails half way, and the
-  `--reinstall` path did not check until 2026-10-02 (the git path told the
-  operator to kill the server by hand, which the guard undoes).
-  `tests/test_package_update_on_a_guarded_install.py`. **The update runs as
+  `kazma update --reinstall -y` (`install_requirements._update_instructions`).
+  **The update stops Kazma itself, through the guard** (`update._ServerHold`,
+  2026-10-02): the running server holds its packages' compiled files open on
+  Windows, so a reinstall under it fails half way, and the guard restarts a
+  server stopped any other way within seconds. The update waits until no chat
+  turn runs, pauses supervision under its own reason, and waits for the
+  guard's word that it holds (`stop_for_maintenance`; the gate before every
+  spawn records `pause_held`, a guard too old to is judged by no child and
+  nothing answering), then installs, lifts its pause
+  (`resume_after_maintenance`, which never lifts another's) and waits for
+  Kazma to answer. The hold covers the package step alone: the git update's
+  pull runs under the server, and a refusal there puts the checkout back. A
+  failed install keeps Kazma stopped (the guard would restart, again and
+  again, a server that may not boot); the repair is the same command, which
+  takes the pause over. A running server no guard supervises is refused with
+  the steps. A pause also stops a server that is still booting, and wakes the
+  backoff and crash-loop cooldown. Every installer (`_reinstall_local`,
+  `do_pip_update`) refuses under a running server itself
+  (`test_every_installer_checks_the_server_before_it_installs`), so a caller
+  that skips the hold cannot replace packages under it; the wheel update and
+  the extras repair had no server check at all. The same morning's fix
+  refused and printed three guard commands to type around it.
+  `tests/test_package_update_on_a_guarded_install.py`, and the real guard in
+  `tests/test_guard_integration.py`. **The update runs as
   `python -m kazma_cli update`, never from a launcher it must replace**
   (Windows): a reinstall replaces `kazma.exe`, and Windows lets nothing
   replace -- or rename -- a running uv launcher (Python keeps the zip
