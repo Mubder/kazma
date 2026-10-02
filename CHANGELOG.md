@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## A pipeline restored at boot arms its timeout without a stray coroutine (2026-10-02)
+
+A swarm pipeline paused for approval and restored after a restart has its
+auto-reject timer armed once the event loop runs. The deferral first built
+the timer's coroutine and then found no loop, so each restored pipeline left
+a "coroutine was never awaited" warning (seen in the test suite's output).
+The loop is checked first now (`tests/test_checkpoint_timeout_deferral.py`,
+the old order as its negative control).
+
 ## MCP servers: Settings shows what runs, its switch switches, and a server that fails at boot comes back (2026-10-02)
 
 Found on the live install while repairing its MCP settings through
