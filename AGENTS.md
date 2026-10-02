@@ -1745,7 +1745,9 @@ scope is `kazma_core/agent_skills/bundled/` — 3 Kazma-native starter skills.
   recorded checksum "verified": live, nine skills another key had signed were
   offered to the model and refused at activation. The page shows a security
   score only where a manifest declares one (none does; it showed an invented
-  "100/100"). `sign` takes several folders. `tests/test_skill_integrity_shown.py`.
+  "100/100"). `sign` takes several folders. Only activation logs a refusal
+  (`verify_skill(warn=False)` logs nothing above DEBUG): the catalog is built
+  every turn and logged each refused skill each time. `tests/test_skill_integrity_shown.py`.
 
 **D. Activation always fences the body** (`catalog.format_skill_activation`):
 the SKILL.md body is wrapped in `format_untrusted_block(source="agent_skill:…")`

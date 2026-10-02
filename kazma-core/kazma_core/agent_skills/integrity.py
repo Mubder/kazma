@@ -137,7 +137,12 @@ def verify_skill(
         skill_md_path: absolute path to the ``SKILL.md`` file.
         meta: pre-read install meta; if None, read from the sibling
             ``.kazma-install.json``.
+        warn: False when the caller shows the verdict itself (a list, the
+            model's catalog, the security report): nothing is logged above
+            DEBUG. The catalog asks on every turn, and each refused skill
+            logged a WARNING each time (2026-10-02, live: 30 in two hours).
     """
+    say = logger.warning if warn else logger.debug
     try:
         text = skill_md_path.read_text(encoding="utf-8")
     except Exception as exc:
@@ -151,17 +156,16 @@ def verify_skill(
 
     # Unsigned skill: warn but allow (backward-compat).
     if not stored_checksum:
-        if warn:
-            logger.warning(
-                "[AgentSkill] '%s' has no integrity checksum — loading unsigned. "
-                "Reinstall or run 'kazma agent-skills sign' to sign it.",
-                skill_md_path.parent.name,
-            )
+        say(
+            "[AgentSkill] '%s' has no integrity checksum — loading unsigned. "
+            "Reinstall or run 'kazma agent-skills sign' to sign it.",
+            skill_md_path.parent.name,
+        )
         return VerifyResult(ok=True, reason="unsigned (no checksum stored)", signed=False)
 
     actual_checksum = compute_checksum(text)
     if not _hmac.compare_digest(stored_checksum, actual_checksum):
-        logger.warning(
+        say(
             "[AgentSkill] '%s' checksum MISMATCH — possible tampering. Refusing.",
             skill_md_path.parent.name,
         )
@@ -186,7 +190,7 @@ def verify_skill(
             # it. Kazma cannot tell which, so it refuses -- and says how to
             # vouch for the skill (2026-10-02: nine live skills were refused
             # under a reason that named only the attacker).
-            logger.warning(
+            say(
                 "[AgentSkill] '%s' is signed with another key; refusing it. If you "
                 "trust it, re-sign it: kazma agent-skills sign %s",
                 skill_md_path.parent.name, skill_md_path.parent,
@@ -209,7 +213,7 @@ def verify_skill(
         # or 'kazma agent-skills sign'.
         secret = _get_secret()
         if secret:
-            logger.warning(
+            say(
                 "[AgentSkill] '%s' stores a checksum but no signature while "
                 "KAZMA_SECRET is configured — refusing (stripped meta or "
                 "pre-signing install). Reinstall or run 'kazma agent-skills sign'.",

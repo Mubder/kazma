@@ -11,6 +11,7 @@ with an invented "100/100" -- a score no code computes, on every skill.
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +70,24 @@ def test_the_model_is_not_offered_a_refused_skill(skills: Path) -> None:
     refused = discovery.discover_skills()["elsewhere"]
     old_attribute = ' integrity="verified"' if refused.checksum else ' integrity="unsigned"'
     assert old_attribute == ' integrity="verified"'
+
+
+def test_showing_a_verdict_logs_nothing_and_activation_still_warns(
+    skills: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The catalog is built on every turn: each refused skill logged a WARNING
+    every time (live 2026-10-02: 30 in two hours for one skill)."""
+    with caplog.at_level(logging.DEBUG, logger="kazma_core.agent_skills.integrity"):
+        catalog.build_catalog_prompt()
+        catalog.build_catalog_prompt()
+        catalog.list_skill_summaries()
+        shown = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        caplog.clear()
+        refused = discovery.discover_skills()["elsewhere"]
+        catalog.format_skill_activation(refused)
+        activated = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert shown == []
+    assert len(activated) == 1 and "elsewhere" in activated[0].getMessage()
 
 
 def test_the_list_tool_and_summaries_carry_the_verdict(skills: Path) -> None:
