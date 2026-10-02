@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## `kazma update` can replace the program it runs from (2026-10-02)
+
+- **A reinstall on Windows no longer breaks itself.** `kazma update` runs
+  from `kazma.exe`, and reinstalling Kazma means replacing that file. Windows
+  will not delete or overwrite a running program, so every attempt failed
+  with "failed to remove file ... kazma.exe" and left Kazma's own package
+  half removed. On the live install the server could not have started until
+  the environment was repaired by hand. The update now renames its launchers
+  aside first: the running one keeps working under its new name, the
+  installer writes fresh ones, and any it did not replace are put back. The
+  old copies are deleted the next time nothing is running them.
+- **The repair steps are corrected.** The update guide's repair section
+  ended with `kazma serve`, which on an install the guard supervises starts a
+  server the guard does not own. It now says to resume the guard, and checks
+  the import with the install's own Python.
+- **Gate:** `tests/test_update_replaces_its_own_launcher.py`.
+
 ## Updating packages on a supervised install is one safe procedure (2026-10-02)
 
 - **`kazma update` no longer replaces packages under a running server.** On

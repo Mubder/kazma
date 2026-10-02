@@ -66,13 +66,18 @@ The first command waits until no chat turn is running; then the guard stops the 
 
 ## Repair after a broken reinstall
 
+A reinstall that fails half way can leave Kazma's own package half removed: `~azma*` folders in `site-packages`, and `import kazma_cli` fails, so the server cannot start. Until 2026-10-02 every reinstall run from `kazma.exe` on Windows ended this way ("failed to remove file ... kazma.exe"): the update has to replace the launcher it runs from, and Windows locks a running program. The update now renames its launchers aside first and puts back any it did not replace.
+
+To repair, with the server stopped, in the install folder:
+
 ```powershell
 # PowerShell (Windows)
 Remove-Item -Recurse -Force .\.venv\Lib\site-packages\~azma* -ErrorAction SilentlyContinue
 uv pip install --python .\.venv\Scripts\python.exe -e ".[rag,tui,document-platform]"
-python -c "import kazma_cli; print('ok')"
-kazma serve
+.\.venv\Scripts\python.exe -c "import kazma_cli; print('ok')"
 ```
+
+Put your install's own extras in the brackets: the ones `kazma update` prints under "Preserving optional extras". Then start the server again: on a guarded install `python scripts/service/kazma_guard.py --resume`, otherwise `kazma serve`.
 
 Or: `kazma update --reinstall -y` once the CLI is importable enough to run, or
 after fixing the venv with `uv pip install` as above.
