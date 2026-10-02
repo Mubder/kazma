@@ -11,9 +11,19 @@ The Settings Test button only read ConfigStore, so servers added from
 ``/mcp`` reported "Server not found". Agent connect merged both, but
 Settings list/test/toggle did not.
 
-This module is the **only** place that reads/writes either store. All
-mutators dual-write both backends so they stay in sync. Readers always
-merge (ConfigStore wins on name conflict — runtime UI edits beat seed).
+This module is the **only** place that reads/writes either store. Readers
+merge kazma.yaml, the agent's in-memory copy of it and the settings store
+(the settings store wins on a name conflict: runtime UI edits beat the seed).
+
+**The running server never writes kazma.yaml** (2026-10-02). It is a
+tracked file in the install's checkout: every MCP change from a page left
+the checkout modified, and a later ``git pull`` of any change to kazma.yaml
+refused to run. Writes go to the settings store (and the agent's in-memory
+copy). A server removed from a page that kazma.yaml still lists is recorded
+in ``mcp.removed_servers`` and left out of the merge; adding it again takes
+it off. A server added to kazma.yaml by hand still appears. The one write to
+kazma.yaml left is :func:`move_plaintext_secrets` replacing secrets typed
+into it with vault pointers.
 
 Every write goes through :func:`_write_everywhere`, which first moves each
 server's secrets into the vault and leaves ``vault://`` pointers
@@ -38,29 +48,34 @@ __all__ = [
     "server_enabled",
     "servers_with_plaintext_secrets",
     "set_mcp_server_enabled",
-    "sync_mcp_servers",
     "upsert_mcp_server",
 ]
 
 logger = logging.getLogger(__name__)
 
 CONFIG_KEY = "mcp.servers"
+#: Servers removed from a page that kazma.yaml still lists (module docstring).
+REMOVED_KEY = "mcp.removed_servers"
 _DEFAULT_YAML = "kazma.yaml"
 
 
 # ── ConfigStore helpers ───────────────────────────────────────────────────
 
 
-def _config_key() -> str:
-    """ConfigStore key — tenant-scoped when multi-user/production isolation is on."""
+def _scoped(key: str) -> str:
+    """ConfigStore *key* — tenant-scoped when multi-user/production isolation is on."""
     try:
         from kazma_core.tenant_isolation import multi_user_or_production, tenant_key
 
         if multi_user_or_production():
-            return tenant_key(CONFIG_KEY)
+            return tenant_key(key)
     except Exception:
         pass
-    return CONFIG_KEY
+    return key
+
+
+def _config_key() -> str:
+    return _scoped(CONFIG_KEY)
 
 
 def _normalize_list(raw: Any) -> list[dict[str, Any]]:
@@ -80,30 +95,44 @@ def _normalize_list(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
-def _cs_get() -> list[dict[str, Any]]:
+def _cs_read(key: str) -> Any:
     try:
         from kazma_core.config_store import get_config_store
 
-        key = _config_key()
-        servers = _normalize_list(get_config_store().get(key, []))
-        # Legacy: if tenant key empty, also merge global mcp.servers once
-        if key != CONFIG_KEY and not servers:
-            servers = _normalize_list(get_config_store().get(CONFIG_KEY, []))
-        return servers
+        return get_config_store().get(key, None)
     except Exception as exc:
         logger.debug("[mcp_servers_store] ConfigStore read failed: %s", exc)
-        return []
+        return None
 
 
-def _cs_set(servers: list[dict[str, Any]]) -> None:
+def _cs_get() -> list[dict[str, Any]]:
+    key = _config_key()
+    servers = _normalize_list(_cs_read(key))
+    # Legacy: if tenant key empty, also merge global mcp.servers once
+    if key != CONFIG_KEY and not servers:
+        servers = _normalize_list(_cs_read(CONFIG_KEY))
+    return servers
+
+
+def _removed_names() -> set[str]:
+    raw = _cs_read(_scoped(REMOVED_KEY))
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return set()
+    return {str(n) for n in raw if isinstance(n, str) and n} if isinstance(raw, list) else set()
+
+
+def _cs_set(servers: list[dict[str, Any]], removed: set[str] | None = None) -> None:
+    """The server list, and the removed names when they change, in one write."""
+    items: list[tuple[str, Any, str]] = [(_config_key(), json.dumps(servers, ensure_ascii=False), "mcp")]
+    if removed is not None:
+        items.append((_scoped(REMOVED_KEY), json.dumps(sorted(removed), ensure_ascii=False), "mcp"))
     try:
         from kazma_core.config_store import get_config_store
 
-        get_config_store().set(
-            _config_key(),
-            json.dumps(servers, ensure_ascii=False),
-            category="mcp",
-        )
+        get_config_store().batch_set(items)
     except Exception as exc:
         logger.warning("[mcp_servers_store] ConfigStore write failed: %s", exc)
         raise
@@ -226,17 +255,23 @@ def list_mcp_servers(
 
     1. On-disk ``kazma.yaml`` (optional seed)
     2. In-memory *yaml_servers* (agent ``config.raw`` — overlays disk)
-    3. ConfigStore (wins — Settings / dual-write runtime SoT)
+    3. ConfigStore (wins — Settings / the MCP page)
+
+    A kazma.yaml server removed from a page (``mcp.removed_servers``) is left
+    out: kazma.yaml is never written, so it still lists it.
     """
+    removed = _removed_names()
     by_name: dict[str, dict[str, Any]] = {}
 
     if include_disk_yaml:
         for s in _read_yaml_servers(yaml_path):
-            by_name[str(s["name"])] = s
+            if str(s["name"]) not in removed:
+                by_name[str(s["name"])] = s
 
     if yaml_servers is not None:
         for s in _normalize_list(yaml_servers):
-            by_name[str(s["name"])] = s
+            if str(s["name"]) not in removed:
+                by_name[str(s["name"])] = s
 
     for s in _cs_get():
         by_name[str(s["name"])] = s
@@ -316,42 +351,39 @@ def _write_everywhere(
     before: list[dict[str, Any]],
     config_raw: dict[str, Any] | None,
     yaml_path: str | Path | None,
+    removed: set[str] | None = None,
+    rewrite_yaml: bool = False,
 ) -> tuple[list[dict[str, Any]], str | None]:
-    """Write *servers* to ConfigStore, config.raw and kazma.yaml, secrets in the vault.
+    """Write *servers* to the settings store and config.raw, secrets in the vault.
 
-    The one way this module writes. *before* is the stored list (pointers
-    unresolved): a secret posted back masked (``****``) or empty keeps what
-    it holds. Returns what was written and the YAML error, or ``None``.
+    The one way this module writes, and never to kazma.yaml (module
+    docstring) but for *rewrite_yaml*: :func:`move_plaintext_secrets` swaps
+    the secrets typed into kazma.yaml's own servers for vault pointers and
+    keeps the file's list of servers as it was. *removed* is the new
+    ``mcp.removed_servers``, written with the list (``None``: unchanged).
+    *before* is the stored list (pointers unresolved): a secret posted back
+    masked (``****``) or empty keeps what it holds. Returns what was written
+    and the YAML error, or ``None``.
     """
     from kazma_core.mcp.secrets import externalize
 
     stored = {str(s.get("name")): s for s in before if isinstance(s, dict)}
     servers = [_canonical_server(externalize(s, stored.get(str(s.get("name"))))) for s in servers]
-    _cs_set(servers)
+    _cs_set(servers, removed)
     _sync_config_raw(config_raw, servers)
+    if not rewrite_yaml:
+        return servers, None
+    written = {str(s.get("name")): s for s in servers}
+    on_disk = [
+        written.get(str(s["name"])) or _canonical_server(externalize(s, None))
+        for s in _read_yaml_servers(yaml_path)
+    ]
     err = persist_mcp_yaml(
-        servers,
+        on_disk,
         yaml_path=yaml_path,
         mcp_section=config_raw.get("mcp") if config_raw else None,
     )
     return servers, err
-
-
-def sync_mcp_servers(
-    servers: list[dict[str, Any]],
-    *,
-    config_raw: dict[str, Any] | None = None,
-    yaml_path: str | Path | None = None,
-) -> str | None:
-    """Replace the full server list in ConfigStore + yaml (+ optional config.raw).
-
-    Returns yaml error message or ``None`` when both stores accept the write.
-    """
-    yaml_in_mem = (config_raw.get("mcp") or {}).get("servers", []) if config_raw else None
-    before = list_mcp_servers(yaml_servers=yaml_in_mem, yaml_path=yaml_path)
-    return _write_everywhere(
-        _normalize_list(servers), before=before, config_raw=config_raw, yaml_path=yaml_path,
-    )[1]
 
 
 def servers_with_plaintext_secrets(
@@ -396,8 +428,13 @@ def move_plaintext_secrets(
             len(holders), ", ".join(holders),
         )
         return 0
+    from kazma_core.mcp.secrets import has_plaintext_secret
+
     current = list_mcp_servers(yaml_servers=yaml_in_mem, yaml_path=yaml_path)
-    _written, err = _write_everywhere(current, before=current, config_raw=config_raw, yaml_path=yaml_path)
+    in_yaml = any(has_plaintext_secret(s) for s in _read_yaml_servers(yaml_path))
+    _written, err = _write_everywhere(
+        current, before=current, config_raw=config_raw, yaml_path=yaml_path, rewrite_yaml=in_yaml,
+    )
     left = servers_with_plaintext_secrets(yaml_path=yaml_path)
     logger.info(
         "[mcp_servers_store] Moved the secrets of %d MCP server(s) into the vault: %s%s",
@@ -414,8 +451,9 @@ def upsert_mcp_server(
     yaml_path: str | Path | None = None,
     replace: bool = True,
 ) -> dict[str, Any]:
-    """Add or update an MCP server in ConfigStore + yaml + optional config.raw.
+    """Add or update an MCP server in the settings store + optional config.raw.
 
+    A name removed before (``mcp.removed_servers``) is taken off that list.
     Returns the stored server dict. Raises ``ValueError`` on missing name or
     (when *replace* is False) duplicate name.
     """
@@ -462,9 +500,11 @@ def upsert_mcp_server(
     else:
         servers.append(server)
 
-    written, err = _write_everywhere(servers, before=before, config_raw=config_raw, yaml_path=yaml_path)
-    if err:
-        logger.warning("[mcp_servers_store] upsert ConfigStore ok, yaml failed: %s", err)
+    removed = _removed_names()
+    written, _err = _write_everywhere(
+        servers, before=before, config_raw=config_raw, yaml_path=yaml_path,
+        removed=removed - {name} if name in removed else None,
+    )
     return next((s for s in written if s.get("name") == name), server)
 
 
@@ -474,12 +514,12 @@ def delete_mcp_server(
     config_raw: dict[str, Any] | None = None,
     yaml_path: str | Path | None = None,
 ) -> None:
-    """Remove *name* from ConfigStore + yaml + optional config.raw.
+    """Remove *name* from the settings store + optional config.raw.
 
-    Raises ``RuntimeError`` when kazma.yaml could not be written and still
-    holds the server: the merge has no tombstones, so it would be back on the
-    next read. The MCP page's Remove reported such a delete as done; only
-    Settings checked (its own re-read, 2026-10-02).
+    kazma.yaml is not written: a server it lists is recorded in
+    ``mcp.removed_servers`` and left out of the merge. Before 2026-10-02 the
+    delete rewrote kazma.yaml, and a delete whose write failed came back on
+    the next read.
     """
     yaml_in_mem = None
     if config_raw is not None:
@@ -487,11 +527,11 @@ def delete_mcp_server(
 
     current = list_mcp_servers(yaml_servers=yaml_in_mem, yaml_path=yaml_path)
     servers = [s for s in current if s.get("name") != name]
-    _written, err = _write_everywhere(servers, before=current, config_raw=config_raw, yaml_path=yaml_path)
-    if err:
-        logger.warning("[mcp_servers_store] delete ConfigStore ok, yaml failed: %s", err)
-        if any(s.get("name") == name for s in _read_yaml_servers(yaml_path)):
-            raise RuntimeError(f"kazma.yaml could not be written ({err}); '{name}' is still in it")
+    in_yaml = any(str(s.get("name")) == name for s in _read_yaml_servers(yaml_path))
+    _write_everywhere(
+        servers, before=current, config_raw=config_raw, yaml_path=yaml_path,
+        removed=_removed_names() | {name} if in_yaml else None,
+    )
     from kazma_core.mcp.secrets import forget
 
     for gone in (s for s in current if s.get("name") == name):
@@ -521,7 +561,5 @@ def set_mcp_server_enabled(
             break
     if not found:
         return False
-    _written, err = _write_everywhere(servers, before=before, config_raw=config_raw, yaml_path=yaml_path)
-    if err:
-        logger.warning("[mcp_servers_store] toggle ConfigStore ok, yaml failed: %s", err)
+    _write_everywhere(servers, before=before, config_raw=config_raw, yaml_path=yaml_path)
     return True

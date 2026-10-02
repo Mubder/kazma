@@ -53,6 +53,9 @@ DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
         "safety.protected_config refuses every key that is not a setting"
     ),
     "kazma-core/kazma_core/lifecycle_notifier.py::_stamp": ("system.lifecycle.",),
+    # One batch: the server list and the names removed from a page that
+    # kazma.yaml still lists (both tenant-scoped like every MCP key).
+    "kazma-core/kazma_core/mcp_servers_store.py::_cs_set": ("mcp.servers", "mcp.removed_servers"),
     "kazma-core/kazma_core/memory/backends.py::save_backends_cfg": ("memory.backends.",),
     "kazma-core/kazma_core/memory/config.py::set_memory_flag": ("memory.",),
     "kazma-core/kazma_core/observability/cadence.py::stamp_run": ("observability.daily_digest.last_sent",),

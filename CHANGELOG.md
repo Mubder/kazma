@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## MCP changes no longer edit kazma.yaml (2026-10-02)
+
+Every MCP change made from a page (add, edit, remove, the on/off switch)
+rewrote `kazma.yaml`, a tracked file in the install's folder. The live
+install's checkout showed it modified after each change, and a `git pull`
+that touched `kazma.yaml` would have refused to update it.
+
+- Changes are kept in Kazma's settings only. `kazma.yaml` stays the starting
+  list and the place to add a server by hand.
+- Removing a server that `kazma.yaml` lists records its name in the setting
+  `mcp.removed_servers` and leaves it out of the list, without editing the
+  file. Adding it again brings it back.
+- The one write left moves a key typed into `kazma.yaml` into the vault and
+  leaves a `vault://` pointer; the file keeps its own list of servers.
+
+A gate allows that one write only (`tests/test_mcp_servers_store.py`).
+
 ## A pipeline restored at boot arms its timeout without a stray coroutine (2026-10-02)
 
 A swarm pipeline paused for approval and restored after a restart has its

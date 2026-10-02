@@ -265,6 +265,8 @@ class TestMCPSettingsService:
 
         store.get.side_effect = _get
         store.set.side_effect = _set
+        # The MCP store writes the list (and the removed names) in one batch.
+        store.batch_set.side_effect = lambda items: [_set(k, v, c) for k, v, c in items]
 
         yaml_path = Path(tmp_path) / "kazma.yaml"
         yaml_path.write_text(

@@ -12,6 +12,7 @@ import yaml
 
 from kazma_core.mcp_servers_store import (
     CONFIG_KEY,
+    REMOVED_KEY,
     delete_mcp_server,
     list_mcp_servers,
     set_mcp_server_enabled,
@@ -38,8 +39,14 @@ def dual_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     def _set(key, value, category="general"):
         store_data[key] = value
 
+    def _batch_set(items):
+        for key, value, _category in items:
+            store_data[key] = value
+        return len(items)
+
     mock_cs.get.side_effect = _get
     mock_cs.set.side_effect = _set
+    mock_cs.batch_set.side_effect = _batch_set
 
     with patch(
         "kazma_core.config_store.get_config_store",
@@ -52,9 +59,12 @@ def dual_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         }
 
 
-def test_upsert_dual_writes_configstore_and_yaml(dual_env):
+def test_upsert_writes_the_settings_store_and_never_kazma_yaml(dual_env):
+    """kazma.yaml is a tracked file: a page's MCP change left the checkout
+    modified and a later `git pull` refused (2026-10-02)."""
     yaml_path = dual_env["yaml_path"]
     store_data = dual_env["store_data"]
+    shipped = yaml_path.read_bytes()
 
     server = upsert_mcp_server(
         {
@@ -73,14 +83,12 @@ def test_upsert_dual_writes_configstore_and_yaml(dual_env):
     parsed = json.loads(raw) if isinstance(raw, str) else raw
     assert any(s.get("name") == "Playwright" for s in parsed)
 
-    # YAML has it
-    on_disk = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-    names = [s.get("name") for s in on_disk["mcp"]["servers"]]
-    assert "Playwright" in names
+    assert yaml_path.read_bytes() == shipped
+    assert [s["name"] for s in list_mcp_servers(yaml_path=yaml_path)] == ["Playwright"]
 
 
 def test_upsert_preserves_sse_bearer_auth_and_trust(dual_env):
-    """SSE credentials and the explicit trust policy survive both stores."""
+    """SSE credentials and the explicit trust policy survive the store."""
     yaml_path = dual_env["yaml_path"]
     store_data = dual_env["store_data"]
 
@@ -99,8 +107,7 @@ def test_upsert_preserves_sse_bearer_auth_and_trust(dual_env):
     assert server["trust"] == "trusted"
     stored = json.loads(store_data[CONFIG_KEY])
     assert stored[0]["auth"] == {"type": "bearer", "token": "test-token"}
-    on_disk = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-    assert on_disk["mcp"]["servers"][0]["trust"] == "trusted"
+    assert stored[0]["trust"] == "trusted"
 
 
 def test_agent_add_forwards_sse_bearer_auth_and_trust() -> None:
@@ -189,7 +196,7 @@ def test_configstore_wins_on_name_conflict(dual_env):
     assert match[0]["command"] == ["new"]
 
 
-def test_delete_removes_from_both(dual_env):
+def test_delete_removes_a_server_the_settings_store_holds(dual_env):
     yaml_path = dual_env["yaml_path"]
 
     upsert_mcp_server(
@@ -200,22 +207,104 @@ def test_delete_removes_from_both(dual_env):
 
     servers = list_mcp_servers(yaml_path=yaml_path)
     assert not any(s.get("name") == "tmp" for s in servers)
-    on_disk = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-    assert not any(
-        s.get("name") == "tmp" for s in on_disk.get("mcp", {}).get("servers", [])
-    )
+    # Not in kazma.yaml, so nothing is recorded as removed: a server added to
+    # the file by hand later under that name still appears.
+    assert REMOVED_KEY not in dual_env["store_data"]
+
+
+def test_delete_of_a_kazma_yaml_server_keeps_it_out_without_writing_the_file(dual_env):
+    yaml_path = dual_env["yaml_path"]
+    yaml_path.write_text(yaml.safe_dump({"mcp": {"servers": [
+        {"name": "seed", "transport": "stdio", "command": ["seed"]},
+        {"name": "keep", "transport": "stdio", "command": ["keep"]},
+    ]}}), encoding="utf-8")
+    shipped = yaml_path.read_bytes()
+
+    delete_mcp_server("seed", yaml_path=yaml_path)
+    assert [s["name"] for s in list_mcp_servers(yaml_path=yaml_path)] == ["keep"]
+    assert yaml_path.read_bytes() == shipped
+    assert json.loads(dual_env["store_data"][REMOVED_KEY]) == ["seed"]
+
+    # Adding it again takes it off the removed list.
+    upsert_mcp_server({"name": "seed", "transport": "stdio", "command": ["seed2"]}, yaml_path=yaml_path)
+    listed = {s["name"]: s for s in list_mcp_servers(yaml_path=yaml_path)}
+    assert listed["seed"]["command"] == ["seed2"] and "keep" in listed
+    assert json.loads(dual_env["store_data"][REMOVED_KEY]) == []
+    assert yaml_path.read_bytes() == shipped
+
+
+def test_negative_control_without_the_removed_list_a_seed_server_comes_back(dual_env, monkeypatch):
+    import kazma_core.mcp_servers_store as store
+
+    yaml_path = dual_env["yaml_path"]
+    yaml_path.write_text(yaml.safe_dump({"mcp": {"servers": [
+        {"name": "seed", "transport": "stdio", "command": ["seed"]},
+    ]}}), encoding="utf-8")
+    monkeypatch.setattr(store, "_removed_names", lambda: set())
+    delete_mcp_server("seed", yaml_path=yaml_path)
+    assert [s["name"] for s in list_mcp_servers(yaml_path=yaml_path)] == ["seed"]
 
 
 def test_toggle_enabled(dual_env):
     yaml_path = dual_env["yaml_path"]
+    shipped = yaml_path.read_bytes()
     upsert_mcp_server(
         {"name": "tog", "transport": "stdio", "command": ["echo"], "enabled": True},
         yaml_path=yaml_path,
     )
-    set_mcp_server_enabled("tog", False, yaml_path=yaml_path)
+    assert set_mcp_server_enabled("tog", False, yaml_path=yaml_path) is True
     servers = list_mcp_servers(yaml_path=yaml_path)
     tog = next(s for s in servers if s["name"] == "tog")
     assert tog["enabled"] is False
+    assert set_mcp_server_enabled("nope", False, yaml_path=yaml_path) is False
+    assert yaml_path.read_bytes() == shipped
+
+
+# ── nothing but the secrets mover writes kazma.yaml (2026-10-02) ─────────
+
+_STORE_SRC = Path(__file__).resolve().parents[1] / "kazma-core" / "kazma_core" / "mcp_servers_store.py"
+
+
+def yaml_rewriters(source: str) -> set[str]:
+    """Functions that call ``_write_everywhere(..., rewrite_yaml=<not False>)``."""
+    import ast
+
+    found = set()
+    for fn in ast.walk(ast.parse(source)):
+        if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        for call in ast.walk(fn):
+            if (
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Name)
+                and call.func.id == "_write_everywhere"
+                and any(
+                    kw.arg == "rewrite_yaml"
+                    and not (isinstance(kw.value, ast.Constant) and kw.value.value is False)
+                    for kw in call.keywords
+                )
+            ):
+                found.add(fn.name)
+    return found
+
+
+def test_only_the_secrets_mover_rewrites_kazma_yaml():
+    """kazma.yaml is a tracked file in the install's checkout: a page's MCP
+    change left it modified, and `git pull` refuses a merge that touches a
+    modified file. The one write left swaps typed secrets for vault pointers."""
+    assert yaml_rewriters(_STORE_SRC.read_text(encoding="utf-8")) == {"move_plaintext_secrets"}
+
+
+def test_negative_control_an_upsert_that_rewrites_kazma_yaml_is_caught():
+    old = (
+        "def upsert_mcp_server(data):\n"
+        "    _write_everywhere(servers, before=before, rewrite_yaml=True)\n"
+        "def move_plaintext_secrets():\n"
+        "    _write_everywhere(current, before=current, rewrite_yaml=in_yaml)\n"
+        "def set_mcp_server_enabled(name, on):\n"
+        "    _write_everywhere(servers, before=before, rewrite_yaml=False)\n"
+    )
+    assert yaml_rewriters(old) == {"upsert_mcp_server", "move_plaintext_secrets"}
 
 
 def test_upsert_syncs_config_raw(dual_env):
@@ -290,20 +379,20 @@ def test_a_stale_settings_copy_is_read_as_the_workspace_bound_server(dual_env):
     assert fs["command"][-1] == _PLACEHOLDER
 
 
-def test_an_mcp_edit_never_writes_the_stale_copy_over_kazma_yaml(dual_env):
+def test_an_mcp_edit_stores_the_canonical_copy_and_leaves_kazma_yaml_alone(dual_env):
     """Live 2026-10-02: replacing the sequential-thinking server wrote the
     settings copy's `kazma-data/workspace` (and no workspace_bound) over
-    kazma.yaml's placeholder."""
+    kazma.yaml's placeholder. Nothing writes kazma.yaml now, and the stored
+    copy is the canonical one."""
     _seed(dual_env)
+    shipped = dual_env["yaml_path"].read_bytes()
     upsert_mcp_server(
         {"name": "sequential-thinking", "command": ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"]},
         yaml_path=dual_env["yaml_path"],
     )
-    written = yaml.safe_load(dual_env["yaml_path"].read_text(encoding="utf-8"))["mcp"]["servers"]
-    fs = next(s for s in written if s["name"] == "filesystem")
-    assert fs["workspace_bound"] is True and fs["command"][-1] == _PLACEHOLDER
+    assert dual_env["yaml_path"].read_bytes() == shipped
     stored = next(s for s in json.loads(dual_env["store_data"][CONFIG_KEY]) if s["name"] == "filesystem")
-    assert stored["command"][-1] == _PLACEHOLDER
+    assert stored["workspace_bound"] is True and stored["command"][-1] == _PLACEHOLDER
 
 
 def test_negative_control_without_the_canonical_form_the_fossil_is_written(dual_env, monkeypatch):
@@ -312,9 +401,8 @@ def test_negative_control_without_the_canonical_form_the_fossil_is_written(dual_
     monkeypatch.setattr(store, "_canonical_server", lambda server: server)
     _seed(dual_env)
     upsert_mcp_server({"name": "x", "command": ["x"]}, yaml_path=dual_env["yaml_path"])
-    written = yaml.safe_load(dual_env["yaml_path"].read_text(encoding="utf-8"))["mcp"]["servers"]
-    fs = next(s for s in written if s["name"] == "filesystem")
-    assert fs["command"][-1] == "kazma-data/workspace" and "workspace_bound" not in fs
+    stored = next(s for s in json.loads(dual_env["store_data"][CONFIG_KEY]) if s["name"] == "filesystem")
+    assert stored["command"][-1] == "kazma-data/workspace" and "workspace_bound" not in stored
 
 
 def test_a_folder_the_operator_chose_stays_and_other_servers_are_untouched() -> None:

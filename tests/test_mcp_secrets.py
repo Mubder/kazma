@@ -154,6 +154,22 @@ def test_secrets_stored_as_typed_move_to_the_vault(vault, yaml_path):
     assert yaml_path.stat().st_mtime_ns == mtime, "nothing left: nothing written"
 
 
+def test_the_mover_keeps_kazma_yaml_s_own_list(vault, yaml_path):
+    """The one write to kazma.yaml swaps its typed secrets for pointers and
+    adds nothing: a server only the settings store holds stays out of it."""
+    from kazma_core.config_store import get_config_store
+    from kazma_core.mcp_servers_store import CONFIG_KEY, move_plaintext_secrets
+
+    settings_only = {"name": "time", "transport": "stdio", "command": ["uvx", "mcp-server-time"]}
+    get_config_store().set(CONFIG_KEY, json.dumps([settings_only]), category="mcp")
+    yaml_path.write_text(yaml.safe_dump({"mcp": {"servers": [_server()]}}), encoding="utf-8")
+
+    assert move_plaintext_secrets(yaml_path=yaml_path) == 1
+    on_disk = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))["mcp"]["servers"]
+    assert [s["name"] for s in on_disk] == ["brave_search"]
+    assert BRAVE not in yaml_path.read_text(encoding="utf-8")
+
+
 def test_without_a_vault_the_servers_still_work(monkeypatch, yaml_path):
     from kazma_core.mcp.secrets import resolve
     from kazma_core.mcp_servers_store import move_plaintext_secrets, upsert_mcp_server
