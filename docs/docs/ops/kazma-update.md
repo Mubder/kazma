@@ -50,13 +50,19 @@ kazma update --accept-discard-local-commits
 
 ## When the server says its packages are behind
 
-A `git pull` brings new code but installs nothing. When a commit raises a minimum version in `pyproject.toml` (a security floor, or a release a new feature needs), the server checks at boot and logs a WARNING naming each package and the version the build requires. It also raises the ops alert `install.requirements_unmet`, and the security report's dependency check lists the same packages. Install them with:
+A `git pull` brings new code but installs nothing. When a commit raises a minimum version in `pyproject.toml` (a security floor, or a release a new feature needs), the server checks at boot and logs a WARNING naming each package and the version the build requires. It also raises the ops alert `install.requirements_unmet`, and the security report's dependency check lists the same packages. The packages cannot be replaced while the server has them loaded: on Windows the reinstall would fail half way and leave some packages new and some old. So `kazma update` refuses while the server answers, and says what to run instead.
+
+On an install the guard supervises (the `KazmaAgent` task), run these from the install folder, with the install's own `kazma`:
 
 ```bash
+python scripts/service/kazma_guard.py --pause --stop --when-idle --reason "package update"
 kazma update --reinstall -y
+python scripts/service/kazma_guard.py --resume
 ```
 
-That is the packages-only path: it keeps your optional extras and touches no git state. Then reload the server.
+The first command waits until no chat turn is running; then the guard stops the server gracefully and keeps it stopped. If you forget the third command, the pause lifts itself after two hours. Without the guard: stop the server, run `kazma update --reinstall -y`, and start the server again.
+
+`--reinstall` is the packages-only path: it keeps your optional extras and touches no git state.
 
 ## Repair after a broken reinstall
 

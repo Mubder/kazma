@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Updating packages on a supervised install is one safe procedure (2026-10-02)
+
+- **`kazma update` no longer replaces packages under a running server.** On
+  Windows the server holds its packages' files open, so a reinstall while it
+  runs fails half way and leaves some packages new and some old. The
+  `--reinstall` path, the fix the boot check recommends, did not check for a
+  running server at all. The full update did check, but told you to kill the
+  server by hand, and the guard restarts a killed server within seconds.
+  Both now refuse while the server answers and name the right steps.
+- **The guard can stop the server when the chats are quiet.**
+  `kazma_guard.py --pause --stop --when-idle` waits until no chat turn is
+  running, then has the guard stop the server and keep it stopped. After the
+  update, `--resume` starts it again; the pause lifts itself after two hours
+  if you forget.
+- **The "packages are behind" alert gives these steps.** It said "Run
+  `kazma update` on the server", which a running server refused.
+- **Gate:** `tests/test_package_update_on_a_guarded_install.py`.
+
 ## The agent's file tools no longer hold up every chat while they look up the workspace (2026-10-02)
 
 - **Path checks run in the background.** Before reading or writing, a file

@@ -2244,9 +2244,24 @@ def _cmd_status() -> int:
     return 0
 
 
-def _cmd_pause(reason: str, ttl: float, *, stop_now: bool) -> int:
-    rec = write_pause(reason, ttl)
+def _cmd_pause(
+    reason: str,
+    ttl: float,
+    *,
+    stop_now: bool,
+    when_idle: bool = False,
+    idle_timeout_s: float = 900.0,
+) -> int:
     log = GuardLog(_default_log_path())
+    # --stop --when-idle: a package update or a diagnosis stops the server;
+    # mid-turn that drops the reply in flight, as a reload would. The wait
+    # comes BEFORE the pause is written: the guard stops its child the
+    # moment it sees one.
+    if stop_now and when_idle:
+        health = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
+        if not _wait_until_idle(health, idle_timeout_s, log, action="stopping", event="maintenance"):
+            return 3
+    rec = write_pause(reason, ttl)
     log("warn", "maintenance.pause_requested", reason=rec["reason"], ttl_s=ttl)
     until = float(rec.get("until") or 0.0)
     print("Supervision PAUSED. Kazma will not be auto-restarted.")
@@ -2377,12 +2392,14 @@ def _activity(health_url: str) -> dict | None:
 
 
 def _wait_until_idle(health_url: str, max_wait_s: float, log: GuardLog, *,
-                     poll_s: float = 5.0) -> bool:
+                     poll_s: float = 5.0, action: str = "reloading",
+                     event: str = "reload") -> bool:
     """Wait until no turn is running (two quiet polls in a row).
 
     True when idle -- or when this build cannot say, which is reported and
-    then treated as idle, since the operator asked for the reload. False
-    when still busy at the deadline: the reload does not happen.
+    then treated as idle, since the operator asked for the reload (or the
+    stop: *action* and *event* name which). False when still busy at the
+    deadline: nothing happens.
     """
     deadline = time.monotonic() + max_wait_s
     quiet = 0
@@ -2391,8 +2408,8 @@ def _wait_until_idle(health_url: str, max_wait_s: float, log: GuardLog, *,
         act = _activity(health_url)
         if act is None:
             print("This build cannot report activity (no /health/activity); "
-                  "reloading without waiting.")
-            log("warn", "reload.idle_unknown")
+                  f"{action} without waiting.")
+            log("warn", f"{event}.idle_unknown")
             return True
         running = int(act.get("active_turns") or 0)
         if running == 0:
@@ -2402,12 +2419,12 @@ def _wait_until_idle(health_url: str, max_wait_s: float, log: GuardLog, *,
         else:
             quiet = 0
             if not told:
-                print(f"Waiting for {running} running turn(s) to finish before reloading…")
-                log("info", "reload.waiting_for_idle", running=running)
+                print(f"Waiting for {running} running turn(s) to finish before {action}…")
+                log("info", f"{event}.waiting_for_idle", running=running)
                 told = True
         if time.monotonic() >= deadline:
-            print(f"Still busy after {max_wait_s:.0f}s ({running} turn(s) running); not reloading.")
-            log("warn", "reload.busy_gave_up", running=running)
+            print(f"Still busy after {max_wait_s:.0f}s ({running} turn(s) running); not {action}.")
+            log("warn", f"{event}.busy_gave_up", running=running)
             return False
         time.sleep(poll_s)
 
@@ -2649,7 +2666,8 @@ def main() -> int:
     ap.add_argument("--reload", action="store_true",
                     help="have the supervisor boot new code (the guard stops the server)")
     ap.add_argument("--when-idle", action="store_true",
-                    help="with --reload: first wait until no chat turn is running")
+                    help="with --reload or --pause --stop: first wait until no "
+                         "chat turn is running")
     ap.add_argument("--idle-timeout", type=float, default=900.0,
                     help="with --when-idle: seconds to wait before giving up (default 900)")
     ap.add_argument("--install", action="store_true",
@@ -2669,7 +2687,10 @@ def main() -> int:
     if args.reload:
         return _cmd_reload(when_idle=args.when_idle, idle_timeout_s=args.idle_timeout)
     if args.pause:
-        return _cmd_pause(args.reason, args.ttl, stop_now=args.stop)
+        return _cmd_pause(
+            args.reason, args.ttl, stop_now=args.stop,
+            when_idle=args.when_idle, idle_timeout_s=args.idle_timeout,
+        )
     if args.resume:
         return _cmd_resume()
 

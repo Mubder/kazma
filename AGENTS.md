@@ -4158,7 +4158,15 @@ no Python update ever arrived.
   means its `pyproject.toml`, because the installed metadata goes stale with
   every pull (the dev venv's still named `aiogram`). On a finding it logs a
   WARNING and raises the ops alert `install.requirements_unmet`. The fix is
-  `kazma update --reinstall -y`. The report's dependency check lists the same
+  `kazma update --reinstall -y` with the server stopped
+  (`install_requirements._update_instructions`, guard-aware: under the guard
+  `kazma_guard.py --pause --stop --when-idle`, the update, `--resume`).
+  `kazma update` refuses while the server answers
+  (`update._server_running_refusal`): the running server holds its packages'
+  compiled files open on Windows, so a reinstall fails half way, and the
+  `--reinstall` path did not check until 2026-10-02 (the git path told the
+  operator to kill the server by hand, which the guard undoes).
+  `tests/test_package_update_on_a_guarded_install.py`. The report's dependency check lists the same
   packages, without OSV. `packaging` is a declared dependency for this.
 - **Advisories with no fix that Kazma cannot reach are reviewed, never
   hidden** (`dependency_scanner.REVIEWED_ADVISORIES`). Each entry has its

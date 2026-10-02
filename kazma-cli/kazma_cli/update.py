@@ -1395,6 +1395,32 @@ def _is_server_running(port: int = 9090) -> bool:
         return False
 
 
+def _server_running_refusal(command: str) -> str | None:
+    """What to do instead, when the server is running; None when it is not.
+
+    On Windows the running server holds its packages' compiled files open, so
+    a reinstall fails half way (WinError 32) and leaves some packages new and
+    some old. ``kazma update --reinstall`` -- the fix the boot check names --
+    did not check at all until 2026-10-02, and the git update told the
+    operator to kill the server by hand, which the guard undoes within
+    seconds. A guarded install is stopped through the guard, when no chat
+    turn is running.
+    """
+    port = _resolve_server_port()
+    if not _is_server_running(port):
+        return None
+    return (
+        f"[red]Kazma's server is running (port {port}); its packages cannot be "
+        "replaced while it has them loaded.[/red]\n"
+        "With the guard (the KazmaAgent task), from the install folder:\n"
+        '  [cyan]python scripts/service/kazma_guard.py --pause --stop --when-idle '
+        '--reason "package update"[/cyan]\n'
+        f"  [cyan]{command}[/cyan]\n"
+        "  [cyan]python scripts/service/kazma_guard.py --resume[/cyan]\n"
+        "Without the guard: stop the server, run the command above, start it again."
+    )
+
+
 def do_git_update(
     *,
     sync_main: bool = False,
@@ -1416,17 +1442,9 @@ def do_git_update(
     # Preflight: the Kazma server holds a lock on kazma.exe on Windows.
     # If it's running, reinstall will fail with WinError 32 halfway through
     # (git updated but package not reinstalled — a broken state).
-    if _is_server_running(_resolve_server_port()):
-        console.print(
-            "[red]â Kazma server is running (port 9090).[/red]\n"
-            "The server holds a lock on kazma.exe â€” the update cannot reinstall "
-            "while it's running.\n\n"
-            "[yellow]Stop the server first, then re-run kazma update:[/yellow]\n"
-            "  [dim]Get-Process -Name python | Where-Object { (Get-CimInstance "
-            "Win32_Process -Filter ('ProcessId=' + $_.Id)).CommandLine -like "
-            "'*uvicorn*kazma*' } | Stop-Process -Force[/dim]\n"
-            "  [dim]kazma update[/dim]"
-        )
+    refusal = _server_running_refusal("kazma update -y")
+    if refusal:
+        console.print(refusal)
         return False
 
     cwd = str(git_root)
@@ -1895,6 +1913,10 @@ def run(args: list[str]) -> None:
 
     # Package-only path (no git) — recover from bare uv sync / missing rag
     if reinstall_only:
+        refusal = _server_running_refusal("kazma update --reinstall -y")
+        if refusal:
+            console.print(refusal)
+            sys.exit(1)
         git_root = _find_git_root()
         if git_root is None:
             # A release-wheel install has no checkout to reinstall from: it

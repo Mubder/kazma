@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -140,6 +141,26 @@ def _add(unmet: dict[str, UnmetRequirement], found: UnmetRequirement) -> None:
     unmet[found.name] = UnmetRequirement(found.name, required, known.installed, groups)
 
 
+def _update_instructions() -> str:
+    """How to bring this install's packages up to date, in the owner's words.
+
+    The packages cannot be replaced while the server has them loaded (on
+    Windows the reinstall fails half way), and a guarded server killed by
+    hand is back within seconds: the guard stops it. The guard hands the
+    server its state file's path, so the server knows it is guarded.
+    """
+    if os.environ.get("KAZMA_GUARD_STATE_FILE"):
+        return (
+            "To fix, in the install folder: python scripts/service/kazma_guard.py "
+            '--pause --stop --when-idle --reason "package update", then '
+            "kazma update --reinstall -y, then python scripts/service/kazma_guard.py --resume."
+        )
+    return (
+        "To fix: stop the server, run kazma update --reinstall -y in the install "
+        "folder, and start the server again."
+    )
+
+
 def report_unmet_requirements(project_root: Path | None = None) -> list[UnmetRequirement]:
     """Say at boot when the environment is behind this build; returns the list.
 
@@ -151,16 +172,17 @@ def report_unmet_requirements(project_root: Path | None = None) -> list[UnmetReq
     if not unmet:
         return unmet
     detail = "; ".join(u.describe() for u in unmet)
+    fix = _update_instructions()
     logger.warning(
-        "[install] %d installed package(s) are older than this build requires: %s. "
-        "Run `kazma update` to install them.", len(unmet), detail,
+        "[install] %d installed package(s) are older than this build requires: %s. %s",
+        len(unmet), detail, fix,
     )
     from kazma_core.observability.ops_alerts import alert
 
     alert(
         "install.requirements_unmet",
         "Installed packages are older than this build of Kazma requires",
-        f"{len(unmet)} package(s): {detail}. Run `kazma update` on the server.",
+        f"{len(unmet)} package(s): {detail}. {fix}",
         severity="warn",
         cooldown_s=12 * 3600,
     )
