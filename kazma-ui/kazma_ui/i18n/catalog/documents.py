@@ -491,6 +491,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "{label} — المخرج جاهز",
         "en": "{label} — artifact ready",
     },
+    "documents.js.split_label": {
+        "ar": "التقسيم",
+        "en": "Split",
+    },
+    "documents.js.redaction_label": {
+        "ar": "التنقيح",
+        "en": "Redaction",
+    },
     "documents.js.op_complete": {
         "ar": "اكتمل {label}",
         "en": "{label} complete",

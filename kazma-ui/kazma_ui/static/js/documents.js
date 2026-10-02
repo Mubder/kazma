@@ -463,7 +463,7 @@ function documentsPage() {
           this.toast(j.error || kazmaT('documents.js.split_failed', "Split failed"), "error");
           return;
         }
-        this._artifactToast("Split", j.artifact);
+        this._artifactToast(kazmaT('documents.js.split_label', 'Split'), j.artifact);
         await this.refreshDetail();
       } catch (e) {
         this.toast(kazmaT('documents.js.split_failed', "Split failed"), "error");
@@ -506,7 +506,7 @@ function documentsPage() {
           this.toast(j.error || kazmaT('documents.js.redaction_failed', "Redaction failed"), "error");
           return;
         }
-        this._artifactToast("Redacted", j.artifact);
+        this._artifactToast(kazmaT('documents.js.redaction_label', 'Redaction'), j.artifact);
         await this.refreshDetail();
       } catch (e) {
         this.toast(kazmaT('documents.js.redaction_failed', "Redaction failed"), "error");

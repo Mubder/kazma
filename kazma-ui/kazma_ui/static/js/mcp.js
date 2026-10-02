@@ -174,10 +174,10 @@ function autoRewriteCommand(commandStr) {
 
 function removalError(response, result) {
     if (!response.ok) {
-        return (result && result.error) || ('Request failed (' + response.status + ')');
+        return (result && result.error) || _mcpT('mcp.ui.request_failed_status', 'Request failed ({status})', { status: response.status });
     }
     if (!result || result.status !== 'ok') {
-        return (result && result.error) || 'Server removal was not confirmed.';
+        return (result && result.error) || _mcpT('mcp.ui.removal_unconfirmed', 'The server did not confirm the removal.');
     }
     return '';
 }
@@ -185,6 +185,20 @@ function removalError(response, result) {
 async function removeMcpServer(button) {
     var endpoint = button.getAttribute('hx-delete');
     if (!endpoint) return;
+    // Removing a server also forgets the keys saved for it (the vault), so
+    // it is asked first. It used to go at the first click.
+    var card = button.closest('.mcp-card');
+    var title = card && card.querySelector('h3');
+    var name = title ? title.textContent.trim() : '';
+    if (typeof window !== 'undefined' && typeof window.kazmaConfirm === 'function') {
+        var ok = await window.kazmaConfirm({
+            title: _mcpT('mcp.ui.remove_confirm_title', 'Remove {name}?', { name: name }),
+            message: _mcpT('mcp.ui.remove_confirm_body', 'Kazma stops this server and forgets its settings and any keys saved for it.'),
+            confirmText: _mcpT('common.remove', 'Remove'),
+            danger: true
+        });
+        if (!ok) return;
+    }
 
     button.disabled = true;
     try {
@@ -201,11 +215,10 @@ async function removeMcpServer(button) {
         var error = removalError(response, result);
         if (error) throw new Error(error);
 
-        var card = button.closest('.mcp-card');
         if (card) card.remove();
-        notify('Server removed', 'success');
+        notify(_mcpT('mcp.server_removed', 'Server removed'), 'success');
     } catch (error) {
-        notify('Failed to remove server: ' + error.message, 'error');
+        notify(_mcpT('mcp.ui.remove_error', 'Failed to remove server: {error}', { error: error.message }), 'error');
         button.disabled = false;
     }
 }
@@ -371,7 +384,7 @@ function mcpApp() {
                         if (testResult.stderr) {
                             this.addError += '\nServer stderr:\n' + testResult.stderr.slice(0, 500);
                         }
-                        notify('Test failed — server not saved. See inline error.', 'error');
+                        notify(_mcpT('mcp.ui.test_failed_not_saved', 'Test failed — server not saved. See the error in the form.'), 'error');
                         return;
                     }
                     if (testResult.tool_count === 0) {
@@ -395,7 +408,7 @@ function mcpApp() {
                     });
                     var result = await resp.json();
                     if (result.status === 'ok') {
-                        notify('Server added — ' + (testResult ? testResult.tool_count : '?') + ' tools', 'success');
+                        notify(_mcpT('mcp.ui.added_tools', 'Server added. Tools: {n}', { n: testResult ? testResult.tool_count : '?' }), 'success');
                         this.showAddModal = false;
                         this.resetNewServer();
                         location.reload();
@@ -445,13 +458,13 @@ function mcpApp() {
                 });
                 var result = await resp.json();
                 if (result.status === 'ok') {
-                    notify('Server started with ' + result.tool_count + ' tools', 'success');
+                    notify(_mcpT('mcp.ui.started_tools', 'Server started. Tools: {n}', { n: result.tool_count }), 'success');
                     location.reload();
                 } else {
                     notify(_mcpT('mcp.ui.start_failed', 'Failed: {error}', { error: result.error || _mcpT('mcp.ui.unable_to_start', 'Unable to start server') }), 'error');
                 }
             } catch (e) {
-                notify('Failed to start server: ' + e.message, 'error');
+                notify(_mcpT('mcp.ui.start_error', 'Failed to start server: {error}', { error: e.message }), 'error');
             } finally {
                 this.actionPending = '';
             }
@@ -466,13 +479,13 @@ function mcpApp() {
                 });
                 var result = await resp.json();
                 if (result.status === 'ok') {
-                    notify('Server stopped', 'info');
+                    notify(_mcpT('mcp.ui.stopped', 'Server stopped'), 'info');
                     location.reload();
                 } else {
                     notify(_mcpT('mcp.ui.start_failed', 'Failed: {error}', { error: result.error || _mcpT('mcp.ui.unable_to_stop', 'Unable to stop server') }), 'error');
                 }
             } catch (e) {
-                notify('Failed to stop server: ' + e.message, 'error');
+                notify(_mcpT('mcp.ui.stop_error', 'Failed to stop server: {error}', { error: e.message }), 'error');
             } finally {
                 this.actionPending = '';
             }
@@ -481,21 +494,21 @@ function mcpApp() {
         async testServer(name) {
             if (this.actionPending) return;
             this.actionPending = 'test:' + name;
-            notify('Testing connection...', 'info');
+            notify(_mcpT('mcp.ui.testing', 'Testing connection…'), 'info');
             try {
                 var resp = await fetch('/api/mcp/servers/' + encodeURIComponent(name) + '/test', {
                     method: 'POST'
                 });
                 var result = await resp.json();
                 if (result.success) {
-                    notify('Connected! ' + result.tool_count + ' tools found', 'success');
+                    notify(_mcpT('mcp.ui.connected_tools', 'Connected. Tools: {n}', { n: result.tool_count }), 'success');
                 } else {
                     var msg = _mcpT('mcp.ui.test_failed', 'Test failed: {error}', { error: result.error || _mcpT('mcp.ui.no_detail', 'no detail') });
                     if (result.stderr) msg += '\n' + String(result.stderr).slice(0, 400);
                     notify(msg, 'error');
                 }
             } catch (e) {
-                notify('Test failed: ' + e.message, 'error');
+                notify(_mcpT('mcp.ui.test_failed', 'Test failed: {error}', { error: e.message }), 'error');
             } finally {
                 this.actionPending = '';
             }
@@ -504,7 +517,7 @@ function mcpApp() {
         async oauthLogin(name) {
             if (this.actionPending) return;
             this.actionPending = 'oauth:' + name;
-            notify('Starting OAuth login — complete the sign-in in your browser…', 'info');
+            notify(_mcpT('mcp.ui.oauth_starting', 'Starting OAuth login — complete the sign-in in your browser…'), 'info');
             try {
                 var resp = await fetch('/api/mcp/servers/' + encodeURIComponent(name) + '/oauth/start', {
                     method: 'POST'
@@ -515,9 +528,9 @@ function mcpApp() {
                     // is visibly started even if the backend couldn't open a
                     // browser itself (headless / remote server).
                     window.open(result.authorization_url, '_blank', 'noopener');
-                    notify('Browser login opened. Return here after signing in, then press Start.', 'success');
+                    notify(_mcpT('mcp.ui.oauth_opened', 'Browser login opened. Return here after signing in, then press Start.'), 'success');
                 } else if (result.status === 'ok') {
-                    notify('Browser login opened. Return here after signing in, then press Start.', 'success');
+                    notify(_mcpT('mcp.ui.oauth_opened', 'Browser login opened. Return here after signing in, then press Start.'), 'success');
                 } else {
                     notifyOAuthError(result.error || _mcpT('mcp.ui.unknown_error', 'unknown error'));
                 }
@@ -554,6 +567,7 @@ if (typeof module !== 'undefined' && module.exports) {
         parseCommand: parseCommand,
         autoRewriteCommand: autoRewriteCommand,
         removalError: removalError,
+        removeMcpServer: removeMcpServer,
         mcpApp: mcpApp,
         notify: notify
     };

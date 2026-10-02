@@ -930,6 +930,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     # A memory queue task's status (the queue's pending/processing/completed/failed).
     "memory.console.queue_pending": {"ar": "بانتظار التنفيذ", "en": "pending"},
+    "memory.console.link_mode_hint": {
+        "ar": "وضع الربط: انقر المصدر، ثم الهدف",
+        "en": "Link mode: click the source, then the target",
+    },
+    "memory.console.merge_mode_hint": {
+        "ar": "وضع الدمج: انقر ما سيُستبعد، ثم ما سيُبقى عليه",
+        "en": "Merge mode: click the one to retire, then the one to keep",
+    },
     "memory.console.queue_processing": {"ar": "قيد التنفيذ", "en": "running"},
     "memory.console.queue_completed": {"ar": "اكتمل", "en": "completed"},
     "memory.console.queue_failed": {"ar": "فشل", "en": "failed"},

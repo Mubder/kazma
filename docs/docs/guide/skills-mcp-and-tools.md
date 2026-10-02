@@ -253,6 +253,10 @@ The `/mcp` page provides a visual **Add Server** modal that replaces manual YAML
 
 Servers added via the UI are persisted to `kazma.yaml` (atomic write) and survive restarts.
 
+The filesystem server always works on the active workspace: Kazma passes the workspace folder when it starts the server, and again after **Switch Repo**. It is stored with the `${KAZMA_ACTIVE_WORKSPACE}` placeholder and `workspace_bound: true`, and an old saved copy with a fixed sandbox path is read and saved back in that form. The card shows the folder the server runs on.
+
+Each server's card has **Start** or **Stop**, **Test** (connects once and reports how many tools it found), **Show tools**, and **Remove**. Remove asks first, because it also stops the server and forgets its settings and any keys saved for it. Until 2026-10-02, Start, Stop, Test and OAuth login did nothing when clicked: they called an Alpine helper (`$parent`) that Alpine 3 does not have.
+
 ### 5.5 Tool name namespacing
 
 MCP tool names are **namespaced** as `mcp__<server>__<tool>` before being sent to the LLM. This prevents collisions between MCP servers and built-in tools (e.g. the Playwright MCP's `browser_click` vs the browser_automation skill's `browser_click`). Without namespacing, providers that require unique tool names (DeepSeek, OpenAI) reject the entire request with `400 Tool names must be unique`, causing Kazma to strip ALL tools for the turn — the root cause of the "agent stopped talking" bug.

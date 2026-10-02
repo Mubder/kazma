@@ -297,7 +297,16 @@ workspace. Three new modules; understanding their interaction is essential.
   `notify_root_changed(root)` → pin tools + MCP rebind for
   `workspace_bound` servers (`${KAZMA_ACTIVE_WORKSPACE}` in command).
 - MCP filesystem must NOT stay on a static `kazma-data/workspace` fossil
-  after Switch Repo / clone.
+  after Switch Repo / clone. **Nor in storage** (2026-10-02): every read and
+  write of the MCP store passes `mcp_servers_store._canonical_server` (a
+  workspace-bound server is marked `workspace_bound: true`, and an old
+  sandbox path in its folder argument goes back to the placeholder;
+  `mcp_rebind.is_legacy_sandbox_arg` knows each spelling, the bare
+  `kazma-data/workspace` included). The live settings held a pre-placeholder
+  copy that won over kazma.yaml's by name, the MCP page showed it, and the
+  next MCP edit wrote it over kazma.yaml. The page shows the command as it
+  runs (`KazmaAgent.get_mcp_servers`). `tests/test_mcp_servers_store.py`
+  (identity canonicalizer as the negative control).
 - **Per-task scope guard (deep-audit 2026-08-19):** MCP rebind is
   PROCESS-GLOBAL — a per-task `workspace_scope` does NOT rebind servers.
   `mcp/manager.py:execute_mcp_tool` fail-closes with an actionable error
