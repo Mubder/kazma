@@ -500,9 +500,7 @@ function memoryPage() {
       });
       if (d.ok) {
         undoToast(
-          d.invalidated === 1
-            ? tx("memory.page.invalidated_n_one", "Invalidated 1 belief.")
-            : tx("memory.page.invalidated_n", "Invalidated {n} beliefs.", { n: d.invalidated }),
+          window.kazmaCount("memory.page.invalidated_n", d.invalidated),
           d.undo_token,
           { kind: "invalidate" }
         );
@@ -734,9 +732,7 @@ function memoryPage() {
         // instead so the operator sees exactly what moved.
         const rewired = (d.receipt && d.receipt.beliefs_rewired) || 0;
         toast(
-          rewired === 1
-            ? tx("memory.page.merged_one", "Merged {source} → {target}: 1 belief rewired.", { source: src, target: tgt })
-            : tx("memory.page.merged_n", "Merged {source} → {target}: {n} beliefs rewired.", { source: src, target: tgt, n: rewired }),
+          window.kazmaCount("memory.page.merged_n", rewired, { source: src, target: tgt }),
           "success"
         );
         this.mergeSource = "";

@@ -205,6 +205,8 @@
         // of *key* (<key>.zero ... <key>.other, i18n.t_plural's convention),
         // the one KazmaFormat.pluralCategory picks -- six in Arabic -- with
         // {n} and *vars* filled. A number glued to one form read "1 أدوات".
+        // The form follows the number *n*; vars.n, when given, is how it is
+        // shown (a formatted "12.3K").
         window.kazmaCount = function(key, n, vars) {
             var lang = window.KAZMA_LANG || 'en';
             var cat = window.KazmaFormat ? window.KazmaFormat.pluralCategory(n)
@@ -213,8 +215,9 @@
                 var entry = window.KAZMA_I18N ? window.KAZMA_I18N[key + '.' + c] : null;
                 return entry ? (entry[lang] || entry.en || '') : '';
             };
-            var text = (form(cat) || form('other') || '{n}').split('{n}').join(String(n));
-            if (vars) for (var k in vars) text = text.split('{' + k + '}').join(String(vars[k]));
+            var text = form(cat) || form('other') || '{n}';
+            var fill = Object.assign({ n: n }, vars || {});
+            for (var k in fill) text = text.split('{' + k + '}').join(String(fill[k]));
             return text;
         };
         // Uncaught fetch/rejection surface (UI audit P1-8): ~70 load calls

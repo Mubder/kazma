@@ -451,7 +451,7 @@ export function registerStores() {
                                     subtitle: (s.platform === 'web' || !s.platform
                                         ? (window.tOr ? window.tOr('dashboard.platform_web', 'Web') : 'web')
                                         : s.platform) + ' \u00B7 ' +
-                                        (window.kazmaT ? window.kazmaT('common.ui.messages_count', '{n} msgs', { n: s.message_count || 0 }) : (s.message_count || 0) + ' msgs'),
+                                        (window.kazmaCount ? window.kazmaCount('common.ui.messages_count', s.message_count || 0) : String(s.message_count || 0)),
                                     href: '/chat?s=' + encodeURIComponent(sid),
                                 });
                             }

@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## Every count reads right, in English and Arabic (2026-10-02)
+
+The interface had 36 labels that printed a number beside a word in one
+form: "1 msgs", "Plan locked (1 steps)", and in Arabic "2 أدوات" or
+"11 معتقدات" (forms that fit only 3 to 10). All 34 still in use now have
+the catalog's six forms, and the two that nothing read are gone. Some
+examples:
+
+- the chat: a plan's steps, "Preparing to execute N tools", the approval
+  button for several tools, a session's message count;
+- the Dashboard's token chart;
+- the memory pages: beliefs, entities, connections cut, facts forgotten,
+  snapshots and days, weekly summaries' turns and chats;
+- Research's source counts and Replay's restored messages;
+- Settings: models to search, secrets stored, chunks in a library, rows
+  synced, backups kept;
+- the Swarm page's tasks and tokens.
+
+`window.kazmaCount` (`base.html`) is the one call for a count a page script
+builds. The memory pages' separate "1 ..." strings it replaces are gone.
+Arabic's "زُامنت" (a misspelling) is now "زُومنت".
+
+The single-form ratchet in `tests/test_count_labels.py` is now a gate: a new
+count label in one form fails the build.
+
 ## MCP changes no longer edit kazma.yaml (2026-10-02)
 
 Every MCP change made from a page (add, edit, remove, the on/off switch)

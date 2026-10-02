@@ -190,8 +190,8 @@
     var comps = Array.isArray(data.components) ? data.components : [];
     var okN = comps.filter(function(c) { return c.status === 'ok'; }).length;
     set('kpi-health-summary', comps.length ? (okN + '/' + comps.length + ' ' + okLbl) : (data.summary || '–'));
-    set('graph-size-metric', data.v2 ? _mt('memory.console.beliefs_n', '{n} beliefs', { n: activeBeliefs }) : '–');
-    set('graph-count-metric', _mt('memory.console.entities_n', '{n} entities', { n: data.v2 ? entitiesTotal : 0 }));
+    set('graph-size-metric', data.v2 ? window.kazmaCount('memory.console.beliefs_n', activeBeliefs) : '–');
+    set('graph-count-metric', window.kazmaCount('memory.console.entities_n', data.v2 ? entitiesTotal : 0));
   }
 
   // Component-health group open state (survives poll re-renders). Default: collapsed.
@@ -339,7 +339,7 @@
     const components = Array.isArray(data.components) ? data.components : [];
     if (summaryEl) {
       summaryEl.textContent = components.length
-        ? _mt('memory.console.components_healthy', '{ok}/{n} components healthy', { ok: components.filter(c => c.status === 'ok').length, n: components.length })
+        ? window.kazmaCount('memory.console.components_healthy', components.length, { ok: components.filter(c => c.status === 'ok').length })
         : '';
     }
 
@@ -415,7 +415,7 @@
               engine: engineOk
                 ? _mt('memory.console.engine_ok', 'V2 cognitive engine operational')
                 : _mt('memory.console.engine_degraded', 'V2 memory degraded or offline'),
-            }) + (comps.length ? ' · ' + _mt('memory.console.components_healthy', '{ok}/{n} components healthy', { ok: okN, n: comps.length }) : '');
+            }) + (comps.length ? ' · ' + window.kazmaCount('memory.console.components_healthy', comps.length, { ok: okN }) : '');
         } else {
           memoryDesc.textContent = data.summary
             ? (I18N.memoryDescActive + ' ' + data.summary)
@@ -535,7 +535,7 @@
 
         const tdFts = document.createElement('td');
         tdFts.style.padding = '10px 16px';
-        tdFts.textContent = _mt('memory.console.fts_docs', '{size} ({n} docs)', { size: ftsSize, n: backup.fts5_count || 0 });
+        tdFts.textContent = window.kazmaCount('memory.console.fts_docs', backup.fts5_count || 0, { size: ftsSize });
 
         const tdVec = document.createElement('td');
         tdVec.style.padding = '10px 16px';
@@ -690,9 +690,8 @@
           const s = res.stats || {};
           const parts = [];
           if (s.deleted != null) {
-            parts.push(s.deleted === 1
-              ? _mt('memory.console.snapshots_deleted_one', '1 snapshot older than {days}d', { days: s.retention_days })
-              : _mt('memory.console.snapshots_deleted', '{n} snapshots older than {days}d', { n: s.deleted, days: s.retention_days }));
+            parts.push(window.kazmaCount('memory.console.snapshots_deleted', s.deleted,
+              { days: window.kazmaCount('common.ui.days', s.retention_days || 0) }));
           }
           if (s.reclaimed != null) parts.push(_mt('memory.console.snapshots_reclaimed', '{size} reclaimed', { size: formatBytes(s.reclaimed) }));
           if (s.prune && s.prune !== 'ok') parts.push(_mt('memory.console.snapshots_prune', 'prune: {state}', { state: s.prune }));
@@ -1100,7 +1099,7 @@
           : '';
         return '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
           '<span translate="no">' + _esc(t.task_type) + '</span> · ' + stHtml + ' · ' +
-          _esc(_mt('memory.console.attempts', '{n} attempts', { n: t.attempts || 0 })) + retry + '</div>';
+          _esc(window.kazmaCount('memory.console.attempts', t.attempts || 0)) + retry + '</div>';
       }).join('');
       el.querySelectorAll('.v2-queue-retry').forEach(function(btn) {
         btn.addEventListener('click', async function() {
@@ -1358,9 +1357,7 @@
                 ? ((r && r.error) || _mt('memory.console.forget_failed', 'Forget failed'))
                 : (!r.facts_forgotten
                   ? _mt('memory.console.forgotten', 'Forgotten')
-                  : (r.facts_forgotten === 1
-                    ? _mt('memory.console.forgotten_with_fact', 'Forgotten (and 1 fact)')
-                    : _mt('memory.console.forgotten_with_facts', 'Forgotten (and {n} facts)', { n: r.facts_forgotten })));
+                  : window.kazmaCount('memory.console.forgotten_with_facts', r.facts_forgotten));
               window.showToast(forgotText, r && r.ok ? 'success' : 'error');
             }
           } catch (e) {
@@ -1387,9 +1384,7 @@
       const data = await resp.json();
       const st = data.state || {};
       if (stateEl) {
-        const parts = [st.weeks_done === 1
-          ? _mt('memory.console.weeks_done_one', '1 week summarized')
-          : _mt('memory.console.weeks_done', '{n} weeks summarized', { n: st.weeks_done || 0 })];
+        const parts = [window.kazmaCount('memory.console.weeks_done', st.weeks_done || 0)];
         if (st.weeks_queued) parts.push(_mt('memory.console.weeks_queued', '{n} in progress', { n: st.weeks_queued }));
         if (st.weeks_failed) parts.push(_mt('memory.console.weeks_failed', '{n} failed', { n: st.weeks_failed }));
         stateEl.textContent = parts.join(' · ');
@@ -1401,10 +1396,8 @@
       }
       el.innerHTML = rows.map(function(s) {
         const monday = s.period_start ? _memDay(s.period_start) : '';
-        const size = (s.turn_count === 1
-          ? _mt('memory.console.summary_turns_one', '1 turn')
-          : _mt('memory.console.summary_turns', '{n} turns', { n: s.turn_count || 0 })) +
-          ((s.chat_count || 0) > 1 ? _mt('memory.console.summary_chats', ' in {n} chats', { n: s.chat_count }) : '');
+        const size = window.kazmaCount('memory.console.summary_turns', s.turn_count || 0) +
+          ((s.chat_count || 0) > 1 ? window.kazmaCount('memory.console.summary_chats', s.chat_count) : '');
         const pending = s.status === 'rebuild';
         const title = pending ? _mt('memory.console.summary_rebuilding', 'Being rewritten without a forgotten conversation') : (s.title || s.id);
         return '<div style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
@@ -2841,9 +2834,7 @@
     }
     var msg =
       opts.message ||
-      (items.length === 1
-        ? _mt('memory.console.cut_n_message_one', 'Cut 1 connection from active memory?')
-        : _mt('memory.console.cut_n_message', 'Cut {n} connections from active memory?', { n: items.length }));
+      window.kazmaCount('memory.console.cut_n_message', items.length);
     var ok = await _v2gConfirm({
       title: opts.title || _mt('memory.console.cut_connections_title', 'Cut connections'),
       message: msg,
@@ -2864,9 +2855,7 @@
       if (done) n++;
     }
     if (n > 0) {
-      _v2gToast(n === 1
-        ? _mt('memory.console.cut_done_one', 'Cut 1 connection')
-        : _mt('memory.console.cut_done', 'Cut {n} connections', { n: n }), 'success');
+      _v2gToast(window.kazmaCount('memory.console.cut_done', n), 'success');
       _v2gOps.selectedEdgeIdx = -1;
       await _v2gReloadGraph();
       try {
@@ -4443,7 +4432,7 @@
     }
     if (window.showToast) {
       window.showToast(matched
-        ? _mt('memory.console.path_highlighted', 'Path: {n} nodes highlighted', { n: matched })
+        ? window.kazmaCount('memory.console.path_highlighted', matched)
         : _mt('memory.console.path_no_match', 'No matching nodes for the query path'), matched ? 'success' : 'info');
     }
     // Zoom to first path node

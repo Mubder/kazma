@@ -934,7 +934,7 @@
   }
   /** "3 sources · rubric 100 passed" */
   function sourcesText(n) {
-    return i18n('research.ui.sources_n', '{n} sources', { n: n });
+    return window.kazmaCount('research.ui.sources_n', n);
   }
   function rubricText(score, ok) {
     var n = Math.round(Number(score));

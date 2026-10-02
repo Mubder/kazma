@@ -814,8 +814,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Tokens Over Time",
     },
     # The charts' own labels (drawn on the canvas): the scale's top value.
-    "dashboard.chart_tokens_max": {
-        "ar": "الأقصى {n} رمز",
+    "dashboard.chart_tokens_max.zero": {
+        "ar": "الأقصى: لا رموز",
+        "en": "{n} tokens max",
+    },
+    "dashboard.chart_tokens_max.one": {
+        "ar": "الأقصى: رمز واحد",
+        "en": "1 token max",
+    },
+    "dashboard.chart_tokens_max.two": {
+        "ar": "الأقصى: رمزان",
+        "en": "{n} tokens max",
+    },
+    "dashboard.chart_tokens_max.few": {
+        "ar": "الأقصى: {n} رموز",
+        "en": "{n} tokens max",
+    },
+    "dashboard.chart_tokens_max.many": {
+        "ar": "الأقصى: {n} رمزًا",
+        "en": "{n} tokens max",
+    },
+    "dashboard.chart_tokens_max.other": {
+        "ar": "الأقصى: {n} رمز",
         "en": "{n} tokens max",
     },
     "dashboard.chart_cost_max": {

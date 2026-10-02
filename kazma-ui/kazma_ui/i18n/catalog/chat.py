@@ -355,16 +355,56 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الخطة",
         "en": "Plan",
     },
-    "chat.plan_locked": {
+    "chat.plan_locked.zero": {
+        "ar": "تم قفل الخطة (بلا خطوات)",
+        "en": "Plan locked ({n} steps)",
+    },
+    "chat.plan_locked.one": {
+        "ar": "تم قفل الخطة (خطوة واحدة)",
+        "en": "Plan locked (1 step)",
+    },
+    "chat.plan_locked.two": {
+        "ar": "تم قفل الخطة (خطوتان)",
+        "en": "Plan locked ({n} steps)",
+    },
+    "chat.plan_locked.few": {
         "ar": "تم قفل الخطة ({n} خطوات)",
+        "en": "Plan locked ({n} steps)",
+    },
+    "chat.plan_locked.many": {
+        "ar": "تم قفل الخطة ({n} خطوة)",
+        "en": "Plan locked ({n} steps)",
+    },
+    "chat.plan_locked.other": {
+        "ar": "تم قفل الخطة ({n} خطوة)",
         "en": "Plan locked ({n} steps)",
     },
     "chat.plan_progress": {
         "ar": "الخطة {done}/{total}",
         "en": "plan {done}/{total}",
     },
-    "chat.preparing_n_tools": {
+    "chat.preparing_n_tools.zero": {
+        "ar": "جارٍ التحضير للتنفيذ…",
+        "en": "Preparing to execute {n} tools…",
+    },
+    "chat.preparing_n_tools.one": {
+        "ar": "جارٍ التحضير لتنفيذ أداة واحدة…",
+        "en": "Preparing to execute 1 tool…",
+    },
+    "chat.preparing_n_tools.two": {
+        "ar": "جارٍ التحضير لتنفيذ أداتين…",
+        "en": "Preparing to execute {n} tools…",
+    },
+    "chat.preparing_n_tools.few": {
         "ar": "جارٍ التحضير لتنفيذ {n} أدوات…",
+        "en": "Preparing to execute {n} tools…",
+    },
+    "chat.preparing_n_tools.many": {
+        "ar": "جارٍ التحضير لتنفيذ {n} أداة…",
+        "en": "Preparing to execute {n} tools…",
+    },
+    "chat.preparing_n_tools.other": {
+        "ar": "جارٍ التحضير لتنفيذ {n} أداة…",
         "en": "Preparing to execute {n} tools…",
     },
     "chat.preparing_tool": {
@@ -507,10 +547,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "توقف",
         "en": "Stopped",
     },
-    "chat.summary_tools": {
-        "ar": "{n} أدوات",
-        "en": "{n} tools",
-    },
     # Count labels: every form, picked by chat.js tiCount with t_plural's
     # CLDR rule (i18n.plural_forms). One way to print a count -- the
     # hand-built ones printed "1 approvals", "3 3 tools" and, through the
@@ -594,10 +630,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "chat.approval_expired_short": {
         "ar": "انتهت المهلة",
         "en": "expired",
-    },
-    "chat.auto_deny_seconds": {
-        "ar": "رفض تلقائي خلال {n} ثانية",
-        "en": "auto-denies in {n} seconds",
     },
     "chat.approval_expired": {
         "ar": "انتهت مهلة الموافقة — سنكمل بدون هذه الأداة.",
@@ -1253,11 +1285,51 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "هذا الاستدعاء فقط",
         "en": "This call only",
     },
-    "chat.hitl_allow_n": {
+    "chat.hitl_allow_n.zero": {
+        "ar": "السماح بهذه الأدوات للجلسة",
+        "en": "Allow these {n} tools (session)",
+    },
+    "chat.hitl_allow_n.one": {
+        "ar": "السماح بهذه الأداة للجلسة",
+        "en": "Allow this tool (session)",
+    },
+    "chat.hitl_allow_n.two": {
+        "ar": "السماح بهاتين الأداتين للجلسة",
+        "en": "Allow these {n} tools (session)",
+    },
+    "chat.hitl_allow_n.few": {
         "ar": "السماح بهذه الأدوات ({n}) للجلسة",
         "en": "Allow these {n} tools (session)",
     },
-    "chat.hitl_allow_n_title": {
+    "chat.hitl_allow_n.many": {
+        "ar": "السماح بهذه الأدوات ({n}) للجلسة",
+        "en": "Allow these {n} tools (session)",
+    },
+    "chat.hitl_allow_n.other": {
+        "ar": "السماح بهذه الأدوات ({n}) للجلسة",
+        "en": "Allow these {n} tools (session)",
+    },
+    "chat.hitl_allow_n_title.zero": {
+        "ar": "السماح بهذه الأدوات لمدة ~30 دقيقة في هذه الجلسة: {names}",
+        "en": "Allow these {n} tools for ~30m in this session: {names}",
+    },
+    "chat.hitl_allow_n_title.one": {
+        "ar": "السماح بهذه الأداة لمدة ~30 دقيقة في هذه الجلسة: {names}",
+        "en": "Allow this tool for ~30m in this session: {names}",
+    },
+    "chat.hitl_allow_n_title.two": {
+        "ar": "السماح بهاتين الأداتين لمدة ~30 دقيقة في هذه الجلسة: {names}",
+        "en": "Allow these {n} tools for ~30m in this session: {names}",
+    },
+    "chat.hitl_allow_n_title.few": {
+        "ar": "السماح بهذه الأدوات ({n}) لمدة ~30 دقيقة في هذه الجلسة: {names}",
+        "en": "Allow these {n} tools for ~30m in this session: {names}",
+    },
+    "chat.hitl_allow_n_title.many": {
+        "ar": "السماح بهذه الأدوات ({n}) لمدة ~30 دقيقة في هذه الجلسة: {names}",
+        "en": "Allow these {n} tools for ~30m in this session: {names}",
+    },
+    "chat.hitl_allow_n_title.other": {
         "ar": "السماح بهذه الأدوات ({n}) لمدة ~30 دقيقة في هذه الجلسة: {names}",
         "en": "Allow these {n} tools for ~30m in this session: {names}",
     },
@@ -1361,8 +1433,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "غير مفيد",
         "en": "Not helpful",
     },
-    "chat.session_msgs": {
-        "ar": "الرسائل: {n}",
+    "chat.session_msgs.zero": {
+        "ar": "لا رسائل",
+        "en": "{n} msgs",
+    },
+    "chat.session_msgs.one": {
+        "ar": "رسالة واحدة",
+        "en": "1 msg",
+    },
+    "chat.session_msgs.two": {
+        "ar": "رسالتان",
+        "en": "{n} msgs",
+    },
+    "chat.session_msgs.few": {
+        "ar": "{n} رسائل",
+        "en": "{n} msgs",
+    },
+    "chat.session_msgs.many": {
+        "ar": "{n} رسالة",
+        "en": "{n} msgs",
+    },
+    "chat.session_msgs.other": {
+        "ar": "{n} رسالة",
         "en": "{n} msgs",
     },
     "chat.hitl_wants_to_run": {

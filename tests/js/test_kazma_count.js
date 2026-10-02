@@ -58,6 +58,13 @@ for (const c of fixture.cases) {
 // A key the catalog does not have still shows the number, never the key.
 ok("an unknown key shows the number", byLang.ar.kazmaCount("no.such.count", 7) === "7");
 
+// The form follows the number; vars.n is how it is shown (the Dashboard's "12.3K").
+ok("a formatted number keeps the number's form",
+  byLang.ar.kazmaCount("mcp.tool_count", 13, { n: "13" }) === "13 أداة"
+  && byLang.ar.kazmaCount("mcp.tool_count", 5, { n: "٥" }) === "٥ أدوات"
+  && byLang.en.kazmaCount("mcp.tool_count", 1500, { n: "1.5K" }) === "1.5K tools",
+  [byLang.ar.kazmaCount("mcp.tool_count", 13, { n: "13" }), byLang.ar.kazmaCount("mcp.tool_count", 5, { n: "٥" })]);
+
 // Negative control: the shipped glued label, one Arabic form for every count.
 const glued = (n) => n + " " + "أدوات";
 const arOne = fixture.cases.find((c) => c.lang === "ar" && c.key === "mcp.tool_count" && c.n === 1);

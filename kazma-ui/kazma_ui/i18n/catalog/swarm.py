@@ -1312,9 +1312,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مهمة",
         "en": "tasks",
     },
-    "swarm.tasks_count_inline": {
-        "ar": "{count} مهمة",
-        "en": "{count} tasks",
+    "swarm.tasks_count_inline.zero": {
+        "ar": "لا مهام",
+        "en": "{n} tasks",
+    },
+    "swarm.tasks_count_inline.one": {
+        "ar": "مهمة واحدة",
+        "en": "1 task",
+    },
+    "swarm.tasks_count_inline.two": {
+        "ar": "مهمتان",
+        "en": "{n} tasks",
+    },
+    "swarm.tasks_count_inline.few": {
+        "ar": "{n} مهام",
+        "en": "{n} tasks",
+    },
+    "swarm.tasks_count_inline.many": {
+        "ar": "{n} مهمة",
+        "en": "{n} tasks",
+    },
+    "swarm.tasks_count_inline.other": {
+        "ar": "{n} مهمة",
+        "en": "{n} tasks",
     },
     "swarm.tasks_today": {
         "ar": "مهام اليوم",
@@ -1432,9 +1452,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "{tokens} رمز",
         "en": "{tokens} tokens",
     },
-    "swarm.tokens_inline": {
-        "ar": "{count} رمز",
-        "en": "{count} tokens",
+    "swarm.tokens_inline.zero": {
+        "ar": "لا رموز",
+        "en": "{n} tokens",
+    },
+    "swarm.tokens_inline.one": {
+        "ar": "رمز واحد",
+        "en": "1 token",
+    },
+    "swarm.tokens_inline.two": {
+        "ar": "رمزان",
+        "en": "{n} tokens",
+    },
+    "swarm.tokens_inline.few": {
+        "ar": "{n} رموز",
+        "en": "{n} tokens",
+    },
+    "swarm.tokens_inline.many": {
+        "ar": "{n} رمزًا",
+        "en": "{n} tokens",
+    },
+    "swarm.tokens_inline.other": {
+        "ar": "{n} رمز",
+        "en": "{n} tokens",
     },
     "swarm.tokens_word": {
         "ar": "رمز",

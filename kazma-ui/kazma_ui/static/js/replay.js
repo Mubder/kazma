@@ -253,7 +253,7 @@
         .then(function (r) { return r.json(); })
         .then(function (data) {
           if (data.error) { toast(tx('replay.restore_failed', 'Restore failed: {error}', { error: data.error }), 'error'); return; }
-          toast(tx('replay.restored', 'Restored iteration {n} ({count} messages)', { n: currentIteration, count: data.message_count }), 'success');
+          toast(window.kazmaCount('replay.restored', data.message_count || 0, { iteration: currentIteration }), 'success');
         })
         .catch(function () { toast(tx('replay.restore_request_failed', 'Restore request failed'), 'error'); });
     },
