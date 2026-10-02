@@ -240,7 +240,38 @@ def list_mcp_servers(
     for s in _cs_get():
         by_name[str(s["name"])] = s
 
-    return list(by_name.values())
+    return [_canonical_server(s) for s in by_name.values()]
+
+
+def _canonical_server(server: dict[str, Any]) -> dict[str, Any]:
+    """*server* as it is stored and shown: a workspace-bound one marked so,
+    with an old sandbox path in its folder argument put back to the
+    placeholder.
+
+    The connect pins a workspace-bound server's folder to the active
+    workspace whatever is stored (:mod:`kazma_core.workspace.mcp_rebind`), so
+    a concrete sandbox path in storage only misleads. The live install's
+    settings held a filesystem server written before the placeholder existed
+    (``kazma-data/workspace``, no ``workspace_bound``); the settings copy wins
+    over kazma.yaml's by name, the MCP page showed it, and the next MCP edit
+    wrote it over kazma.yaml's ``${KAZMA_ACTIVE_WORKSPACE}`` (2026-10-02). A
+    folder the operator chose stays as written.
+    """
+    from kazma_core.workspace.mcp_rebind import (
+        ACTIVE_WORKSPACE_PLACEHOLDER,
+        is_legacy_sandbox_arg,
+        is_workspace_bound_server,
+    )
+
+    if not is_workspace_bound_server(server):
+        return server
+    out = dict(server)
+    out["workspace_bound"] = True
+    command = list(out.get("command") or [])
+    if command and is_legacy_sandbox_arg(str(command[-1])):
+        command[-1] = ACTIVE_WORKSPACE_PLACEHOLDER
+        out["command"] = command
+    return out
 
 
 def _sync_config_raw(
@@ -272,7 +303,7 @@ def _write_everywhere(
     from kazma_core.mcp.secrets import externalize
 
     stored = {str(s.get("name")): s for s in before if isinstance(s, dict)}
-    servers = [externalize(s, stored.get(str(s.get("name")))) for s in servers]
+    servers = [_canonical_server(externalize(s, stored.get(str(s.get("name"))))) for s in servers]
     _cs_set(servers)
     _sync_config_raw(config_raw, servers)
     err = persist_mcp_yaml(

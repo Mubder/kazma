@@ -33,22 +33,22 @@
             <div class="mcp-card-actions">
                 {% if server.status == 'stopped' %}
                 <button class="btn btn-sm btn-primary"
-                        @click='$parent.startServer({{ server.name|tojson }})'>{{ t('mcp.start') }}</button>
+                        @click='startServer({{ server.name|tojson }})'>{{ t('mcp.start') }}</button>
                 {% else %}
                 <button class="btn btn-sm btn-secondary"
-                        @click='$parent.stopServer({{ server.name|tojson }})'>{{ t('mcp.stop') }}</button>
+                        @click='stopServer({{ server.name|tojson }})'>{{ t('mcp.stop') }}</button>
                 {% endif %}
                 <button class="btn btn-sm btn-secondary"
-                        @click='$parent.testServer({{ server.name|tojson }})'>{{ t('mcp.test') }}</button>
+                        @click='testServer({{ server.name|tojson }})'>{{ t('mcp.test') }}</button>
                 {% if server.transport != 'stdio' %}
                 <button class="btn btn-sm btn-primary"
-                        @click='$parent.oauthLogin({{ server.name|tojson }})'>{{ t('mcp.oauth_login') }}</button>
+                        @click='oauthLogin({{ server.name|tojson }})'>{{ t('mcp.oauth_login') }}</button>
                 {% endif %}
                 <button class="btn btn-sm btn-secondary" @click="expanded = !expanded">
                     <span x-text="expanded ? t('mcp.hide_tools') : t('mcp.show_tools')"></span>
                 </button>
                 <button class="btn btn-sm btn-danger"
-                        hx-delete="/api/mcp/servers/{{ server.name }}"
+                        hx-delete="/api/mcp/servers/{{ server.name|urlencode }}"
                         hx-on::after-request="showToast({{ t('mcp.server_removed')|tojson|forceescape }}, 'success')">{{ t('common.remove') }}</button>
             </div>
             <div x-show="expanded" x-cloak class="mcp-tools-list">

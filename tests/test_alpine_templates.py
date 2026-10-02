@@ -198,3 +198,62 @@ def test_negative_control_a_second_init_call_is_caught() -> None:
     assert duplicate_init_calls('<div x-data="page()" x-init="loadAll()"></div>') == []
     assert duplicate_init_calls('<div x-data="page()" x-init="editor.init()"></div>') == []
     assert duplicate_init_calls('<div x-data="page()"></div><span x-init="init()"></span>') == []
+
+
+# ── only the magics Alpine 3 has ─────────────────────────────────────────
+
+#: Alpine 3's magic properties (no plugin is loaded: base.html loads
+#: alpine.min.js alone, and no script registers one with Alpine.magic).
+#: ``$event`` is the event inside a handler.
+ALPINE_MAGICS = {
+    "$el", "$refs", "$store", "$watch", "$dispatch", "$nextTick", "$root",
+    "$data", "$id", "$event",
+}
+_MAGIC = re.compile(r"(?<![\w$.])\$[A-Za-z_]\w*")
+_THIS_MAGIC = re.compile(r"\bthis\.(\$[A-Za-z_]\w*)")
+SCRIPTS = REPO / "kazma-ui" / "kazma_ui" / "static" / "js"
+
+
+def unknown_magics(markup: str) -> list[tuple[int, str]]:
+    """``(line, name)`` of each ``$name`` a directive uses that Alpine lacks."""
+    return [
+        (line, m.group())
+        for line, _attr, value in directives_of(markup).found
+        for m in _MAGIC.finditer(value)
+        if m.group() not in ALPINE_MAGICS
+    ]
+
+
+def test_every_magic_a_template_uses_exists() -> None:
+    """The MCP page's Start, Stop, Test and OAuth buttons called
+    ``$parent.startServer(...)``: Alpine 3 has no ``$parent`` (a nested
+    ``x-data`` reaches its parent's methods by name), so every click threw
+    "ReferenceError: $parent is not defined" and did nothing, from
+    4f5eb41d until 2026-10-02. The page loaded clean, so no load-time
+    check saw it."""
+    offenders = [
+        f"{path.relative_to(REPO).as_posix()}:{line}: {name}"
+        for path in _templates()
+        for line, name in unknown_magics(path.read_text(encoding="utf-8"))
+    ]
+    offenders += [
+        f"{path.relative_to(REPO).as_posix()}: this.{name}"
+        for path in sorted(SCRIPTS.rglob("*.js"))
+        if "vendor" not in path.parts and not path.name.endswith(".min.js")
+        for name in _THIS_MAGIC.findall(path.read_text(encoding="utf-8"))
+        if name not in ALPINE_MAGICS
+    ]
+    assert not offenders, (
+        "Alpine 3 has no such magic; the expression throws when it runs:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_negative_control_the_parent_magic_is_caught() -> None:
+    shipped = """<div x-data="mcpApp()"><div x-data="{ expanded: false }">
+      <button @click='$parent.startServer("x")'>Start</button></div></div>"""
+    assert unknown_magics(shipped) == [(2, "$parent")]
+    fixed = shipped.replace("$parent.", "")
+    assert unknown_magics(fixed) == []
+    # The magics the pages do use pass.
+    assert unknown_magics('<a @click="$store.modal.open($event, $el); $refs.x">') == []

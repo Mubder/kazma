@@ -639,6 +639,10 @@ class KazmaAgent:
         Reads from the unified YAML + ConfigStore SoT.
         """
         from kazma_core.mcp.secrets import masked
+        from kazma_core.workspace.mcp_rebind import (
+            apply_workspace_to_server_config,
+            is_workspace_bound_server,
+        )
 
         servers = self.get_mcp_servers_config()
         result: list[dict[str, Any]] = []
@@ -648,8 +652,12 @@ class KazmaAgent:
             tools = []
             if is_connected:
                 tools = self.tools.get_mcp_tools_for_server(name)
-            # What a page shows: every secret "****" (kazma_core.mcp.secrets).
-            shown = masked(s)
+            # What a page shows: every secret "****" (kazma_core.mcp.secrets),
+            # and a workspace-bound server's command as it runs -- on the
+            # active workspace, which the connect pins whatever is stored.
+            # The MCP page showed the stored `kazma-data/workspace` of an old
+            # config over a server running on the install folder (2026-10-02).
+            shown = masked(apply_workspace_to_server_config(s) if is_workspace_bound_server(s) else s)
             result.append(
                 {
                     "name": name,

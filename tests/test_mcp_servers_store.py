@@ -261,3 +261,107 @@ def test_settings_service_sees_yaml_seeded_server(dual_env):
         svc = MCPSettingsService(dual_env["mock_cs"])
         names = [s.get("name") for s in svc.get_mcp_servers()]
         assert "Playwright" in names
+
+
+# ── a workspace-bound server is stored and shown as it runs (2026-10-02) ──
+
+_PLACEHOLDER = "${KAZMA_ACTIVE_WORKSPACE}"
+#: The live install's settings copy: written before the placeholder existed.
+_STALE_FILESYSTEM = {
+    "name": "filesystem",
+    "transport": "stdio",
+    "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "kazma-data/workspace"],
+}
+
+
+def _seed(dual_env) -> None:
+    dual_env["yaml_path"].write_text(yaml.safe_dump({"mcp": {"servers": [{
+        "name": "filesystem", "transport": "stdio", "workspace_bound": True,
+        "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", _PLACEHOLDER],
+        "enabled": True, "trust": "approval_required",
+    }]}}), encoding="utf-8")
+    dual_env["store_data"][CONFIG_KEY] = json.dumps([_STALE_FILESYSTEM])
+
+
+def test_a_stale_settings_copy_is_read_as_the_workspace_bound_server(dual_env):
+    _seed(dual_env)
+    (fs,) = list_mcp_servers(yaml_path=dual_env["yaml_path"])
+    assert fs["workspace_bound"] is True
+    assert fs["command"][-1] == _PLACEHOLDER
+
+
+def test_an_mcp_edit_never_writes_the_stale_copy_over_kazma_yaml(dual_env):
+    """Live 2026-10-02: replacing the sequential-thinking server wrote the
+    settings copy's `kazma-data/workspace` (and no workspace_bound) over
+    kazma.yaml's placeholder."""
+    _seed(dual_env)
+    upsert_mcp_server(
+        {"name": "sequential-thinking", "command": ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking"]},
+        yaml_path=dual_env["yaml_path"],
+    )
+    written = yaml.safe_load(dual_env["yaml_path"].read_text(encoding="utf-8"))["mcp"]["servers"]
+    fs = next(s for s in written if s["name"] == "filesystem")
+    assert fs["workspace_bound"] is True and fs["command"][-1] == _PLACEHOLDER
+    stored = next(s for s in json.loads(dual_env["store_data"][CONFIG_KEY]) if s["name"] == "filesystem")
+    assert stored["command"][-1] == _PLACEHOLDER
+
+
+def test_negative_control_without_the_canonical_form_the_fossil_is_written(dual_env, monkeypatch):
+    import kazma_core.mcp_servers_store as store
+
+    monkeypatch.setattr(store, "_canonical_server", lambda server: server)
+    _seed(dual_env)
+    upsert_mcp_server({"name": "x", "command": ["x"]}, yaml_path=dual_env["yaml_path"])
+    written = yaml.safe_load(dual_env["yaml_path"].read_text(encoding="utf-8"))["mcp"]["servers"]
+    fs = next(s for s in written if s["name"] == "filesystem")
+    assert fs["command"][-1] == "kazma-data/workspace" and "workspace_bound" not in fs
+
+
+def test_a_folder_the_operator_chose_stays_and_other_servers_are_untouched() -> None:
+    from kazma_core.mcp_servers_store import _canonical_server
+
+    chosen = {"name": "photos", "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "D:/photos"]}
+    assert _canonical_server(chosen)["command"][-1] == "D:/photos"
+    assert _canonical_server(chosen)["workspace_bound"] is True
+    other = {"name": "time", "command": ["uvx", "mcp-server-time", "kazma-data/workspace"]}
+    assert _canonical_server(other) == other
+
+
+@pytest.mark.parametrize("arg, old", [
+    ("kazma-data/workspace", True),
+    ("./kazma-data/workspace", True),
+    ("kazma-data\workspace\\", True),
+    ("data/workspace", True),
+    ("D:/photos", False),
+    ("kazma-data/workspace/sub", False),
+])
+def test_old_sandbox_spellings(arg, old) -> None:
+    from kazma_core.workspace.mcp_rebind import is_legacy_sandbox_arg
+
+    assert is_legacy_sandbox_arg(arg) is old
+
+
+def test_the_install_s_own_sandbox_matches_in_any_spelling() -> None:
+    """The absolute <data dir>/workspace was compared as typed against a
+    lowercased, slash-normalized argument: on Windows it never matched."""
+    from kazma_core.paths import data_dir
+    from kazma_core.workspace.mcp_rebind import is_legacy_sandbox_arg
+
+    sandbox = str(data_dir() / "workspace")
+    assert is_legacy_sandbox_arg(sandbox)
+    assert is_legacy_sandbox_arg(sandbox.upper().replace("\\", "/") + "/")
+
+
+def test_the_mcp_page_shows_the_folder_a_bound_server_runs_on(tmp_path, monkeypatch) -> None:
+    """The page showed the stored `kazma-data/workspace` over a server the
+    connect had pinned to the install folder."""
+    import kazma_core.workspace.mcp_rebind as rebind
+    from kazma_core.agent_runner import KazmaAgent
+
+    monkeypatch.setattr(rebind, "resolve_active_root", lambda: tmp_path)
+    fake = SimpleNamespace(
+        get_mcp_servers_config=lambda: [dict(_STALE_FILESYSTEM)],
+        tools=SimpleNamespace(is_server_connected=lambda name: False),
+    )
+    (shown,) = KazmaAgent.get_mcp_servers(fake)
+    assert shown["command"][-1] == str(tmp_path.resolve())

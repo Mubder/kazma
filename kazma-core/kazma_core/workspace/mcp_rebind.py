@@ -51,6 +51,7 @@ __all__ = [
     "apply_workspace_to_server_config",
     "install_mcp_workspace_rebind",
     "interpolate_command",
+    "is_legacy_sandbox_arg",
     "is_workspace_bound_server",
     "rebind_workspace_mcp_servers",
 ]
@@ -107,15 +108,26 @@ def interpolate_command(command: list[Any], root: Path) -> list[str]:
     return out
 
 
-def _looks_like_legacy_sandbox_arg(arg: str) -> bool:
-    """True for relative default sandbox paths we used to hardcode in yaml."""
-    norm = arg.replace("\\", "/").strip().lower()
-    return norm in (
-        str(_paths_data_dir() / "workspace"),
-        "./kazma-data/workspace",
-        "data/workspace",
-        "./data/workspace",
-    )
+def _norm_path_arg(arg: str) -> str:
+    return arg.replace("\\", "/").strip().rstrip("/").lower()
+
+
+def is_legacy_sandbox_arg(arg: str) -> bool:
+    """True for a default sandbox path an older config held in place of the
+    active workspace: relative (``kazma-data/workspace``, ``./data/workspace``)
+    or this install's own ``<data dir>/workspace``.
+
+    Both sides are compared in one form (slashes, case): the absolute one used
+    to be compared as typed against a lowercased argument, so it never
+    matched on Windows; and the bare ``kazma-data/workspace`` the live
+    install's settings held (2026-10-02) was not on the list.
+    """
+    norm = _norm_path_arg(arg)
+    if norm == _norm_path_arg(str(_paths_data_dir() / "workspace")):
+        return True
+    # Recognized by its parts, relative ("./" or not); never opened.
+    return norm.removeprefix("./").split("/") in (["kazma-data", "workspace"], ["data", "workspace"])
+
 
 
 def apply_workspace_to_server_config(
@@ -144,7 +156,7 @@ def apply_workspace_to_server_config(
         if any("server-filesystem" in str(c) for c in command):
             command[-1] = abs_root
         elif command and (
-            _looks_like_legacy_sandbox_arg(command[-1])
+            is_legacy_sandbox_arg(command[-1])
             or ACTIVE_WORKSPACE_PLACEHOLDER in str(cfg.get("command", [])[-1:])
         ):
             command[-1] = abs_root

@@ -2587,8 +2587,8 @@
     _v2gSyncOpsBar();
     _v2gToast(
       mode === 'link'
-        ? 'Link mode: click source, then target'
-        : 'Merge mode: click source (retire), then target (keep)',
+        ? _mt('memory.console.link_mode_hint', 'Link mode: click the source, then the target')
+        : _mt('memory.console.merge_mode_hint', 'Merge mode: click the one to retire, then the one to keep'),
       'info'
     );
   }

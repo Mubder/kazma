@@ -1,5 +1,46 @@
 # CHANGELOG
 
+## The MCP page's buttons work, and its messages follow the page language (2026-10-02)
+
+Found while switching the live install's sequential-thinking server to the
+certified preset.
+
+- **Start, Stop, Test and OAuth login did nothing.** Each card button
+  called `$parent.startServer(...)`. Alpine 3 has no `$parent`; a card's
+  own scope already reaches the page's methods by name. Every click threw
+  "ReferenceError: $parent is not defined". A test required that form,
+  on the belief that the card could not see the page's methods. It now runs
+  each button's real expression against the page's real code, the way
+  Alpine resolves it, and the old form is its negative control.
+- **Remove asks first.** Removing a server also forgets the keys saved for
+  it; it used to go at the first click. The request now carries the
+  server's name URL-encoded.
+- **Messages in the page's language.** The MCP page's toasts (server
+  started, stopped, tested, added, removed, the OAuth steps) were English
+  on the Arabic page, as were two Documents toasts ("Split", "Redacted")
+  and the memory graph's link and merge hints.
+- **The filesystem server is stored and shown as it runs.** It always runs
+  on the active workspace: the connect pins its folder. But the live
+  install's settings held a copy saved before the
+  `${KAZMA_ACTIVE_WORKSPACE}` placeholder existed, with
+  `kazma-data/workspace` and no `workspace_bound`. That copy wins over
+  kazma.yaml's by name, the MCP page showed it, and the next MCP edit wrote
+  it over kazma.yaml. Every read and write of the MCP store now puts a
+  workspace-bound server back in canonical form (the placeholder and
+  `workspace_bound: true`, a folder you chose kept as written), and the page
+  shows the folder the server runs on. The check for old sandbox spellings
+  missed the bare `kazma-data/workspace`, and on Windows its absolute form
+  never matched.
+- **Gates.** `tests/test_alpine_templates.py`: every `$name` a template's
+  directives use (and every `this.$name` in a script) is a magic Alpine 3
+  has, with the shipped `$parent` card as the negative control.
+  `tests/test_scripts_have_no_english.py`: a page's own wrapper of a toast
+  or dialog (`notify(message)` calling `showToast(message)`) is found from
+  the source and read like the toast. The gate knew only the shared names,
+  so 19 English strings passed it; a negative control shows the old gate
+  saw none of them. `tests/js/test_mcp_remove_confirm.js`: declining sends
+  nothing.
+
 ## `kazma update` stops and restarts a supervised Kazma itself (2026-10-02)
 
 Earlier the same day, the update refused while the server ran and printed

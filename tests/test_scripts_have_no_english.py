@@ -341,6 +341,132 @@ def english_in(toks: list[Tok], lo: int, hi: int, helpers: set[str]) -> list[Tok
 _CALL_SINKS = {"showToast", "toast", "kazmaAlert", "kazmaConfirm", "kazmaPrompt", "showModal", "alert", "confirm", "prompt"}
 #: Calls whose whole argument (an options object) a person reads.
 _WHOLE_ARGUMENT = {"kazmaAlert", "kazmaConfirm", "kazmaPrompt", "showModal"}
+#: The shared sinks: name -> the argument a person reads (None: all of them).
+BASE_SINKS: dict[str, int | None] = {
+    name: (None if name in _WHOLE_ARGUMENT else 0) for name in _CALL_SINKS
+}
+_NOT_A_NAME = {"if", "for", "while", "switch", "catch", "function", "return", "with", "typeof", "new"}
+
+
+def _arguments(toks: list[Tok], open_paren: int) -> list[tuple[int, int]]:
+    """The ``(lo, hi)`` token span of each argument of the call whose
+    ``(`` is ``toks[open_paren]``."""
+    close = matching(toks, open_paren)
+    out: list[tuple[int, int]] = []
+    lo = open_paren + 1
+    while lo < close:
+        hi = min(value_end(toks, lo), close)
+        out.append((lo, hi))
+        lo = hi + 1
+    return out
+
+
+def _definitions(toks: list[Tok]) -> list[tuple[str, list[str], int, int]]:
+    """``(name, parameters, body_lo, body_hi)`` of each function the tokens
+    define: ``function f(a)``, ``f = function (a)``, ``f: function (a)``,
+    ``f = (a) => ...``, ``f = a => ...`` and a method ``f(a) { ... }``."""
+    out: list[tuple[str, list[str], int, int]] = []
+    n = len(toks)
+    for k, t in enumerate(toks):
+        if t.kind != "id":
+            continue
+        name, open_paren, single = "", -1, ""
+        if t.text == "function":
+            j = k + 1
+            if j < n and toks[j].kind == "id":
+                name, j = toks[j].text, j + 1
+            else:
+                b = k - 1 - (k >= 1 and toks[k - 1].text == "async")
+                if b >= 1 and toks[b].text in ("=", ":") and toks[b - 1].kind == "id":
+                    name = toks[b - 1].text
+            if j < n and toks[j].text == "(":
+                open_paren = j
+        elif t.text in _NOT_A_NAME or k + 1 >= n:
+            continue
+        elif toks[k + 1].text == "=" and k + 2 < n:
+            # NAME = (a, b) => ...   |   NAME = a => ...   |   NAME = async (a) => ...
+            j = k + 2 + (toks[k + 2].text == "async")
+            if j < n and toks[j].text == "(":
+                end = matching(toks, j)
+                if end + 2 < n and toks[end + 1].text == "=" and toks[end + 2].text == ">":
+                    name, open_paren = t.text, j
+            elif (j + 2 < n and toks[j].kind == "id" and toks[j + 1].text == "="
+                  and toks[j + 2].text == ">"):
+                name, single = t.text, toks[j].text
+        elif toks[k + 1].text == "(" and (k == 0 or toks[k - 1].text in ("{", ",", ";", "}", "async")):
+            end = matching(toks, k + 1)
+            if end + 1 < n and toks[end + 1].text == "{":
+                name, open_paren = t.text, k + 1
+        if not name:
+            continue
+        if single:
+            params, after = [single], k + 6 if toks[k + 2].text == "async" else k + 5
+        elif open_paren >= 0:
+            params = [toks[lo].text for lo, _hi in _arguments(toks, open_paren) if toks[lo].kind == "id"]
+            after = matching(toks, open_paren) + 1
+            if after + 1 < n and toks[after].text == "=" and toks[after + 1].text == ">":
+                after += 2
+        else:
+            continue
+        if after < n and toks[after].text == "{":
+            out.append((name, params, after + 1, matching(toks, after)))
+        elif after < n:
+            out.append((name, params, after, value_end(toks, after)))
+    return out
+
+
+def _sink_calls(toks: list[Tok], lo: int, hi: int, sinks: dict[str, int | None]):
+    """``(name, read_lo, read_hi)`` for each call of a sink in ``toks[lo:hi]``:
+    the span of the argument a person reads (all of them for an options
+    object)."""
+    for k in range(lo, hi):
+        t = toks[k]
+        if t.kind != "id" or t.text not in sinks or k + 1 >= hi or toks[k + 1].text != "(":
+            continue
+        prv = toks[k - 1].text if k else ""
+        if prv == "function":
+            continue
+        if prv == "." and t.text not in BASE_SINKS and toks[k - 2].text != "this":
+            continue  # another object's method of the same name
+        if prv == "." and t.text in ("alert", "confirm", "prompt") and toks[k - 2].text != "window":
+            continue
+        idx = sinks[t.text]
+        if idx is None:
+            yield t.text, k + 2, matching(toks, k + 1)
+            continue
+        args = _arguments(toks, k + 1)
+        if idx < len(args):
+            yield t.text, args[idx][0], args[idx][1]
+
+
+def sinks_found(sources: list[tuple[str, str]]) -> dict[str, int | None]:
+    """The shared sinks and every function that hands a parameter to one.
+
+    A page's own ``notify(message, type)`` that calls ``showToast(message,
+    type)`` is a sink too: until 2026-10-02 the MCP page's messages went
+    through it, in English, and this gate never looked. Found again until
+    nothing new turns up (a wrapper of a wrapper).
+    """
+    sinks = dict(BASE_SINKS)
+    defs = []
+    for _name, src in sources:
+        toks = lex(src)
+        defs += [(name, params, toks, lo, hi) for name, params, lo, hi in _definitions(toks)]
+    changed = True
+    while changed:
+        changed = False
+        for name, params, toks, lo, hi in defs:
+            if name in sinks or not params:
+                continue
+            for _sink, rlo, rhi in _sink_calls(toks, lo, hi, sinks):
+                read = {toks[j].text for j in range(rlo, rhi)
+                        if toks[j].kind == "id" and toks[j - 1].text != "."}
+                hit = [i for i, p in enumerate(params) if p in read]
+                if hit:
+                    sinks[name] = hit[0]
+                    changed = True
+                    break
+    return sinks
 #: Properties a person reads.
 _TEXT_PROPS = {"title", "textContent", "innerText", "placeholder", "ariaLabel", "alt"}
 _TEXT_ATTRS = {"title", "aria-label", "placeholder", "alt"}
@@ -420,7 +546,8 @@ def english_in_html(toks: list[Tok], lo: int, hi: int, helpers: set[str]) -> lis
     return [owner[k] for k, chars in text.items() if _is_english_text("".join(chars))]
 
 
-def english_at_sinks(src: str, helpers: set[str]) -> list[Tok]:
+def english_at_sinks(src: str, helpers: set[str], sinks: dict[str, int | None] | None = None) -> list[Tok]:
+    sinks = BASE_SINKS if sinks is None else sinks
     toks = lex(src)
     found: list[Tok] = []
     for k, t in enumerate(toks):
@@ -440,13 +567,21 @@ def english_at_sinks(src: str, helpers: set[str]) -> list[Tok]:
             if first_end < len(toks) and toks[first_end].text == ",":
                 found.extend(english_in_html(toks, first_end + 1, matching(toks, k + 1), helpers))
             continue
-        if t.kind == "id" and t.text in _CALL_SINKS and nxt == "(":
+        if t.kind == "id" and t.text in sinks and nxt == "(":
             if prv == "." and t.text in ("alert", "confirm", "prompt") and toks[k - 2].text != "window":
                 continue
+            if prv == "." and t.text not in BASE_SINKS and toks[k - 2].text != "this":
+                continue  # another object's method that shares a wrapper's name
             if prv == "function":
                 continue
-            close = matching(toks, k + 1)
-            span = (k + 2, close if t.text in _WHOLE_ARGUMENT else min(close, value_end(toks, k + 2)))
+            idx = sinks[t.text]
+            if idx is None:
+                span = (k + 2, matching(toks, k + 1))
+            else:
+                args = _arguments(toks, k + 1)
+                if idx >= len(args):
+                    continue
+                span = args[idx]
         elif t.kind == "id" and t.text in _TEXT_PROPS and prv == "." and nxt == "=" and (k + 2 >= len(toks) or toks[k + 2].text != "="):
             span = (k + 2, value_end(toks, k + 2))
         elif (
@@ -473,6 +608,11 @@ def helpers(sources) -> set[str]:
     return translation_helpers(sources)
 
 
+@pytest.fixture(scope="module")
+def sinks(sources) -> dict[str, int | None]:
+    return sinks_found(sources)
+
+
 def test_the_scan_reads_the_scripts(sources, helpers) -> None:
     names = {name for name, _src in sources}
     assert "static/js/chat.js" in names and "templates/workspace.html" in names
@@ -480,11 +620,11 @@ def test_the_scan_reads_the_scripts(sources, helpers) -> None:
     assert {"ti", "tiFmt", "_k", "_mt", "tx", "_tx", "_tr"} <= helpers, sorted(helpers)
 
 
-def test_no_script_writes_english_a_person_reads(sources, helpers) -> None:
+def test_no_script_writes_english_a_person_reads(sources, helpers, sinks) -> None:
     english = [
         f"{name}:{tok.line}: {tok.text[:90]}"
         for name, src in sources
-        for tok in english_at_sinks(src, helpers)
+        for tok in english_at_sinks(src, helpers, sinks)
     ]
     assert not english, (
         "Text a person reads is written in English here, whatever the page "
@@ -658,3 +798,53 @@ def test_a_strings_table_holds_every_key_its_script_reads(script) -> None:
 def test_negative_control_a_missing_table_key_is_caught() -> None:
     html = "<script>window.__KB_STRINGS = {\n  a: {{ t('x') | tojson }},\n};</script>"
     assert keys_read("toast(S.a || 'A'); toast(S.b || 'B');") - table_keys(html, "__KB_STRINGS") == {"b"}
+
+
+# ── a page's own wrapper of a sink is a sink ─────────────────────────────
+
+
+_WRAPPED = """
+function notify(message, type) {
+    if (typeof window.showToast === 'function') { window.showToast(message, type); return; }
+}
+function notifyOAuthError(message) {
+    if (window.kazmaAlert) { window.kazmaAlert({ title: 'x', message: message }); return; }
+    notify(message, 'error');
+}
+notify('Server stopped', 'info');
+notifyOAuthError('Browser login failed');
+"""
+
+
+def test_a_pages_own_wrapper_is_read_like_the_sink(helpers) -> None:
+    """mcp.js sent its messages through notify(message, type), which calls
+    showToast: the gate knew only showToast by name, so 15 English toasts
+    passed it until 2026-10-02."""
+    sinks = sinks_found([("page.js", _WRAPPED)])
+    assert sinks["notify"] == 0 and sinks["notifyOAuthError"] == 0
+    found = {t.text.strip("'") for t in english_at_sinks(_WRAPPED, helpers, sinks)}
+    assert found == {"Server stopped", "Browser login failed"}, found
+
+
+def test_negative_control_without_the_wrappers_the_gate_was_blind(helpers) -> None:
+    assert english_at_sinks(_WRAPPED, helpers) == []
+
+
+@pytest.mark.parametrize("snippet", [
+    # An arrow, a method called through this, the message as the 2nd parameter.
+    "const say = (msg) => showToast(msg); say('Saved the profile');",
+    "x = { flash(m) { showToast(m, 'info'); }, go() { this.flash('Profile saved'); } };",
+    "function report(err, text) { showToast(text); } report(e, 'Upload finished');",
+])
+def test_wrappers_of_every_shape_are_found(snippet, helpers) -> None:
+    sinks = sinks_found([("page.js", snippet)])
+    assert english_at_sinks(snippet, helpers, sinks), snippet
+
+
+def test_a_wrapper_called_with_a_translated_or_variable_argument_passes(helpers) -> None:
+    src = _WRAPPED.split("notify('Server")[0] + (
+        "notify(_mcpT('mcp.ui.stopped', 'Server stopped'), 'info');\n"
+        "notify(result.error, 'error');\n"
+    )
+    sinks = sinks_found([("page.js", src)])
+    assert english_at_sinks(src, {"_mcpT", *helpers}, sinks) == []

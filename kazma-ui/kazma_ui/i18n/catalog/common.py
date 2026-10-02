@@ -1826,6 +1826,66 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "خطأ غير معروف",
         "en": "unknown error",
     },
+    "mcp.ui.request_failed_status": {
+        "ar": "فشل الطلب ({status})",
+        "en": "Request failed ({status})",
+    },
+    "mcp.ui.removal_unconfirmed": {
+        "ar": "لم يؤكد الخادم الإزالة.",
+        "en": "The server did not confirm the removal.",
+    },
+    "mcp.ui.remove_confirm_title": {
+        "ar": "إزالة {name}؟",
+        "en": "Remove {name}?",
+    },
+    "mcp.ui.remove_confirm_body": {
+        "ar": "يوقف Kazma هذا الخادم وينسى إعداداته وأي مفاتيح محفوظة له.",
+        "en": "Kazma stops this server and forgets its settings and any keys saved for it.",
+    },
+    "mcp.ui.remove_error": {
+        "ar": "تعذّرت إزالة الخادم: {error}",
+        "en": "Failed to remove server: {error}",
+    },
+    "mcp.ui.test_failed_not_saved": {
+        "ar": "فشل الاختبار — لم يُحفظ الخادم. انظر الخطأ في النموذج.",
+        "en": "Test failed — server not saved. See the error in the form.",
+    },
+    "mcp.ui.added_tools": {
+        "ar": "أُضيف الخادم. الأدوات: {n}",
+        "en": "Server added. Tools: {n}",
+    },
+    "mcp.ui.started_tools": {
+        "ar": "بدأ تشغيل الخادم. الأدوات: {n}",
+        "en": "Server started. Tools: {n}",
+    },
+    "mcp.ui.start_error": {
+        "ar": "تعذّر تشغيل الخادم: {error}",
+        "en": "Failed to start server: {error}",
+    },
+    "mcp.ui.stopped": {
+        "ar": "أُوقف الخادم",
+        "en": "Server stopped",
+    },
+    "mcp.ui.stop_error": {
+        "ar": "تعذّر إيقاف الخادم: {error}",
+        "en": "Failed to stop server: {error}",
+    },
+    "mcp.ui.testing": {
+        "ar": "جارٍ اختبار الاتصال…",
+        "en": "Testing connection…",
+    },
+    "mcp.ui.connected_tools": {
+        "ar": "تم الاتصال. الأدوات: {n}",
+        "en": "Connected. Tools: {n}",
+    },
+    "mcp.ui.oauth_starting": {
+        "ar": "يبدأ تسجيل الدخول عبر OAuth — أكمل الدخول في متصفحك…",
+        "en": "Starting OAuth login — complete the sign-in in your browser…",
+    },
+    "mcp.ui.oauth_opened": {
+        "ar": "فُتحت صفحة الدخول في المتصفح. ارجع إلى هنا بعد الدخول، ثم اضغط «تشغيل».",
+        "en": "Browser login opened. Return here after signing in, then press Start.",
+    },
     "common.ui.model_not_switched": {
         "ar": "لم يُبدَّل النموذج: {error}",
         "en": "Model not switched: {error}",
