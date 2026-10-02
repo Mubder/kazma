@@ -310,6 +310,17 @@ workspace. Three new modules; understanding their interaction is essential.
   configuration only: `_canonical_server` drops the runtime fields
   (`_RUNTIME_FIELDS`: status, connected, tool counts...), which `upsert`
   wrote into kazma.yaml for every server.
+- **The running server never writes kazma.yaml's MCP servers**
+  (2026-10-02): it is a tracked file, and every page's MCP change left the
+  live checkout modified, so a `git pull` touching kazma.yaml refused to
+  merge (the swarm templates' lesson, §14). Writes go to the settings store
+  (`mcp.servers`) and config.raw; a kazma.yaml server removed from a page is
+  named in `mcp.removed_servers` (written in the same `batch_set`) and left
+  out of the merge, and adding it again clears it. The one write left is
+  `move_plaintext_secrets` swapping typed secrets for pointers
+  (`_write_everywhere(rewrite_yaml=...)`, the file's own list kept). Gate:
+  `test_only_the_secrets_mover_rewrites_kazma_yaml`
+  (`tests/test_mcp_servers_store.py`).
 - **The manager's connect pins, and keeps failures per server**
   (`AsyncMCPManager.connect_from_config`, 2026-10-02). A workspace-bound
   config no caller pinned (no `_resolved_workspace`) starts on the active

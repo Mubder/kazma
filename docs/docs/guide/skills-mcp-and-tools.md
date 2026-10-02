@@ -251,7 +251,7 @@ The `/mcp` page provides a visual **Add Server** modal that replaces manual YAML
    A blue notice explains the rewrite so you know what changed.
 3. **Validate-before-save** — before persisting, the server connection is tested via `/api/mcp/test-config`. If it fails (spawn error, 0 tools, bad key), the error + subprocess stderr is shown inline and the server is **not saved**. No more "0 tools, no idea why."
 
-Servers added via the UI are persisted to `kazma.yaml` (atomic write) and survive restarts.
+Servers added, changed or removed through the pages are kept in Kazma's settings and survive restarts. Kazma never writes them into `kazma.yaml`: it is a tracked file in your install's folder, and a change there makes a later `git pull` refuse to update it. `kazma.yaml` is the starting list and the place to add a server by hand; removing one of its servers from a page keeps it out of the list without editing the file (the setting `mcp.removed_servers`), and adding it again brings it back. The one exception: a key typed into `kazma.yaml` is moved into the vault, and the file keeps a `vault://` pointer in its place. Until 2026-10-02 every change from a page rewrote `kazma.yaml`.
 
 The filesystem server always works on the active workspace: Kazma passes the workspace folder when it starts the server, and again after **Switch Repo**. It is stored with the `${KAZMA_ACTIVE_WORKSPACE}` placeholder and `workspace_bound: true`, and an old saved copy with a fixed sandbox path is read and saved back in that form. The card shows the folder the server runs on.
 

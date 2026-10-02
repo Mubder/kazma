@@ -606,7 +606,7 @@ class KazmaAgent:
     # ── MCP server config management ───────────────────────────────
 
     def _mcp_yaml_path(self) -> str:
-        """Resolve the shipped kazma.yaml path for dual-write persistence."""
+        """The kazma.yaml path: the MCP seed, written only to swap typed secrets for vault pointers."""
         return str(getattr(self.config, "config_path", None) or CONFIG_FILE)
 
     def _move_mcp_secrets_to_vault(self) -> None:
@@ -741,7 +741,8 @@ class KazmaAgent:
         auth: dict[str, str] | None = None,
         trust: Literal["trusted", "approval_required", "sandboxed"] = "approval_required",
     ) -> dict[str, str]:
-        """Add an MCP server and dual-write ConfigStore + kazma.yaml.
+        """Add an MCP server to the settings store (``mcp_servers_store``; the
+        running server never writes kazma.yaml).
 
         Returns ``{"status": "ok"}`` on success or
         ``{"status": "error", "error": "..."}`` if a duplicate name exists
@@ -780,12 +781,13 @@ class KazmaAgent:
         except ValueError as exc:
             return {"status": "error", "error": str(exc)}
         except Exception as exc:
-            logger.warning("[MCP] dual-write failed for add: %s", exc)
+            logger.warning("[MCP] could not save the new server: %s", exc)
             return {"status": "error", "error": f"Persist failed: {exc}"}
         return {"status": "ok"}
 
     def remove_mcp_server(self, name: str) -> dict[str, str]:
-        """Remove an MCP server from ConfigStore + yaml + config.raw.
+        """Remove an MCP server from the settings store + config.raw (a server
+        kazma.yaml lists is recorded as removed; the file is not written).
 
         Returns ``{"status": "ok"}`` on success or
         ``{"status": "error", "error": "..."}`` if persistence fails. Does
@@ -800,29 +802,9 @@ class KazmaAgent:
                 yaml_path=self._mcp_yaml_path(),
             )
         except Exception as exc:
-            logger.warning("[MCP] dual-write failed for remove: %s", exc)
+            logger.warning("[MCP] could not save the removal: %s", exc)
             return {"status": "error", "error": f"Removed in-memory but not persisted: {exc}"}
         return {"status": "ok"}
-
-    def _persist_mcp_servers(self) -> str | None:
-        """Write the current ``mcp.servers`` list to ConfigStore + kazma.yaml.
-
-        Kept for callers that mutate ``config.raw`` then flush. Prefer
-        :meth:`add_mcp_server` / :meth:`remove_mcp_server` which dual-write
-        via :mod:`kazma_core.mcp_servers_store`.
-        """
-        from kazma_core.mcp_servers_store import sync_mcp_servers
-
-        servers = list(self.config.raw.get("mcp", {}).get("servers", []))
-        try:
-            return sync_mcp_servers(
-                servers,
-                config_raw=self.config.raw,
-                yaml_path=self._mcp_yaml_path(),
-            )
-        except Exception as exc:
-            logger.warning("[MCP] dual persist failed: %s", exc)
-            return str(exc)
 
     # ── LLM config ─────────────────────────────────────────────────
 

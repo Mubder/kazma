@@ -179,6 +179,8 @@ KEY_RULES: tuple[KeyRule, ...] = (
     KeyRule("llm.", SETTING, "the LLM connection kazma.yaml or the environment sets"),
     KeyRule("logging.", SETTING, "log levels"),
     KeyRule("mcp.servers", SETTING, "MCP servers (merged by name; their keys follow the key rule)"),
+    KeyRule("mcp.removed_servers", SETTING, "MCP servers removed from a page that kazma.yaml still "
+            "lists (the running server never writes kazma.yaml)"),
     KeyRule("memory.", SETTING, "memory settings"),
     KeyRule("models.", SETTING, "model profiles and per-task defaults"),
     KeyRule("notifications.", SETTING, "which messages go where"),

@@ -1,10 +1,10 @@
 """MCP settings service — extracted from settings_manager (S5).
 
 Reads and writes go through :mod:`kazma_core.mcp_servers_store` so the
-Settings page and the ``/mcp`` page share one dual-written SoT
-(ConfigStore + ``kazma.yaml``). The previous ConfigStore-only path was
-why Settings Test reported "Server not found" for servers added via
-``/mcp`` Add Server.
+Settings page and the ``/mcp`` page share one source of truth (the settings
+store over the kazma.yaml seed, which the running server never writes). The
+previous ConfigStore-only path was why Settings Test reported "Server not
+found" for servers added via ``/mcp`` Add Server.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def _resolve_live_agent() -> Any:
 
 
 def _agent_config_raw() -> dict[str, Any] | None:
-    """Best-effort resolve of the live agent's config.raw for dual-write sync."""
+    """Best-effort resolve of the live agent's config.raw, kept in step with each write."""
     agent = _resolve_live_agent()
     cfg = getattr(agent, "config", None)
     raw = getattr(cfg, "raw", None)
@@ -96,7 +96,7 @@ class MCPSettingsService:
         )
 
     def add_mcp_server(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Add a new MCP server (dual-write ConfigStore + yaml); returns it masked."""
+        """Add a new MCP server to the settings store; returns it masked."""
         from kazma_core.mcp.secrets import masked
         from kazma_core.mcp_servers_store import upsert_mcp_server
 
@@ -117,13 +117,13 @@ class MCPSettingsService:
             return {"error": str(exc)}
 
     def delete_mcp_server(self, name: str) -> dict[str, Any]:
-        """Remove an MCP server from both stores.
+        """Remove an MCP server.
 
         Returns ``{"status": "ok"}`` or ``{"status": "error", "error": ...}``.
-        After writing, re-reads the merged store and verifies the server is
-        actually gone — a failed/misdirected yaml write otherwise lets the
-        disk copy resurrect the server on the next read (no tombstones in
-        the merge), while the API still reported success.
+        The agent's own kazma.yaml path is required: whether the seed lists
+        the server decides that it is recorded as removed, and a wrong file
+        would let it come back. After writing, re-reads the merged store and
+        verifies the server is actually gone.
         """
         from kazma_core.mcp_servers_store import delete_mcp_server
 
@@ -132,7 +132,7 @@ class MCPSettingsService:
             return {
                 "status": "error",
                 "error": "Cannot resolve the live agent's config path — deletion aborted "
-                "rather than writing the wrong kazma.yaml",
+                "rather than reading the wrong kazma.yaml",
             }
         try:
             delete_mcp_server(
@@ -151,8 +151,8 @@ class MCPSettingsService:
                 return {
                     "status": "error",
                     "error": (
-                        f"Server '{name}' reappeared after delete — the on-disk "
-                        "kazma.yaml was not updated (check write permissions/lock)."
+                        f"Server '{name}' is still listed after the delete — the "
+                        "settings could not be saved."
                     ),
                 }
         except Exception:
@@ -160,7 +160,7 @@ class MCPSettingsService:
         return {"status": "ok"}
 
     def toggle_mcp_server(self, name: str, enabled: bool) -> bool:
-        """Switch an MCP server on or off (dual-write); False when there is
+        """Switch an MCP server on or off (the settings store); False when there is
         no such server. The Settings route applies it to the running server.
 
         Test is the MCP page's route; the copy here started a workspace-bound

@@ -58,6 +58,7 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     cs = MagicMock()
     cs.get.side_effect = lambda key, default=None: data.get(key, default)
     cs.set.side_effect = lambda key, value, category="general": data.__setitem__(key, value)
+    cs.batch_set.side_effect = lambda items: [data.__setitem__(k, v) for k, v, _c in items]
     import kazma_core.settings_mcp as settings_mcp
 
     monkeypatch.setattr(settings_mcp, "_agent_yaml_path", lambda: str(yaml_path))
@@ -84,10 +85,11 @@ def test_runtime_fields_are_never_stored(store) -> None:
     upsert_mcp_server({"name": "time", "command": ["uvx", "mcp-server-time"], **RUNTIME}, yaml_path=store.yaml_path)
     import json
 
-    for stored in (json.loads(store.data["mcp.servers"]), _on_disk(store.yaml_path), list_mcp_servers(yaml_path=store.yaml_path)):
+    for stored in (json.loads(store.data["mcp.servers"]), list_mcp_servers(yaml_path=store.yaml_path)):
         (row,) = stored
         assert not set(row) & set(RUNTIME), row
         assert row["command"] == ["uvx", "mcp-server-time"] and row["enabled"] is True
+    assert _on_disk(store.yaml_path) == []  # kazma.yaml is never written
 
 
 def test_an_old_row_reads_without_them(store) -> None:
@@ -105,9 +107,11 @@ def test_an_old_row_reads_without_them(store) -> None:
 def test_negative_control_without_the_rule_they_are_stored(store, monkeypatch) -> None:
     import kazma_core.mcp_servers_store as mss
 
+    import json
+
     monkeypatch.setattr(mss, "_RUNTIME_FIELDS", frozenset())
     mss.upsert_mcp_server({"name": "time", "command": ["uvx", "mcp-server-time"], **RUNTIME}, yaml_path=store.yaml_path)
-    (row,) = _on_disk(store.yaml_path)
+    (row,) = json.loads(store.data["mcp.servers"])
     assert row["connected"] is True and row["tool_count"] == 14
 
 
