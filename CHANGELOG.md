@@ -29,6 +29,10 @@ the refusal.
   run that repair. Each function that runs an installer now refuses while
   the server answers, so no path can replace packages under it.
 - **The "packages are behind" alert names the one command.**
+- **The update's output reads as one account.** On the first live run the
+  guard's own events (`maintenance.pause_requested {...}`) were echoed among
+  the update's lines, and out of order once the output was redirected. They
+  now go to `guard.log` only; the guard's own console still shows them.
 - **Gates:** `tests/test_package_update_on_a_guarded_install.py` (each
   outcome, the git update, every installer found from the source, with a
   negative control) and `tests/test_guard_integration.py` (the real guard

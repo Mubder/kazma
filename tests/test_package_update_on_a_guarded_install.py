@@ -423,7 +423,7 @@ def api(monkeypatch, tmp_path):
     guard = _guard()
     monkeypatch.setenv("KAZMA_GUARD_STATE", str(tmp_path / "state.json"))
     monkeypatch.setenv("KAZMA_GUARD_PAUSE_FILE", str(tmp_path / "paused"))
-    monkeypatch.setattr(guard, "GuardLog", lambda path: _Log())
+    monkeypatch.setattr(guard, "GuardLog", lambda path, **kw: _Log())
     return guard
 
 
@@ -497,6 +497,25 @@ def test_a_taken_over_pause_stays_when_the_guard_does_not_hold(api, monkeypatch)
     api.write_pause("update", 600)
     assert api.stop_for_maintenance("update", hold_timeout_s=0) == "not_held"
     assert api.read_pause()["reason"] == "update"
+
+
+def test_the_api_records_its_events_without_echoing_them(monkeypatch, tmp_path, capsys) -> None:
+    """The update prints its own account of what it asked the guard; the
+    guard's raw events go to guard.log only. They echoed into the update's
+    output (first live run, 2026-10-02), out of order once redirected."""
+    guard = _guard()
+    log_file = tmp_path / "guard.log"
+    monkeypatch.setenv("KAZMA_GUARD_STATE", str(tmp_path / "state.json"))
+    monkeypatch.setenv("KAZMA_GUARD_PAUSE_FILE", str(tmp_path / "paused"))
+    monkeypatch.setenv("KAZMA_GUARD_LOG", str(log_file))
+    monkeypatch.setattr(guard, "_guard_alive", lambda: True)
+    guard.write_pause("update", 600)
+    assert guard.resume_after_maintenance("update", wait=False) == "resumed"
+    assert "maintenance.resume_requested" in log_file.read_text(encoding="utf-8")
+    assert "[guard]" not in capsys.readouterr().err
+    # Negative control: the guard's own logger (its console, --pause) mirrors.
+    guard.GuardLog(tmp_path / "other.log")("info", "probe.event")
+    assert "[guard] info  probe.event" in capsys.readouterr().err
 
 
 def test_resume_lifts_only_its_own_pause(api, monkeypatch) -> None:
