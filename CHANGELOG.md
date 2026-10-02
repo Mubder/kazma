@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## A chat kept out of memory from its first message stays out (2026-10-02)
+
+- **"Don't remember this chat" holds from the start.** A web chat is
+  stored under two ids, a session id and a thread id, and the thread id is
+  saved with the first message. Memory switched off before that put the
+  chat's ledger row under the session id alone, while the catch-up sweep
+  (turn reconcile) writes a chat's turns under its thread id. On the live
+  install a test chat kept out from the start reached memory: two turns
+  and two facts. The episode writer now checks the ledger under every id
+  the chat has when it writes, so a row under either id keeps the chat
+  out. The lookup reads the two ids only, never the conversation.
+- **Gate:** `tests/test_memory_forget.py` (a chat kept out before its
+  first message; the old one-id check as the negative control).
+
 ## A refused agent skill is logged when it is used, not on every turn (2026-10-02)
 
 - Showing a skill's verdict (the model's skill catalog, which is built on

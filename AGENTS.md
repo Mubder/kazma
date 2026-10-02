@@ -952,6 +952,10 @@ has decided otherwise, and every path that rebuilds memory must respect it.
   store). `dual_write.mirror_episode` asks it FIRST (`refuses_write`) -- it
   embeds, upserts the remote index and mirrors to Postgres even when its
   insert is ignored -- and so do the swarm bridge and the legacy restore.
+  It asks under every id the chat has WHEN IT WRITES (2026-10-02): a web
+  chat's thread id is saved with its first message, so a chat kept out
+  before that has its row under the session id alone, and turn reconcile
+  writes under the thread id; a test chat on live reached memory that way.
   Every product site that inserts an episode is declared in
   `tests/test_memory_forget.py`, and the live writers must ask the ledger.
 - The facts a forgotten turn produced (`source_session`/`source_turn`) are

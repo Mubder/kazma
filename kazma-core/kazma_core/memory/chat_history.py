@@ -200,6 +200,63 @@ def conversations_for(
     return out
 
 
+def _id_rows(keys: list[str], sqlite_path: Path | None) -> list[dict[str, Any]]:
+    """``session_id`` and ``thread_id`` of every stored copy (the spool and the
+    primary store) that one of *keys* names as either id -- never the
+    messages. Raises what the store raises."""
+    wanted = set(keys)
+    sessions = _sessions_path(sqlite_path)
+    rows: list[dict[str, Any]] = [
+        {"session_id": s.get("session_id"), "thread_id": s.get("thread_id")}
+        for s in _spooled(sessions)
+        if s.get("session_id") in wanted or s.get("thread_id") in wanted
+    ]
+    for start in range(0, len(keys), 400):
+        part = keys[start: start + 400]
+        if sqlite_path is None and _postgres():
+            from kazma_core.db.pg_helpers import get_pool
+
+            rows.extend(get_pool().execute(
+                "SELECT session_id, thread_id FROM kazma_chat_sessions "
+                "WHERE session_id = ANY(%s) OR thread_id = ANY(%s)",
+                [part, part],
+            ))
+            continue
+        conn = _ro(sessions)
+        if conn is None:
+            break
+        try:
+            marks = ",".join("?" for _ in part)
+            rows.extend(dict(r) for r in conn.execute(
+                f"SELECT session_id, thread_id FROM sessions "
+                f"WHERE session_id IN ({marks}) OR thread_id IN ({marks})",
+                (*part, *part),
+            ).fetchall())
+        finally:
+            conn.close()
+    return rows
+
+
+def ids_of(key: str, *, sqlite_path: Path | None = None) -> list[str]:
+    """Every id the chat *key* names is stored under, *key* first: its session
+    id and its thread id (a web chat's differ). Just *key* when the store holds
+    no copy of it or cannot be read."""
+    out = [key] if key else []
+    if not key:
+        return out
+    try:
+        rows = _id_rows([key], sqlite_path)
+    except STORE_ERRORS as exc:
+        if not _never_created(exc):
+            logger.debug("[chat_history] ids of %s unreadable", key, exc_info=True)
+        return out
+    for r in rows:
+        for k in (r.get("session_id"), r.get("thread_id")):
+            if k and str(k) not in out:
+                out.append(str(k))
+    return out
+
+
 def chat_ids(keys: Iterable[str], *, sqlite_path: Path | None = None) -> dict[str, str]:
     """The conversation each key names: ``key -> its session id``.
 
@@ -213,34 +270,8 @@ def chat_ids(keys: Iterable[str], *, sqlite_path: Path | None = None) -> dict[st
     out = {k: k for k in wanted}
     if not wanted:
         return out
-    sessions = _sessions_path(sqlite_path)
-    rows: list[dict[str, Any]] = []
     try:
-        for s in _spooled(sessions):
-            rows.append({"session_id": s.get("session_id"), "thread_id": s.get("thread_id")})
-        for start in range(0, len(wanted), 400):
-            part = wanted[start: start + 400]
-            if sqlite_path is None and _postgres():
-                from kazma_core.db.pg_helpers import get_pool
-
-                rows.extend(get_pool().execute(
-                    "SELECT session_id, thread_id FROM kazma_chat_sessions "
-                    "WHERE session_id = ANY(%s) OR thread_id = ANY(%s)",
-                    [part, part],
-                ))
-                continue
-            conn = _ro(sessions)
-            if conn is None:
-                break
-            try:
-                marks = ",".join("?" for _ in part)
-                rows.extend(dict(r) for r in conn.execute(
-                    f"SELECT session_id, thread_id FROM sessions "
-                    f"WHERE session_id IN ({marks}) OR thread_id IN ({marks})",
-                    (*part, *part),
-                ).fetchall())
-            finally:
-                conn.close()
+        rows = _id_rows(wanted, sqlite_path)
     except STORE_ERRORS as exc:
         if not _never_created(exc):
             logger.debug("[chat_history] chat ids unreadable -- each key is its own chat", exc_info=True)

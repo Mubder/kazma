@@ -351,8 +351,11 @@ class DualWriteMirror:
             # (plan U1, memory/forget.py): nothing is written -- not the row,
             # and not the embedding, remote vector or mirror below, which run
             # even when the insert is ignored. Every episode write reaches this.
-            from kazma_core.memory.forget import refuses_write
+            from kazma_core.memory.forget import chat_keys, refuses_write
 
+            # Every id of the chat (a chat-store read): outside the lock that
+            # serializes the local writes.
+            keys = chat_keys(session_id)
             with self._lock:
                 refused = refuses_write(
                     self._primary,
@@ -360,6 +363,7 @@ class DualWriteMirror:
                     session_id=session_id,
                     turn_number=row["turn_number"],
                     user_text=row["user_text"],
+                    keys=keys,
                 )
             if refused:
                 logger.debug("[dual_write] turn kept out of memory by the user: %s", eid)
