@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 
 #: Calls that return the catalog's text in the page's language.
-TRANSLATORS = ("t", "tOr", "i18n", "ti", "tiFmt", "tiCount", "tx", "_k", "kazmaT")
+TRANSLATORS = ("t", "tOr", "i18n", "ti", "tiFmt", "tiCount", "tx", "_k", "kazmaT", "kazmaCount")
 
 #: A field that holds text data.
 TEXT_FIELD = re.compile(

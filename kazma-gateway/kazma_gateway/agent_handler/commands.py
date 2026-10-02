@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from kazma_core.english_count import count_noun
 from kazma_gateway.gateway import IncomingMessage, OutboundMessage, SessionStore
 from .store import _build_target_id
 from .swarm_dispatch import (
@@ -505,7 +506,7 @@ async def _try_ide_command(
         lang = res.get("lang", "plaintext")
         await _send_model_reply(
             msg, store, manager, thread_id,
-            f"📄 `{rel}` ({res['lines']} lines)\n```{lang}\n{res['content']}\n```",
+            f"📄 `{rel}` ({count_noun(res['lines'], 'line')})\n```{lang}\n{res['content']}\n```",
         )
         return True
 
@@ -921,7 +922,7 @@ async def _try_kb_command(
         for lib in libs:
             lines.append(
                 f"• `{lib['id']}` — {lib['name']} "
-                f"({lib['chunk_count']} chunks)"
+                f"({count_noun(lib['chunk_count'], 'chunk')})"
             )
             if lib.get("seed_url"):
                 lines.append(f"   seed: {lib['seed_url']}")
@@ -957,7 +958,7 @@ async def _try_kb_command(
             await _send_model_reply(
                 msg, store, manager, thread_id,
                 f"✅ Ingested 1 page into `{lib_id}`: "
-                f"{result.chunks_new} new chunks (+{result.chunks_skipped} deduped)."
+                f"{count_noun(result.chunks_new, 'new chunk')} (+{result.chunks_skipped} deduped)."
                 + (f"\n⚠️ {len(result.errors)} error(s)." if result.errors else ""),
             )
         except Exception as exc:
@@ -1198,7 +1199,7 @@ async def _try_kb_command(
             else:
                 await _send_model_reply(
                     msg, store, manager, thread_id,
-                    f"📊 `{lib_id}`: {lib['chunk_count']} chunks "
+                    f"📊 `{lib_id}`: {count_noun(lib['chunk_count'], 'chunk')} "
                     f"(no active crawl).",
                 )
             return True
@@ -1466,7 +1467,7 @@ async def _try_documents_command(
                     msg, store, manager, thread_id,
                     (
                         f"📄 Converted → `{data.get('artifact_id')}`\n"
-                        f"format: {out.get('extension')} ({out.get('size')} bytes)\n"
+                        f"format: {out.get('extension')} ({count_noun(out.get('size') or 0, 'byte')})\n"
                         "Download from the Web UI Documents page."
                     ),
                 )
@@ -1716,7 +1717,7 @@ async def _try_model_command(
                 reply_ctx = dict(ctx)
                 reply_ctx["reply_markup"] = keyboard
                 model_lines = "\n".join(
-                    f"  • {p['display_name']} ({len(p['models'])} models)"
+                    f"  • {p['display_name']} ({count_noun(len(p['models']), 'model')})"
                     for p in providers
                 )
                 await manager.send(OutboundMessage(
@@ -1734,7 +1735,7 @@ async def _try_model_command(
         # Text fallback (non-Telegram or keyboard build failed)
         lines = ["Available providers:\n"]
         for p in providers:
-            lines.append(f"  {p['display_name']} — {len(p['models'])} models")
+            lines.append(f"  {p['display_name']} — {count_noun(len(p['models']), 'model')}")
             for m in p["models"][:5]:
                 active = " *(active)*" if _is_active_model(m) else ""
                 lines.append(f"    {m}{active}")

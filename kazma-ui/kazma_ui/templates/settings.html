@@ -3390,7 +3390,7 @@
                                         {{ t('settings.xt.subject_label') }} <span translate="no" x-text="xReplyPreview.result.subject || '—'"></span>
                                         · <span x-text="(xReplyPreview.result.draft || '').length"></span>/280
                                         <span x-show="xReplyPreview.result.knowledge && xReplyPreview.result.knowledge.used" x-cloak>
-                                            · <span x-text="t('settings.xt.kb_hits').replace('{n}', xReplyPreview.result.knowledge.hits)"></span>
+                                            · <span x-text="kazmaCount('settings.xt.kb_hits', xReplyPreview.result.knowledge.hits || 0)"></span>
                                             <span translate="no" x-show="(xReplyPreview.result.knowledge.libraries || []).length" x-cloak
                                                   x-text="' ' + t('settings.xt.kb_from').replace('{libs}', (xReplyPreview.result.knowledge.libraries || []).join(', '))"></span>
                                         </span>

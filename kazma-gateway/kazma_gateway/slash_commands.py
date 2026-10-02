@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from kazma_core.english_count import count_noun
+
 if TYPE_CHECKING:
     pass
 
@@ -460,8 +462,8 @@ def _cmd_cost(ctx: dict[str, Any]) -> str:
     if not isinstance(tokens, int) or not isinstance(cost, (int, float)) or not isinstance(calls, int):
         return "💰 Session cost: unknown (the cost ledger could not be read)."
     text = (
-        f"💰 Session cost: `${cost:.4f}` ({tokens:,} tokens, "
-        f"{calls:,} model call{'' if calls == 1 else 's'})"
+        f"💰 Session cost: `${cost:.4f}` ({count_noun(tokens, 'token')}, "
+        f"{count_noun(calls, 'model call')})"
     )
     if tokens and not cost:
         text += " — no price is recorded for this chat's models"

@@ -26,6 +26,7 @@ from typing import Any
 
 import httpx
 
+from kazma_core.english_count import count_noun
 from kazma_core.http_tls import shared_ssl_context
 from kazma_gateway.adapters.slack_receive import SLACK_REASONS
 from kazma_gateway.connector_test import Checks, judge_message, listening, show, when
@@ -142,21 +143,21 @@ def _with_connection_count(
     seen = show(when(live.get("slack_open_connections_at")))
     if False in reached:
         return None, (
-            f"{said} But when Kazma connected ({seen}) Slack counted {shared} open connections "
+            f"{said} But when Kazma connected ({seen}) Slack counted {count_noun(shared, 'open connection')} "
             "for this app, and a message checked above never reached Kazma: Slack hands each "
             "message to one connection, so another program connected to this app is taking some "
             "of Kazma's messages. Stop it, or give it its own Slack app."
         )
     if True in reached:
         return ok, (
-            f"{said} When Kazma connected ({seen}) Slack counted {shared} open connections for "
+            f"{said} When Kazma connected ({seen}) Slack counted {count_noun(shared, 'open connection')} for "
             "this app. The messages checked above reached Kazma, so the extra one is most likely "
             "a connection that ended without closing, which Slack counts until it notices (that "
             "can take hours). If a message ever fails to reach Kazma, another program connected "
             "to this app is taking it."
         )
     return None, (
-        f"{said} When Kazma connected ({seen}) Slack counted {shared} open connections for "
+        f"{said} When Kazma connected ({seen}) Slack counted {count_noun(shared, 'open connection')} for "
         "this app, and it hands each message to one of them. Send the bot a few messages and "
         "Test again: if one never reaches Kazma, another program connected to this app is "
         "taking it (stop it, or give it its own Slack app); if all arrive, the extra one is a "

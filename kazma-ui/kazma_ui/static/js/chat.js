@@ -4097,7 +4097,7 @@
     }
     m = /^Agent wants to run (\d+) danger tools: ([\s\S]*)$/.exec(s);
     if (m) {
-      return escapeHtml(tiFmt('hitl_wants_to_run_n', 'Agent wants to run {n} danger tools:', { n: m[1] })) +
+      return escapeHtml(tiCount('hitl_wants_to_run_n', Number(m[1]), 'Agent wants to run 1 danger tool:', 'Agent wants to run {n} danger tools:')) +
         ' <bdi dir="ltr" translate="no">' + escapeHtml(m[2]) + '</bdi>';
     }
     return s ? '<bdi translate="no">' + escapeHtml(s) + '</bdi>' : '';

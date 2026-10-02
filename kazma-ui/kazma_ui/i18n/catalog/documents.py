@@ -27,9 +27,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "اسم المكتبة التي سيُضاف إليها هذا المستند:",
         "en": "Name of the library to add this document to:",
     },
-    "documents.library_added": {
+    "documents.library_added.zero": {
+        "ar": "لم يُضف أي مقطع إلى «{library}».",
+        "en": "Added {n} passages to “{library}”.",
+    },
+    "documents.library_added.one": {
+        "ar": "أُضيف مقطع واحد إلى «{library}».",
+        "en": "Added 1 passage to “{library}”.",
+    },
+    "documents.library_added.two": {
+        "ar": "أُضيف مقطعان إلى «{library}».",
+        "en": "Added {n} passages to “{library}”.",
+    },
+    "documents.library_added.few": {
+        "ar": "أُضيفت {n} مقاطع إلى «{library}».",
+        "en": "Added {n} passages to “{library}”.",
+    },
+    "documents.library_added.many": {
+        "ar": "أُضيف {n} مقطعًا إلى «{library}».",
+        "en": "Added {n} passages to “{library}”.",
+    },
+    "documents.library_added.other": {
         "ar": "أُضيف {n} مقطع إلى «{library}».",
-        "en": "Added {n} passage(s) to “{library}”.",
+        "en": "Added {n} passages to “{library}”.",
     },
     "documents.library_failed": {
         "ar": "تعذّرت الإضافة إلى المكتبة: {error}",
@@ -127,9 +147,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "معاينة المحتوى",
         "en": "Content preview",
     },
-    "documents.pages_n": {
-        "ar": "الصفحات: {n}",
-        "en": "{n} page(s)",
+    "documents.pages_n.zero": {
+        "ar": "لا صفحات",
+        "en": "{n} pages",
+    },
+    "documents.pages_n.one": {
+        "ar": "صفحة واحدة",
+        "en": "1 page",
+    },
+    "documents.pages_n.two": {
+        "ar": "صفحتان",
+        "en": "{n} pages",
+    },
+    "documents.pages_n.few": {
+        "ar": "{n} صفحات",
+        "en": "{n} pages",
+    },
+    "documents.pages_n.many": {
+        "ar": "{n} صفحة",
+        "en": "{n} pages",
+    },
+    "documents.pages_n.other": {
+        "ar": "{n} صفحة",
+        "en": "{n} pages",
     },
     "documents.empty": {
         "ar": "(فارغ)",
@@ -459,13 +499,53 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشل الحذف (الشبكة)",
         "en": "Delete failed (network)",
     },
-    "documents.js.gc_confirm": {
-        "ar": "وجدت التجربة المسبقة {n} عنصرًا للحذف (نحو {size} قابلة للاستعادة). لا يُزال أبدًا محتوى مُشار إليه ولا الإصدارات الحالية. هل تتابع؟",
-        "en": "Dry-run found {n} item(s) to delete (~{size} reclaimable). Referenced content and current versions are never removed. Proceed?",
+    "documents.js.gc_confirm.zero": {
+        "ar": "لم تجد التجربة المسبقة شيئًا للحذف (نحو {size} قابلة للاستعادة). لا يُزال أبدًا محتوى مُشار إليه ولا الإصدارات الحالية. هل تتابع؟",
+        "en": "Dry-run found {n} items to delete (~{size} reclaimable). Referenced content and current versions are never removed. Proceed?",
     },
-    "documents.js.gc_done": {
+    "documents.js.gc_confirm.one": {
+        "ar": "وجدت التجربة المسبقة عنصرًا واحدًا للحذف (نحو {size} قابلة للاستعادة). لا يُزال أبدًا محتوى مُشار إليه ولا الإصدارات الحالية. هل تتابع؟",
+        "en": "Dry-run found 1 item to delete (~{size} reclaimable). Referenced content and current versions are never removed. Proceed?",
+    },
+    "documents.js.gc_confirm.two": {
+        "ar": "وجدت التجربة المسبقة عنصرين للحذف (نحو {size} قابلة للاستعادة). لا يُزال أبدًا محتوى مُشار إليه ولا الإصدارات الحالية. هل تتابع؟",
+        "en": "Dry-run found {n} items to delete (~{size} reclaimable). Referenced content and current versions are never removed. Proceed?",
+    },
+    "documents.js.gc_confirm.few": {
+        "ar": "وجدت التجربة المسبقة {n} عناصر للحذف (نحو {size} قابلة للاستعادة). لا يُزال أبدًا محتوى مُشار إليه ولا الإصدارات الحالية. هل تتابع؟",
+        "en": "Dry-run found {n} items to delete (~{size} reclaimable). Referenced content and current versions are never removed. Proceed?",
+    },
+    "documents.js.gc_confirm.many": {
+        "ar": "وجدت التجربة المسبقة {n} عنصرًا للحذف (نحو {size} قابلة للاستعادة). لا يُزال أبدًا محتوى مُشار إليه ولا الإصدارات الحالية. هل تتابع؟",
+        "en": "Dry-run found {n} items to delete (~{size} reclaimable). Referenced content and current versions are never removed. Proceed?",
+    },
+    "documents.js.gc_confirm.other": {
+        "ar": "وجدت التجربة المسبقة {n} عنصر للحذف (نحو {size} قابلة للاستعادة). لا يُزال أبدًا محتوى مُشار إليه ولا الإصدارات الحالية. هل تتابع؟",
+        "en": "Dry-run found {n} items to delete (~{size} reclaimable). Referenced content and current versions are never removed. Proceed?",
+    },
+    "documents.js.gc_done.zero": {
+        "ar": "لم يستعد التنظيف أي كتلة، {size}",
+        "en": "GC reclaimed {n} blobs, {size}",
+    },
+    "documents.js.gc_done.one": {
+        "ar": "استعاد التنظيف كتلة واحدة، {size}",
+        "en": "GC reclaimed 1 blob, {size}",
+    },
+    "documents.js.gc_done.two": {
+        "ar": "استعاد التنظيف كتلتين، {size}",
+        "en": "GC reclaimed {n} blobs, {size}",
+    },
+    "documents.js.gc_done.few": {
+        "ar": "استعاد التنظيف {n} كتل، {size}",
+        "en": "GC reclaimed {n} blobs, {size}",
+    },
+    "documents.js.gc_done.many": {
         "ar": "استعاد التنظيف {n} كتلة، {size}",
-        "en": "GC reclaimed {n} blob(s), {size}",
+        "en": "GC reclaimed {n} blobs, {size}",
+    },
+    "documents.js.gc_done.other": {
+        "ar": "استعاد التنظيف {n} كتلة، {size}",
+        "en": "GC reclaimed {n} blobs, {size}",
     },
     "documents.js.upload_not_authed": {
         "ar": "فشل الرفع: غير مصادَق (أعد تسجيل الدخول / اضبط السر)",
@@ -511,9 +591,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مثل رقم الحساب أو رقم الهوية",
         "en": "e.g. account number, SSN",
     },
-    "documents.js.redact_confirm": {
+    "documents.js.redact_confirm.zero": {
+        "ar": "تنقيح المصطلحات فعليًا؟ ينتج هذا مخرجًا جديدًا متحققًا منه بشكل مستقل وغير قابل للتعديل، ولا يغيّر الأصل.",
+        "en": "Physically redact {n} terms? This produces a new, independently-verified immutable artifact and cannot alter the original.",
+    },
+    "documents.js.redact_confirm.one": {
+        "ar": "تنقيح مصطلح واحد فعليًا؟ ينتج هذا مخرجًا جديدًا متحققًا منه بشكل مستقل وغير قابل للتعديل، ولا يغيّر الأصل.",
+        "en": "Physically redact 1 term? This produces a new, independently-verified immutable artifact and cannot alter the original.",
+    },
+    "documents.js.redact_confirm.two": {
+        "ar": "تنقيح مصطلحين فعليًا؟ ينتج هذا مخرجًا جديدًا متحققًا منه بشكل مستقل وغير قابل للتعديل، ولا يغيّر الأصل.",
+        "en": "Physically redact {n} terms? This produces a new, independently-verified immutable artifact and cannot alter the original.",
+    },
+    "documents.js.redact_confirm.few": {
+        "ar": "تنقيح {n} مصطلحات فعليًا؟ ينتج هذا مخرجًا جديدًا متحققًا منه بشكل مستقل وغير قابل للتعديل، ولا يغيّر الأصل.",
+        "en": "Physically redact {n} terms? This produces a new, independently-verified immutable artifact and cannot alter the original.",
+    },
+    "documents.js.redact_confirm.many": {
         "ar": "تنقيح {n} مصطلحًا فعليًا؟ ينتج هذا مخرجًا جديدًا متحققًا منه بشكل مستقل وغير قابل للتعديل، ولا يغيّر الأصل.",
-        "en": "Physically redact {n} term(s)? This produces a new, independently-verified immutable artifact and cannot alter the original.",
+        "en": "Physically redact {n} terms? This produces a new, independently-verified immutable artifact and cannot alter the original.",
+    },
+    "documents.js.redact_confirm.other": {
+        "ar": "تنقيح {n} مصطلح فعليًا؟ ينتج هذا مخرجًا جديدًا متحققًا منه بشكل مستقل وغير قابل للتعديل، ولا يغيّر الأصل.",
+        "en": "Physically redact {n} terms? This produces a new, independently-verified immutable artifact and cannot alter the original.",
     },
     "documents.js.archive_confirm": {
         "ar": "أرشفة «{label}»؟\n\nيغادر المستند مكتبتك (حذف مرن). تُزال مدخلات فهرس البحث. تبقى البيانات الأصلية حتى يستعيد التنظيف المساحة غير المُشار إليها — ولا يمكن التراجع عن ذلك من الواجهة.",

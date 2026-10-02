@@ -160,9 +160,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الاسم المعروض",
         "en": "Display name",
     },
-    "knowledge.page_ingested": {
-        "ar": "تم ابتلاع صفحة واحدة — {chunks} مقطع جديد.",
-        "en": "Ingested 1 page — {chunks} new chunks.",
+    "knowledge.page_ingested.zero": {
+        "ar": "تم ابتلاع صفحة واحدة — لا مقاطع جديدة.",
+        "en": "Ingested 1 page — {n} new chunks.",
+    },
+    "knowledge.page_ingested.one": {
+        "ar": "تم ابتلاع صفحة واحدة — مقطع جديد واحد.",
+        "en": "Ingested 1 page — 1 new chunk.",
+    },
+    "knowledge.page_ingested.two": {
+        "ar": "تم ابتلاع صفحة واحدة — مقطعان جديدان.",
+        "en": "Ingested 1 page — {n} new chunks.",
+    },
+    "knowledge.page_ingested.few": {
+        "ar": "تم ابتلاع صفحة واحدة — {n} مقاطع جديدة.",
+        "en": "Ingested 1 page — {n} new chunks.",
+    },
+    "knowledge.page_ingested.many": {
+        "ar": "تم ابتلاع صفحة واحدة — {n} مقطعًا جديدًا.",
+        "en": "Ingested 1 page — {n} new chunks.",
+    },
+    "knowledge.page_ingested.other": {
+        "ar": "تم ابتلاع صفحة واحدة — {n} مقطع جديد.",
+        "en": "Ingested 1 page — {n} new chunks.",
     },
     "knowledge.page_ingested_failed": {
         "ar": "فشل الابتلاع: {error}",
@@ -352,9 +372,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "المصدر:",
         "en": "seed:",
     },
-    "knowledge.hits_count": {
-        "ar": "النتائج: {n}",
-        "en": "{n} hit(s)",
+    "knowledge.hits_count.zero": {
+        "ar": "لا نتائج",
+        "en": "{n} hits",
+    },
+    "knowledge.hits_count.one": {
+        "ar": "نتيجة واحدة",
+        "en": "1 hit",
+    },
+    "knowledge.hits_count.two": {
+        "ar": "نتيجتان",
+        "en": "{n} hits",
+    },
+    "knowledge.hits_count.few": {
+        "ar": "{n} نتائج",
+        "en": "{n} hits",
+    },
+    "knowledge.hits_count.many": {
+        "ar": "{n} نتيجة",
+        "en": "{n} hits",
+    },
+    "knowledge.hits_count.other": {
+        "ar": "{n} نتيجة",
+        "en": "{n} hits",
     },
     "knowledge.hit_score": {
         "ar": "الدرجة",

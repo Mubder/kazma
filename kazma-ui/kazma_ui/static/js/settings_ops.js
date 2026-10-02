@@ -1188,7 +1188,7 @@
                     this.backupRunning = false;
                     this.backupResult = data.result || { ok: true };
                     if (this.backupResult.ok) {
-                        showToast(_t('settings.backup_complete', 'Backup complete: {dbs} DBs, {mb} MB', {dbs: this.backupResult.databases_ok, mb: this.backupResult.total_size_mb}), 'success');
+                        showToast(window.kazmaCount('settings.backup_complete', this.backupResult.databases_ok || 0, {mb: this.backupResult.total_size_mb}), 'success');
                     }
                     await this.loadBackupList();
                 } else if (data.phase === 'error') {

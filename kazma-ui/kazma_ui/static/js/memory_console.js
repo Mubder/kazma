@@ -212,8 +212,8 @@
       else errN++;
     });
     var parts = [_mt('memory.console.group_ok', '{ok}/{n} OK', { ok: okN, n: cards.length })];
-    if (warnN) parts.push(_mt('memory.console.group_warn', '{n} warn', { n: warnN }));
-    if (errN) parts.push(_mt('memory.console.group_err', '{n} err', { n: errN }));
+    if (warnN) parts.push(window.kazmaCount('memory.console.group_warn', warnN));
+    if (errN) parts.push(window.kazmaCount('memory.console.group_err', errN));
     if (offN) parts.push(_mt('memory.console.group_off', '{n} off', { n: offN }));
     return parts.join(' · ');
   }
@@ -846,7 +846,7 @@
         if (failedQ > 0 || hasErr || h.status === 'DEGRADED') {
           banner.style.display = 'block';
           const parts = [];
-          if (failedQ > 0) parts.push(_mt('memory.console.banner_failed', '{n} failed queue task(s)', { n: failedQ }));
+          if (failedQ > 0) parts.push(window.kazmaCount('memory.console.banner_failed', failedQ));
           if (pt.last_error || h.last_error) parts.push(_mt('memory.console.banner_last_error', 'last post-turn error recorded'));
           if (h.status === 'DEGRADED') parts.push(_mt('memory.console.banner_degraded', 'status DEGRADED'));
           if (bannerText) bannerText.textContent = ' ' + (parts.join(' · ') || _mt('memory.console.banner_check', 'Check queue and post-turn strip.'));
@@ -1125,7 +1125,7 @@
     try {
       const r = await fetch('/api/memory/v2/queue/clear-failed', { method: 'POST' });
       const d = await r.json();
-      if (window.showToast) window.showToast(d.ok ? _mt('memory.console.cleared_failed', 'Cleared {n} failed', { n: d.deleted || 0 }) : (d.error || d.detail || _mt('memory.console.failed', 'Failed')), d.ok ? 'success' : 'error');
+      if (window.showToast) window.showToast(d.ok ? window.kazmaCount('memory.console.cleared_failed', d.deleted || 0) : (d.error || d.detail || _mt('memory.console.failed', 'Failed')), d.ok ? 'success' : 'error');
       loadV2Queue();
       pollV2Health();
     } catch (e) { /* silent */ }
@@ -2899,10 +2899,7 @@
       {
         title: _mt('memory.console.cut_hub_title', 'Cut hub shortcut'),
         message:
-          (edges.length === 1
-            ? _mt('memory.console.cut_hub_message_one', 'Remove 1 direct link to the hub (you)?')
-            : _mt('memory.console.cut_hub_message', 'Remove {n} direct links to the hub (you)?', { n: edges.length })) +
-          hint,
+          window.kazmaCount('memory.console.cut_hub_message', edges.length) + hint,
         confirmText: edges.length > 1
           ? _mt('memory.console.cut_hub_links', 'Cut hub links')
           : _mt('memory.console.cut_hub_link', 'Cut hub link'),
@@ -3840,8 +3837,8 @@
             }),
             {
               title: _mt('memory.console.cut_all_title', 'Cut all connections'),
-              message: _mt('memory.console.cut_all_message', 'Detach “{name}” from all {n} neighbor(s)? Node shell stays.', {
-                name: _v2gDisplayName(p), n: all.length,
+              message: window.kazmaCount('memory.console.cut_all_message', all.length, {
+                name: _v2gDisplayName(p),
               }),
               confirmText: _mt('memory.console.cut_all', 'Cut all'),
             }

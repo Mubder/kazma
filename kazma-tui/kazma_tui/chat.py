@@ -10,6 +10,8 @@ from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Input, ListItem, ListView, ProgressBar, RichLog, Static
 
+from kazma_core.english_count import count_noun
+
 __all__ = ["ChatPanel", "ROLE_HEX"]
 
 logger = logging.getLogger(__name__)
@@ -542,7 +544,7 @@ class ChatPanel(Vertical):
             self.write("error", f"Could not load season #{hit.short_id}: {exc}")
             return
         hint = (
-            f"Loaded #{hit.short_id}  {hit.title}  ({n} msgs). "
+            f"Loaded #{hit.short_id}  {hit.title}  ({count_noun(n, 'message')}). "
             "Next messages continue this season on the same supervisor."
         )
         if n == 0:
@@ -569,7 +571,7 @@ class ChatPanel(Vertical):
         tail = self._messages[-40:]
         skipped = max(0, len(self._messages) - len(tail))
         if skipped:
-            self.write("system", f"Showing last {len(tail)} of {len(self._messages)} messages.")
+            self.write("system", f"Showing last {len(tail)} of {count_noun(len(self._messages), 'message')}.")
         for m in tail:
             role = str(m.get("role") or "assistant")
             content = str(m.get("content") or "")
@@ -1051,7 +1053,7 @@ class ChatPanel(Vertical):
                         f"  Iteration {rec.get('iteration')}  |  "
                         f"{rec.get('timestamp') or '?'}  |  "
                         f"model={rec.get('model') or '?'}  |  "
-                        f"{rec.get('message_count', 0)} msgs"
+                        f"{count_noun(rec.get('message_count') or 0, 'message')}"
                     )
                 self.write("system", "\n".join(lines))
                 return
@@ -1081,7 +1083,7 @@ class ChatPanel(Vertical):
                 self.write(
                     "system",
                     f"Snapshot {iteration}  |  model={data.get('model') or '?'}  |  "
-                    f"{data.get('message_count', 0)} messages",
+                    f"{count_noun(data.get('message_count') or 0, 'message')}",
                 )
                 return
 
@@ -1101,7 +1103,7 @@ class ChatPanel(Vertical):
             self.write(
                 "system",
                 f"Rewound season to iteration {iteration} "
-                f"({loaded} messages). Next send continues from here.",
+                f"({count_noun(loaded, 'message')}). Next send continues from here.",
             )
         except Exception as e:
             self.write("error", f"Replay command failed: {e}")
@@ -1143,7 +1145,7 @@ class ChatPanel(Vertical):
                 n = int((data or {}).get("message_count") or 0)
             self.write(
                 "system",
-                f"Forked iteration {iteration} → #{new_tid[-8:]} ({n} msgs). "
+                f"Forked iteration {iteration} → #{new_tid[-8:]} ({count_noun(n, 'message')}). "
                 "This mouth is now on the new season.",
             )
         except Exception as e:
@@ -1198,7 +1200,7 @@ class ChatPanel(Vertical):
             )
             self.write(
                 "system",
-                f"Exported {len(msgs)} live-server messages to:\n  {md_path}\n  {json_path}",
+                f"Exported {count_noun(len(msgs), 'live-server message')} to:\n  {md_path}\n  {json_path}",
             )
         except Exception as e:
             self.write("error", f"Export failed: {e}")
@@ -1242,7 +1244,7 @@ class ChatPanel(Vertical):
                     data = await self._api("GET", "/api/swarm/status")
                     workers = (data or {}).get("workers") or []
                     if sub == "status":
-                        lines = [f"Swarm Status ({len(workers)} workers, live API):"]
+                        lines = [f"Swarm Status ({count_noun(len(workers), 'worker')}, live API):"]
                         for w in workers:
                             name = w.get("name") or "?"
                             model = w.get("model") or "?"

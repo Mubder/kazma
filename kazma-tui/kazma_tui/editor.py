@@ -17,6 +17,8 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen, Screen
 from textual.widgets import Button, Input, RichLog, Static, TextArea
 
+from kazma_core.english_count import count_noun
+
 __all__ = ["EditorScreen", "PromptScreen"]
 
 logger = logging.getLogger(__name__)
@@ -177,7 +179,7 @@ class EditorScreen(Screen[None]):
                 text_area.language = lang
             except Exception as exc:  # language not registered in this build
                 logger.debug("TextArea language unsupported: %s (%s)", lang, exc)
-        self._set_status(f"Loaded {result.get('lines', 0)} lines · lang={lang}")
+        self._set_status(f"Loaded {count_noun(result.get('lines') or 0, 'line')} · lang={lang}")
 
     # ── Actions ──────────────────────────────────────────────────────────
 

@@ -13,6 +13,7 @@ from kazma_core.constants import (
     TELEGRAM_MAX_CHAT_ID,
     VALID_OUTPUT_PLATFORMS,
 )
+from kazma_core.english_count import count_noun
 from kazma_core.exceptions import sanitize_error
 from kazma_gateway.gateway import IncomingMessage, OutboundMessage, SessionStore
 from kazma_gateway.telegram_format import format_swarm_task_result, md_to_tg_html
@@ -563,7 +564,7 @@ async def _dispatch_swarm_from_chat(
         # as CANCELLED — its workers' partial work is discarded, nothing runs
         # in the background. The old "may still be running" message lied.
         error_reply = (
-            f"⚠️ Swarm task cancelled after {wait_budget / 60:.0f} minutes "
+            f"⚠️ Swarm task cancelled after {count_noun(round(wait_budget / 60), 'minute')} "
             "(gateway wait budget). Partial work was discarded — re-dispatch "
             "with a narrower prompt or fewer steps."
         )

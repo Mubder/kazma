@@ -1128,13 +1128,53 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "جزئي",
         "en": "Partial",
     },
-    "swarm.status_running": {
-        "ar": "● السرب يعمل — {count} عامل نشط",
-        "en": "● Swarm running — {count} worker(s) active",
+    "swarm.status_running.zero": {
+        "ar": "● السرب يعمل — لا يوجد عمال نشطون",
+        "en": "● Swarm running — {n} workers active",
     },
-    "swarm.status_stopped": {
-        "ar": "● السرب متوقف — {count} عامل مسجل",
-        "en": "● Swarm stopped — {count} worker(s) registered",
+    "swarm.status_running.one": {
+        "ar": "● السرب يعمل — عامل نشط واحد",
+        "en": "● Swarm running — 1 worker active",
+    },
+    "swarm.status_running.two": {
+        "ar": "● السرب يعمل — عاملان نشطان",
+        "en": "● Swarm running — {n} workers active",
+    },
+    "swarm.status_running.few": {
+        "ar": "● السرب يعمل — {n} عمال نشطين",
+        "en": "● Swarm running — {n} workers active",
+    },
+    "swarm.status_running.many": {
+        "ar": "● السرب يعمل — {n} عاملًا نشطًا",
+        "en": "● Swarm running — {n} workers active",
+    },
+    "swarm.status_running.other": {
+        "ar": "● السرب يعمل — {n} عامل نشط",
+        "en": "● Swarm running — {n} workers active",
+    },
+    "swarm.status_stopped.zero": {
+        "ar": "● السرب متوقف — لا يوجد عمال مسجلون",
+        "en": "● Swarm stopped — {n} workers registered",
+    },
+    "swarm.status_stopped.one": {
+        "ar": "● السرب متوقف — عامل مسجل واحد",
+        "en": "● Swarm stopped — 1 worker registered",
+    },
+    "swarm.status_stopped.two": {
+        "ar": "● السرب متوقف — عاملان مسجلان",
+        "en": "● Swarm stopped — {n} workers registered",
+    },
+    "swarm.status_stopped.few": {
+        "ar": "● السرب متوقف — {n} عمال مسجلين",
+        "en": "● Swarm stopped — {n} workers registered",
+    },
+    "swarm.status_stopped.many": {
+        "ar": "● السرب متوقف — {n} عاملًا مسجلًا",
+        "en": "● Swarm stopped — {n} workers registered",
+    },
+    "swarm.status_stopped.other": {
+        "ar": "● السرب متوقف — {n} عامل مسجل",
+        "en": "● Swarm stopped — {n} workers registered",
     },
     "swarm.status_timeout": {
         "ar": "انتهت المهلة",
@@ -1199,14 +1239,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "swarm.swarm_idle": {
         "ar": "السرب خامل",
         "en": "swarm idle",
-    },
-    "swarm.swarm_running_workers": {
-        "ar": "السرب يعمل — {count} عامل نشط",
-        "en": "Swarm running — {count} worker(s) active",
-    },
-    "swarm.swarm_stopped_workers": {
-        "ar": "السرب متوقف — {count} عامل مسجل",
-        "en": "Swarm stopped — {count} worker(s) registered",
     },
     "swarm.synthesis_output": {
         "ar": "مخرجات التوليف:",
@@ -1276,9 +1308,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تفاصيل المهمة",
         "en": "Task Detail",
     },
-    "swarm.task_dispatched_to": {
-        "ar": "تم إرسال المهمة إلى {count} عامل",
-        "en": "Task dispatched to {count} worker(s)",
+    "swarm.task_dispatched_to.zero": {
+        "ar": "لم تُرسل المهمة إلى أي عامل",
+        "en": "Task dispatched to {n} workers",
+    },
+    "swarm.task_dispatched_to.one": {
+        "ar": "تم إرسال المهمة إلى عامل واحد",
+        "en": "Task dispatched to 1 worker",
+    },
+    "swarm.task_dispatched_to.two": {
+        "ar": "تم إرسال المهمة إلى عاملين",
+        "en": "Task dispatched to {n} workers",
+    },
+    "swarm.task_dispatched_to.few": {
+        "ar": "تم إرسال المهمة إلى {n} عمال",
+        "en": "Task dispatched to {n} workers",
+    },
+    "swarm.task_dispatched_to.many": {
+        "ar": "تم إرسال المهمة إلى {n} عاملًا",
+        "en": "Task dispatched to {n} workers",
+    },
+    "swarm.task_dispatched_to.other": {
+        "ar": "تم إرسال المهمة إلى {n} عامل",
+        "en": "Task dispatched to {n} workers",
     },
     "swarm.task_execution_started": {
         "ar": "بدأ تنفيذ المهمة.",

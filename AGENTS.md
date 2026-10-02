@@ -4537,8 +4537,19 @@ sent: ... -> Error: ...", and the document pipeline logged "✓ Delivered".
   the number; the chat's own scripts read their forms through the
   `plural` bridge (`tiCount`). Gates: `tests/test_count_labels.py` (no glued
   count in a template or an Alpine expression; no catalog count label in
-  one form -- the last 34 were converted on 2026-10-02),
+  one form -- the last 34 were converted on 2026-10-02 -- whether the noun
+  comes right after the count or after a word or two, "(s)" included; and
+  the ARABIC of every entry checked on its own, because the English cannot
+  show it: "Cleared {n} failed" was "مُسحت {n} مهام فاشلة". An Arabic word
+  that does not change with the count, such as a preposition, a stat line's
+  adjective or a unit, is declared there; a placeholder that is not a count
+  (a name, a path) is skipped by both),
   `tests/test_kazma_count.py` (every `kazmaCount` key has every form).
+  The English-only surfaces, which are the TUI, the CLI and the chat-app
+  replies, say a count through `kazma_core.english_count.count_noun(n,
+  'message')`: they printed "(1 msgs)" and "0/1 requests available".
+  `tests/test_english_counts.py` reads every f-string in those packages,
+  and a value that is not a count is declared there with why.
   A page-level helper for catalog strings must not be named after an
   element tag: the Dashboard's `tr()` was shadowed by `var tr =
   createElement('tr')` in its row loop and rendered no rows (caught by

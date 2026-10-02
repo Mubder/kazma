@@ -1457,8 +1457,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "يريد الوكيل تشغيل:",
         "en": "Agent wants to run:",
     },
-    "chat.hitl_wants_to_run_n": {
+    "chat.hitl_wants_to_run_n.zero": {
+        "ar": "يريد الوكيل تشغيل أدوات خطرة:",
+        "en": "Agent wants to run {n} danger tools:",
+    },
+    "chat.hitl_wants_to_run_n.one": {
+        "ar": "يريد الوكيل تشغيل أداة خطرة واحدة:",
+        "en": "Agent wants to run 1 danger tool:",
+    },
+    "chat.hitl_wants_to_run_n.two": {
+        "ar": "يريد الوكيل تشغيل أداتين خطرتين:",
+        "en": "Agent wants to run {n} danger tools:",
+    },
+    "chat.hitl_wants_to_run_n.few": {
         "ar": "يريد الوكيل تشغيل {n} أدوات خطرة:",
+        "en": "Agent wants to run {n} danger tools:",
+    },
+    "chat.hitl_wants_to_run_n.many": {
+        "ar": "يريد الوكيل تشغيل {n} أداة خطرة:",
+        "en": "Agent wants to run {n} danger tools:",
+    },
+    "chat.hitl_wants_to_run_n.other": {
+        "ar": "يريد الوكيل تشغيل {n} أداة خطرة:",
         "en": "Agent wants to run {n} danger tools:",
     },
     "chat.node_label": {

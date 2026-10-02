@@ -42,7 +42,6 @@
     crawl_finished_ok: {{ t('knowledge.crawl_finished_ok') | tojson }},
     crawl_finished_partial: {{ t('knowledge.crawl_finished_partial') | tojson }},
     crawl_finished_empty: {{ t('knowledge.crawl_finished_empty') | tojson }},
-    page_ingested: {{ t('knowledge.page_ingested') | tojson }},
     page_ingested_failed: {{ t('knowledge.page_ingested_failed') | tojson }},
     no_seed: {{ t('knowledge.no_seed') | tojson }},
     refresh_confirm_title: {{ t('knowledge.refresh_confirm_title') | tojson }},
@@ -217,7 +216,7 @@
           </template>
           <template x-if="lib._hits">
             <div>
-              <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:4px;" x-text="{{ t('knowledge.hits_count') | tojson | forceescape }}.replace('{n}', lib._hits.length)"></div>
+              <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:4px;" x-text="kazmaCount('knowledge.hits_count', lib._hits.length)"></div>
               <template x-for="(h, i) in lib._hits" :key="h.chunk_id">
                 <div style="margin-bottom:0.5rem;border-left:2px solid var(--primary);padding-left:8px;">
                   <div style="font-size:0.75rem;color:var(--text-secondary);word-break:break-all;">

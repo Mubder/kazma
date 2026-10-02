@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
+from kazma_core.english_count import count_noun
 from kazma_gateway.gateway import IncomingMessage, OutboundMessage, SessionStore
 
 from .store import _build_target_id
@@ -234,8 +235,8 @@ def approval_card_suppressed(thread_id: str, tool: str, args: Any) -> str | None
             else:
                 _recent_cards[thread_id] = history
             return (
-                f"{storm} approval requests already sent for this thread in "
-                f"the last {int(_BURST_WINDOW_S / 60)} minutes — muting further "
+                f"{count_noun(storm, 'approval request')} already sent for this thread in "
+                f"the last {count_noun(int(_BURST_WINDOW_S / 60), 'minute')} — muting further "
                 "cards until you reply. Nothing has been approved or run."
             )
 
@@ -421,7 +422,7 @@ def _format_content_preview(tool: str, args: Any) -> str | None:
         lines.append(f"path: {path}")
     all_lines = body.splitlines()
     lines.append(
-        f"{field}: {len(body):,} characters, {len(all_lines):,} lines"
+        f"{field}: {count_noun(len(body), 'character')}, {count_noun(len(all_lines), 'line')}"
     )
 
     # Any other arg is small and decision-relevant (encoding, mode) — keep it.
@@ -432,7 +433,7 @@ def _format_content_preview(tool: str, args: Any) -> str | None:
 
     shown = all_lines[:_CONTENT_PREVIEW_LINES]
     lines.append("")
-    lines.append(f"--- first {len(shown)} of {len(all_lines):,} lines ---")
+    lines.append(f"--- first {len(shown)} of {count_noun(len(all_lines), 'line')} ---")
     for ln in shown:
         lines.append(
             ln if len(ln) <= _CONTENT_LINE_CHARS
@@ -440,7 +441,7 @@ def _format_content_preview(tool: str, args: Any) -> str | None:
         )
     remaining = len(all_lines) - len(shown)
     if remaining > 0:
-        lines.append(f"--- {remaining:,} more lines not shown ---")
+        lines.append(f"--- {count_noun(remaining, 'more line')} not shown ---")
     return "\n".join(lines)
 
 
@@ -570,7 +571,7 @@ def _build_approval_prompt(
     if isinstance(tools, list) and len(tools) > 1:
         lines = [
             "⚠️ Approval required",
-            f"{len(tools)} actions in this turn:",
+            f"{count_noun(len(tools), 'action')} in this turn:",
             "",
         ]
         for i, item in enumerate(tools, 1):
@@ -804,7 +805,7 @@ async def _handle_hitl_resume(
                     target_id=_build_target_id(msg.platform, ctx),
                     text=(
                         "⚠️ Cannot approve: target session expired "
-                        f"(SessionStore TTL is {SESSION_TTL_SECONDS // 60} minutes). Approve from the "
+                        f"(SessionStore TTL is {count_noun(SESSION_TTL_SECONDS // 60, 'minute')}). Approve from the "
                         "original chat, or send a new request."
                     ),
                     context_metadata=ctx,
