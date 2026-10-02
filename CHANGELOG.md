@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## A refused agent skill is logged when it is used, not on every turn (2026-10-02)
+
+- Showing a skill's verdict (the model's skill catalog, which is built on
+  every turn, the skills list, the Skills page and the security report) logged
+  each refused skill as a WARNING every time. On the live install that was 30
+  warnings for one skill in two hours, which drowned the log and the weekly
+  report's counts. Only activating a skill logs its refusal now; the lists
+  show the verdict.
+- **Gate:** `tests/test_skill_integrity_shown.py`.
+
 ## `kazma update` can replace the program it runs from (2026-10-02)
 
 - **A reinstall on Windows no longer breaks itself.** `kazma update` runs
