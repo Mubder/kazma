@@ -592,8 +592,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "{n} متوقفة",
         "en": "{n} off",
     },
-    "memory.console.components_healthy": {
-        "ar": "{ok}/{n} مكوّنات سليمة",
+    "memory.console.components_healthy.zero": {
+        "ar": "المكوّنات السليمة: {ok} من {n}",
+        "en": "{ok}/{n} components healthy",
+    },
+    "memory.console.components_healthy.one": {
+        "ar": "المكوّنات السليمة: {ok} من {n}",
+        "en": "{ok}/1 component healthy",
+    },
+    "memory.console.components_healthy.two": {
+        "ar": "المكوّنات السليمة: {ok} من {n}",
+        "en": "{ok}/{n} components healthy",
+    },
+    "memory.console.components_healthy.few": {
+        "ar": "المكوّنات السليمة: {ok} من {n}",
+        "en": "{ok}/{n} components healthy",
+    },
+    "memory.console.components_healthy.many": {
+        "ar": "المكوّنات السليمة: {ok} من {n}",
+        "en": "{ok}/{n} components healthy",
+    },
+    "memory.console.components_healthy.other": {
+        "ar": "المكوّنات السليمة: {ok} من {n}",
         "en": "{ok}/{n} components healthy",
     },
     "memory.console.superseded_n": {
@@ -608,12 +628,52 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "إجمالي الكيانات",
         "en": "total entities",
     },
-    "memory.console.beliefs_n": {
+    "memory.console.beliefs_n.zero": {
+        "ar": "لا معتقدات",
+        "en": "{n} beliefs",
+    },
+    "memory.console.beliefs_n.one": {
+        "ar": "معتقد واحد",
+        "en": "1 belief",
+    },
+    "memory.console.beliefs_n.two": {
+        "ar": "معتقدان",
+        "en": "{n} beliefs",
+    },
+    "memory.console.beliefs_n.few": {
         "ar": "{n} معتقدات",
         "en": "{n} beliefs",
     },
-    "memory.console.entities_n": {
+    "memory.console.beliefs_n.many": {
+        "ar": "{n} معتقدًا",
+        "en": "{n} beliefs",
+    },
+    "memory.console.beliefs_n.other": {
+        "ar": "{n} معتقد",
+        "en": "{n} beliefs",
+    },
+    "memory.console.entities_n.zero": {
+        "ar": "لا كيانات",
+        "en": "{n} entities",
+    },
+    "memory.console.entities_n.one": {
+        "ar": "كيان واحد",
+        "en": "1 entity",
+    },
+    "memory.console.entities_n.two": {
+        "ar": "كيانان",
+        "en": "{n} entities",
+    },
+    "memory.console.entities_n.few": {
         "ar": "{n} كيانات",
+        "en": "{n} entities",
+    },
+    "memory.console.entities_n.many": {
+        "ar": "{n} كيانًا",
+        "en": "{n} entities",
+    },
+    "memory.console.entities_n.other": {
+        "ar": "{n} كيان",
         "en": "{n} entities",
     },
     "memory.console.headline": {
@@ -924,8 +984,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "إعادة المحاولة",
         "en": "retry",
     },
-    "memory.console.attempts": {
-        "ar": "المحاولات: {n}",
+    "memory.console.attempts.zero": {
+        "ar": "لا محاولات",
+        "en": "{n} attempts",
+    },
+    "memory.console.attempts.one": {
+        "ar": "محاولة واحدة",
+        "en": "1 attempt",
+    },
+    "memory.console.attempts.two": {
+        "ar": "محاولتان",
+        "en": "{n} attempts",
+    },
+    "memory.console.attempts.few": {
+        "ar": "{n} محاولات",
+        "en": "{n} attempts",
+    },
+    "memory.console.attempts.many": {
+        "ar": "{n} محاولة",
+        "en": "{n} attempts",
+    },
+    "memory.console.attempts.other": {
+        "ar": "{n} محاولة",
         "en": "{n} attempts",
     },
     # A memory queue task's status (the queue's pending/processing/completed/failed).
@@ -1089,12 +1169,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "نُسيت",
         "en": "Forgotten",
     },
-    "memory.console.forgotten_with_fact": {
+    "memory.console.forgotten_with_facts.zero": {
+        "ar": "نُسيت",
+        "en": "Forgotten (and {n} facts)",
+    },
+    "memory.console.forgotten_with_facts.one": {
         "ar": "نُسيت (ومعها حقيقة واحدة)",
         "en": "Forgotten (and 1 fact)",
     },
-    "memory.console.forgotten_with_facts": {
+    "memory.console.forgotten_with_facts.two": {
+        "ar": "نُسيت (ومعها حقيقتان)",
+        "en": "Forgotten (and {n} facts)",
+    },
+    "memory.console.forgotten_with_facts.few": {
         "ar": "نُسيت (ومعها {n} حقائق)",
+        "en": "Forgotten (and {n} facts)",
+    },
+    "memory.console.forgotten_with_facts.many": {
+        "ar": "نُسيت (ومعها {n} حقيقة)",
+        "en": "Forgotten (and {n} facts)",
+    },
+    "memory.console.forgotten_with_facts.other": {
+        "ar": "نُسيت (ومعها {n} حقيقة)",
         "en": "Forgotten (and {n} facts)",
     },
     "memory.console.forget_failed": {
@@ -1105,11 +1201,27 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشل تحميل الذكريات",
         "en": "Memories load failed",
     },
-    "memory.console.weeks_done_one": {
-        "ar": "أسبوع واحد مُلخَّص",
+    "memory.console.weeks_done.zero": {
+        "ar": "الأسابيع المُلخَّصة: {n}",
+        "en": "{n} weeks summarized",
+    },
+    "memory.console.weeks_done.one": {
+        "ar": "الأسابيع المُلخَّصة: {n}",
         "en": "1 week summarized",
     },
-    "memory.console.weeks_done": {
+    "memory.console.weeks_done.two": {
+        "ar": "الأسابيع المُلخَّصة: {n}",
+        "en": "{n} weeks summarized",
+    },
+    "memory.console.weeks_done.few": {
+        "ar": "الأسابيع المُلخَّصة: {n}",
+        "en": "{n} weeks summarized",
+    },
+    "memory.console.weeks_done.many": {
+        "ar": "الأسابيع المُلخَّصة: {n}",
+        "en": "{n} weeks summarized",
+    },
+    "memory.console.weeks_done.other": {
         "ar": "الأسابيع المُلخَّصة: {n}",
         "en": "{n} weeks summarized",
     },
@@ -1125,16 +1237,52 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لا ملخصات أسبوعية بعد. يكتبها Kazma بعد يوم من نهاية كل أسبوع.",
         "en": "No weekly summaries yet. Kazma writes them a day after each week ends.",
     },
-    "memory.console.summary_turns_one": {
+    "memory.console.summary_turns.zero": {
+        "ar": "لا أدوار",
+        "en": "{n} turns",
+    },
+    "memory.console.summary_turns.one": {
         "ar": "دور واحد",
         "en": "1 turn",
     },
-    "memory.console.summary_turns": {
-        "ar": "الأدوار: {n}",
+    "memory.console.summary_turns.two": {
+        "ar": "دوران",
         "en": "{n} turns",
     },
-    "memory.console.summary_chats": {
+    "memory.console.summary_turns.few": {
+        "ar": "{n} أدوار",
+        "en": "{n} turns",
+    },
+    "memory.console.summary_turns.many": {
+        "ar": "{n} دورًا",
+        "en": "{n} turns",
+    },
+    "memory.console.summary_turns.other": {
+        "ar": "{n} دور",
+        "en": "{n} turns",
+    },
+    "memory.console.summary_chats.zero": {
+        "ar": " في لا محادثات",
+        "en": " in {n} chats",
+    },
+    "memory.console.summary_chats.one": {
+        "ar": " في محادثة واحدة",
+        "en": " in 1 chat",
+    },
+    "memory.console.summary_chats.two": {
+        "ar": " في محادثتين",
+        "en": " in {n} chats",
+    },
+    "memory.console.summary_chats.few": {
         "ar": " في {n} محادثات",
+        "en": " in {n} chats",
+    },
+    "memory.console.summary_chats.many": {
+        "ar": " في {n} محادثة",
+        "en": " in {n} chats",
+    },
+    "memory.console.summary_chats.other": {
+        "ar": " في {n} محادثة",
         "en": " in {n} chats",
     },
     "memory.console.summary_rebuilding": {
@@ -1337,12 +1485,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لا حواف للقطع",
         "en": "No edges to cut",
     },
-    "memory.console.cut_n_message_one": {
+    "memory.console.cut_n_message.zero": {
+        "ar": "قطع الاتصالات من الذاكرة النشطة؟",
+        "en": "Cut {n} connections from active memory?",
+    },
+    "memory.console.cut_n_message.one": {
         "ar": "قطع اتصال واحد من الذاكرة النشطة؟",
         "en": "Cut 1 connection from active memory?",
     },
-    "memory.console.cut_n_message": {
+    "memory.console.cut_n_message.two": {
+        "ar": "قطع اتصالين من الذاكرة النشطة؟",
+        "en": "Cut {n} connections from active memory?",
+    },
+    "memory.console.cut_n_message.few": {
         "ar": "قطع {n} اتصالات من الذاكرة النشطة؟",
+        "en": "Cut {n} connections from active memory?",
+    },
+    "memory.console.cut_n_message.many": {
+        "ar": "قطع {n} اتصالًا من الذاكرة النشطة؟",
+        "en": "Cut {n} connections from active memory?",
+    },
+    "memory.console.cut_n_message.other": {
+        "ar": "قطع {n} اتصال من الذاكرة النشطة؟",
         "en": "Cut {n} connections from active memory?",
     },
     "memory.console.cut_connections_title": {
@@ -1353,12 +1517,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "قطع {n}",
         "en": "Cut {n}",
     },
-    "memory.console.cut_done_one": {
+    "memory.console.cut_done.zero": {
+        "ar": "لم يُقطع أي اتصال",
+        "en": "Cut {n} connections",
+    },
+    "memory.console.cut_done.one": {
         "ar": "قُطع اتصال واحد",
         "en": "Cut 1 connection",
     },
-    "memory.console.cut_done": {
+    "memory.console.cut_done.two": {
+        "ar": "قُطع اتصالان",
+        "en": "Cut {n} connections",
+    },
+    "memory.console.cut_done.few": {
         "ar": "قُطعت {n} اتصالات",
+        "en": "Cut {n} connections",
+    },
+    "memory.console.cut_done.many": {
+        "ar": "قُطع {n} اتصالًا",
+        "en": "Cut {n} connections",
+    },
+    "memory.console.cut_done.other": {
+        "ar": "قُطع {n} اتصال",
         "en": "Cut {n} connections",
     },
     "memory.console.no_edges_cut": {
@@ -2021,12 +2201,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "أُبطل {id}",
         "en": "Invalidated {id}",
     },
-    "memory.page.invalidated_n_one": {
+    "memory.page.invalidated_n.zero": {
+        "ar": "لم يُبطَل أي معتقد.",
+        "en": "Invalidated {n} beliefs.",
+    },
+    "memory.page.invalidated_n.one": {
         "ar": "أُبطل معتقد واحد.",
         "en": "Invalidated 1 belief.",
     },
-    "memory.page.invalidated_n": {
+    "memory.page.invalidated_n.two": {
+        "ar": "أُبطل معتقدان.",
+        "en": "Invalidated {n} beliefs.",
+    },
+    "memory.page.invalidated_n.few": {
         "ar": "أُبطلت {n} معتقدات.",
+        "en": "Invalidated {n} beliefs.",
+    },
+    "memory.page.invalidated_n.many": {
+        "ar": "أُبطل {n} معتقدًا.",
+        "en": "Invalidated {n} beliefs.",
+    },
+    "memory.page.invalidated_n.other": {
+        "ar": "أُبطل {n} معتقد.",
         "en": "Invalidated {n} beliefs.",
     },
     "memory.page.prompt_object": {
@@ -2085,12 +2281,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "عيّن معرّفي الكيانين المصدر والهدف (أو اخترهما على الرسم)",
         "en": "Set source and target entity ids (or pick on the graph)",
     },
-    "memory.page.merged_one": {
+    "memory.page.merged_n.zero": {
+        "ar": "دُمج {source} ← {target}: لم يُنقل أي معتقد.",
+        "en": "Merged {source} → {target}: {n} beliefs rewired.",
+    },
+    "memory.page.merged_n.one": {
         "ar": "دُمج {source} ← {target}: نُقل معتقد واحد.",
         "en": "Merged {source} → {target}: 1 belief rewired.",
     },
-    "memory.page.merged_n": {
+    "memory.page.merged_n.two": {
+        "ar": "دُمج {source} ← {target}: نُقل معتقدان.",
+        "en": "Merged {source} → {target}: {n} beliefs rewired.",
+    },
+    "memory.page.merged_n.few": {
         "ar": "دُمج {source} ← {target}: نُقلت {n} معتقدات.",
+        "en": "Merged {source} → {target}: {n} beliefs rewired.",
+    },
+    "memory.page.merged_n.many": {
+        "ar": "دُمج {source} ← {target}: نُقل {n} معتقدًا.",
+        "en": "Merged {source} → {target}: {n} beliefs rewired.",
+    },
+    "memory.page.merged_n.other": {
+        "ar": "دُمج {source} ← {target}: نُقل {n} معتقد.",
         "en": "Merged {source} → {target}: {n} beliefs rewired.",
     },
     "memory.page.link_need_slots": {
@@ -2125,8 +2337,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لا شيء",
         "en": "None",
     },
-    "memory.console.fts_docs": {
+    "memory.console.fts_docs.zero": {
+        "ar": "{size} (لا مستندات)",
+        "en": "{size} ({n} docs)",
+    },
+    "memory.console.fts_docs.one": {
+        "ar": "{size} (مستند واحد)",
+        "en": "{size} (1 doc)",
+    },
+    "memory.console.fts_docs.two": {
+        "ar": "{size} (مستندان)",
+        "en": "{size} ({n} docs)",
+    },
+    "memory.console.fts_docs.few": {
         "ar": "{size} ({n} مستندات)",
+        "en": "{size} ({n} docs)",
+    },
+    "memory.console.fts_docs.many": {
+        "ar": "{size} ({n} مستندًا)",
+        "en": "{size} ({n} docs)",
+    },
+    "memory.console.fts_docs.other": {
+        "ar": "{size} ({n} مستند)",
         "en": "{size} ({n} docs)",
     },
     "memory.console.restore_title": {
@@ -2191,7 +2423,27 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "{summary} — استخدم التصفية لتضييق العرض.",
         "en": "{summary} — filter to narrow the view.",
     },
-    "memory.console.path_highlighted": {
+    "memory.console.path_highlighted.zero": {
+        "ar": "عُقد المسار المُبرزة: {n}",
+        "en": "Path: {n} nodes highlighted",
+    },
+    "memory.console.path_highlighted.one": {
+        "ar": "عُقد المسار المُبرزة: {n}",
+        "en": "Path: 1 node highlighted",
+    },
+    "memory.console.path_highlighted.two": {
+        "ar": "عُقد المسار المُبرزة: {n}",
+        "en": "Path: {n} nodes highlighted",
+    },
+    "memory.console.path_highlighted.few": {
+        "ar": "عُقد المسار المُبرزة: {n}",
+        "en": "Path: {n} nodes highlighted",
+    },
+    "memory.console.path_highlighted.many": {
+        "ar": "عُقد المسار المُبرزة: {n}",
+        "en": "Path: {n} nodes highlighted",
+    },
+    "memory.console.path_highlighted.other": {
         "ar": "عُقد المسار المُبرزة: {n}",
         "en": "Path: {n} nodes highlighted",
     },
@@ -2232,13 +2484,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "انقر للتعديل أو فك الربط",
         "en": "click to edit / unlink",
     },
-    "memory.console.snapshots_deleted_one": {
-        "ar": "لقطة واحدة أقدم من {days} يوم",
-        "en": "1 snapshot older than {days}d",
+    "memory.console.snapshots_deleted.zero": {
+        "ar": "لا لقطات أقدم من {days}",
+        "en": "{n} snapshots older than {days}",
     },
-    "memory.console.snapshots_deleted": {
-        "ar": "{n} لقطات أقدم من {days} يوم",
-        "en": "{n} snapshots older than {days}d",
+    "memory.console.snapshots_deleted.one": {
+        "ar": "لقطة واحدة أقدم من {days}",
+        "en": "1 snapshot older than {days}",
+    },
+    "memory.console.snapshots_deleted.two": {
+        "ar": "لقطتان أقدم من {days}",
+        "en": "{n} snapshots older than {days}",
+    },
+    "memory.console.snapshots_deleted.few": {
+        "ar": "{n} لقطات أقدم من {days}",
+        "en": "{n} snapshots older than {days}",
+    },
+    "memory.console.snapshots_deleted.many": {
+        "ar": "{n} لقطة أقدم من {days}",
+        "en": "{n} snapshots older than {days}",
+    },
+    "memory.console.snapshots_deleted.other": {
+        "ar": "{n} لقطة أقدم من {days}",
+        "en": "{n} snapshots older than {days}",
     },
     "memory.console.snapshots_reclaimed": {
         "ar": "استُعيد {size}",

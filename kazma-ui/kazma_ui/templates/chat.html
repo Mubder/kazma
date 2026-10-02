@@ -278,7 +278,12 @@ function setupWall() {
       count_memories: {{ plural_forms('chat.count_memories') | tojson }},
       count_weekly: {{ plural_forms('chat.count_weekly') | tojson }},
       count_passages: {{ plural_forms('chat.count_passages') | tojson }},
-      count_results: {{ plural_forms('chat.count_results') | tojson }}
+      count_results: {{ plural_forms('chat.count_results') | tojson }},
+      plan_locked: {{ plural_forms('chat.plan_locked') | tojson }},
+      preparing_n_tools: {{ plural_forms('chat.preparing_n_tools') | tojson }},
+      hitl_allow_n: {{ plural_forms('chat.hitl_allow_n') | tojson }},
+      hitl_allow_n_title: {{ plural_forms('chat.hitl_allow_n_title') | tojson }},
+      session_msgs: {{ plural_forms('chat.session_msgs') | tojson }}
     },
     // The turn's memory row, and keys chat.js used with no entry here (they
     // showed in English in every language; tests/test_chat_i18n_bridge.py).
@@ -330,7 +335,6 @@ function setupWall() {
     waiting_approval: {{ t('chat.waiting_approval') | tojson }},
     routing: {{ t('chat.routing') | tojson }},
     routing_arrow: {{ t('chat.routing_arrow') | tojson }},
-    plan_locked: {{ t('chat.plan_locked') | tojson }},
     plan_progress: {{ t('chat.plan_progress') | tojson }},
     thinking_queue: {{ t('chat.thinking_queue') | tojson }},
     type_message: {{ t('chat.type_message') | tojson }},
@@ -351,7 +355,6 @@ function setupWall() {
     resuming_execution: {{ t('chat.resuming_execution') | tojson }},
     resuming_graph: {{ t('chat.resuming_graph') | tojson }},
     preparing_tool: {{ t('chat.preparing_tool') | tojson }},
-    preparing_n_tools: {{ t('chat.preparing_n_tools') | tojson }},
     running_tool: {{ t('chat.running_tool') | tojson }},
     running_after_approval: {{ t('chat.running_after_approval') | tojson }},
     continuing_after_deny: {{ t('chat.continuing_after_deny') | tojson }},
@@ -361,7 +364,6 @@ function setupWall() {
     step_failed: {{ t('chat.step_failed') | tojson }},
     show_more: {{ t('chat.show_more') | tojson }},
     show_less: {{ t('chat.show_less') | tojson }},
-    summary_tools: {{ t('chat.summary_tools') | tojson }},
     context_size: {{ t('chat.context_size') | tojson }},
     placeholder: {{ t('chat.placeholder') | tojson }},
     pinned: {{ t('chat.pinned') | tojson }},
@@ -423,7 +425,6 @@ function setupWall() {
     task_retry: {{ t('chat.task_retry') | tojson }},
     task_auto_deny_in: {{ t('chat.task_auto_deny_in') | tojson }},
     auto_deny_in: {{ t('chat.auto_deny_in') | tojson }},
-    auto_deny_seconds: {{ t('chat.auto_deny_seconds') | tojson }},
     approval_expired: {{ t('chat.approval_expired') | tojson }},
     approval_expired_short: {{ t('chat.approval_expired_short') | tojson }},
     /* Composer, capacity bar, build badge and empty session (2026-09-28):
@@ -518,8 +519,6 @@ function setupWall() {
     hitl_tip_always: {{ t('chat.hitl_tip_always') | tojson }},
     hitl_approve_once: {{ t('chat.hitl_approve_once') | tojson }},
     hitl_approve_once_title: {{ t('chat.hitl_approve_once_title') | tojson }},
-    hitl_allow_n: {{ t('chat.hitl_allow_n') | tojson }},
-    hitl_allow_n_title: {{ t('chat.hitl_allow_n_title') | tojson }},
     hitl_allow_tool: {{ t('chat.hitl_allow_tool') | tojson }},
     hitl_allow_tool_title: {{ t('chat.hitl_allow_tool_title') | tojson }},
     hitl_yolo: {{ t('chat.hitl_yolo') | tojson }},
@@ -547,7 +546,6 @@ function setupWall() {
     msg_helpful: {{ t('chat.msg_helpful') | tojson }},
     msg_not_helpful: {{ t('chat.msg_not_helpful') | tojson }},
     platform_web: {{ t('dashboard.platform_web') | tojson }},
-    session_msgs: {{ t('chat.session_msgs') | tojson }},
     hitl_wants_to_run: {{ t('chat.hitl_wants_to_run') | tojson }},
     hitl_wants_to_run_n: {{ t('chat.hitl_wants_to_run_n') | tojson }}
   };

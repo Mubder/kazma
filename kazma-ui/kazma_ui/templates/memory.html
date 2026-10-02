@@ -426,7 +426,7 @@
           <template x-for="e in (hygienePreview.isolated_entities || []).slice(0,40)" :key="e.id">
             <li>
               <code x-text="e.id"></code>
-              <span x-text="' · ' + t('memory.console.beliefs_n', { n: e.belief_count || 0 })"></span>
+              <span x-text="' · ' + kazmaCount('memory.console.beliefs_n', e.belief_count || 0)"></span>
               <button class="btn btn-sm btn-secondary" style="margin-left:6px;" @click="tab='entities'; mergeSource=e.id; loadEntities()">{{ t('common.open') }}</button>
             </li>
           </template>

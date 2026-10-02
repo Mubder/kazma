@@ -64,6 +64,8 @@ function load(patch) {
   sb.globalThis = sb;
   sb.showToast = (msg, type) => toasts.push({ msg: String(msg), type: type || "info" });
   sb.kazmaT = (key, en, vars) => fill(en, vars);
+  // base.html's count helper; the catalog is not loaded here, so the number.
+  sb.kazmaCount = (key, n) => String(n);
   sb.t = (key) => key;
   sb.tOr = (key, fallback) => fallback;
   const answer = { ok: true, success: true, message: "", adapters_count: 0, adapters: [] };

@@ -353,7 +353,7 @@
     // Label — canvas can't resolve CSS vars; read the computed token
     ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8b9bb8';
     ctx.font = '10px "IBM Plex Sans", sans-serif';
-    drawChartLabel(ctx, canvas, window.kazmaT('dashboard.chart_tokens_max', '{n} tokens max',
+    drawChartLabel(ctx, canvas, window.kazmaCount('dashboard.chart_tokens_max', max,
       { n: KS.formatTokens(max) }), 12);
   }
 

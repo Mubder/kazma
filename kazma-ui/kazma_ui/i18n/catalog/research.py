@@ -312,8 +312,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "خط المعالجة",
         "en": "pipeline",
     },
-    "research.ui.sources_n": {
-        "ar": "المصادر: {n}",
+    "research.ui.sources_n.zero": {
+        "ar": "لا مصادر",
+        "en": "{n} sources",
+    },
+    "research.ui.sources_n.one": {
+        "ar": "مصدر واحد",
+        "en": "1 source",
+    },
+    "research.ui.sources_n.two": {
+        "ar": "مصدران",
+        "en": "{n} sources",
+    },
+    "research.ui.sources_n.few": {
+        "ar": "{n} مصادر",
+        "en": "{n} sources",
+    },
+    "research.ui.sources_n.many": {
+        "ar": "{n} مصدرًا",
+        "en": "{n} sources",
+    },
+    "research.ui.sources_n.other": {
+        "ar": "{n} مصدر",
         "en": "{n} sources",
     },
     "research.ui.rubric": {

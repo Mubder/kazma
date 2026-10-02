@@ -22,7 +22,10 @@ from kazma_ui.i18n import PLURAL_CATEGORIES, TRANSLATIONS, plural_forms, t_plura
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = json.loads((ROOT / "tests" / "fixtures" / "i18n" / "count_labels.json").read_text(encoding="utf-8"))
 CHAT_JS = ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
-BASES = ("count_tools", "count_steps", "count_approvals", "count_requests", "count_results")
+BASES = (
+    "count_tools", "count_steps", "count_approvals", "count_requests", "count_results",
+    "plan_locked", "preparing_n_tools", "hitl_allow_n", "hitl_allow_n_title", "session_msgs",
+)
 
 
 @pytest.mark.parametrize("base", BASES)
@@ -152,12 +155,11 @@ def test_negative_control_the_shipped_settings_row_is_caught():
 
 
 #: Catalog entries that are a count label in one form ("{n} sessions"): right
-#: in English from 2 up and in Arabic from 11 up. A ratchet: the number may
-#: only go down (convert an entry to <key>.<category> forms, read through
-#: t_plural / plural_forms + KazmaFormat.count / kazmaCount, and lower this).
-#: 39 on 2026-10-02; the Dashboard's two and Settings -> MCP's Test went that
-#: day.
-SINGLE_FORM_COUNT_LABELS = 36
+#: in English from 2 up and in Arabic from 11 up. None is left: 39 on the
+#: morning of 2026-10-02, the last 34 converted that evening and two dead ones
+#: removed. A count label is written as <key>.zero ... <key>.other and read
+#: through t_plural, plural_forms + KazmaFormat.count, window.kazmaCount, or
+#: chat.js tiCount.
 _SINGLE_FORM = re.compile(r"\{(?:n|count)\}\s+(?:more\s+)?[a-z]+s\b")
 
 
@@ -169,14 +171,12 @@ def single_form_count_labels() -> list[str]:
     )
 
 
-def test_single_form_count_labels_only_go_down():
+def test_no_count_label_is_in_one_form():
     found = single_form_count_labels()
-    assert len(found) <= SINGLE_FORM_COUNT_LABELS, (
-        f"New count label in one form ({len(found)} > {SINGLE_FORM_COUNT_LABELS}); "
-        "write it as plural forms:\n  " + "\n  ".join(found)
-    )
-    assert len(found) == SINGLE_FORM_COUNT_LABELS, (
-        f"Down to {len(found)}: lower SINGLE_FORM_COUNT_LABELS to lock it in."
+    assert not found, (
+        "A count label in one form reads wrong for some numbers (\"1 sessions\", "
+        "\"1 أدوات\"); write it as plural forms (<key>.zero ... <key>.other):\n  "
+        + "\n  ".join(found)
     )
 
 

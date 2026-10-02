@@ -140,11 +140,13 @@
    *  Hand-built "n + ' ' + noun" labels printed "1 approvals", "3 3 tools"
    *  and, through the wrong key, "1 step" for one tool (2026-09-24);
    *  tests/test_count_labels.py keeps them from coming back. */
-  function tiCount(base, n, oneEn, otherEn) {
+  function tiCount(base, n, oneEn, otherEn, vars) {
     var forms = (((window.CHAT_I18N || {}).plural) || {})[base] || {};
     var cat = _pluralCategory(n);
-    var s = forms[cat] || forms.other || (Number(n) === 1 ? oneEn : otherEn);
-    return String(s).replace(/\{n\}/g, String(n));
+    var s = String(forms[cat] || forms.other || (Number(n) === 1 ? oneEn : otherEn)).replace(/\{n\}/g, String(n));
+    // A function, so a value holding "$&" or "$'" is inserted as it is.
+    if (vars) Object.keys(vars).forEach(function (k) { var v = String(vars[k]); s = s.replace(new RegExp('\\{' + k + '\\}', 'g'), function () { return v; }); });
+    return s;
   }
 
   function generateSessionId() {
@@ -4006,7 +4008,7 @@
       setPlan(items);
       logProgress({
         kind: 'status',
-        title: tiFmt('plan_locked', 'Plan locked ({n} steps)', { n: items.length }),
+        title: tiCount('plan_locked', items.length, 'Plan locked (1 step)', 'Plan locked ({n} steps)'),
         state: 'info',
       });
     }
@@ -4060,12 +4062,12 @@
     if (/^continuing after deny/i.test(s)) return ti('continuing_after_deny', s);
     if (/^waiting for approval/i.test(s)) return ti('waiting_approval', s);
     m = s.match(/^preparing to execute\s+(\d+)\s+tools?/i);
-    if (m) return tiFmt('preparing_n_tools', s, { n: m[1] });
+    if (m) return tiCount('preparing_n_tools', Number(m[1]), s, s);
     m = s.match(/^preparing to execute\s+(.+?)\s*\.?\.?\.?$/i);
     if (m) {
       var tool = m[1].replace(/\.+$/, '').trim();
       if (/^\d+\s+tools?$/i.test(tool)) {
-        return tiFmt('preparing_n_tools', s, { n: (tool.match(/^(\d+)/) || [])[1] || tool });
+        return tiCount('preparing_n_tools', Number((tool.match(/^(\d+)/) || [])[1]) || 0, s, s);
       }
       return tiFmt('preparing_tool', s, { tool: tool });
     }
@@ -5851,10 +5853,12 @@
         // hides which tools one approval covers (2026-09-21). Say the number.
         (tools.length > 1
           ? '<button class="btn btn-sm btn-primary hitl-approve-tool" data-scope="tool" title="' +
-            escapeHtml(tiFmt('hitl_allow_n_title', 'Allow these {n} tools for ~30m in this session: {names}', {
-              n: tools.length, names: tools.map(function (t) { return t.name || ''; }).join(', '),
-            })) +
-            '">' + escapeHtml(tiFmt('hitl_allow_n', 'Allow these {n} tools (session)', { n: tools.length })) + '</button>'
+            escapeHtml(tiCount('hitl_allow_n_title', tools.length,
+              'Allow this tool for ~30m in this session: {names}',
+              'Allow these {n} tools for ~30m in this session: {names}', {
+                names: tools.map(function (t) { return t.name || ''; }).join(', '),
+              })) +
+            '">' + escapeHtml(tiCount('hitl_allow_n', tools.length, 'Allow this tool (session)', 'Allow these {n} tools (session)')) + '</button>'
           : '<button class="btn btn-sm btn-primary hitl-approve-tool" data-scope="tool" title="' + escapeHtml(ti('hitl_allow_tool_title', 'Allow this tool for ~30m in this session')) + '">' +
             escapeHtml(ti('hitl_allow_tool', 'Allow tool (session)')) + '</button>') +
         (yoloOk
@@ -6365,7 +6369,7 @@
     // direction; the platform's name is isolated. With dir="auto" its first
     // letter decided: "Telegram \u00B7 \u0627\u0644\u0631\u0633\u0627\u0626\u0644: 34 \u00B7 \u0642\u0628\u0644 \u0633\u0627\u0639\u062A\u064A\u0646" ran left-to-right.
     var meta = '<bdi>' + escapeHtml(_platformName(lastPlat)) + '</bdi> \u00B7 ' +
-      escapeHtml(tiFmt('session_msgs', '{n} msgs', { n: s.message_count })) +
+      escapeHtml(tiCount('session_msgs', s.message_count || 0, '1 msg', '{n} msgs')) +
       ' \u00B7 ' + escapeHtml(relativeTime(s.updated_at || s.created_at));
     var html = '<div class="session-item' + (isActive ? ' active' : '') + (s.pinned ? ' pinned' : '') + (isMenuOpen ? ' menu-open' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '" data-platform="' + escapeHtml(plat) + '">' +
       '<span class="session-platform-dot dot-' + escapeHtml(plat) + '" title="' + escapeHtml(_platformName(plat)) + '"></span>' +

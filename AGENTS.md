@@ -4533,8 +4533,11 @@ sent: ... -> Error: ...", and the document pipeline logged "✓ Delivered".
   template, `window.kazmaCount('key', n, vars)` in a script (`base.html`: the
   catalog's `<key>.zero` ... `<key>.other`, six in Arabic), never a number
   beside a word in one form -- "1 أدوات" on the MCP card and in Settings.
-  Gates: `tests/test_count_labels.py` (no glued count in a template or an
-  Alpine expression; a ratchet on one-form catalog labels),
+  `vars.n` shows the number another way ("12.3K") while the form follows
+  the number; the chat's own scripts read their forms through the
+  `plural` bridge (`tiCount`). Gates: `tests/test_count_labels.py` (no glued
+  count in a template or an Alpine expression; no catalog count label in
+  one form -- the last 34 were converted on 2026-10-02),
   `tests/test_kazma_count.py` (every `kazmaCount` key has every form).
   A page-level helper for catalog strings must not be named after an
   element tag: the Dashboard's `tr()` was shadowed by `var tr =

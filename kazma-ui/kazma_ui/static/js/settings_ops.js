@@ -1056,7 +1056,7 @@
                 if (data.status === 'error') {
                     showToast(data.error || _t('settings.save_failed', 'Save failed'), 'error');
                 } else {
-                    showToast(_t('settings.retention_saved', 'Backup retention saved — keeping the newest {n} backups', {n: n}), 'success');
+                    showToast(window.kazmaCount('settings.retention_saved', n), 'success');
                 }
             } catch (e) {
                 showToast(_t('settings.failed_with_reason', 'Failed: {error}', {error: e.message}), 'error');

@@ -1156,9 +1156,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشلت الاستعادة: {error}",
         "en": "Restore failed: {error}",
     },
-    "replay.restored": {
-        "ar": "استُعيد التكرار {n} ({count} رسالة)",
-        "en": "Restored iteration {n} ({count} messages)",
+    "replay.restored.zero": {
+        "ar": "استُعيد التكرار {iteration} (بلا رسائل)",
+        "en": "Restored iteration {iteration} ({n} messages)",
+    },
+    "replay.restored.one": {
+        "ar": "استُعيد التكرار {iteration} (رسالة واحدة)",
+        "en": "Restored iteration {iteration} (1 message)",
+    },
+    "replay.restored.two": {
+        "ar": "استُعيد التكرار {iteration} (رسالتان)",
+        "en": "Restored iteration {iteration} ({n} messages)",
+    },
+    "replay.restored.few": {
+        "ar": "استُعيد التكرار {iteration} ({n} رسائل)",
+        "en": "Restored iteration {iteration} ({n} messages)",
+    },
+    "replay.restored.many": {
+        "ar": "استُعيد التكرار {iteration} ({n} رسالة)",
+        "en": "Restored iteration {iteration} ({n} messages)",
+    },
+    "replay.restored.other": {
+        "ar": "استُعيد التكرار {iteration} ({n} رسالة)",
+        "en": "Restored iteration {iteration} ({n} messages)",
     },
     "replay.restore_request_failed": {
         "ar": "فشل طلب الاستعادة",
@@ -1926,9 +1946,53 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشل النسخ",
         "en": "Failed to copy",
     },
-    "common.ui.messages_count": {
-        "ar": "الرسائل: {n}",
+    "common.ui.messages_count.zero": {
+        "ar": "لا رسائل",
         "en": "{n} msgs",
+    },
+    "common.ui.messages_count.one": {
+        "ar": "رسالة واحدة",
+        "en": "1 msg",
+    },
+    "common.ui.messages_count.two": {
+        "ar": "رسالتان",
+        "en": "{n} msgs",
+    },
+    "common.ui.messages_count.few": {
+        "ar": "{n} رسائل",
+        "en": "{n} msgs",
+    },
+    "common.ui.messages_count.many": {
+        "ar": "{n} رسالة",
+        "en": "{n} msgs",
+    },
+    "common.ui.messages_count.other": {
+        "ar": "{n} رسالة",
+        "en": "{n} msgs",
+    },
+    "common.ui.days.zero": {
+        "ar": "{n} يوم",
+        "en": "{n} days",
+    },
+    "common.ui.days.one": {
+        "ar": "يوم واحد",
+        "en": "1 day",
+    },
+    "common.ui.days.two": {
+        "ar": "يومان",
+        "en": "{n} days",
+    },
+    "common.ui.days.few": {
+        "ar": "{n} أيام",
+        "en": "{n} days",
+    },
+    "common.ui.days.many": {
+        "ar": "{n} يومًا",
+        "en": "{n} days",
+    },
+    "common.ui.days.other": {
+        "ar": "{n} يوم",
+        "en": "{n} days",
     },
     "login.page_title": {
         "ar": "Kazma — تسجيل الدخول",

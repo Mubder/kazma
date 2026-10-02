@@ -805,7 +805,7 @@
 
     evtSource.addEventListener('worker_progress', function(e) {
       var data = parseSseData(e); if (!data) return;
-      addEventLine(taskId, '', esc(data.worker) + ': ' + t('swarm.tokens_inline', {count: (Number(data.tokens) || 0)}));
+      addEventLine(taskId, '', esc(data.worker) + ': ' + window.kazmaCount('swarm.tokens_inline', Number(data.tokens) || 0));
     });
 
     evtSource.addEventListener('worker_completed', function(e) {
@@ -1392,7 +1392,7 @@
 
   function updateHistoryPagination() {
     var maxPage = Math.ceil(historyTotal / historyPageSize) || 1;
-    setText('history-count', t('swarm.tasks_count_inline', {count: historyTotal}));
+    setText('history-count', window.kazmaCount('swarm.tasks_count_inline', historyTotal));
     setText('history-page-info', t('swarm.page_x_of_y', {x: historyPage, y: maxPage}));
     var prevBtn = $('history-prev'); if (prevBtn) prevBtn.disabled = historyPage <= 1;
     var nextBtn = $('history-next'); if (nextBtn) nextBtn.disabled = historyPage >= maxPage;
@@ -2645,7 +2645,7 @@
     var statusBadge = $('play-state-status');
     if (statusBadge) { statusBadge.className = 'badge badge-warning'; }
     setText('play-state-node', '—');
-    setText('play-state-tokens', t('swarm.tokens_inline', {count: 0}));
+    setText('play-state-tokens', window.kazmaCount('swarm.tokens_inline', 0));
     setText('play-state-cost', '$0.0000');
 
     var hitlGate = $('play-hitl-gate');
@@ -2733,7 +2733,7 @@
       var d = parseSseData(e); if (!d) return;
       var tokens = d.tokens || 0;
       playgroundTotalTokens += tokens;
-      setText('play-state-tokens', t('swarm.tokens_inline', {count: playgroundTotalTokens}));
+      setText('play-state-tokens', window.kazmaCount('swarm.tokens_inline', playgroundTotalTokens));
       
       var estCost = playgroundTotalTokens * 0.0000015;
       setText('play-state-cost', '$' + estCost.toFixed(4));
@@ -2782,7 +2782,7 @@
       }
       
       if (res.total_tokens) {
-        setText('play-state-tokens', t('swarm.tokens_inline', {count: res.total_tokens}));
+        setText('play-state-tokens', window.kazmaCount('swarm.tokens_inline', Number(res.total_tokens) || 0));
       }
       if (res.total_cost !== undefined) {
         setText('play-state-cost', '$' + parseFloat(res.total_cost).toFixed(4));

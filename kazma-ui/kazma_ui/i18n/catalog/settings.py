@@ -2718,8 +2718,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "يجب أن يكون الاحتفاظ بنسخة واحدة على الأقل",
         "en": "Backup retention must be at least 1",
     },
-    "settings.retention_saved": {
+    "settings.retention_saved.zero": {
+        "ar": "حُفظ الاحتفاظ — الإبقاء على {n} نسخة",
+        "en": "Backup retention saved — keeping the newest {n} backups",
+    },
+    "settings.retention_saved.one": {
+        "ar": "حُفظ الاحتفاظ — الإبقاء على أحدث نسخة",
+        "en": "Backup retention saved — keeping the newest backup",
+    },
+    "settings.retention_saved.two": {
+        "ar": "حُفظ الاحتفاظ — الإبقاء على أحدث نسختين",
+        "en": "Backup retention saved — keeping the newest {n} backups",
+    },
+    "settings.retention_saved.few": {
         "ar": "حُفظ الاحتفاظ — الإبقاء على أحدث {n} نسخ",
+        "en": "Backup retention saved — keeping the newest {n} backups",
+    },
+    "settings.retention_saved.many": {
+        "ar": "حُفظ الاحتفاظ — الإبقاء على أحدث {n} نسخة",
+        "en": "Backup retention saved — keeping the newest {n} backups",
+    },
+    "settings.retention_saved.other": {
+        "ar": "حُفظ الاحتفاظ — الإبقاء على أحدث {n} نسخة",
         "en": "Backup retention saved — keeping the newest {n} backups",
     },
     "settings.backup_complete": {
@@ -3194,8 +3214,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "(المختارة: {n})",
         "en": "({n} selected)",
     },
-    "settings.hub.search_models_n": {
+    "settings.hub.search_models_n.zero": {
+        "ar": "ابحث في النماذج…",
+        "en": "Search {n} models…",
+    },
+    "settings.hub.search_models_n.one": {
+        "ar": "ابحث في نموذج واحد…",
+        "en": "Search 1 model…",
+    },
+    "settings.hub.search_models_n.two": {
+        "ar": "ابحث في نموذجين…",
+        "en": "Search {n} models…",
+    },
+    "settings.hub.search_models_n.few": {
+        "ar": "ابحث في {n} نماذج…",
+        "en": "Search {n} models…",
+    },
+    "settings.hub.search_models_n.many": {
         "ar": "ابحث في {n} نموذجًا…",
+        "en": "Search {n} models…",
+    },
+    "settings.hub.search_models_n.other": {
+        "ar": "ابحث في {n} نموذج…",
         "en": "Search {n} models…",
     },
     "settings.hub.no_models_match": {
@@ -3490,7 +3530,27 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الخزنة معطّلة",
         "en": "Vault Disabled",
     },
-    "settings.sys.secrets_stored": {
+    "settings.sys.secrets_stored.zero": {
+        "ar": "الأسرار المخزّنة: {n}",
+        "en": "{n} secrets stored",
+    },
+    "settings.sys.secrets_stored.one": {
+        "ar": "الأسرار المخزّنة: {n}",
+        "en": "1 secret stored",
+    },
+    "settings.sys.secrets_stored.two": {
+        "ar": "الأسرار المخزّنة: {n}",
+        "en": "{n} secrets stored",
+    },
+    "settings.sys.secrets_stored.few": {
+        "ar": "الأسرار المخزّنة: {n}",
+        "en": "{n} secrets stored",
+    },
+    "settings.sys.secrets_stored.many": {
+        "ar": "الأسرار المخزّنة: {n}",
+        "en": "{n} secrets stored",
+    },
+    "settings.sys.secrets_stored.other": {
         "ar": "الأسرار المخزّنة: {n}",
         "en": "{n} secrets stored",
     },
@@ -3666,8 +3726,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "كل المكتبات التي تحوي مقاطع",
         "en": "All libraries with chunks",
     },
-    "settings.xt.lib_chunks": {
+    "settings.xt.lib_chunks.zero": {
+        "ar": "{name} (لا مقاطع)",
+        "en": "{name} ({n} chunks)",
+    },
+    "settings.xt.lib_chunks.one": {
+        "ar": "{name} (مقطع واحد)",
+        "en": "{name} (1 chunk)",
+    },
+    "settings.xt.lib_chunks.two": {
+        "ar": "{name} (مقطعان)",
+        "en": "{name} ({n} chunks)",
+    },
+    "settings.xt.lib_chunks.few": {
+        "ar": "{name} ({n} مقاطع)",
+        "en": "{name} ({n} chunks)",
+    },
+    "settings.xt.lib_chunks.many": {
         "ar": "{name} ({n} مقطعًا)",
+        "en": "{name} ({n} chunks)",
+    },
+    "settings.xt.lib_chunks.other": {
+        "ar": "{name} ({n} مقطع)",
         "en": "{name} ({n} chunks)",
     },
     "settings.xt.no_libraries": {
@@ -4485,8 +4565,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "اسم الملف الشخصي مطلوب",
         "en": "Profile name is required",
     },
-    "settings.agentjs.synced_neo4j": {
-        "ar": "زُامنت {n} معتقدات إلى Neo4j",
+    "settings.agentjs.synced_neo4j.zero": {
+        "ar": "لم يُزامَن أي معتقد إلى Neo4j",
+        "en": "Synced {n} beliefs to Neo4j",
+    },
+    "settings.agentjs.synced_neo4j.one": {
+        "ar": "زُومن معتقد واحد إلى Neo4j",
+        "en": "Synced 1 belief to Neo4j",
+    },
+    "settings.agentjs.synced_neo4j.two": {
+        "ar": "زُومن معتقدان إلى Neo4j",
+        "en": "Synced {n} beliefs to Neo4j",
+    },
+    "settings.agentjs.synced_neo4j.few": {
+        "ar": "زُومنت {n} معتقدات إلى Neo4j",
+        "en": "Synced {n} beliefs to Neo4j",
+    },
+    "settings.agentjs.synced_neo4j.many": {
+        "ar": "زُومن {n} معتقدًا إلى Neo4j",
+        "en": "Synced {n} beliefs to Neo4j",
+    },
+    "settings.agentjs.synced_neo4j.other": {
+        "ar": "زُومن {n} معتقد إلى Neo4j",
         "en": "Synced {n} beliefs to Neo4j",
     },
     "settings.agentjs.rebuild_started_status": {
@@ -4561,8 +4661,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "بدأت إعادة البناء",
         "en": "Rebuild started",
     },
-    "settings.agentjs.synced_rows_postgres": {
-        "ar": "الصفوف المُزامنة إلى Postgres: {n}",
+    "settings.agentjs.synced_rows_postgres.zero": {
+        "ar": "لم يُزامَن أي صف إلى Postgres",
+        "en": "Synced {n} rows to Postgres",
+    },
+    "settings.agentjs.synced_rows_postgres.one": {
+        "ar": "زُومن صف واحد إلى Postgres",
+        "en": "Synced 1 row to Postgres",
+    },
+    "settings.agentjs.synced_rows_postgres.two": {
+        "ar": "زُومن صفّان إلى Postgres",
+        "en": "Synced {n} rows to Postgres",
+    },
+    "settings.agentjs.synced_rows_postgres.few": {
+        "ar": "زُومنت {n} صفوف إلى Postgres",
+        "en": "Synced {n} rows to Postgres",
+    },
+    "settings.agentjs.synced_rows_postgres.many": {
+        "ar": "زُومن {n} صفًّا إلى Postgres",
+        "en": "Synced {n} rows to Postgres",
+    },
+    "settings.agentjs.synced_rows_postgres.other": {
+        "ar": "زُومن {n} صف إلى Postgres",
         "en": "Synced {n} rows to Postgres",
     },
     "settings.agentjs.logging_settings_saved_restart_for": {
@@ -4889,8 +5009,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "جارٍ مزامنة المعتقدات إلى Neo4j…",
         "en": "Syncing beliefs to Neo4j…",
     },
-    "settings.agentjs.st_synced_beliefs": {
-        "ar": "زُامنت {n} معتقدات",
+    "settings.agentjs.st_synced_beliefs.zero": {
+        "ar": "لم يُزامَن أي معتقد",
+        "en": "Synced {n} beliefs",
+    },
+    "settings.agentjs.st_synced_beliefs.one": {
+        "ar": "زُومن معتقد واحد",
+        "en": "Synced 1 belief",
+    },
+    "settings.agentjs.st_synced_beliefs.two": {
+        "ar": "زُومن معتقدان",
+        "en": "Synced {n} beliefs",
+    },
+    "settings.agentjs.st_synced_beliefs.few": {
+        "ar": "زُومنت {n} معتقدات",
+        "en": "Synced {n} beliefs",
+    },
+    "settings.agentjs.st_synced_beliefs.many": {
+        "ar": "زُومن {n} معتقدًا",
+        "en": "Synced {n} beliefs",
+    },
+    "settings.agentjs.st_synced_beliefs.other": {
+        "ar": "زُومن {n} معتقد",
         "en": "Synced {n} beliefs",
     },
     "settings.agentjs.st_sync_failed": {
@@ -4905,8 +5045,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "جارٍ مزامنة المعتقدات والحلقات إلى Postgres…",
         "en": "Syncing beliefs + episodes to Postgres…",
     },
-    "settings.agentjs.st_synced_rows": {
-        "ar": "زُامنت {n} صفوف",
+    "settings.agentjs.st_synced_rows.zero": {
+        "ar": "لم يُزامَن أي صف",
+        "en": "Synced {n} rows",
+    },
+    "settings.agentjs.st_synced_rows.one": {
+        "ar": "زُومن صف واحد",
+        "en": "Synced 1 row",
+    },
+    "settings.agentjs.st_synced_rows.two": {
+        "ar": "زُومن صفّان",
+        "en": "Synced {n} rows",
+    },
+    "settings.agentjs.st_synced_rows.few": {
+        "ar": "زُومنت {n} صفوف",
+        "en": "Synced {n} rows",
+    },
+    "settings.agentjs.st_synced_rows.many": {
+        "ar": "زُومن {n} صفًّا",
+        "en": "Synced {n} rows",
+    },
+    "settings.agentjs.st_synced_rows.other": {
+        "ar": "زُومن {n} صف",
         "en": "Synced {n} rows",
     },
     "settings.agentjs.st_testing_embedder": {

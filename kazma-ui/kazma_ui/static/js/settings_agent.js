@@ -261,8 +261,8 @@
                 const data = await resp.json();
                 if (data.ok) {
                     this.memoryNeo4jOk = true;
-                    this.memoryNeo4jStatus = data.detail || _k('settings.agentjs.st_synced_beliefs', 'Synced {n} beliefs', { n: data.synced || 0 });
-                    showToast(_k('settings.agentjs.synced_neo4j', 'Synced {n} beliefs to Neo4j', { n: data.synced || 0 }), 'success');
+                    this.memoryNeo4jStatus = data.detail || window.kazmaCount('settings.agentjs.st_synced_beliefs', data.synced || 0);
+                    showToast(window.kazmaCount('settings.agentjs.synced_neo4j', data.synced || 0), 'success');
                 } else {
                     this.memoryNeo4jStatus = data.error || _k('settings.agentjs.st_sync_failed', 'Sync failed');
                     showToast(_k('settings.agentjs.neo4j_sync_failed', 'Neo4j sync failed'), 'error');
@@ -283,8 +283,8 @@
                 const data = await resp.json();
                 if (data.ok) {
                     this.memoryStateSyncOk = true;
-                    this.memoryStateSyncStatus = data.detail || _k('settings.agentjs.st_synced_rows', 'Synced {n} rows', { n: data.synced || 0 });
-                    showToast(data.detail || _k('settings.agentjs.synced_rows_postgres', 'Synced {n} rows to Postgres', { n: data.synced || 0 }), 'success');
+                    this.memoryStateSyncStatus = data.detail || window.kazmaCount('settings.agentjs.st_synced_rows', data.synced || 0);
+                    showToast(data.detail || window.kazmaCount('settings.agentjs.synced_rows_postgres', data.synced || 0), 'success');
                 } else {
                     this.memoryStateSyncStatus = data.error || _k('settings.agentjs.st_sync_failed', 'Sync failed');
                     showToast(_k('settings.agentjs.postgres_sync_failed', 'Postgres sync failed'), 'error');

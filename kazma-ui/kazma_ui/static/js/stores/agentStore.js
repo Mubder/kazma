@@ -46,17 +46,17 @@ function registerAgentStore() {
     const nTools = Array.isArray(d.tools) ? d.tools.length : 0;
 
     if (step === 'preparing' || /^preparing to execute\b/i.test(msg)) {
+      // A count in its plural form (window.kazmaCount, base.html): "1 tools"
+      // and "{n} أدوات" for every number were the one-form label's.
       const mN = msg.match(/preparing to execute\s+(\d+)\s+tools?/i);
-      if (mN) return _tiFmt('preparing_n_tools', 'Preparing to execute {n} tools…', { n: mN[1] });
+      if (mN) return window.kazmaCount('chat.preparing_n_tools', Number(mN[1]));
       if (/^\d+\s+tools?$/i.test(tool) || (nTools > 1 && !tool)) {
-        const n = nTools > 1 ? nTools : (tool.match(/^(\d+)/) || [])[1] || tool;
-        return _tiFmt('preparing_n_tools', 'Preparing to execute {n} tools…', { n: n });
+        const n = nTools > 1 ? nTools : Number((tool.match(/^(\d+)/) || [])[1]) || 0;
+        return window.kazmaCount('chat.preparing_n_tools', n);
       }
       const tname = tool || (msg.replace(/^preparing to execute\s+/i, '').replace(/\.{2,}$/, '').trim()) || 'tool';
       if (/^\d+\s+tools?$/i.test(tname)) {
-        return _tiFmt('preparing_n_tools', 'Preparing to execute {n} tools…', {
-          n: (tname.match(/^(\d+)/) || [])[1] || tname,
-        });
+        return window.kazmaCount('chat.preparing_n_tools', Number((tname.match(/^(\d+)/) || [])[1]) || 0);
       }
       return _tiFmt('preparing_tool', 'Preparing to execute {tool}…', { tool: tname });
     }
