@@ -21,7 +21,6 @@ import asyncio
 import logging
 import os
 import stat
-import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -30,6 +29,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
 from kazma_core.errors import safe_error
+from kazma_core.workspace.project_files import GENERATED_DIRS
 
 logger = logging.getLogger(__name__)
 
@@ -86,44 +86,11 @@ def _file_mtime_str(p: Path) -> str:
 
 #: Folders the fallback walk never enters, besides hidden ones (``.git``,
 #: ``.venv``...): generated trees and the install's own data folder.
-_SKIP_DIRS = frozenset(
-    {"node_modules", "__pycache__", "venv", "site-packages", "dist", "build", "kazma-data"}
-)
+#: The folders no project walk enters (``workspace.project_files``, the one list).
+_SKIP_DIRS = GENERATED_DIRS
 #: The fallback walk stops after this many files: a workspace that is not a
 #: repository can be any folder.
 _WALK_FILE_CAP = 20_000
-
-
-def _git_project_files(root: Path) -> list[Path] | None:
-    """The workspace's own files as git sees them -- tracked, plus untracked
-    ones ``.gitignore`` does not exclude -- or None when ``root`` is not the
-    top of a repository, or git is missing.
-
-    Only a repository's own top level: the default sandbox
-    (``<data dir>/workspace``) sits inside the install's checkout, which
-    ignores it, and git would list nothing there.
-
-    No server secrets for git (it runs the repository's configured programs,
-    AGENTS.md §26I), and ``core.fsmonitor`` off so none is started at all.
-    """
-    from kazma_core.security.child_env import tool_child_env
-
-    if not (root / ".git").exists():
-        return None
-    try:
-        res = subprocess.run(
-            ["git", "-c", "core.fsmonitor=false", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-            cwd=str(root),
-            env=tool_child_env(),
-            capture_output=True,
-            timeout=15,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if res.returncode != 0:
-        return None
-    return [root / name for name in res.stdout.decode("utf-8", "replace").split("\0") if name]
 
 
 def _walk_files(root: Path) -> list[Path]:
@@ -149,7 +116,9 @@ def _scan_recent_files(root: Path, limit: int) -> list[dict[str, Any]]:
     (2026-09-28). A repository's files come from git; any other folder gets
     a pruned walk.
     """
-    candidates = _git_project_files(root)
+    from kazma_core.workspace import project_files
+
+    candidates = project_files.git_project_files(root)
     if candidates is None:
         candidates = _walk_files(root)
     stamped: list[tuple[float, int, Path]] = []

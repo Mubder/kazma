@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import io
-from dataclasses import replace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-
 from kazma_core.documents.config import DocumentConfig
 from kazma_core.documents.ingestion import (
     DocumentIngestionError,
@@ -18,6 +16,7 @@ from kazma_core.documents.knowledge import DocumentIndexResult
 from kazma_core.documents.models import DocumentJobState, DocumentResult
 from kazma_core.documents.repository import DocumentAccessError
 
+from tests._document_jobs import wait_for_job
 
 TEXT = b"Kazma document intelligence platform.\nPhase 8 durable ingestion.\n"
 
@@ -32,19 +31,8 @@ def _service(tmp_path) -> DocumentIngestionService:
     return DocumentIngestionService(config=config)
 
 
-async def _wait_state(svc, tenant, job_id, expected, *, timeout=10.0):
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    last = None
-    while loop.time() < deadline:
-        status = await asyncio.to_thread(
-            svc.job_status, tenant_id=tenant, job_id=job_id
-        )
-        last = status
-        if status is not None and status["state"] == expected:
-            return status
-        await asyncio.sleep(0.05)
-    raise AssertionError(f"job did not reach {expected}; last={last}")
+async def _wait_state(svc, tenant, job_id, expected):
+    return await wait_for_job(svc, tenant, job_id, expected)
 
 
 @pytest.mark.asyncio

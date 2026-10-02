@@ -15,6 +15,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from kazma_core.workspace import project_files
 from kazma_ui import workspace_api as wa
 
 
@@ -65,8 +66,8 @@ def test_git_runs_without_the_servers_secrets_or_the_repositorys_programs(tmp_pa
         return subprocess.CompletedProcess(argv, 0, b"", b"")
 
     monkeypatch.setenv("KAZMA_VAULT_KEY", "must-not-reach-git")
-    monkeypatch.setattr(wa.subprocess, "run", fake_run)
-    assert wa._git_project_files(root) == []
+    monkeypatch.setattr(project_files.subprocess, "run", fake_run)
+    assert project_files.git_project_files(root) == []
     assert "core.fsmonitor=false" in seen["argv"]
     assert "KAZMA_VAULT_KEY" not in seen["env"]
 
@@ -102,7 +103,7 @@ def test_git_missing_falls_back_to_the_walk(tmp_path, monkeypatch):
     def no_git(*a, **k):
         raise FileNotFoundError("git")
 
-    monkeypatch.setattr(wa.subprocess, "run", no_git)
+    monkeypatch.setattr(project_files.subprocess, "run", no_git)
     assert _paths(root) == ["main.py"]
 
 

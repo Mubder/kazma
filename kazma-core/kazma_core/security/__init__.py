@@ -1,71 +1,11 @@
-"""
-Kazma Security Module
+"""Kazma's security modules.
 
-Provides security linting, skill certification, audit trail logging,
-and dependency vulnerability scanning for Kazma skills.
+Import what you use from its own module (``kazma_core.security.vault``,
+``kazma_core.security.secret_scan``, ...). The package imports nothing
+itself: until 2026-10-02 it imported six modules for every ``from
+kazma_core.security import vault``, each behind ``except ImportError: pass``,
+so a broken module became a silently missing name (AGENTS.md §24A) and no
+caller used any of those re-exports.
 """
 
 from __future__ import annotations
-
-try:
-    from .linter import LintReport, LintResult, Rule, SecurityLinter
-except ImportError:
-    pass
-
-try:
-    from .certification import CertificationResult, KazmaCertification, VerificationResult
-except ImportError:
-    pass
-
-try:
-    from .audit_trail import SecurityAuditTrail, SecurityEvent, SecurityReport
-except ImportError:
-    pass
-
-try:
-    from .dependency_scanner import (
-        DependabotStyleScanner,
-        DependencyReport,
-        DependencyScanner,
-        ScanReport,
-        ScanResult,
-        SkillScanResult,
-        Vulnerability,
-    )
-except ImportError:
-    pass
-
-try:
-    from .disclosure import DisclosureReport, VulnerabilityDisclosure
-except ImportError:
-    pass
-
-try:
-    from .hardening import HardeningCheck, HardeningReport, SecurityHardeningRunner
-except ImportError:
-    pass
-
-__all__ = [
-    "SecurityLinter",
-    "LintReport",
-    "LintResult",
-    "Rule",
-    "KazmaCertification",
-    "CertificationResult",
-    "VerificationResult",
-    "SecurityAuditTrail",
-    "SecurityEvent",
-    "SecurityReport",
-    "DependencyScanner",
-    "Vulnerability",
-    "DependencyReport",
-    "ScanResult",
-    "ScanReport",
-    "SkillScanResult",
-    "DependabotStyleScanner",
-    "VulnerabilityDisclosure",
-    "DisclosureReport",
-    "SecurityHardeningRunner",
-    "HardeningCheck",
-    "HardeningReport",
-]

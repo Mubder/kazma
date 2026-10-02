@@ -5,13 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from kazma_core.documents.binaries import find_soffice
 from kazma_core.documents.config import DocumentConfig
 from kazma_core.documents.hostile_corpus import _minimal_pdf
 from kazma_core.documents.renderers import RendererReadiness, get_renderer_registry
 from kazma_core.documents.service import DocumentService
 from kazma_core.documents.sniff import _pdf_has_active_content, sniff_document
+
+from tests._document_jobs import wait_for_job
 
 
 def test_resolve_prefers_available_docx_pdf_engine() -> None:
@@ -48,8 +49,9 @@ def test_pdf_sniff_rejects_javascript_openaction(tmp_path: Path) -> None:
 
 
 def test_find_soffice_prefers_com_on_windows() -> None:
-    from kazma_core.documents.binaries import find_soffice
     import sys
+
+    from kazma_core.documents.binaries import find_soffice
 
     found = find_soffice()
     if found and sys.platform == "win32":
@@ -129,19 +131,7 @@ async def test_delete_document_soft_archives(tmp_path: Path) -> None:
             workspace_id="ws",
             actor_id="alice",
         )
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 20.0
-        while loop.time() < deadline:
-            status = await asyncio.to_thread(
-                svc.job_status, tenant_id="tenant-a", job_id=result.job_id
-            )
-            if status and status["state"] == "ready":
-                break
-            if status and status["state"] in {"rejected", "dead_letter", "cancelled"}:
-                raise AssertionError(f"ingest ended in {status['state']}")
-            await asyncio.sleep(0.05)
-        else:
-            raise AssertionError("ingest did not become ready")
+        await wait_for_job(svc, "tenant-a", result.job_id)
 
         listed = svc.list_documents(tenant_id="tenant-a", actor_id="alice")
         assert any(d["document_id"] == str(result.document_id) for d in listed)

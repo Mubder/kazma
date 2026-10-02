@@ -68,6 +68,7 @@ __all__ = [
     "gate_for",
     "live_gates",
     "pending_gates",
+    "recorded_decision_count",
     "expire_due_gates",
     "boot_sweep",
     "boot_sweep_async",
@@ -726,6 +727,20 @@ def live_gates(thread_id: str) -> list[GateRow]:
             (thread_id, *LIVE_STATES),
         )
         return [_row_to_gate(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def recorded_decision_count() -> int:
+    """How many approval questions the registry holds a decision for.
+
+    The security report reads it: the registry is where an approval is
+    recorded (who decided, what, when).
+    """
+    ensure_gate_schema()
+    conn = _connect()
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM hitl_gates WHERE decision != ''").fetchone()[0])
     finally:
         conn.close()
 

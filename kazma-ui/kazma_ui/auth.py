@@ -35,6 +35,10 @@ from typing import Any
 from fastapi import Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 
+# Shorter than this, a KAZMA_SECRET set by hand is guessable at scale: one
+# number for the boot warning below and the security report.
+from kazma_core.security.boot_guard import WEAK_SECRET_CHARS, env_flag
+
 logger = logging.getLogger(__name__)
 
 # One-shot loud warning for KAZMA_DEMO_MODE (see auth_middleware_with_gate).
@@ -202,6 +206,49 @@ def undeclared_proxy_detected() -> bool:
 def reset_proxy_detection() -> None:
     """Clear the detection latch (tests only)."""
     _undeclared_proxy.update({"seen": False, "peer": "", "warned": False})
+
+
+def _arrived_through_a_proxy(request: Request) -> bool:
+    """This request reached Kazma by way of a proxy, from another machine.
+
+    The TCP peer is a declared proxy, or the request carries forwarding
+    headers (a proxy nobody declared, or a client claiming one: refusing
+    either only closes a door).
+    """
+    peer = _peer_host(request)
+    if peer and _is_trusted_proxy(peer):
+        return True
+    return any(request.headers.get(h) for h in _FORWARDED_HEADERS)
+
+
+_auth_disabled_proxy_logged: list[bool] = [False]
+
+
+def _auth_disabled_behind_proxy_response() -> JSONResponse:
+    """The refusal for a proxied request while sign-in is switched off.
+
+    ``KAZMA_AUTH_DISABLED`` is a convenience for one machine. The boot guard
+    refuses it beside a non-loopback bind or a declared proxy; a proxy
+    nobody declared shows itself only in the traffic, so the middleware
+    refuses here (2026-10-02).
+    """
+    if not _auth_disabled_proxy_logged[0]:
+        _auth_disabled_proxy_logged[0] = True
+        logger.error(
+            "[SECURITY] KAZMA_AUTH_DISABLED is set and a request came through a "
+            "proxy: Kazma is reachable from other machines. Every proxied /api "
+            "request is refused until KAZMA_AUTH_DISABLED is unset."
+        )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": (
+                "Sign-in is switched off (KAZMA_AUTH_DISABLED), and this request "
+                "came through a proxy from another machine. Kazma refuses it: "
+                "unset KAZMA_AUTH_DISABLED to use Kazma from here."
+            )
+        },
+    )
 
 
 def _note_forwarded_headers(request: Request) -> None:
@@ -1309,6 +1356,8 @@ def create_auth_middleware(
         #    Account API token (still validate those when present).
         provided = await asyncio.to_thread(extract_provided_credential, request)
         if not expected:
+            if env_flag("KAZMA_AUTH_DISABLED") and _arrived_through_a_proxy(request):
+                return _auth_disabled_behind_proxy_response()
             # Open mode: still accept valid API tokens; otherwise pass through.
             if provided and provided.startswith("kazma_") and not await asyncio.to_thread(
                 verify_api_token, provided
@@ -1562,11 +1611,6 @@ def client_address(request: Request) -> str:
     behind a reverse proxy collapses into a single bucket (audit F-01/F-12).
     """
     return _client_host(request)
-
-
-#: Shorter than this, a KAZMA_SECRET set by hand is guessable at scale. A
-#: generated one is 32 hex characters (128 bits).
-WEAK_SECRET_CHARS = 20
 
 
 def warn_if_weak_secret() -> bool:

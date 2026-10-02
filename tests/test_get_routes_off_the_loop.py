@@ -84,7 +84,7 @@ def walk_app(app: FastAPI, skip: dict[str, str] | None = None) -> dict[str, list
     # still run, over no files.
     from kazma_core.security import hardening
 
-    mp.setattr(hardening, "_project_files", lambda _root, _suffix: iter(()))
+    mp.setattr(hardening.SecurityHardeningRunner, "_product_files", lambda _self: [])
 
     real_create = socket.create_connection
     real_getaddrinfo = socket.getaddrinfo

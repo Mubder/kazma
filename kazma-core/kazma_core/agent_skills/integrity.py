@@ -118,7 +118,9 @@ def write_install_meta(skill_dir: Path, meta: dict[str, Any]) -> None:
     )
 
 
-def verify_skill(skill_md_path: Path, *, meta: dict[str, Any] | None = None) -> VerifyResult:
+def verify_skill(
+    skill_md_path: Path, *, meta: dict[str, Any] | None = None, warn: bool = True,
+) -> VerifyResult:
     """Verify the integrity of a SKILL.md against its stored install meta.
 
     Behavior:
@@ -149,11 +151,12 @@ def verify_skill(skill_md_path: Path, *, meta: dict[str, Any] | None = None) -> 
 
     # Unsigned skill: warn but allow (backward-compat).
     if not stored_checksum:
-        logger.warning(
-            "[AgentSkill] '%s' has no integrity checksum — loading unsigned. "
-            "Reinstall or run 'kazma agent-skills sign' to sign it.",
-            skill_md_path.parent.name,
-        )
+        if warn:
+            logger.warning(
+                "[AgentSkill] '%s' has no integrity checksum — loading unsigned. "
+                "Reinstall or run 'kazma agent-skills sign' to sign it.",
+                skill_md_path.parent.name,
+            )
         return VerifyResult(ok=True, reason="unsigned (no checksum stored)", signed=False)
 
     actual_checksum = compute_checksum(text)

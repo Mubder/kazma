@@ -1516,11 +1516,13 @@ class SettingsRouterBuilder:
             (2026-10-01). Here they run on their own loop in a worker thread.
             The install's own folder is scanned, never the working directory.
             """
+            from kazma_core.diagnostic_scope import read_only_diagnostic
             from kazma_core.paths import get_project_root, installed_project_root
             from kazma_core.security.hardening import SecurityHardeningRunner
 
             root = installed_project_root() or get_project_root()
-            report = asyncio.run(SecurityHardeningRunner(root).run_all_checks())
+            with read_only_diagnostic("/api/security/hardening"):
+                report = asyncio.run(SecurityHardeningRunner(root).run_all_checks())
             return {
                 "total": report.total,
                 "passed": report.passed,
@@ -1628,24 +1630,27 @@ class SettingsRouterBuilder:
                 return {"status": "error", "error": validation_error(exc)}
 
         @router.get("/api/security/deps")
-        async def api_security_deps() -> dict[str, Any]:
-            """Scan installed skill manifests (local; no NVD/OSV required)."""
-            from kazma_core.security.dependency_scanner import DependabotStyleScanner
+        def api_security_deps() -> dict[str, Any]:
+            """Check the skills installed from the hub.
 
-            # The scanner opens its database as it is built: in a thread.
-            scanner = await asyncio.to_thread(DependabotStyleScanner)
+            For each: a credential written into its manifest, MCP settings
+            that hand a server the host, and OSV advisories for the installed
+            versions of its requirements. A plain ``def``: the manifests are
+            read from disk, and it ran on the server's loop. When OSV cannot
+            be asked the answer is an error, never an empty list.
+            """
+            from dataclasses import asdict
+
+            from kazma_core.security.dependency_scanner import (
+                DependencyQueryError,
+                scan_skill_manifests,
+            )
+
             try:
-                hits = await scanner.scan_skill_manifests()
-            except Exception as exc:
-                logger.debug("[security] skill dep scan failed", exc_info=True)
-                return {"status": "error", "error": safe_error(exc), "results": []}
-            out = []
-            for h in hits or []:
-                if hasattr(h, "__dict__"):
-                    out.append({k: v for k, v in vars(h).items() if not k.startswith("_")})
-                else:
-                    out.append(str(h))
-            return {"status": "ok", "results": out}
+                results = asyncio.run(scan_skill_manifests())
+            except DependencyQueryError as exc:
+                return {"status": "error", "error": str(exc), "results": []}
+            return {"status": "ok", "results": [asdict(r) for r in results]}
 
         @router.get("/api/settings/system/updates")
         async def api_check_updates() -> dict[str, Any]:

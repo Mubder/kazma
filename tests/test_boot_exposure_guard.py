@@ -29,7 +29,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 
 @pytest.fixture(autouse=True)
 def _clean_switches(monkeypatch: pytest.MonkeyPatch) -> None:
-    for var in ("KAZMA_AUTH_DISABLED", "KAZMA_DEMO_MODE", "KAZMA_PRODUCTION"):
+    for var in ("KAZMA_AUTH_DISABLED", "KAZMA_DEMO_MODE", "KAZMA_PRODUCTION",
+                "KAZMA_DEV_WS_BYPASS", "KAZMA_TRUSTED_PROXIES"):
         monkeypatch.delenv(var, raising=False)
 
 

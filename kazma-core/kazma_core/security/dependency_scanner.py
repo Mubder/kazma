@@ -1,908 +1,376 @@
-"""
-Dependency Vulnerability Scanner for Kazma Skills.
+"""Known vulnerabilities in the packages Kazma runs on, from OSV.
 
-Queries the OSV (Open Source Vulnerabilities) API to check skill
-dependencies for known CVEs and security advisories.  Includes the
-original ``DependencyScanner`` (single-source OSV) and the newer
-``DependabotStyleScanner`` (multi-source: OSV, GitHub Advisories, NVD).
+The scanner this replaces asked OSV about the lowest version a requirement
+allowed (``httpx>=0.27`` was asked as ``0.27``, an unpinned name as ``0``),
+so every advisory ever published against a package counted: the live
+security report said "202 vulnerable dependencies" across 35 requirements
+(2026-10-02). A network failure returned "none", which made a scan that
+never ran look clean, and answers were cached forever. Its multi-source
+sibling (GitHub advisories asked without a version, NVD, a scan-history
+database, a ``gh issue create`` helper) was reached by nothing.
+
+What runs is what is installed. :func:`_installed_packages` reads the
+environment's distributions, and :func:`_audit_packages` asks OSV about those
+exact versions (``/v1/querybatch``, then each advisory's summary and fixed
+version). A failure to ask raises :class:`DependencyQueryError`: a package
+that was not asked about is never reported clean.
+
+:func:`scan_skill_manifests` checks the skills installed from the hub: a
+credential written into a manifest, MCP settings that hand a server the
+host, and the installed versions of a skill's ``requirements.txt``.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
+import importlib.metadata
+import logging
 import re
-import sqlite3
-import subprocess
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+
+import httpx
+
 from kazma_core.http_tls import shared_ssl_context
+from kazma_core.security.secret_scan import find_credentials
 
-__all__ = ["DependabotStyleScanner", "DependencyReport", "DependencyScanner", "OSV_API_URL", "ScanReport", "ScanResult", "SkillScanResult", "Vulnerability"]
+__all__ = [
+    "DependencyQueryError",
+    "DependencyReport",
+    "OSV_QUERYBATCH_URL",
+    "OSV_VULN_URL",
+    "SkillScanResult",
+    "Vulnerability",
+    "audit_installed",
+    "scan_skill_manifests",
+]
 
-try:
-    import httpx
-except ImportError:  # pragma: no cover
-    httpx = None  # type: ignore[assignment]
+logger = logging.getLogger(__name__)
+
+OSV_QUERYBATCH_URL = "https://api.osv.dev/v1/querybatch"
+OSV_VULN_URL = "https://api.osv.dev/v1/vulns/{id}"
+
+#: Queries per batch request (OSV accepts up to 1,000).
+_BATCH_SIZE = 500
+#: Advisories whose details (summary, fixed version) are fetched, at most.
+_MAX_DETAILS = 200
+_DETAIL_CONCURRENCY = 8
+_TIMEOUT_S = 30.0
 
 
-OSV_API_URL = "https://api.osv.dev/v1/query"
+class DependencyQueryError(RuntimeError):
+    """OSV could not be asked, so nothing is known about the packages."""
 
 
-@dataclass
+@dataclass(frozen=True)
 class Vulnerability:
-    """A single known vulnerability."""
+    """One advisory that affects one installed package version."""
 
     package: str
     version: str
     vuln_id: str
-    severity: str
-    description: str
+    summary: str = ""
     fixed_version: str | None = None
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass
 class DependencyReport:
-    """Aggregated scan report for a skill's dependencies."""
+    """The packages asked about and the advisories that affect them."""
 
-    skill_path: str
-    total_deps: int
-    vulnerable_deps: int
-    results: list[Vulnerability] = field(default_factory=list)
+    total: int
+    vulnerabilities: list[Vulnerability] = field(default_factory=list)
 
+    @property
+    def vulnerable_packages(self) -> list[str]:
+        return sorted({f"{v.package} {v.version}" for v in self.vulnerabilities})
 
-class DependencyScanner:
-    """Scan skill dependencies against the OSV vulnerability database."""
-
-    def __init__(self, cache_path: Path | str | None = None) -> None:
-        """Initialise the scanner.
-
-        Args:
-            cache_path: Path for the local JSON vulnerability cache.
-                        Defaults to ``kazma-data/vuln_cache.json``.
-        """
-        if cache_path is None:
-            from kazma_core.paths import data_dir as _dd
-
-            cache_path = _dd() / "vuln_cache.json"
-        self._cache_path = Path(cache_path)
-        self._cache: dict[str, list[dict]] = {}
-        self._load_cache()
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    async def scan(self, skill_path: Path) -> DependencyReport:
-        """Scan all dependencies of a skill for known vulnerabilities.
-
-        Reads ``requirements.txt`` and/or ``pyproject.toml`` from
-        *skill_path*, queries the OSV API for each dependency, and
-        returns a :class:`DependencyReport`.
-
-        Args:
-            skill_path: Root directory of the skill.
-
-        Returns:
-            :class:`DependencyReport` with all findings.
-        """
-        deps = self._parse_dependencies(skill_path)
-        total = len(deps)
-        all_vulns: list[Vulnerability] = []
-
-        for pkg, ver in deps:
-            vulns = await self.check_single(pkg, ver)
-            all_vulns.extend(vulns)
-
-        return DependencyReport(
-            skill_path=str(skill_path),
-            total_deps=total,
-            vulnerable_deps=len(all_vulns),
-            results=all_vulns,
-        )
-
-    async def check_single(self, package: str, version: str) -> list[Vulnerability]:
-        """Query the OSV API for vulnerabilities in a single package.
-
-        Args:
-            package: Package name (PyPI ecosystem assumed).
-            version: Package version string.
-
-        Returns:
-            List of :class:`Vulnerability` items (empty if none found).
-        """
-        cache_key = f"{package}=={version}"
-
-        # Check cache first
-        if cache_key in self._cache:
-            return self._deserialise_vulns(self._cache[cache_key], package, version)
-
-        if httpx is None:  # pragma: no cover
-            return []
-
-        payload = {
-            "package": {
-                "name": package,
-                "ecosystem": "PyPI",
-            },
-            "version": version,
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
-                resp = await client.post(OSV_API_URL, json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-        except Exception:  # pragma: no cover — network / parse errors
-            return []
-
-        vulns_raw: list[dict] = data.get("vulns", [])
-        vulns = self._deserialise_vulns(vulns_raw, package, version)
-
-        # Store in cache
-        self._cache[cache_key] = vulns_raw
-        self._save_cache()
-
-        return vulns
-
-    async def update_database(self) -> None:
-        """Refresh the local vulnerability cache.
-
-        This is a stub — a production implementation would re-query
-        recently-changed packages or subscribe to OSV change feeds.
-        """
-        # Clear cache to force fresh queries on next scan
-        self._cache.clear()
-        self._save_cache()
-
-    # ------------------------------------------------------------------
-    # Dependency parsing
-    # ------------------------------------------------------------------
-
-    def _parse_dependencies(self, skill_path: Path) -> list[tuple[str, str]]:
-        """Parse dependency files from a skill directory.
-
-        Returns:
-            List of ``(package_name, version)`` tuples.
-        """
-        deps: list[tuple[str, str]] = []
-
-        # requirements.txt
-        req_file = skill_path / "requirements.txt"
-        if req_file.exists():
-            deps.extend(self._parse_requirements_txt(req_file))
-
-        # pyproject.toml
-        pyproject = skill_path / "pyproject.toml"
-        if pyproject.exists():
-            deps.extend(self._parse_pyproject_toml(pyproject))
-
-        return deps
-
-    @staticmethod
-    def _parse_requirements_txt(path: Path) -> list[tuple[str, str]]:
-        """Parse a ``requirements.txt`` file.
-
-        Recognises formats: ``pkg>=1.0``, ``pkg==1.2.3``, ``pkg~=1.0``, ``pkg``.
-        """
-        deps: list[tuple[str, str]] = []
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            return deps
-
-        for line in text.splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or line.startswith("-"):
-                continue
-            # Strip extras like pkg[extra]>=1.0
-            match = re.match(r"([A-Za-z0-9_.-]+)(?:\[.*?\])?\s*([><=!~]+)\s*([^\s;#]+)", line)
-            if match:
-                deps.append((match.group(1), match.group(3)))
-            else:
-                # No version specifier
-                pkg_match = re.match(r"([A-Za-z0-9_.-]+)", line)
-                if pkg_match:
-                    deps.append((pkg_match.group(1), "0"))
-
-        return deps
-
-    @staticmethod
-    def _parse_pyproject_toml(path: Path) -> list[tuple[str, str]]:
-        """Parse dependencies from ``pyproject.toml`` (basic parsing, no tomllib dependency)."""
-        deps: list[tuple[str, str]] = []
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            return deps
-
-        in_deps = False
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped == "[project.dependencies]" or stripped == "dependencies = [":
-                in_deps = True
-                continue
-            if in_deps:
-                if stripped.startswith("["):
-                    in_deps = False
-                    continue
-                if stripped.startswith("]"):
-                    in_deps = False
-                    continue
-                # Lines like: "requests>=2.28.0",  or  'requests>=2.28.0',
-                cleaned = stripped.strip(chr(39) + chr(34) + ", ")
-                match = re.match(r"([A-Za-z0-9_.-]+)\s*([><=!~]+)\s*(.+)", cleaned)
-                if match:
-                    deps.append((match.group(1), match.group(3)))
-                else:
-                    pkg_match = re.match(r"([A-Za-z0-9_.-]+)", cleaned)
-                    if pkg_match:
-                        deps.append((pkg_match.group(1), "0"))
-
-        return deps
-
-    # ------------------------------------------------------------------
-    # Cache
-    # ------------------------------------------------------------------
-
-    def _load_cache(self) -> None:
-        if self._cache_path.exists():
-            try:
-                self._cache = json.loads(self._cache_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                self._cache = {}
-        else:
-            self._cache = {}
-
-    def _save_cache(self) -> None:
-        try:
-            self._cache_path.parent.mkdir(parents=True, exist_ok=True)
-            self._cache_path.write_text(json.dumps(self._cache, indent=2), encoding="utf-8")
-        except OSError:  # pragma: no cover
-            pass
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _deserialise_vulns(raw: list[dict], package: str, version: str) -> list[Vulnerability]:
-        """Convert raw OSV vulnerability dicts into :class:`Vulnerability` objects."""
-        results: list[Vulnerability] = []
-        for v in raw:
-            severity = "UNKNOWN"
-            sev_list = v.get("severity", [])
-            if isinstance(sev_list, list) and sev_list:
-                severity = sev_list[0].get("type", sev_list[0].get("score", "UNKNOWN"))
-            elif isinstance(sev_list, str):
-                severity = sev_list
-
-            # Determine fixed version from affected ranges
-            fixed: str | None = None
-            for aff in v.get("affected", []):
-                for rng in aff.get("ranges", []):
-                    for evt in rng.get("events", []):
-                        if "fixed" in evt:
-                            fixed = evt["fixed"]
-                            break
-
-            results.append(
-                Vulnerability(
-                    package=package,
-                    version=version,
-                    vuln_id=v.get("id", "UNKNOWN"),
-                    severity=str(severity),
-                    description=v.get("summary", v.get("details", "")),
-                    fixed_version=fixed,
-                )
-            )
-
-        return results
-
-
-# ======================================================================
-# Dependabot-style multi-source scanner
-# ======================================================================
-
-
-@dataclass
-class ScanResult:
-    """A single vulnerability finding from any source."""
-
-    package: str
-    current_version: str
-    vulnerability: Vulnerability
-    fix_available: bool
-    fix_version: str | None = None
-    source: str = "osv"  # "osv", "github_advisories", "nvd"
-
-
-@dataclass
-class ScanReport:
-    """Aggregated multi-source scan report."""
-
-    scan_time: str
-    total_packages: int
-    vulnerable_packages: int
-    results: list[ScanResult] = field(default_factory=list)
-    sources_checked: list[str] = field(default_factory=list)
+    def upgrades(self) -> dict[str, tuple[str | None, int]]:
+        """Per ``"name version"``: the release that fixes every advisory with a
+        fix (the highest), and how many advisories have none."""
+        out: dict[str, tuple[str | None, int]] = {}
+        for v in self.vulnerabilities:
+            key = f"{v.package} {v.version}"
+            best, unfixed = out.get(key, (None, 0))
+            if v.fixed_version is None:
+                unfixed += 1
+            elif best is None or _version_key(v.fixed_version) > _version_key(best):
+                best = v.fixed_version
+            out[key] = (best, unfixed)
+        return out
 
 
 @dataclass
 class SkillScanResult:
-    """Result of scanning an installed skill manifest."""
+    """What a scan found in one installed skill."""
 
     skill_name: str
     skill_path: str
     issues: list[str] = field(default_factory=list)
-    vulnerable_deps: list[ScanResult] = field(default_factory=list)
+    vulnerabilities: list[Vulnerability] = field(default_factory=list)
 
 
-class DependabotStyleScanner:
-    """Automated dependency vulnerability scanning with multi-source support.
+def _canonical_name(name: str) -> str:
+    """A distribution name as PyPI and OSV compare it (PEP 503)."""
+    return re.sub(r"[-_.]+", "-", name).strip().lower()
 
-    Extends the basic ``DependencyScanner`` with:
-    * Multi-source queries (OSV, GitHub Advisories, NVD)
-    * SQLite scan history tracking
-    * Skill manifest scanning
-    * GitHub issue auto-creation
-    * Security advisory generation
+
+def _installed_packages() -> list[tuple[str, str]]:
+    """``(name, version)`` of every distribution in this environment.
+
+    The first distribution of a name on ``sys.path`` wins, as it does for
+    ``import``. A local version label (``2.5.1+cpu``) is dropped: OSV knows
+    the public release.
     """
+    found: dict[str, str] = {}
+    for dist in importlib.metadata.distributions():
+        name = dist.metadata["Name"] if dist.metadata else None
+        if not name or not dist.version:
+            continue
+        found.setdefault(_canonical_name(name), dist.version.split("+", 1)[0])
+    return sorted(found.items())
 
-    GITHUB_ADVISORIES_URL = "https://api.github.com/advisories"
-    NVD_API_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
-    def __init__(self, db_path: str | None = None) -> None:
-        if db_path is None:
-            from kazma_core.paths import data_dir
+def _client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=_TIMEOUT_S, verify=shared_ssl_context())
 
-            db_path = str(data_dir() / "security_scan.db")
-        self.db_path = db_path
-        self.scan_interval_hours = 24
-        self._db_path = Path(db_path)
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: sqlite3.Connection | None = None
-        self._init_db()
 
-    def close(self) -> None:
-        """Close the database connection."""
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+async def _post_batch(client: httpx.AsyncClient, queries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    try:
+        resp = await client.post(OSV_QUERYBATCH_URL, json={"queries": queries})
+        resp.raise_for_status()
+        results = resp.json().get("results")
+    except (httpx.HTTPError, ValueError) as exc:
+        raise DependencyQueryError(f"OSV could not be asked: {exc}") from exc
+    if not isinstance(results, list) or len(results) != len(queries):
+        raise DependencyQueryError("OSV answered a batch with the wrong number of results")
+    return results
 
-    def __del__(self) -> None:
-        self.close()
 
-    # ------------------------------------------------------------------
-    # DB helpers
-    # ------------------------------------------------------------------
+async def _advisory_ids(
+    client: httpx.AsyncClient, packages: list[tuple[str, str]],
+) -> dict[tuple[str, str], list[str]]:
+    """Every advisory id OSV lists for each ``(name, version)``, all pages."""
+    ids: dict[tuple[str, str], list[str]] = {pkg: [] for pkg in packages}
+    pending: list[tuple[tuple[str, str], str | None]] = [(pkg, None) for pkg in packages]
+    while pending:
+        batch, pending = pending[:_BATCH_SIZE], pending[_BATCH_SIZE:]
+        queries = []
+        for (name, version), token in batch:
+            query: dict[str, Any] = {"package": {"name": name, "ecosystem": "PyPI"}, "version": version}
+            if token:
+                query["page_token"] = token
+            queries.append(query)
+        for (pkg, _token), result in zip(batch, await _post_batch(client, queries), strict=True):
+            for vuln in result.get("vulns") or ():
+                if vuln.get("id"):
+                    ids[pkg].append(str(vuln["id"]))
+            if result.get("next_page_token"):
+                pending.append((pkg, str(result["next_page_token"])))
+    return ids
 
-    def _get_conn(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._conn = sqlite3.connect(str(self._db_path))
-            from kazma_core.config_store import apply_sqlite_pragmas
 
-            apply_sqlite_pragmas(self._conn)
-            self._conn.row_factory = sqlite3.Row
-        return self._conn
+def _fixed_version(advisory: dict[str, Any], package: str) -> str | None:
+    """The first version that fixes *advisory* for *package*, if OSV says."""
+    for affected in advisory.get("affected") or ():
+        pkg = affected.get("package") or {}
+        if _canonical_name(str(pkg.get("name", ""))) != package:
+            continue
+        for rng in affected.get("ranges") or ():
+            for event in rng.get("events") or ():
+                if event.get("fixed"):
+                    return str(event["fixed"])
+    return None
 
-    def _init_db(self) -> None:
-        conn = self._get_conn()
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS scan_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scan_time TEXT NOT NULL,
-                total_packages INTEGER NOT NULL,
-                vulnerable_packages INTEGER NOT NULL,
-                sources_checked TEXT NOT NULL,
-                results_json TEXT NOT NULL
-            );
 
-            CREATE TABLE IF NOT EXISTS scan_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scan_id INTEGER NOT NULL,
-                package TEXT NOT NULL,
-                current_version TEXT NOT NULL,
-                vuln_id TEXT NOT NULL,
-                severity TEXT NOT NULL,
-                description TEXT NOT NULL,
-                fix_available INTEGER NOT NULL,
-                fix_version TEXT,
-                source TEXT NOT NULL,
-                FOREIGN KEY (scan_id) REFERENCES scan_history(id)
-            );
-            """
-        )
-        conn.commit()
+async def _details(client: httpx.AsyncClient, vuln_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """Each advisory's record; one that cannot be fetched is left out (its id still counts)."""
+    gate = asyncio.Semaphore(_DETAIL_CONCURRENCY)
 
-    # ------------------------------------------------------------------
-    # Dependency parsing (reuses DependencyScanner logic)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _parse_requirements_txt(path: Path) -> list[tuple[str, str]]:
-        """Parse a ``requirements.txt`` file."""
-        return DependencyScanner._parse_requirements_txt(path)
-
-    @staticmethod
-    def _parse_pyproject_toml(path: Path) -> list[tuple[str, str]]:
-        """Parse dependencies from ``pyproject.toml``."""
-        return DependencyScanner._parse_pyproject_toml(path)
-
-    def _parse_dependencies(self, project_root: Path) -> list[tuple[str, str]]:
-        """Parse dependency files from a project directory."""
-        deps: list[tuple[str, str]] = []
-        req_file = project_root / "requirements.txt"
-        if req_file.exists():
-            deps.extend(self._parse_requirements_txt(req_file))
-        pyproject = project_root / "pyproject.toml"
-        if pyproject.exists():
-            deps.extend(self._parse_pyproject_toml(pyproject))
-        return deps
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    async def scan_all_dependencies(self, project_root: Path) -> ScanReport:
-        """Scan project dependencies against OSV, GitHub Advisories, and NVD.
-
-        1. Parse dependencies from project files
-        2. Query each source (OSV, GitHub, NVD)
-        3. Deduplicate and merge results
-        4. Store scan history in SQLite
-        5. Return aggregated ScanReport
-        """
-        deps = self._parse_dependencies(project_root)
-        total = len(deps)
-        all_results: list[ScanResult] = []
-        sources_checked: list[str] = []
-
-        # Query OSV
-        osv_results = await self._query_osv(deps)
-        if osv_results:
-            all_results.extend(osv_results)
-            sources_checked.append("osv")
-
-        # Query GitHub Advisories
-        gh_results = await self._query_github_advisories(deps)
-        if gh_results:
-            all_results.extend(gh_results)
-            sources_checked.append("github_advisories")
-
-        # Query NVD
-        nvd_results = await self._query_nvd(deps)
-        if nvd_results:
-            all_results.extend(nvd_results)
-            sources_checked.append("nvd")
-
-        # Deduplicate by (package, vuln_id)
-        seen: set[tuple[str, str]] = set()
-        deduped: list[ScanResult] = []
-        for r in all_results:
-            key = (r.package, r.vulnerability.vuln_id)
-            if key not in seen:
-                seen.add(key)
-                deduped.append(r)
-
-        vulnerable_packages = len({r.package for r in deduped})
-
-        report = ScanReport(
-            scan_time=datetime.now(UTC).isoformat(),
-            total_packages=total,
-            vulnerable_packages=vulnerable_packages,
-            results=deduped,
-            sources_checked=sources_checked,
-        )
-
-        # Persist to SQLite
-        self._store_scan_report(report)
-
-        return report
-
-    async def scan_skill_manifests(self, skills_dir: str | None = None) -> list[SkillScanResult]:
-        """Scan installed skill manifests for vulnerabilities and suspicious configs.
-
-        1. Find all skill directories
-        2. Parse manifest.yaml from each
-        3. Check for known vulnerable deps
-        4. Flag suspicious MCP server configs
-        5. Detect permission escalation attempts
-        """
-        if skills_dir is None:
+    async def fetch(vuln_id: str) -> tuple[str, dict[str, Any] | None]:
+        async with gate:
             try:
-                from kazma_core.paths import installed_skills_dir
-
-                skills_dir = str(installed_skills_dir())
-            except Exception:
-                skills_dir = str(Path.home() / ".kazma" / "skills")
-        resolved = Path(skills_dir).expanduser()
-        results: list[SkillScanResult] = []
-
-        if not resolved.exists():
-            return results
-
-        for skill_dir in resolved.iterdir():
-            if not skill_dir.is_dir():
-                continue
-
-            manifest_path = None
-            for name in ("manifest.yaml", "manifest.yml"):
-                candidate = skill_dir / name
-                if candidate.exists():
-                    manifest_path = candidate
-                    break
-
-            if manifest_path is None:
-                continue
-
-            try:
-                content = manifest_path.read_text(encoding="utf-8")
-            except OSError:
-                continue
-
-            issues: list[str] = []
-
-            # Check for suspicious MCP server configs
-            suspicious_patterns = [
-                (r"command\s*:\s*.*(?:eval|exec|system|shell)", "Suspicious MCP command detected"),
-                (r"env\s*:.*(?:TOKEN|SECRET|KEY|PASSWORD)", "MCP env may leak secrets"),
-                (r"args\s*:.*--privileged", "Privileged MCP container detected"),
-                (r"network\s*:\s*host", "Host network access in MCP server"),
-            ]
-            for pattern, msg in suspicious_patterns:
-                if re.search(pattern, content, re.I):
-                    issues.append(msg)
-
-            # Check for permission escalation indicators
-            escalation_patterns = [
-                (r"sudo\s", "sudo usage in skill"),
-                (r"chmod\s+777", "World-writable permissions"),
-                (r"setuid|setgid", "SUID/SGID bit usage"),
-            ]
-            for pattern, msg in escalation_patterns:
-                if re.search(pattern, content, re.I):
-                    issues.append(msg)
-
-            # Check for vulnerable deps if skill has requirements.txt
-            vuln_deps: list[ScanResult] = []
-            req_file = skill_dir / "requirements.txt"
-            if req_file.exists():
-                deps = self._parse_requirements_txt(req_file)
-                osv_results = await self._query_osv(deps)
-                vuln_deps.extend(osv_results)
-
-            results.append(
-                SkillScanResult(
-                    skill_name=skill_dir.name,
-                    skill_path=str(skill_dir),
-                    issues=issues,
-                    vulnerable_deps=vuln_deps,
-                )
-            )
-
-        return results
-
-    async def create_github_issue(self, vulnerability: Vulnerability) -> str:
-        """Auto-create GitHub issue for a new vulnerability.
-
-        Uses ``gh`` CLI if available.  Returns the issue URL on success,
-        or an error message string on failure.
-        """
-        title = f"Security: {vulnerability.vuln_id} in {vulnerability.package}"
-        body = (
-            f"## Vulnerability Report\n\n"
-            f"**Package:** {vulnerability.package}\n"
-            f"**Version:** {vulnerability.version}\n"
-            f"**Vuln ID:** {vulnerability.vuln_id}\n"
-            f"**Severity:** {vulnerability.severity}\n"
-            f"**Fixed in:** {vulnerability.fixed_version or 'N/A'}\n\n"
-            f"### Description\n\n{vulnerability.description}\n\n"
-            f"### Recommendation\n\n"
-            f"Update `{vulnerability.package}` to version "
-            f"`{vulnerability.fixed_version or 'latest'}` or later.\n"
-        )
-
-        try:
-            proc = await asyncio.to_thread(
-                subprocess.run,
-                [
-                    "gh",
-                    "issue",
-                    "create",
-                    "--title",
-                    title,
-                    "--body",
-                    body,
-                    "--label",
-                    "security",
-                    "--label",
-                    "vulnerability",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if proc.returncode == 0:
-                return proc.stdout.strip()
-            return f"gh issue create failed: {proc.stderr.strip()}"
-        except FileNotFoundError:
-            return "gh CLI not installed"
-        except Exception as exc:
-            return f"Failed to create issue: {exc}"
-
-    async def generate_advisory(self, vulnerability: Vulnerability) -> dict:
-        """Generate a security advisory document for publication.
-
-        Uses an internal ``KAZMA-ADV-…`` id. Prefer the upstream
-        ``vulnerability.vuln_id`` (GHSA/OSV/CVE) when it is already a real
-        advisory identifier. Never mint a fake ``CVE-`` prefix.
-        """
-        now = datetime.now(UTC).isoformat()
-        year = now[:4]
-        upstream = (vulnerability.vuln_id or "").strip()
-        # Keep real upstream IDs (CVE-*, GHSA-*, OSV-*, …); mint KAZMA-ADV only
-        # when the scanner has no authoritative id.
-        if upstream and not upstream.upper().startswith("KAZMA-ADV-"):
-            # Reject only if someone already stored a synthetic-looking blank.
-            advisory_id = upstream
-        else:
-            digest = abs(hash(f"{vulnerability.package}:{vulnerability.vuln_id}:{vulnerability.version}")) % 10**7
-            advisory_id = f"KAZMA-ADV-{year}-{digest:07d}"
-        return {
-            "advisory_id": advisory_id,
-            # Legacy key: same as advisory_id (may be a real upstream CVE/GHSA).
-            "cve_id": advisory_id,
-            "package": vulnerability.package,
-            "affected_version": vulnerability.version,
-            "fixed_version": vulnerability.fixed_version or "N/A",
-            "severity": vulnerability.severity,
-            "description": vulnerability.description,
-            "published_at": now,
-            "advisory_content": (
-                f"# Security Advisory: {advisory_id}\n\n"
-                f"**Upstream ID:** {vulnerability.vuln_id}\n"
-                f"**Package:** {vulnerability.package}\n"
-                f"**Affected:** {vulnerability.version}\n"
-                f"**Fixed in:** {vulnerability.fixed_version or 'N/A'}\n"
-                f"**Severity:** {vulnerability.severity}\n\n"
-                f"{vulnerability.description}\n"
-            ),
-        }
-
-    async def check_for_updates(self, project_root: Path) -> list:
-        """Check if any dependencies have security updates available."""
-        deps = self._parse_dependencies(project_root)
-        updates: list = []
-        for pkg, ver in deps:
-            vulns = await self._query_osv_single(pkg, ver)
-            for sr in vulns:
-                if sr.fix_available and sr.fix_version:
-                    updates.append(
-                        {
-                            "package": pkg,
-                            "current_version": ver,
-                            "fix_version": sr.fix_version,
-                            "vuln_id": sr.vulnerability.vuln_id,
-                            "severity": sr.vulnerability.severity,
-                        }
-                    )
-        return updates
-
-    def get_scan_history(self, limit: int = 10) -> list:
-        """Get recent scan history from SQLite."""
-        conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT * FROM scan_history ORDER BY scan_time DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-        return [dict(r) for r in rows]
-
-    # ------------------------------------------------------------------
-    # Source queries
-    # ------------------------------------------------------------------
-
-    async def _query_osv(self, deps: list[tuple[str, str]]) -> list[ScanResult]:
-        """Query OSV for all deps."""
-        results: list[ScanResult] = []
-        for pkg, ver in deps:
-            results.extend(await self._query_osv_single(pkg, ver))
-        return results
-
-    async def _query_osv_single(self, pkg: str, ver: str) -> list[ScanResult]:
-        """Query OSV API for a single package."""
-        if httpx is None:  # pragma: no cover
-            return []
-
-        payload = {
-            "package": {"name": pkg, "ecosystem": "PyPI"},
-            "version": ver,
-        }
-        try:
-            async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
-                resp = await client.post(OSV_API_URL, json=payload)
+                resp = await client.get(OSV_VULN_URL.format(id=vuln_id))
                 resp.raise_for_status()
-                data = resp.json()
-        except Exception:  # pragma: no cover
-            return []
+                return vuln_id, resp.json()
+            except (httpx.HTTPError, ValueError):
+                logger.info("[security] OSV advisory %s could not be read; reported by id", vuln_id)
+                return vuln_id, None
 
-        results: list[ScanResult] = []
-        for v in data.get("vulns", []):
-            vuln = DependencyScanner._deserialise_vulns([v], pkg, ver)
-            if vuln:
-                fixed = vuln[0].fixed_version
-                results.append(
-                    ScanResult(
-                        package=pkg,
-                        current_version=ver,
-                        vulnerability=vuln[0],
-                        fix_available=fixed is not None,
-                        fix_version=fixed,
-                        source="osv",
-                    )
-                )
+    pairs = await asyncio.gather(*(fetch(v) for v in vuln_ids[:_MAX_DETAILS]))
+    return {vuln_id: record for vuln_id, record in pairs if record}
+
+
+async def _audit_packages(
+    packages: list[tuple[str, str]], *, client: httpx.AsyncClient | None = None,
+) -> DependencyReport:
+    """The OSV advisories affecting exactly these ``(name, version)`` pairs.
+
+    Raises :class:`DependencyQueryError` when OSV cannot be asked.
+    """
+    packages = sorted({(_canonical_name(n), v) for n, v in packages if n and v})
+    if not packages:
+        return DependencyReport(total=0)
+    own = client is None
+    http = client or _client()
+    try:
+        ids = await _advisory_ids(http, packages)
+        unique = sorted({i for found in ids.values() for i in found})
+        records = await _details(http, unique) if unique else {}
+    finally:
+        if own:
+            await http.aclose()
+    vulns = []
+    for (name, version), found in ids.items():
+        for group in _same_advisories(sorted(set(found)), records):
+            vuln_id = min(group, key=_id_preference)
+            record = records.get(vuln_id) or next((records[i] for i in group if i in records), {})
+            fixes = [f for f in (_fixed_version(records.get(i) or {}, name) for i in group) if f]
+            vulns.append(Vulnerability(
+                package=name,
+                version=version,
+                vuln_id=vuln_id,
+                summary=str(record.get("summary") or "")[:300],
+                fixed_version=max(fixes, key=_version_key) if fixes else None,
+                aliases=tuple(sorted(set(group) - {vuln_id})),
+            ))
+    return DependencyReport(total=len(packages), vulnerabilities=vulns)
+
+
+def _same_advisories(ids: list[str], records: dict[str, dict[str, Any]]) -> list[list[str]]:
+    """*ids* grouped by advisory: OSV lists one issue under several ids
+    (a GHSA and a PYSEC id name each other as aliases)."""
+    parent = {i: i for i in ids}
+
+    def root(i: str) -> str:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in ids:
+        for alias in (records.get(i) or {}).get("aliases") or ():
+            if alias in parent:
+                parent[root(str(alias))] = root(i)
+    groups: dict[str, list[str]] = {}
+    for i in ids:
+        groups.setdefault(root(i), []).append(i)
+    return sorted(groups.values())
+
+
+def _id_preference(vuln_id: str) -> tuple[int, str]:
+    """The id a merged advisory is shown under: GHSA (it has a summary), then PYSEC."""
+    return (0 if vuln_id.startswith("GHSA-") else 1 if vuln_id.startswith("PYSEC-") else 2, vuln_id)
+
+
+def _version_key(version: str) -> tuple[tuple[int, int | str], ...]:
+    """A sort key for release strings (``2.10.0`` after ``2.9.1``)."""
+    return tuple((0, int(part)) if part.isdigit() else (1, part) for part in re.split(r"[.+-]", version))
+
+
+async def audit_installed(*, client: httpx.AsyncClient | None = None) -> DependencyReport:
+    """:func:`_audit_packages` over every installed distribution."""
+    packages = await asyncio.to_thread(_installed_packages)
+    return await _audit_packages(packages, client=client)
+
+
+# ---------------------------------------------------------------------------
+# Installed hub skills
+# ---------------------------------------------------------------------------
+
+#: A ``command:`` whose program is a shell (``command: bash``,
+#: ``command: ["/bin/sh", ...]``), and the flag that hands it a script.
+_SHELL_PROGRAM = re.compile(
+    r"(?im)\bcommand\s*:\s*\[?\s*[\"']?(?:[^\s\"'\],]*[/\\])?(?:sh|bash|zsh|dash|cmd|powershell|pwsh)(?:\.exe)?[\"']?(?=[\s,\]]|$)"
+)
+_SCRIPT_FLAG = re.compile(r"(?i)(?:^|[\s\"',\[])(?:-c|/c|-command)(?=[\s\"',\]]|$)")
+
+#: Manifest settings that hand an MCP server more than a program needs.
+_MANIFEST_FLAGS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?i)--privileged\b"), "asks for a privileged container"),
+    (re.compile(r"(?i)\bnetwork(?:_mode)?\s*:\s*['\"]?host\b"), "shares the host network"),
+    (re.compile(r"(?i)\bsudo\s"), "uses sudo"),
+    (re.compile(r"(?i)\bchmod\s+(?:-R\s+)?777\b"), "makes files writable by everyone"),
+    (re.compile(r"(?i)\bset[ug]id\b"), "sets a set-user-ID or set-group-ID bit"),
+)
+
+_REQUIREMENT = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+
+def _requirement_names(path: Path) -> list[str]:
+    names: list[str] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line or line.startswith("-"):
+            continue
+        match = _REQUIREMENT.match(line)
+        if match:
+            names.append(_canonical_name(match.group(1)))
+    return names
+
+
+def _installed_version(name: str) -> str | None:
+    try:
+        return importlib.metadata.version(name).split("+", 1)[0]
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def _manifest_issues(text: str) -> list[str]:
+    issues = [
+        f"line {f.line}: a {f.kind} is written in the manifest"
+        for f in find_credentials(text, bare_values=True)
+    ]
+    if _SHELL_PROGRAM.search(text) and _SCRIPT_FLAG.search(text):
+        issues.append("the manifest runs its command through a shell")
+    issues.extend(f"the manifest {what}" for pattern, what in _MANIFEST_FLAGS if pattern.search(text))
+    return issues
+
+
+def _default_skills_dir() -> Path:
+    from kazma_core.paths import installed_skills_dir
+
+    return Path(installed_skills_dir())
+
+
+async def scan_skill_manifests(
+    skills_dir: str | Path | None = None, *, client: httpx.AsyncClient | None = None,
+) -> list[SkillScanResult]:
+    """Every installed skill with a manifest, and what is wrong with it.
+
+    Raises :class:`DependencyQueryError` when a skill's requirements could
+    not be checked against OSV.
+    """
+    root = Path(skills_dir).expanduser() if skills_dir else _default_skills_dir()
+    results: list[SkillScanResult] = []
+    asked: list[tuple[SkillScanResult, list[tuple[str, str]]]] = []
+    if not root.is_dir():
         return results
-
-    async def _query_github_advisories(self, deps: list[tuple[str, str]]) -> list[ScanResult]:
-        """Query GitHub Security Advisories API for all deps."""
-        if httpx is None:  # pragma: no cover
-            return []
-
-        results: list[ScanResult] = []
-        for pkg, ver in deps:
-            try:
-                async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
-                    resp = await client.get(
-                        self.GITHUB_ADVISORIES_URL,
-                        params={"ecosystem": "pip", "package": pkg},
-                    )
-                    if resp.status_code == 403:  # Rate limited
-                        continue
-                    resp.raise_for_status()
-                    advisories = resp.json()
-            except Exception:  # pragma: no cover
-                continue
-
-            for adv in advisories:
-                cve_id = adv.get("cve_id", "N/A")
-                severity = adv.get("severity", "unknown")
-                summary = adv.get("summary", "")
-                # Determine fix version from vulnerabilities
-                fix_ver = None
-                for vuln in adv.get("vulnerabilities", []):
-                    patched = vuln.get("patched_versions")
-                    if patched:
-                        fix_ver = patched
-                        break
-                results.append(
-                    ScanResult(
-                        package=pkg,
-                        current_version=ver,
-                        vulnerability=Vulnerability(
-                            package=pkg,
-                            version=ver,
-                            vuln_id=cve_id,
-                            severity=str(severity),
-                            description=summary,
-                            fixed_version=fix_ver,
-                        ),
-                        fix_available=fix_ver is not None,
-                        fix_version=fix_ver,
-                        source="github_advisories",
-                    )
-                )
-        return results
-
-    async def _query_nvd(self, deps: list[tuple[str, str]]) -> list[ScanResult]:
-        """Query NVD API for all deps."""
-        if httpx is None:  # pragma: no cover
-            return []
-
-        results: list[ScanResult] = []
-        for pkg, ver in deps:
-            try:
-                async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
-                    resp = await client.get(
-                        self.NVD_API_URL,
-                        params={"keywordSearch": pkg, "resultsPerPage": 5},
-                    )
-                    if resp.status_code == 403:  # Rate limited
-                        continue
-                    resp.raise_for_status()
-                    data = resp.json()
-            except Exception:  # pragma: no cover
-                continue
-
-            for item in data.get("vulnerabilities", []):
-                cve = item.get("cve", {})
-                cve_id = cve.get("id", "N/A")
-                descriptions = cve.get("descriptions", [])
-                desc = next(
-                    (d["value"] for d in descriptions if d.get("lang") == "en"),
-                    "",
-                )
-                # Determine severity from CVSS metrics
-                severity = "unknown"
-                metrics = cve.get("metrics", {})
-                for metric_key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
-                    metric_list = metrics.get(metric_key, [])
-                    if metric_list:
-                        cvss = metric_list[0].get("cvssData", {})
-                        severity = cvss.get("baseSeverity", "unknown")
-                        break
-
-                results.append(
-                    ScanResult(
-                        package=pkg,
-                        current_version=ver,
-                        vulnerability=Vulnerability(
-                            package=pkg,
-                            version=ver,
-                            vuln_id=cve_id,
-                            severity=str(severity),
-                            description=desc,
-                        ),
-                        fix_available=False,
-                        source="nvd",
-                    )
-                )
-        return results
-
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
-
-    def _store_scan_report(self, report: ScanReport) -> int:
-        """Store a scan report in SQLite. Returns the scan_id."""
-        conn = self._get_conn()
-        with conn:  # the report and its findings commit together, or not at all
-            cur = conn.execute(
-                """
-                INSERT INTO scan_history (scan_time, total_packages, vulnerable_packages, sources_checked, results_json)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    report.scan_time,
-                    report.total_packages,
-                    report.vulnerable_packages,
-                    json.dumps(report.sources_checked),
-                    json.dumps(
-                        [
-                            {
-                                "package": r.package,
-                                "current_version": r.current_version,
-                                "vuln_id": r.vulnerability.vuln_id,
-                                "severity": r.vulnerability.severity,
-                                "description": r.vulnerability.description,
-                                "fix_available": r.fix_available,
-                                "fix_version": r.fix_version,
-                                "source": r.source,
-                            }
-                            for r in report.results
-                        ]
-                    ),
-                ),
-            )
-            scan_id: int = cur.lastrowid or 0  # type: ignore[assignment]
-            for r in report.results:
-                conn.execute(
-                    """
-                    INSERT INTO scan_results
-                        (scan_id, package, current_version, vuln_id, severity, description, fix_available, fix_version, source)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        scan_id,
-                        r.package,
-                        r.current_version,
-                        r.vulnerability.vuln_id,
-                        r.vulnerability.severity,
-                        r.vulnerability.description,
-                        1 if r.fix_available else 0,
-                        r.fix_version,
-                        r.source,
-                    ),
-                )
-        return scan_id
+    for skill_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        manifest = next((skill_dir / n for n in ("manifest.yaml", "manifest.yml") if (skill_dir / n).is_file()), None)
+        if manifest is None:
+            continue
+        result = SkillScanResult(skill_name=skill_dir.name, skill_path=str(skill_dir))
+        try:
+            result.issues.extend(_manifest_issues(manifest.read_text(encoding="utf-8", errors="replace")))
+        except OSError as exc:
+            result.issues.append(f"the manifest cannot be read: {exc}")
+        requirements = skill_dir / "requirements.txt"
+        if requirements.is_file():
+            pinned: list[tuple[str, str]] = []
+            for name in _requirement_names(requirements):
+                version = _installed_version(name)
+                if version is None:
+                    result.issues.append(f"requirement {name} is not installed")
+                else:
+                    pinned.append((name, version))
+            asked.append((result, pinned))
+        results.append(result)
+    wanted = sorted({pkg for _result, pkgs in asked for pkg in pkgs})
+    if wanted:
+        report = await _audit_packages(wanted, client=client)
+        for result, pkgs in asked:
+            mine = set(pkgs)
+            result.vulnerabilities = [v for v in report.vulnerabilities if (v.package, v.version) in mine]
+    return results

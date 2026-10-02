@@ -22,6 +22,13 @@ definitions via a per-workspace SQLite symbol index (tree-sitter if you
 `pip install -e ".[index]"`, else regex) plus live ripgrep. Install `rg`
 for faster text hits. Kill-switch `KAZMA_CODE_INDEX=0`.
 
+**What a search reads:** in a git repository, the index and the agent's
+`file_search` read the files the repository keeps: tracked files, plus
+untracked ones `.gitignore` does not exclude. An ignored folder (a cloned
+repository, build output) is left out unless you name it as the path to
+search. A folder outside any repository is walked. Either way, environments,
+caches, build output and Kazma's data folder are skipped.
+
 **Language intelligence:** the Web editor is **syntax-only** (CodeMirror
 modes). `POST /api/ide/lsp` still exists for hover/complete/definition/
 diagnostics (Python/JSON in-process; symbols reuse the code index) but is
