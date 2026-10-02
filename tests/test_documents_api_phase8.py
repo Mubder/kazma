@@ -7,6 +7,8 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from tests._document_jobs import PARSE_DEADLINE_S
+
 
 @pytest.fixture
 def client() -> TestClient:
@@ -17,7 +19,9 @@ def client() -> TestClient:
         yield c
 
 
-def _wait_ready(client: TestClient, job_id: str, timeout: float = 20.0) -> str:
+def _wait_ready(client: TestClient, job_id: str, timeout: float = PARSE_DEADLINE_S) -> str:
+    # The shared parse deadline: 20 s failed a full run with the job still
+    # parsing (eight chunks in parallel, 2026-10-02); the file passed alone.
     deadline = time.time() + timeout
     state = "?"
     while time.time() < deadline:

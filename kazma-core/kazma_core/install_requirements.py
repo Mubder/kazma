@@ -26,6 +26,7 @@ from __future__ import annotations
 import importlib.metadata
 import logging
 import os
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -141,7 +142,7 @@ def _add(unmet: dict[str, UnmetRequirement], found: UnmetRequirement) -> None:
     unmet[found.name] = UnmetRequirement(found.name, required, known.installed, groups)
 
 
-def _update_instructions() -> str:
+def _update_instructions(project_root: Path | None = None) -> str:
     """How to bring this install's packages up to date, in the owner's words.
 
     The packages cannot be replaced while the server has them loaded (on
@@ -150,15 +151,42 @@ def _update_instructions() -> str:
     server its state file's path, so the server knows it is guarded.
     """
     if os.environ.get("KAZMA_GUARD_STATE_FILE"):
+        if project_root is None:
+            from kazma_core.paths import installed_project_root
+
+            project_root = installed_project_root()
+        script = os.path.join("scripts", "service", "kazma_guard.py")
+        guard = f"{_install_python(project_root)} {script}"
         return (
-            "To fix, in the install folder: python scripts/service/kazma_guard.py "
+            f"To fix, in the install folder: {guard} "
             '--pause --stop --when-idle --reason "package update", then '
-            "kazma update --reinstall -y, then python scripts/service/kazma_guard.py --resume."
+            f"kazma update --reinstall -y, then {guard} --resume."
         )
     return (
         "To fix: stop the server, run kazma update --reinstall -y in the install "
         "folder, and start the server again."
     )
+
+
+def _install_python(root: Path | None) -> str:
+    """This install's Python, as typed in the install folder.
+
+    A bare ``python`` may be another interpreter, or none at all on Windows.
+    ``sys.executable`` is the server's -- the install's own. Inside the
+    install folder it is given relative (``.venv\\Scripts\\python.exe`` runs
+    as typed in cmd, PowerShell and a POSIX shell), in full elsewhere. The
+    CLI keeps its own copy (``kazma_cli.update``): the updater must run when
+    this package does not import.
+    """
+    exe = sys.executable or "python"
+    if root is not None:
+        try:
+            rel = os.path.relpath(exe, root)
+        except ValueError:  # on another drive
+            rel = ""
+        if rel and not rel.startswith(".."):
+            exe = rel
+    return f'"{exe}"' if " " in exe else exe
 
 
 def report_unmet_requirements(project_root: Path | None = None) -> list[UnmetRequirement]:
@@ -172,7 +200,7 @@ def report_unmet_requirements(project_root: Path | None = None) -> list[UnmetReq
     if not unmet:
         return unmet
     detail = "; ".join(u.describe() for u in unmet)
-    fix = _update_instructions()
+    fix = _update_instructions(project_root)
     logger.warning(
         "[install] %d installed package(s) are older than this build requires: %s. %s",
         len(unmet), detail, fix,

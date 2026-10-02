@@ -149,6 +149,9 @@ def test_the_skills_page_shows_the_verdict_and_no_invented_score(
     assert by_name["elsewhere"]["integrity"] == "refused"
     assert "kazma agent-skills sign" in by_name["elsewhere"]["integrity_reason"]
     assert by_name["ours"]["integrity"] == "verified"
+    # A skill that declares no version (the spec makes it optional) shows
+    # none: the page printed "v—" under most agent skills.
+    assert by_name["ours"]["version"] == ""
     # No skill carries a score nobody computed: no built-in manifest declares one.
     assert all(e["security_score"] is None for e in entries), [
         (e["name"], e["security_score"]) for e in entries if e["security_score"] is not None
@@ -159,6 +162,8 @@ def test_the_skills_page_shows_the_verdict_and_no_invented_score(
 def test_the_page_renders_the_badge_only_where_there_is_a_verdict() -> None:
     template = (Path(__file__).resolve().parents[1] / "kazma-ui/kazma_ui/templates/skills.html").read_text(encoding="utf-8")
     assert "{% if skill.security_score is not none %}" in template
+    assert "{% if skill.version %}<span>v{{ skill.version }}</span>{% endif %}" in template
+    assert """<span x-show="skill.version" x-cloak x-text="'v' + skill.version"></span>""" in template
     assert "t('skills.integrity_' ~ skill.integrity)" in template
     # The reason is the server's words: shown for a refused skill, untranslated
     # (an English tooltip on Arabic pages failed the Arabic page tour).

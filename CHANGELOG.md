@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Three small fixes found by testing on the live install (2026-10-02)
+
+- **The SQL tools' refusal names the SQL tools.** Asked to query one of
+  Kazma's own databases, `sqlite_query` answered "file tools may not open
+  it": the workspace check ran before the store check and answered in the
+  file tools' words. The store check runs first now.
+- **No "v—" on the Skills page.** Agent skills rarely declare a version (the
+  spec makes it optional), and the page printed "v—" under each one. A
+  skill with no version now shows none.
+- **The update commands name the install's own Python.** `kazma update`'s
+  refusal and the boot check's alert said `python scripts/service/kazma_guard.py`;
+  a bare `python` may be another interpreter, or none on Windows. They now
+  name the interpreter Kazma runs on, relative in the install folder
+  (`.venv\Scripts\python.exe` on Windows), and the refusal prints each
+  command on one line: Rich wrapped them, and a pasted half-command runs.
+- **Gates:** `tests/test_store_registry.py` (each refusal names its own
+  door), `tests/test_skill_integrity_shown.py`,
+  `tests/test_package_update_on_a_guarded_install.py`.
+
 ## Settings can send a test alert (2026-10-02)
 
 - **You can check that alerts reach you.** Settings -> Adapters & Routes has
