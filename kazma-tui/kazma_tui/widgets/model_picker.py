@@ -9,6 +9,8 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, ListItem, ListView, Static
 from textual.binding import Binding
 
+from kazma_core.english_count import count_noun
+
 __all__ = ["ModelPicker"]
 
 logger = logging.getLogger(__name__)
@@ -163,7 +165,7 @@ class ModelPicker(ModalScreen[str | None]):
         # Update search info
         model_count = sum(1 for t, _, _ in self._filtered if t == "model")
         info = self.query_one(".search-info", Static)
-        info.update(f"{model_count} models")
+        info.update(count_noun(model_count, "model"))
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._filter(event.value)

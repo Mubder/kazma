@@ -710,7 +710,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Optimization completed successfully!",
     },
     "dashboard.over_budget": {
-        "ar": "تجاوز الميزانية — {seconds} ثانية حتى الإيقاف",
+        "ar": "تجاوز الميزانية — {seconds} ث حتى الإيقاف",
         "en": "Over budget — {seconds}s until halt",
     },
     "dashboard.pending_approvals": {

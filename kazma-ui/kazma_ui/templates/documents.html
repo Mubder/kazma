@@ -195,7 +195,7 @@
         <div style="margin-bottom:.6rem;">
           <div style="display:flex;align-items:center;justify-content:space-between;">
             <span style="font-size:.75rem;color:var(--text-muted);">{{ t('documents.content_preview') }}</span>
-            <span class="doc-meta" x-show="pageCount" x-text="t('documents.pages_n').replace('{n}', pageCount)" x-cloak></span>
+            <span class="doc-meta" x-show="pageCount" x-text="kazmaCount('documents.pages_n', pageCount)" x-cloak></span>
           </div>
           <div class="doc-preview document-content" dir="auto"
                translate="no" x-text="preview || (currentState === 'ready' ? t('documents.empty') : t('documents.not_ready'))"></div>

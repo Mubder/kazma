@@ -25,6 +25,8 @@ import logging
 import sys
 from pathlib import Path
 
+from kazma_core.english_count import count_noun
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["run", "print_help"]
@@ -128,7 +130,7 @@ def _cmd_verify(args: list[str]) -> None:
             if isinstance(counts, dict):
                 summary = ", ".join(f"{t}={n}" for t, n in list(counts.items())[:4])
                 if len(counts) > 4:
-                    summary += f", … ({len(counts)} tables)"
+                    summary += f", … ({count_noun(len(counts), 'table')})"
                 print(f"      {db_name}: {summary}")
 
     if report.warnings:

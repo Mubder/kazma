@@ -138,18 +138,17 @@ def _check_venv(project_root: Path) -> bool:
     return (venv / "bin" / "python").exists() or (venv / "Scripts" / "python.exe").exists()
 
 
-def _count_slash_commands() -> int:
-    """Count slash commands from the gateway module, if available."""
-    try:
-        # resolve_slash_command checked via importlib below
+def _count_slash_commands() -> int | None:
+    """How many commands the chat apps' "/" menu offers; None without the gateway.
 
-        # Commands are registered in resolve_slash_command's dispatch table
-        # We count them by checking against known commands
-        known = ["/help", "/reset", "/status", "/model", "/memory", "/cost",
-                 "/undo", "/edit", "/replay", "/personality", "/context"]
-        return len(known)
+    Read from the gateway's own menu: this counted a hand-kept list of 11 and
+    said "11 slash commands" beside a menu of 36 (2026-10-03).
+    """
+    try:
+        from kazma_gateway.slash_commands import BOT_MENU_COMMANDS
     except ImportError:
-        return 0
+        return None
+    return len(BOT_MENU_COMMANDS)
 
 
 def _get_active_adapters(config: dict[str, Any]) -> list[str]:
@@ -233,7 +232,14 @@ def show_status(config: dict[str, Any] | None = None) -> str:
 
     # Tools (slash commands)
     tools = _count_slash_commands()
-    lines.append(f"  Tools:     {tools} slash commands available")
+    if tools is None:
+        lines.append("  Tools:     slash commands unknown (the gateway does not import)")
+    else:
+        # Here, not at the top: the updater imports this module and must run
+        # while kazma_core may not import.
+        from kazma_core.english_count import count_noun
+
+        lines.append(f"  Tools:     {count_noun(tools, 'slash command')} available")
 
     # Adapters
     adapters = _get_active_adapters(config)

@@ -391,10 +391,10 @@
     var stopBtn = $('swarm-stop');
     if (statusEl) {
       statusEl.innerHTML = started
-        ? '<span style="color:var(--success);">' + esc(t('swarm.status_running', {count: count})) + '</span>'
+        ? '<span style="color:var(--success);">' + esc(window.kazmaCount('swarm.status_running', count || 0)) + '</span>'
         : onDemand(started, count, templates)
           ? '<span style="color:var(--text-secondary);">' + esc(t('swarm.status_on_demand')) + '</span>'
-          : '<span style="color:var(--text-muted);">' + esc(t('swarm.status_stopped', {count: count})) + '</span>';
+          : '<span style="color:var(--text-muted);">' + esc(window.kazmaCount('swarm.status_stopped', count || 0)) + '</span>';
     }
     if (startBtn) startBtn.disabled = started;
     if (stopBtn) stopBtn.disabled = !started;
@@ -598,7 +598,7 @@
       .then(function(data) {
         if (data.status === 'ok' || data.status === 'warning') {
           var dispatchedCount = (data.dispatched || []).length;
-          showToast(t('swarm.task_dispatched_to', {count: dispatchedCount}), true);
+          showToast(window.kazmaCount('swarm.task_dispatched_to', dispatchedCount), true);
 
           // Connect SSE for live updates using the real task id.
           if (data.task_id) {

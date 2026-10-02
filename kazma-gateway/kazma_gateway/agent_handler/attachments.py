@@ -29,6 +29,7 @@ from urllib.parse import urljoin
 from kazma_core.documents.errors import DocumentParseError
 from kazma_core.documents.registry import get_parser_registry
 from kazma_core.documents.service import DocumentService
+from kazma_core.english_count import count_noun
 
 if TYPE_CHECKING:
     from kazma_gateway.gateway import Attachment
@@ -288,7 +289,7 @@ def build_user_content(
                 MAX_ATTACHMENT_COUNT,
             )
             text_parts.append(
-                f"[Attachment limit reached: only {MAX_ATTACHMENT_COUNT} files are processed per turn]"
+                f"[Attachment limit reached: Kazma reads at most {count_noun(MAX_ATTACHMENT_COUNT, 'file')} per turn]"
             )
             break
         data = att.data

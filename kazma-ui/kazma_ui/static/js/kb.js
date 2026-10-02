@@ -170,11 +170,11 @@ function knowledgePage() {
         if (mode === "page") {
           // Page ingest: show clean toast from structured fields, not raw internal message.
           if (data.chunks_new > 0) {
-            toast((S.page_ingested || "Ingested 1 page — {chunks} new chunks.").replace("{chunks}", data.chunks_new), "success");
+            toast(window.kazmaCount("knowledge.page_ingested", data.chunks_new), "success");
           } else if (data.errors && data.errors.length) {
             toast((S.page_ingested_failed || "Ingest failed: {error}").replace("{error}", data.errors[0]), "error");
           } else {
-            toast((S.page_ingested || "Ingested 1 page — {chunks} new chunks.").replace("{chunks}", 0), "info");
+            toast(window.kazmaCount("knowledge.page_ingested", 0), "info");
           }
           this.resetForm();
           await this.load();

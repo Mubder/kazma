@@ -283,7 +283,8 @@ function setupWall() {
       preparing_n_tools: {{ plural_forms('chat.preparing_n_tools') | tojson }},
       hitl_allow_n: {{ plural_forms('chat.hitl_allow_n') | tojson }},
       hitl_allow_n_title: {{ plural_forms('chat.hitl_allow_n_title') | tojson }},
-      session_msgs: {{ plural_forms('chat.session_msgs') | tojson }}
+      session_msgs: {{ plural_forms('chat.session_msgs') | tojson }},
+      hitl_wants_to_run_n: {{ plural_forms('chat.hitl_wants_to_run_n') | tojson }}
     },
     // The turn's memory row, and keys chat.js used with no entry here (they
     // showed in English in every language; tests/test_chat_i18n_bridge.py).
@@ -545,8 +546,7 @@ function setupWall() {
     msg_helpful: {{ t('chat.msg_helpful') | tojson }},
     msg_not_helpful: {{ t('chat.msg_not_helpful') | tojson }},
     platform_web: {{ t('dashboard.platform_web') | tojson }},
-    hitl_wants_to_run: {{ t('chat.hitl_wants_to_run') | tojson }},
-    hitl_wants_to_run_n: {{ t('chat.hitl_wants_to_run_n') | tojson }}
+    hitl_wants_to_run: {{ t('chat.hitl_wants_to_run') | tojson }}
   };
 </script>
 <script src="/static/js/modules/delivery_cursor.js?v={{ js_version() }}"></script>

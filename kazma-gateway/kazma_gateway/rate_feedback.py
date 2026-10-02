@@ -17,6 +17,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+from kazma_core.english_count import count_noun
+
 __all__ = [
     "RateFeedbackManager",
 ]
@@ -136,7 +138,7 @@ class RateFeedbackManager:
         remaining = self.get_remaining(user_id)
         reset = self.get_reset_seconds(user_id)
         limit = self._get_limit_for_user(user_id)
-        return f"⏳ Slow down — {remaining}/{limit} requests available. Resets in {reset}s."
+        return f"⏳ Slow down — {remaining}/{count_noun(limit, 'request')} available. Resets in {reset}s."
 
     def record_feedback(self, user_id: str) -> None:
         """Record that feedback was sent (update cooldown timer)."""

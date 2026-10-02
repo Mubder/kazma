@@ -1820,10 +1820,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "اختر الأقسام للاستيراد",
         "en": "Select sections to import",
     },
-    "settings.selected_n": {
-        "ar": "({n} محدد)",
-        "en": "({n} selected)",
-    },
     "settings.selective_import": {
         "ar": "استيراد انتقائي",
         "en": "Selective Import",
@@ -2742,9 +2738,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "حُفظ الاحتفاظ — الإبقاء على أحدث {n} نسخة",
         "en": "Backup retention saved — keeping the newest {n} backups",
     },
-    "settings.backup_complete": {
-        "ar": "اكتمل النسخ: {dbs} قواعد، {mb} م.ب",
-        "en": "Backup complete: {dbs} DBs, {mb} MB",
+    "settings.backup_complete.zero": {
+        "ar": "اكتمل النسخ: لا قواعد بيانات، {mb} ميغابايت",
+        "en": "Backup complete: {n} databases, {mb} MB",
+    },
+    "settings.backup_complete.one": {
+        "ar": "اكتمل النسخ: قاعدة بيانات واحدة، {mb} ميغابايت",
+        "en": "Backup complete: 1 database, {mb} MB",
+    },
+    "settings.backup_complete.two": {
+        "ar": "اكتمل النسخ: قاعدتا بيانات، {mb} ميغابايت",
+        "en": "Backup complete: {n} databases, {mb} MB",
+    },
+    "settings.backup_complete.few": {
+        "ar": "اكتمل النسخ: {n} قواعد بيانات، {mb} ميغابايت",
+        "en": "Backup complete: {n} databases, {mb} MB",
+    },
+    "settings.backup_complete.many": {
+        "ar": "اكتمل النسخ: {n} قاعدة بيانات، {mb} ميغابايت",
+        "en": "Backup complete: {n} databases, {mb} MB",
+    },
+    "settings.backup_complete.other": {
+        "ar": "اكتمل النسخ: {n} قاعدة بيانات، {mb} ميغابايت",
+        "en": "Backup complete: {n} databases, {mb} MB",
     },
     "settings.backup_deleted": {
         "ar": "حُذف النسخ الاحتياطي",
@@ -4038,9 +4054,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الموضوع:",
         "en": "subject:",
     },
-    "settings.xt.kb_hits": {
+    "settings.xt.kb_hits.zero": {
+        "ar": "المكتبة: لا مقتطفات",
+        "en": "KB: {n} snippets",
+    },
+    "settings.xt.kb_hits.one": {
+        "ar": "المكتبة: مقتطف واحد",
+        "en": "KB: 1 snippet",
+    },
+    "settings.xt.kb_hits.two": {
+        "ar": "المكتبة: مقتطفان",
+        "en": "KB: {n} snippets",
+    },
+    "settings.xt.kb_hits.few": {
+        "ar": "المكتبة: {n} مقتطفات",
+        "en": "KB: {n} snippets",
+    },
+    "settings.xt.kb_hits.many": {
+        "ar": "المكتبة: {n} مقتطفًا",
+        "en": "KB: {n} snippets",
+    },
+    "settings.xt.kb_hits.other": {
         "ar": "المكتبة: {n} مقتطف",
-        "en": "KB: {n} snippet(s)",
+        "en": "KB: {n} snippets",
     },
     "settings.xt.kb_from": {
         "ar": "من {libs}",
@@ -4436,9 +4472,33 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "حُمّل الملف الشخصي «{name}»",
         "en": "Loaded profile \"{name}\"",
     },
-    "settings.hub.gateway_refreshed": {
+    "settings.hub.gateway_refreshed.zero": {
+        "ar": "حُدّثت البوابة — لا محوّلات",
+        "en": "Gateway refreshed — {n} adapters: {names}",
+    },
+    "settings.hub.gateway_refreshed.one": {
+        "ar": "حُدّثت البوابة — محوّل واحد: {names}",
+        "en": "Gateway refreshed — 1 adapter: {names}",
+    },
+    "settings.hub.gateway_refreshed.two": {
+        "ar": "حُدّثت البوابة — محوّلان: {names}",
+        "en": "Gateway refreshed — {n} adapters: {names}",
+    },
+    "settings.hub.gateway_refreshed.few": {
         "ar": "حُدّثت البوابة — {n} محوّلات: {names}",
-        "en": "Gateway refreshed — {n} adapter(s): {names}",
+        "en": "Gateway refreshed — {n} adapters: {names}",
+    },
+    "settings.hub.gateway_refreshed.many": {
+        "ar": "حُدّثت البوابة — {n} محوّلًا: {names}",
+        "en": "Gateway refreshed — {n} adapters: {names}",
+    },
+    "settings.hub.gateway_refreshed.other": {
+        "ar": "حُدّثت البوابة — {n} محوّل: {names}",
+        "en": "Gateway refreshed — {n} adapters: {names}",
+    },
+    "settings.hub.gateway_refreshed_none": {
+        "ar": "حُدّثت البوابة — لا محوّلات تعمل",
+        "en": "Gateway refreshed — no adapters are running",
     },
     "settings.hub.test_failed_error": {
         "ar": "فشل الاختبار: {error}",

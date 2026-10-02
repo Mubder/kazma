@@ -177,6 +177,7 @@ def test_the_binding_check_tells_data_from_interface() -> None:
       <span x-text="t('k')"></span>
       <span x-text="busy ? t('a') : t('b')"></span>
       <span x-text="items.length"></span>
+      <span x-text="kazmaCount('k.n', preview.result.hits || 0)"></span>
       <div translate="no"><span x-text="item.name"></span></div>
       <span :translate="x ? 'no' : null" x-text="item.reason"></span>
     </div>

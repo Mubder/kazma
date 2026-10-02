@@ -580,13 +580,53 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "{ok}/{n} سليمة",
         "en": "{ok}/{n} OK",
     },
-    "memory.console.group_warn": {
-        "ar": "{n} تحذير",
-        "en": "{n} warn",
+    "memory.console.group_warn.zero": {
+        "ar": "لا تحذيرات",
+        "en": "{n} warnings",
     },
-    "memory.console.group_err": {
+    "memory.console.group_warn.one": {
+        "ar": "تحذير واحد",
+        "en": "1 warning",
+    },
+    "memory.console.group_warn.two": {
+        "ar": "تحذيران",
+        "en": "{n} warnings",
+    },
+    "memory.console.group_warn.few": {
+        "ar": "{n} تحذيرات",
+        "en": "{n} warnings",
+    },
+    "memory.console.group_warn.many": {
+        "ar": "{n} تحذيرًا",
+        "en": "{n} warnings",
+    },
+    "memory.console.group_warn.other": {
+        "ar": "{n} تحذير",
+        "en": "{n} warnings",
+    },
+    "memory.console.group_err.zero": {
+        "ar": "لا أخطاء",
+        "en": "{n} errors",
+    },
+    "memory.console.group_err.one": {
+        "ar": "خطأ واحد",
+        "en": "1 error",
+    },
+    "memory.console.group_err.two": {
+        "ar": "خطآن",
+        "en": "{n} errors",
+    },
+    "memory.console.group_err.few": {
+        "ar": "{n} أخطاء",
+        "en": "{n} errors",
+    },
+    "memory.console.group_err.many": {
+        "ar": "{n} خطأً",
+        "en": "{n} errors",
+    },
+    "memory.console.group_err.other": {
         "ar": "{n} خطأ",
-        "en": "{n} err",
+        "en": "{n} errors",
     },
     "memory.console.group_off": {
         "ar": "{n} متوقفة",
@@ -884,9 +924,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": " · المتجهات {provider}",
         "en": " · vector {provider}",
     },
-    "memory.console.banner_failed": {
+    "memory.console.banner_failed.zero": {
+        "ar": "لا مهام فاشلة في الطابور",
+        "en": "{n} failed queue tasks",
+    },
+    "memory.console.banner_failed.one": {
+        "ar": "مهمة فاشلة واحدة في الطابور",
+        "en": "1 failed queue task",
+    },
+    "memory.console.banner_failed.two": {
+        "ar": "مهمتان فاشلتان في الطابور",
+        "en": "{n} failed queue tasks",
+    },
+    "memory.console.banner_failed.few": {
         "ar": "{n} مهام فاشلة في الطابور",
-        "en": "{n} failed queue task(s)",
+        "en": "{n} failed queue tasks",
+    },
+    "memory.console.banner_failed.many": {
+        "ar": "{n} مهمة فاشلة في الطابور",
+        "en": "{n} failed queue tasks",
+    },
+    "memory.console.banner_failed.other": {
+        "ar": "{n} مهمة فاشلة في الطابور",
+        "en": "{n} failed queue tasks",
     },
     "memory.console.banner_last_error": {
         "ar": "سُجّل خطأ بعد الدور",
@@ -937,8 +997,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "{name}: {count} ({pct}%)",
     },
     "memory.console.procedural_breakdown": {
-        "ar": "{active} مهارات نشطة · {quarantined} معزولة",
-        "en": "{active} active skills · {quarantined} quarantined",
+        "ar": "المهارات: {active} نشطة · {quarantined} معزولة",
+        "en": "Skills: {active} active · {quarantined} quarantined",
     },
     "memory.console.enter_query": {
         "ar": "اكتب استعلامًا.",
@@ -1109,9 +1169,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مسح كل المهام الفاشلة في الطابور؟",
         "en": "Clear all failed queue tasks?",
     },
-    "memory.console.cleared_failed": {
+    "memory.console.cleared_failed.zero": {
+        "ar": "لم تُمسح أي مهمة فاشلة",
+        "en": "Cleared {n} failed tasks",
+    },
+    "memory.console.cleared_failed.one": {
+        "ar": "مُسحت مهمة فاشلة واحدة",
+        "en": "Cleared 1 failed task",
+    },
+    "memory.console.cleared_failed.two": {
+        "ar": "مُسحت مهمتان فاشلتان",
+        "en": "Cleared {n} failed tasks",
+    },
+    "memory.console.cleared_failed.few": {
         "ar": "مُسحت {n} مهام فاشلة",
-        "en": "Cleared {n} failed",
+        "en": "Cleared {n} failed tasks",
+    },
+    "memory.console.cleared_failed.many": {
+        "ar": "مُسحت {n} مهمة فاشلة",
+        "en": "Cleared {n} failed tasks",
+    },
+    "memory.console.cleared_failed.other": {
+        "ar": "مُسحت {n} مهمة فاشلة",
+        "en": "Cleared {n} failed tasks",
     },
     "memory.console.failed": {
         "ar": "فشل",
@@ -1649,12 +1729,28 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "قطع الاختصار إلى المحور",
         "en": "Cut hub shortcut",
     },
-    "memory.console.cut_hub_message_one": {
+    "memory.console.cut_hub_message.zero": {
+        "ar": "إزالة الروابط المباشرة بالمحور (أنت)؟",
+        "en": "Remove {n} direct links to the hub (you)?",
+    },
+    "memory.console.cut_hub_message.one": {
         "ar": "إزالة رابط مباشر واحد بالمحور (أنت)؟",
         "en": "Remove 1 direct link to the hub (you)?",
     },
-    "memory.console.cut_hub_message": {
+    "memory.console.cut_hub_message.two": {
+        "ar": "إزالة رابطين مباشرين بالمحور (أنت)؟",
+        "en": "Remove {n} direct links to the hub (you)?",
+    },
+    "memory.console.cut_hub_message.few": {
         "ar": "إزالة {n} روابط مباشرة بالمحور (أنت)؟",
+        "en": "Remove {n} direct links to the hub (you)?",
+    },
+    "memory.console.cut_hub_message.many": {
+        "ar": "إزالة {n} رابطًا مباشرًا بالمحور (أنت)؟",
+        "en": "Remove {n} direct links to the hub (you)?",
+    },
+    "memory.console.cut_hub_message.other": {
+        "ar": "إزالة {n} رابط مباشر بالمحور (أنت)؟",
         "en": "Remove {n} direct links to the hub (you)?",
     },
     "memory.console.cut_hub_link": {
@@ -2097,9 +2193,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "قطع كل الاتصالات",
         "en": "Cut all connections",
     },
-    "memory.console.cut_all_message": {
+    "memory.console.cut_all_message.zero": {
+        "ar": "فصل «{name}» عن جيرانها؟ يبقى غلاف العقدة.",
+        "en": "Detach “{name}” from all {n} neighbors? Node shell stays.",
+    },
+    "memory.console.cut_all_message.one": {
+        "ar": "فصل «{name}» عن جارها الوحيد؟ يبقى غلاف العقدة.",
+        "en": "Detach “{name}” from its only neighbor? Node shell stays.",
+    },
+    "memory.console.cut_all_message.two": {
+        "ar": "فصل «{name}» عن جاريها كليهما؟ يبقى غلاف العقدة.",
+        "en": "Detach “{name}” from all {n} neighbors? Node shell stays.",
+    },
+    "memory.console.cut_all_message.few": {
         "ar": "فصل «{name}» عن جيرانها كلها ({n})؟ يبقى غلاف العقدة.",
-        "en": "Detach “{name}” from all {n} neighbor(s)? Node shell stays.",
+        "en": "Detach “{name}” from all {n} neighbors? Node shell stays.",
+    },
+    "memory.console.cut_all_message.many": {
+        "ar": "فصل «{name}» عن جيرانها كلها ({n})؟ يبقى غلاف العقدة.",
+        "en": "Detach “{name}” from all {n} neighbors? Node shell stays.",
+    },
+    "memory.console.cut_all_message.other": {
+        "ar": "فصل «{name}» عن جيرانها كلها ({n})؟ يبقى غلاف العقدة.",
+        "en": "Detach “{name}” from all {n} neighbors? Node shell stays.",
     },
     "memory.console.cut_all": {
         "ar": "اقطع الكل",

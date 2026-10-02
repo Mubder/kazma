@@ -6,6 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
+from kazma_core.english_count import count_noun
 from kazma_gateway.gateway import IncomingMessage, OutboundMessage
 
 from .store import _build_target_id
@@ -172,7 +173,7 @@ async def try_session_command(
     await _reply(
         f"▶️ Taken over: **{hit.title}**\n"
         f"This {msg.platform.capitalize()} chat now continues that season "
-        f"({hit.message_count} msgs).\n"
+        f"({count_noun(hit.message_count, 'message')}).\n"
         f"Web: `/chat?s={hit.session_id}`"
     )
     logger.info(

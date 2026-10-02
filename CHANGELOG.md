@@ -1,5 +1,55 @@
 # CHANGELOG
 
+## Counts in the terminal, the CLI and the chat apps (2026-10-03)
+
+The English-only surfaces printed a count beside a plural whatever the
+number. The TUI said "(1 msgs)" after loading a one-message chat, and "1
+models" in the model picker. The chat apps said "1 new chunks" after a `/kb`
+ingest, "1 more lines not shown" on an approval card, and "Slow down — 0/1
+requests available". 39 such places in the TUI, the CLI and the gateway now
+go through `kazma_core.english_count.count_noun`, which also writes large
+numbers with separators ("12,345 tokens"). A gate,
+`tests/test_english_counts.py`, reads every f-string in those packages. The
+eleven values it would misread (a name, a verb, a unit) are declared there
+with why.
+
+`kazma` with no arguments said "Tools: 11 slash commands available", from a
+list of 11 names someone had typed into the banner. The chat apps' "/" menu
+has 36. The banner now counts the gateway's own menu.
+
+## Counts the gate could not see (2026-10-03)
+
+The count gate of 2026-10-02 looked for a plural right after a number. It
+missed twenty labels written another way, all with their Arabic in one form:
+
+- "(s)" plurals: the Swarm page's "N worker(s) active", "Task dispatched to
+  N worker(s)", Documents' garbage collection, redaction and "Added N
+  passage(s)", a library search's hits, a document's pages, the X reply
+  preview's snippets, the gateway refresh;
+- a word before the noun: "Agent wants to run N danger tools" on the
+  approval card, "N new chunks" after a page ingest, "N failed queue tasks"
+  and "N direct links" on the memory console, "N DBs" after a backup.
+
+Four more were wrong in Arabic alone, because their English has no plural to
+find: "Cleared N failed" read "مُسحت 1 مهام فاشلة", the memory health
+groups' "N err" and "N warn" read "3 خطأ" and "5 تحذير", and the
+Dashboard's budget countdown read "5 ثانية" (it now abbreviates like the
+English: "5 ث").
+
+All have the six forms, read through `kazmaCount` (the chat's approval card
+through the chat page's plural bridge). The memory console's skills line is
+a label now ("Skills: 3 active · 0 quarantined"), and three unused keys are
+gone. The gateway refresh said "none" in English on every page when nothing
+was running; it says so in the page's language. Documents' three "request
+failed" fallbacks are translated.
+
+`tests/test_count_labels.py` now reads a count with up to two words before
+its noun, "(s)" plurals and capitalised plurals, and checks the Arabic of
+every entry: a count followed by an Arabic noun fails the build unless the
+word is declared as one that does not change with the count (a preposition,
+a stat line's adjective, a unit). Both gates skip placeholders that hold a
+name, a path or an id.
+
 ## Every count reads right, in English and Arabic (2026-10-02)
 
 The interface had 36 labels that printed a number beside a word in one

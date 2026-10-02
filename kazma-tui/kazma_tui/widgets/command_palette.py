@@ -9,6 +9,8 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, ListItem, ListView, Static, TabbedContent, RichLog
 from textual.binding import Binding
 
+from kazma_core.english_count import count_noun
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["CommandPalette", "FuzzyMatcher"]
@@ -268,9 +270,9 @@ class CommandPalette(ModalScreen[str | None]):
             info = self.query_one("#search-info", Static)
             if query:
                 total = len(self._all_commands)
-                info.update(f"{count or 0}/{total} matches • ESC to close")
+                info.update(f"{count_noun(count or 0, 'match', 'matches')} of {total} • ESC to close")
             else:
-                info.update(f"{len(self._all_commands)} commands • Type to filter")
+                info.update(f"{count_noun(len(self._all_commands), 'command')} • Type to filter")
         except Exception as exc:
             logger.debug("Search info update failed: %s", exc)
 

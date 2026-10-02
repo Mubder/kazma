@@ -198,8 +198,10 @@
                 const resp = await fetch('/api/gateway/refresh-adapters', { method: 'POST' });
                 const data = await resp.json();
                 if (resp.ok) {
-                    const names = (data.adapters || []).join(', ') || 'none';
-                    showToast(_k('settings.hub.gateway_refreshed', 'Gateway refreshed — {n} adapter(s): {names}', { n: data.adapters_count || 0, names: names }), 'success');
+                    const running = data.adapters_count || 0;
+                    showToast(running
+                        ? window.kazmaCount('settings.hub.gateway_refreshed', running, { names: (data.adapters || []).join(', ') })
+                        : _k('settings.hub.gateway_refreshed_none', 'Gateway refreshed — no adapters are running'), 'success');
                 } else {
                     showToast(_k('settings.hub.gateway_refresh_failed', 'Gateway refresh failed: ') + (data.detail || resp.statusText), 'error');
                 }

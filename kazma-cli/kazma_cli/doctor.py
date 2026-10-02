@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 
 from kazma_core.diagnostic_scope import read_only_diagnostic
+from kazma_core.english_count import count_noun
 
 OK = "ok"
 WARN = "warn"
@@ -268,7 +269,7 @@ def _collect() -> list[tuple[str, str]]:
         # "'deepseek' offers 'glm-5.3-flash'" is nonsense that undermines the
         # whole report.
         out.append(_line(OK, f"{_cat_owner!r} offers {model!r}",
-                         f"{len(catalog)} models known"))
+                         f"{count_noun(len(catalog), 'model')} known"))
     else:
         bare = model.split("/", 1)[1] if "/" in model else None
         if bare and bare in catalog:

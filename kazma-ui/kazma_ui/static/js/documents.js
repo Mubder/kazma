@@ -155,7 +155,7 @@ function documentsPage() {
         }
         const proceed = await window.kazmaConfirm({
           title: kazmaT('documents.js.run_garbage_collection', "Run garbage collection?"),
-          message: kazmaT('documents.js.gc_confirm', 'Dry-run found {n} item(s) to delete (~{size} reclaimable). Referenced content and current versions are never removed. Proceed?', { n: wouldDelete, size: this.fmtBytes(rep.reclaimed_bytes) }),
+          message: window.kazmaCount('documents.js.gc_confirm', wouldDelete, { size: this.fmtBytes(rep.reclaimed_bytes) }),
           confirmText: kazmaT('documents.js.run_gc', "Run GC"),
           cancelText: kazmaT('common.cancel', "Cancel"),
           danger: true,
@@ -166,7 +166,7 @@ function documentsPage() {
         if (rj.ok) {
           this.gcReport = rj.report;
           this.toast(
-            kazmaT('documents.js.gc_done', 'GC reclaimed {n} blob(s), {size}', { n: rj.report.deleted_blobs, size: this.fmtBytes(rj.report.reclaimed_bytes) }),
+            window.kazmaCount('documents.js.gc_done', rj.report.deleted_blobs || 0, { size: this.fmtBytes(rj.report.reclaimed_bytes) }),
             "success",
           );
           await this.loadOps();
@@ -490,7 +490,7 @@ function documentsPage() {
       }
       const ok = await window.kazmaConfirm({
         title: kazmaT('documents.js.confirm_redaction', "Confirm redaction"),
-        message: kazmaT('documents.js.redact_confirm', 'Physically redact {n} term(s)? This produces a new, independently-verified immutable artifact and cannot alter the original.', { n: terms.length }),
+        message: window.kazmaCount('documents.js.redact_confirm', terms.length),
         confirmText: kazmaT('documents.redact', "Redact"),
       });
       if (!ok) return;
@@ -551,7 +551,7 @@ function documentsPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: name.trim(), name: name.trim() }),
-          }).then((r) => r.json()).catch(() => ({ ok: false, error: "request failed" }));
+          }).then((r) => r.json()).catch(() => ({ ok: false, error: kazmaT('common.request_failed', 'Request failed') }));
           if (!created.ok) {
             this.toast(this._tr("documents.library_failed", "Could not add it to the library: {error}", { error: created.error || "" }), "error");
             return;
@@ -565,11 +565,11 @@ function documentsPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ library_id: lib }),
         });
-        const j = await r.json().catch(() => ({ ok: false, error: "request failed" }));
+        const j = await r.json().catch(() => ({ ok: false, error: kazmaT('common.request_failed', 'Request failed') }));
         const shown = (this.libraries.find((l) => l.id === lib) || { name: lib }).name;
         if (j.ok) {
           const n = (j.index && (j.index.chunk_count ?? j.index.chunks)) || 0;
-          this.toast(this._tr("documents.library_added", "Added {n} passage(s) to “{library}”.", { n, library: shown }), "success");
+          this.toast(window.kazmaCount("documents.library_added", n, { library: shown }), "success");
           await this.refreshDetail();
         } else {
           this.toast(this._tr("documents.library_failed", "Could not add it to the library: {error}", { error: j.error || "" }), "error");
@@ -603,7 +603,7 @@ function documentsPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ library_id: lib.id }),
         });
-        const j = await r.json().catch(() => ({ ok: false, error: "request failed" }));
+        const j = await r.json().catch(() => ({ ok: false, error: kazmaT('common.request_failed', 'Request failed') }));
         if (r.ok && j.ok) {
           this.toast(this._tr("documents.library_removed", "Removed from “{library}”.", { library: lib.name || lib.id }), "success");
         } else {
