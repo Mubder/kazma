@@ -178,3 +178,113 @@ def test_the_app_binds_and_unbinds_its_loop() -> None:
     }
     assert hooks["_on_startup"] == ["bind_server_loop(asyncio.get_running_loop())"]
     assert hooks["_on_shutdown"] and set(hooks["_on_shutdown"]) == {"bind_server_loop(None)"}
+
+
+# ── the Settings test alert (Adapters & Routes -> Send a test alert) ───
+
+
+class _Named(_Sender):
+    def __init__(self, name: str, answer: Any = True) -> None:
+        super().__init__(answer)
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+
+@pytest.fixture
+def server_loop():
+    """A running loop in its own thread, bound as the server's."""
+    import threading
+
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, name="server-loop", daemon=True)
+    thread.start()
+    ops_alerts.bind_server_loop(loop)
+    yield loop
+    ops_alerts.bind_server_loop(None)
+    loop.call_soon_threadsafe(loop.stop)
+    thread.join(timeout=5)
+    loop.close()
+
+
+def _routes(monkeypatch: pytest.MonkeyPatch, *senders: _Named) -> None:
+    fan_out = FanOutBusAdapter(list(senders))
+    monkeypatch.setattr(bus_mod, "get_message_bus", lambda: _Bus(fan_out))
+    monkeypatch.setattr(ops_alerts, "_ops_channels", lambda: [])
+
+
+def test_the_test_alert_names_the_routes_that_took_it(
+    monkeypatch: pytest.MonkeyPatch, server_loop: asyncio.AbstractEventLoop,
+) -> None:
+    telegram, slack = _Named("telegram"), _Named("slack", answer=False)
+    _routes(monkeypatch, telegram, slack)
+    direct: list[str] = []
+    monkeypatch.setattr(ops_alerts, "_telegram_direct", lambda text, **_: direct.append(text) or True)
+
+    result = ops_alerts.send_test_alert(timeout_s=10)
+
+    assert result["sent"] == ["telegram"] and result["failed"] == ["slack"]
+    assert result["ok"] is False and result["error"] == ""
+    # Delivered the way a background job's alert is: on the server's loop.
+    assert telegram.loops == [server_loop] and slack.loops == [server_loop]
+    assert "[Ops] Test alert" in telegram.sent[0]
+    assert direct == []  # a route took it: no fallback
+
+
+def test_every_route_taking_it_is_ok(monkeypatch: pytest.MonkeyPatch, server_loop: asyncio.AbstractEventLoop) -> None:
+    _routes(monkeypatch, _Named("telegram"), _Named("discord"), _Named("slack"))
+    result = ops_alerts.send_test_alert(timeout_s=10)
+    assert result == {"ok": True, "sent": ["telegram", "discord", "slack"], "failed": [], "routes": [], "error": ""}
+
+
+def test_a_test_alert_that_reached_nobody_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No bus and no Telegram credentials: the fallback failed, and it says
+    so (no server loop bound: the CLI's path, a loop of its own)."""
+    monkeypatch.setattr(bus_mod, "get_message_bus", lambda: _Bus(NullBusAdapter()))
+    monkeypatch.setattr(ops_alerts, "_ops_channels", lambda: [])
+    monkeypatch.setattr(ops_alerts, "_telegram_direct", lambda text, **_: False)
+    ops_alerts.bind_server_loop(None)
+    result = ops_alerts.send_test_alert(timeout_s=10)
+    assert result["ok"] is False and result["sent"] == [] and result["failed"] == ["telegram"]
+
+
+def test_a_route_the_bus_missed_but_the_fallback_reached_counts_once(
+    monkeypatch: pytest.MonkeyPatch, server_loop: asyncio.AbstractEventLoop,
+) -> None:
+    _routes(monkeypatch, _Named("telegram", answer=False))
+    monkeypatch.setattr(ops_alerts, "_telegram_direct", lambda text, **_: True)
+    result = ops_alerts.send_test_alert(timeout_s=10)
+    assert result["sent"] == ["telegram"] and result["failed"] == [] and result["ok"] is True
+
+
+def test_the_test_alert_refuses_to_block_a_running_loop() -> None:
+    async def main() -> None:
+        with pytest.raises(RuntimeError, match="worker thread"):
+            ops_alerts.send_test_alert()
+
+    asyncio.run(main())
+
+
+def test_the_settings_route_sends_it_from_a_worker_thread(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The route is a plain ``def``: FastAPI runs it in a worker thread. As an
+    ``async def`` it would call the blocking function on the loop, which
+    refuses (500)."""
+    from unittest.mock import MagicMock
+
+    from fastapi import FastAPI
+    from fastapi.templating import Jinja2Templates
+    from fastapi.testclient import TestClient
+    from kazma_core.config_store import ConfigStore
+    from kazma_ui.settings import create_settings_router
+
+    _routes(monkeypatch, _Named("telegram"), _Named("discord", answer=RuntimeError("down")))
+    (tmp_path / "templates").mkdir()
+    app = FastAPI()
+    app.include_router(create_settings_router(
+        MagicMock(), ConfigStore(db_path=str(tmp_path / "s.db")), Jinja2Templates(directory=str(tmp_path / "templates"))))
+    resp = TestClient(app).post("/api/settings/notifications/test-alert")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["sent"] == ["telegram"] and body["failed"] == ["discord"] and body["ok"] is False

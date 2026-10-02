@@ -255,6 +255,9 @@
         // Every server status message, in the order the card lists them
         // (kazma_core.lifecycle_notifier.EVENT_NAMES).
         lifecycleEventNames: ['started', 'startup_failed', 'starting', 'shutting_down'],
+        // "Send a test alert": one alert through the saved routes; the
+        // result names the routes that took it.
+        opsTestAlert: { sending: false, result: null },
         adapterRoutingSaving: false,
         adapterRoutingSnapshot: '',
         routingShow: { tgToken: false, tgGroupToken: false, discordToken: false, slackToken: false, slackAppToken: false },

@@ -554,6 +554,12 @@
                                     <span x-text="({telegram: 'Telegram', 'telegram-group': t('settings.hub.route_tg_group'), discord: 'Discord', slack: 'Slack'})[r] || r"></span>
                                 </label>
                             </template>
+                            <button class="btn btn-secondary btn-sm" style="margin-top:8px" @click="sendTestAlert()" :disabled="opsTestAlert.sending"
+                                    x-text="opsTestAlert.sending ? t('settings.hub.test_alert_sending') : t('settings.hub.test_alert')"></button>
+                            <p class="text-muted" style="font-size:0.68rem;margin:4px 0 0">{{ t('settings.hub.test_alert_hint') }}</p>
+                            <p style="font-size:0.75rem;margin:4px 0 0" x-show="opsTestAlert.result" x-cloak
+                               :class="opsTestAlert.result && opsTestAlert.result.ok ? 'text-success' : 'text-error'"
+                               x-text="testAlertSummary()"></p>
                         </div>
                         <div>
                             <label class="form-label" style="font-size:0.75rem;margin-bottom:4px">{{ t('settings.hub.swarm_goes_to') }}</label>

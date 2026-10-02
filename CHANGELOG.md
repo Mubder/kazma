@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Settings can send a test alert (2026-10-02)
+
+- **You can check that alerts reach you.** Settings -> Adapters & Routes has
+  **Send a test alert** under "Alerts go to". It sends one message along the
+  saved alert routes, the way a real alert travels: from a background
+  thread onto the server's loop, through each chat app, with the Telegram
+  fallback. The page then names each route that took it and each that did
+  not. Until now a real failure was the only proof, and the one failure
+  that happened (2026-10-02) reached nobody. A test alert is not throttled,
+  and the weekly report does not count it as an alert.
+- **Gate:** `tests/test_ops_alert_delivery.py`.
+
 ## A chat kept out of memory from its first message stays out (2026-10-02)
 
 - **"Don't remember this chat" holds from the start.** A web chat is

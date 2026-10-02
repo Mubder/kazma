@@ -31,6 +31,7 @@ Design constraints, each earned:
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import os
 import threading
@@ -47,6 +48,7 @@ __all__ = [
     "reset_alert_state",
     "alert_state",
     "bus_send_targets",
+    "send_test_alert",
 ]
 
 # How long the same key stays quiet after being reported. Long enough that a
@@ -292,7 +294,7 @@ def _telegram_direct(text: str, *, group_route: bool = False) -> bool:
         return False
 
 
-async def _deliver(text: str) -> bool:
+async def _deliver(text: str, outcome: dict[str, list[str]] | None = None) -> bool:
     """Deliver an alert. Returns whether it actually went anywhere.
 
     Prefers the in-process bus (it reaches every configured platform, not
@@ -305,7 +307,15 @@ async def _deliver(text: str) -> bool:
     bus only the selected adapters are sent through; the Telegram-direct
     fallback only fires when Telegram is among the selected (or routing
     is unset).
+
+    *outcome*, when given, collects the routes that took the alert
+    (``sent``) and those that did not (``failed``): the Settings test says
+    where it went.
     """
+    if outcome is None:
+        outcome = {}
+    sent = outcome.setdefault("sent", [])
+    failed = outcome.setdefault("failed", [])
     channels = _ops_channels()
     # The group route is Telegram-direct only (it is not a bus adapter):
     # always fire it alongside whatever the bus delivers.
@@ -316,6 +326,7 @@ async def _deliver(text: str) -> bool:
             )
         except Exception:  # noqa: BLE001
             logger.warning("[ops_alerts] telegram-group delivery failed", exc_info=True)
+        (sent if sent_group else failed).append("telegram-group")
     bus_refused = False
     try:
         from kazma_core.swarm.bus import (
@@ -342,10 +353,16 @@ async def _deliver(text: str) -> bool:
                 content=text[:4000],
                 level="warn",
             )
-            results = await asyncio.wait_for(
-                asyncio.gather(*(a.send(msg) for a in targets), return_exceptions=True),
-                timeout=10.0,
-            )
+            try:
+                results = await asyncio.wait_for(
+                    asyncio.gather(*(a.send(msg) for a in targets), return_exceptions=True),
+                    timeout=10.0,
+                )
+            except TimeoutError:
+                results = [TimeoutError()] * len(targets)
+            for target, result in zip(targets, results):
+                route = str(getattr(target, "name", "") or type(target).__name__).lower()
+                (sent if result is True else failed).append(route)
             # An adapter reports whether its platform took the message; a
             # bus that took it nowhere is not a delivery (it counted as one
             # until 2026-10-02, so a failed send never reached the fallback).
@@ -375,8 +392,9 @@ async def _deliver(text: str) -> bool:
             channels,
         )
         return True
-    return await asyncio.to_thread(_telegram_direct, text
-    )
+    direct = await asyncio.to_thread(_telegram_direct, text)
+    (sent if direct else failed).append("telegram")
+    return direct
 
 
 def _has_any_sink() -> bool:
@@ -504,6 +522,73 @@ def drain_alerts(timeout: float = 5.0) -> int:
     if still:
         logger.debug("[ops_alerts] %d delivery thread(s) still running", still)
     return still
+
+
+#: The test alert's text. Plain on purpose: it lands where real alerts land.
+_TEST_TITLE = "Test alert"
+_TEST_DETAIL = (
+    "Sent from Settings to check that alerts reach you. Nothing is wrong; "
+    "no action needed."
+)
+
+
+def send_test_alert(*, timeout_s: float = 45.0) -> dict[str, Any]:
+    """Send one test alert through the saved alert routes; say where it went.
+
+    The operator's way to see that alerts reach them (Settings -> Adapters &
+    Routes). Until 2026-10-02 the only proof was a real failure: an alert the
+    boot check raised in a worker thread reached nobody, and nothing showed it.
+    This is that path -- the saved routes, the bus, the Telegram fallback --
+    run on the server's loop from the calling thread, as an alert raised by a
+    background job is. Never throttled, and not an alert (no incident): one
+    log line, which the weekly report does not count.
+
+    Blocks until delivery finishes: call it from a worker thread (the route is
+    a plain ``def``), never from the loop.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError("send_test_alert blocks; call it from a worker thread")
+
+    text = _format("info", _TEST_TITLE, _TEST_DETAIL, 0, DEFAULT_COOLDOWN_S)
+    outcome: dict[str, list[str]] = {"sent": [], "failed": []}
+    error = ""
+    server = _server_loop
+    try:
+        if server is not None and not server.is_closed() and server.is_running():
+            future = asyncio.run_coroutine_threadsafe(_deliver(text, outcome), server)
+            try:
+                future.result(timeout=timeout_s)
+            except concurrent.futures.TimeoutError:
+                future.cancel()
+                error = f"no answer within {timeout_s:.0f} s"
+            except concurrent.futures.CancelledError:
+                error = "the server stopped before it was sent"
+        else:
+            asyncio.run(_deliver(text, outcome))
+    except RuntimeError as exc:  # the loop closed between the check and the send
+        error = str(exc)[:300]
+
+    sent = list(dict.fromkeys(outcome["sent"]))
+    failed = [r for r in dict.fromkeys(outcome["failed"]) if r not in sent]
+    if sent and not failed and not error:
+        logger.info("[ops_alerts] test alert delivered to %s", ", ".join(sent))
+    else:
+        logger.warning(
+            "[ops_alerts] test alert: delivered to %s; not delivered to %s%s",
+            ", ".join(sent) or "nothing", ", ".join(failed) or "-",
+            f" ({error})" if error else "",
+        )
+    return {
+        "ok": bool(sent) and not failed and not error,
+        "sent": sent,
+        "failed": failed,
+        "routes": _ops_channels(),
+        "error": error,
+    }
 
 
 def alert(
