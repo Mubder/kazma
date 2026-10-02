@@ -40,26 +40,22 @@ mcp:
   servers:
   - name: filesystem
     transport: stdio
-    workspace_bound: true
     command:
     - npx
     - -y
     - '@modelcontextprotocol/server-filesystem'
     - ${KAZMA_ACTIVE_WORKSPACE}
-    enabled: true
-    tool_count: 0
-    tools: []
-    trust: approval_required
-    auth: {}
+    workspace_bound: true
   - name: sequential-thinking
     transport: stdio
     command:
-    - C:\Users\balfa\kazma\AppData\Roaming\uv\tools\mcp-sequential-thinking\Scripts\mcp-sequential-thinking.exe
+    - npx
+    - -y
+    - '@modelcontextprotocol/server-sequential-thinking'
+    url: ''
+    env: {}
     enabled: true
-    tool_count: 0
-    tools: []
     trust: approval_required
-    auth: {}
 system_prompt: 'You are Kazma (Arabic: كاظمه / كاظمة — never كازما), an autonomous
   multi-platform AI agent framework.
 
