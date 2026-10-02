@@ -30,8 +30,9 @@ _CALL = re.compile(
     r"""(?<![\w$])([A-Za-z_$][\w$]*)\(\s*(['"])([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)\2\s*[,)]"""
 )
 # A plural's key is the base of its six CLDR forms (``chat.count_tools`` ->
-# ``chat.count_tools_one`` ...); tests/test_chat_i18n_bridge.py holds those.
-_PLURAL_HELPERS = {"plural_forms", "t_plural", "tiCount"}
+# ``chat.count_tools.one`` ...); tests/test_chat_i18n_bridge.py holds the
+# chat's, tests/test_kazma_count.py every ``kazmaCount`` key's.
+_PLURAL_HELPERS = {"plural_forms", "t_plural", "tiCount", "kazmaCount"}
 _FILE_SUFFIXES = {"js", "css", "html", "json", "py", "md", "png", "svg", "txt", "yaml", "yml", "db"}
 
 

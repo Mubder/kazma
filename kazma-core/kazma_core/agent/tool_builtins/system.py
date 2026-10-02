@@ -62,13 +62,8 @@ def register_system_tools(registry: Any) -> None:
                 known = ", ".join(str(s.get("name")) for s in servers) or "(none)"
                 return f"Error: MCP server '{name}' not found. Configured servers: {known}"
 
-            try:
-                from kazma_core.workspace.mcp_rebind import apply_workspace_to_server_config
-
-                target = apply_workspace_to_server_config(dict(target))
-            except Exception:
-                pass
-
+            # The manager starts a workspace-bound server on the active
+            # workspace (it pinned it here, on the loop, until 2026-10-02).
             manager = AsyncMCPManager()
             try:
                 count = await manager.connect_from_config(

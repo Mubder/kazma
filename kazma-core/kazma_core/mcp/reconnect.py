@@ -188,10 +188,12 @@ class MCPReconnector:
             logger.debug("[MCP-reconnect] config unavailable: %s", exc)
             return 0
 
+        from kazma_core.mcp_servers_store import server_enabled
+
         by_name = {
             str(c.get("name") or "unnamed"): c
             for c in configured
-            if isinstance(c, dict) and c.get("enabled", True)
+            if isinstance(c, dict) and server_enabled(c)
         }
         errors = dict(getattr(self._manager, "connection_errors", {}) or {})
         connected_names = self._connected_names()

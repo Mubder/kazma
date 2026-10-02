@@ -35,6 +35,7 @@ __all__ = [
     "list_mcp_servers",
     "move_plaintext_secrets",
     "persist_mcp_yaml",
+    "server_enabled",
     "servers_with_plaintext_secrets",
     "set_mcp_server_enabled",
     "sync_mcp_servers",
@@ -243,10 +244,32 @@ def list_mcp_servers(
     return [_canonical_server(s) for s in by_name.values()]
 
 
+def server_enabled(server: dict[str, Any]) -> bool:
+    """Whether *server* is switched on: started at boot and kept running.
+
+    The one reading of ``enabled`` (absent = on): the boot connect, the list
+    every page reads, Settings' switch and ``/config tools`` all ask it.
+    """
+    return bool(server.get("enabled", True))
+
+
+#: What a page is told about a server while Kazma runs -- never configuration.
+#: ``upsert_mcp_server`` stored three as defaults (``connected: false``,
+#: ``tool_count: 0``, ``tools: []``), so kazma.yaml said every server was
+#: down with no tools while it ran with fourteen (2026-10-02). Nothing that
+#: connects a server reads them. ``_resolved_workspace`` is the folder a
+#: connect pinned: stored, the manager would take it as pinned already and
+#: start the server there after a repo switch.
+_RUNTIME_FIELDS = frozenset({
+    "status", "connected", "tool_count", "tools",
+    "connection_error", "oauth_status", "oauth_required", "_resolved_workspace",
+})
+
+
 def _canonical_server(server: dict[str, Any]) -> dict[str, Any]:
-    """*server* as it is stored and shown: a workspace-bound one marked so,
-    with an old sandbox path in its folder argument put back to the
-    placeholder.
+    """*server* as it is stored and shown: its configuration only (the
+    runtime fields above dropped), a workspace-bound one marked so, with an
+    old sandbox path in its folder argument put back to the placeholder.
 
     The connect pins a workspace-bound server's folder to the active
     workspace whatever is stored (:mod:`kazma_core.workspace.mcp_rebind`), so
@@ -263,9 +286,9 @@ def _canonical_server(server: dict[str, Any]) -> dict[str, Any]:
         is_workspace_bound_server,
     )
 
-    if not is_workspace_bound_server(server):
-        return server
-    out = dict(server)
+    out = {k: v for k, v in server.items() if k not in _RUNTIME_FIELDS}
+    if not is_workspace_bound_server(out):
+        return out
     out["workspace_bound"] = True
     command = list(out.get("command") or [])
     if command and is_legacy_sandbox_arg(str(command[-1])):
@@ -420,9 +443,6 @@ def upsert_mcp_server(
         "url": data.get("url", "") or "",
         "env": data.get("env", {}) or {},
         "enabled": data.get("enabled", True),
-        "connected": data.get("connected", False),
-        "tool_count": data.get("tool_count", 0),
-        "tools": data.get("tools", []) or [],
     }
     if data.get("working_dir"):
         server["working_dir"] = data["working_dir"]
@@ -454,7 +474,13 @@ def delete_mcp_server(
     config_raw: dict[str, Any] | None = None,
     yaml_path: str | Path | None = None,
 ) -> None:
-    """Remove *name* from ConfigStore + yaml + optional config.raw."""
+    """Remove *name* from ConfigStore + yaml + optional config.raw.
+
+    Raises ``RuntimeError`` when kazma.yaml could not be written and still
+    holds the server: the merge has no tombstones, so it would be back on the
+    next read. The MCP page's Remove reported such a delete as done; only
+    Settings checked (its own re-read, 2026-10-02).
+    """
     yaml_in_mem = None
     if config_raw is not None:
         yaml_in_mem = (config_raw.get("mcp") or {}).get("servers", [])
@@ -464,6 +490,8 @@ def delete_mcp_server(
     _written, err = _write_everywhere(servers, before=current, config_raw=config_raw, yaml_path=yaml_path)
     if err:
         logger.warning("[mcp_servers_store] delete ConfigStore ok, yaml failed: %s", err)
+        if any(s.get("name") == name for s in _read_yaml_servers(yaml_path)):
+            raise RuntimeError(f"kazma.yaml could not be written ({err}); '{name}' is still in it")
     from kazma_core.mcp.secrets import forget
 
     for gone in (s for s in current if s.get("name") == name):
@@ -476,8 +504,9 @@ def set_mcp_server_enabled(
     *,
     config_raw: dict[str, Any] | None = None,
     yaml_path: str | Path | None = None,
-) -> None:
-    """Toggle *enabled* on a server (dual-write)."""
+) -> bool:
+    """Toggle *enabled* on a server (dual-write); False when there is no
+    server *name* (nothing is written)."""
     yaml_in_mem = None
     if config_raw is not None:
         yaml_in_mem = (config_raw.get("mcp") or {}).get("servers", [])
@@ -491,7 +520,8 @@ def set_mcp_server_enabled(
             found = True
             break
     if not found:
-        return
+        return False
     _written, err = _write_everywhere(servers, before=before, config_raw=config_raw, yaml_path=yaml_path)
     if err:
         logger.warning("[mcp_servers_store] toggle ConfigStore ok, yaml failed: %s", err)
+    return True

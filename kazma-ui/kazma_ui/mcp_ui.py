@@ -203,62 +203,21 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         result = await asyncio.to_thread(agent.remove_mcp_server, name)
         if result.get("status") != "ok":
             return result
-
-        # Disconnect if running — use the unified executor's public API.
-        if agent.tools.is_server_connected(name):
-            try:
-                await agent.tools.disconnect_server(name)
-            except Exception as exc:
-                logger.debug("MCP server disconnect failed for %s: %s", name, exc)
-
+        # A removed server's tools leave the agent now, not at the next start.
+        stopped = await agent.stop_mcp_server(name)
+        if stopped.get("status") != "ok":
+            logger.warning("[mcp_api] %s removed but still running: %s", name, stopped.get("error"))
         return {"status": "ok"}
 
     @router.post("/api/mcp/servers/{name}/start")
     async def api_start_server(name: str) -> dict[str, Any]:
-        """Start/connect an MCP server."""
-        servers = await asyncio.to_thread(agent.get_mcp_servers_config)
-        server_cfg = None
-        for s in servers:
-            if s.get("name") == name:
-                server_cfg = s
-                break
-
-        if not server_cfg:
-            return {"status": "error", "error": f"Server '{name}' not found in config"}
-
-        try:
-            count = await agent.tools.connect_server(server_cfg)
-        except Exception as exc:
-            logger.exception("[mcp_api] Failed to start MCP server %s", name)
-            return {"status": "error", "error": f"Failed to start server: {exc}"}
-
-        # connect_server → connect_from_config(raise_on_error=False) swallows
-        # spawn/handshake failures into _connection_errors and returns 0 —
-        # reporting "ok" here is what made Start look dead. Surface the real
-        # recorded error instead.
-        if not agent.tools.is_server_connected(name):
-            detail = ""
-            try:
-                errors = getattr(agent.tools._mcp, "connection_errors", None) or {}
-                detail = errors.get(name, "")
-            except Exception:
-                detail = ""
-            return {
-                "status": "error",
-                "error": f"Failed to start server: {detail or 'connection failed (0 tools, not connected)'}",
-            }
-        return {"status": "ok", "tool_count": count}
+        """Start/connect an MCP server (``KazmaAgent.start_mcp_server``)."""
+        return await agent.start_mcp_server(name)
 
     @router.post("/api/mcp/servers/{name}/stop")
-    async def api_stop_server(name: str) -> dict[str, str]:
-        """Stop/disconnect an MCP server."""
-        if agent.tools.is_server_connected(name):
-            try:
-                await agent.tools.disconnect_server(name)
-            except Exception as exc:
-                logger.exception("[mcp_api] Failed to stop MCP server %s", name)
-                return {"status": "error", "error": f"Failed to stop server: {exc}"}
-        return {"status": "ok"}
+    async def api_stop_server(name: str) -> dict[str, Any]:
+        """Stop/disconnect an MCP server (``KazmaAgent.stop_mcp_server``)."""
+        return await agent.stop_mcp_server(name)
 
     @router.post("/api/mcp/servers/{name}/test")
     async def api_test_server(name: str) -> dict[str, Any]:
@@ -281,13 +240,15 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         if not server_cfg:
             return {"success": False, "error": f"Server '{name}' not found"}
 
-        # Expand ${KAZMA_ACTIVE_WORKSPACE} exactly like the Start path
-        # (UnifiedToolExecutor.connect_server → apply_workspace_to_server_config)
-        # so Test exercises the same command the server would actually run.
+        # Expand ${KAZMA_ACTIVE_WORKSPACE} exactly like the Start path (the
+        # manager's connect pins a workspace-bound server) so Test exercises
+        # the command the server would actually run. The stdio client below
+        # does not go through the manager. The root is a workspace-store
+        # read: off the loop.
         try:
             from kazma_core.workspace.mcp_rebind import apply_workspace_to_server_config
 
-            server_cfg = apply_workspace_to_server_config(server_cfg)
+            server_cfg = await asyncio.to_thread(apply_workspace_to_server_config, server_cfg)
         except Exception as exc:
             logger.debug("[mcp_api] workspace interpolation skipped for %s: %s", name, exc)
 

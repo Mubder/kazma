@@ -61,37 +61,6 @@ async def test_strict_connection_reports_actual_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_settings_test_returns_connection_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Settings must not label a swallowed manager failure as a zero-tool success."""
-    from kazma_core.settings_mcp import MCPSettingsService
-
-    manager = AsyncMCPManager()
-    connect = AsyncMock(side_effect=MCPBridgeError("Command not found: mcp-server"))
-    shutdown = AsyncMock()
-    monkeypatch.setattr("kazma_core.mcp.manager.AsyncMCPManager", lambda: manager)
-    monkeypatch.setattr(manager, "connect_from_config", connect)
-    monkeypatch.setattr(manager, "shutdown", shutdown)
-
-    service = MCPSettingsService(MagicMock())
-    monkeypatch.setattr(
-        service,
-        "get_mcp_servers",
-        lambda: [{"name": "broken", "transport": "stdio", "command": ["mcp-server"]}],
-    )
-
-    result = await service.test_mcp_server("broken")
-
-    assert result == {
-        "success": False,
-        "error": "Command not found: mcp-server",
-    }
-    assert connect.await_args.kwargs == {"raise_on_error": True}
-    shutdown.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 async def test_tools_discovery_failure_closes_stdio_process(monkeypatch: pytest.MonkeyPatch) -> None:
     """A failed tools/list after initialize must not orphan the child process."""
     manager = AsyncMCPManager()

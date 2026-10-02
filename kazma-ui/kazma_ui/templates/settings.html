@@ -1639,15 +1639,17 @@
             <template x-for="s in mcpServers" :key="s.name">
                 <div style="padding:14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:10px">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                        <span class="status-dot" :class="s.connected ? 'status-ok' : 'status-stopped'"></span>
+                        <span class="status-dot" role="img" :class="s.status === 'running' ? 'status-ok' : 'status-stopped'"
+                              :title="s.status === 'running' ? t('settings.mcp_state_running') : t('settings.mcp_state_stopped')"
+                              :aria-label="s.status === 'running' ? t('settings.mcp_state_running') : t('settings.mcp_state_stopped')"></span>
                         <strong translate="no" x-text="s.name"></strong>
                         <span class="badge" translate="no" :class="s.transport === 'stdio' ? 'badge-stdio' : 'badge-sse'" x-text="s.transport"></span>
-                        <span style="font-size:0.8rem;color:var(--text-muted)" x-text="(s.tool_count || 0) + ' {{ t('settings.tools_count') }}'"></span>
+                        <span style="font-size:0.8rem;color:var(--text-muted)" x-text="kazmaCount('mcp.tool_count', s.tool_count || 0)"></span>
                     </div>
                     <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:8px" translate="no" x-text="s.transport === 'stdio' ? (s.command || []).join(' ') : s.url"></div>
                     <div style="display:flex;gap:6px">
                         <label class="toggle">
-                            <input type="checkbox" :checked="s.enabled !== false" @change="toggleMcpServer(s.name, $event.target.checked)">
+                            <input type="checkbox" :aria-label="t('settings.mcp_switch_label').replace('{name}', s.name)" :checked="s.enabled !== false" @change="toggleMcpServer(s.name, $event.target.checked)">
                             <span class="toggle-slider"></span>
                         </label>
                         <button class="btn btn-secondary btn-sm" @click="testMcpServer(s.name)" :disabled="testingMcp === s.name" x-text="testingMcp === s.name ? '...' : '{{ t('settings.test') }}'"></button>

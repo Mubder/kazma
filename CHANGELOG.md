@@ -1,5 +1,52 @@
 # CHANGELOG
 
+## MCP servers: Settings shows what runs, its switch switches, and a server that fails at boot comes back (2026-10-02)
+
+Found on the live install while repairing its MCP settings through
+Settings → MCP: turning a server off and on again left it off.
+
+- **The switch could not show "off".** Settings → MCP reads the list the
+  MCP page reads, which carried no `enabled`, so every switch showed on.
+  The second click of "off, then on" sent off again, and the server would
+  not have started at the next boot. The list now carries `enabled`.
+- **Off changed nothing until a restart.** The switch only saved the flag;
+  a server switched off kept serving its tools to the agent. It now starts
+  or stops the server too, through the same code as the MCP page's Start
+  and Stop, and says so ("is on and running", or why it did not start).
+  Deleting a server in Settings stops it. `/config tools toggle` in a chat
+  app applies at once as well; it said "from the next start".
+- **The state dot was always red.** It read a `connected` field no row
+  carries. It now reads the server's status and says it on hover and to a
+  screen reader. The tool count uses the catalog's plural forms (it read
+  "1 أدوات"), through `window.kazmaCount`, the new one call for a count a
+  page script builds. A gate now catches a count glued to a word inside an
+  Alpine expression too.
+- **Settings' Test failed for the filesystem server.** It was a second copy
+  of the MCP page's Test that started the server on the literal
+  `${KAZMA_ACTIVE_WORKSPACE}`. Settings now calls the MCP page's Test.
+- **A server that failed at boot was never retried.** Boot connects one
+  server per call, and each call cleared every server's recorded failure,
+  so only the last server's survived. The reconnect sweeper, which retries
+  exactly the failed servers, never retried the others, and the health
+  check and the "MCP servers unavailable" alert saw only one. Failures are
+  now kept per server until it connects or is stopped. The sweeper's retry
+  of a filesystem server started it on the literal placeholder as well:
+  the manager now starts every workspace-bound server on the active
+  workspace, reading that folder off the event loop. The executor read it
+  on the loop at every connect before.
+- **A failure's text never carries a key.** It is shown on both MCP pages
+  and logged; an HTTP failure quotes its URL, query string and all. Key-like
+  fragments are now masked, and paths kept (`kazma_core.errors.redact_secrets`).
+- **kazma.yaml holds configuration only.** Adding or editing a server wrote
+  `connected: false`, `tool_count: 0` and `tools: []` into kazma.yaml and
+  the settings for a server running with fourteen tools. Runtime fields
+  are no longer stored, and old rows read without them. A delete that could
+  not write kazma.yaml is reported from the MCP page too; the server would
+  have come back on the next read.
+
+Tests: `tests/test_mcp_servers_live.py` (against the old manager, seven of
+its tests fail), `tests/test_kazma_count.py`, `tests/js/test_kazma_count.js`.
+
 ## The MCP page's buttons work, and its messages follow the page language (2026-10-02)
 
 Found while switching the live install's sequential-thinking server to the

@@ -9,7 +9,6 @@ why Settings Test reported "Server not found" for servers added via
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -160,50 +159,20 @@ class MCPSettingsService:
             pass  # verification is best-effort; the write itself succeeded
         return {"status": "ok"}
 
-    def toggle_mcp_server(self, name: str, enabled: bool) -> None:
-        """Enable/disable an MCP server (dual-write)."""
+    def toggle_mcp_server(self, name: str, enabled: bool) -> bool:
+        """Switch an MCP server on or off (dual-write); False when there is
+        no such server. The Settings route applies it to the running server.
+
+        Test is the MCP page's route; the copy here started a workspace-bound
+        server on the literal ``${KAZMA_ACTIVE_WORKSPACE}``. ``get_mcp_tools``
+        read the stored ``tools`` field, which nothing kept up to date and
+        nothing called (both removed 2026-10-02).
+        """
         from kazma_core.mcp_servers_store import set_mcp_server_enabled
 
-        set_mcp_server_enabled(
+        return set_mcp_server_enabled(
             name,
             enabled,
             config_raw=_agent_config_raw(),
             yaml_path=_agent_yaml_path(),
         )
-
-    async def test_mcp_server(self, name: str) -> dict[str, Any]:
-        """Test an MCP server connection using the unified merged store."""
-        # kazma.yaml, the agent's config and the settings store: off the loop.
-        servers = await asyncio.to_thread(self.get_mcp_servers)
-        server = None
-        for s in servers:
-            if s.get("name") == name:
-                server = s
-                break
-
-        if not server:
-            return {"success": False, "error": f"Server '{name}' not found"}
-
-        try:
-            from kazma_core.mcp.manager import AsyncMCPManager
-
-            manager = AsyncMCPManager()
-            try:
-                count = await manager.connect_from_config([server], raise_on_error=True)
-                tool_schemas = manager.get_all_tool_schemas()
-                tool_names = [t.get("function", {}).get("name", "") for t in tool_schemas]
-                return {"success": True, "tool_count": count, "tools": tool_names[:20]}
-            finally:
-                # A failed test can still have completed a stdio handshake or
-                # allocated an HTTP pool.  Always release it before reporting.
-                await manager.shutdown()
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def get_mcp_tools(self, server_name: str) -> list[dict[str, Any]]:
-        """List tools for an MCP server (from stored metadata if any)."""
-        servers = self.get_mcp_servers()
-        for s in servers:
-            if s.get("name") == server_name:
-                return s.get("tools", [])
-        return []

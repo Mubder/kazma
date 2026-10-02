@@ -108,8 +108,19 @@ _GLUED = re.compile(
 )
 
 
+#: The same inside an Alpine expression: ``(s.tool_count || 0) + ' {{ t('<a
+#: noun>') }}'``. Settings -> MCP read "1 أدوات" that way (2026-10-02); a
+#: script says a count through ``kazmaCount`` (tests/test_kazma_count.py).
+_GLUED_IN_EXPRESSION = re.compile(
+    r"(?P<expr>[\w.()|\s]*?(?:count|total|length|size|num)[\w.()|\s]*?)\+\s*'\s*"
+    r"\{\{\s*t\('(?P<key>[\w.]+)'\)\s*\}\}\s*'"
+)
+
+
 def glued_counts(html: str) -> list[str]:
-    return [f"{m.group('expr')} {m.group('key')}" for m in _GLUED.finditer(html)]
+    found = [f"{m.group('expr')} {m.group('key')}" for m in _GLUED.finditer(html)]
+    found += [f"{m.group('expr').strip()} {m.group('key')}" for m in _GLUED_IN_EXPRESSION.finditer(html)]
+    return found
 
 
 def test_no_template_glues_a_count_to_a_word():
@@ -131,12 +142,22 @@ def test_negative_control_the_shipped_card_is_caught():
     assert glued_counts("{{ t_plural('mcp.tool_count', server.tool_count) }}") == []
 
 
+def test_negative_control_the_shipped_settings_row_is_caught():
+    """Settings -> MCP's count before 2026-10-02, inside an Alpine expression."""
+    shipped = (
+        "<span x-text=\"(s.tool_count || 0) + ' {{ t('settings.tools_count') }}'\"></span>"
+    )
+    assert glued_counts(shipped) == ["(s.tool_count || 0) settings.tools_count"]
+    assert glued_counts("<span x-text=\"kazmaCount('mcp.tool_count', s.tool_count || 0)\"></span>") == []
+
+
 #: Catalog entries that are a count label in one form ("{n} sessions"): right
 #: in English from 2 up and in Arabic from 11 up. A ratchet: the number may
 #: only go down (convert an entry to <key>.<category> forms, read through
-#: t_plural / plural_forms + KazmaFormat.count, and lower this). 39 on
-#: 2026-10-02; the Dashboard's two went that day.
-SINGLE_FORM_COUNT_LABELS = 37
+#: t_plural / plural_forms + KazmaFormat.count / kazmaCount, and lower this).
+#: 39 on 2026-10-02; the Dashboard's two and Settings -> MCP's Test went that
+#: day.
+SINGLE_FORM_COUNT_LABELS = 36
 _SINGLE_FORM = re.compile(r"\{(?:n|count)\}\s+(?:more\s+)?[a-z]+s\b")
 
 

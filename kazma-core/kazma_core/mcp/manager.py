@@ -53,6 +53,7 @@ from typing import Any
 import httpx
 
 from kazma_core.chaos import InjectionTarget, chaos_injection
+from kazma_core.errors import redact_secrets
 from kazma_core.http_tls import shared_ssl_context
 from kazma_core.mcp.child_env import MCP_CHILD_ENV_ALLOWLIST, mcp_child_env
 from kazma_core.mcp.secrets import MCPSecretUnavailable, redacted_argv, redacted_url, resolve, secret_values
@@ -394,6 +395,14 @@ def mcp_scope_guard_enabled() -> bool:
 # ══════════════════════════════════════════════════════════════════════════
 
 
+def _needs_workspace_pin(cfg: dict[str, Any]) -> bool:
+    """A workspace-bound server config no caller has pinned to a folder yet
+    (``apply_workspace_to_server_config`` marks what it pins)."""
+    from kazma_core.workspace.mcp_rebind import is_workspace_bound_server
+
+    return "_resolved_workspace" not in cfg and is_workspace_bound_server(cfg)
+
+
 class MCPBridgeError(Exception):
     """Raised when an MCP server returns a JSON-RPC error or transport fails."""
 
@@ -548,7 +557,13 @@ class AsyncMCPManager:
 
     @property
     def connection_errors(self) -> dict[str, str]:
-        """Return failures from the most recent :meth:`connect_from_config` call."""
+        """Why each server that is down failed its last connect.
+
+        Kept per server -- a server's entry goes when it connects or is
+        stopped -- because callers connect one server at a time: boot, Start,
+        Settings' switch and the reconnect sweeper, which retries exactly the
+        servers named here.
+        """
         return dict(self._connection_errors)
 
     async def connect_from_config(
@@ -559,6 +574,18 @@ class AsyncMCPManager:
     ) -> int:
         """Connect to all servers from a config list.
 
+        A workspace-bound server no caller pinned (no ``_resolved_workspace``)
+        starts on the active workspace, read off the loop once a call: the
+        reconnect sweeper and Settings' Test passed the stored config, so a
+        filesystem server retried that way started on the literal
+        ``${KAZMA_ACTIVE_WORKSPACE}`` (2026-10-02).
+
+        Each call used to clear every server's recorded failure. Boot makes
+        one call per server, so only the LAST server's failure survived, and
+        the reconnect sweeper never retried the others (it retries what
+        :attr:`connection_errors` names). Only this call's servers change
+        now; the summary, the alert and *raise_on_error* judge this call's.
+
         Args:
             servers: List of dicts, each with at least ``name`` and ``transport``.
 
@@ -566,12 +593,13 @@ class AsyncMCPManager:
             Total number of tools discovered across all servers.
         """
         total_tools = 0
-        self._connection_errors.clear()
+        failed: dict[str, str] = {}
+        root: Path | None = None
         for cfg in servers:
             if not isinstance(cfg, dict):
                 name = "unnamed"
                 message = "server configuration must be an object"
-                self._connection_errors[name] = message
+                failed[name] = message
                 logger.error("[MCP] Failed to connect server '%s': %s", name, message)
                 continue
 
@@ -580,6 +608,14 @@ class AsyncMCPManager:
                 self._server_templates[name] = dict(cfg)
             transport = cfg.get("transport", "stdio")
             try:
+                if _needs_workspace_pin(cfg):
+                    if root is None:
+                        from kazma_core.workspace import binding
+
+                        root = await asyncio.to_thread(binding.resolve_active_root)
+                    from kazma_core.workspace.mcp_rebind import apply_workspace_to_server_config
+
+                    cfg = apply_workspace_to_server_config(cfg, root)
                 # A repeated startup/start request must not orphan the prior
                 # child process or HTTP client.  A healthy handle is already
                 # serving the configured tools, so report it idempotently.
@@ -599,23 +635,26 @@ class AsyncMCPManager:
                     count = await self._connect_streamable_http(name, cfg)
                 else:
                     logger.warning("[MCP] Unknown transport '%s' for server '%s'", transport, name)
-                    self._connection_errors[name] = f"unsupported transport '{transport}'"
+                    failed[name] = f"unsupported transport '{transport}'"
                     continue
                 total_tools += count
                 self._connection_errors.pop(name, None)
             except Exception as exc:
-                message = str(exc) or type(exc).__name__
-                self._connection_errors[name] = message
+                # Shown on the MCP pages and logged: an HTTP failure quotes its
+                # URL, query string and all.
+                message = redact_secrets(str(exc) or type(exc).__name__)
+                failed[name] = message
                 logger.error("[MCP] Failed to connect server '%s': %s", name, message)
+        self._connection_errors.update(failed)
         # End-of-batch summary (audit M5): per-server errors were already
         # logged at ERROR, but with many servers the operator had to grep the
         # log to know which subset failed. One summary line closes the loop.
-        if self._connection_errors:
+        if failed:
             logger.warning(
                 "[MCP] %d server(s) failed to connect: %s — tools from these "
                 "servers are unavailable until fixed (see /mcp settings page)",
-                len(self._connection_errors),
-                "; ".join(f"{n} ({m[:80]})" for n, m in self._connection_errors.items()),
+                len(failed),
+                "; ".join(f"{n} ({m[:80]})" for n, m in failed.items()),
             )
             # 60 failures across eight days, never surfaced anywhere the
             # operator would see. Tools silently vanish from the agent's
@@ -635,10 +674,8 @@ class AsyncMCPManager:
                 )
             except Exception:
                 pass
-        if raise_on_error and self._connection_errors:
-            details = "; ".join(
-                f"{name}: {message}" for name, message in self._connection_errors.items()
-            )
+        if raise_on_error and failed:
+            details = "; ".join(f"{name}: {message}" for name, message in failed.items())
             raise MCPBridgeError(f"MCP connection failed: {details}")
         return total_tools
 
@@ -682,7 +719,12 @@ class AsyncMCPManager:
         self._scoped.clear()
 
     async def disconnect_server(self, name: str) -> bool:
-        """Disconnect one server, safely handling an already-dead transport."""
+        """Disconnect one server, safely handling an already-dead transport.
+
+        Its recorded failure goes too: a server someone stopped is not down,
+        and the reconnect sweeper must not start it again.
+        """
+        self._connection_errors.pop(name, None)
         handle = self._servers.pop(name, None)
         if handle is None:
             return False
@@ -2116,36 +2158,26 @@ class UnifiedToolExecutor:
     async def connect_server(self, server_config: dict[str, Any]) -> int:
         """Connect a single MCP server and register its tools.
 
-        Workspace-bound servers (filesystem MCP) have their allowed root
-        substituted to the active workspace before spawn. Templates are
-        stored so Switch Repo can rebind without losing the original shape.
+        The manager starts a workspace-bound server (filesystem MCP) on the
+        active workspace (:meth:`AsyncMCPManager.connect_from_config`). The
+        config is kept as given so Switch Repo can rebind it.
         """
         if self._mcp is None:
             return 0
 
-        # Install rebind bus once (idempotent)
+        name = str(server_config.get("name") or "unnamed")
+        # Kept without a resolved absolute path, for the rebind.
+        self._server_configs[name] = dict(server_config)
         try:
-            from kazma_core.workspace.mcp_rebind import (
-                apply_workspace_to_server_config,
-                install_mcp_workspace_rebind,
-                is_workspace_bound_server,
-            )
+            from kazma_core.workspace.mcp_rebind import install_mcp_workspace_rebind
 
-            install_mcp_workspace_rebind(self)
-            name = str(server_config.get("name") or "unnamed")
-            # Keep a template without a resolved absolute path for rebind
-            template = dict(server_config)
-            self._server_configs[name] = template
-            cfg = (
-                apply_workspace_to_server_config(template)
-                if is_workspace_bound_server(template)
-                else dict(server_config)
-            )
-        except Exception as exc:
-            logger.debug("[Unified] workspace MCP bind skipped: %s", exc)
-            cfg = dict(server_config)
+            # It records the active root, a workspace-store read: off the
+            # loop. It pinned the server here too, on the loop.
+            await asyncio.to_thread(install_mcp_workspace_rebind, self)
+        except Exception as exc:  # noqa: BLE001 -- the server still connects
+            logger.debug("[Unified] workspace MCP rebind not installed: %s", exc)
 
-        return await self._mcp.connect_from_config([cfg])
+        return await self._mcp.connect_from_config([dict(server_config)])
 
     def list_servers(self) -> list[dict[str, Any]]:
         """Return status info for all managed MCP servers."""

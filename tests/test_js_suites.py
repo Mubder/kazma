@@ -28,8 +28,13 @@ def js_test_files() -> list[Path]:
 
 
 def run_js(path: Path) -> subprocess.CompletedProcess[str]:
+    # Node writes UTF-8. Decoded with the Windows code page, a test that
+    # prints Arabic (test_block_direction.js) lost its whole output to a
+    # UnicodeDecodeError in the reader thread -- a failure there would have
+    # been reported with nothing to read.
     return subprocess.run(
-        ["node", str(path)], cwd=REPO, capture_output=True, text=True, timeout=240, check=False,
+        ["node", str(path)], cwd=REPO, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=240, check=False,
     )
 
 

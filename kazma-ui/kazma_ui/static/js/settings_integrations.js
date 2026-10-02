@@ -72,11 +72,24 @@
 
         async toggleMcpServer(name, enabled) {
             try {
-                await window.kazmaSave(`/api/settings/mcp/${encodeURIComponent(name)}/toggle`, {
+                // Saved for the next start and applied now: the answer says
+                // whether the server runs, and why not.
+                const body = await window.kazmaSave(`/api/settings/mcp/${encodeURIComponent(name)}/toggle`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ enabled }),
                 });
+                if (body && body.error) {
+                    showToast(enabled
+                        ? _k('settings.int.mcp_on_not_running', '{name} is on, but it did not start: {error}', { name: name, error: body.error })
+                        : _k('settings.int.mcp_off_still_running', '{name} is off, but it is still running: {error}', { name: name, error: body.error }),
+                        'warning');
+                } else {
+                    showToast(enabled
+                        ? _k('settings.int.mcp_on_running', '{name} is on and running', { name: name })
+                        : _k('settings.int.mcp_off_stopped', '{name} is off and stopped', { name: name }),
+                        'success');
+                }
             } catch (e) {
                 showToast(_k('settings.int.toggle_failed', 'Toggle failed: ') + e.message, 'error');
             }
@@ -84,13 +97,22 @@
             await this.loadMcpServers();
         },
 
+        /* The MCP page's Test (POST /api/mcp/servers/{name}/test): Settings had
+           a copy that started a workspace-bound server on the literal
+           ${KAZMA_ACTIVE_WORKSPACE}, so its Test of the filesystem server
+           failed (2026-10-02). */
         async testMcpServer(name) {
             this.testingMcp = name;
             try {
-                const resp = await fetch(`/api/settings/mcp/${encodeURIComponent(name)}/test`, { method: 'POST' });
+                const resp = await fetch(`/api/mcp/servers/${encodeURIComponent(name)}/test`, { method: 'POST' });
                 const result = await resp.json();
-                showToast(result.success ? _k('settings.int.mcp_tools_found', '{name}: {n} tools found', { name: name, n: result.tool_count }) : `${name}: ${result.error}`,
-                    result.success ? 'success' : 'error');
+                if (result.success) {
+                    showToast(window.kazmaCount('settings.int.mcp_tools_found', result.tool_count || 0, { name: name }), 'success');
+                } else {
+                    // The server's own last stderr line says why it failed.
+                    const why = [result.error, (result.stderr || '').trim().split('\n').pop()].filter(Boolean).join(' — ');
+                    showToast(`${name}: ${why || resp.status}`, 'error');
+                }
             } catch (e) {
                 showToast(_k('settings.int.test_failed', 'Test failed: {error}', { error: e.message }), 'error');
             }

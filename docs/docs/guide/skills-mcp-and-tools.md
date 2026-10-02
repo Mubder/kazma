@@ -257,6 +257,10 @@ The filesystem server always works on the active workspace: Kazma passes the wor
 
 Each server's card has **Start** or **Stop**, **Test** (connects once and reports how many tools it found), **Show tools**, and **Remove**. Remove asks first, because it also stops the server and forgets its settings and any keys saved for it. Until 2026-10-02, Start, Stop, Test and OAuth login did nothing when clicked: they called an Alpine helper (`$parent`) that Alpine 3 does not have.
 
+**Settings → MCP** lists the same servers with an on/off switch. The switch decides whether a server starts with Kazma, and applies at once: off stops the server and takes its tools from the agent, on starts it. If a server cannot start, the switch stays on, the message says why, and the server is tried again at the next start. The dot beside the name is the server's state now (running or stopped). **Test** is the MCP page's Test. `/config tools toggle <name>` in a chat app does the same as the switch. Start and Stop on the MCP page only start or stop the server for now; the switch is what decides the next start. Until 2026-10-02 the switch only saved the setting, could not show a server as off, and the dot was always red.
+
+**A server that fails to start is retried.** Kazma remembers why each server failed until it connects or someone stops it. A background sweep retries the failed ones with a growing delay, and the MCP page shows each one's reason with any key masked. Until 2026-10-02 only the last server's failure was remembered, so a server that failed early at startup was never retried.
+
 ### 5.5 Tool name namespacing
 
 MCP tool names are **namespaced** as `mcp__<server>__<tool>` before being sent to the LLM. This prevents collisions between MCP servers and built-in tools (e.g. the Playwright MCP's `browser_click` vs the browser_automation skill's `browser_click`). Without namespacing, providers that require unique tool names (DeepSeek, OpenAI) reject the entire request with `400 Tool names must be unique`, causing Kazma to strip ALL tools for the turn — the root cause of the "agent stopped talking" bug.

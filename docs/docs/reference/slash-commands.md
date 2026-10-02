@@ -486,7 +486,7 @@ model or personality, turn memory on or off, switch MCP servers, and export
 /config personality <name>     # switch personality (alias of /personality)
 /config memory on|off          # turn memory on or off
 /config tools list             # show the MCP servers
-/config tools toggle <name>    # turn an MCP server on or off (from the next start)
+/config tools toggle <name>    # turn an MCP server on or off (now and at every start)
 /config export                 # export config as JSON
 ```
 
@@ -592,7 +592,7 @@ Lists all available commands grouped by category.
 • `/config personality <name>` — Switch personality
 • `/config memory on|off` — Toggle memory
 • `/config tools list` — Show the MCP servers
-• `/config tools toggle <name>` — Turn an MCP server on or off (from the next start)
+• `/config tools toggle <name>` — Turn an MCP server on or off (now and at every start)
 • `/config export` — Export config as JSON
 
 ℹ️ *Info*

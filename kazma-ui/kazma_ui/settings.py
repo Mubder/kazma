@@ -1841,28 +1841,55 @@ class SettingsRouterBuilder:
             return _get_sm().add_mcp_server(req.model_dump())
 
         @router.delete("/api/settings/mcp/{name}")
-        def api_delete_mcp(name: str) -> dict[str, str]:
-            """Delete an MCP server."""
-            from fastapi.responses import JSONResponse
-
-            result = _get_sm().delete_mcp_server(name)
+        async def api_delete_mcp(name: str) -> Any:
+            """Delete an MCP server; a running one stops (its tools leave the
+            agent now -- they stayed until a restart, 2026-10-02)."""
+            result = await asyncio.to_thread(_get_sm().delete_mcp_server, name)
             if isinstance(result, dict) and result.get("status") == "error":
                 return JSONResponse(
                     {"status": "error", "message": result.get("error", "delete failed")},
                     status_code=500,
                 )
+            stopped = await self.agent.stop_mcp_server(name)
+            if stopped.get("status") != "ok":
+                logger.warning("[settings] MCP server %s removed but still running: %s", name, stopped.get("error"))
             return {"status": "ok"}
 
         @router.put("/api/settings/mcp/{name}/toggle")
-        def api_toggle_mcp(name: str, req: MCPServerToggleRequest) -> dict[str, str]:
-            """Toggle MCP server enabled/disabled."""
-            _get_sm().toggle_mcp_server(name, req.enabled)
-            return {"status": "ok"}
+        async def api_toggle_mcp(name: str, req: MCPServerToggleRequest) -> Any:
+            """Switch an MCP server on or off: saved for the next start and
+            applied now -- started, or stopped with its tools taken from the
+            agent (``KazmaAgent.start_mcp_server`` / ``stop_mcp_server``, the
+            MCP page's Start and Stop).
 
-        @router.post("/api/settings/mcp/{name}/test")
-        async def api_test_mcp(name: str) -> dict[str, Any]:
-            """Test an MCP server connection."""
-            return await _get_sm().test_mcp_server(name)
+            Until 2026-10-02 it only saved, so a server switched off kept
+            serving its tools until a restart. The answer says whether the
+            server runs, and why not when it was switched on and could not
+            start (the setting is kept: it applies at the next start).
+            """
+            found = await asyncio.to_thread(_get_sm().toggle_mcp_server, name, req.enabled)
+            if not found:
+                return JSONResponse(
+                    {"status": "error", "error": f"Server '{name}' not found"}, status_code=404,
+                )
+            agent = self.agent
+            if req.enabled:
+                outcome = await agent.start_mcp_server(name)
+            else:
+                outcome = await agent.stop_mcp_server(name)
+            body: dict[str, Any] = {
+                "status": "ok",
+                "enabled": req.enabled,
+                "running": bool(agent.tools.is_server_connected(name)),
+            }
+            if outcome.get("status") != "ok":
+                body["error"] = str(outcome.get("error") or "")
+            return body
+
+        # Test is the MCP page's route (POST /api/mcp/servers/{name}/test),
+        # which Settings calls too. This copy started a workspace-bound
+        # server on the literal ${KAZMA_ACTIVE_WORKSPACE}, so Settings' Test
+        # of the filesystem server failed (removed 2026-10-02).
 
         # No catch-all DELETE /api/settings/{key:path}: nothing called it, and
         # it deleted whatever key the path named -- the provider list, the

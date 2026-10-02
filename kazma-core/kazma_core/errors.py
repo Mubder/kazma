@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "ErrorInfo",
+    "redact_secrets",
     "safe_error",
     "validation_error",
     "error_payload",
@@ -61,17 +62,30 @@ _CODES: tuple[tuple[type[BaseException], str], ...] = (
     (OSError, "io_error"),
 )
 
-#: Fragments that must never reach a client even in verbose mode.
-_REDACT = re.compile(
-    r"""(
+_PATH_FRAGMENTS = r"""
         \b[A-Za-z]:[\\/](?![\\/])[^\s'"]*   # Windows absolute paths (not the "s://" of a URL)
       | /(?:home|Users|root|etc|var|opt)/[^\s'"]*   # POSIX absolute paths
-      | (?:password|secret|token|api[_-]?key)\s*[=:]\s*\S+
+"""
+_SECRET_FRAGMENTS = r"""
+        (?:password|secret|token|api[_-]?key)\s*[=:]\s*\S+
       | \b(?:sk|xox[baprs]|ghp|gho|ghu|ghs|AIza)[-_][A-Za-z0-9_-]{8,}
       | [a-z][a-z0-9+.-]*://[^/\s:@'"]+:[^@\s/'"]+@  # URL userinfo (a DSN's password)
-    )""",
-    re.IGNORECASE | re.VERBOSE,
-)
+"""
+#: Fragments that must never reach a client even in verbose mode.
+_REDACT = re.compile("(" + _PATH_FRAGMENTS + "|" + _SECRET_FRAGMENTS + ")", re.IGNORECASE | re.VERBOSE)
+#: The secrets alone, for a message whose path is the answer (below).
+_REDACT_SECRETS = re.compile("(" + _SECRET_FRAGMENTS + ")", re.IGNORECASE | re.VERBOSE)
+
+
+def redact_secrets(text: str) -> str:
+    """*text* with every secret-shaped fragment ``<redacted>``, paths kept.
+
+    For a message the operator reads to fix their own setup -- an MCP server
+    that would not start ("No such file: C:\\...\\npx.cmd") -- where
+    :func:`validation_error`'s path redaction would remove the answer. A key
+    is still never shown: an HTTP failure quotes its URL, query and all.
+    """
+    return _REDACT_SECRETS.sub("<redacted>", str(text))
 
 _MAX_VERBOSE_CHARS = 300
 
