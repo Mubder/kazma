@@ -102,7 +102,7 @@ tui = [
 ]
 rag = [
     "chromadb>=0.5.0",
-    "sentence-transformers>=3.0.0",
+    "sentence-transformers>=6.1.0",
     "sqlite-vec>=0.1.6",  # L4 local vector layer (UnifiedMemoryAdapter)
     # Security floors for what these bring in (see the base list).
     "torch>=2.13.0",
