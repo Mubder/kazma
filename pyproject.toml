@@ -9,7 +9,7 @@ dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
     "langgraph>=0.2.0",
-    "langgraph-checkpoint-sqlite>=3.0.0",
+    "langgraph-checkpoint-sqlite>=3.1.1",
     # Imported unconditionally at module level (FastAPI request models;
     # kazma_gateway checkpoint RunnableConfig). Transitively present via
     # fastapi / langgraph today, but declared so a transitive change cannot
@@ -20,9 +20,12 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "langfuse>=2.0.0",
     "pyyaml>=6.0",
+    # Reads requirements and versions for the boot check that the installed
+    # packages meet this build's minimums (kazma_core.install_requirements).
+    "packaging>=24.0",
     "httpx>=0.27.0",
-    "cryptography>=41.0.0",
-    "PyJWT>=2.8.0",
+    "cryptography>=50.0.0",
+    "PyJWT>=2.15.0",
     "jinja2>=3.1.0",
     "python-multipart>=0.0.9",
     "textual>=8.0.0",
@@ -45,9 +48,18 @@ dependencies = [
     "reportlab>=4.0.0",
     "python-docx>=1.1.0",
     "openpyxl>=3.1.0",
-    "pypdf>=4.0.0",
+    "pypdf>=6.19.0",
     "pdfplumber>=0.11.0",
     "python-pptx>=0.6.23",
+    # Security floors (2026-10-02): packages Kazma runs on without importing
+    # them by name. A minimum here is what makes `kazma update` (an additive
+    # `uv pip install -e .`) upgrade an install that has an affected
+    # version; the lock alone changes only fresh installs. Each floor is the
+    # release that fixes an advisory (GET /api/security/hardening lists what
+    # an install still has).
+    "urllib3>=2.8.0",
+    "anyio>=4.14.2",
+    "pyasn1>=0.6.4",
 ]
 
 [project.optional-dependencies]
@@ -65,6 +77,7 @@ dev = [
     # web tool output fenced). ~8s total. Activate once per clone with
     # `pre-commit install`; until you do, the hooks never fire.
     "pre-commit>=3.7.0",
+    "virtualenv>=21.7.13",  # security floor (see the base list): pre-commit brings it
 ]
 test = [
     "pytest>=8.0.0",
@@ -79,6 +92,7 @@ push = [
     # Web Push for task completion (Turn Delivery V2 P5). Optional: the
     # feature self-disables when absent — see kazma_ui/push.py.
     "pywebpush>=2.0.0",
+    "aiohttp>=3.14.3",  # security floor (see the base list): pywebpush brings it
 ]
 # Compatibility alias. textual and python-bidi are already base dependencies.
 # Installing without this extra does not remove the TUI libraries.
@@ -90,6 +104,12 @@ rag = [
     "chromadb>=0.5.0",
     "sentence-transformers>=3.0.0",
     "sqlite-vec>=0.1.6",  # L4 local vector layer (UnifiedMemoryAdapter)
+    # Security floors for what these bring in (see the base list).
+    "torch>=2.13.0",
+    "transformers>=5.10.0",
+    "oauthlib>=4.0.0",
+    "aiohttp>=3.14.3",
+    "setuptools>=83.0.0",
 ]
 observability = [
     "prometheus-client>=0.20.0",
@@ -100,7 +120,7 @@ web = [
 # Multi-replica / SaaS shared state (Phase 4.3)
 postgres = [
     "psycopg[binary,pool]>=3.1.0",
-    "langgraph-checkpoint-postgres>=2.0.0",
+    "langgraph-checkpoint-postgres>=3.1.1",
 ]
 # Compatibility alias. These libraries are already base dependencies.
 # Installing without this extra does not remove document generation.
@@ -110,7 +130,7 @@ document = [
     "openpyxl>=3.1.0",
     "arabic-reshaper>=3.0.0",
     "python-bidi>=0.4.2",
-    "pypdf>=4.0.0",
+    "pypdf>=6.19.0",
     "pdfplumber>=0.11.0",
     "python-pptx>=0.6.23",
 ]
@@ -124,7 +144,7 @@ ocr = [
 ]
 # Document format conversion (HTML→PDF, Markdown→PDF)
 convert = [
-    "weasyprint>=60.0",
+    "weasyprint>=70.0",
 ]
 # Full Document Intelligence platform engines (parse/redact/render)
 # System deps still needed: Tesseract (OCR), LibreOffice (some conversions),
@@ -138,6 +158,10 @@ document-platform = [
 # Optional Docling local extract (hard PDFs; salvage after PyMuPDF)
 docling = [
     "docling>=2.0.0",
+    # Security floors for what docling brings in (see the base list).
+    "torch>=2.13.0",
+    "transformers>=5.10.0",
+    "setuptools>=83.0.0",
 ]
 # Codebase index (tree-sitter languages; regex fallback always works)
 index = [

@@ -154,6 +154,7 @@ def test_osv_unreachable_raises(failure: str) -> None:
 def test_the_report_says_it_could_not_check(monkeypatch: pytest.MonkeyPatch) -> None:
     from kazma_core.security.hardening import SecurityHardeningRunner
 
+    monkeypatch.setattr("kazma_core.install_requirements.unmet_requirements", lambda root=None: [])
     async def down() -> ds.DependencyReport:
         raise ds.DependencyQueryError("OSV could not be asked: no route")
 
@@ -175,6 +176,7 @@ def test_the_report_says_it_could_not_check(monkeypatch: pytest.MonkeyPatch) -> 
 def test_the_report_names_the_upgrades(monkeypatch: pytest.MonkeyPatch) -> None:
     from kazma_core.security.hardening import SecurityHardeningRunner
 
+    monkeypatch.setattr("kazma_core.install_requirements.unmet_requirements", lambda root=None: [])
     async def found() -> ds.DependencyReport:
         return ds.DependencyReport(total=3, vulnerabilities=[
             ds.Vulnerability("pyjwt", "2.13.0", "GHSA-1", fixed_version="2.14.0"),
@@ -269,3 +271,77 @@ def test_the_skill_route_reports_an_osv_failure(monkeypatch: pytest.MonkeyPatch,
         "status": "ok",
         "results": [{"skill_name": "ok", "skill_path": "/x", "issues": [], "vulnerabilities": []}],
     }
+
+
+# ── reviewed advisories ─────────────────────────────────────────────────
+
+
+def _no_unmet(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("kazma_core.install_requirements.unmet_requirements", lambda root=None: [])
+
+
+def test_a_review_covers_its_advisory_by_id_or_alias_for_its_package() -> None:
+    review_id, review = next(iter(ds.REVIEWED_ADVISORIES.items()))
+    assert ds.review_of(ds.Vulnerability(review.package, "1.0", review_id)) is review
+    assert ds.review_of(ds.Vulnerability(review.package, "1.0", "PYSEC-0000-1", aliases=(review_id,))) is review
+    assert ds.review_of(ds.Vulnerability("another-package", "1.0", review_id)) is None
+    assert ds.review_of(ds.Vulnerability(review.package, "1.0", "GHSA-not-reviewed")) is None
+
+
+def test_a_reviewed_advisory_is_named_never_counted_clean(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kazma_core.security.hardening import SecurityHardeningRunner
+
+    _no_unmet(monkeypatch)
+    review_id, review = next(iter(ds.REVIEWED_ADVISORIES.items()))
+
+    async def only_reviewed(**_: Any) -> ds.DependencyReport:
+        return ds.DependencyReport(total=2, vulnerabilities=[ds.Vulnerability(review.package, "1.5.9", review_id)])
+
+    monkeypatch.setattr(ds, "audit_installed", only_reviewed)
+    check = asyncio.run(SecurityHardeningRunner(Path.cwd()).run_check("check_dependency_vulnerabilities"))
+    assert check.passed is True
+    assert "1 reviewed as out of Kazma's reach" in check.message and review_id in check.message
+
+    # Negative control: the same advisory with no review fails the check.
+    monkeypatch.setattr(ds, "REVIEWED_ADVISORIES", {})
+    check = asyncio.run(SecurityHardeningRunner(Path.cwd()).run_check("check_dependency_vulnerabilities"))
+    assert check.passed is False and check.severity == "critical"
+
+
+def _product_python() -> dict[str, str]:
+    import subprocess
+
+    from kazma_core.security.child_env import tool_child_env
+
+    root = Path(__file__).resolve().parents[1]
+    listed = subprocess.run(
+        ["git", "-c", "core.fsmonitor=false", "ls-files", "-z", "--", "kazma-*/kazma_*/*.py"],
+        cwd=root, capture_output=True, check=True, env=tool_child_env(),
+    ).stdout.decode("utf-8").split("\0")
+    scanner = "kazma-core/kazma_core/security/dependency_scanner.py"  # names the patterns
+    return {
+        rel: (root / rel).read_text(encoding="utf-8", errors="replace")
+        for rel in listed
+        if rel and rel != scanner and "/tests/" not in rel and not rel.split("/")[0].endswith("_tests")
+        and (root / rel).is_file()
+    }
+
+
+def test_no_reviewed_advisory_is_reachable_from_product_code() -> None:
+    """Each review says why its advisory cannot be reached; the code that
+    would make it reachable must not appear (re-read the advisory if it does)."""
+    import re
+
+    sources = _product_python()
+    assert len(sources) > 500
+    for vuln_id, review in ds.REVIEWED_ADVISORIES.items():
+        pattern = re.compile(review.reachable_if)
+        hits = sorted(rel for rel, text in sources.items() if pattern.search(text))
+        assert not hits, f"{vuln_id} ({review.package}) may be reachable now: {hits} -- re-read it"
+    # Negative controls: each premise catches the use it guards against.
+    assert re.search(ds._CHROMA_SERVER, "client = chromadb.HttpClient(host='chroma')")
+    assert re.search(ds._CHROMA_SERVER, "client = chromadb.AsyncHttpClient()")
+    assert re.search(
+        ds.REVIEWED_ADVISORIES["GHSA-4j2p-28q2-5m79"].reachable_if,
+        "model = load_checkpoint_and_dispatch(model, checkpoint)",
+    )

@@ -1790,6 +1790,14 @@ class KazmaAppBuilder:
 
             spawn_background(_aio.to_thread(probe_vector_backend), name="vector-store-probe")
 
+            # ── Does the environment hold what this build declares? ───
+            # A deploy is a pull and a reload: nothing installs a package a
+            # newer pyproject.toml raised. Say so at boot (WARNING + ops
+            # alert naming `kazma update`), in the background.
+            from kazma_core.install_requirements import report_unmet_requirements
+
+            spawn_background(_aio.to_thread(report_unmet_requirements), name="install-requirements")
+
             from kazma_ui.dashboard import set_dashboard_context
 
             set_dashboard_context(checkpoint_manager=self._checkpointer)

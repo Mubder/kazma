@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## Packages with known advisories are upgraded, and the server says when an install is behind (2026-10-02)
+
+- **Security floors.** The new dependency check found 51 advisories in 14
+  installed packages, among them PyJWT, pypdf, urllib3, aiohttp,
+  cryptography, anyio, oauthlib, pyasn1, langgraph-checkpoint-sqlite,
+  langgraph-checkpoint-postgres, transformers, weasyprint, torch and
+  setuptools. Each minimum in `pyproject.toml` is now the release that fixes
+  them, including packages Kazma runs on without importing by name. A minimum
+  is what makes `kazma update` upgrade an existing install, because it
+  installs additively.
+- **The lock matches the project.** `uv.lock` still pinned kazma 0.10.0 and a
+  dependency removed on 2026-09-30. It is refreshed: the locked versions now
+  have no open advisory. CI and the release SBOM run `uv export --locked`,
+  which fails on a stale lock. Dependabot moves from the `pip` ecosystem
+  (which never updated `uv.lock`) to `uv`.
+- **The server says when its packages are behind.** A deploy by `git pull`
+  installs nothing. At boot Kazma compares the installed packages with what
+  this build declares (a checkout's own `pyproject.toml`; its installed
+  metadata goes stale with every pull). When something is behind, it logs a
+  WARNING naming each package and raises the ops alert
+  `install.requirements_unmet`. The fix is `kazma update --reinstall -y`.
+  The security report's dependency check shows the same list, even without
+  OSV.
+- **Reviewed, not hidden.** Four `chromadb` advisories concern the Chroma HTTP
+  server, which Kazma does not run, and one `accelerate` advisory concerns a
+  checkpoint loader Kazma never calls. None has a fixed release. The report
+  names them as reviewed, and a test fails if product code starts using a
+  Chroma server or that loader.
+- **Gates:** `tests/test_install_requirements.py` and
+  `tests/test_dependency_scanner.py`.
+
 ## Document tests wait for the parse, not for a clock (2026-10-02)
 
 - A document is parsed in a fresh subprocess. Four document tests gave it

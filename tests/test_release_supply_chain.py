@@ -67,9 +67,15 @@ def test_release_generates_an_sbom_from_the_lockfile(
     # actually installs, so it is what the SBOM has to describe.
     assert "uv export" in runs
     assert "--no-dev" in runs
-    # Without --frozen, `uv export` re-resolves and can rewrite uv.lock during
-    # the release, so the SBOM would describe a set nobody committed.
-    assert "--frozen" in runs
+    # Without --locked (or --frozen), `uv export` re-resolves and can rewrite
+    # uv.lock during the release, so the SBOM would describe a set nobody
+    # committed; --frozen also accepted a lock that no longer matched
+    # pyproject.toml. Read the command, not the comments around it.
+    commands = [
+        line.strip() for line in runs.splitlines()
+        if line.strip().startswith("uv export") and not line.strip().startswith("#")
+    ]
+    assert commands and all("--locked" in c and "--frozen" not in c for c in commands), commands
 
 
 def test_release_attests_build_provenance(steps: list[dict[str, Any]]) -> None:

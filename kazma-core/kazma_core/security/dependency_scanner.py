@@ -40,9 +40,12 @@ __all__ = [
     "DependencyReport",
     "OSV_QUERYBATCH_URL",
     "OSV_VULN_URL",
+    "REVIEWED_ADVISORIES",
+    "ReviewedAdvisory",
     "SkillScanResult",
     "Vulnerability",
     "audit_installed",
+    "review_of",
     "scan_skill_manifests",
 ]
 
@@ -75,6 +78,56 @@ class Vulnerability:
     aliases: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class ReviewedAdvisory:
+    """An advisory read against how Kazma uses the package, and found out of reach."""
+
+    package: str
+    why: str
+    #: What product code would contain if the advisory became reachable;
+    #: ``tests/test_dependency_scanner.py`` fails when it appears.
+    reachable_if: str
+
+
+_CHROMA_SERVER = r"chromadb\.(?:Async)?HttpClient|chromadb\.server|chromadb\.app\b|\bchroma run\b"
+
+#: Advisories with no fixed release yet that cannot be reached through
+#: Kazma's use of the package (2026-10-02). Kazma's own report lists them as
+#: reviewed, never as clean; a hub skill's scan does not apply them (its
+#: code is not Kazma's). Re-read an entry when the package's use changes.
+REVIEWED_ADVISORIES: dict[str, ReviewedAdvisory] = {
+    "GHSA-36p7-vc44-83pf": ReviewedAdvisory(
+        "chromadb",
+        "code injection through a Chroma server's collection API; Kazma embeds Chroma "
+        "in its own process and runs no Chroma server",
+        _CHROMA_SERVER),
+    "GHSA-f4j7-r4q5-qw2c": ReviewedAdvisory(
+        "chromadb",
+        "pre-authentication code injection through a Chroma server's collection API; "
+        "no Chroma server runs",
+        _CHROMA_SERVER),
+    "GHSA-2wm9-hf6c-p5cr": ReviewedAdvisory(
+        "chromadb", "a Chroma server's tenant authorization; no Chroma server runs", _CHROMA_SERVER),
+    "GHSA-xph7-9rjv-w5fr": ReviewedAdvisory(
+        "chromadb", "a Chroma server's SimpleRBACAuthorizationProvider; no Chroma server runs",
+        _CHROMA_SERVER),
+    "GHSA-4j2p-28q2-5m79": ReviewedAdvisory(
+        "accelerate",
+        "loading a sharded checkpoint whose index names other paths; Kazma never calls "
+        "load_checkpoint_in_model or load_checkpoint_and_dispatch",
+        r"load_checkpoint_in_model|load_checkpoint_and_dispatch"),
+}
+
+
+def review_of(vuln: Vulnerability) -> ReviewedAdvisory | None:
+    """The review that covers *vuln* (by its id or an alias), if there is one."""
+    for vuln_id in (vuln.vuln_id, *vuln.aliases):
+        review = REVIEWED_ADVISORIES.get(vuln_id)
+        if review and review.package == vuln.package:
+            return review
+    return None
+
+
 @dataclass
 class DependencyReport:
     """The packages asked about and the advisories that affect them."""
@@ -83,14 +136,19 @@ class DependencyReport:
     vulnerabilities: list[Vulnerability] = field(default_factory=list)
 
     @property
+    def open_vulnerabilities(self) -> list[Vulnerability]:
+        """The advisories no review covers."""
+        return [v for v in self.vulnerabilities if review_of(v) is None]
+
+    @property
     def vulnerable_packages(self) -> list[str]:
-        return sorted({f"{v.package} {v.version}" for v in self.vulnerabilities})
+        return sorted({f"{v.package} {v.version}" for v in self.open_vulnerabilities})
 
     def upgrades(self) -> dict[str, tuple[str | None, int]]:
-        """Per ``"name version"``: the release that fixes every advisory with a
-        fix (the highest), and how many advisories have none."""
+        """Per ``"name version"`` with an open advisory: the release that fixes
+        every one with a fix (the highest), and how many have none."""
         out: dict[str, tuple[str | None, int]] = {}
-        for v in self.vulnerabilities:
+        for v in self.open_vulnerabilities:
             key = f"{v.package} {v.version}"
             best, unfixed = out.get(key, (None, 0))
             if v.fixed_version is None:

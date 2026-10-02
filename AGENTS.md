@@ -4066,6 +4066,48 @@ to.
   `tests/test_auth_disabled_behind_proxy.py` (the bind-only rule and an
   always-false proxy check as the controls).
 
+### 50. Dependency floors reach every install, and the server says when one is behind (`kazma_core/install_requirements.py`, 2026-10-02)
+
+The rewritten report (§49) found what OSV knows about the live install's
+packages: 51 advisories in 14 packages (PyJWT, pypdf, urllib3, aiohttp,
+cryptography...). `uv.lock` still pinned kazma 0.10.0 and the `aiogram` removed
+on 2026-09-30, and CI's `uv export --frozen` exported it without asking
+whether it matched `pyproject.toml`. Dependabot watched the `pip` ecosystem,
+which never touches `uv.lock` and finds nothing to raise in `>=` minimums, so
+no Python update ever arrived.
+
+- **A minimum in `pyproject.toml` is a security floor.** It sits at the
+  release that fixes the advisory, and also covers packages Kazma runs on
+  without importing them by name. Base: urllib3, anyio, pyasn1. Per extra:
+  aiohttp (push, rag), torch, transformers, oauthlib and setuptools (rag,
+  docling), and virtualenv (dev). `kazma update` installs additively
+  (`uv pip install -e`) and keeps any installed version that satisfies the
+  range, so only a minimum makes an existing install upgrade. The lock changes
+  only fresh installs.
+- **The lock must match:** CI and the release SBOM run `uv export --locked`.
+  Dependabot uses the `uv` ecosystem.
+- **The server says when it is behind.** A deploy is a `git pull` and installs
+  nothing. At boot (background thread) `report_unmet_requirements` compares
+  the installed packages with what this build declares and lists every
+  requirement that is not met: a base requirement must be installed in range;
+  an extra binds only a package that is installed. For a checkout "declares"
+  means its `pyproject.toml`, because the installed metadata goes stale with
+  every pull (the dev venv's still named `aiogram`). On a finding it logs a
+  WARNING and raises the ops alert `install.requirements_unmet`. The fix is
+  `kazma update --reinstall -y`. The report's dependency check lists the same
+  packages, without OSV. `packaging` is a declared dependency for this.
+- **Advisories with no fix that Kazma cannot reach are reviewed, never
+  hidden** (`dependency_scanner.REVIEWED_ADVISORIES`). Each entry has its
+  reason and `reachable_if`, the code that would make the advisory reachable.
+  Today: chromadb's Chroma-server advisories (Kazma embeds Chroma; no server,
+  no `HttpClient`) and accelerate's `load_checkpoint_in_model`. The report
+  names them as reviewed. A hub skill's scan does not apply the reviews.
+- Gates: `tests/test_install_requirements.py` (pyproject over stale metadata
+  as the negative control, extras, markers, self-references, the boot call),
+  and `tests/test_dependency_scanner.py`. That file checks that no reviewed
+  advisory's `reachable_if` matches product code, with planted uses as the
+  controls, and that an unreviewed advisory fails the check.
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

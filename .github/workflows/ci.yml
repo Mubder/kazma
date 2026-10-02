@@ -84,7 +84,11 @@ jobs:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v5
       - name: Lockfile is the dependency set
-        run: uv export --frozen --no-dev --no-emit-project --format requirements-txt -o "$RUNNER_TEMP/requirements.lock.txt"
+        # --locked fails when uv.lock no longer matches pyproject.toml. With
+        # --frozen it exported whatever the lock held: by 2026-10-02 it still
+        # pinned kazma 0.10.0 and a dependency removed on 2026-09-30, and
+        # versions with known advisories that pyproject's minimums now refuse.
+        run: uv export --locked --no-dev --no-emit-project --format requirements-txt -o "$RUNNER_TEMP/requirements.lock.txt"
       - name: Build the wheel
         run: uv build --wheel --out-dir dist
       - name: Install that wheel into a clean environment
