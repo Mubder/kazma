@@ -127,7 +127,7 @@ Every line below describes that setup.
 | Old chat step history pruned on a schedule you set | Shipped | Settings → System |
 | Postgres for settings, chats, tasks and checkpoints; SQLite with no setup | Shipped | [Postgres](docs/ops/postgres-and-saas.md) |
 | Prometheus metrics; OpenTelemetry and Langfuse traces | Shipped / Opt-in | `/metrics`, [OpenTelemetry](docs/ops/opentelemetry.md) |
-| Updates in one command | Shipped | [`kazma update`](docs/ops/kazma-update.md) |
+| Updates in one command: on a supervised install it waits for the chats to go quiet, stops Kazma, installs and starts it again | Shipped | [`kazma update`](docs/ops/kazma-update.md) |
 | Fault injection to test retries and failover: slow or failing model calls, tool calls and reply saves (other targets have no injection point yet); off unless enabled | Opt-in | `KAZMA_CHAOS_ENABLED`, [Chaos testing](docs/ops/chaos-testing.md) |
 
 ## Not built

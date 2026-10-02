@@ -347,6 +347,106 @@ def test_pause_is_not_counted_as_a_crash(tmp_path):
         assert not restarting, "maintenance must not enter the restart/backoff path"
 
 
+# ── kazma update: the guard holds Kazma stopped while packages change ──
+
+
+def _point_updater_at(g: GuardRun, monkeypatch) -> object:
+    """This process's updater and guard API, aimed at *g*'s guard and server."""
+    from kazma_cli import update
+
+    for name in ("KAZMA_GUARD_STATE", "KAZMA_GUARD_PAUSE_FILE", "KAZMA_GUARD_LOG",
+                 "KAZMA_GUARD_RELOAD_FILE", "KAZMA_GUARD_HEALTH_URL"):
+        monkeypatch.setenv(name, g.env[name])
+    monkeypatch.setenv("KAZMA_PORT", str(g.port))
+    monkeypatch.setattr(update, "_find_git_root", lambda: ROOT)
+    return update
+
+
+def _answers(port: int) -> bool:
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health/ready", timeout=3):
+            return True
+    except Exception:
+        return False
+
+
+def test_an_update_holds_kazma_stopped_and_starts_it_again(tmp_path, monkeypatch):
+    """The whole one-command update against a real guard: Kazma stops once
+    idle, nothing restarts it while the packages change, and it comes back."""
+    port = _free_port()
+    with GuardRun(tmp_path, port) as g:
+        g.wait_for("child.ready", timeout=60)
+        update = _point_updater_at(g, monkeypatch)
+        seen: dict = {}
+
+        def install() -> bool:
+            spawned = g.count("child.spawned")
+            seen["answered"] = _answers(port)
+            time.sleep(4)  # a respawn would show within this
+            seen["respawned"] = g.count("child.spawned") != spawned or _answers(port)
+            return True
+
+        assert update._install_held("kazma update --reinstall -y", install) == "done"
+        assert seen == {"answered": False, "respawned": False}
+        assert _answers(port), "Kazma is serving again"
+        names = g.event_names()
+        assert "maintenance.held" in names and "child.stopped_gracefully" in names
+        assert g.count("guard.restarting") == 0, "a maintenance stop is not a crash"
+        assert not Path(g.env["KAZMA_GUARD_PAUSE_FILE"]).exists()
+
+
+def test_a_busy_kazma_is_not_stopped_for_an_update(tmp_path, monkeypatch):
+    port = _free_port()
+    with GuardRun(tmp_path, port, FAKE_ACTIVE_TURNS="1") as g:
+        g.wait_for("child.ready", timeout=60)
+        update = _point_updater_at(g, monkeypatch)
+        monkeypatch.setattr(update, "_IDLE_TIMEOUT_S", 3.0)
+        ran: list[bool] = []
+        assert update._install_held("kazma update --reinstall -y", lambda: ran.append(True)) == "refused"
+        assert ran == []
+        assert _answers(port)
+        assert not Path(g.env["KAZMA_GUARD_PAUSE_FILE"]).exists()
+        assert g.count("child.spawned") == 1
+
+
+def test_a_failed_update_keeps_kazma_stopped_until_the_repair_succeeds(tmp_path, monkeypatch):
+    port = _free_port()
+    with GuardRun(tmp_path, port) as g:
+        g.wait_for("child.ready", timeout=60)
+        update = _point_updater_at(g, monkeypatch)
+        assert update._install_held("kazma update --reinstall -y", lambda: False) == "failed"
+        pause = json.loads(Path(g.env["KAZMA_GUARD_PAUSE_FILE"]).read_text(encoding="utf-8"))
+        assert pause["reason"] == update._UPDATE_PAUSE_REASON
+        spawned = g.count("child.spawned")
+        time.sleep(5)
+        assert g.count("child.spawned") == spawned and not _answers(port), (
+            "a half-replaced install must not be started"
+        )
+        # The repair: the same command takes the hold over and starts Kazma.
+        assert update._install_held("kazma update --reinstall -y", lambda: True) == "done"
+        assert _answers(port)
+        assert not Path(g.env["KAZMA_GUARD_PAUSE_FILE"]).exists()
+
+
+def test_a_pause_while_kazma_boots_stops_the_boot(tmp_path, monkeypatch):
+    """A pause during a boot is held at once; the boot used to run to its end
+    (minutes on the live install) before the pause was seen."""
+    port = _free_port()
+    with GuardRun(tmp_path, port, FAKE_BOOT_DELAY_S="60", START_TIMEOUT="120") as g:
+        g.wait_for("child.spawned", timeout=30)
+        update = _point_updater_at(g, monkeypatch)
+        guard = update._load_guard(ROOT)
+        started = time.monotonic()
+        assert guard.stop_for_maintenance("integration test", hold_timeout_s=40) == "held"
+        assert time.monotonic() - started < 40, "held long before the 60 s boot ends"
+        assert "maintenance.requested_while_starting" in g.event_names()
+        state = json.loads(Path(g.env["KAZMA_GUARD_STATE"]).read_text(encoding="utf-8"))
+        assert "pause_held" in state.get("guard_features", [])
+        assert guard.resume_after_maintenance("integration test", wait=False) == "resumed"
+
+
 # ── operator reload: the guard does the stop ──────────────────────────
 
 

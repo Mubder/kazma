@@ -23,14 +23,18 @@ Flags:
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import logging
 import subprocess
 import sys
 import os
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+from types import ModuleType
 
 from rich.console import Console
 from rich.table import Table
@@ -538,6 +542,9 @@ def do_pip_update(
         console.print(f"[red]Not installing v{release.version} automatically: {problem}.[/red]")
         console.print(f"Verify and install it by hand: {page}")
         return False
+    if _packages_in_use():  # every flow stops the server first; this covers any caller that did not
+        console.print(_IN_USE)
+        return False
     try:
         import httpx
 
@@ -852,7 +859,7 @@ def _launcher_refusal(command: str) -> str | None:
     Checked before anything is installed or pulled: an installer that meets a
     held launcher stops half way, and on 2026-10-02 that left Kazma's own
     package half removed. pip refuses the same way when run from ``pip.exe``.
-    Print it with ``soft_wrap=True`` (see :func:`_server_running_refusal`).
+    Print it with ``soft_wrap=True`` (see :meth:`_ServerHold.preview`).
     """
     busy = _launchers_in_use()
     if not busy:
@@ -955,7 +962,13 @@ def _reinstall_local(cwd: str) -> bool:
     4. Fall back to ``uv sync --inexact --extra …`` (never bare ``uv sync``)
     5. Fall back to ``python -m pip install -e ".[extras]"``
     6. **Verify** ``kazma_cli`` imports — never report success if the CLI is broken
+
+    Refuses while the server answers: every flow stops it first
+    (:class:`_ServerHold`), and this covers any caller that did not.
     """
+    if _packages_in_use():
+        console.print(_IN_USE)
+        return False
     extras = detect_active_extras(cwd)
     # Repair path: packages were wiped but memory status/data still exists
     if "rag" not in extras and (
@@ -1500,33 +1513,295 @@ def _is_server_running(port: int = 9090) -> bool:
         return False
 
 
-def _server_running_refusal(command: str) -> str | None:
-    """What to do instead, when the server is running; None when it is not.
+def _packages_in_use() -> bool:
+    """Kazma's server answers on its port, so it has the packages loaded."""
+    return _is_server_running(_resolve_server_port())
 
-    On Windows the running server holds its packages' compiled files open, so
-    a reinstall fails half way (WinError 32) and leaves some packages new and
-    some old. ``kazma update --reinstall`` -- the fix the boot check names --
-    did not check at all until 2026-10-02, and the git update told the
-    operator to kill the server by hand, which the guard undoes within
-    seconds. A guarded install is stopped through the guard, when no chat
-    turn is running. Print it with ``soft_wrap=True``: Rich breaks a long
-    line with a real newline, and a pasted command split in two runs half
-    of it.
-    """
-    port = _resolve_server_port()
-    if not _is_server_running(port):
-        return None
+
+_IN_USE = (
+    "[red]Kazma's server is running; not replacing the packages it has loaded "
+    "(on Windows the install would fail half way).[/red]"
+)
+
+# The pause reason `kazma update` gives the guard. An update that finds it
+# (an earlier one failed half way) takes the pause over, and lifts it once
+# its own install succeeds: the repair is the same one command.
+_UPDATE_PAUSE_REASON = "kazma update: replacing Kazma's packages"
+# How long an update waits for running chat turns before it stops Kazma.
+_IDLE_TIMEOUT_S = 900.0
+# What the updater calls on the guard (scripts/service/kazma_guard.py).
+_GUARD_API = ("maintenance_preview", "stop_for_maintenance", "resume_after_maintenance", "read_pause")
+
+
+def _guard_command() -> str:
+    """This install's guard, as typed in the install folder."""
     script = os.path.join("scripts", "service", "kazma_guard.py")
-    guard = f"{_install_python(_find_git_root())} {script}"
-    return (
-        f"[red]Kazma's server is running (port {port}); its packages cannot be "
-        "replaced while it has them loaded.[/red]\n"
-        "With the guard (the KazmaAgent task), from the install folder:\n"
-        f'  [cyan]{guard} --pause --stop --when-idle --reason "package update"[/cyan]\n'
-        f"  [cyan]{command}[/cyan]\n"
-        f"  [cyan]{guard} --resume[/cyan]\n"
-        "Without the guard: stop the server, run the command above, start it again."
-    )
+    return f"{_install_python(_find_git_root())} {script}"
+
+
+def _load_guard(root: Path | None) -> ModuleType | None:
+    """This install's guard, loaded from ``scripts/service/kazma_guard.py``.
+
+    The updater asks it to stop and start Kazma (:class:`_ServerHold`). None
+    when the install has none (a wheel install) or it does not load. The
+    guard is standard library only, and loading it runs only definitions.
+    """
+    if root is None:
+        return None
+    path = root / "scripts" / "service" / "kazma_guard.py"
+    if not path.is_file():
+        return None
+    name = "kazma_guard_for_update"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    # A dataclass looks its module up by name while it is being defined.
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except (OSError, SyntaxError, ImportError, ValueError):
+        # Unreadable, broken, or a KAZMA_GUARD_* setting it cannot parse.
+        logger.warning("Could not load the guard at %s", path, exc_info=True)
+        return None
+    finally:
+        sys.modules.pop(name, None)
+    if not all(callable(getattr(module, fn, None)) for fn in _GUARD_API):
+        logger.warning("The guard at %s has no maintenance API", path)
+        return None
+    return module
+
+
+class _ServerHold:
+    """Kazma's server kept stopped, through its guard, while packages change.
+
+    The running server holds its packages' files open -- on Windows a
+    reinstall under it fails half way (WinError 32), leaving some packages
+    new and some old -- and its guard restarts a server stopped any other way
+    within seconds. So an update asks the guard. :meth:`acquire` waits until
+    no chat turn runs, then has the guard stop Kazma and hold it; it holds a
+    guard whose server is down too (crash-looping, in a backoff), which
+    would otherwise start one in the middle of the install. :meth:`release`
+    lifts the hold after a good install, and Kazma starts on the new
+    packages. After a failed one Kazma stays stopped -- the guard would
+    restart, again and again, a server that may not boot -- and the repair is
+    the same command, which takes the hold over and lifts it once it
+    succeeds. A server no guard supervises is never stopped here: the
+    operator stops and starts it.
+
+    Until 2026-10-02 every update refused while the server ran and printed
+    the three guard commands to type around it.
+    """
+
+    def __init__(self, command: str) -> None:
+        self.command = command
+        self.port = _resolve_server_port()
+        self.guard = _load_guard(_find_git_root())
+        self.held = False
+
+    def _plan(self) -> str:
+        """``"guard"``: a live guard will stop and start Kazma. Otherwise why
+        not: ``"no_guard"`` (none runs), ``"paused"`` (paused for something
+        else) or ``"no_guard_script"`` (the install has no guard)."""
+        if self.guard is None:
+            return "no_guard_script"
+        # Reads two files and never raises (the guard's own --status relies on it).
+        return str(self.guard.maintenance_preview(_UPDATE_PAUSE_REASON))
+
+    def preview(self) -> tuple[bool, str]:
+        """Before anything changes: ``(True, what happens to Kazma)`` -- empty
+        when nothing does -- or ``(False, why the update must not run)``.
+        Print the refusal with ``soft_wrap=True``: Rich breaks a long line
+        with a real newline, and a pasted command split in two runs half."""
+        running = _is_server_running(self.port)
+        plan = self._plan()
+        if plan == "guard":
+            if running:
+                return True, (
+                    "Kazma is stopped through its guard once no chat turn is running, "
+                    "and started again after."
+                )
+            return True, "Kazma's guard is paused while the packages change, and starts Kazma after."
+        if not running:
+            return True, ""
+        return False, self._refusal(plan)
+
+    def _refusal(self, plan: str) -> str:
+        head = (
+            f"[red]Kazma's server is running (port {self.port}); its packages "
+            "cannot be replaced while it has them loaded.[/red]\n"
+        )
+        if plan == "paused":
+            pause = self._pause() or {}
+            return head + (
+                f"Its guard is paused ({pause.get('reason') or 'maintenance'}), so it did "
+                "not start the server on the port and cannot stop it. Stop that server, "
+                "then run the update again:\n"
+                f"  [cyan]{self.command}[/cyan]"
+            )
+        if plan == "no_guard":
+            return head + (
+                "No guard is running for this install, so the update cannot stop and "
+                "restart Kazma. The guard:\n"
+                f"  [cyan]{_guard_command()} --status[/cyan]\n"
+                "Or stop the server yourself, run this, then start it again:\n"
+                f"  [cyan]{self.command}[/cyan]"
+            )
+        return head + (
+            "Stop the server, run this, then start it again:\n"
+            f"  [cyan]{self.command}[/cyan]"
+        )
+
+    def _pause(self) -> dict | None:
+        # read_pause never raises: an unreadable file reads as a pause.
+        pause = self.guard.read_pause() if self.guard is not None else None
+        return pause if isinstance(pause, dict) else None
+
+    def acquire(self) -> bool:
+        """Make the packages replaceable. False -- the reason printed, nothing
+        changed -- when the update must not run."""
+        running = _is_server_running(self.port)
+        plan = self._plan()
+        if plan != "guard":
+            if running:
+                console.print(self._refusal(plan), soft_wrap=True)
+                return False
+            return True
+        if running:
+            console.print("[cyan]Stopping Kazma through its guard once no chat turn is running…[/cyan]")
+        else:
+            console.print("[cyan]Pausing Kazma's guard while the packages change…[/cyan]")
+        before = self._pause()
+        outcome = ""
+        try:
+            outcome = str(self.guard.stop_for_maintenance(
+                _UPDATE_PAUSE_REASON, idle_timeout_s=_IDLE_TIMEOUT_S,
+            ))
+        except OSError as exc:  # the pause file could not be written
+            console.print(f"[red]The guard could not stop Kazma ({exc}); nothing was installed.[/red]")
+        finally:
+            # Interrupted (Ctrl+C in the wait) or failed part way: never leave
+            # a pause behind that holds Kazma stopped for nothing. One an
+            # earlier, failed update took stays: the packages may be broken.
+            if not outcome and before is None:
+                self.guard.resume_after_maintenance(_UPDATE_PAUSE_REASON, wait=False)
+        if not outcome:
+            return False
+        if outcome == "held":
+            self.held = True
+            console.print("[green]Kazma is stopped; its guard holds it until the update is done.[/green]")
+            return True
+        if outcome == "busy":
+            console.print(
+                f"[red]A chat turn was still running after {_IDLE_TIMEOUT_S / 60:.0f} minutes, "
+                "so Kazma was not stopped and nothing was installed.[/red]\n"
+                "Run the update again when Kazma is idle."
+            )
+            return False
+        if outcome in ("no_guard", "paused"):
+            # Changed since the plan was read (the guard stopped, or someone paused it).
+            if _is_server_running(self.port):
+                console.print(self._refusal(outcome), soft_wrap=True)
+                return False
+            return True
+        console.print(
+            "[red]Kazma's guard did not stop the server in time; nothing was installed.[/red]\n"
+            f"  [cyan]{_guard_command()} --status[/cyan]",
+            soft_wrap=True,
+        )
+        return False
+
+    def release(self, ok: bool) -> bool:
+        """After the install: start Kazma again after a good one, keep it
+        stopped after a failed one. True when nothing more is needed."""
+        if self.guard is None:
+            return True
+        guard = _guard_command()
+        if not ok:
+            pause = self._pause()
+            if pause is not None and pause.get("reason") == _UPDATE_PAUSE_REASON:
+                until = float(pause.get("until") or 0.0)
+                when = (
+                    datetime.fromtimestamp(until, UTC).strftime("%H:%M UTC")
+                    if until else "you resume it"
+                )
+                console.print(
+                    "[red]Kazma stays stopped: the update failed, and its packages may be "
+                    "half replaced. Its guard would restart a server that may not boot, "
+                    "again and again.[/red]\n"
+                    "Repair with the same command; it starts Kazma again when it succeeds:\n"
+                    f"  [cyan]{_update_command('--reinstall', '-y')}[/cyan]\n"
+                    "Or start Kazma as it is:\n"
+                    f"  [cyan]{guard} --resume[/cyan]\n"
+                    f"The guard holds until {when}, then starts Kazma by itself.",
+                    soft_wrap=True,
+                )
+            return False
+        try:
+            result = str(self.guard.resume_after_maintenance(_UPDATE_PAUSE_REASON))
+        except OSError as exc:  # the pause file could not be removed
+            console.print(
+                f"[red]Could not start Kazma again ({exc}).[/red]\n  [cyan]{guard} --resume[/cyan]",
+                soft_wrap=True,
+            )
+            return False
+        if result == "up":
+            return True
+        if result == "slow":
+            console.print(
+                "[yellow]The update is installed, but Kazma has not answered within its "
+                "start budget. Its guard keeps at it:[/yellow]\n"
+                f"  [cyan]{guard} --status[/cyan]",
+                soft_wrap=True,
+            )
+            return False
+        if result == "unsupervised":
+            console.print(
+                "[yellow]The update is installed. No guard is running for this install, "
+                "so nothing starts Kazma; this starts the guard, which starts it:[/yellow]\n"
+                f"  [cyan]{guard} --reload[/cyan]",
+                soft_wrap=True,
+            )
+            return not self.held
+        if self.held:
+            # not_paused / not_ours: the pause went away during the install.
+            console.print(
+                "[yellow]Supervision was resumed during the update (by someone else, or its "
+                "pause expired), so Kazma may have started before the packages were in "
+                "place. Reload it once it is idle:[/yellow]\n"
+                f"  [cyan]{guard} --reload --when-idle[/cyan]",
+                soft_wrap=True,
+            )
+            return False
+        if result == "not_ours":
+            pause = self._pause() or {}
+            console.print(
+                f"[dim]Supervision stays paused ({pause.get('reason')}); resume it when you "
+                f"are done: {guard} --resume[/dim]",
+                soft_wrap=True,
+            )
+        return True
+
+
+def _install_held(command: str, install: Callable[[], bool]) -> str:
+    """Run *install* with Kazma's server held stopped (:class:`_ServerHold`).
+
+    ``"refused"``: nothing was stopped or installed (the reason is printed).
+    ``"failed"``: the install failed; Kazma stays stopped where the guard
+    held it. ``"done"``: installed, and Kazma is serving again where it was
+    held. ``"not_back"``: installed, but Kazma did not come back (printed).
+    """
+    hold = _ServerHold(command)
+    if not hold.acquire():
+        return "refused"
+    ok = False
+    try:
+        ok = bool(install())
+    finally:
+        back = hold.release(ok)
+    if not ok:
+        return "failed"
+    return "done" if back else "not_back"
 
 
 def _install_python(root: Path | None) -> str:
@@ -1569,13 +1844,17 @@ def do_git_update(
     # Preflight, before git moves: on Windows the running server holds its
     # packages' files and a running launcher cannot be replaced, so the
     # reinstall would fail with WinError 32 halfway through (git updated but
-    # package not reinstalled -- a broken state).
+    # package not reinstalled -- a broken state). A server its guard can stop
+    # is stopped later, for the reinstall alone (_ServerHold).
     command = _update_command(
         "--sync-main" if sync_main else "",
         "--accept-discard-local-commits" if accept_discard_local_commits else "",
         "-y",
     )
-    refusal = _server_running_refusal(command) or _launcher_refusal(command)
+    refusal = _launcher_refusal(command)
+    if refusal is None:
+        go, why = _ServerHold(command).preview()
+        refusal = None if go else why
     if refusal:
         console.print(refusal, soft_wrap=True)
         return False
@@ -1597,7 +1876,8 @@ def do_git_update(
                 f"(phase={_prior.get('phase')!r}, "
                 f"from_commit={_prior.get('from_commit')!r}).[/yellow]\n"
                 "If `kazma serve` is broken, recover with: "
-                "[cyan]kazma update --reinstall -y[/cyan]"
+                f"[cyan]{_update_command('--reinstall', '-y')}[/cyan]",
+                soft_wrap=True,
             )
     except Exception:
         pass
@@ -1729,6 +2009,41 @@ def do_git_update(
             _restore_stash(cwd, stash_msg)
         return False
 
+    # The server is stopped for the reinstall alone: the git work above runs
+    # under it, as a deploy's pull does, and a refusal here (a turn still
+    # running at the deadline) puts the checkout back.
+    hold = _ServerHold(command)
+    if not hold.acquire():
+        console.print(f"[yellow]Putting the checkout back at {from_commit}…[/yellow]")
+        _roll_back_checkout(cwd, from_commit, stash_msg)
+        _clear_update_state(cwd)
+        return False
+    ok = False
+    try:
+        ok = _reinstall_after_reset(cwd, from_commit, stash_msg)
+    finally:
+        back = hold.release(ok)
+    if not ok and not hold.held:
+        console.print(
+            "Repair the packages with:\n"
+            f"  [cyan]{_update_command('--reinstall', '-y')}[/cyan]",
+            soft_wrap=True,
+        )
+    return ok and back
+
+
+def _roll_back_checkout(cwd: str, from_commit: str, stash_msg: str | None) -> None:
+    """Put the checkout back at *from_commit*, with the operator's stashed edits."""
+    try:
+        _run_cmd(["git", "reset", "--hard", from_commit], cwd=cwd)
+        if stash_msg:
+            _restore_stash(cwd, stash_msg)
+    except (OSError, subprocess.SubprocessError):  # git missing, or it timed out
+        logger.warning("Could not put the checkout back at %s", from_commit, exc_info=True)
+
+
+def _reinstall_after_reset(cwd: str, from_commit: str, stash_msg: str | None) -> bool:
+    """The git update's reinstall and postflight, with the server stopped."""
     _write_update_state(cwd, phase="reinstalling")
     if not _reinstall_via_subprocess(cwd):
         _write_update_state(cwd, phase="reinstall_failed")
@@ -1739,15 +2054,10 @@ def do_git_update(
         console.print(
             "[yellow]Reinstall failed — rolling HEAD back to pre-update commit…[/yellow]"
         )
-        try:
-            _run_cmd(["git", "reset", "--hard", from_commit], cwd=cwd)
-            if stash_msg:
-                _restore_stash(cwd, stash_msg)
-        except Exception:  # noqa: BLE001
-            pass
+        _roll_back_checkout(cwd, from_commit, stash_msg)
         console.print(
-            "[red]Update aborted; install restored to its pre-update state.[/red]\n"
-            "Repair manually with: [cyan]kazma update --reinstall -y[/cyan]"
+            f"[red]Update aborted; the checkout is back at {from_commit}, and the "
+            "packages may be half replaced.[/red]"
         )
         return False
 
@@ -1794,6 +2104,12 @@ def print_help() -> None:
         "  • Reinstall preserves optional extras; verifies [cyan]kazma_cli[/cyan] imports"
     )
     console.print("  • Ignored files (.env, secrets) are never stashed away")
+    console.print(
+        "  • A running server is stopped through its guard once no chat turn runs,"
+    )
+    console.print(
+        "    and started again after; a failed install keeps it stopped (run it again)"
+    )
     console.print()
     console.print("[bold]Developer clones:[/bold]")
     console.print(
@@ -1803,7 +2119,7 @@ def print_help() -> None:
         "  • Local commits on main: move them, or pass --accept-discard-local-commits"
     )
     console.print()
-    console.print("Repair wiped packages: [cyan]kazma update --reinstall -y[/cyan]")
+    console.print(f"Repair wiped packages: [cyan]{_update_command('--reinstall', '-y')}[/cyan]", soft_wrap=True)
     console.print(
         '  or  [cyan]uv pip install -e ".[rag]"[/cyan]  '
         "(avoid bare [red]uv sync[/red])"
@@ -1896,22 +2212,23 @@ def _run_pip_check_and_update(
         console.print("[yellow]--check mode: not installing.[/yellow]")
         return
 
-    refusal = _launcher_refusal(_update_command("--force" if force else "", "-y"))
-    if refusal:
-        console.print(refusal, soft_wrap=True)
-        sys.exit(1)
+    command = _update_command("--force" if force else "", "-y")
+    note = _refuse_or_note(command)
 
     if not skip_confirm:
-        if not _confirm(f"Update kazma from v{current_version} to v{latest}? [y/N] "):
+        if not _confirm(f"Update kazma from v{current_version} to v{latest}?{note} [y/N] "):
             console.print("Update cancelled.")
             return
 
-    if do_pip_update(release, detect_active_extras(), reinstall=not update_available):
-        new_version = get_current_version()
-        console.print()
-        console.print(f"[green]Update complete![/green] Now at v{new_version}")
-    else:
+    extras = detect_active_extras()
+    outcome = _install_held(
+        command, lambda: do_pip_update(release, extras, reinstall=not update_available),
+    )
+    if outcome != "done":
         sys.exit(1)
+    new_version = get_current_version()
+    console.print()
+    console.print(f"[green]Update complete![/green] Now at v{new_version}")
 
 
 def _run_git_check_and_update(
@@ -1963,21 +2280,27 @@ def _run_git_check_and_update(
             console.print()
             console.print(
                 "[yellow]Optional packages missing "
-                "(e.g. chromadb / sentence-transformers for VectorMemory).[/yellow]\n"
-                "Reinstalling preserved extras now…"
+                "(e.g. chromadb / sentence-transformers for VectorMemory).[/yellow]"
             )
-            refusal = _launcher_refusal(_update_command("-y"))
-            if refusal:
-                console.print(refusal, soft_wrap=True)
-                sys.exit(1)
-            if _reinstall_via_subprocess(cwd):
+            if check_only:
+                console.print("[yellow]--check mode: not installing.[/yellow]")
+                return
+            command = _update_command("-y")
+            note = _refuse_or_note(command)
+            if not skip_confirm and not _confirm(f"Reinstall the preserved extras now?{note} [y/N] "):
+                console.print("Cancelled.")
+                return
+            outcome = _install_held(command, lambda: _reinstall_via_subprocess(cwd))
+            if outcome == "done":
                 console.print("[green]Package repair finished.[/green]")
-            else:
+                return
+            if outcome == "failed":
                 console.print(
                     "[red]Repair incomplete.[/red] Try:\n"
-                    '  [cyan]uv pip install -e ".[rag]"[/cyan]'
+                    f"  [cyan]{_update_command('--reinstall', '-y')}[/cyan]",
+                    soft_wrap=True,
                 )
-                sys.exit(1)
+            sys.exit(1)
         return
 
     if check_only:
@@ -1991,14 +2314,11 @@ def _run_git_check_and_update(
         "--accept-discard-local-commits" if accept_discard_local_commits else "",
         "-y",
     )
-    refusal = _server_running_refusal(command) or _launcher_refusal(command)
-    if refusal:
-        console.print(refusal, soft_wrap=True)
-        sys.exit(1)
+    note = _refuse_or_note(command)
 
     if not skip_confirm:
         if not _confirm(
-            f"Sync to {_UPDATE_REMOTE_REF} ({commits_behind} commit(s)) and reinstall? [y/N] "
+            f"Sync to {_UPDATE_REMOTE_REF} ({commits_behind} commit(s)) and reinstall?{note} [y/N] "
         ):
             console.print("Update cancelled.")
             return
@@ -2023,7 +2343,21 @@ def _run_git_check_and_update(
 # Sync entry point
 # ---------------------------------------------------------------------------
 
-def _reinstall_release_wheel(current_version: str, skip_confirm: bool) -> None:
+def _refuse_or_note(command: str) -> str:
+    """Before an install is asked for: exit when it cannot run now (a held
+    launcher, a server nothing can stop), else what happens to Kazma, for
+    the question (``" ..."``, or ``""`` when nothing does)."""
+    refusal = _launcher_refusal(command)
+    if refusal is None:
+        go, note = _ServerHold(command).preview()
+        if go:
+            return f" {note}" if note else ""
+        refusal = note
+    console.print(refusal, soft_wrap=True)
+    sys.exit(1)
+
+
+def _reinstall_release_wheel(current_version: str, skip_confirm: bool, note: str = "") -> None:
     """``--reinstall`` on a release-wheel install: its own release again, with its extras."""
     release = _get_release(current_version)
     if release is None:
@@ -2032,11 +2366,15 @@ def _reinstall_release_wheel(current_version: str, skip_confirm: bool) -> None:
         sys.exit(1)
     extras = detect_active_extras()
     if not skip_confirm and not _confirm(
-        f"Reinstall kazma v{release.version} from its GitHub release? [y/N] "
+        f"Reinstall kazma v{release.version} from its GitHub release?{note} [y/N] "
     ):
         console.print("Cancelled.")
         return
-    if not do_pip_update(release, extras, reinstall=True):
+    outcome = _install_held(
+        _update_command("--reinstall", "-y"),
+        lambda: do_pip_update(release, extras, reinstall=True),
+    )
+    if outcome != "done":
         sys.exit(1)
     console.print("[green]Reinstall complete.[/green]")
 
@@ -2067,17 +2405,14 @@ def run(args: list[str]) -> None:
     # Package-only path (no git) — recover from bare uv sync / missing rag
     if reinstall_only:
         command = _update_command("--reinstall", "-y")
-        refusal = _server_running_refusal(command) or _launcher_refusal(command)
-        if refusal:
-            console.print(refusal, soft_wrap=True)
-            sys.exit(1)
+        note = _refuse_or_note(command)
         git_root = _find_git_root()
         if git_root is None:
             # A release-wheel install has no checkout to reinstall from: it
             # reinstalls its own release's wheel. Until 2026-09-30 this took
             # the current folder for the project and ran an editable install
             # of whatever the operator stood in.
-            _reinstall_release_wheel(current_version, skip_confirm)
+            _reinstall_release_wheel(current_version, skip_confirm, note)
             return
         cwd = str(git_root)
         extras = detect_active_extras(cwd)
@@ -2093,18 +2428,18 @@ def run(args: list[str]) -> None:
         persist_extras(extras)
         console.print(f"[cyan]Reinstall extras:[/cyan] {', '.join(extras)}")
         if not skip_confirm and not _confirm(
-            f"Reinstall packages for extras [{', '.join(extras)}]? [y/N] "
+            f"Reinstall packages for extras [{', '.join(extras)}]?{note} [y/N] "
         ):
             console.print("Cancelled.")
             return
         # In-process is fine: no git pull happened, module matches disk
-        ok = _reinstall_local(cwd)
-        if ok:
+        outcome = _install_held(command, lambda: _reinstall_local(cwd))
+        if outcome == "done":
             console.print("[green]Reinstall complete.[/green]")
-        else:
+            return
+        if outcome == "failed":
             console.print("[red]Reinstall failed.[/red]")
-            sys.exit(1)
-        return
+        sys.exit(1)
 
     if install_type == "git":
         _run_git_check_and_update(

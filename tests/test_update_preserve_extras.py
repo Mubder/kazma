@@ -11,6 +11,14 @@ import pytest
 from kazma_cli import update as upd
 
 
+@pytest.fixture(autouse=True)
+def _no_server(monkeypatch):
+    """No Kazma server answers. The installers refuse while one does, and this
+    machine may run a live install on the port: without this, the tests below
+    would check what a refused install ran -- nothing -- and pass."""
+    monkeypatch.setattr(upd, "_is_server_running", lambda port=9090: False)
+
+
 def test_normalize_extras_order_and_all():
     assert upd._normalize_extras(["web", "rag", "web"]) == ["rag", "web"]
     assert "rag" in upd._normalize_extras(["all"])

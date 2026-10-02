@@ -142,6 +142,12 @@ GUARD_STALE_S = max(120.0, GRACEFUL_STOP_S + TERMINATE_GRACE_S + 3 * HEARTBEAT_E
 # --reload hands the stop to the running guard; this is how long it waits
 # for the guard to take the request before doing the stop itself.
 GUARD_ACK_S = 20.0
+# What this guard does that a program reading its state file relies on. A
+# guard started before a feature, still running after the update that added
+# it, lists none of it:
+#   pause_held -- the gate before every spawn records the pause it holds
+#                 (state ``pause_held`` = that pause's ``since``).
+GUARD_FEATURES = ("pause_held",)
 # What the supervisor loop returns when it stopped the child for --reload.
 RELOAD_REASON = "operator reload"
 
@@ -402,6 +408,16 @@ def clear_pause() -> bool:
     except Exception:
         pass
     return False
+
+
+def _pause_signature(pause: dict | None) -> str:
+    """Which pause this is: its ``since`` (every write has its own); "" for none."""
+    if pause is None:
+        return ""
+    try:
+        return repr(float(pause.get("since") or 0.0))
+    except (TypeError, ValueError):
+        return "?"
 
 
 # -- logging (deliberately not the app's logger) ----------------------
@@ -1461,6 +1477,7 @@ class Guard:
     spawned_at = 0.0
     _reload_seen: tuple[int, int] | None = None
     _stopped_for_reload = False
+    _stopped_for_maintenance = False
     _last_stop_graceful = False
     _last_beat = 0.0
     _internal_errors = 0
@@ -1626,6 +1643,15 @@ class Guard:
                 # already have imported part of the old. Start over rather
                 # than finish a boot of mixed builds.
                 return False
+            if read_pause() is not None and self.proc is not None:
+                # A pause taken while the child boots (kazma update is about
+                # to replace the packages it is loading) stops it now. The
+                # boot used to run to the end -- minutes -- and only then
+                # meet the pause in _supervise.
+                self.log("info", "maintenance.requested_while_starting", pid=self.proc.pid)
+                self._stopped_for_maintenance = True
+                self._last_stop_graceful = stop_child(self.proc, self.log, grace_s=GRACEFUL_STOP_S)
+                return False
             if self.proc and self.proc.poll() is not None:
                 self.log("error", "child.exited_during_startup",
                          code=self.proc.returncode,
@@ -1681,13 +1707,16 @@ class Guard:
         wake_on_child_exit: bool = False,
         wake_on_reload: bool = False,
         wake_on_pause: bool = False,
+        wake_on_pause_change: str | None = None,
     ) -> bool:
         """Interruptible sleep so shutdown, --reload, and a dead child stay responsive.
 
         Wakes early only for what the caller handles: a reload request the
         guard has not dealt with yet (``wake_on_reload``), a pause
-        (``wake_on_pause``), a child that exited (``wake_on_child_exit``), or
-        shutdown. Beats the heartbeat.
+        (``wake_on_pause``), the pause lifted or rewritten
+        (``wake_on_pause_change``: the signature of the one the caller
+        holds), a child that exited (``wake_on_child_exit``), or shutdown.
+        Beats the heartbeat.
         Returns True when it woke early, False when the time ran out.
         """
         end = time.monotonic() + seconds
@@ -1702,6 +1731,8 @@ class Guard:
             if wake_on_reload and self._reload_pending():
                 return True
             if wake_on_pause and read_pause() is not None:
+                return True
+            if wake_on_pause_change is not None and _pause_signature(read_pause()) != wake_on_pause_change:
                 return True
             if (
                 wake_on_child_exit
@@ -1808,7 +1839,8 @@ class Guard:
         reap_orphan(self.log)
         # From here on this is the guard --reload, --status and the server
         # see as alive (the heartbeat; see HEARTBEAT_EVERY_S).
-        _update_state(guard_pid=os.getpid(), guard_started=time.time())
+        _update_state(guard_pid=os.getpid(), guard_started=time.time(),
+                      guard_features=list(GUARD_FEATURES), pause_held=None)
         self._beat(force=True)
 
         if self._foreign_server_present():
@@ -1882,6 +1914,7 @@ class Guard:
                     spawned_at = time.time()
                     self.spawned_at = spawned_at
                     self._stopped_for_reload = False
+                    self._stopped_for_maintenance = False
                     self.proc = spawn(self.cmd, self.cwd, self.log)
                     # --reload reads this: a child spawned after its request
                     # already runs the code it asked for.
@@ -1910,6 +1943,8 @@ class Guard:
                         reason = self._supervise()
                     elif self._stopped_for_reload:
                         reason = RELOAD_REASON
+                    elif self._stopped_for_maintenance:
+                        reason = "maintenance"
                     else:
                         reason = "never became healthy"
                         stop_child(self.proc, self.log, grace_s=NEVER_READY_STOP_S)
@@ -1966,8 +2001,11 @@ class Guard:
                     )
                     self.recent.clear()
                     # An operator reload ends the cooldown: it is someone
-                    # acting on exactly this page.
-                    self._sleep(CRASH_LOOP_COOLDOWN_S, wake_on_reload=True)
+                    # acting on exactly this page. So does a pause (kazma
+                    # update repairing the packages that crash it): the
+                    # guard holds at once, and the resume after the repair
+                    # starts Kazma without waiting out the cooldown.
+                    self._sleep(CRASH_LOOP_COOLDOWN_S, wake_on_reload=True, wake_on_pause=True)
                     continue
 
                 delay = self._backoff()
@@ -1978,7 +2016,9 @@ class Guard:
                 self.log("warn", "guard.restarting", reason=reason, in_s=delay,
                          restarts=self.restarts, **extra)
                 self.notify_restart(reason, delay, tail=tail)
-                self._sleep(delay, wake_on_reload=True)
+                # A pause during the backoff holds at once (the gate before
+                # the next spawn), not after up to five minutes.
+                self._sleep(delay, wake_on_reload=True, wake_on_pause=True)
             except Exception as exc:  # noqa: BLE001 -- see the comment above the try
                 self._internal_error(exc)
 
@@ -2032,6 +2072,12 @@ class Guard:
         pause = read_pause()
         if pause is None:
             return False
+        # The answer a program waiting on this pause reads (kazma update,
+        # stop_for_maintenance): the guard holds -- no child runs, and none
+        # starts until the pause is lifted. Only this gate writes it, and
+        # it is reached only with no live child.
+        held = _pause_signature(pause)
+        _update_state(pause_held=pause.get("since"))
 
         until = float(pause.get("until") or 0.0)
         human_until = (
@@ -2052,10 +2098,19 @@ class Guard:
 
         next_nag = time.monotonic() + PAUSE_NAG_EVERY_S
         while not self._stop:
-            self._sleep(10.0)
+            # Wakes within a second of a resume (it used to take up to ten).
+            self._sleep(10.0, wake_on_pause_change=held)
             if self._stop:
                 return True
-            if read_pause() is None:
+            current = read_pause()
+            if current is not None and _pause_signature(current) != held:
+                # Rewritten (a new TTL, another program's pause): held
+                # still, and the new one is acknowledged too.
+                pause, held = current, _pause_signature(current)
+                _update_state(pause_held=current.get("since"))
+                continue
+            if current is None:
+                _update_state(pause_held=None)
                 self.log("info", "maintenance.resumed")
                 self._page(
                     "info",
@@ -2328,6 +2383,141 @@ def _cmd_resume() -> int:
     return 0
 
 
+# -- maintenance for another program ----------------------------------
+#
+# `kazma update` replaces Kazma's packages, which the running server holds
+# open: on Windows a reinstall under it fails half way. It stops Kazma
+# through these two, loading this file: a server stopped any other way is
+# restarted by the guard within seconds, and the update's shell may not have
+# the rights the server runs with (the KazmaAgent task runs elevated). The
+# switch is the pause, as for --pause/--resume. These add what a program
+# needs: the guard's own word that it holds, and a resume that lifts only
+# the pause it was given.
+
+
+def maintenance_preview(reason: str) -> str:
+    """What :func:`stop_for_maintenance` would meet, changing nothing:
+    ``"guard"`` (a live guard would stop and hold Kazma), ``"no_guard"``,
+    or ``"paused"`` (paused for something other than *reason*)."""
+    current = read_pause()
+    if current is not None and current.get("reason") != reason:
+        return "paused"
+    return "guard" if _guard_alive() else "no_guard"
+
+
+def stop_for_maintenance(reason: str, *, ttl_s: float = DEFAULT_PAUSE_TTL_S,
+                         idle_timeout_s: float = 900.0,
+                         hold_timeout_s: float | None = None) -> str:
+    """Have the running guard stop Kazma and hold it stopped.
+
+    Waits until no chat turn runs (a stop mid-turn drops the reply), pauses
+    supervision under *reason*, then waits until the guard holds: nothing
+    answers, and nothing starts until :func:`resume_after_maintenance`. A
+    pause already taken under the same *reason* (an earlier run that failed
+    half way) is taken over with a fresh expiry. Returns:
+
+    ``"held"``      the guard holds; Kazma is stopped.
+    ``"busy"``      a turn still ran at *idle_timeout_s*; nothing changed.
+    ``"not_held"``  the guard did not hold in time. A pause this call wrote
+                    is lifted again; one it took over stays.
+    ``"no_guard"``  no live guard supervises this install; nothing changed.
+    ``"paused"``    supervision is paused for something else; left alone.
+    """
+    current = read_pause()
+    if current is not None and current.get("reason") != reason:
+        return "paused"
+    if not _guard_alive():
+        return "no_guard"
+    log = GuardLog(_default_log_path())
+    health = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
+    if current is None and probe(health, 5.0).answered and not _wait_until_idle(
+        health, idle_timeout_s, log, action="stopping", event="maintenance",
+    ):
+        return "busy"
+    rec = write_pause(reason, ttl_s)
+    log("warn", "maintenance.pause_requested", reason=reason, ttl_s=ttl_s,
+        took_over=current is not None)
+    budget = (
+        hold_timeout_s if hold_timeout_s is not None
+        else GRACEFUL_STOP_S + TERMINATE_GRACE_S + 30.0
+    )
+    if _wait_until_held(rec, health, budget):
+        log("info", "maintenance.held", reason=reason)
+        return "held"
+    if current is None:
+        clear_pause()
+    log("error", "maintenance.not_held", reason=reason, waited_s=budget)
+    return "not_held"
+
+
+def _wait_until_held(pause: dict, health_url: str, timeout_s: float) -> bool:
+    """Has the guard taken *pause*: no server, and none about to start?
+
+    A guard that records what it holds (``pause_held`` in its
+    ``guard_features``) is asked. An older one -- still running after the
+    update that taught it -- is judged by what it leaves: no recorded child
+    and nothing answering, twice, a second apart, so a spawn the guard had
+    decided on before the pause has time to show.
+    """
+    try:
+        since = float(pause.get("since") or 0.0)
+    except (TypeError, ValueError):
+        since = 0.0
+    deadline = time.monotonic() + timeout_s
+    quiet = 0
+    while True:
+        state = _read_state()
+        if "pause_held" in (state.get("guard_features") or ()):
+            ack = state.get("pause_held")
+            if (
+                isinstance(ack, (int, float))
+                and abs(float(ack) - since) < 1e-6
+                and not probe(health_url, 3.0).answered
+            ):
+                return True
+        else:
+            try:
+                child = int(state.get("child_pid") or 0)
+            except (TypeError, ValueError):
+                child = 0
+            if not child and not probe(health_url, 3.0).answered:
+                quiet += 1
+                if quiet >= 2:
+                    return True
+            else:
+                quiet = 0
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(1.0)
+
+
+def resume_after_maintenance(reason: str, *, wait: bool = True) -> str:
+    """Lift the pause *reason* names and, with a live guard, wait for Kazma.
+
+    Never lifts another pause: an operator's diagnosis stays paused. Returns
+    ``"up"`` (a server started after the resume answers ready), ``"slow"``
+    (not within the start budget; the guard is still at it), ``"resumed"``
+    (lifted, not waited for), ``"unsupervised"`` (lifted, but no guard runs
+    to start Kazma), ``"not_ours"`` or ``"not_paused"`` (nothing lifted).
+    """
+    current = read_pause()
+    if current is None:
+        return "not_paused"
+    if current.get("reason") != reason:
+        return "not_ours"
+    log = GuardLog(_default_log_path())
+    health = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
+    resumed_at = time.time()
+    clear_pause()
+    log("info", "maintenance.resume_requested", reason=reason)
+    if not _guard_alive():
+        return "unsupervised"
+    if not wait:
+        return "resumed"
+    code = _wait_for_new_boot(health, resumed_at, None, log, event="maintenance")
+    return "up" if code == 0 else "slow"
+
+
 def _stop_recorded_child(log: GuardLog, *, spawned_before: float | None = None) -> int:
     """Kill the guard's recorded child tree. Returns the pid stopped, or 0.
 
@@ -2483,9 +2673,13 @@ def _old_server_serving(health_url: str, requested_at: float) -> bool:
     return boot is not None and boot <= requested_at
 
 
-def _wait_for_new_boot(health_url: str, requested_at: float, before: str,
-                       log: GuardLog) -> int:
-    """Wait until a server that booted AFTER the request answers ready."""
+def _wait_for_new_boot(health_url: str, requested_at: float, before: str | None,
+                       log: GuardLog, *, event: str = "reload") -> int:
+    """Wait until a server that booted AFTER the request answers ready.
+
+    *before* is the build that served before a reload; None after a
+    maintenance stop, which says nothing about the build.
+    """
     print("Waiting for Kazma to come back on the new code…")
     print(
         f"(Typical bind is under 2 minutes; budget {int(START_TIMEOUT_S)}s. "
@@ -2500,13 +2694,16 @@ def _wait_for_new_boot(health_url: str, requested_at: float, before: str,
             ok, _detail = probe(health_url, 5.0)
             if ok:
                 after = _live_commit(health_url)
-                print(f"Kazma is up. build {after or '?'} (was {before or '?'})")
+                if before is None:
+                    print(f"Kazma is up. build {after or '?'}")
+                else:
+                    print(f"Kazma is up. build {after or '?'} (was {before or '?'})")
                 if before and after and before == after:
                     print(
                         "NOTE: commit hash unchanged — the process restarted but "
                         "git HEAD is the same. Code edits still need this reload."
                     )
-                log("info", "reload.ready", commit=after, previous=before)
+                log("info", f"{event}.ready", commit=after, previous=before)
                 return 0
         now = time.monotonic()
         if now >= next_progress:
@@ -2524,7 +2721,7 @@ def _wait_for_new_boot(health_url: str, requested_at: float, before: str,
     print(f"  {_command_here()} --status")
     print(f"  {_command_here('install_service.py')} --status")
     print(f"  {_command_here()}          # start supervision in this terminal")
-    log("error", "reload.not_ready")
+    log("error", f"{event}.not_ready")
     return 2
 
 

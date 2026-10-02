@@ -27,6 +27,9 @@ each of the specific ways that broke the guard in production:
     FAKE_COUNT_PROBES     also append one "probe" line per /health/ready
     FAKE_IGNORE_STOP      ignore the graceful stop request (SIGBREAK on
                           Windows, SIGTERM elsewhere), so only a kill works
+    FAKE_ACTIVE_TURNS     chat turns /health/activity reports as running
+                          (default 0)
+    FAKE_ACTIVITY         0 drops /health/activity: a build from before it
 
 A graceful stop request is otherwise honoured the way uvicorn honours it:
 the process notes "graceful_exit" and exits 0.
@@ -58,6 +61,8 @@ MARKER = os.environ.get("FAKE_MARKER", "")
 COUNT_PROBES = os.environ.get("FAKE_COUNT_PROBES", "").lower() in ("1", "true", "yes")
 IGNORE_STOP = os.environ.get("FAKE_IGNORE_STOP", "").lower() in ("1", "true", "yes")
 RESTART_REQUIRED = os.environ.get("FAKE_NOT_READY_RESTART_REQUIRED", "").lower() in ("1", "true", "yes")
+ACTIVE_TURNS = int(os.environ.get("FAKE_ACTIVE_TURNS", "0"))
+ACTIVITY = os.environ.get("FAKE_ACTIVITY", "1").lower() not in ("0", "false", "no")
 
 _state = {"hung": False, "not_ready": False, "degraded": False}
 
@@ -109,6 +114,8 @@ class Handler(BaseHTTPRequestHandler):
                 "status": "alive",
                 "build": {"started_at": STARTED_AT, "commit": "fake"},
             }
+        elif self.path.startswith("/health/activity") and ACTIVITY:
+            body = {"active_turns": ACTIVE_TURNS}
         elif self.path.startswith("/health/ready"):
             if COUNT_PROBES:
                 _note("probe")
@@ -194,7 +201,12 @@ def main() -> int:
             time.sleep(1)
 
     if BOOT_DELAY_S:
-        time.sleep(BOOT_DELAY_S)
+        # In short steps: a booting server is busy, not in one long system
+        # call, and a stop request (SIGBREAK) is handled between them --
+        # Windows does not interrupt one long sleep for it.
+        booted = time.monotonic() + BOOT_DELAY_S
+        while time.monotonic() < booted:
+            time.sleep(0.2)
 
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     _note("ready")
