@@ -372,11 +372,11 @@
         <p style="font-size:0.75rem;max-width:380px;margin:0 auto 16px auto;line-height:1.5;">{{ t('workspace.ws.connect_prefix') }} <span style="color:var(--accent);font-family:var(--font-mono);" translate="no" x-text="ghOwner + '/' + ghRepo"></span> {{ t('workspace.ws.connect_suffix') }}</p>
         
         <!-- Surface API / App errors prominently on the unauthenticated card -->
-        <div x-show="ghError" x-cloak class="ic-row-start" style="margin:0 auto 16px auto;max-width:460px;padding:10px 14px;border-radius:var(--radius-sm);background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);color:#f87171;font-size:0.8rem;line-height:1.4;text-align:left;word-break:break-word;">
+        <div x-show="ghError" x-cloak class="ic-row-start" style="margin:0 auto 16px auto;max-width:460px;padding:10px 14px;border-radius:var(--radius-sm);background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);color:#f87171;font-size:0.8rem;line-height:1.4;text-align:start;word-break:break-word;">
           <span style="color:#ef4444;font-size:1rem;flex-shrink:0;"><span class="ki" data-icon="x-circle" aria-hidden="true"></span></span>
           <div style="flex:1;">
             <div style="font-weight:600;margin-bottom:2px;color:#ef4444;">{{ t('workspace.ws.gh_error') }}</div>
-            <div x-text="ghError" style="font-family:var(--font-mono);font-size:0.75rem;opacity:0.95;"></div>
+            <div x-text="ghError" translate="no" style="font-family:var(--font-mono);font-size:0.75rem;opacity:0.95;"></div>
           </div>
         </div>
         <div style="display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;">
@@ -396,7 +396,7 @@
       <!-- Main GitHub Card Body — OAuth *or* valid PAT/env token -->
       <div style="padding:12px;background:var(--bg-surface);" x-show="ghIsGitHub && ghAuthenticated" x-cloak>
         <!-- Surface API errors (rate limit / 403 / private repo) above the zeroed stats -->
-        <div x-show="ghError" x-cloak style="margin-bottom:10px;padding:8px 10px;border-radius:var(--radius-sm);background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);color:#fca5a5;font-size:0.75rem;line-height:1.4;" x-text="ghError"></div>
+        <div translate="no" x-show="ghError" x-cloak style="margin-bottom:10px;padding:8px 10px;border-radius:var(--radius-sm);background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);color:#fca5a5;font-size:0.75rem;line-height:1.4;" x-text="ghError"></div>
         <!-- Tab navigation -->
         <div style="display:flex;gap:2px;border-bottom:1px solid var(--border-subtle);margin-bottom:10px;overflow-x:auto;">
           <template x-for="tab in [['overview',t('workspace.gh_tab_overview')],['pulls',t('workspace.gh_tab_prs')],['issues',t('workspace.gh_tab_issues')],['commits',t('workspace.gh_tab_commits')],['workflows',t('workspace.gh_tab_actions')],['releases',t('workspace.gh_tab_releases')]]" :key="tab[0]">
@@ -517,7 +517,7 @@
               </div>
               <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
                 <template x-if="pr.draft"><span style="font-size:0.6rem;color:var(--text-muted);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;">{{ t('workspace.pr_draft') }}</span></template>
-                <span style="font-size:0.65rem;color:var(--text-muted);" x-text="pr.author"></span>
+                <span translate="no" style="font-size:0.65rem;color:var(--text-muted);" x-text="pr.author"></span>
               </div>
             </div>
           </template>
@@ -530,7 +530,7 @@
             <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;justify-content:space-between;gap:8px;">
               <div style="display:flex;align-items:center;gap:6px;min-width:0;">
                 <span style="color:var(--text-tertiary);font-weight:700;font-size:0.72rem;font-family:var(--font-mono);flex-shrink:0;" x-text="'#' + iss.number"></span>
-                <span style="font-size:0.78rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" x-text="iss.title"></span>
+                <span translate="no" style="font-size:0.78rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" x-text="iss.title"></span>
               </div>
               <div style="display:flex;gap:3px;flex-shrink:0;">
                 <template x-for="lab in iss.labels.slice(0,2)" :key="lab">
@@ -547,8 +547,8 @@
           <template x-for="c in ghCommits" :key="c.sha">
             <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;gap:8px;">
               <code style="font-family:var(--font-mono);font-size:0.65rem;background:var(--bg-deep);padding:1px 5px;border-radius:var(--radius-xs);color:var(--accent);flex-shrink:0;" x-text="c.sha"></code>
-              <span style="font-size:0.75rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;" x-text="c.message"></span>
-              <span style="font-size:0.62rem;color:var(--text-muted);flex-shrink:0;margin-left:auto;" x-text="c.author"></span>
+              <span translate="no" style="font-size:0.75rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;" x-text="c.message"></span>
+              <span translate="no" style="font-size:0.62rem;color:var(--text-muted);flex-shrink:0;margin-left:auto;" x-text="c.author"></span>
             </div>
           </template>
           <div x-show="ghCommits.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_recent_commits')" x-cloak></div>
@@ -592,7 +592,7 @@
       <div x-show="!ghIsGitHub && !loading" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
         <div style="margin-bottom:8px;color:var(--text-muted);"><span x-html="KazmaIcons.cloud({class:'icon-lg'})"></span></div>
         <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('workspace.gh_offline') }}</h4>
-        <p style="font-size:0.75rem;max-width:320px;margin:0 auto 10px auto;line-height:1.4;" x-text="ghError || t('workspace.gh_offline_body')"></p>
+        <p translate="no" style="font-size:0.75rem;max-width:320px;margin:0 auto 10px auto;line-height:1.4;" x-text="ghError || t('workspace.gh_offline_body')"></p>
         <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
           <button class="btn btn-xs btn-primary" @click="showAppModal = true">
             <span class="ki" data-icon="github" aria-hidden="true"></span> {{ t('workspace.configure_app') }}
@@ -671,7 +671,7 @@
           </div>
         </template>
         <p x-show="extraRootsLoaded && extraRoots.length === 0" x-cloak style="margin:4px 0;color:var(--text-muted);">{{ t('workspace.extra_roots_none') }}</p>
-        <p x-show="extraRootsError" x-cloak style="margin:4px 0;color:var(--danger);" x-text="extraRootsError"></p>
+        <p translate="no" x-show="extraRootsError" x-cloak style="margin:4px 0;color:var(--danger);" x-text="extraRootsError"></p>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center;">
           <input class="form-input" type="text" translate="no" style="flex:2;min-width:12rem;font-family:var(--font-mono);font-size:0.75rem;"
                  x-model="newExtraRoot.path" placeholder="{{ t('workspace.extra_roots_path_ph') }}" aria-label="{{ t('workspace.extra_roots_path') }}">

@@ -224,8 +224,9 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
             return []
 
     def _request_lang(request: Request) -> str:
-        lang = request.cookies.get("kazma-lang") or "en"
-        return lang if lang in ("ar", "en") else "en"
+        from kazma_ui.i18n import current_language
+
+        return current_language()
 
     @router.get("/skills", response_class=HTMLResponse)
     async def skills_page(request: Request) -> HTMLResponse:

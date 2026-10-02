@@ -544,6 +544,18 @@ var KazmaStream = (function() {
       return line.replace(/^\s{0,3}>\s?/, '');
     }
 
+    // Each block takes its direction from its own words (KazmaBidi.blockDir),
+    // whatever the UI's language: an English paragraph left-to-right, an
+    // Arabic one right-to-left, in one reply. A block with no letters (a
+    // number, a date) takes its container's, so a number column in an Arabic
+    // table stays on its right. dir="auto" -- the first letter -- only where
+    // the helper is not loaded.
+    function dirAttr(text) {
+      if (!(window.KazmaBidi && KazmaBidi.blockDir)) return ' dir="auto"';
+      var d = KazmaBidi.blockDir(text);
+      return d ? ' dir="' + d + '"' : '';
+    }
+
     function render(text) {
       if (!text) return '';
       // Process line-oriented markdown first (headers, rules, tables, lists)
@@ -749,7 +761,8 @@ var KazmaStream = (function() {
         if (block.ordered && block.items[0] && block.items[0].start > 1) {
           startAttr = ' start="' + block.items[0].start + '"';
         }
-        var html = '<' + tag + startAttr + ' class="md-list" dir="auto">';
+        var html = '<' + tag + startAttr + ' class="md-list"' +
+          dirAttr(block.items.map(function(it) { return it.text; }).join('\n')) + '>';
         var k = 0;
         while (k < block.items.length) {
           var it = block.items[k];
@@ -766,7 +779,7 @@ var KazmaStream = (function() {
               (it.checked ? ' checked' : '') +
               ' class="md-task-check" aria-hidden="true"> ';
           }
-          html += '<li' + liClass + ' dir="auto">' + check +
+          html += '<li' + liClass + dirAttr(it.text) + '>' + check +
             inline(it.text).replace(/\n/g, '<br>');
           if (nested.length) {
             html += renderList({
@@ -785,23 +798,23 @@ var KazmaStream = (function() {
 
       function renderTable(block) {
         var cols = block.header.length;
-        // Detect if table content is Arabic-dominant → render RTL
+        // The table's columns run in its language's direction (the rule a
+        // paragraph's direction follows); each cell's text in its own.
         var allText = (block.header || []).join(' ') + ' ' +
           (block.rows || []).map(function(r) { return r.join(' '); }).join(' ');
-        var isAr = !!(window.KazmaBidi && KazmaBidi.isArabicDominant(allText));
-        var tableDir = isAr ? 'rtl' : 'ltr';
+        var tableDir = (window.KazmaBidi && KazmaBidi.blockDir && KazmaBidi.blockDir(allText)) || 'ltr';
         var html = '<div class="md-table-wrap" dir="' + tableDir + '"><table class="md-table" dir="' + tableDir + '">';
         html += '<thead><tr>';
         for (var c = 0; c < cols; c++) {
           var al = (block.aligns && block.aligns[c]) ? ' style="text-align:' + block.aligns[c] + '"' : '';
-          html += '<th' + al + ' dir="auto">' + inline(block.header[c] || '') + '</th>';
+          html += '<th' + al + dirAttr(block.header[c] || '') + '>' + inline(block.header[c] || '') + '</th>';
         }
         html += '</tr></thead><tbody>';
         for (var r = 0; r < block.rows.length; r++) {
           html += '<tr>';
           for (var c2 = 0; c2 < cols; c2++) {
             var al2 = (block.aligns && block.aligns[c2]) ? ' style="text-align:' + block.aligns[c2] + '"' : '';
-            html += '<td' + al2 + ' dir="auto">' + inline(block.rows[r][c2] || '') + '</td>';
+            html += '<td' + al2 + dirAttr(block.rows[r][c2] || '') + '>' + inline(block.rows[r][c2] || '') + '</td>';
           }
           html += '</tr>';
         }
@@ -816,7 +829,7 @@ var KazmaStream = (function() {
           out.push(codeBlock(b.lang || null, b.text));
         } else if (b.type === 'h') {
           var htag = 'h' + Math.min(6, Math.max(1, b.level));
-          out.push('<' + htag + ' dir="auto">' + inline(b.text) + '</' + htag + '>');
+          out.push('<' + htag + dirAttr(b.text) + '>' + inline(b.text) + '</' + htag + '>');
         } else if (b.type === 'hr') {
           out.push('<hr>');
         } else if (b.type === 'table') {
@@ -826,9 +839,9 @@ var KazmaStream = (function() {
         } else if (b.type === 'blockquote') {
           // Re-render inner content so lists/paragraphs inside quotes work
           var inner = render(b.text);
-          out.push('<blockquote class="md-quote" dir="auto">' + inner + '</blockquote>');
+          out.push('<blockquote class="md-quote"' + dirAttr(b.text) + '>' + inner + '</blockquote>');
         } else {
-          out.push('<p dir="auto">' + inline(b.text).replace(/\n/g, '<br>') + '</p>');
+          out.push('<p' + dirAttr(b.text) + '>' + inline(b.text).replace(/\n/g, '<br>') + '</p>');
         }
       }
       return out.join('\n');

@@ -564,6 +564,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "chat.count_passages.few": {"ar": "{n} مقاطع من المكتبة", "en": "{n} library passages"},
     "chat.count_passages.many": {"ar": "{n} مقطعًا من المكتبة", "en": "{n} library passages"},
     "chat.count_passages.other": {"ar": "{n} مقطع من المكتبة", "en": "{n} library passages"},
+    # A tool step's one-line gist of a result that is a list.
+    "chat.count_results.zero": {"ar": "لا نتائج", "en": "{n} results"},
+    "chat.count_results.one": {"ar": "نتيجة واحدة", "en": "{n} result"},
+    "chat.count_results.two": {"ar": "نتيجتان", "en": "{n} results"},
+    "chat.count_results.few": {"ar": "{n} نتائج", "en": "{n} results"},
+    "chat.count_results.many": {"ar": "{n} نتيجةً", "en": "{n} results"},
+    "chat.count_results.other": {"ar": "{n} نتيجة", "en": "{n} results"},
     "chat.awaiting_decisions": {
         "ar": "{n} بانتظار قرارك",
         "en": "{n} awaiting your decision",

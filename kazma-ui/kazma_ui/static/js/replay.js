@@ -288,7 +288,7 @@
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {
-          if (data.error) { $('replay-diff-result').innerHTML = '<div style="color:var(--error);">' + esc(data.error) + '</div>'; return; }
+          if (data.error) { $('replay-diff-result').innerHTML = '<div translate="no" style="color:var(--error);">' + esc(data.error) + '</div>'; return; }
           var d = data.diff;
           if (!d) { $('replay-diff-result').innerHTML = '<div>' + esc(tx('replay.no_diff', 'No diff available.')) + '</div>'; return; }
           function arrow(v) { return v > 0 ? '+' + v : String(v); }

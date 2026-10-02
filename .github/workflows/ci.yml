@@ -494,6 +494,15 @@ jobs:
         run: python -m pytest tests/e2e/test_pages_read_in_arabic.py -q --timeout=900
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: Text follows its own language, in either UI (2026-10-02)
+        # Real turns in the Arabic and the English UI, live and reloaded:
+        # every paragraph, quote, list item and tool output starts at its
+        # own language's edge, and the two UIs lay each paragraph out the
+        # same. The Arabic UI right-aligned English replies and tool output,
+        # and a mostly English reply ran its Arabic paragraphs left to right.
+        run: python -m pytest tests/e2e/test_text_follows_its_language.py -q --timeout=900
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Remaining e2e suites
         # scripts/fast_test.py excludes everything under tests/e2e, and this
         # job only ever ran test_smoke.py — so test_delivery_v2_e2e.py,

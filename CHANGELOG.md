@@ -1,5 +1,47 @@
 # CHANGELOG
 
+## Text follows its own language, whatever the UI's (2026-10-02)
+
+- **English runs left to right and Arabic right to left, in either UI.**
+  The owner found English text right-aligned in the Arabic UI: a quoted
+  refusal in a chat, and much more. The Arabic UI aligned replies, tool
+  output, tables, cards, menus and form fields to the right because the page
+  is right to left. Each now aligns to the start of its own text.
+- **Arabic paragraphs in mostly English replies are right to left again.**
+  Measuring real turns found the opposite fault, in both UIs. The bidi
+  helper isolated an Arabic paragraph's words against the message's
+  direction, which left the paragraph's `dir="auto"` with only its one
+  English word to go by. Each markdown block now takes its direction from
+  its own words, so an Arabic sentence that opens with "PDF" stays right to
+  left, and isolation follows the paragraph.
+- **Data on every page follows its own text.** The names, titles, model
+  output, errors and paths that pages show are marked as content (59
+  bindings across 13 templates, and the rows that scripts build). Content
+  takes its direction from its own text, paragraph by paragraph. So does
+  what you type into a field.
+- **Tool rows, the memory row and the chat list.** A tool's output in the
+  activity panel takes its own direction. In the "Memory used" row, each
+  memory is on its own line in its own language; before, the Arabic label
+  decided the direction of English memories. The line under each chat's
+  title ("Telegram · 34 messages · 2 hours ago") is interface text, so it
+  follows the page with the platform's name set apart; the name had turned
+  the Arabic line left to right.
+- **A reply looks the same in both UIs.** The Arabic UI aligned replies to
+  the start while the English UI justified them, so wrapped lines sat
+  differently. One rule now applies to both.
+- **Arabic installs show Arabic where they showed English.** Four routes
+  read the language cookie and fell back to English, so an Arabic install
+  with no cookie showed the Dashboard's budget line, the packages list, the
+  tools list and the Skills page's labels in English. They now ask
+  `current_language()`, which falls back to the install's language. The
+  activity panel's list count ("3 results") and two skill badges were in
+  English in every language.
+- **Gates:** `tests/test_text_follows_its_language.py` (the stylesheets,
+  every template binding, the cookie, each with a negative control),
+  `tests/e2e/test_text_follows_its_language.py` (real turns in both UIs,
+  live and after a reload, the two UIs compared line by line; the old rules
+  put back as the negative controls), `tests/js/test_block_direction.js`.
+
 ## `kazma update` runs from the install's Python on Windows (2026-10-02)
 
 - **The launcher fix did not hold on the live install.** This morning's

@@ -80,9 +80,13 @@ class TestTheGistLeads:
 
 
 class TestResults:
-    def test_a_list_result_is_counted(self):
-        assert _call("M.resultSummary('[{\"a\":1},{\"a\":2}]')") == "2 results"
-        assert _call("M.resultSummary('[{\"a\":1}]')") == "1 result"
+    def test_a_list_result_is_counted_in_the_pages_words(self):
+        """The caller prints the count (chat.js: tiCount, in the page's
+        language); the module printed "2 results" in English in every one."""
+        label = "function (n) { return 'n=' + n; }"
+        assert _call(f"M.resultSummary('[{{\"a\":1}},{{\"a\":2}}]', {label})") == "n=2"
+        assert _call(f"M.resultSummary('[{{\"a\":1}}]', {label})") == "n=1"
+        assert _call("M.resultSummary('[{\"a\":1},{\"a\":2}]')") == "2"
 
     def test_a_long_result_leads_with_its_first_line(self):
         multi = "first line" + chr(92) + "nsecond line" + chr(92) + "nthird line"
@@ -125,8 +129,10 @@ class TestChatJsUsesIt:
 
     def test_the_formatting_is_not_reimplemented_inside_chat_js(self):
         chat = self._chat()
-        assert "M.resultSummary(result)" in chat, "chat.js grew its own copy again"
+        assert "M.resultSummary(result, " in chat, "chat.js grew its own copy again"
         assert "M.withGist(gist, raw)" in chat
+        # The count is the catalog's (chat.count_results), never English.
+        assert "tiCount('count_results', n, " in chat
 
     def test_the_module_is_loaded_before_chat_js(self):
         html = (

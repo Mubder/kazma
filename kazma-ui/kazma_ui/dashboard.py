@@ -181,10 +181,9 @@ def _get_metrics() -> dict[str, Any]:
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request) -> HTMLResponse:
     """Render observability dashboard with traces, costs, and metrics."""
-    from kazma_ui.i18n import make_translator
+    from kazma_ui.i18n import current_language, make_translator
 
-    cookie_lang = request.cookies.get("kazma-lang")
-    _ = make_translator(cookie_lang if cookie_lang in ("ar", "en") else "en")
+    _ = make_translator(current_language())
 
     cost_current = 0.0
     cost_max = 0.50

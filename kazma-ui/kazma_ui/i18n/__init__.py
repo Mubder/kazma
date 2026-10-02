@@ -15,6 +15,7 @@ Usage in templates (after the global is registered)::
 
 from __future__ import annotations
 
+import contextvars
 import logging
 from typing import Any
 
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "PLURAL_CATEGORIES",
     "TRANSLATIONS",
+    "current_language",
     "get_arabic_plural_form",
     "make_translator",
     "plural_forms",
@@ -133,6 +135,34 @@ def plural_forms(key: str, lang: str = "en") -> dict[str, str]:
             if text:
                 out[category] = text
     return out
+
+
+#: The interface language of the request being served: the reader's choice
+#: (the ``kazma-lang`` cookie), set by the app's language middleware.
+_REQUEST_LANG: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "kazma_request_lang", default=None
+)
+#: The install's language (``agent.language``): a request without a choice.
+_install_lang = "en"
+
+
+def set_install_language(lang: str) -> None:
+    """The language a request with no ``kazma-lang`` cookie is served in."""
+    global _install_lang
+    _install_lang = lang if lang in ("ar", "en") else "en"
+
+
+def set_request_language(lang: str) -> contextvars.Token:
+    """Bind the current request's language (the app's middleware only)."""
+    return _REQUEST_LANG.set(lang)
+
+
+def current_language() -> str:
+    """The page's language for this request: the reader's choice, else the
+    install's. The one answer -- code that reads the ``kazma-lang`` cookie
+    itself falls back to English on an Arabic install with no cookie (the
+    Dashboard's budget line and three other routes, until 2026-10-02)."""
+    return _REQUEST_LANG.get() or _install_lang
 
 
 def make_translator(lang: str = "en"):
