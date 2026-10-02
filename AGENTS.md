@@ -4317,8 +4317,11 @@ sent: ... -> Error: ...", and the document pipeline logged "✓ Delivered".
   paragraph ran left-to-right in both UIs). Data a page shows is content
   (`translate="no"`; the global `unicode-bidi: plaintext` rule gives it and
   its blocks their text's direction, except an element whose `dir` a script
-  set -- the renderer's paragraph, a `<bdi dir="ltr">` tool call; never mark
-  a number, which then reads left-to-right). A line mixing a page label and content is split (the
+  set -- the renderer's paragraph, a `<bdi dir="ltr">` tool call -- and an
+  interface word inside content (`translate="yes"`: an isolate in the page's
+  direction); never mark a number, which then reads left-to-right). Content
+  shown in a row of interface text is its own block, or it sits on the
+  row's start in the page's direction. A line mixing a page label and content is split (the
   memory row). No page-`dir` rule aligns a chat bubble: a reply looks the
   same in either UI. Python asks `i18n.current_language()`; only the
   middleware reads the `kazma-lang` cookie (four routes defaulted to English
