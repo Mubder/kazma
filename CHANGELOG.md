@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## An ops alert raised from a worker thread reaches you (2026-10-02)
+
+- **Alerts from background work were not delivered.** Backups, the boot
+  checks and other background work raise ops alerts from worker threads.
+  Those alerts were sent through the chat-app senders on a new event loop,
+  but the senders' connections belong to the server's loop. The send failed
+  with `RuntimeError`, the sender swallowed the error, and the alert counted
+  as delivered: on the live install the "packages are behind" alert reached
+  nobody. Such an alert is now delivered on the server's own loop.
+- **A failed send is no longer a delivery.** The Telegram, Discord and Slack
+  senders now say whether the platform took the message. An alert no
+  platform took falls back to the direct Telegram send. If your chosen
+  channels refused it, it is logged as not delivered. The start card (which
+  says each chat app's connection) gets the same honest answer.
+- **Gate:** `tests/test_ops_alert_delivery.py`.
+
 ## Packages with known advisories are upgraded, and the server says when an install is behind (2026-10-02)
 
 - **Security floors.** The new dependency check found 51 advisories in 14

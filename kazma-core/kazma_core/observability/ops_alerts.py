@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "alert",
+    "bind_server_loop",
     "ops_alerts_enabled",
     "reset_alert_state",
     "alert_state",
@@ -85,6 +86,43 @@ _lock = threading.RLock()
 #: rather than left to write into whatever the process tears down next.
 _dispatch_threads: set[threading.Thread] = set()
 _threads_lock = threading.RLock()
+
+#: The server's event loop, bound at startup. An alert raised in a worker
+#: thread is delivered ON it: the bus adapters' HTTP clients belong to that
+#: loop. From a new loop of the alert's own they raised RuntimeError -- live
+#: 2026-10-02 the boot check's alert reached nobody -- and a client first
+#: made on such a loop would break the server's own sends afterwards.
+_server_loop: asyncio.AbstractEventLoop | None = None
+
+
+def bind_server_loop(loop: asyncio.AbstractEventLoop | None) -> None:
+    """Deliver alerts raised off the loop on *loop*; ``None`` unbinds it.
+
+    The app binds its loop at startup and unbinds it at the end of shutdown.
+    A process with no bound loop (a CLI, a script) keeps the delivery thread.
+    """
+    global _server_loop
+    _server_loop = loop
+
+
+def _on_server_loop(coro_text: str) -> bool:
+    """Schedule delivery on the bound server loop; False when there is none."""
+    server = _server_loop
+    if server is None or server.is_closed() or not server.is_running():
+        return False
+    future = asyncio.run_coroutine_threadsafe(_deliver(coro_text), server)
+
+    def _report(done: Any) -> None:
+        if done.cancelled():
+            return
+        error = done.exception()
+        if error is not None:
+            logger.warning("[ops_alerts] delivery raised: %s", error)
+        elif done.result() is False:
+            logger.warning("[ops_alerts] alert was NOT delivered anywhere")
+
+    future.add_done_callback(_report)
+    return True
 
 
 def ops_alerts_enabled() -> bool:
@@ -278,6 +316,7 @@ async def _deliver(text: str) -> bool:
             )
         except Exception:  # noqa: BLE001
             logger.warning("[ops_alerts] telegram-group delivery failed", exc_info=True)
+    bus_refused = False
     try:
         from kazma_core.swarm.bus import (
             BusMessage,
@@ -303,19 +342,33 @@ async def _deliver(text: str) -> bool:
                 content=text[:4000],
                 level="warn",
             )
-            await asyncio.wait_for(
-                asyncio.gather(*(a.send(msg) for a in targets)),
+            results = await asyncio.wait_for(
+                asyncio.gather(*(a.send(msg) for a in targets), return_exceptions=True),
                 timeout=10.0,
             )
-            return True
+            # An adapter reports whether its platform took the message; a
+            # bus that took it nowhere is not a delivery (it counted as one
+            # until 2026-10-02, so a failed send never reached the fallback).
+            if sent_group or any(r is True for r in results):
+                return True
+            bus_refused = True
+            logger.warning(
+                "[ops_alerts] no bus adapter took the alert (%s); trying direct",
+                ", ".join(type(r).__name__ if isinstance(r, BaseException) else str(r) for r in results),
+            )
     except Exception as exc:  # noqa: BLE001
+        bus_refused = True
         logger.warning("[ops_alerts] bus delivery failed, trying direct: %s", exc)
 
-    # No platform bus in this process (worker/CLI/script) -- go direct.
-    # Direct is Telegram-only: honor the routing choice.
+    # No platform bus in this process (worker/CLI/script), or the bus took it
+    # nowhere -- go direct. Direct is Telegram-only: honor the routing choice.
     if channels and "telegram" not in channels:
         if sent_group:
             return True
+        if bus_refused:
+            # The chosen channels were tried and did not take it: not a
+            # routing choice, a failed delivery (alert() says so).
+            return False
         logger.info(
             "[ops_alerts] no bus adapter and Telegram not in channels %s "
             "— alert exists only in this log (operator routing choice)",
@@ -379,6 +432,9 @@ def _dispatch(text: str) -> None:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = None
+
+    if loop is None and _on_server_loop(text):
+        return
 
     if loop is not None:
         # Already on an event loop: fire and forget. Never await here — the

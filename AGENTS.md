@@ -2767,6 +2767,26 @@ was skipped (2026-09-28). `tests/test_browser_egress_every_context.py`
 Model fallbacks (§38) ride the second row plus the web banner
 (`AlertDispatcher.post_banner`, banner only) — not a fourth notifier.
 
+**An alert reaches someone, or says it did not (2026-10-02).**
+- An alert raised in a worker thread is delivered ON the server's loop
+  (`ops_alerts.bind_server_loop`, bound at the top of `_on_startup` and
+  unbound at the end of `_on_shutdown`). The chat-app senders' HTTP clients
+  belong to that loop. The old delivery thread ran them on a new loop of its
+  own: on live the boot check's alert raised `RuntimeError` in the Telegram
+  sender and reached nobody. A client first made on such a loop would also
+  break the server's own sends afterwards.
+- A bus adapter's `send` returns whether the platform took the message (the
+  Telegram, Discord and Slack senders, FanOut: any; Null: False). `_deliver`
+  counts only a True. A bus that took the alert nowhere falls back to
+  Telegram-direct when the routing allows. When the chosen channels
+  themselves refused it, the alert is reported as NOT delivered, never as a
+  "routing choice". Every sender used to answer `None`, so a finished
+  `gather` counted as a delivery and a failed send never reached the
+  fallback. The lifecycle card had the same blind spot.
+- Gate: `tests/test_ops_alert_delivery.py` (the loop a worker-thread alert
+  is delivered on, with the unbound path as the negative control; a refusing
+  bus; each platform sender's answer).
+
 **The guard's credentials come from a child process.** `Notifier` reads
 env first, then Kazma's settings — through `_NOTIFY_LOOKUP`, run with the
 server's interpreter in the install folder, which loads the install's `.env`

@@ -87,8 +87,13 @@ class BusAdapter(ABC):
     """
 
     @abstractmethod
-    async def send(self, message: BusMessage) -> None:
-        """Deliver a single log/status line to the platform."""
+    async def send(self, message: BusMessage) -> bool:
+        """Deliver a single log/status line to the platform.
+
+        True when the platform accepted it. The ops alerts and the lifecycle
+        card fall back, or say the message went nowhere, on False; an
+        adapter that answered None looked delivered whatever happened.
+        """
         ...
 
     @abstractmethod
@@ -120,8 +125,8 @@ class BusAdapter(ABC):
 class NullBusAdapter(BusAdapter):
     """Drops all messages. Used when no platform adapter is connected."""
 
-    async def send(self, message: BusMessage) -> None:
-        pass
+    async def send(self, message: BusMessage) -> bool:
+        return False
 
     async def send_report(self, report: SwarmReport) -> None:
         pass
@@ -165,11 +170,12 @@ class FanOutBusAdapter(BusAdapter):
     def adapters(self) -> list[BusAdapter]:
         return list(self._adapters)
 
-    async def send(self, message: BusMessage) -> None:
-        await asyncio.gather(
+    async def send(self, message: BusMessage) -> bool:
+        results = await asyncio.gather(
             *(a.send(message) for a in self._adapters),
             return_exceptions=True,
         )
+        return any(r is True for r in results)
 
     async def send_report(self, report: SwarmReport) -> None:
         await asyncio.gather(

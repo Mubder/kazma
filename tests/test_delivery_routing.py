@@ -353,8 +353,9 @@ class TestBusAdapterNames:
             def __init__(self, name: str) -> None:
                 self.name = name
 
-            async def send(self, message: Any) -> None:
+            async def send(self, message: Any) -> bool:
                 sent.append(self.name)
+                return True  # the platform took it (BusAdapter.send's contract)
 
         import kazma_core.swarm.bus as bus_mod
 
@@ -421,8 +422,9 @@ class TestLifecycleHonorsAlertRoutes:
             def __init__(self, name: str) -> None:
                 self.name = name
 
-            async def send(self, message: Any) -> None:
+            async def send(self, message: Any) -> bool:
                 sent.append(self.name)
+                return True  # the platform took it (BusAdapter.send's contract)
 
         fan = bus_mod.FanOutBusAdapter(
             [_Named("telegram"), _Named("discord"), _Named("slack")]
@@ -459,8 +461,9 @@ class TestLifecycleHonorsAlertRoutes:
             def __init__(self, name: str) -> None:
                 self.name = name
 
-            async def send(self, message: Any) -> None:
+            async def send(self, message: Any) -> bool:
                 sent.append(self.name)
+                return True  # the platform took it (BusAdapter.send's contract)
 
         fan = bus_mod.FanOutBusAdapter(
             [_Named("telegram"), _Named("discord"), _Named("slack")]
@@ -495,8 +498,9 @@ class TestLifecycleHonorsAlertRoutes:
             def __init__(self, name: str) -> None:
                 self.name = name
 
-            async def send(self, message: Any) -> None:
+            async def send(self, message: Any) -> bool:
                 sent.append(self.name)
+                return True  # the platform took it (BusAdapter.send's contract)
 
         fan = bus_mod.FanOutBusAdapter(
             [_Named("telegram"), _Named("discord"), _Named("slack")]
