@@ -207,10 +207,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "عدد الأحرف",
         "en": "Characters typed",
     },
-    "chat.context_size": {
-        "ar": "{chars} حرفًا ≈ {tokens} رمزًا",
-        "en": "{chars} chars ≈ {tokens} tokens",
-    },
     "chat.context_size_hint": {
         "ar": "تقدير حجم سياق المحادثة",
         "en": "Conversation context estimate",

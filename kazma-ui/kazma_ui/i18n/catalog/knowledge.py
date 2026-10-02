@@ -56,6 +56,30 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "{n} مقطع",
         "en": "{n} chunks",
     },
+    "knowledge.pages_count.zero": {
+        "ar": "لا صفحات",
+        "en": "{n} pages",
+    },
+    "knowledge.pages_count.one": {
+        "ar": "صفحة واحدة",
+        "en": "1 page",
+    },
+    "knowledge.pages_count.two": {
+        "ar": "صفحتان",
+        "en": "{n} pages",
+    },
+    "knowledge.pages_count.few": {
+        "ar": "{n} صفحات",
+        "en": "{n} pages",
+    },
+    "knowledge.pages_count.many": {
+        "ar": "{n} صفحة",
+        "en": "{n} pages",
+    },
+    "knowledge.pages_count.other": {
+        "ar": "{n} صفحة",
+        "en": "{n} pages",
+    },
     "knowledge.chunks_count.two": {
         "ar": "مقطعان",
         "en": "2 chunks",
@@ -69,12 +93,20 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Crawl finished but no pages were ingested. Check the failures list.",
     },
     "knowledge.crawl_finished_ok": {
-        "ar": "اكتمل الزحف: {fetched}/{discovered} صفحة · {ingested} مقطع",
-        "en": "Crawl finished: {fetched}/{discovered} pages · {ingested} chunks",
+        "ar": "اكتمل الزحف: {fetched}/{pages} · {chunks}",
+        "en": "Crawl finished: {fetched}/{pages} · {chunks}",
     },
     "knowledge.crawl_finished_partial": {
-        "ar": "اكتمل الزحف: {fetched}/{discovered} صفحة · {ingested} مقطع · فشل {failed}",
-        "en": "Crawl finished: {fetched}/{discovered} pages · {ingested} chunks · {failed} failed",
+        "ar": "اكتمل الزحف: {fetched}/{pages} · {chunks} · فشل {failed}",
+        "en": "Crawl finished: {fetched}/{pages} · {chunks} · {failed} failed",
+    },
+    "knowledge.crawl_unchanged": {
+        "ar": "دون تغيير: {n}",
+        "en": "{n} unchanged",
+    },
+    "knowledge.crawl_pruned": {
+        "ar": "المُزالة: {n}",
+        "en": "{n} pruned",
     },
     "knowledge.crawl_started": {
         "ar": "بدأ الزحف — تابع التقدّم بالأسفل.",

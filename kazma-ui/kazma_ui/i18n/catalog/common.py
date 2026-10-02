@@ -1994,6 +1994,54 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "{n} يوم",
         "en": "{n} days",
     },
+    "common.ui.chars.zero": {
+        "ar": "لا أحرف",
+        "en": "{n} chars",
+    },
+    "common.ui.chars.one": {
+        "ar": "حرف واحد",
+        "en": "1 char",
+    },
+    "common.ui.chars.two": {
+        "ar": "حرفان",
+        "en": "{n} chars",
+    },
+    "common.ui.chars.few": {
+        "ar": "{n} أحرف",
+        "en": "{n} chars",
+    },
+    "common.ui.chars.many": {
+        "ar": "{n} حرفًا",
+        "en": "{n} chars",
+    },
+    "common.ui.chars.other": {
+        "ar": "{n} حرف",
+        "en": "{n} chars",
+    },
+    "common.ui.tokens.zero": {
+        "ar": "لا رموز",
+        "en": "{n} tokens",
+    },
+    "common.ui.tokens.one": {
+        "ar": "رمز واحد",
+        "en": "1 token",
+    },
+    "common.ui.tokens.two": {
+        "ar": "رمزان",
+        "en": "{n} tokens",
+    },
+    "common.ui.tokens.few": {
+        "ar": "{n} رموز",
+        "en": "{n} tokens",
+    },
+    "common.ui.tokens.many": {
+        "ar": "{n} رمزًا",
+        "en": "{n} tokens",
+    },
+    "common.ui.tokens.other": {
+        "ar": "{n} رمز",
+        "en": "{n} tokens",
+    },
     "login.page_title": {
         "ar": "Kazma — تسجيل الدخول",
         "en": "Kazma — Login",

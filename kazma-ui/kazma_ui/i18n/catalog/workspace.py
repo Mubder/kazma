@@ -676,7 +676,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "workspace.pr_diff_stats": {
         "ar": "الإضافات: {additions} · الحذف: {deletions} · الملفات: {files}",
-        "en": "{additions} additions / {deletions} deletions across {files} files",
+        "en": "Additions: {additions} · Deletions: {deletions} · Files: {files}",
     },
     "workspace.pr_state_line": {
         "ar": "الحالة: {state}",

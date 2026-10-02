@@ -3731,7 +3731,7 @@
                 <span translate="no" style="font-size:0.85rem"
                       :class="backupResult?.ok ? 'text-success' : 'text-error'"
                       x-text="backupResult?.ok
-                          ? (t('settings.backup_done') + ' ' + t('settings.bk.done_summary').replace('{dbs}', backupResult.databases_ok).replace('{mb}', backupResult.total_size_mb)
+                          ? (t('settings.backup_done') + ' ' + kazmaCount('settings.bk.done_summary', backupResult.databases_ok || 0, { mb: backupResult.total_size_mb })
                              + (backupResult?.offsite?.ok ? ' · ' + t('settings.bk.synced_to').replace('{remote}', (backupResult.offsite.remote || t('settings.bk.cloud')).split(':')[0]) : ''))
                           : (t('settings.backup_failed') + ' ' + (backupResult?.error || ''))"></span>
             </div>
@@ -3756,7 +3756,7 @@
                               title="{{ t('settings.bk.not_synced') }}"
                               x-text="t('settings.bk.local_only')" x-cloak></span>
                         <span style="margin-left:12px;font-size:0.8rem;color:var(--text-muted)"
-                              x-text="t('settings.bk.row_summary').replace('{dbs}', b.databases_ok).replace('{mb}', b.size_mb) + (b.postgres ? ' · PG ✓' : '') + (b.incomplete ? ' · ' + t('settings.bk.incomplete') : '')"></span>
+                              x-text="kazmaCount('settings.bk.row_summary', b.databases_ok || 0, { mb: b.size_mb }) + (b.postgres ? ' · PG ✓' : '') + (b.incomplete ? ' · ' + t('settings.bk.incomplete') : '')"></span>
                     </div>
                     <div style="display:flex;gap:6px">
                         <button class="btn btn-secondary btn-sm" @click="archiveBackup(b.dir)"

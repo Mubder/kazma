@@ -215,22 +215,25 @@ function knowledgePage() {
             const unchanged = j.pages_unchanged || 0;
             const pruned = j.pruned_urls || 0;
             const extra =
-              (unchanged ? " · " + unchanged + " unchanged" : "") +
-              (pruned ? " · " + pruned + " pruned" : "");
+              (unchanged ? " · " + _k("knowledge.crawl_unchanged", "{n} unchanged", { n: unchanged }) : "") +
+              (pruned ? " · " + _k("knowledge.crawl_pruned", "{n} pruned", { n: pruned }) : "");
+            // Each count in its plural form: "200 pages", "210 مقاطع".
+            const pages = window.kazmaCount("knowledge.pages_count", discovered);
+            const chunks = chunkCountLabel(ingested);
             if (ingested === 0 && fetched === 0) {
               toast(S.crawl_finished_empty || "Crawl finished but no pages were ingested.", "warning");
             } else if (failed > 0) {
               toast(
-                (S.crawl_finished_partial || "Crawl finished: {fetched}/{discovered} pages · {ingested} chunks · {failed} failed")
-                  .replace("{fetched}", fetched).replace("{discovered}", discovered)
-                  .replace("{ingested}", ingested).replace("{failed}", failed) + extra,
+                (S.crawl_finished_partial || "Crawl finished: {fetched}/{pages} · {chunks} · {failed} failed")
+                  .replace("{fetched}", fetched).replace("{pages}", pages)
+                  .replace("{chunks}", chunks).replace("{failed}", failed) + extra,
                 "warning",
               );
             } else {
               toast(
-                (S.crawl_finished_ok || "Crawl finished: {fetched}/{discovered} pages · {ingested} chunks")
-                  .replace("{fetched}", fetched).replace("{discovered}", discovered)
-                  .replace("{ingested}", ingested) + extra,
+                (S.crawl_finished_ok || "Crawl finished: {fetched}/{pages} · {chunks}")
+                  .replace("{fetched}", fetched).replace("{pages}", pages)
+                  .replace("{chunks}", chunks) + extra,
                 "success",
               );
             }

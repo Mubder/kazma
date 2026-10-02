@@ -25,6 +25,23 @@ Arabic's "زُامنت" (a misspelling) is now "زُومنت".
 The single-form ratchet in `tests/test_count_labels.py` is now a gate: a new
 count label in one form fails the build.
 
+A second pass, after the live memory page still read "200 عقد · 295
+معتقدات": the gate had looked only for `{n}` and `{count}`. It now reads any
+placeholder name. Ten more labels were fixed:
+
+- labels with two counts (the memory graph's header and its spoken label,
+  the chat's context-size hint, the Knowledge crawl toast) are built from one
+  count per noun;
+- graph truncation, quality checks, the queue line and the backup summaries
+  have the six forms;
+- the pull request's diff line uses the label style its Arabic already had;
+- an unused key is removed.
+
+Two scripts glued English words after a number: "N chat models discovered
+(M speech models hidden …)" was English on every page, and the crawl toast's
+" · N unchanged · N pruned" was too. Both are in the catalog now, and a gate
+stops a script gluing an English word to a value again.
+
 ## MCP changes no longer edit kazma.yaml (2026-10-02)
 
 Every MCP change made from a page (add, edit, remove, the on/off switch)

@@ -7138,10 +7138,10 @@
         totalTokens += estimateTokens(t);   // per-message: preserves script mix
       }
     } catch (e) { return; }
-    var full = tiFmt('context_size', '{chars} chars \u2248 {tokens} tokens', {
-      chars: totalChars.toLocaleString(),
-      tokens: totalTokens.toLocaleString(),
-    });
+    // Each count in its own plural form (window.kazmaCount, base.html).
+    var fmt = window.KazmaFormat ? window.KazmaFormat.number : function (v) { return String(v); };
+    var full = window.kazmaCount('common.ui.chars', totalChars, { n: fmt(totalChars) }) + ' \u2248 ' +
+      window.kazmaCount('common.ui.tokens', totalTokens, { n: fmt(totalTokens) });
     contextBadge.textContent = totalTokens
       ? ('~' + formatCompactCount(totalTokens) + ' ' + ti('ctx_unit', 'ctx'))
       : '—';
