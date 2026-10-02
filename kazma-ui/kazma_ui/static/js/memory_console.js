@@ -1398,7 +1398,9 @@
         const title = pending ? _mt('memory.console.summary_rebuilding', 'Being rewritten without a forgotten conversation') : (s.title || s.id);
         return '<div style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);">' +
           '<span style="min-width:0;overflow-wrap:anywhere;">' +
-          '<span' + (pending ? '' : ' translate="no"') + ' style="color:var(--text-primary);font-weight:600;">' + _esc(title) + '</span>' +
+          // The title is its own line, in its own language (as the memories
+          // list above): inline in the row it took the page's direction.
+          '<span' + (pending ? '' : ' translate="no"') + ' style="display:block;color:var(--text-primary);font-weight:600;">' + _esc(title) + '</span>' +
           '<span style="display:block;color:var(--text-muted);font-size:0.65rem;">' + _esc(_mt('memory.console.week_of', 'Week of {date}', { date: monday })) + ' · ' + _esc(size) + '</span>' +
           (pending ? '' : '<span translate="no" style="display:block;margin-top:2px;white-space:pre-wrap;">' + _esc(s.summary_text || '') + '</span>') +
           '</span>' +
