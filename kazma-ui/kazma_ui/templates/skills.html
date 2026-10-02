@@ -38,10 +38,15 @@
                     {% if skill.security_score is not none %}<span class="security-score">{{ skill.security_score }}/100</span>{% endif %}
                     {% if skill.integrity %}
                     {% set _ib = {'verified': 'badge-success', 'unsigned': 'badge-warning', 'refused': 'badge-danger'} %}
-                    <span class="badge {{ _ib.get(skill.integrity, 'badge-warning') }}" title="{{ skill.integrity_reason }}">{{ t('skills.integrity_' ~ skill.integrity) }}</span>
+                    <span class="badge {{ _ib.get(skill.integrity, 'badge-warning') }}">{{ t('skills.integrity_' ~ skill.integrity) }}</span>
                     {% endif %}
                     <span class="text-muted" translate="no">{{ skill.author }}</span>
                 </div>
+                {# Why activation refuses it, and the command that fixes it:
+                   the server's own words, so not translated. #}
+                {% if skill.integrity == 'refused' %}
+                <p class="skill-desc text-muted" dir="auto" translate="no">{{ skill.integrity_reason }}</p>
+                {% endif %}
                 <div class="skill-actions">
                     <label class="toggle">
                         <input type="checkbox" {% if skill.enabled %}checked{% endif %}
