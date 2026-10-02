@@ -12,7 +12,6 @@ import inspect
 import io
 
 import pytest
-
 from kazma_core.documents.artifacts import ArtifactManifest, DocumentArtifact
 from kazma_core.documents.config import DocumentConfig
 from kazma_core.documents.ingestion import (
@@ -21,6 +20,7 @@ from kazma_core.documents.ingestion import (
 )
 from kazma_core.documents.models import DocumentResult, new_artifact_id
 
+from tests._document_jobs import wait_for_job
 
 MD = b"# Kazma\n\nPhase 8 document actions.\n\nSecond paragraph.\n"
 
@@ -44,18 +44,8 @@ async def _ingest_ready(svc, *, tenant, actor, workspace, filename, data) -> str
         workspace_id=workspace,
         actor_id=actor,
     )
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + 15.0
-    while loop.time() < deadline:
-        status = await asyncio.to_thread(
-            svc.job_status, tenant_id=tenant, job_id=result.job_id
-        )
-        if status and status["state"] == "ready":
-            return str(result.document_id)
-        if status and status["state"] in {"rejected", "dead_letter", "cancelled"}:
-            raise AssertionError(f"ingest ended in {status['state']}")
-        await asyncio.sleep(0.05)
-    raise AssertionError("document did not reach ready")
+    await wait_for_job(svc, tenant, result.job_id)
+    return str(result.document_id)
 
 
 # ── Coordinator API shape: no raw path is ever accepted ─────────────────
@@ -335,18 +325,7 @@ async def test_generate_document_durably_ingests(tmp_path) -> None:
         assert out["target_format"] == "markdown"
 
         # The generated document is tenant-owned and readable by opaque ID.
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + 15.0
-        state = None
-        while loop.time() < deadline:
-            status = await asyncio.to_thread(
-                svc.job_status, tenant_id="tenant-a", job_id=out["job_id"]
-            )
-            state = status["state"] if status else None
-            if state == "ready":
-                break
-            await asyncio.sleep(0.05)
-        assert state == "ready"
+        await wait_for_job(svc, "tenant-a", out["job_id"])
         content = await asyncio.to_thread(
             svc.get_content,
             tenant_id="tenant-a",
@@ -382,7 +361,7 @@ async def test_generate_rejects_oversized_payload(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_pdf_info_when_pypdf_available(tmp_path) -> None:
-    pypdf = pytest.importorskip("pypdf")
+    pytest.importorskip("pypdf")
     from pypdf import PdfWriter
 
     writer = PdfWriter()

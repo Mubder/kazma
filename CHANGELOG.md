@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Document tests wait for the parse, not for a clock (2026-10-02)
+
+- A document is parsed in a fresh subprocess. Four document tests gave it
+  10 to 20 seconds and failed while it was still parsing during a full
+  parallel run (`test_convert_denies_other_actor`; the file passed on its
+  own). They now share `tests/_document_jobs.wait_for_job`, which returns
+  the moment the job is ready and fails as soon as the job ends in another
+  state. Its 120-second deadline only catches a job that never finishes.
+
 ## The security report measures what it names; sign-in off is refused behind a proxy (2026-10-02)
 
 - **The report's failures were not true, and its passes measured nothing.**
