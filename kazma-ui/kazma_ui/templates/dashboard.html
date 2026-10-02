@@ -79,7 +79,10 @@
       <div class="metric-icon"><span class="ki" data-icon="plug" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('dashboard.circuit_breaker') }}</div>
       <div class="metric-value {{ breaker_color }}" id="metric-breaker">{{ breaker_status }}</div>
-      <div class="metric-sub">{{ tracing_backend }} {{ t('dashboard.backend') }}</div>
+      {# The backend's name in each language's own word order, set apart:
+         "console backend" read "console الخادم" in Arabic. #}
+      {% set backend_parts = t('dashboard.backend_named').split('{name}') %}
+      <div class="metric-sub">{{ backend_parts[0] }}<bdi translate="no">{{ tracing_backend }}</bdi>{{ backend_parts[1] if backend_parts|length > 1 else '' }}</div>
     </div>
     <div class="metric-card">
       <div class="metric-icon" x-html="KazmaIcons.clock()"></div>

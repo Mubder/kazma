@@ -34,35 +34,60 @@
   // letter is left-to-right; digits and punctuation are neither.
   var RTL_LETTER_RE = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
   var LETTER_RE = /\p{L}/u;
+  // Arabic punctuation: a word carrying one was written in Arabic.
+  var ARABIC_PUNCT_RE = /[\u060C\u061B\u061F\u06D4]/;
+  var UPPER_RE = /\p{Lu}/u;
 
   /**
-   * The direction of one paragraph: the script most of its words are in --
-   * a URL, a path or an identifier is one word -- and on a tie its first
-   * letter's. '' when it has no letters (a number, a rule).
+   * The direction of one paragraph: the language its words are written in,
+   * and on a tie its first letter's. '' when it has no letters (a number,
+   * a rule).
    *
    * Text follows its own language, whatever the UI's (the owner's rule,
    * 2026-10-02). dir="auto" asks only the first letter, so "PDF \u0627\u0644\u0645\u0644\u0641
    * \u062C\u0627\u0647\u0632" came out left-to-right; counting letters lays an Arabic sentence
-   * holding one long path out left-to-right. Inline code and a link's
-   * target are not the paragraph's words.
+   * holding one long path out left-to-right. So words are counted: a URL, a
+   * path or an identifier is one word, and inline code and a link's target
+   * are not the paragraph's words. A word with an Arabic letter or Arabic
+   * punctuation is Arabic ("\u0648DOCX", "Telegram\u060C": Arabic grammar around a
+   * term). A Latin word that looks like a name -- an acronym, CamelCase, a
+   * digit in it, a capital away from a sentence's start (PDF, MyCloud, OS5,
+   * Python) -- counts a quarter: Arabic technical prose is full of them,
+   * and "WebDAV \u064A\u0639\u0645\u0644 \u0645\u0639 WD MyCloud OS5 \u0648\u0623\u064A \u062C\u0647\u0627\u0632 NAS" is an Arabic sentence.
    */
   function blockDir(text) {
     var s = String(text || '').replace(/`[^`]*`/g, ' ').replace(/\]\([^)]*\)/g, '] ');
     var words = s.split(/\s+/);
-    var rtl = 0, ltr = 0, first = '';
+    var rtl = 0, ltr = 0, first = '', sentenceStart = true;
     for (var i = 0; i < words.length; i++) {
-      var r = 0, l = 0, lead = '';
-      for (var ch of words[i]) {
+      var w = words[i];
+      var r = 0, l = 0, uppers = 0, lead = '', firstLetterUpper = false, digit = /\d/.test(w);
+      for (var ch of w) {
         if (!LETTER_RE.test(ch)) continue;
         if (RTL_LETTER_RE.test(ch)) { r++; if (!lead) lead = 'rtl'; }
-        else { l++; if (!lead) lead = 'ltr'; }
+        else {
+          l++;
+          if (UPPER_RE.test(ch)) { uppers++; if (!lead) firstLetterUpper = true; }
+          if (!lead) lead = 'ltr';
+        }
       }
-      if (!lead) continue;
+      var startsSentence = sentenceStart;
+      // A sentence ends at . ! ? : (and their Arabic forms); the next word
+      // may start with a capital without being a name.
+      sentenceStart = /[.!?:\u061F\u06D4]["')\]]*$/.test(w) || (!lead && sentenceStart);
+      if (!lead) {
+        if (ARABIC_PUNCT_RE.test(w)) rtl += 1;
+        continue;
+      }
       if (!first) first = lead;
-      if (r > l || (r === l && lead === 'rtl')) rtl++; else ltr++;
+      if (r || ARABIC_PUNCT_RE.test(w)) { rtl += 1; continue; }
+      var nameLike = digit || uppers >= 2 || (firstLetterUpper && !startsSentence);
+      ltr += nameLike ? 0.25 : 1;
     }
     if (!rtl && !ltr) return '';
-    if (rtl !== ltr) return rtl > ltr ? 'rtl' : 'ltr';
+    if (!rtl) return 'ltr';
+    if (!ltr) return 'rtl';
+    if (Math.abs(rtl - ltr) > 1e-9) return rtl > ltr ? 'rtl' : 'ltr';
     return first;
   }
 

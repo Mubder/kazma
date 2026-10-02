@@ -359,7 +359,19 @@
     // Label — canvas can't resolve CSS vars; read the computed token
     ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8b9bb8';
     ctx.font = '10px "IBM Plex Sans", sans-serif';
-    ctx.fillText(KS.formatTokens(max) + ' tokens max', 12, 12);
+    drawChartLabel(ctx, canvas, window.kazmaT('dashboard.chart_tokens_max', '{n} tokens max',
+      { n: KS.formatTokens(max) }), 12);
+  }
+
+  // A chart's label, in the page's language, at the page's start corner.
+  // The canvas itself runs left to right (kazma.css), so an Arabic label is
+  // drawn right to left from the right edge. It was English in every
+  // language, drawn from the left (2026-10-02).
+  function drawChartLabel(ctx, canvas, text, inset) {
+    var rtl = document.documentElement.getAttribute('dir') === 'rtl';
+    ctx.direction = rtl ? 'rtl' : 'ltr';
+    ctx.textAlign = 'start';
+    ctx.fillText(text, rtl ? canvas.width - inset : inset, 12);
   }
 
   function drawCostChart(range) {
@@ -409,7 +421,8 @@
 
     ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8b9bb8';
     ctx.font = '10px "IBM Plex Sans", sans-serif';
-    ctx.fillText('$' + max.toFixed(4) + ' max', 18, 12);
+    drawChartLabel(ctx, canvas, window.kazmaT('dashboard.chart_cost_max', '{n} max',
+      { n: '$' + max.toFixed(4) }), 18);
   }
 
   function filterByRange(data, range, field) {

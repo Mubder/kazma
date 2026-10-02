@@ -342,7 +342,7 @@
           <div x-show="auditEvents.length === 0" x-cloak style="color:var(--text-muted);font-size:.74rem;padding:.3rem 0;">{{ t('documents.no_audit') }}</div>
           <template x-for="a in auditEvents" :key="a.id">
             <div class="evt-row" style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;">
-              <span>
+              <span translate="no">
                 <span translate="no" x-text="a.event_type"></span>·<span translate="no" x-text="a.action"></span>
                 <span class="evt-err" translate="no" x-show="a.outcome !== 'success'" x-cloak x-text="' (' + a.outcome + ')'"></span>
               </span>
