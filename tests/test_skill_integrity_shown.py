@@ -141,6 +141,10 @@ def test_the_page_renders_the_badge_only_where_there_is_a_verdict() -> None:
     template = (Path(__file__).resolve().parents[1] / "kazma-ui/kazma_ui/templates/skills.html").read_text(encoding="utf-8")
     assert "{% if skill.security_score is not none %}" in template
     assert "t('skills.integrity_' ~ skill.integrity)" in template
+    # The reason is the server's words: shown for a refused skill, untranslated
+    # (an English tooltip on Arabic pages failed the Arabic page tour).
+    assert 'translate="no">{{ skill.integrity_reason }}</p>' in template
+    assert 'title="{{ skill.integrity_reason }}"' not in template
     from kazma_ui.i18n.catalog.common import TRANSLATIONS
 
     for state in ("verified", "unsigned", "refused"):
