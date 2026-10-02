@@ -29,6 +29,8 @@ import subprocess
 import sys
 import os
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -570,16 +572,17 @@ def do_pip_update(
             console.print(f"[cyan]Installing {release.wheel_name} (SHA-256 verified)...[/cyan]")
             # Extras (rag: torch) can take far longer than Kazma itself.
             timeout = _INSTALL_TIMEOUT_HEAVY if extras else _INSTALL_TIMEOUT
-            if reinstall:
-                # --no-deps keeps the forced reinstall to Kazma itself; the
-                # second install then brings back any missing dependency.
-                result = _run_pip(
-                    ["install", "--force-reinstall", "--no-deps", str(wheel)], timeout=_INSTALL_TIMEOUT,
-                )
-                if result.returncode == 0:
-                    result = _run_pip(["install", spec], timeout=timeout)
-            else:
-                result = _run_pip(["install", "--upgrade", spec], timeout=timeout)
+            with _launchers_moved_aside():
+                if reinstall:
+                    # --no-deps keeps the forced reinstall to Kazma itself; the
+                    # second install then brings back any missing dependency.
+                    result = _run_pip(
+                        ["install", "--force-reinstall", "--no-deps", str(wheel)], timeout=_INSTALL_TIMEOUT,
+                    )
+                    if result.returncode == 0:
+                        result = _run_pip(["install", spec], timeout=timeout)
+                else:
+                    result = _run_pip(["install", "--upgrade", spec], timeout=timeout)
         if result.returncode == 0:
             console.print("[green]pip upgrade completed.[/green]")
             return True
@@ -777,6 +780,79 @@ def _site_packages_dir() -> Path | None:
     return candidate if candidate.is_dir() else None
 
 
+#: The launchers this distribution installs, when its metadata cannot say
+#: (a reinstall that failed half way removes the metadata first).
+_DEFAULT_LAUNCHERS = ("kazma", "kazma-tui", "kazma-web")
+
+
+def _launcher_names() -> tuple[str, ...]:
+    """The console scripts of this install's ``kazma`` distribution."""
+    try:
+        from importlib.metadata import distribution
+
+        names = tuple(sorted(
+            ep.name for ep in distribution(PACKAGE_NAME).entry_points
+            if ep.group == "console_scripts"
+        ))
+    except ImportError:  # PackageNotFoundError: the metadata is gone
+        names = ()
+    return names or _DEFAULT_LAUNCHERS
+
+
+def _remove_old_launchers(scripts: Path) -> None:
+    """Delete launchers moved aside by earlier updates, once nothing runs them."""
+    for old in scripts.glob("*.exe.*.old"):
+        try:
+            old.unlink()
+        except OSError:
+            continue  # still running: a later update removes it
+
+
+@contextmanager
+def _launchers_moved_aside(scripts: Path | None = None, *, windows: bool | None = None) -> Iterator[None]:
+    """Rename this install's launchers aside while a reinstall replaces them.
+
+    Windows refuses to delete or overwrite a running .exe but lets it be
+    renamed. ``kazma update`` runs from ``kazma.exe``, which the reinstall
+    must replace: on the live install it failed with "The process cannot
+    access the file" and left Kazma's own install half removed (2026-10-02).
+    Each launcher is renamed to ``<name>.exe.<pid>.old`` first: the running
+    one keeps running under its new name, the installer writes fresh ones,
+    and one it did not write is renamed back. Copies left by earlier runs are
+    deleted once nothing runs them.
+    """
+    if windows is None:
+        windows = os.name == "nt"
+    if not windows:
+        yield
+        return
+    scripts = scripts or Path(sys.executable).parent
+    _remove_old_launchers(scripts)
+    moved: list[tuple[Path, Path]] = []
+    for name in _launcher_names():
+        exe = scripts / f"{name}.exe"
+        if not exe.is_file():
+            continue
+        aside = exe.with_name(f"{exe.name}.{os.getpid()}.old")
+        try:
+            exe.replace(aside)
+        except OSError as exc:
+            logger.warning("Could not move %s aside before the reinstall: %s", exe, exc)
+            continue
+        moved.append((exe, aside))
+    try:
+        yield
+    finally:
+        for exe, aside in moved:
+            if exe.exists():
+                continue  # the installer wrote a fresh one
+            try:
+                aside.replace(exe)
+            except OSError as exc:
+                logger.warning("Could not put %s back after the reinstall: %s", exe, exc)
+        _remove_old_launchers(scripts)
+
+
 def _cleanup_broken_distributions() -> None:
     """Remove pip/uv partial-uninstall leftovers (``~azma*`` dist-info).
 
@@ -838,6 +914,16 @@ def _print_reinstall_recovery(spec: str) -> None:
 
 
 def _reinstall_local(cwd: str) -> bool:
+    """Reinstall the editable package, its launchers moved aside (Windows).
+
+    See :func:`_launchers_moved_aside`; the body is
+    :func:`_reinstall_local_unguarded`.
+    """
+    with _launchers_moved_aside():
+        return _reinstall_local_unguarded(cwd)
+
+
+def _reinstall_local_unguarded(cwd: str) -> bool:
     """Reinstall editable package without wiping optional extras.
 
     Bare ``uv sync`` is exact-by-default and **removes** packages not in the
