@@ -483,7 +483,8 @@ async def test_document_processor_and_crawler_delegate(
 
     service.read_transient.reset_mock()
     monkeypatch.setattr(crawler, "DocumentService", Mock(return_value=service))
-    monkeypatch.setattr(crawler, "_workspace_scope_error", Mock(return_value=None))
+    # The crawler resolves and checks the path in one threaded call.
+    monkeypatch.setattr(crawler, "resolve_in_scope", AsyncMock(return_value=(path, None)))
     assert await crawler.parse_document(str(path)) == "delegated"
     service.read_transient.assert_awaited_once()
 

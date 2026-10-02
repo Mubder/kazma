@@ -348,7 +348,7 @@ async def _export_docx(title: str, report_md: str, dest_dir: Path) -> str | None
                     dest = dest_dir / "report.docx"
                     try:
                         dest.write_bytes(src.read_bytes())
-                        return _rel(dest)
+                        return await asyncio.to_thread(_rel, dest)
                     except Exception:
                         return str(src)
         # Fallback write via python-docx in place
@@ -388,8 +388,8 @@ async def run_research_pipeline(
 
     t0 = time.time()
     log: list[str] = []
-    out_dir = _workspace_research_dir(topic)
-    rel_dir = _rel(out_dir)
+    out_dir = await asyncio.to_thread(_workspace_research_dir, topic)
+    rel_dir = await asyncio.to_thread(_rel, out_dir)
 
     # Industry preflight — fail fast when no search path exists
     await _emit(progress_cb, "preflight", "Checking research stack…")
@@ -528,7 +528,7 @@ async def run_research_pipeline(
             t_acq = time.time()
             try:
                 name = f"src-{idx:02d}.md"
-                path = _rel(out_dir / name)
+                path = await asyncio.to_thread(_rel, out_dir / name)
                 (out_dir / name).parent.mkdir(parents=True, exist_ok=True)
                 res = await read_url_to_file(url, path=path)
                 latency = round(time.time() - t_acq, 2)
@@ -560,7 +560,7 @@ async def run_research_pipeline(
                         try:
                             p_abs = out_dir / Path(saved_path).name
                             if not p_abs.is_file():
-                                p_abs = _get_ws_root() / saved_path
+                                p_abs = (await asyncio.to_thread(_get_ws_root)) / saved_path
                             if p_abs.is_file():
                                 chars = p_abs.stat().st_size
                         except Exception:
@@ -603,7 +603,8 @@ async def run_research_pipeline(
             json.dumps(acquire_meta, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
-        log.append(f"Wrote `{_rel(meta_path)}`")
+        meta_rel = await asyncio.to_thread(_rel, meta_path)
+        log.append(f"Wrote `{meta_rel}`")
     except Exception as exc:
         log.append(f"sources.json write failed: {exc}")
 
@@ -635,7 +636,7 @@ async def run_research_pipeline(
             dpath.write_text(
                 dig if not dig.startswith("Error:") else dig, encoding="utf-8"
             )
-            drel = _rel(dpath)
+            drel = await asyncio.to_thread(_rel, dpath)
             log.append(f"Digest `{p}` → `{drel}`")
             return drel
         except Exception as exc:
@@ -678,7 +679,8 @@ async def run_research_pipeline(
         write_claims_json(claims_path, all_claims)
         claims_md = claims_to_markdown(all_claims)
         (out_dir / "claims.md").write_text(claims_md, encoding="utf-8")
-        log.append(f"Evidence claims: {len(all_claims)} → `{_rel(claims_path)}`")
+        claims_rel = await asyncio.to_thread(_rel, claims_path)
+        log.append(f"Evidence claims: {len(all_claims)} → `{claims_rel}`")
     except Exception as exc:
         claims_md = ""
         log.append(f"claims extract failed: {exc}")
@@ -692,7 +694,7 @@ async def run_research_pipeline(
     )
     synth_paths = digests
     if (out_dir / "claims.md").is_file():
-        synth_paths = digests + [_rel(out_dir / "claims.md")]
+        synth_paths = digests + [(await asyncio.to_thread(_rel, out_dir / "claims.md"))]
     synthesis = await synthesize_from_digests(
         synth_paths,
         question=topic,
@@ -789,7 +791,7 @@ async def run_research_pipeline(
             except Exception:
                 logger.warning("[research] could not save the claims files in %s", out_dir, exc_info=True)
             synth_paths = digests + (
-                [_rel(out_dir / "claims.md")] if (out_dir / "claims.md").is_file() else []
+                [(await asyncio.to_thread(_rel, out_dir / "claims.md"))] if (out_dir / "claims.md").is_file() else []
             )
             await _emit(progress_cb, "reduce", "Re-synthesizing after gap fill…")
             synthesis = await synthesize_from_digests(
@@ -820,7 +822,7 @@ async def run_research_pipeline(
     )
     report_path = out_dir / "report.md"
     report_path.write_text(report, encoding="utf-8")
-    report_rel = _rel(report_path)
+    report_rel = await asyncio.to_thread(_rel, report_path)
 
     # Structural rubric (R0)
     rubric_dict: dict[str, Any] = {}
@@ -844,7 +846,8 @@ async def run_research_pipeline(
             log.append(f"DOCX: `{docx_rel}`")
 
     paper_id = out_dir.name
-    _register_paper(
+    await asyncio.to_thread(
+        _register_paper,
         {
             "id": paper_id,
             "topic": topic,
@@ -859,7 +862,7 @@ async def run_research_pipeline(
             "created_at": datetime.now(UTC).isoformat(),
             "elapsed_seconds": round(elapsed, 1),
             "kind": "research_paper",
-        }
+        },
     )
 
     await _emit(progress_cb, "done", f"Report ready: {report_rel}")

@@ -226,6 +226,26 @@ async def test_send_file(places, tools, monkeypatch):
     assert Path(sent["file_path"]) == (ws / "notes.txt").resolve()
 
 
+async def test_the_sql_tools(places):
+    """``sqlite_query(db_path="data.db")`` opened the server CWD's file."""
+    import sqlite3
+
+    from kazma_skills.native.database_client.tools import inspect_db_schema, sqlite_query
+
+    ws, cwd = places
+    for folder, table in ((ws, "workspace"), (cwd, "server_cwd")):
+        conn = sqlite3.connect(folder / "data.db")
+        conn.execute(f"CREATE TABLE {table} (who TEXT)")
+        conn.execute(f"INSERT INTO {table} VALUES ('{table}')")
+        conn.commit()
+        conn.close()
+    async with workspace_path_scope(ws):
+        rows = await sqlite_query("SELECT who FROM workspace", db_path="data.db")
+        schema = await inspect_db_schema("data.db")
+    assert '"workspace"' in rows, rows
+    assert "workspace" in schema and "server_cwd" not in schema, schema
+
+
 async def test_the_skill_tools(places):
     ws, _cwd = places
     from kazma_skills.native.document_platform.tools import _resolve_workspace_file
@@ -402,12 +422,12 @@ _TOOL_DIRS = (
 _PATHY = re.compile(
     r"^(path|paths|file|files|filename|filepath|dir|dirname|directory|folder|root|"
     r"src|dst|source|dest|destination|target|cwd|workdir|workspace)$"
-    r"|_(path|paths|file|dir|directory|folder|root)$"
+    r"|_(path|paths|file|dir|directory|folder|root|uri)$"
 )
 _OPENERS = {
     "Path", "PurePath", "pathlib.Path", "open", "io.open", "os.path.abspath",
     "os.path.realpath", "os.path.exists", "os.path.isfile", "os.path.isdir",
-    "os.listdir", "os.scandir", "os.walk",
+    "os.listdir", "os.scandir", "os.walk", "sqlite3.connect",
 }
 # Functions that take a path the MODEL never wrote, each with the reason.
 _NOT_TOOL_INPUT = {
@@ -481,6 +501,8 @@ def test_the_gate_sees_a_raw_path():
     assert _raw_path_uses(old) == [("file_read", 2, "path")]
     assert _raw_path_uses(new) == []
     assert _raw_path_uses("def f(image_path):\n    open(image_path)\n") == [("f", 2, "image_path")]
+    # database_client named its path ``db_uri`` and opened it with sqlite3.connect.
+    assert _raw_path_uses("async def q(db_uri):\n    sqlite3.connect(db_uri)\n") == [("q", 2, "db_uri")]
 
 
 # ── the CLI's explicit workspace ─────────────────────────────────────────

@@ -1214,7 +1214,7 @@ async def read_url_to_file(url: str, path: str | None = None) -> str:
     if full.startswith("Error:"):
         return full
 
-    target = _safe_workspace_path(path, url)
+    target = await asyncio.to_thread(_safe_workspace_path, path, url)
     if isinstance(target, str):
         return target
 
@@ -1237,7 +1237,7 @@ async def read_url_to_file(url: str, path: str | None = None) -> str:
     target.write_text(header + full, encoding="utf-8")
     rel = target.name
     try:
-        rel = str(target.relative_to(_workspace_root()))
+        rel = str(target.relative_to((await asyncio.to_thread(_workspace_root))))
     except ValueError:
         pass
 
@@ -1294,7 +1294,7 @@ async def list_research_chunks(
         path: Workspace-relative path (usually under research/).
         chunk_size: Characters per chunk (default 4000).
     """
-    loaded = _load_research_body(path)
+    loaded = await asyncio.to_thread(_load_research_body, path)
     if isinstance(loaded, str):
         return loaded
     body, _p = loaded
@@ -1345,7 +1345,7 @@ async def read_research_chunk(
         chunk_index: 0-based chunk index.
         chunk_size: Characters per chunk.
     """
-    loaded = _load_research_body(path)
+    loaded = await asyncio.to_thread(_load_research_body, path)
     if isinstance(loaded, str):
         return loaded
     body, _p = loaded
@@ -1382,7 +1382,7 @@ async def summarize_research_file(
     For each chunk: first heading-like line (if any) + first ~200 chars.
     Use this to plan which chunks to ``read_research_chunk`` in full.
     """
-    loaded = _load_research_body(path)
+    loaded = await asyncio.to_thread(_load_research_body, path)
     if isinstance(loaded, str):
         return loaded
     body, _p = loaded
@@ -1445,7 +1445,7 @@ async def digest_research_file(
     This is extractive (no nested LLM). For deeper synthesis the agent still
     reasons over the digest + selective ``read_research_chunk`` calls.
     """
-    loaded = _load_research_body(path)
+    loaded = await asyncio.to_thread(_load_research_body, path)
     if isinstance(loaded, str):
         return loaded
     body, _p = loaded

@@ -7,6 +7,7 @@ within this group is preserved.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC
 from pathlib import Path
@@ -48,8 +49,6 @@ def register_system_tools(registry: Any) -> None:
     )
     async def mcp_test_server(name: str) -> str:
         try:
-            import asyncio
-
             from kazma_core.mcp.manager import AsyncMCPManager
             from kazma_core.mcp_servers_store import list_mcp_servers
 
@@ -253,7 +252,6 @@ def register_system_tools(registry: Any) -> None:
         category="system",
     )
     async def shell_exec(command: str, timeout: int = 30) -> str:
-        import asyncio
         import shlex
         from kazma_core.safety.post_hitl import host_shell_allowed
 
@@ -404,7 +402,7 @@ def register_system_tools(registry: Any) -> None:
         try:
             # Restrict context strictly to active workspace
             from kazma_core.tools.file_write import _get_workspace
-            cwd = _get_workspace()
+            cwd = await asyncio.to_thread(_get_workspace)
             cwd_s = str(cwd)
 
             # Resolve binary under restricted PATH (post-HITL hardening).

@@ -17,10 +17,9 @@ from kazma_core.workspace.binding import (
     allow_absolute_paths as _allow_absolute_paths,
     configure_workspace,
     resolve_active_root,
-    resolve_tool_path,
 )
 from kazma_core.tools.text_newlines import existing_newline, in_newline_style
-from kazma_core.workspace.path_policy import check_path_access, denied_message
+from kazma_core.workspace.path_policy import check_path_access, denied_message, resolve_and_check
 
 __all__ = ["configure_workspace", "file_write"]
 
@@ -91,10 +90,9 @@ async def file_write(path: str, content: str) -> str:
     if not path or not path.strip():
         return "Error: No path provided."
 
-    p = resolve_tool_path(path)
-
     # ── Safety check (workspace + path grants + allow_absolute) ───
-    access = check_path_access(p, "write")
+    # Store reads: resolved and checked in a worker thread.
+    p, access = await resolve_and_check(path, "write")
     if not access.allowed:
         return denied_message(path, "write", result=access)
 
@@ -127,7 +125,7 @@ async def file_write(path: str, content: str) -> str:
         # destination; if it escaped (race won between lstat and open),
         # remove the written file and fail loudly.
         try:
-            post = check_path_access(p.resolve(), "write")
+            post = await asyncio.to_thread(lambda: check_path_access(p.resolve(), "write"))
         except Exception:
             post = None
         if post is not None and not post.allowed:
@@ -150,7 +148,8 @@ async def file_write(path: str, content: str) -> str:
     try:
         from kazma_core.code_index.indexer import notify_file_changed
 
-        notify_file_changed(p)
+        # Re-indexes the file (settings, the workspace, SQLite): off the loop.
+        await asyncio.to_thread(notify_file_changed, p)
     except Exception:
         pass
     return f"Wrote {line_count} lines, {byte_count} bytes to {path}"

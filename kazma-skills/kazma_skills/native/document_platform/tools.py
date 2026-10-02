@@ -9,6 +9,7 @@ no arbitrary server paths.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -85,9 +86,7 @@ async def document_import(path: str, title: str = "") -> str:
     files inside the active workspace are accepted.
     """
 
-    import asyncio
-
-    resolved, error = _resolve_workspace_file(path)
+    resolved, error = await asyncio.to_thread(_resolve_workspace_file, path)
     if error:
         return error
     assert resolved is not None
@@ -131,8 +130,6 @@ async def document_status(document_id: str = "", job_id: str = "") -> str:
     returns that job's stage/attempts.
     """
 
-    import asyncio
-
     tenant, _ws, actor = _scope()
     try:
         svc = await _ensure_service()
@@ -163,8 +160,6 @@ async def document_read(
     max_chars: int = _MAX_OUTPUT_CHARS,
 ) -> str:
     """Read paged, fenced content of a processed document by opaque ID."""
-
-    import asyncio
 
     tenant, _ws, _actor = _scope()
     try:
@@ -197,8 +192,6 @@ async def document_read(
 
 async def document_index(document_id: str, library_id: str) -> str:
     """Publish a processed document's current version to a Knowledge library."""
-
-    import asyncio
 
     if not library_id.strip():
         return "Error: library_id is required"
@@ -251,8 +244,6 @@ async def document_search(library_id: str, query: str, top_k: int = 5) -> str:
 
 async def document_cancel(job_id: str) -> str:
     """Request cooperative cancellation of a running/pending document job."""
-
-    import asyncio
 
     if not job_id.strip():
         return "Error: job_id is required"
@@ -351,8 +342,6 @@ def _format_artifact(action: str, data: dict[str, Any]) -> str:
 
 
 async def _wait_terminal(svc, tenant: str, job_id: str) -> str:
-    import asyncio
-
     loop = asyncio.get_running_loop()
     deadline = loop.time() + _INGEST_WAIT_SECONDS
     state = "unknown"

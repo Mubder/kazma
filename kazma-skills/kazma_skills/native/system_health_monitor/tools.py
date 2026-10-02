@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import logging
@@ -20,8 +21,6 @@ async def get_system_stats() -> str:
         A formatted markdown string presenting the system metrics.
     """
     try:
-        import asyncio
-
         # CPU Info — interval=0.1 sleeps the calling thread; never do that
         # on the SSE event loop (audit 2026-09-17).
         cpu_count = psutil.cpu_count(logical=True)
@@ -39,7 +38,7 @@ async def get_system_stats() -> str:
         ram_percent = vm.percent
 
         # Disk Info
-        workspace = _get_workspace()
+        workspace = await asyncio.to_thread(_get_workspace)
         disk = psutil.disk_usage(str(workspace))
         disk_total = disk.total / (1024**3)  # GB
         disk_used = disk.used / (1024**3)  # GB
@@ -213,6 +212,4 @@ async def read_system_logs(lines: int = 100) -> str:
         lines = 200
 
     # The file open + backward tail + sanitize is blocking I/O — off the loop.
-    import asyncio
-
     return await asyncio.to_thread(_read_system_logs_sync, lines)

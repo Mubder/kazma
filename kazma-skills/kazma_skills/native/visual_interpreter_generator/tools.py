@@ -6,8 +6,7 @@ import logging
 
 from kazma_core.tools.vision_analyze import analyze_image
 from kazma_core.tools.image_gen import generate_image
-from kazma_core.agent.tool_registry import _workspace_scope_error
-from kazma_core.workspace.binding import resolve_tool_path
+from kazma_core.agent.tool_scope import resolve_in_scope
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +22,7 @@ async def analyze_local_image(path: str, query: str = "Describe this image in de
         Structured textual description of the image content.
     """
     if not path.startswith(("http://", "https://")):
-        p = resolve_tool_path(path)
-        scope_err = _workspace_scope_error(p, path, "reads")
+        p, scope_err = await resolve_in_scope(path, "reads")
         if scope_err:
             return scope_err
 

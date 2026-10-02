@@ -871,7 +871,7 @@ class AsyncMCPManager:
             return {"content": "uri is required", "is_error": True}
         path_arg = _resource_path_from_uri(target)
         if path_arg:
-            denial = _gate_mcp_path_access("resources_read", {"path": path_arg})
+            denial = await asyncio.to_thread(_gate_mcp_path_access, "resources_read", {"path": path_arg})
             if denial is not None:
                 return denial
         try:
@@ -1148,7 +1148,7 @@ class AsyncMCPManager:
         # Gate filesystem path access BEFORE dispatching to the MCP server.
         # Closes the hole where MCP filesystem tools bypassed the path-grant
         # system (their own allowlist was the only gate).
-        denial = _gate_mcp_path_access(raw_tool_name, arguments or {})
+        denial = await asyncio.to_thread(_gate_mcp_path_access, raw_tool_name, arguments or {})
         if denial is not None:
             return denial
 

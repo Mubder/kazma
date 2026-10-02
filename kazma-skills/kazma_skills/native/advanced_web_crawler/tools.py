@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import logging
 
-from kazma_core.agent.tool_registry import _workspace_scope_error
+from kazma_core.agent.tool_scope import resolve_in_scope
 from kazma_core.documents.errors import DocumentParseError
 from kazma_core.documents.service import DocumentService
 from kazma_core.tools.read_url import read_url
 from kazma_core.tools.web_search import web_search
-from kazma_core.workspace.binding import resolve_tool_path
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +74,7 @@ async def parse_document(
     Returns:
         Organized textual representation of the document contents.
     """
-    p = resolve_tool_path(path)
-    scope_err = _workspace_scope_error(p, path, "reads")
+    p, scope_err = await resolve_in_scope(path, "reads")
     if scope_err:
         return scope_err
 

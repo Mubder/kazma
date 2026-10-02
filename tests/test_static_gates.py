@@ -956,7 +956,9 @@ _LOOP_STALL_HELPERS = frozenset({
     # directly, and the GitHub helpers -- a token lookup can mint a GitHub
     # App token over the network.
     "restic_available", "ensure_password", "repo_paths",
-    "resolve_active_root", "get_active_cwd", "resolve_repo",
+    "resolve_active_root", "get_active_cwd", "resolve_repo", "resolve_tool_path",
+    "check_path_access", "_workspace_scope_error", "_get_workspace",
+    "notify_file_changed",
     "get_github_token", "is_oauth_connected", "store_oauth_token", "clear_oauth_token",
     # Chat apps' /cost and /context (2026-10-01): the per-call ledger's
     # totals for a chat (SQLite), and the context report -- the active
@@ -1005,6 +1007,45 @@ _LOOP_STALL_HELPERS = frozenset({
 })
 
 
+def _called_name(call: ast.Call, aliases: dict[str, str]) -> str:
+    fn = call.func
+    name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+    return aliases.get(name, name)
+
+
+def _module_stall_wrappers(tree: ast.AST, aliases: dict[str, str]) -> set[str]:
+    """Private sync functions of the module that reach a listed helper.
+
+    The list names functions; a wrapper under another name is invisible to
+    it. document_processor's ``_resolve_input`` (the workspace lookup and the
+    access check) was called on the loop by eight async tools until
+    2026-10-02. Followed inside the module to a fixed point, private
+    (``_``) module-level functions only, so a common public name elsewhere is
+    never taken for one.
+    """
+    funcs = {
+        node.name: node
+        for node in getattr(tree, "body", [])
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("_")
+    }
+    stalls: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for name, fn in funcs.items():
+            if name in stalls:
+                continue
+            if any(
+                isinstance(node, ast.Call)
+                and (_called_name(node, aliases) in _LOOP_STALL_HELPERS
+                     or _called_name(node, aliases) in stalls)
+                for node in ast.walk(fn)
+            ):
+                stalls.add(name)
+                changed = True
+    return stalls
+
+
 def _loop_stall_helper_calls(tree: ast.AST) -> list[tuple[int, str]]:
     found: list[tuple[int, str]] = []
     # `from ... import recall as v2_recall` calls the helper by another name:
@@ -1017,6 +1058,7 @@ def _loop_stall_helper_calls(tree: ast.AST) -> list[tuple[int, str]]:
         for a in node.names
         if a.asname and a.name in _LOOP_STALL_HELPERS
     }
+    helpers = _LOOP_STALL_HELPERS | _module_stall_wrappers(tree, aliases)
 
     def visit(node: ast.AST, in_async: bool) -> None:
         for child in ast.iter_child_nodes(node):
@@ -1026,10 +1068,8 @@ def _loop_stall_helper_calls(tree: ast.AST) -> list[tuple[int, str]]:
                 visit(child, False)  # what to_thread runs
             else:
                 if in_async and isinstance(child, ast.Call):
-                    fn = child.func
-                    name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
-                    name = aliases.get(name, name)
-                    if name in _LOOP_STALL_HELPERS:
+                    name = _called_name(child, aliases)
+                    if name in helpers:
                         found.append((child.lineno, name))
                 visit(child, in_async)
 
@@ -1076,6 +1116,29 @@ def test_loop_stall_gate_catches_the_watchdog_shape():
         "    return v2_recall(query)\n"
     )
     assert _loop_stall_helper_calls(ast.parse(aliased)) == [(3, "recall")]
+
+
+def test_loop_stall_gate_follows_a_private_wrapper():
+    """Negative control: document_processor's ``_resolve_input`` shape.
+
+    A private sync function reaching a listed helper, through another private
+    one, is a helper itself; a public name is never inferred (it could be any
+    other module's function of that name).
+    """
+    bad = (
+        "def _resolve_input(path):\n"
+        "    p = resolve_tool_path(path)\n"
+        "    return p, _workspace_scope_error(p, path, 'reads')\n"
+        "def _outer(path):\n"
+        "    return _resolve_input(path)\n"
+        "async def read_document(path):\n"
+        "    return _outer(path)\n"
+    )
+    good = bad.replace("    return _outer(path)\n", "    return await asyncio.to_thread(_outer, path)\n")
+    public = bad.replace("_outer", "outer")
+    assert _loop_stall_helper_calls(ast.parse(bad)) == [(7, "_outer")]
+    assert _loop_stall_helper_calls(ast.parse(good)) == []
+    assert _loop_stall_helper_calls(ast.parse(public)) == []
 
 
 # ── 2f'''. The settings store is never used on the event loop (2026-09-30) ──

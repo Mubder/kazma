@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import replace
 from pathlib import Path
@@ -96,7 +97,7 @@ async def read_document(
 ) -> str:
     """Read a supported document through the isolated parser worker."""
 
-    source, error = _resolve_input(path)
+    source, error = await asyncio.to_thread(_resolve_input, path)
     if error:
         return error
     assert source is not None
@@ -128,7 +129,7 @@ async def ocr_document(
 ) -> str:
     """OCR a document through the isolated parser worker."""
 
-    source, error = _resolve_input(path, "document OCR reads")
+    source, error = await asyncio.to_thread(_resolve_input, path, "document OCR reads")
     if error:
         return error
     assert source is not None
@@ -161,7 +162,7 @@ async def pdf_merge(file_paths: list[str], output_name: str = "merged") -> str:
 
     sources: list[Path] = []
     for path in file_paths:
-        source, error = _resolve_input(path, "PDF merge reads")
+        source, error = await asyncio.to_thread(_resolve_input, path, "PDF merge reads")
         if error:
             return error
         assert source is not None
@@ -184,7 +185,7 @@ async def pdf_split(
 ) -> str:
     """Extract a bounded PDF page range through the isolated mutation worker."""
 
-    source, error = _resolve_input(file_path, "PDF split reads")
+    source, error = await asyncio.to_thread(_resolve_input, file_path, "PDF split reads")
     if error:
         return error
     assert source is not None
@@ -203,7 +204,7 @@ async def pdf_split(
 async def pdf_info(file_path: str) -> str:
     """Inspect PDF metadata in the isolated mutation worker."""
 
-    source, error = _resolve_input(file_path)
+    source, error = await asyncio.to_thread(_resolve_input, file_path)
     if error:
         return error
     assert source is not None
@@ -231,7 +232,7 @@ async def convert_document(
 ) -> str:
     """Convert a document through an isolated, runtime-probed renderer."""
 
-    source, error = _resolve_input(file_path, "document conversion reads")
+    source, error = await asyncio.to_thread(_resolve_input, file_path, "document conversion reads")
     if error:
         return error
     assert source is not None
@@ -251,7 +252,7 @@ async def pdf_fill_form(
 ) -> str:
     """Fill validated AcroForm fields through the isolated mutation worker."""
 
-    source, error = _resolve_input(file_path, "PDF form reads")
+    source, error = await asyncio.to_thread(_resolve_input, file_path, "PDF form reads")
     if error:
         return error
     assert source is not None
@@ -271,7 +272,7 @@ async def pdf_redact(
 ) -> str:
     """Physically redact a PDF and fail closed unless every verification passes."""
 
-    source, error = _resolve_input(file_path, "PDF redaction reads")
+    source, error = await asyncio.to_thread(_resolve_input, file_path, "PDF redaction reads")
     if error:
         return error
     assert source is not None

@@ -473,7 +473,7 @@ async def _run_local_subprocess(code_file: Path, tmp_dir: str, timeout: int) -> 
     }
 
     try:
-        ws = _fw._get_workspace()
+        ws = await asyncio.to_thread(_fw._get_workspace)
         exec_cwd = str(ws) if ws and ws.exists() else tmp_dir
     except Exception:
         exec_cwd = tmp_dir
@@ -560,7 +560,7 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
     mount_args = ["--mount", f"type=bind,src={tmp_dir},dst=/work,ro"]
     ws_mount_target = ""
     try:
-        ws = _fw._get_workspace()
+        ws = await asyncio.to_thread(_fw._get_workspace)
         if ws and ws.exists():
             ws_path = str(ws.resolve())
             # POSIX hosts mount the workspace at its own path so absolute paths

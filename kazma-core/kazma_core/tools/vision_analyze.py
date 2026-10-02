@@ -14,6 +14,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import logging
@@ -320,6 +321,29 @@ def _get_llm_provider():
 # ── Main entry point ───────────────────────────────────────────────────
 
 
+def _load_checked_local_image(image_path: str) -> tuple[bytes, str] | str:
+    """The image's bytes and type, or the refusal to answer with.
+
+    Honors the same path policy as file_read and file_write, so an
+    operator-granted extra root or a session path grant applies to image
+    analysis too (it checked only the raw workspace and the absolute-path
+    flag once, so a granted path was refused here). A check that fails
+    refuses (fail-closed). Store reads and a file read: run in a thread.
+    """
+    from kazma_core.workspace.binding import resolve_tool_path
+    from kazma_core.workspace.path_policy import check_path_access, denied_message
+
+    path = resolve_tool_path(image_path)
+    try:
+        access = check_path_access(str(path), "read")
+    except Exception:
+        logger.warning("[analyze_image] path check failed for %s", path, exc_info=True)
+        return "Safety: the path check failed — image access denied."
+    if not access.allowed:
+        return denied_message(str(path), "read", result=access)
+    return _load_local_image(path)
+
+
 async def analyze_image(
     image_path: str,
     question: str | None = None,
@@ -347,25 +371,12 @@ async def analyze_image(
         if is_url:
             image_bytes, mime = await _download_image(image_path)
         else:
-            from kazma_core.workspace.binding import resolve_tool_path
-
-            path = resolve_tool_path(image_path)
-            # Honor the same path-policy SoT as file_read/file_write so an
-            # operator-granted extra root or a session path grant applies to
-            # image analysis too. Previously this checked only the raw
-            # workspace + allow_absolute flag, so a granted path was rejected
-            # here while file_read accepted it (inconsistent UX) (audit finding).
-            try:
-                from kazma_core.workspace.path_policy import check_path_access, denied_message
-
-                _access = check_path_access(str(path), "read")
-                if not _access.allowed:
-                    return denied_message(str(path), "read", result=_access)
-            except Exception:
-                # If the workspace module is unavailable, deny by default (fail-closed)
-                return "Safety: workspace module unavailable — image access denied."
-            
-            image_bytes, mime = _load_local_image(path)
+            # The workspace lookup, the path policy and the file read: in a
+            # worker thread (they ran on the event loop until 2026-10-02).
+            loaded = await asyncio.to_thread(_load_checked_local_image, image_path)
+            if isinstance(loaded, str):
+                return loaded
+            image_bytes, mime = loaded
     except FileNotFoundError as exc:
         return f"Error: {exc}"
     except ValueError as exc:

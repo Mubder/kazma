@@ -192,6 +192,23 @@ def _content_digest(p: Path, size: int) -> bytes:
     return h.digest()
 
 
+def _resolve_for_read(path: str) -> tuple[Path, str | None]:
+    """Where *path* points, and the refusal to answer with (None: allowed).
+
+    The workspace, the grants and the skill folders are read here (stores):
+    ``file_read`` runs this in a worker thread.
+    """
+    from kazma_core.agent.tool_scope import _is_under_agent_skill_dir
+    from kazma_core.workspace.path_policy import check_path_access, denied_message
+
+    p = resolve_tool_path(path)
+    access = check_path_access(p, "read")
+    # Agent Skills resources (SKILL.md scripts/references) are readable too.
+    if access.allowed or _is_under_agent_skill_dir(p):
+        return p, None
+    return p, denied_message(path, "read", result=access)
+
+
 async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
     """Read a file and return its contents with line numbers.
 
@@ -206,25 +223,13 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
     if not path or not path.strip():
         return "Error: No path provided."
 
-    p = resolve_tool_path(path)
-
     # ── Safety check FIRST (workspace + path grants + allow_absolute) ──
     # Reordered (M31/H16): a cached read must never bypass a grant
     # revocation — validate access BEFORE serving per-turn dedup content.
-    from kazma_core.workspace.path_policy import check_path_access, denied_message
-
-    access = check_path_access(p, "read")
-    if not access.allowed:
-        # Allow Agent Skills resource reads (SKILL.md scripts/references)
-        skill_ok = False
-        try:
-            from kazma_core.agent.tool_registry import _is_under_agent_skill_dir
-
-            skill_ok = _is_under_agent_skill_dir(p)
-        except Exception:
-            skill_ok = False
-        if not skill_ok:
-            return denied_message(path, "read", result=access)
+    # The workspace lookup and the check read stores: in a worker thread.
+    p, refusal = await asyncio.to_thread(_resolve_for_read, path)
+    if refusal:
+        return refusal
 
     # ── Per-turn dedup: same path+offset+limit already read this turn ──
     cache_key = (str(p), int(offset or 0), int(limit or 500))
@@ -291,8 +296,6 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
                 f"Error: Parser for {suffix} is unavailable: "
                 f"{capability.reason or 'runtime health probe failed'}"
             )
-
-        import asyncio
 
         limit_n = max(int(limit or 500), 1)
         offset_n = int(offset or 0)

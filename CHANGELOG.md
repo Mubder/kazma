@@ -1,5 +1,52 @@
 # CHANGELOG
 
+## The agent's file tools no longer hold up every chat while they look up the workspace (2026-10-02)
+
+- **Path checks run in the background.** Before reading or writing, a file
+  tool looks up the active workspace and the folders you have granted. Those
+  are database reads, and every file tool made them on the server's event
+  loop, which serves every chat and the health probe. A slow database (on
+  Postgres, a lost connection waits up to five seconds) froze them all. So
+  did a dozen other tools that read the workspace the same way, the research
+  pipeline, the MCP path check and the gateway's sync of each chat-app turn
+  into the web sidebar, four times per turn. All of them now run in a worker
+  thread.
+- **The check finds wrappers.** The test that keeps these lookups off the
+  event loop matched function names, so a helper that called one under
+  another name went unseen. It now follows a module's own private helpers,
+  which is how it found the remaining 39 calls.
+- **SQL tools read the project's database.** `sqlite_query` and
+  `inspect_db_schema` opened a relative path such as `app.db` in the server's
+  working directory, not in the active workspace like every other file tool.
+  They resolve it the same way now.
+- **Gates:** `tests/test_static_gates.py`, `tests/test_tool_paths.py` and
+  `tests/test_unbound_local_imports.py`.
+
+## A message Kazma could not send is no longer reported as sent (2026-10-02)
+
+- **Reminders, files and notices say when they did not arrive.** The chat-app
+  send path answered "sent" whatever Telegram, Discord or Slack said. A
+  reminder a platform refused was logged as delivered. A refused notice about
+  a scheduled X post never tried your other chat apps. The `send_file` tool
+  told the agent "File sent" over an error, and generated documents were
+  logged "✓ Delivered". Each of these now reads the platform's answer: a
+  refused reminder is logged as a failed delivery, the post notice falls
+  back to every connected chat app, and the agent is told the file was not
+  sent.
+- **`send_file` works again from reminders and the command line.** With no
+  chat bound to the turn, the tool looks up your Telegram chat. A Python
+  scoping mistake made that lookup fail on every such call since 2026-09-30,
+  and the tool answered "No active Telegram/chat channel configured". The
+  same kind of mistake made the model-discovery guard raise an error,
+  instead of refusing, for a malformed provider URL. A new check finds this
+  mistake anywhere in the code.
+- **Files are read in the background.** Sending a file read it (up to 50 MB)
+  on the server's event loop, which serves every chat. Attachments are now
+  read in a worker thread, and an attachment that names a path instead of
+  carrying its contents is no longer read.
+- **Gates:** `tests/test_send_results_read.py` and
+  `tests/test_unbound_local_imports.py`.
+
 ## Every list of agent skills shows what activation will do with each (2026-10-02)
 
 - **A refused skill is no longer offered as verified.** An installed Agent

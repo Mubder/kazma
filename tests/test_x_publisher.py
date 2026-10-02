@@ -322,10 +322,12 @@ def test_every_fire_outcome_is_announced(monkeypatch) -> None:
 
     async def _send(target, text, backend=None):
         sent.append((target, backend))
+        return f"sent:{target}"  # the platform took it (send_message's answer)
 
     class _Adapter:
         async def send(self, msg):
             fanned.append({"content": msg.content, "level": msg.level})
+            return True  # BusAdapter.send: the platform took it
 
     class _Bus:
         adapter = _Adapter()

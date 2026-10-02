@@ -307,7 +307,7 @@ async def _persist_hitl_pause(
     approve with no session) lost the pre-approval notes. Does not put
     ``chat_id`` into graph state (AGENTS.md §2).
     """
-    _sync_platform_session_to_web(thread_id, platform, metadata, messages)
+    await asyncio.to_thread(_sync_platform_session_to_web, thread_id, platform, metadata, messages)
     try:
         from kazma_ui.turn_runtime import close_turn
 
@@ -464,12 +464,58 @@ async def _majlis_fast_path_reply(text: str, *, sender_id: str = "") -> str | No
         return None
 
 
+def _outbound_attachments(text: str, platform: str, raw_attachments: Any) -> list[Attachment]:
+    """The files a send carries: those handed in, and for Telegram the files
+    its text names under the auto-attach roots. Reads files: run in a thread.
+
+    An attachment carries its bytes (``send_file_message`` resolves a path
+    with the tool's own path rules). A ``path`` entry used to be read here
+    with no check at all; nothing passed one.
+    """
+    attachments: list[Attachment] = []
+    if raw_attachments and isinstance(raw_attachments, list):
+        for att in raw_attachments:
+            if not isinstance(att, dict):
+                continue
+            if not att.get("data"):
+                logger.warning("[gateway-send] attachment %r has no data; not sent", att.get("filename"))
+                continue
+            attachments.append(Attachment(
+                kind=att.get("kind", "file"),
+                filename=att.get("filename", "file"),
+                mime=att.get("mime", "application/octet-stream"),
+                data=att["data"],
+            ))
+    if platform == "telegram":
+        from kazma_gateway.agent_handler.attachments import find_auto_attach_paths
+
+        for fpath in find_auto_attach_paths(text):
+            if any(a.filename == fpath.name for a in attachments):
+                continue
+            try:
+                attachments.append(Attachment(
+                    kind="document",
+                    filename=fpath.name,
+                    mime="application/pdf" if fpath.suffix.lower() == ".pdf" else "application/octet-stream",
+                    data=fpath.read_bytes(),
+                ))
+            except OSError as exc:
+                logger.warning("[telegram] auto-attach file failed: %s", exc)
+    return attachments
+
+
 def make_gateway_send_handler(manager: Any, store: Any):
     """send_message backend: parse platform: off target_id, GatewayManager.send.
 
     Used for telegram, discord, and slack so cron delivery_target fires
     on every configured platform (audit H-2). SessionStore is keyed by
     thread ids (gw-…), never by platform-prefixed target ids.
+
+    Answers ``sent:<target>`` when the platform took the message and an
+    ``Error: ...`` when it did not (``send_message.send_failed`` reads it).
+    It answered "sent" whatever ``GatewayManager.send`` said, so a reminder a
+    platform refused, and the agent's own sends, were reported delivered
+    (2026-10-02).
     """
 
     async def _handler(target_id: str, text: str, **kwargs: Any) -> str:
@@ -497,49 +543,16 @@ def make_gateway_send_handler(manager: Any, store: Any):
         )
         if kwargs.get("reply_markup"):
             out_ctx["reply_markup"] = kwargs["reply_markup"]
-        raw_attachments = kwargs.get("attachments")
-        outbound_attachments: list[Attachment] = []
-        if raw_attachments and isinstance(raw_attachments, list):
-            for att in raw_attachments:
-                if isinstance(att, dict):
-                    if att.get("data"):
-                        outbound_attachments.append(Attachment(
-                            kind=att.get("kind", "file"),
-                            filename=att.get("filename", "file"),
-                            mime=att.get("mime", "application/octet-stream"),
-                            data=att["data"],
-                        ))
-                    elif att.get("path"):
-                        from pathlib import Path
-                        fpath = Path(att["path"]).expanduser().resolve()
-                        if fpath.exists() and fpath.is_file():
-                            outbound_attachments.append(Attachment(
-                                kind=att.get("kind", "document"),
-                                filename=fpath.name,
-                                mime=att.get("mime", "application/octet-stream"),
-                                data=fpath.read_bytes(),
-                            ))
-        if platform == "telegram":
-            from kazma_gateway.agent_handler.attachments import find_auto_attach_paths
-
-            for fpath in find_auto_attach_paths(text):
-                if any(a.filename == fpath.name for a in outbound_attachments):
-                    continue
-                try:
-                    outbound_attachments.append(Attachment(
-                        kind="document",
-                        filename=fpath.name,
-                        mime="application/pdf" if fpath.suffix.lower() == ".pdf" else "application/octet-stream",
-                        data=fpath.read_bytes(),
-                    ))
-                except Exception as exc:
-                    logger.warning("[telegram] auto-attach file failed: %s", exc)
+        outbound_attachments = await asyncio.to_thread(
+            _outbound_attachments, text, platform, kwargs.get("attachments"),
+        )
 
         outbound = OutboundMessage(
             target_id=target_id, text=out_text, context_metadata=out_ctx,
             attachments=outbound_attachments,
         )
-        await manager.send(outbound)
+        if not await manager.send(outbound):
+            return f"Error: {platform} did not take the message for {target_id}"
         return f"sent:{target_id}"
 
     return _handler
@@ -1660,7 +1673,8 @@ def create_graph_handler(
                 )
 
             # Sync turn start to Web UI so the session appears immediately in sidebar
-            _sync_platform_session_to_web(
+            await asyncio.to_thread(
+                _sync_platform_session_to_web,
                 thread_id,
                 msg.platform,
                 msg.context_metadata,
@@ -1913,7 +1927,8 @@ def create_graph_handler(
                         exc_info=True,
                     )
 
-                _sync_platform_session_to_web(
+                await asyncio.to_thread(
+                    _sync_platform_session_to_web,
                     thread_id,
                     msg.platform,
                     msg.context_metadata,
@@ -1988,7 +2003,8 @@ def create_graph_handler(
                             "role": "assistant",
                             "content": assistant_text,
                         })
-                    _sync_platform_session_to_web(
+                    await asyncio.to_thread(
+                        _sync_platform_session_to_web,
                         thread_id,
                         msg.platform,
                         msg.context_metadata,

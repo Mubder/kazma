@@ -314,7 +314,12 @@ workspace. Three new modules; understanding their interaction is essential.
   Repo, `file_read("README.md")` read the install's README. Gate:
   `tests/test_tool_paths.py` (every tool that builds a path from its own
   parameter, behavioural runs from a CWD holding a same-named decoy).
-  `file_delete` refuses the workspace root and its ancestors.
+  `file_delete` refuses the workspace root and its ancestors. The SQL tools
+  (`sqlite_query`, `execute_db_query`, `inspect_db_schema`) joined them on
+  2026-10-02 (`database_client._checked_sqlite_file`): their path parameter
+  is `db_uri`, which the gate's name pattern did not match, and they opened
+  it with `sqlite3.connect`, which was not on its list of openers; both are
+  now.
 - **File tools keep a file's own line endings**
   (`tools/text_newlines.py`): read exact, write `newline=""` in the file's
   existing style; a new file takes the platform default. Text mode turned
@@ -2959,6 +2964,18 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   request in the gate's table or fails. See §16's multi-tenant note.
 - **Every product module is reached** (`tests/test_orphan_modules.py`); a
   module only its own tests import fails, unless allowlisted with a reason.
+- **No function reads a name it imported on another path**
+  (`tests/test_unbound_local_imports.py`, 2026-10-02). Any import in a
+  function makes the name local to the whole function, so a read on a path
+  that skipped the import raises UnboundLocalError; ruff's undefined-name
+  check cannot see it. `send_file` imported `asyncio` in its web branch and
+  called it on every other path (two days of "No active chat channel" from
+  reminders and the CLI, hidden by a DEBUG line), and `discover_models`
+  named `SSRFError` in an `except` the import had not reached. The gate is
+  definite-assignment over every function in the packages and `scripts/`; an
+  import of Kazma's own modules or the standard library counts as unable to
+  raise, a third-party one can. Import at the top of the function (or the
+  module), never inside the branch that happens to need it first.
 - **A SQLite connection kept across calls cannot sit on the write lock**
   (`tests/test_sqlite_kept_connections.py`, 2026-09-27). In Python's default
   mode every INSERT/UPDATE/DELETE opens a transaction -- also one that changes
@@ -3024,6 +3041,24 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   behind `/mcp` and `/api/mcp/servers` (`get_mcp_servers`, `oauth_status`).
   No stall dump had caught them: a normal write takes milliseconds; an
   outage is when they stall.
+  Sixth (2026-10-02): the agent's file tools. `resolve_tool_path`,
+  `check_path_access` and `_workspace_scope_error` read the workspace store,
+  the durable roots and the session grants, and every async file tool ran
+  them on the loop; so did 14 tools through `file_write._get_workspace` (an
+  alias of `resolve_active_root` the list never named), `file_write`'s
+  re-index (`notify_file_changed`: settings, the workspace, SQLite, a parse),
+  and `request_path_access`'s settings writes. Async tools take
+  `path_policy.resolve_and_check` or `tool_scope.resolve_in_scope` (one
+  thread for the lookup and the check); a tool whose body never awaited
+  (`file_apply_patch`, `request_path_access`) runs the body in a thread.
+  **The gate follows private wrappers now**: a private module-level sync
+  function that reaches a listed helper, directly or through another such
+  function in the module, counts as one (`_module_stall_wrappers`, public
+  names never inferred). That found 39 more calls through 16 wrappers: the
+  research pipeline's path helpers and its ConfigStore write, `read_url`'s
+  research loaders, the MCP manager's path gate, the gateway's web-session
+  sync (four per turn, chat-store writes), the document tools'
+  `_resolve_input` (8), `x_test`'s status payload.
 - **The settings store is never used on the loop** (2026-09-30,
   `test_the_settings_store_is_not_used_on_the_loop`, negative control beside
   it). On Postgres a settings read that misses the cache, and every write, is a
@@ -4136,6 +4171,36 @@ no Python update ever arrived.
   and `tests/test_dependency_scanner.py`. That file checks that no reviewed
   advisory's `reachable_if` matches product code, with planted uses as the
   controls, and that an unreviewed advisory fails the check.
+
+### 51. A send says whether it was delivered (`kazma_core/tools/send_message.py`, 2026-10-02)
+
+The gateway's send backend (`make_gateway_send_handler`) answered
+`sent:<target>` whatever `GatewayManager.send` said, and the callers of the
+send API mostly did not read the answer at all. A reminder a platform refused
+was logged as delivered, a refused scheduled-post notice skipped the fan-out
+that would have reached another chat app, `send_file` told the model "File
+sent: ... -> Error: ...", and the document pipeline logged "✓ Delivered".
+§33 makes the bus senders say the same thing.
+
+- **The answer is `sent:<target>` or `Error: ...`**: the backend returns the
+  error when the platform did not take the message (no adapter, a refusal, a
+  timeout). `send_failed(result)` is the one reader. A caller either returns
+  the answer (a tool) or reads it with `send_failed`: the cron delivery logs
+  `delivery FAILED` (CRITICAL) or `delivered`, the scheduled-post notice falls
+  through to the fan-out and says when no chat app took it, the cron denial
+  notice warns, `send_file` and the dispatcher tools return the `Error:` (a
+  failed tool call, §37).
+- **Files are read off the loop and carry their bytes.**
+  `send_file_message` resolves the path and reads the file (up to 50 MB) in a
+  thread (`_file_attachment`); the backend reads the Telegram auto-attach
+  files in one (`_outbound_attachments`). An attachment without `data` is
+  dropped with a warning: the backend read a `path` entry with no access
+  check, and nothing passed one.
+- Gate: `tests/test_send_results_read.py` (every call of the send API in the
+  packages returns its answer or reads it with `send_failed`; the HEAD of
+  2026-10-02 fails it at seven sites. Behaviour: the backend's answer, the
+  reminder, the post notice, the dispatcher tools, `send_file` with no bound
+  chat, reads off the loop).
 
 ## UI Conventions (Web)
 

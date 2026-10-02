@@ -773,12 +773,17 @@ class ModelRegistry:
         # previously allow_private=True unconditionally, so an admin-pasted
         # provider URL could probe any private/internal host with the API key
         # attached (audit finding).
-        try:
-            from urllib.parse import urlparse
+        # Imported before the try: imported inside it after urlparse, a URL
+        # urlparse refuses ("http://[::1") left SSRFError unbound when the
+        # except clause named it, and the guard raised UnboundLocalError
+        # instead of answering (2026-10-02).
+        from urllib.parse import urlparse
 
+        from kazma_core.security.ssrf import SSRFError, validate_url
+
+        try:
             _host = (urlparse(url).hostname or "").lower()
             _loopback = _host in ("localhost", "127.0.0.1", "::1")
-            from kazma_core.security.ssrf import SSRFError, validate_url
             await asyncio.to_thread(validate_url, url, block_unresolved=True, allow_private=_loopback)
         except SSRFError as exc:
             logger.warning("discover_models: SSRF blocked %r for %r: %s", url, clean_name, exc)

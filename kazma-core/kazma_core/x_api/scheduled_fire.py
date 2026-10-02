@@ -219,11 +219,17 @@ async def _deliver(post: ScheduledXPost, text: str) -> None:
     target = post.delivery_target or ""
     if target and ":" in target:
         try:
-            from kazma_core.tools.send_message import send_message
+            from kazma_core.tools.send_message import send_failed, send_message
 
             platform = target.split(":", 1)[0]
-            await send_message(target, text, backend=platform)
-            return
+            result = await send_message(target, text, backend=platform)
+            if not send_failed(result):
+                return
+            # Refused: fall through to every connected chat app (it returned
+            # here as if delivered until 2026-10-02).
+            logger.critical(
+                "[x-schedule] could not deliver notification to %s: %s", target, result,
+            )
         except Exception:
             logger.critical(
                 "[x-schedule] could not deliver notification to %s",
@@ -240,7 +246,7 @@ async def _deliver(post: ScheduledXPost, text: str) -> None:
             # No platform configured — nothing to announce to. Not an
             # error: single-operator headless installs still fire posts.
             return
-        await _aio.wait_for(
+        took = await _aio.wait_for(
             adapter.send(
                 BusMessage(
                     worker_name="Kazma",
@@ -251,6 +257,12 @@ async def _deliver(post: ScheduledXPost, text: str) -> None:
             ),
             timeout=15.0,
         )
+        if not took:
+            # The senders report a refused send (2026-10-02); it used to pass
+            # as delivered.
+            logger.critical(
+                "[x-schedule] no chat app took the notification for post %s", post.id,
+            )
     except Exception:  # a notification must never fail the fire
         logger.critical(
             "[x-schedule] notification fan-out failed for post %s",
