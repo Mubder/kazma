@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## `kazma update` runs from the install's Python on Windows (2026-10-02)
+
+- **The launcher fix did not hold on the live install.** This morning's
+  fix renamed `kazma.exe` aside so a reinstall could replace it; its test
+  used a running copy of `ping.exe`, which Windows does let you rename. A
+  uv launcher cannot be renamed while it runs (Python keeps the zip
+  appended to it open), and the guarded update run on the live install
+  that afternoon met exactly that: the rename failed, the first install
+  attempt failed on `kazma.exe`, and only a fallback that did not need to
+  replace it kept the install whole.
+- **Now the update refuses to run from a launcher it must replace**,
+  before it installs or pulls anything, and prints the command to use:
+  `.venv\Scripts\python.exe -m kazma_cli update ...` (pip does the same
+  from `pip.exe`). A running `kazma-tui` is named too. `python -m
+  kazma_cli` is new: it is the `kazma` command without its launcher.
+- **Every instruction names that command**: the refusal, the boot alert
+  about packages behind, the guard's "Resume with" hints (which now also
+  name the install's Python), the update guide and the CLI reference.
+- **Gate:** `tests/test_update_not_from_its_launcher.py` (a copy of a real
+  uv launcher held by a running test).
+
 ## Three small fixes found by testing on the live install (2026-10-02)
 
 - **The SQL tools' refusal names the SQL tools.** Asked to query one of

@@ -4179,15 +4179,22 @@ no Python update ever arrived.
   compiled files open on Windows, so a reinstall fails half way, and the
   `--reinstall` path did not check until 2026-10-02 (the git path told the
   operator to kill the server by hand, which the guard undoes).
-  `tests/test_package_update_on_a_guarded_install.py`. **A reinstall run from
-  `kazma.exe` can replace it** (`update._launchers_moved_aside`, Windows):
-  Windows refuses to delete or overwrite a running .exe but lets it be
-  renamed, so the launchers are renamed to `<name>.exe.<pid>.old` before the
-  installer runs and any it did not rewrite are renamed back; old copies go
-  once nothing runs them. Live 2026-10-02 every attempt failed on the locked
-  `kazma.exe` and left Kazma's own install half removed.
-  `tests/test_update_replaces_its_own_launcher.py` (a running copy of
-  `ping.exe` as the launcher; deleting it is the negative control). The report's dependency check lists the same
+  `tests/test_package_update_on_a_guarded_install.py`. **The update runs as
+  `python -m kazma_cli update`, never from a launcher it must replace**
+  (Windows): a reinstall replaces `kazma.exe`, and Windows lets nothing
+  replace -- or rename -- a running uv launcher (Python keeps the zip
+  appended to it open). Live 2026-10-02 every reinstall from `kazma.exe`
+  failed half way and left Kazma's own package half removed; renaming the
+  launchers aside, tried that morning with a running `ping.exe` as its test,
+  failed on the real launcher the same afternoon. So the update checks
+  first (`update._launchers_in_use`: opening a launcher for writing fails
+  while it runs, and writes nothing), refuses before it installs or pulls
+  anything (pip does the same from `pip.exe`), and names the command;
+  every instruction (the refusal, the boot alert, the guard's hints, the
+  docs) names `<install python> -m kazma_cli update`.
+  `tests/test_update_not_from_its_launcher.py` (a copy of a real uv launcher
+  held by a running test; the rename it cannot do is the negative control
+  of the old fix). The report's dependency check lists the same
   packages, without OSV. `packaging` is a declared dependency for this.
 - **Advisories with no fix that Kazma cannot reach are reviewed, never
   hidden** (`dependency_scanner.REVIEWED_ADVISORIES`). Each entry has its

@@ -34,6 +34,7 @@ def test_reinstall_refuses_while_the_server_runs(running: bool, monkeypatch, cap
     monkeypatch.setattr(update, "detect_install_type", lambda: "git")  # no `pip show`
     monkeypatch.setattr(update, "get_current_version", lambda: "0.0.0")
     monkeypatch.setattr(update, "_is_server_running", lambda port=9090: running)
+    monkeypatch.setattr(update, "_launchers_in_use", lambda *a, **k: [])
     monkeypatch.setattr(update, "_reinstall_local", lambda cwd: installs.append(cwd) or True)
     monkeypatch.setattr(update, "persist_extras", lambda extras: None)
     monkeypatch.setattr(update, "detect_active_extras", lambda cwd=None: ["rag"])
@@ -44,7 +45,7 @@ def test_reinstall_refuses_while_the_server_runs(running: bool, monkeypatch, cap
         out = capsys.readouterr().out
         assert installs == []
         assert "--pause --stop --when-idle" in out and "--resume" in out
-        assert "kazma update --reinstall -y" in out
+        assert "-m kazma_cli update --reinstall -y" in out
         # Each command on one line, as pasted: Rich wrapped them at 80 columns.
         assert any(line.strip().endswith('--when-idle --reason "package update"')
                    and "kazma_guard.py --pause" in line for line in out.splitlines()), out
@@ -60,7 +61,7 @@ def test_the_git_update_names_the_guard_not_a_kill(monkeypatch, capsys) -> None:
     assert update.do_git_update() is False
     out = capsys.readouterr().out
     assert "Stop-Process" not in out
-    assert "--pause --stop --when-idle" in out and "kazma update -y" in out
+    assert "--pause --stop --when-idle" in out and "-m kazma_cli update -y" in out
 
 
 # ── the boot check names the same procedure ──────────────────────────────
@@ -74,7 +75,8 @@ def test_the_alert_says_how_to_update_a_guarded_install(monkeypatch) -> None:
     monkeypatch.delenv("KAZMA_GUARD_STATE_FILE")
     plain = ir._update_instructions()
     assert "--pause --stop --when-idle" in guarded and "--resume" in guarded
-    assert "kazma update --reinstall -y" in guarded and "kazma update --reinstall -y" in plain
+    assert "-m kazma_cli update --reinstall -y" in guarded
+    assert "-m kazma_cli update --reinstall -y" in plain
     assert "kazma_guard" not in plain
 
 
@@ -193,3 +195,15 @@ def test_the_alert_and_the_refusal_carry_that_python(tmp_path, monkeypatch, caps
     monkeypatch.setattr(update, "_is_server_running", lambda port=9090: True)
     refusal = update._server_running_refusal("kazma update --reinstall -y")
     assert f"{python} {os.path.join('scripts', 'service', 'kazma_guard.py')} --resume" in refusal
+
+
+def test_the_guard_names_its_own_python(monkeypatch) -> None:
+    """The guard's hints ("Resume with: ...") name the interpreter running it."""
+    import os
+    import sys
+
+    guard = _guard()
+    monkeypatch.setattr(sys, "executable", str(guard.REPO_ROOT / ".venv" / "Scripts" / "python.exe"))
+    expected = os.path.join(".venv", "Scripts", "python.exe") + " " + os.path.join("scripts", "service", "kazma_guard.py")
+    assert guard._command_here() == expected
+    assert guard._command_here("install_service.py").endswith(os.path.join("scripts", "service", "install_service.py"))

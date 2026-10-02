@@ -29,8 +29,6 @@ import subprocess
 import sys
 import os
 import tempfile
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -572,17 +570,16 @@ def do_pip_update(
             console.print(f"[cyan]Installing {release.wheel_name} (SHA-256 verified)...[/cyan]")
             # Extras (rag: torch) can take far longer than Kazma itself.
             timeout = _INSTALL_TIMEOUT_HEAVY if extras else _INSTALL_TIMEOUT
-            with _launchers_moved_aside():
-                if reinstall:
-                    # --no-deps keeps the forced reinstall to Kazma itself; the
-                    # second install then brings back any missing dependency.
-                    result = _run_pip(
-                        ["install", "--force-reinstall", "--no-deps", str(wheel)], timeout=_INSTALL_TIMEOUT,
-                    )
-                    if result.returncode == 0:
-                        result = _run_pip(["install", spec], timeout=timeout)
-                else:
-                    result = _run_pip(["install", "--upgrade", spec], timeout=timeout)
+            if reinstall:
+                # --no-deps keeps the forced reinstall to Kazma itself; the
+                # second install then brings back any missing dependency.
+                result = _run_pip(
+                    ["install", "--force-reinstall", "--no-deps", str(wheel)], timeout=_INSTALL_TIMEOUT,
+                )
+                if result.returncode == 0:
+                    result = _run_pip(["install", spec], timeout=timeout)
+            else:
+                result = _run_pip(["install", "--upgrade", spec], timeout=timeout)
         if result.returncode == 0:
             console.print("[green]pip upgrade completed.[/green]")
             return True
@@ -799,58 +796,90 @@ def _launcher_names() -> tuple[str, ...]:
     return names or _DEFAULT_LAUNCHERS
 
 
-def _remove_old_launchers(scripts: Path) -> None:
-    """Delete launchers moved aside by earlier updates, once nothing runs them."""
-    for old in scripts.glob("*.exe.*.old"):
-        try:
-            old.unlink()
-        except OSError:
-            continue  # still running: a later update removes it
+def _current_launcher(argv0: str | None = None) -> Path | None:
+    """The launcher this command runs from (``kazma.exe``); None when it runs
+    as ``python -m kazma_cli`` or anywhere launchers are scripts (POSIX)."""
+    path = Path(sys.argv[0] if argv0 is None else argv0)
+    if path.suffix.lower() != ".exe" or not path.is_file():
+        return None
+    return path
 
 
-@contextmanager
-def _launchers_moved_aside(scripts: Path | None = None, *, windows: bool | None = None) -> Iterator[None]:
-    """Rename this install's launchers aside while a reinstall replaces them.
+def _launchers_in_use(scripts: Path | None = None, *, windows: bool | None = None) -> list[Path]:
+    """This install's launchers a running program holds (Windows; none elsewhere).
 
-    Windows refuses to delete or overwrite a running .exe but lets it be
-    renamed. ``kazma update`` runs from ``kazma.exe``, which the reinstall
-    must replace: on the live install it failed with "The process cannot
-    access the file" and left Kazma's own install half removed (2026-10-02).
-    Each launcher is renamed to ``<name>.exe.<pid>.old`` first: the running
-    one keeps running under its new name, the installer writes fresh ones,
-    and one it did not write is renamed back. Copies left by earlier runs are
-    deleted once nothing runs them.
+    A reinstall must replace every launcher, and Windows lets nothing replace
+    -- or even rename -- a running one: Python keeps the zip appended to the
+    launcher open while it runs. Measured 2026-10-02 on a copy of a uv
+    launcher: no rename while the launcher ran it, nor while ``python`` ran
+    the copy directly. Renaming the launchers aside (the fix tried that
+    morning) therefore failed on the live install's ``kazma.exe``. Opening
+    one for writing tells: it fails while any program runs it, and writes
+    nothing.
     """
     if windows is None:
         windows = os.name == "nt"
     if not windows:
-        yield
-        return
+        return []
     scripts = scripts or Path(sys.executable).parent
-    _remove_old_launchers(scripts)
-    moved: list[tuple[Path, Path]] = []
+    busy: list[Path] = []
     for name in _launcher_names():
         exe = scripts / f"{name}.exe"
         if not exe.is_file():
             continue
-        aside = exe.with_name(f"{exe.name}.{os.getpid()}.old")
         try:
-            exe.replace(aside)
-        except OSError as exc:
-            logger.warning("Could not move %s aside before the reinstall: %s", exe, exc)
-            continue
-        moved.append((exe, aside))
-    try:
-        yield
-    finally:
-        for exe, aside in moved:
-            if exe.exists():
-                continue  # the installer wrote a fresh one
-            try:
-                aside.replace(exe)
-            except OSError as exc:
-                logger.warning("Could not put %s back after the reinstall: %s", exe, exc)
-        _remove_old_launchers(scripts)
+            with open(exe, "r+b"):
+                pass
+        except PermissionError:
+            busy.append(exe)
+    return busy
+
+
+def _update_command(*flags: str) -> str:
+    """``kazma update <flags>`` as this install's Python runs it.
+
+    Never from the launcher on Windows (:func:`_launchers_in_use`), and the
+    same form everywhere, so one instruction fits every install.
+    """
+    tail = " ".join(f for f in flags if f)
+    return f"{_install_python(_find_git_root())} -m kazma_cli update {tail}".rstrip()
+
+
+def _launcher_refusal(command: str) -> str | None:
+    """Why the update cannot replace this install's launchers now, and what to
+    run instead; None when nothing holds them.
+
+    Checked before anything is installed or pulled: an installer that meets a
+    held launcher stops half way, and on 2026-10-02 that left Kazma's own
+    package half removed. pip refuses the same way when run from ``pip.exe``.
+    Print it with ``soft_wrap=True`` (see :func:`_server_running_refusal`).
+    """
+    busy = _launchers_in_use()
+    if not busy:
+        return None
+
+    def key(path: Path) -> str:
+        return os.path.normcase(str(path.resolve()))
+
+    current = _current_launcher()
+    mine = key(current) if current is not None else None
+    lines = [
+        "[red]Windows does not let the reinstall replace a program while it "
+        f"runs: {', '.join(p.name for p in busy)}.[/red]"
+    ]
+    if current is not None and mine in {key(p) for p in busy}:
+        lines.append(
+            f"This command runs from {current.name}. Run it with the install's "
+            "Python instead, from the install folder:"
+        )
+        lines.append(f"  [cyan]{command}[/cyan]")
+    others = [p.name for p in busy if key(p) != mine]
+    if others:
+        lines.append(
+            f"Close what is running {', '.join(others)} (the TUI, another kazma "
+            "command), then run the update again."
+        )
+    return "\n".join(lines)
 
 
 def _cleanup_broken_distributions() -> None:
@@ -914,16 +943,6 @@ def _print_reinstall_recovery(spec: str) -> None:
 
 
 def _reinstall_local(cwd: str) -> bool:
-    """Reinstall the editable package, its launchers moved aside (Windows).
-
-    See :func:`_launchers_moved_aside`; the body is
-    :func:`_reinstall_local_unguarded`.
-    """
-    with _launchers_moved_aside():
-        return _reinstall_local_unguarded(cwd)
-
-
-def _reinstall_local_unguarded(cwd: str) -> bool:
     """Reinstall editable package without wiping optional extras.
 
     Bare ``uv sync`` is exact-by-default and **removes** packages not in the
@@ -1547,10 +1566,16 @@ def do_git_update(
         console.print("[red]Could not locate git repository root.[/red]")
         return False
 
-    # Preflight: the Kazma server holds a lock on kazma.exe on Windows.
-    # If it's running, reinstall will fail with WinError 32 halfway through
-    # (git updated but package not reinstalled — a broken state).
-    refusal = _server_running_refusal("kazma update -y")
+    # Preflight, before git moves: on Windows the running server holds its
+    # packages' files and a running launcher cannot be replaced, so the
+    # reinstall would fail with WinError 32 halfway through (git updated but
+    # package not reinstalled -- a broken state).
+    command = _update_command(
+        "--sync-main" if sync_main else "",
+        "--accept-discard-local-commits" if accept_discard_local_commits else "",
+        "-y",
+    )
+    refusal = _server_running_refusal(command) or _launcher_refusal(command)
     if refusal:
         console.print(refusal, soft_wrap=True)
         return False
@@ -1871,6 +1896,11 @@ def _run_pip_check_and_update(
         console.print("[yellow]--check mode: not installing.[/yellow]")
         return
 
+    refusal = _launcher_refusal(_update_command("--force" if force else "", "-y"))
+    if refusal:
+        console.print(refusal, soft_wrap=True)
+        sys.exit(1)
+
     if not skip_confirm:
         if not _confirm(f"Update kazma from v{current_version} to v{latest}? [y/N] "):
             console.print("Update cancelled.")
@@ -1936,6 +1966,10 @@ def _run_git_check_and_update(
                 "(e.g. chromadb / sentence-transformers for VectorMemory).[/yellow]\n"
                 "Reinstalling preserved extras now…"
             )
+            refusal = _launcher_refusal(_update_command("-y"))
+            if refusal:
+                console.print(refusal, soft_wrap=True)
+                sys.exit(1)
             if _reinstall_via_subprocess(cwd):
                 console.print("[green]Package repair finished.[/green]")
             else:
@@ -1950,6 +1984,17 @@ def _run_git_check_and_update(
         console.print()
         console.print("[yellow]--check mode: not installing.[/yellow]")
         return
+
+    # Said before the question, not after it (do_git_update checks again).
+    command = _update_command(
+        "--sync-main" if sync_main else "",
+        "--accept-discard-local-commits" if accept_discard_local_commits else "",
+        "-y",
+    )
+    refusal = _server_running_refusal(command) or _launcher_refusal(command)
+    if refusal:
+        console.print(refusal, soft_wrap=True)
+        sys.exit(1)
 
     if not skip_confirm:
         if not _confirm(
@@ -2021,7 +2066,8 @@ def run(args: list[str]) -> None:
 
     # Package-only path (no git) — recover from bare uv sync / missing rag
     if reinstall_only:
-        refusal = _server_running_refusal("kazma update --reinstall -y")
+        command = _update_command("--reinstall", "-y")
+        refusal = _server_running_refusal(command) or _launcher_refusal(command)
         if refusal:
             console.print(refusal, soft_wrap=True)
             sys.exit(1)
