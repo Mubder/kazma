@@ -20,9 +20,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "النسخ الاحتياطية المتاحة",
         "en": "Available Backups",
     },
-    "dashboard.backend": {
-        "ar": "الخادم",
-        "en": "backend",
+    # The tracing backend's name in place of {name}, in each language's order.
+    "dashboard.backend_named": {
+        "ar": "الخادم: {name}",
+        "en": "{name} backend",
     },
     "dashboard.backup_failed": {
         "ar": "فشل النسخ الاحتياطي",
@@ -799,6 +800,15 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.tokens_over_time": {
         "ar": "الرموز عبر الوقت",
         "en": "Tokens Over Time",
+    },
+    # The charts' own labels (drawn on the canvas): the scale's top value.
+    "dashboard.chart_tokens_max": {
+        "ar": "الأقصى {n} رمز",
+        "en": "{n} tokens max",
+    },
+    "dashboard.chart_cost_max": {
+        "ar": "الأقصى {n}",
+        "en": "{n} max",
     },
     "dashboard.tool_calls": {
         "ar": "استدعاءات الأدوات",

@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## Text direction: what the live install still showed (2026-10-02)
+
+A sweep of every page of the live install in Arabic, after the change below,
+measured each paragraph's language against its direction and alignment.
+The chat page went from 119 mismatches to none. These were left:
+
+- **Cards that borrow the chart class follow the page.** An old rule made
+  every `chart-card` left to right, for the sake of the chart's canvas. The
+  Dashboard's card titles, the Memory page's sections and the Agents page
+  use the class, so their Arabic ran left to right, and after the change
+  below it was also aligned left. Only the canvas stays left to right now.
+- **The Dashboard's charts speak the page's language.** Their labels
+  ("56k tokens max", "$0.0012 max") were English in every language; they
+  come from the catalog and are drawn from the right in Arabic. The tracing
+  backend line follows each language's word order ("الخادم: console").
+- **Research titles take their question's direction.** A depth tag in
+  front ("[مختصر]") decided the line's direction, so an English question
+  ran right to left in the Arabic UI. The tag is set apart now.
+- **The Documents page's audit lines are data**, laid out left to right
+  ("delete·tombstone" read backwards in the Arabic UI).
+- **Arabic technical writing counts as Arabic.** A paragraph's language is
+  the language of most of its words; "توليد مستندات PDF وDOCX وXLSX
+  وMarkdown." counted as English (four Latin words to two Arabic ones). A
+  word with an Arabic letter or Arabic punctuation now counts as Arabic,
+  and a Latin word that looks like a name (PDF, MyCloud, OS5, Python) counts
+  for a quarter. English with the same names stays English.
+- **Gates:** `tests/js/test_block_direction.js` (32 real sentences; a plain
+  word count as the negative control), `tests/e2e/test_text_follows_its_language.py`
+  (a chart card's title is right to left in Arabic and its canvas left to
+  right), `tests/test_text_follows_its_language.py` (the chart rule is now
+  `.chart-card canvas`; the whole-card rule fails the gate).
+
 ## Text follows its own language, whatever the UI's (2026-10-02)
 
 - **English runs left to right and Arabic right to left, in either UI.**

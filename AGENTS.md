@@ -4306,8 +4306,11 @@ sent: ... -> Error: ...", and the document pipeline logged "✓ Delivered".
   page's `dir` is declared with its reason (`DECLARED` in
   `tests/test_text_follows_its_language.py`) -- the Arabic UI right-aligned
   English replies, tool output, tables and cards. Markdown blocks get their
-  direction from their own words (`KazmaBidi.blockDir`: the script most of
-  the words are in, a URL/path/identifier one word, a tie to the first
+  direction from their own words (`KazmaBidi.blockDir`: the language most of
+  the words are in, a URL/path/identifier one word; a word with an Arabic
+  letter or Arabic punctuation is Arabic ("وDOCX"); a name-like Latin word
+  -- acronym, CamelCase, a digit, a capital mid-sentence -- counts a
+  quarter, or Arabic technical prose reads as English; a tie to the first
   letter; no letters -> the container's, so a number column stays put),
   never from `dir="auto"`'s first letter; the bidi helper isolates a run
   against ITS paragraph, never the message (an English-first reply's Arabic

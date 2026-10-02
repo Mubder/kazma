@@ -87,9 +87,14 @@ reply laid its Arabic paragraphs out left to right in both UIs.
 - **Each paragraph takes its own direction.** The markdown renderer
   (`streaming.js`) gives every paragraph, heading, quote, list, list item and
   table cell a `dir` from its own words, using `KazmaBidi.blockDir`
-  (`bidi.js`). A paragraph takes the script that most of its words are in. A
-  URL, a path or an identifier counts as one word. On a tie, the first letter
-  decides. A block with no letters, such as a number, takes its container's
+  (`bidi.js`). A paragraph takes the language most of its words are written
+  in. A URL, a path or an identifier counts as one word. A word with an
+  Arabic letter or Arabic punctuation is Arabic, so "وDOCX" and "Telegram،"
+  count as Arabic. A Latin word that looks like a name (an acronym,
+  CamelCase, a word with a digit, a capital in mid-sentence) counts for a
+  quarter, because Arabic technical writing is full of them: "WebDAV يعمل مع
+  WD MyCloud OS5 وأي جهاز NAS" is an Arabic sentence. On a tie, the first
+  letter decides. A block with no letters, such as a number, takes its container's
   direction, so a number column in an Arabic table stays on the right. The
   browser's own `dir="auto"` looks only at the first letter, which put "PDF
   الملف جاهز" left to right.

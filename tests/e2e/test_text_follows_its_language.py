@@ -370,6 +370,35 @@ def test_without_a_direction_per_paragraph_arabic_ran_left_to_right(harness: Har
     assert arabic["dir"] == "ltr" and _starts_left(arabic["lines"]), arabic
 
 
+def test_a_card_borrowing_the_chart_class_follows_the_page(harness: Harness) -> None:
+    """A chart's canvas runs left to right; the card around it follows the
+    page. `[dir=rtl] .chart-card` was left-to-right whole, so the Dashboard's
+    card titles and the Memory page's sections (which borrow the class) laid
+    their Arabic out left-to-right (2026-10-02)."""
+    from playwright.sync_api import sync_playwright
+
+    host = harness.base.split("//", 1)[1].split(":", 1)[0]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1280, "height": 900})
+        context.add_cookies([{"name": "kazma-lang", "value": "ar", "domain": host, "path": "/"}])
+        try:
+            pg = context.new_page()
+            pg.goto(f"{harness.base}/dashboard", wait_until="domcontentloaded", timeout=30000)
+            pg.wait_for_selector(".chart-card .chart-title", timeout=20000)
+            got = pg.evaluate(
+                "() => ({titles: [...document.querySelectorAll('.chart-card .chart-title')]"
+                ".map((e) => getComputedStyle(e).direction),"
+                " canvases: [...document.querySelectorAll('.chart-card canvas')]"
+                ".map((e) => getComputedStyle(e).direction)})"
+            )
+        finally:
+            context.close()
+            browser.close()
+    assert got["titles"] and set(got["titles"]) == {"rtl"}, got
+    assert got["canvases"] and set(got["canvases"]) == {"ltr"}, got
+
+
 def test_the_replies_are_what_the_controls_need() -> None:
     """R1 counts as mostly English and R2 as mostly Arabic by the bidi helper's
     own measure, or the second control tests something else: the old isolation

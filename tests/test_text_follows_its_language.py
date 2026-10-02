@@ -45,7 +45,7 @@ DECLARED = {
     '[dir="rtl"] .plan-block, [dir="rtl"] .workbench-plan, [dir="rtl"] .plan-checklist, [dir="rtl"] .agent-plan, '
     '.chat-message[data-lang="ar"] .plan-block, .chat-message[data-lang="ar"] .agent-plan': "the plan box's layout",
     # Layout, not text: chart canvases, a grid's order, a utility, a number column.
-    '[dir="rtl"] .chart-card, [dir="rtl"] .charts-row': "chart canvases",
+    '[dir="rtl"] .chart-card canvas': "a chart's canvas (its labels are drawn from the left edge)",
     '[dir="rtl"] .swarm-container .metrics-grid': "grid order",
     ".text-right": "a utility class a page asks for",
     ".pc-pmeta": "a check's result column",

@@ -4233,9 +4233,13 @@ details.kazma-working > summary {
 }
 
 /* ── RTL: Charts ── */
-[dir="rtl"] .chart-card,
-[dir="rtl"] .charts-row {
-  direction: ltr; /* chart canvases render correctly LTR internally */
+/* A chart's canvas draws left to right in either language (its labels are
+   placed from the left edge); the card around it -- title, text -- follows
+   the page. The whole card and row were left-to-right, so every card that
+   borrows the class (the Memory page's sections, the Agents page) laid its
+   Arabic out left-to-right (2026-10-02). */
+[dir="rtl"] .chart-card canvas {
+  direction: ltr;
 }
 [dir="rtl"] .chart-title {
   text-align: start;

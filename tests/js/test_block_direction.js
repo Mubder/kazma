@@ -53,6 +53,18 @@ const CASES = [
   ["42", ""],
   ["---", ""],
   ["", ""],
+  // Arabic technical prose: terms joined by و or Arabic commas, and names
+  // (acronyms, CamelCase, digits) that count for little. All four are
+  // Arabic sentences; a plain word count calls them English.
+  ["توليد مستندات PDF وDOCX وXLSX وMarkdown.", "rtl"],
+  ["WebDAV — يعمل مع WD MyCloud OS5 وأي جهاز NAS.", "rtl"],
+  ["استخدم Python, JavaScript, Go, Rust", "rtl"],
+  ["يدعم Telegram، Discord، Slack، Web", "rtl"],
+  // English with the same kinds of names stays English.
+  ["The OpenAI API returns JSON for GPT models.", "ltr"],
+  ["Run npm install and then npm run build in the repo.", "ltr"],
+  ["HypertFit Rebranding", "ltr"],
+  ["Live test 3, reply briefly in English. Use sqlite_query on the relative path.", "ltr"],
 ];
 for (const [text, want] of CASES) {
   ok("blockDir " + JSON.stringify(text.slice(0, 40)) + " -> " + (want || "none"),
@@ -70,6 +82,21 @@ ok("dir=auto's first letter puts an Arabic sentence opening in English left-to-r
   firstLetter(CASES[2][0]) === "ltr");
 ok("counting letters puts an Arabic sentence with a long path left-to-right",
   B.isArabicDominant(CASES[3][0]) === false);
+function plainWordCount(text) {  // every word counts once, by its majority script
+  let rtl = 0, ltr = 0;
+  for (const w of String(text).split(/\s+/)) {
+    let r = 0, l = 0;
+    for (const ch of w) {
+      if (!/\p{L}/u.test(ch)) continue;
+      if (/[֐-ࣿיִ-﷿ﹰ-﻿]/.test(ch)) r++; else l++;
+    }
+    if (r > l) rtl++; else if (l) ltr++;
+  }
+  return rtl > ltr ? "rtl" : "ltr";
+}
+ok("a plain word count calls Arabic technical prose English",
+  plainWordCount("توليد مستندات PDF وDOCX وXLSX وMarkdown.") === "ltr" &&
+  plainWordCount("WebDAV — يعمل مع WD MyCloud OS5 وأي جهاز NAS.") === "ltr");
 
 // The renderer: every block its own direction; a block with no letters takes
 // its container's (a number column in an Arabic table stays on its right).
