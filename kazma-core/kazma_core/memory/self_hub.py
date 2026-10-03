@@ -3,7 +3,7 @@
 Beliefs often use subject ``user``. Backfill and entity resolution also create
 person shells like ``ent_<hash>`` named ``User``. The canvas hub is always
 ``id=user`` (styling, center placement). This module keeps that hub's
-*display name* and self-entity shells in sync so rename (User → Mubder)
+*display name* and self-entity shells in sync so rename (User → the owner's name)
 and list→graph focus work.
 """
 

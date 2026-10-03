@@ -11,11 +11,21 @@ Single source of truth: the canonical count/degree SQL lives HERE as
 must never be a second handwritten copy — the 2026-08-24 orphan-node fix
 originally patched only the memory_api copy and silently left this
 maintainer with pre-fix semantics (scalars counted as neighbors).
+
+The columns are a cache, and a cache a writer forgets drifts: a merge moves
+the source's facts onto the target, which changes the distinct-neighbour
+count of every entity that linked to both, and only source and target were
+recomputed (11 of 377 live entities were wrong on 2026-10-03, two since an
+August merge). Merges recompute the neighbours now (``neighbours=True``),
+and :func:`repair_entity_counts` -- a maintenance sweep -- recomputes any
+row whose stored counts differ from the live ones, whichever writer missed
+it.
 """
 
 from __future__ import annotations
 
 import logging
+import sqlite3
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -25,6 +35,7 @@ __all__ = [
     "belief_count_sql",
     "entity_degree_sql",
     "recompute_entity_counts",
+    "repair_entity_counts",
 ]
 
 # Sentinel stored in entities.belief_count / graph_degree meaning "not yet
@@ -84,6 +95,7 @@ def recompute_entity_counts(
     entity_ids: list[str],
     *,
     tenant_id: str = "default",
+    neighbours: bool = False,
 ) -> int:
     """Recompute and persist belief_count + graph_degree for the given entities.
 
@@ -95,6 +107,9 @@ def recompute_entity_counts(
         entity_ids:  Entity ids whose counts may have changed. De-duplicated
                      internally; empties/None are skipped.
         tenant_id:   Tenant scope fallback when the entity row lacks one.
+        neighbours:  Also recompute every entity sharing a live fact with
+                     these (a merge: the source's neighbours now link to the
+                     target, and one that linked to both lost a neighbour).
 
     Returns:
         The number of entity rows updated (0 if none matched / on no-op).
@@ -116,6 +131,11 @@ def recompute_entity_counts(
             ids.append(s)
     if not ids:
         return 0
+    if neighbours:
+        for other in _neighbours(conn, ids):
+            if other not in seen:
+                seen.add(other)
+                ids.append(other)
 
     sql = (
         f"SELECT {belief_count_sql()} AS cnt, {entity_degree_sql()} AS deg "
@@ -139,3 +159,39 @@ def recompute_entity_counts(
         except Exception:
             logger.debug("[entity_counts] recompute failed for %r", eid, exc_info=True)
     return updated
+
+
+def _neighbours(conn: Any, entity_ids: list[str]) -> list[str]:
+    """Entity ids that share a live fact with any of *entity_ids*."""
+    marks = ",".join("?" for _ in entity_ids)
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT CASE WHEN b.subject IN (" + marks + ") THEN b.object "
+            "ELSE b.subject END FROM beliefs b "
+            "WHERE b.valid_until IS NULL AND b.invalidated_at IS NULL "
+            "AND (b.subject IN (" + marks + ") OR b.object IN (" + marks + "))",
+            (*entity_ids, *entity_ids, *entity_ids),
+        ).fetchall()
+    except sqlite3.Error:
+        logger.warning("[entity_counts] neighbours of %d entities unreadable", len(entity_ids), exc_info=True)
+        return []
+    return [str(r[0]) for r in rows if r[0]]
+
+
+def repair_entity_counts(conn: Any, *, limit: int = 500) -> list[str]:
+    """Recompute every entity (up to *limit*) whose stored counts differ from
+    the live ones; returns their ids. The caller owns the commit.
+
+    One pass reads every entity's live counts: 261 ms for 377 entities and
+    2,249 facts on the live install.
+    """
+    rows = conn.execute(
+        f"SELECT e.id FROM entities e WHERE e.belief_count != {belief_count_sql()} "
+        f"OR e.graph_degree != {entity_degree_sql()} ORDER BY e.id LIMIT ?",
+        (int(limit),),
+    ).fetchall()
+    ids = [str(r[0]) for r in rows if r[0]]
+    if ids:
+        recompute_entity_counts(conn, ids)
+        logger.info("[entity_counts] repaired the counts of %d entit(ies): %s", len(ids), ids[:10])
+    return ids

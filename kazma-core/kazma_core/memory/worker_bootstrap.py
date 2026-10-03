@@ -899,6 +899,27 @@ def _repair_memory_vectors() -> None:
     run_vector_repair_pass()
 
 
+def _repair_entity_counts() -> None:
+    # The Memory page's fact and link counts are a cache on each entity row
+    # (entity_counts); a writer that forgets one leaves it wrong for good (11
+    # of 377 live entities on 2026-10-03, two since an August merge). Rows
+    # whose stored counts differ from the live ones are recomputed, 500 a
+    # pass; logs what it repairs.
+    import sqlite3
+
+    from kazma_core.config_store import apply_sqlite_pragmas
+    from kazma_core.memory.entity_counts import repair_entity_counts
+    from kazma_core.paths import primary_memory_db
+
+    conn = sqlite3.connect(primary_memory_db(), timeout=30)
+    try:
+        apply_sqlite_pragmas(conn)
+        with conn:
+            repair_entity_counts(conn)
+    finally:
+        conn.close()
+
+
 def _embed_knowledge_chunks() -> None:
     # Each Knowledge Library's vectors made to match its chunks: missing ones
     # embedded, shortest first, those of retired chunks removed (AGENTS.md
@@ -1005,6 +1026,7 @@ _MAINTENANCE_SWEEPS: tuple[tuple[str, Callable[[], None]], ...] = (
     ("memory turn reconcile", _reconcile_memory_turns),
     ("memory mirror sync", _sync_memory_mirror),
     ("memory topic summaries", _queue_topic_summaries),
+    ("entity count repair", _repair_entity_counts),
     ("knowledge vector repair", _embed_knowledge_chunks),
 )
 

@@ -4,8 +4,10 @@ Read-only. Nothing here changes a row: an operator reads the report (memory
 health, ``/api/memory/v2/health`` -> ``graph``) and decides, with the
 existing controls, what to merge or delete.
 
-- ``empty``: entities with no live fact (``purge_empty_entities`` takes
-  them; new ones are removed as they empty, ``entity_retire``).
+- ``empty``: entities that hold nothing -- no live fact, nothing but their
+  own name (``entity_retire.plain_empty_shells``: the purge controls take
+  exactly these; new ones are removed as they empty). A merge redirect, a
+  protected entity or one someone typed is not clutter.
 - ``isolated``: entities with facts but no link to another entity -- only
   literal values hang off them.
 - ``work_items``: entity ids shaped like a step of work, not a thing
@@ -14,8 +16,9 @@ existing controls, what to merge or delete.
 - ``duplicates``: ids that are the same words (order, separators, a plural
   "s" aside) -- merge candidates.
 
-Counts use the materialized ``belief_count`` / ``graph_degree`` columns;
-a row still at the stale sentinel (-1) is not counted.
+``isolated`` reads the materialized ``belief_count`` / ``graph_degree``
+columns (a row still at the stale sentinel, -1, is not counted); ``empty``
+counts live facts, as the purge does.
 """
 
 from __future__ import annotations
@@ -48,8 +51,10 @@ def graph_hygiene_report(conn: sqlite3.Connection, *, tenant_id: str | None = No
     ``None`` / ``"default"`` read the whole install, like the rest of health.
     """
     from kazma_core.memory.ego_anchor import subject_should_mint_entity
+    from kazma_core.memory.entity_retire import plain_empty_shells
 
     scoped = tenant_id not in (None, "", "default")
+    empty = [eid for _tenant, eid in plain_empty_shells(conn, tenant_id=tenant_id if scoped else None)]
     # A merged-away entity is a redirect (metadata.merged_into), not clutter.
     rows = conn.execute(
         "SELECT id, belief_count, graph_degree FROM entities "
@@ -60,7 +65,6 @@ def graph_hygiene_report(conn: sqlite3.Connection, *, tenant_id: str | None = No
         (tenant_id,) if scoped else (),
     ).fetchall()
 
-    empty: list[str] = []
     isolated: list[str] = []
     work_items: list[str] = []
     by_words: dict[str, list[str]] = {}
@@ -70,9 +74,7 @@ def graph_hygiene_report(conn: sqlite3.Connection, *, tenant_id: str | None = No
             continue
         count = int(count if count is not None else -1)
         degree = int(degree if degree is not None else -1)
-        if count == 0:
-            empty.append(eid)
-        elif count > 0 and degree == 0:
+        if count > 0 and degree == 0:
             isolated.append(eid)
         if not subject_should_mint_entity(eid):
             work_items.append(eid)

@@ -508,6 +508,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "محمي",
         "en": "protected",
     },
+    "memory.pg.merged_into": {
+        "ar": "مدمج في",
+        "en": "merged into",
+    },
+    "memory.pg.merged_into_hint": {
+        "ar": "اسم دُمج في كيان آخر: يُبقي هذا الصف الاسم القديم مرتبطًا بالكيان الجديد، فلا تحذفه تنظيفات الذاكرة.",
+        "en": "A name merged into another entity: this row keeps the old name reaching the new one, so memory clean-ups never remove it.",
+    },
     "memory.pg.graph_3": {
         "ar": "الرسم",
         "en": "Graph",

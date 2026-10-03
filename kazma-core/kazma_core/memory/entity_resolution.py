@@ -53,7 +53,8 @@ def canonical_entity_id(conn, eid: str, *, _max_chain: int = 8) -> str:
 
     Merges soft-retire the source entity by writing ``merged_into`` into its
     metadata. Nothing used to READ this, so extraction kept minting beliefs
-    under the retired id (the root cause of the mubder→user re-orphaning).
+    under the retired id (the root cause of a person merged into the hub,
+    ``user``, getting new facts under the old id).
     This helper resolves any id to its canonical target — chain-following so
     a→b→c collapses to c — and is the single chokepoint for the redirect.
 
@@ -595,7 +596,7 @@ def decide_entity_merge(
                     from kazma_core.memory.entity_counts import recompute_entity_counts
 
                     recompute_entity_counts(
-                        conn, [source_id, target_id], tenant_id=_merge_tenant
+                        conn, [source_id, target_id], tenant_id=_merge_tenant, neighbours=True
                     )
                 except Exception:
                     logger.debug("[entity_resolve] merge count recompute skipped", exc_info=True)
