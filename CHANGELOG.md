@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## The Memory page's numbers match what memory holds (2026-10-03)
+
+The Memory page's "empty" count included merge redirects, which no clean-up
+removes, so it stayed above zero after a purge that left nothing to take. It
+now counts what the Hygiene purge takes, and the Entities list shows a
+redirect as "merged into" its target instead of "empty".
+
+Each entity's fact and link counts are stored with the entity so the page
+can show them quickly. A merge refreshed the two entities it joined but not
+the entities linked to both, and on the live install 11 of 377 entities
+showed wrong counts. Merges now refresh those neighbours too, and a
+maintenance pass every 15 minutes fixes any stored count that disagrees
+with the live one.
+
 ## Kazma learns who its owner is from memory, not from its code (2026-10-03)
 
 Five places decided which memory entities may not be deleted or merged

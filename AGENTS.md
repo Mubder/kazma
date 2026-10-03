@@ -701,7 +701,7 @@ scheduler needs a case there.
   retention, §41, the supervisor
   watch, §39, memory vector repair, knowledge vector repair (§24F), memory
   recovery and memory turn reconcile, §15F, memory mirror sync, §15K,
-  weekly topic summaries, §15J),
+  weekly topic summaries, §15J, entity count repair, §15L),
   run by ONE isolated
   runner so a failing sweep never stops the rest -- and is logged at WARNING
   (it was DEBUG: a sweep failing every pass is a feature that is off). A new periodic cleanup is a
@@ -1188,6 +1188,17 @@ drawing, the rest by extraction.
   `tests/test_no_owner_identity_in_product.py` (no product string literal
   names the author, none outside a docstring the author's projects; the
   repository's address is the product's).
+- **The page's counts converge** (`entity_counts.repair_entity_counts`,
+  maintenance entry "entity count repair"): an entity whose stored
+  `belief_count`/`graph_degree` differ from the live counts is recomputed,
+  500 a pass, and a merge recomputes the neighbours too
+  (`recompute_entity_counts(neighbours=True)`: one that linked to both
+  names has one neighbour fewer). 11 of 377 live entities were wrong, two
+  since an August merge. The stats bar's "empty" is what the purge takes,
+  and a redirect is listed "merged into X", never "empty" -- the bar
+  counted redirects and stayed above zero after a purge.
+  `tests/test_entity_count_repair.py` (the source-and-target-only
+  recompute as the negative control).
 - **The Entities search finds an entity by its id**
   (`memory_api._fts_match_expr`): words split where the index splits them
   (an underscore separates), the id matches even when the index holds no

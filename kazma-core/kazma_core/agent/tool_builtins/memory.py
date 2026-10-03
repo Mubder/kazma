@@ -286,7 +286,7 @@ def register_memory_tools(registry: Any) -> None:
             try:
                 from kazma_core.memory.entity_counts import recompute_entity_counts
 
-                recompute_entity_counts(conn, [src_id, tgt_id], tenant_id=tenant)
+                recompute_entity_counts(conn, [src_id, tgt_id], tenant_id=tenant, neighbours=True)
             except Exception:
                 logger.debug("[memory_merge] count recompute skipped", exc_info=True)
             conn.commit()

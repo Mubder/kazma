@@ -175,6 +175,23 @@ def _fts_match_expr(text: str) -> str:
     return " OR ".join(toks)
 
 
+#: SQL for the outer ``entities e`` row's merge target ('' when it is none).
+_MERGED_INTO_SQL = (
+    "COALESCE(json_extract(CASE WHEN json_valid(e.metadata_json) "
+    "THEN e.metadata_json END, '$.merged_into'), '')"
+)
+
+
+def _merged_into(metadata_json: Any) -> str:
+    """The entity a merged-away entity redirects to, else ''."""
+    try:
+        meta = json.loads(metadata_json or "{}")
+    except (TypeError, ValueError):
+        return ""
+    target = meta.get("merged_into") if isinstance(meta, dict) else None
+    return str(target) if target else ""
+
+
 def _like_literal(text: str) -> str:
     """*text* as a LIKE pattern that matches itself (``ESCAPE '!'``): a ``_``
     in an entity id is a character, not "any one character"."""
@@ -440,10 +457,12 @@ def _memory_admin_summary_sync() -> dict[str, Any]:
         ents = conn.execute(
             "SELECT COUNT(*) FROM entities WHERE 1=1" + tfilter, tparam
         ).fetchone()[0]
-        empty = conn.execute(
-            f"SELECT COUNT(*) FROM entities e WHERE {count_expr} = 0" + tfilter,
-            tparam,
-        ).fetchone()[0]
+        # "Empty" is what the Hygiene purge takes (entity_retire): it
+        # counted every entity with no facts, merge redirects included, so
+        # it stayed above zero after a purge that left nothing to take.
+        from kazma_core.memory.entity_retire import plain_empty_shells
+
+        empty = len(plain_empty_shells(conn, tenant_id=tid if scoped else None))
         isolated = conn.execute(
             "SELECT COUNT(*) FROM entities e "
             "WHERE " + count_expr + " > 0 AND " + degree_expr + " = 0 "
@@ -588,7 +607,7 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
                 params.extend([ql, ql, ql])
                 matched_via = "like"
         if empty_only:
-            where += f" AND {count_expr} = 0"
+            where += f" AND {count_expr} = 0 AND {_MERGED_INTO_SQL} = ''"
         if isolated_only:
             where += (
                 f" AND {count_expr} > 0 AND {degree_expr} = 0"
@@ -622,7 +641,10 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
 
         self_ids = collect_self_entity_ids(conn, tid)
         for r in rows:
-            r["empty"] = int(r.get("belief_count") or 0) == 0
+            # A merge redirect is a retired name, not an empty entity: it is
+            # how the name keeps reaching its target (canonical_entity_id).
+            r["merged_into"] = _merged_into(r.get("metadata_json"))
+            r["empty"] = int(r.get("belief_count") or 0) == 0 and not r["merged_into"]
             r["isolated"] = (
                 int(r.get("belief_count") or 0) > 0
                 and int(r.get("linked_others") or 0) == 0
@@ -1101,12 +1123,13 @@ def _merge_entities_sync(payload: Any) -> dict[str, Any]:
             ),
         )
         # Phase 3: the merge rewired beliefs (source → target), so recompute
-        # the materialized counts for BOTH entities. Source's count drops to
-        # 0 (its beliefs were reassigned); target's rises by the rewired count.
+        # the materialized counts for BOTH entities -- source's drops to 0,
+        # target's rises -- and their neighbours': one that linked to both
+        # has one neighbour fewer.
         try:
             from kazma_core.memory.entity_counts import recompute_entity_counts
 
-            recompute_entity_counts(conn, [source_id, target_id])
+            recompute_entity_counts(conn, [source_id, target_id], neighbours=True)
         except Exception:
             logger.debug("[memory_api] merge count recompute failed", exc_info=True)
         conn.commit()

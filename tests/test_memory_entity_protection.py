@@ -280,3 +280,25 @@ def test_the_old_search_token_matched_nothing(search_db):
         ).fetchone()[0] >= 1
     finally:
         conn.close()
+
+
+# ── The page's "empty" is what the purge takes ──────────────────────────
+
+
+def test_the_stats_bar_counts_what_the_purge_takes(db):
+    from kazma_ui.memory_api import _memory_admin_summary_sync
+
+    assert _memory_admin_summary_sync()["entities_empty"] == 2
+
+
+def test_a_redirect_is_listed_as_merged_not_empty(db):
+    from kazma_ui.memory_api import _list_entities_sync
+
+    by_id = {e["id"]: e for e in _list_entities_sync("", 100, 0, False, False)["entities"]}
+    assert (by_id["acme_app"]["merged_into"], by_id["acme_app"]["empty"]) == ("acme", False)
+    assert (by_id["Layla"]["merged_into"], by_id["Layla"]["empty"]) == ("user", False)
+    assert (by_id["plain_one"]["merged_into"], by_id["plain_one"]["empty"]) == ("", True)
+
+    empty_only = {e["id"] for e in _list_entities_sync("", 100, 0, True, False)["entities"]}
+    assert "acme_app" not in empty_only and "Layla" not in empty_only
+    assert {"mubder", "plain_one"} <= empty_only

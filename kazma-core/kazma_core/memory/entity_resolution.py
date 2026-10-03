@@ -596,7 +596,7 @@ def decide_entity_merge(
                     from kazma_core.memory.entity_counts import recompute_entity_counts
 
                     recompute_entity_counts(
-                        conn, [source_id, target_id], tenant_id=_merge_tenant
+                        conn, [source_id, target_id], tenant_id=_merge_tenant, neighbours=True
                     )
                 except Exception:
                     logger.debug("[entity_resolve] merge count recompute skipped", exc_info=True)
