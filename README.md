@@ -26,7 +26,7 @@
   <b><a href="#what-you-get">Features</a></b> ·
   <b><a href="#measured-not-asserted">Security</a></b> ·
   <b><a href="https://kazma-demo.fly.dev/">Live demo</a></b> ·
-  <b><a href="https://kazma.ai/ar/docs/">العربية</a></b>
+  <b><a href="README.ar.md">العربية</a></b>
 
 </div>
 
