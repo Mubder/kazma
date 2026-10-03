@@ -29,6 +29,9 @@ import pytest
 from kazma_core.backup import restic_repo as rr
 from kazma_core.observability import firing_ledger as fl
 
+from tests._emitted_lines import REPO as _REPO
+from tests._emitted_lines import emitted_app_lines, guard_events, product_roots, render
+
 _QUOTA_ERR = (
     "googleapi: Error 403: Service Accounts do not have storage quota. "
     "Leverage shared drives, storageQuotaExceeded"
@@ -211,7 +214,7 @@ def test_ledger_signatures_match_lines_the_code_emits():
         "foreign server detection": '{"event": "child.foreign_server_holds_port"}',
         "health-gated restart": '{"event": "guard.restarting", "reason": "unhealthy (500)"}',
         "probe miss tolerated": '{"event": "health.recovered", "after_failures": 1}',
-        "daily digest": "[digest] daily digest dispatched (812 chars)",
+        "daily digest": "[digest] daily digest delivered (812 chars)",
         "install restore": "[restore] RESTORED: 9/9 steps, generation 1787",
     }
     by_name = {s.mechanism: s for s in fl.FIRING_SIGNATURES}
@@ -227,104 +230,6 @@ def test_ledger_signatures_match_lines_the_code_emits():
 
 
 # -- every signature is derived from a line the code really emits ---------
-
-_REPO = __import__("pathlib").Path(__file__).resolve().parents[1]
-_LOG_METHODS = {"debug", "info", "warning", "error", "critical", "exception"}
-
-
-_SLOT = "\x00"
-
-
-def _render(node, fill: str = "1") -> str | None:
-    """A logger format string as it would print, placeholders filled with
-    ``fill`` ("1" satisfies both \\d and \\w in a pattern)."""
-    import ast
-
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return re.sub(r"%[-#0 +]*\d*(?:\.\d+)?[sdrfix]", fill, node.value)
-    if isinstance(node, ast.JoinedStr):
-        return "".join(
-            v.value if isinstance(v, ast.Constant) else fill for v in node.values
-        )
-    return None
-
-
-def _real_summaries() -> list[str]:
-    """What the result objects logged as ``"[tag] %s", res.summary()`` print."""
-    from kazma_core.backup.restore import RestoreResult
-    from kazma_core.backup.restore_drill import DrillResult
-
-    out = []
-    for status in (True, False, None):
-        d = DrillResult(backup_dir="(deep)")
-        d.add("check", status, "detail")
-        out.append(d.summary())
-    for ok in (True, False):
-        r = RestoreResult(ok=ok, target="t", generation=1)
-        r.add("step", ok)
-        out.append(r.summary())
-    return out
-
-
-def _func_name(node) -> str:
-    import ast
-
-    f = node.func
-    return f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ""
-
-
-def _emitted_app_lines(roots) -> list[str]:
-    """Every line the code can log: logger format strings, ops-alert keys
-    (alert() logs "[ops_alert] <key> | <title>"), and result summaries."""
-    import ast
-
-    summaries = _real_summaries()
-    lines: list[str] = []
-    for root in roots:
-        for path in root.rglob("*.py"):
-            if "_tests" in path.parts or "tests" in path.parts or "__pycache__" in path.parts:
-                continue
-            try:
-                tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-            except SyntaxError:
-                continue
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call) or not node.args:
-                    continue
-                name = _func_name(node)
-                if name in _LOG_METHODS and isinstance(node.func, ast.Attribute):
-                    text = _render(node.args[0])
-                    if text:
-                        lines.append(text)
-                    if any(
-                        isinstance(a, ast.Call) and _func_name(a) == "summary"
-                        for a in node.args[1:]
-                    ):
-                        slotted = _render(node.args[0], fill=_SLOT) or ""
-                        lines += [slotted.replace(_SLOT, s, 1).replace(_SLOT, "1") for s in summaries]
-                elif name in ("alert", "_alert"):
-                    key = node.args[0]
-                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
-                        lines.append(f"[ops_alert] {key.value} | 1")
-    return lines
-
-
-def _guard_events() -> set[str]:
-    import ast
-
-    tree = ast.parse((_REPO / "scripts" / "service" / "kazma_guard.py").read_text(encoding="utf-8"))
-    events: set[str] = set()
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and len(node.args) >= 2
-            and isinstance(node.args[1], ast.Constant)
-            and isinstance(node.args[1].value, str)
-            and re.fullmatch(r"[a-z_]+\.[a-z_]+", node.args[1].value)
-        ):
-            events.add(node.args[1].value)
-    return events
-
 
 def _unmatched_signatures(signatures, app_lines, guard_events) -> list[str]:
     missing = []
@@ -348,11 +253,9 @@ def test_every_ledger_signature_matches_a_line_the_code_emits():
     maintenance, which logged only on failure. The hand-written samples in
     the test above all passed throughout.
     """
-    app_lines = _emitted_app_lines(
-        [p for p in _REPO.glob("kazma-*/kazma_*") if p.is_dir()] + [_REPO / "scripts"]
-    )
+    app_lines = emitted_app_lines(product_roots())
     assert len(app_lines) > 1000, "the source walk found almost nothing"
-    missing = _unmatched_signatures(fl.FIRING_SIGNATURES, app_lines, _guard_events())
+    missing = _unmatched_signatures(fl.FIRING_SIGNATURES, app_lines, guard_events())
     assert not missing, f"signatures no code emits (copy them from the emitting line): {missing}"
 
 
@@ -382,7 +285,7 @@ def test_health_gated_signature_matches_the_supervisors_real_reason(tmp_path):
         if isinstance(n, ast.FunctionDef) and n.name == "_supervise"
     )
     reasons = [
-        _render(n) for n in ast.walk(sup)
+        render(n) for n in ast.walk(sup)
         if isinstance(n, ast.Return) and isinstance(n.value, ast.JoinedStr)
         for n in [n.value]
     ]

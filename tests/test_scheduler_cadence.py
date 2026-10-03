@@ -194,14 +194,14 @@ async def test_the_old_digest_loop_fails_the_same_check(monkeypatch):
         while True:
             try:
                 await asyncio.sleep(daily_digest.DIGEST_INTERVAL_HOURS * 3600)
-                daily_digest.send_digest()
+                daily_digest.build_digest()
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 -- a copy of the old loop
                 await asyncio.sleep(300)
 
     clock = _Clock()
-    monkeypatch.setattr(daily_digest, "send_digest", _hook(clock))
+    monkeypatch.setattr(daily_digest, "build_digest", _hook(clock))
     _install_clock(monkeypatch, clock)
     worked_at = await _run_until_work(
         lambda: asyncio.get_running_loop().create_task(old_digest_scheduler()), clock

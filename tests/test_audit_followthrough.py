@@ -228,7 +228,11 @@ def test_readme_does_not_claim_production_grade_or_blanket_multi_replica():
     text = readme.read_text(encoding="utf-8")
     assert "Production-Grade" not in text
     assert "Multi-replica ready" not in text
-    assert "Jobs can multi-replica" in text
+    # What scales out, and what does not, stated together (README 2026-10-03
+    # rewrite; it read "Jobs can multi-replica" before).
+    prose = " ".join(text.split())
+    assert "Document jobs can run on several replicas" in prose
+    assert "document metadata and the SQLite stores are single-replica" in prose
 
 
 def test_filter_injection_broader_than_override():

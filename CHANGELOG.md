@@ -1,5 +1,46 @@
 # CHANGELOG
 
+## The daily digest counts the whole day (2026-10-03)
+
+The digest that reached Telegram on 2026-10-03 said "Turns completed: 0" and
+"Needs attention: maintenance pauses: 2". Both lines were wrong. The day held
+four turns: three on the web, and one on Telegram that paused for an approval
+and finished once it was approved. The two pauses were `kazma update`
+holding Kazma for 41 s and 11 s, and both had ended.
+
+The digest read only the live `kazma.log`. That file rotates at local
+midnight, so a digest sent at 05:17 UTC saw eight hours of its 24. It also
+counted turns by a line only the web chat writes. It now reads the rotated
+files written during the window too. It counts turns by a line the turn
+closer writes once per finished turn, whatever the chat app ("Turns
+completed: 4 (web 3, telegram 1)"). A turn that ended in an error is listed
+under "Needs attention".
+
+Approvals now come from the approval registry, which holds one row per
+question ("approvals asked: 1 (approved 1)"). The old count used log lines,
+and the browser connection wrote one more of those each time a page opened
+while a question waited.
+
+Alerts are counted from the line each alert leaves in the log, so the
+whole window is covered. The digest used to read the server's own memory of
+alerts, which starts empty at every reload, and the live server reloads
+several times a day. An alert raised before the last reload never appeared.
+
+A digest is marked as sent only when a channel takes it. It used to be
+handed off and marked sent whatever happened, so a digest that reached no one
+was never sent again, and that silence looked like a quiet day. A digest
+that fails is now tried again an hour later. When no channel is set up for
+ops messages at all, the digest waits for the next day.
+
+Reloads and maintenance pauses are listed under "Planned work", with the
+longest pause, and are never counted as problems. The counter "turns
+finished after you left" is gone. Its log line was removed on 2026-08-28,
+the day the digest shipped, so it never counted anything.
+
+Every line and guard event the digest reads is now checked against the lines
+the code writes, the same way the weekly report's checks work
+(`tests/test_daily_digest.py`: the old code fails 20 of its 32 tests).
+
 ## Slack says when its app is full (2026-10-03)
 
 After the two reloads of 2026-10-02 evening, Slack refused Kazma's Socket

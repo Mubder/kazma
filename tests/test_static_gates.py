@@ -896,6 +896,10 @@ _LOOP_STALL_HELPERS = frozenset({
     "list_due", "perform_native_backups", "perform_document_backup",
     "export_nightly_snapshots", "run_gc_cycle", "gc_sweep", "log_x_event",
     "get_session_payload", "run_weekly_sweep", "build_report", "scan_log",
+    # The daily digest reads a day of logs (rotated files too) and the
+    # approval registry; its scheduler runs it in a thread. Whether any
+    # channel takes ops messages is a settings read with a vault pointer.
+    "build_digest", "gate_outcomes_since", "_has_any_sink",
     "mirror_drift_summary", "purge_completed_tasks", "expire_due_gates",
     "check_database", "perform_universal_backup",
     # The saved-drafts store (agent/artifacts.py): each call opens SQLite,
