@@ -508,6 +508,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "محمي",
         "en": "protected",
     },
+    "memory.pg.merged": {
+        "ar": "مدمج",
+        "en": "merged",
+    },
     "memory.pg.merged_into": {
         "ar": "مدمج في",
         "en": "merged into",

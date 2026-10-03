@@ -148,6 +148,12 @@
     word-break: break-all;
     font-size: 0.78rem;
   }
+  /* A merged-away name: its target under the id, where the column is wide. */
+  .memory-page .mem-merged-into {
+    margin-top: 2px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+  }
   .memory-page .mem-actions {
     display: flex;
     flex-wrap: wrap;
@@ -322,7 +328,7 @@
                 @click="focusEntity(e.id, { entity: e })"
                 :title="(e.is_self ? t('memory.pg.memory_hub_on_graph') : t('memory.pg.show_on_graph')) + ': ' + (e.graph_id || e.id) + (e.name ? ' (' + e.name + ')' : '')"
               >
-                <td><code x-text="e.id"></code></td>
+                <td><code x-text="e.id"></code><div x-show="e.merged_into" x-cloak class="mem-merged-into" title="{{ t('memory.pg.merged_into_hint') }}">{{ t('memory.pg.merged_into') }} <bdi dir="ltr" translate="no"><code x-text="e.merged_into"></code></bdi></div></td>
                 <td :translate="tOr('memory.console.etype_' + (e.type || ''), '') ? null : 'no'"
                     x-text="tOr('memory.console.etype_' + (e.type || ''), e.type || '')"></td>
                 <td translate="no" x-text="e.name"></td>
@@ -330,7 +336,7 @@
                 <td x-text="e.linked_others"></td>
                 <td style="font-size:0.72rem;">
                   <span x-show="e.empty" class="badge">{{ t('memory.pg.empty') }}</span>
-                  <span x-show="e.merged_into" x-cloak class="badge" title="{{ t('memory.pg.merged_into_hint') }}">{{ t('memory.pg.merged_into') }} <bdi dir="ltr" translate="no"><code x-text="e.merged_into"></code></bdi></span>
+                  <span x-show="e.merged_into" x-cloak class="badge" title="{{ t('memory.pg.merged_into_hint') }}">{{ t('memory.pg.merged') }}</span>
                   <span x-show="e.isolated" class="badge" style="background:var(--warning,#f59e0b);">{{ t('memory.pg.isolated') }}</span>
                   <span x-show="e.protected" class="badge">{{ t('memory.pg.protected') }}</span>
                 </td>
