@@ -156,7 +156,14 @@ Coverage matrix: [Recent features → Non-Stop Execution](../guide/recent-featur
 - **Research archive**: each research card has an archive button. Archived
   items move to the "Archived" tab (with restore + delete). Uses the JSON
   `metadata.archived` flag — no schema migration.
-- Soft-nav SPA may be feature-flagged off — full page loads are the reliable path.
+- **Page switching**: a sidebar link swaps the page without a full reload
+  (soft navigation, `static/js/modules/nav.js`). The incoming page's own
+  scripts run on every visit, the shared scripts in `static/js/modules/`
+  (Chat's turn machinery) load once per version, and the base shell's
+  scripts run once with the page load. Until 2026-10-03 the shared ones were
+  skipped, so a Chat reached from another page showed no turn until a reload;
+  `tests/test_soft_nav_page_scripts.py` now checks that no script any page
+  includes is left out.
 
 ## Theming & design tokens
 

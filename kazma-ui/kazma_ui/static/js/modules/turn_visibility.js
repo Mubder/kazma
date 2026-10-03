@@ -7,6 +7,15 @@
    and Web Push, armed from the send gesture once permission is granted.
    ═══════════════════════════════════════════════════════ */
 
+// A newer version can load into a page that ran this one (soft-nav loads
+// shared scripts once per version): stop the old copy's title flashing
+// before replacing it.
+try {
+  if (window.KazmaTurnVisibility && typeof window.KazmaTurnVisibility.restore === 'function') {
+    window.KazmaTurnVisibility.restore();
+  }
+} catch (e) { /* the old copy is best-effort */ }
+
 window.KazmaTurnVisibility = (function() {
   'use strict';
 
@@ -164,8 +173,13 @@ window.KazmaTurnVisibility = (function() {
   };
 })();
 
-document.addEventListener('visibilitychange', function() {
-  if (!document.hidden && window.KazmaTurnVisibility) {
-    KazmaTurnVisibility.restore();
-  }
-});
+// One listener per page, whichever version is running: it reads the current
+// window.KazmaTurnVisibility.
+if (!window.__kazmaTurnVisibilityBound) {
+  window.__kazmaTurnVisibilityBound = true;
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden && window.KazmaTurnVisibility) {
+      window.KazmaTurnVisibility.restore();
+    }
+  });
+}

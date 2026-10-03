@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## A chat opened from another page shows its turn live (2026-10-03)
+
+On the live install, the owner opened the Memory page, clicked Chat in the
+sidebar and sent a task. The chat showed nothing while the task ran: no
+"thinking" header, no steps, no approval card. A refresh showed all of it.
+The task was paused at that approval card, waiting for an answer.
+
+A sidebar link swaps the page without reloading it, then runs the new page's
+scripts. It skipped every script in `static/js/modules/`, a folder it
+treated as the shell's own. Chat keeps the code that draws a turn there. A
+chat opened from any other page therefore could not draw a turn, and it
+failed quietly, so nothing said why. A chat opened directly, or refreshed,
+worked, which is all the browser tests did.
+
+The scripts in that folder now load the first time a page needs them, once
+per version. The page's own scripts still run on every visit, and the
+shell's scripts never run twice; `locale_format.js` had been run again on
+every page switch. A test reads every page template and fails if any script
+a page includes would never run (`tests/test_soft_nav_page_scripts.py`). A
+browser test opens Memory, goes to Chat through the sidebar, sends a task
+and waits for the turn and its approval card
+(`tests/e2e/test_soft_nav_into_chat.py`).
+
 ## The daily digest counts the whole day (2026-10-03)
 
 The digest that reached Telegram on 2026-10-03 said "Turns completed: 0" and

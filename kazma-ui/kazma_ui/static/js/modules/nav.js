@@ -34,25 +34,62 @@ function kazmaNewChat() {
     window.location.href = '/chat?new=1';
 }
 
+// The base shell's classic scripts (base.html): every page has run them, and
+// soft-nav never runs them again.
 const GLOBAL_LIB_PATHS = [
     '/static/js/app.js',
     '/static/js/htmx.min.js',
     '/static/js/alpine.min.js',
     '/static/js/icons.js',
     '/static/js/auth-guard.js',
+    '/static/js/locale_format.js',
     '/static/js/bidi.js',
 ];
+
+const SHARED_SCRIPT_DIR = '/static/js/modules/';
 
 /** True for a script the incoming page owns and soft-nav must re-run. */
 export function isSoftNavPageScript(src) {
     if (!src) return false;
     const path = String(src).split('?')[0];
     if (GLOBAL_LIB_PATHS.some((g) => path.endsWith(g))) return false;
-    if (path.includes('/static/js/modules/')) return false;
+    if (path.includes(SHARED_SCRIPT_DIR)) return false;
     // documents.js, memory_console.js, dash_lists.js, voice.js, mermaid, …
     if (path.includes('/static/js/')) return true;
     if (/codemirror/i.test(path)) return true;
     return false;
+}
+
+/**
+ * True for a classic script in /static/js/modules/ that a page includes:
+ * shared machinery (Chat's turn document, view and presentation, its
+ * delivery cursor...) that soft-nav loads when the page needs it and never
+ * runs twice. The shell's ES modules in that folder are imported by app.js
+ * and never appear as a page's script tags.
+ *
+ * Soft-nav skipped the folder, so a Chat reached from another page had no
+ * turn machinery: a sent turn painted nothing (no header, no steps, no
+ * approval card) until a reload, and chat.js declined quietly without the
+ * modules, so nothing said why (live 2026-10-03).
+ */
+export function isSoftNavSharedScript(src) {
+    if (!src) return false;
+    const path = String(src).split('?')[0];
+    if (GLOBAL_LIB_PATHS.some((g) => path.endsWith(g))) return false;
+    return path.includes(SHARED_SCRIPT_DIR);
+}
+
+/**
+ * A script's identity for "already loaded": its URL without soft-nav's
+ * cache-buster. The version parameter stays, so a deploy's new version of a
+ * shared script loads once more.
+ */
+export function scriptKey(src) {
+    const text = String(src || '');
+    const at = text.indexOf('?');
+    if (at < 0) return text;
+    const kept = text.slice(at + 1).split('&').filter((kv) => kv && !kv.startsWith('_sn='));
+    return kept.length ? text.slice(0, at) + '?' + kept.join('&') : text.slice(0, at);
 }
 
 export function initSoftNav() {
@@ -65,6 +102,15 @@ export function initSoftNav() {
     const HARD_RELOAD_ALWAYS = new Set([]);
 
     const GLOBAL_LIBS = GLOBAL_LIB_PATHS;
+
+    // Shared scripts this document has run (isSoftNavSharedScript): the
+    // first page's, and those soft-nav loaded since.
+    const loadedShared = new Set(
+        Array.from(document.querySelectorAll('script[src]'))
+            .map((s) => s.getAttribute('src') || '')
+            .filter(isSoftNavSharedScript)
+            .map(scriptKey),
+    );
 
     let navInFlight = null;
     let softNavGeneration = 0;
@@ -236,18 +282,30 @@ export function initSoftNav() {
             }
         }
 
-        const pageScripts = Array.from(doc.querySelectorAll('script')).filter((s) => {
+        // In the page's own order: a shared script comes before the page
+        // script that uses it (chat.html: turn modules, then chat.js).
+        const scripts = Array.from(doc.querySelectorAll('script')).filter((s) => {
             const src = s.getAttribute('src') || '';
             const type = (s.getAttribute('type') || '').toLowerCase();
             if (!src) return false;
             if (type === 'module' || type === 'importmap') return false;
             if (isGlobalLib(src)) return false;
             if (s.hasAttribute('data-kazma-page-script') || s.hasAttribute('data-page-script')) return true;
-            return isSoftNavPageScript(src);
+            return isSoftNavPageScript(src) || isSoftNavSharedScript(src);
         });
 
-        for (const s of pageScripts) {
+        for (const s of scripts) {
             const src = s.getAttribute('src') || '';
+            const explicitPage = s.hasAttribute('data-kazma-page-script') || s.hasAttribute('data-page-script');
+            if (!explicitPage && isSoftNavSharedScript(src)) {
+                // Once per version: shared machinery keeps its state and
+                // listeners from page to page, as after a full load.
+                const key = scriptKey(src);
+                if (loadedShared.has(key)) continue;
+                loadedShared.add(key);
+                if (!(await loadScript(src, 'data-kazma-shared-script'))) loadedShared.delete(key);
+                continue;
+            }
             // Monaco / mermaid are sticky globals — reloading them mid-session
             // resets the constructor. Skip if the previous page already loaded them.
             if (/monaco-editor/i.test(src) && window.monaco) continue;
@@ -256,29 +314,37 @@ export function initSoftNav() {
             const fullSrc = src.includes('?')
                 ? src + '&_sn=' + Date.now()
                 : src + '?_sn=' + Date.now();
-
-            await new Promise((resolve) => {
-                const ns = document.createElement('script');
-                ns.setAttribute('data-kazma-page-script', '1');
-                ns.async = false;
-                let settled = false;
-                const done = () => {
-                    if (settled) return;
-                    settled = true;
-                    resolve();
-                };
-                ns.onload = done;
-                ns.onerror = () => {
-                    console.warn('[soft-nav] script failed to load:', fullSrc);
-                    done();
-                };
-                // Append first, then set src (most reliable load order across browsers)
-                document.body.appendChild(ns);
-                ns.src = fullSrc;
-                // Safety: never hang soft-nav on a stuck script tag
-                setTimeout(done, 8000);
-            });
+            await loadScript(fullSrc, 'data-kazma-page-script');
         }
+    }
+
+    /**
+     * Run one classic script, in order. Resolves true once it ran, false
+     * when it failed to load; a script that has not answered in 8 s is left
+     * to finish on its own (resolves true) so soft-nav never hangs on it.
+     */
+    function loadScript(url, marker) {
+        return new Promise((resolve) => {
+            const ns = document.createElement('script');
+            ns.setAttribute(marker, '1');
+            ns.async = false;
+            let settled = false;
+            const done = (ok) => {
+                if (settled) return;
+                settled = true;
+                resolve(ok);
+            };
+            ns.onload = () => done(true);
+            ns.onerror = () => {
+                console.warn('[soft-nav] script failed to load:', url);
+                done(false);
+            };
+            // Append first, then set src (most reliable load order across browsers)
+            document.body.appendChild(ns);
+            ns.src = url;
+            // Safety: never hang soft-nav on a stuck script tag
+            setTimeout(() => done(true), 8000);
+        });
     }
 
     function initAlpineOn(el) {
