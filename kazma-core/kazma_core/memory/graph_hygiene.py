@@ -34,10 +34,12 @@ _HUB_IDS = ("user", "assistant")
 
 
 def _same_words_key(entity_id: str) -> str:
-    """Key under which ids made of the same words collide."""
-    words = [w for w in re.split(r"[^a-z0-9]+", (entity_id or "").lower()) if w]
-    words = [w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w for w in words]
-    return " ".join(sorted(words))
+    """Key under which ids made of the same words collide: the rule predicate
+    names follow (``predicates._predicate_key``: order, filler words and a
+    plural "s" aside), so "the same words" means one thing everywhere."""
+    from kazma_core.memory.predicates import _predicate_key
+
+    return " ".join(sorted(_predicate_key(re.sub(r"[^a-z0-9]+", "_", (entity_id or "").lower()))))
 
 
 def graph_hygiene_report(conn: sqlite3.Connection, *, tenant_id: str | None = None) -> dict[str, Any]:

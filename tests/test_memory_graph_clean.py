@@ -416,3 +416,15 @@ def test_the_report_finds_duplicates_and_work_items(dbs):
     report = graph_hygiene_report(p)
     assert report["duplicates"]["examples"] == [["app_shipx", "shipx_app"]]
     assert report["work_items"]["examples"] == ["phase_3_rollout"]
+
+
+def test_a_product_with_a_number_is_still_an_entity():
+    """Subjects are slugged lower case, so a ticket's shape cannot be told
+    from a product's by its case: "gpt-4", "windows-11" and "covid-19" are
+    things the user talks about and keep their node; "jira-142" is a ticket."""
+    from kazma_core.memory.ego_anchor import subject_should_mint_entity
+
+    for name in ("gpt-4", "windows-11", "covid-19", "python-3"):
+        assert subject_should_mint_entity(name), name
+    for name in ("jira-142", "abc-1234"):
+        assert not subject_should_mint_entity(name), name

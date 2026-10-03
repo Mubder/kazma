@@ -143,7 +143,11 @@ _WORK_ITEM_RE = re.compile(
     r"^(phase|step|stage|sprint|wave|round|milestone|ticket|issue|pr|task|run)[_\s-]*\d",
     re.I,
 )
-_TICKET_RE = re.compile(r"^[a-z]{2,10}-\d+$", re.I)
+# Three digits at least: subjects are slugged lower case, so "gpt-4",
+# "windows-11" or "covid-19" cannot be told from a ticket by their case, and
+# a product the user talks about losing its node costs more than a ticket
+# keeping one (the health report lists those).
+_TICKET_RE = re.compile(r"^[a-z]{2,10}-\d{3,}$", re.I)
 _VERSION_RE = re.compile(r"^v?\d+([._]\d+)+([._-]?[a-z0-9]+)*$", re.I)
 _HASH_RE = re.compile(r"^(?=[0-9a-f]*\d)[0-9a-f]{7,40}$", re.I)
 _MAX_SUBJECT_WORDS = 6

@@ -1161,14 +1161,22 @@ drawing, the rest by extraction.
   written and anchored. An object is minted only beside a subject that is
   an entity. The deep pass is given the subjects in use
   (`entity_resolution.entity_vocabulary`), as it is given the predicates.
+  A ticket has three digits at least: slugs are lower case, so "gpt-4",
+  "windows-11" or "covid-19" look like tickets by shape, and a product
+  losing its node costs more than a ticket keeping one. Measured on live
+  (377 entities) the rules matched six, all clutter.
 - **An entity goes with its last fact if it holds nothing else**
   (`entity_retire.retire_empty_entities`, from `invalidate_belief` and a
   supersede): a plain concept only -- own name and hash as aliases, no
   metadata, grouping, merge row or redirect onto it; not protected, major
-  or high-stakes. Declared in `tests/test_memory_deletes.py`.
+  or high-stakes. Declared in `tests/test_memory_deletes.py`. The ids no
+  clean-up removes are one list, `entity_retire.PROTECTED_IDS`, which
+  `purge_empty_entities` reads too.
 - **Memory health reports the clutter** (`v2_health` -> `graph`: empty,
   isolated, work-item and same-word duplicate entities, with examples).
   Read-only; the operator merges or deletes with the existing controls.
+  "The same words" is the predicates' rule (`predicates._predicate_key`:
+  order, filler words and a plural "s" aside), one rule for both.
 - Gate: `tests/test_memory_graph_clean.py` (a noisy extraction batch leaves
   no work-item, isolated or empty entity; each rule with the old behaviour
   as its negative control).

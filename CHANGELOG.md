@@ -21,7 +21,8 @@ exist, the database refused it, and a duplicate was created (the failure was
 logged only at debug level). The merge now leaves the merged name as a
 redirect, as a manual merge does. Subjects that are work items (phase names,
 tickets, versions, paths, sentences) no longer become entities; their facts
-are kept. An entity whose last fact is invalidated is removed if it holds
+are kept. A ticket needs three digits at least, so products such as `gpt-4`
+or `windows-11` keep their node. An entity whose last fact is invalidated is removed if it holds
 nothing else. The extractor is told which subjects are already in use.
 
 Memory health now reports empty, isolated, work-item and duplicate entities

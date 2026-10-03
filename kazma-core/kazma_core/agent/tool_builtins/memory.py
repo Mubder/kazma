@@ -440,7 +440,9 @@ def register_memory_tools(registry: Any) -> None:
         from kazma_core.paths import primary_memory_db
         from kazma_core.safety.hitl import get_current_tenant_id
 
-        protected = {"user", "assistant", "kazma", "mubder"}
+        # The ids no clean-up removes: one list, with the automatic one
+        # (memory/entity_retire.py).
+        from kazma_core.memory.entity_retire import PROTECTED_IDS as protected
         try:
             conn = sqlite3.connect(
                 primary_memory_db(), check_same_thread=False
