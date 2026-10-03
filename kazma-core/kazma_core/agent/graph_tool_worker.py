@@ -1134,7 +1134,11 @@ async def tool_worker_node(
                 message = (
                     f"Agent wants to run {len(danger_tools)} danger tools: {names}"
                 )
-                primary_tool = f"{len(danger_tools)} tools"
+                from kazma_core.safety.hitl_grants import tool_batch_label
+
+                # A label, never a tool: the approve route grants only
+                # the tools themselves (hitl_grants.tools_to_grant).
+                primary_tool = tool_batch_label(len(danger_tools))
                 primary_args = {"tools": [t["name"] for t in tools_payload]}
 
             # S1-3: proposal-backed posts resolve the STORED text onto the

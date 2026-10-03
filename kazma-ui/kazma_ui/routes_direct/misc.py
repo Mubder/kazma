@@ -832,21 +832,14 @@ def register_misc_routes(self: Any) -> None:
                         scope = "once"
                 elif approved and scope == "tool":
                     try:
-                        from kazma_core.safety.hitl_grants import grant_tool
+                        from kazma_core.safety.hitl_grants import grant_tool, tools_to_grant
 
-                        tools_to_grant: list[str] = []
-                        if pending_tools:
-                            for t in pending_tools:
-                                if isinstance(t, dict) and t.get("name"):
-                                    tools_to_grant.append(str(t["name"]))
-                        elif pending_tool_name and " tools" not in pending_tool_name:
-                            tools_to_grant.append(pending_tool_name)
-                        explicit = body.get("tool") or body.get("grant_tool")
-                        if explicit:
-                            tools_to_grant.append(str(explicit))
-                        tools_to_grant = list(dict.fromkeys(tools_to_grant))
                         grant_info = {"tools": []}
-                        for tname in tools_to_grant:
+                        for tname in tools_to_grant(
+                            pending_tools,
+                            pending_tool_name,
+                            body.get("tool") or body.get("grant_tool") or "",
+                        ):
                             st = grant_tool(thread_id, tname, actor=actor)
                             grant_info["tools"].append(st)
                     except Exception:

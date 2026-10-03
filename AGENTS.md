@@ -4493,6 +4493,24 @@ sent: ... -> Error: ...", and the document pipeline logged "✓ Delivered".
   template compiles in node; `<template x-for>` scope; no second `init()`),
   `tests/js/test_settings_mixins.js`, `tests/test_vendor_codemirror.py` —
   each with a negative control.
+- **A page reached by soft navigation has every script it includes**
+  (`modules/nav.js`, 2026-10-03). A sidebar link swaps the page and runs its
+  scripts; each is one of three kinds: the base shell's (`GLOBAL_LIB_PATHS`,
+  run once by the page load: every classic script base.html loads), a shared
+  one (`isSoftNavSharedScript`: a classic script in `static/js/modules/`,
+  loaded once per version, `scriptKey`), or the page's own
+  (`isSoftNavPageScript`, run on every visit). The shared kind did not
+  exist: the folder was skipped as "modules", and Chat keeps its turn
+  machinery there (`turn_document.js`, `turn_view.js`,
+  `turn_presentation.js`, `delivery_cursor.js`...). On live, a Chat opened
+  from the Memory page painted no turn -- no header, no steps, no approval
+  card -- until a refresh, and `chat.js` declines quietly without those
+  modules, so no error said why. A shared script that binds a document
+  listener binds it once (`turn_visibility.js`). Gates:
+  `tests/test_soft_nav_page_scripts.py` (every template's scripts, none
+  dropped; the old rule as the negative control) and
+  `tests/e2e/test_soft_nav_into_chat.py` (Memory, then Chat by the sidebar,
+  then a turn that must paint; away and back runs each module once).
 - **Every `KazmaX.member` a page reads exists** (2026-09-28). The Swarm
   Templates tab called `KazmaUtils.esc` (the helper is `escapeHtml`), the
   render threw, and its fetch's `catch` showed "Failed to load templates"
