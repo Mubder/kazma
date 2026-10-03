@@ -132,11 +132,13 @@ def test_invalidate_belief_updates_counts(state_db):
     invalidate_belief("b1", conn=conn)  # alice → lives_in → paris
     conn.commit()
     after = dict(conn.execute("SELECT belief_count FROM entities WHERE id='alice'").fetchone())
-    paris = dict(conn.execute("SELECT belief_count FROM entities WHERE id='paris'").fetchone())
+    paris = conn.execute("SELECT belief_count FROM entities WHERE id='paris'").fetchone()
     conn.close()
 
     assert after["belief_count"] == before["belief_count"] - 1, "alice count must decrement"
-    assert paris["belief_count"] == 0, f"paris (only belief b1) must drop to 0, got {paris}"
+    # paris held only b1 and nothing else, so it goes with it
+    # (memory/entity_retire.py; tests/test_memory_graph_clean.py).
+    assert paris is None, f"paris (only belief b1) must be removed, got {dict(paris)}"
 
 
 # ── 3. Self-heal read path ────────────────────────────────────────────────

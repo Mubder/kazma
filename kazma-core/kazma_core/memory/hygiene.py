@@ -258,6 +258,19 @@ def invalidate_belief(
                 conn.commit()
             except Exception:
                 logger.debug("[hygiene] entity count recompute skipped", exc_info=True)
+            # An entity this was the last fact of, holding nothing else, goes
+            # with it (entity_retire: plain shells only).
+            from kazma_core.memory.entity_retire import retire_empty_entities
+
+            try:
+                if retire_empty_entities(
+                    conn,
+                    [str(_col("subject", 1) or ""), str(_col("object", 3) or "")],
+                    tenant_id=str(_col("tenant_id", 4) or "default"),
+                ):
+                    conn.commit()
+            except sqlite3.Error:
+                logger.warning("[hygiene] empty-entity cleanup failed", exc_info=True)
 
             # Mirror tombstone (M-04): push death flags to shared state so a
             # role=primary cutover can never resurrect this fact.

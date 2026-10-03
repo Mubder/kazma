@@ -1259,6 +1259,7 @@ def register_memory_routes(self: Any) -> None:
             if type and type.strip():
                 bsql += " AND predicate_type = ?"
                 bparams.append(type.strip())
+            filter_sql, filter_params = bsql, list(bparams)
             bsql += " ORDER BY (structural_importance * confidence) DESC LIMIT ?"
             bparams.append(max(10, min(limit * 4, 800)))
             brows = conn.execute(bsql, bparams).fetchall()
@@ -1273,6 +1274,11 @@ def register_memory_routes(self: Any) -> None:
             # Self / hub: canvas hub is always id=user. Person shells like
             # ent_* named User/Mubder collapse onto that hub so rename and
             # list focus land on the same node (not a missing orphan).
+            from kazma_core.memory.graph_view import (
+                isolated_ids,
+                keep_connected,
+                value_node_id,
+            )
             from kazma_core.memory.self_hub import (
                 HUB_ID,
                 collect_self_entity_ids,
@@ -1287,6 +1293,30 @@ def register_memory_routes(self: Any) -> None:
                     return str(t or "").strip().lower() in (
                         "true", "false", "null", "none", "yes", "no", "0", "1",
                     )
+
+            # The links that join a concept to the user (``user → related_to
+            # → X``, the ego anchors) rank last by importance * confidence, so
+            # the cap above dropped them first and every subject they anchor
+            # floated away from the hub. Load the hub links of every endpoint
+            # the capped query returned, whatever their rank.
+            hub_ids = sorted(collect_self_entity_ids(conn) | {HUB_ID})
+            endpoints = sorted(
+                {str(b["subject"]) for b in brows} | {str(b["object"]) for b in brows if b["object"]}
+            )
+            have = {b["id"] for b in brows}
+            hub_marks = ",".join("?" * len(hub_ids))
+            for i in range(0, len(endpoints), 400):
+                chunk = endpoints[i:i + 400]
+                marks = ",".join("?" * len(chunk))
+                for row in conn.execute(
+                    filter_sql
+                    + f" AND ((subject IN ({hub_marks}) AND object IN ({marks}))"
+                    + f" OR (object IN ({hub_marks}) AND subject IN ({marks})))",
+                    [*filter_params, *hub_ids, *chunk, *hub_ids, *chunk],
+                ).fetchall():
+                    if row["id"] not in have:
+                        have.add(row["id"])
+                        brows.append(row)
 
             obj_texts: set[str] = set()
             obj_belief_count: dict[str, int] = {}
@@ -1408,6 +1438,31 @@ def register_memory_routes(self: Any) -> None:
                 })
                 existing_ids.add(obj_text)
 
+            # A literal value such as ``true`` or ``4`` is drawn as one node
+            # per fact, on its subject: dropping it (the old rule) painted the
+            # subject alone, and one shared node would join every subject
+            # holding the same value.
+            value_target: dict[str, str] = {}
+            for b in brows:
+                raw = str(b["object"] or "")
+                if not raw.strip() or raw in existing_ids or raw in self_ids:
+                    continue
+                if not is_junk_entity_token(raw):
+                    continue
+                if entity_type and entity_type.strip() and "concept" != entity_type.strip():
+                    continue
+                vid = value_node_id(str(b["id"]))
+                value_target[b["id"]] = vid
+                nodes.append({
+                    "id": vid,
+                    "name": raw,
+                    "type": "concept",
+                    "isHighStakes": False,
+                    "beliefCount": 1,
+                    "isVirtual": True,
+                    "isValue": True,
+                })
+
             links: list[dict] = []
             node_ids = {n["id"] for n in nodes}
             for b in brows:
@@ -1416,7 +1471,7 @@ def register_memory_routes(self: Any) -> None:
                 # edges attach to the single You/Mubder node.
                 src = HUB_ID if b["subject"] in self_ids else b["subject"]
                 tgt_raw = b["object"] or ""
-                tgt = HUB_ID if tgt_raw in self_ids else tgt_raw
+                tgt = HUB_ID if tgt_raw in self_ids else value_target.get(b["id"], tgt_raw)
                 if src not in node_ids:
                     continue
                 if tgt not in node_ids:
@@ -1465,12 +1520,19 @@ def register_memory_routes(self: Any) -> None:
             total_nodes = len(nodes)
             total_links = len(links)
             truncated = total_nodes > limit
-            kept_ids = {n["id"] for n in nodes[:limit]}
+            # Nodes no link touches, before the cut: alone in the data, not
+            # in the drawing.
+            isolated = sum(1 for nid in isolated_ids(nodes, links) if nid != HUB_ID)
+            # Cut by connected groups, never node by node: a node kept
+            # without the neighbours that join it to its group is painted
+            # alone (graph_view.keep_connected).
+            kept_ids = keep_connected(nodes, links, limit, hub_id=HUB_ID)
+            nodes = [n for n in nodes if n["id"] in kept_ids]
             links = [l for l in links if l["source"] in kept_ids and l["target"] in kept_ids]
 
             valid_froms = [l["valid_from"] for l in links if l["valid_from"]]
             type_counts: dict[str, int] = {}
-            for n in nodes[:limit]:
+            for n in nodes:
                 t = str(n.get("type") or "concept")
                 type_counts[t] = type_counts.get(t, 0) + 1
             pred_counts: dict[str, int] = {}
@@ -1480,11 +1542,12 @@ def register_memory_routes(self: Any) -> None:
             meta = _graph_backend_meta()
             meta["paint_source"] = "sqlite"
             stats = {
-                "nodes": len(nodes[:limit]),
+                "nodes": len(nodes),
                 "links": len(links),
                 "total_nodes": total_nodes,
                 "total_links": total_links,
                 "truncated": truncated,
+                "isolated": isolated,
                 "limit": limit,
                 "superseded": sum(1 for l in links if l["superseded"]),
                 "earliest": min(valid_froms, default=0),
@@ -1495,7 +1558,7 @@ def register_memory_routes(self: Any) -> None:
             }
             stats.update(meta)
             # `groups` was read above (before conn.close); tiers stamped on nodes.
-            return {"nodes": nodes[:limit], "links": links, "stats": stats, "groups": groups}
+            return {"nodes": nodes, "links": links, "stats": stats, "groups": groups}
         except Exception as exc:
             return {
                 "nodes": [],

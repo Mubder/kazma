@@ -95,7 +95,7 @@ BASELINE = {
 
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
 STRUCTURAL_BASELINE = {
-    "module_local_public_symbols": 569,
+    "module_local_public_symbols": 568,
     "patched_value_imports": 79,
     "sleep_then_assert": 52,
     "bare_module_attr_assignments": 0,

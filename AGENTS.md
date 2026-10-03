@@ -1135,6 +1135,44 @@ an answer ("User prefers dark mode").
   budget on a refused row. The two policies behaved the same until
   2026-09-27. `tests/test_memory_mirror_sync.py`.
 
+**L. The graph shows what memory holds, and extraction keeps it clean
+(2026-10-03, `memory/graph_view.py`, `entity_retire.py`, `graph_hygiene.py`).**
+On live, the Memory graph showed many nodes alone; most were made by the
+drawing, the rest by extraction.
+- **The route cuts by connected group** (`graph_view.keep_connected`): the
+  hub's group grown out from the hub by belief count, then the other groups
+  by weight. A node kept without the neighbours that join it to its group is
+  painted alone, and the old sort-and-slice dropped the one-belief fact
+  nodes first. The hub links of every endpoint (`user → related_to → X`,
+  importance 1) are loaded past the 800-fact cap: the cap ranked them last
+  and dropped them first. A literal value (`true`, `4`) is one node per fact
+  (`value:<belief id>`, `isValue`), never dropped and never one shared node.
+  `stats.isolated` counts nodes alone in the DATA, before the cut.
+- **A vector auto-merge leaves a redirect** (`entity_resolution._auto_merge`):
+  the merged name becomes a shell with `metadata.merged_into`, and the
+  target gains the name's alias hash. The ledger row named an entity that
+  did not exist, so under `ensure_primary_schema`'s foreign keys every
+  auto-merge raised (logged at DEBUG) and created a duplicate. Quarantine
+  creates the new entity before its ledger row for the same reason. The
+  extractor files a fact under the id a name resolved onto.
+- **Subjects that are work items are not entities**
+  (`ego_anchor.subject_should_mint_entity`: phases, tickets, versions,
+  hashes, paths, mostly-digit and sentence-length slugs). The fact is still
+  written and anchored. An object is minted only beside a subject that is
+  an entity. The deep pass is given the subjects in use
+  (`entity_resolution.entity_vocabulary`), as it is given the predicates.
+- **An entity goes with its last fact if it holds nothing else**
+  (`entity_retire.retire_empty_entities`, from `invalidate_belief` and a
+  supersede): a plain concept only -- own name and hash as aliases, no
+  metadata, grouping, merge row or redirect onto it; not protected, major
+  or high-stakes. Declared in `tests/test_memory_deletes.py`.
+- **Memory health reports the clutter** (`v2_health` -> `graph`: empty,
+  isolated, work-item and same-word duplicate entities, with examples).
+  Read-only; the operator merges or deletes with the existing controls.
+- Gate: `tests/test_memory_graph_clean.py` (a noisy extraction batch leaves
+  no work-item, isolated or empty entity; each rule with the old behaviour
+  as its negative control).
+
 ### 16. Cron Scheduler & Reminder Delivery (`kazma-core/kazma_core/cron/`)
 
 The user-facing reminder cron (`schedule_task` native skill → `CronScheduler`

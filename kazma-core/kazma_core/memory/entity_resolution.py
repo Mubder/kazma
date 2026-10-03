@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "resolve_entity",
     "alias_hash",
+    "entity_vocabulary",
     "slug",
     "list_pending_merges",
     "decide_entity_merge",
@@ -85,6 +86,23 @@ def canonical_entity_id(conn, eid: str, *, _max_chain: int = 8) -> str:
             break
         cur = nxt
     return cur
+
+
+def entity_vocabulary(conn, *, tenant_id: str, limit: int = 60) -> list[str]:
+    """The tenant's most used entity ids, for the extractor to reuse as
+    subjects instead of minting a second slug for the same thing."""
+    try:
+        rows = conn.execute(
+            "SELECT id FROM entities WHERE tenant_id = ? AND belief_count > 0 "
+            "AND COALESCE(json_extract(CASE WHEN json_valid(metadata_json) "
+            "THEN metadata_json END, '$.merged_into'), '') = '' "
+            "ORDER BY belief_count DESC, id LIMIT ?",
+            (tenant_id or "default", int(limit)),
+        ).fetchall()
+    except sqlite3.Error:
+        logger.warning("[entity_resolve] entity vocabulary unavailable", exc_info=True)
+        return []
+    return [str(r[0]) for r in rows if r[0] and str(r[0]) != "user"]
 
 
 def alias_hash(text: str) -> str:
@@ -171,7 +189,13 @@ def resolve_entity(
                         # Create as separate entity; no quarantine
                         pass
                     else:
-                        # unknown / llm off → quarantine for human review
+                        # unknown / llm off → quarantine for human review.
+                        # The new entity exists first: the ledger row names
+                        # it, and entity_merges enforces that foreign key.
+                        _create_entity(
+                            conn, canonical, norm_name, ahash, entity_type, tenant_id,
+                            is_high_stakes,
+                        )
                         _quarantine_merge(
                             conn,
                             canonical,
@@ -187,7 +211,9 @@ def resolve_entity(
         except ImportError:
             pass  # numpy absent — skip tier 2
         except Exception:
-            logger.debug("[entity_resolve] tier-2 vector match failed", exc_info=True)
+            # WARNING: at DEBUG this hid every auto-merge failing on the
+            # merge ledger's foreign key, each leaving a duplicate entity.
+            logger.warning("[entity_resolve] tier-2 vector match failed", exc_info=True)
 
     # ── No match: create a new canonical entity ──
     _create_entity(conn, canonical, norm_name, ahash, entity_type, tenant_id, is_high_stakes)
@@ -323,7 +349,17 @@ def _auto_merge(
     tenant_id: str,
     entity_type: str,
 ) -> None:
-    """Low-stakes auto-merge: add the alias to the target entity."""
+    """Low-stakes auto-merge: fold *name* into the target entity.
+
+    The target gains the name and its alias hash (so tier 1 finds it next
+    time), and *new_id* is written as a retired shell pointing at the target
+    (``metadata.merged_into``) -- the shape every merge leaves, which
+    ``canonical_entity_id`` follows. Without the shell the ledger row below
+    broke ``entity_merges``' foreign key on every connection that enforces
+    it (``ensure_primary_schema`` turns it on): the merge raised, the caller
+    created a second entity for the same thing, and the target kept a
+    half-written alias.
+    """
     # Ensure the target exists
     conn.execute(
         """INSERT OR IGNORE INTO entities
@@ -337,12 +373,20 @@ def _auto_merge(
         aliases = json.loads(row["aliases_json"] if row else "[]")
     except Exception:
         aliases = []
-    if name not in aliases:
-        aliases.append(name)
+    for alias in (name, ahash):
+        if alias and alias not in aliases:
+            aliases.append(alias)
     conn.execute(
         "UPDATE entities SET aliases_json=? WHERE id=?",
         (json.dumps(aliases), target_id),
     )
+    if new_id and new_id != target_id:
+        conn.execute(
+            """INSERT OR IGNORE INTO entities
+               (id, tenant_id, type, name, aliases_json, is_high_stakes, metadata_json)
+               VALUES (?, ?, ?, ?, '[]', 0, ?)""",
+            (new_id, tenant_id, entity_type, name, json.dumps({"merged_into": target_id})),
+        )
     _record_merge(conn, new_id, target_id, tenant_id, confidence=1.0 - 0.12, tier="tier2_vector", status="auto_merged")
     conn.commit()
 

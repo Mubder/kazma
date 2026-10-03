@@ -31,6 +31,7 @@ personal memory graph is reachable from the ego node):
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from typing import Any
 
@@ -40,6 +41,7 @@ __all__ = [
     "ANCHOR_PREDICATE",
     "is_payload_object",
     "object_should_mint_entity",
+    "subject_should_mint_entity",
     "subject_reaches_hub",
     "subject_has_entity_link",
     "anchor_leaf_subject",
@@ -131,6 +133,46 @@ def object_should_mint_entity(
         logger.debug("[ego_anchor] entity lookup failed", exc_info=True)
     pred = (predicate or "").strip().lower().replace(" ", "_")
     return pred in _RELATIONAL_OBJECT_PREDICATES
+
+
+# Subject shapes that name a step of work or a record, not a thing the user
+# talks about: "phase_25_unified_notification_alert_system", "JIRA-142",
+# "v0.10.2", a commit hash. The fact is kept as text on the belief; only the
+# entity is not minted, so the entity list holds things, not work items.
+_WORK_ITEM_RE = re.compile(
+    r"^(phase|step|stage|sprint|wave|round|milestone|ticket|issue|pr|task|run)[_\s-]*\d",
+    re.I,
+)
+_TICKET_RE = re.compile(r"^[a-z]{2,10}-\d+$", re.I)
+_VERSION_RE = re.compile(r"^v?\d+([._]\d+)+([._-]?[a-z0-9]+)*$", re.I)
+_HASH_RE = re.compile(r"^(?=[0-9a-f]*\d)[0-9a-f]{7,40}$", re.I)
+_MAX_SUBJECT_WORDS = 6
+
+
+def subject_should_mint_entity(subject: str) -> bool:
+    """True when a belief *subject* should become a concept entity.
+
+    False for junk tokens, paths and URLs, work-item names (phases, tickets,
+    versions, hashes), mostly-digit strings and sentence-length slugs. The
+    belief itself is still written and anchored -- the graph draws its
+    subject either way; the entity row is what made these clutter the
+    entity list as "isolated" concepts.
+    """
+    from kazma_core.memory.hygiene import is_junk_entity_token
+
+    s = (subject or "").strip()
+    if not s or s == "user" or is_junk_entity_token(s):
+        return False
+    if _looks_like_path_or_url(s):
+        return False
+    if _WORK_ITEM_RE.match(s) or _TICKET_RE.match(s) or _VERSION_RE.match(s) or _HASH_RE.match(s):
+        return False
+    letters = sum(ch.isalpha() for ch in s)
+    digits = sum(ch.isdigit() for ch in s)
+    if digits > letters:
+        return False
+    words = [w for w in re.split(r"[_\s\-]+", s) if w]
+    return len(words) <= _MAX_SUBJECT_WORDS
 
 
 def is_payload_object(conn: sqlite3.Connection, obj: str, *, predicate: str = "") -> bool:

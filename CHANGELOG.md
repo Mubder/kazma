@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## The memory graph shows what memory holds (2026-10-03)
+
+The Memory graph showed many nodes alone, and some looked like junk. Read
+against the code, most lone nodes were made by the drawing, not the data:
+
+- The graph loads at most 800 facts, ranked by importance times confidence.
+  The links that join each concept to you have the lowest importance, so
+  they were the first dropped and their concepts floated away. They are now
+  loaded whatever their rank.
+- Nodes were cut one by one by how many facts they hold, so a fact's node
+  went first and left its subject alone. The cut now keeps connected groups
+  whole, starting from you.
+- A value such as `true` or `4` was dropped with its link. It is now drawn
+  on its own fact.
+
+The data side had its own causes. A vector merge of two names for the same
+thing failed on every install: the merge ledger named an entity that did not
+exist, the database refused it, and a duplicate was created (the failure was
+logged only at debug level). The merge now leaves the merged name as a
+redirect, as a manual merge does. Subjects that are work items (phase names,
+tickets, versions, paths, sentences) no longer become entities; their facts
+are kept. An entity whose last fact is invalidated is removed if it holds
+nothing else. The extractor is told which subjects are already in use.
+
+Memory health now reports empty, isolated, work-item and duplicate entities
+with examples (`/api/memory/v2/health`, `graph`). Existing clutter is not
+deleted automatically; use the report and the existing merge and delete
+controls.
+
 ## "Allow for this chat" grants tools, not a card's label (2026-10-03)
 
 A card that asks about two tools at once is labelled "2 tools". Answering it
