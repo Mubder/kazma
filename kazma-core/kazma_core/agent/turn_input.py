@@ -317,7 +317,6 @@ def classify_turn_intent(
             "graph",
             "entity",
             "entities",
-            "shipx",
             "kazma",
             "repo",
             "pipeline",
@@ -404,20 +403,20 @@ def is_bulk_document_message(text: str, *, min_chars: int = 600) -> bool:
 
 # User wants graph/entity hygiene: merge, link, delete junk — NOT memory_store.
 # Keep patterns *exclusive* enough that multi-part tasks mentioning hierarchy
-# as a *storage shape* (Mubder → kazma → facts) are not forced into cleanup-only.
+# as a *storage shape* (user → kazma → facts) are not forced into cleanup-only.
 _GRAPH_CLEANUP_RE = re.compile(
     r"(?is)"
     r"("
     r"\b(?:entities?|beliefs?|graph|nodes?)\b.{0,80}\b(?:messy|missy|clutter|cleanup|clean\s*up|align|restructur|organiz|organise|duplicate)\b"
     r"|"
-    r"\b(?:merge|align|restructur|cleanup|clean\s*up)\b.{0,80}\b(?:entities?|beliefs?|graph|nodes?|kazma|shipx)\b"
+    r"\b(?:merge|align|restructur|cleanup|clean\s*up)\b.{0,80}\b(?:entities?|beliefs?|graph|nodes?|kazma)\b"
     r"|"
     r"\b(?:aligned|structure)\b.{0,40}\b(?:this way|like|as)\b.{0,40}\b(?:entities?|graph|nodes?)\b"
     r"|"
     # Hierarchy alone is not cleanup — require hygiene verbs nearby
-    r"\b(?:mubder|user)\b.{0,20}(?:→|->|—>|>).{0,20}\bkazma\b.{0,120}\b(?:merge|cleanup|clean\s*up|delete|junk|messy|duplicate)\b"
+    r"\buser\b.{0,20}(?:→|->|—>|>).{0,20}\bkazma\b.{0,120}\b(?:merge|cleanup|clean\s*up|delete|junk|messy|duplicate)\b"
     r"|"
-    r"\b(?:merge|cleanup|clean\s*up|delete|junk|messy|duplicate)\b.{0,120}\b(?:mubder|user)\b.{0,20}(?:→|->|—>|>).{0,20}\bkazma\b"
+    r"\b(?:merge|cleanup|clean\s*up|delete|junk|messy|duplicate)\b.{0,120}\buser\b.{0,20}(?:→|->|—>|>).{0,20}\bkazma\b"
     r"|"
     r"\bjunk\b.{0,40}\b(?:entities?|nodes?|true|false|graph)\b"
     r"|"
@@ -461,7 +460,7 @@ def is_memory_graph_cleanup_intent(text: str) -> bool:
     """True when the user wants *primarily* to restructure/clean the belief graph.
 
     Returns False for multi-part work that only *mentions* hierarchy as the
-    desired storage shape (e.g. read PAT repos then save under Mubder→kazma).
+    desired storage shape (e.g. read PAT repos then save under user→kazma).
     """
     t = (text or "").strip()
     if not t:
@@ -579,7 +578,7 @@ def latest_turn_priority_note(
             f"{focus_bit} Typical steps may include: (1) use the stored GitHub "
             "PAT/token to read the named repos/projects; (2) save *new* facts "
             "into memory with clean hierarchy "
-            "Mubder(user) → has_project → {kazma|shipx|kca} → has_part → details "
+            "user → has_project → <project> → has_part → details "
             "(no junk true/false shells); (3) compare projects and answer any "
             "analysis/job/email question. Prefer memory_link_entities + "
             "memory_store over endless list/merge loops. If a step fails "
@@ -594,8 +593,8 @@ def latest_turn_priority_note(
             "memory_link_entities (hierarchy edges e.g. user has_project kazma; "
             "kazma has_part …), memory_delete_entity (junk shells like true/false), "
             "memory_invalidate (bad beliefs). Target shape often: "
-            "Mubder(user) → has_project → kazma → has_part → related entities. "
-            "Do NOT invent ShipX notes or re-save FILE_INDEX unless they asked. "
+            "user → has_project → <project> → has_part → related entities. "
+            "Do NOT write new notes or re-save existing ones unless they asked. "
             "Finish in a bounded number of tool rounds — do not loop list→merge forever."
         )
         if focus:

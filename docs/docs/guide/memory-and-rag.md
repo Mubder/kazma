@@ -461,8 +461,16 @@ not a hardcoded “You”.
 | List / filter | `GET /api/memory/v2/entities` |
 | Merge shells | `POST /api/memory/v2/entities/merge` |
 | Link two entities | `POST /api/memory/v2/entities/link` |
-| Delete empty shell | `DELETE /api/memory/v2/entities/{id}` (not protected hub ids). Copies `entity_merges` rows to `entity_merges_archive` first (FK still drops live ledger rows). |
+| Delete empty shell | `DELETE /api/memory/v2/entities/{id}` (not protected entities). Copies `entity_merges` rows to `entity_merges_archive` first (FK still drops live ledger rows). |
+| Purge empty entities | Hygiene tab, `POST /api/memory/v2/hygiene/run` with `purge_empty_entities`: removes only shells with no live fact and nothing but their own name, the rule that removes them automatically. Merge redirects stay: they send a merged name to its target. |
 | Invalidate belief | `POST /api/memory/v2/beliefs/{id}/invalidate` (+ batch) |
+
+Protected entities are never deleted, purged or merged away: the hub
+(`user`), the agent (`assistant`, `kazma`), the hub's own names (an entity
+the hub's aliases list, such as the person entity you were before the hub
+took your name) and any entity you mark **Protect**. One of the hub's own
+names can still be merged into the hub. Kazma learns the owner's names from
+the hub, never from its code (`memory/entity_protection.py`).
 
 ---
 

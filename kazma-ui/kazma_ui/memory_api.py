@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import sqlite3
 import time
 import uuid
@@ -20,27 +21,35 @@ from kazma_core.errors import safe_error
 
 logger = logging.getLogger(__name__)
 
-_PROTECTED_ENTITIES = frozenset({"user", "assistant", "kazma", "mubder"})
-
 router = APIRouter(tags=["memory-admin"])
 
 
-def _is_protected(conn: sqlite3.Connection, eid: str) -> bool:
-    """True if `eid` is protected from deletion / merge-as-source.
+def _protection(conn: sqlite3.Connection, eid: str) -> str | None:
+    """Why `eid` may not be deleted (``memory/entity_protection.py``: the hub,
+    the agent, the owner's own names, or the operator's flag), else None.
 
-    The hardcoded floor (_PROTECTED_ENTITIES: user/assistant/kazma/mubder) is
-    always protected. F3 adds a per-row `is_protected` flag so an operator can
-    extend protection to any entity (e.g. mark `shipx` protected).
+    A store that cannot answer refuses (``"unknown"``): this used to answer
+    "not protected" on any read error.
     """
-    if str(eid or "").lower() in _PROTECTED_ENTITIES:
-        return True
+    from kazma_core.memory.entity_protection import protection
+
     try:
-        row = conn.execute(
-            "SELECT is_protected FROM entities WHERE id=?", (eid,)
-        ).fetchone()
-        return bool(row and int(row["is_protected"] or 0) == 1)
-    except Exception:
-        return False
+        return protection(conn, eid)
+    except sqlite3.Error:
+        logger.warning("[memory_api] protection check failed for %r", str(eid)[:60], exc_info=True)
+        return "unknown"
+
+
+def _merge_refusal(conn: sqlite3.Connection, source_id: str, target_id: str) -> str | None:
+    """Why `source_id` may not be merged into `target_id`, else None (refuses
+    when the store cannot answer, like :func:`_protection`)."""
+    from kazma_core.memory.entity_protection import merge_refusal
+
+    try:
+        return merge_refusal(conn, source_id, target_id)
+    except sqlite3.Error:
+        logger.warning("[memory_api] merge protection check failed for %r", str(source_id)[:60], exc_info=True)
+        return "unknown"
 
 
 def _would_orphan(
@@ -150,18 +159,26 @@ def _consume_undo(token: str) -> dict[str, Any] | None:
 
 
 def _fts_match_expr(text: str) -> str:
-    """Build a safe FTS5 MATCH expression (alnum tokens OR-joined).
+    """Build a safe FTS5 MATCH expression (word tokens OR-joined).
 
-    Mirrors ``kazma_core.memory.recall._fts_match_query`` but kept local to
-    the UI layer so it doesn't couple to recall's private helpers. Returns
-    "" when no usable tokens remain (caller then falls back to LIKE).
+    Words split where the index splits them (``unicode61``: at anything but a
+    letter or a digit, the underscore included). Until 2026-10-03 each
+    space-separated part had its other characters dropped, so an entity's own
+    id, ``kazma_ai_admin``, became the one token ``kazmaaiadmin``, which no
+    row holds. Returns "" when no usable tokens remain (the caller then falls
+    back to LIKE).
     """
     toks: list[str] = []
-    for part in (text or "").lower().replace("-", " ").split():
-        cleaned = "".join(c for c in part if c.isalnum())
-        if len(cleaned) >= 2 and cleaned not in toks:
-            toks.append(cleaned)
+    for tok in re.findall(r"[^\W_]+", (text or "").lower()):
+        if len(tok) >= 2 and tok not in toks:
+            toks.append(tok)
     return " OR ".join(toks)
+
+
+def _like_literal(text: str) -> str:
+    """*text* as a LIKE pattern that matches itself (``ESCAPE '!'``): a ``_``
+    in an entity id is a character, not "any one character"."""
+    return text.replace("!", "!!").replace("%", "!%").replace("_", "!_")
 
 
 def _conn() -> sqlite3.Connection:
@@ -551,24 +568,23 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
                     fts_rowids = [int(r["rowid"]) for r in fts_rows]
                 except Exception:
                     fts_rowids = None  # FTS unavailable → LIKE fallback
+            ql = f"%{_like_literal(query.lower())}%"
             if fts_rowids is not None:
                 matched_via = "fts"
-                if not fts_rowids:
-                    # FTS matched nothing — return empty.
-                    conn.close()
-                    return {
-                        "ok": True, "count": 0, "total": 0, "offset": off,
-                        "limit": lim, "entities": [], "matched_via": "fts",
-                    }
+                # The id itself matches too (ids aren't in FTS) -- also when
+                # the index holds no word of the query: an empty FTS answer
+                # returned no rows, so an entity's own id found nothing.
                 ph = ",".join("?" for _ in fts_rowids)
-                # Also allow an exact id match alongside FTS (ids aren't in FTS).
-                where += f" AND (e.rowid IN ({ph}) OR LOWER(e.id) LIKE ?)"
+                rowid_match = f"e.rowid IN ({ph}) OR " if fts_rowids else ""
+                where += f" AND ({rowid_match}LOWER(e.id) LIKE ? ESCAPE '!')"
                 params.extend(fts_rowids)
-                params.append(f"%{query.lower()}%")
+                params.append(ql)
             else:
                 # FTS unavailable or no usable tokens → LIKE on id/name/type.
-                ql = f"%{query.lower()}%"
-                where += " AND (LOWER(e.id) LIKE ? OR LOWER(e.name) LIKE ? OR LOWER(e.type) LIKE ?)"
+                where += (
+                    " AND (LOWER(e.id) LIKE ? ESCAPE '!' OR LOWER(e.name) LIKE ? ESCAPE '!'"
+                    " OR LOWER(e.type) LIKE ? ESCAPE '!')"
+                )
                 params.extend([ql, ql, ql])
                 matched_via = "like"
         if empty_only:
@@ -582,19 +598,29 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
         # tenant_id-leading indexes; cheap relative to the row query.
         total = conn.execute(f"SELECT COUNT(*){where}", params).fetchone()[0]
 
+        # The entity the query names exactly (its id, its id's words, its
+        # name) comes first; the rest by how much memory each holds.
+        exact_first = ""
+        order_params: list[Any] = []
+        if query:
+            exact_first = "(LOWER(e.id) IN (?, ?) OR LOWER(e.name) = ?) DESC, "
+            order_params = [query.lower(), _entity_slug(query), query.lower()]
         sql = (
             f"SELECT e.id, e.type, e.name, e.is_high_stakes, e.is_protected,"
             f" e.aliases_json, e.metadata_json, {count_expr} AS belief_count,"
             f" {degree_expr} AS linked_others{where}"
-            " ORDER BY belief_count DESC, linked_others ASC, e.name ASC LIMIT ? OFFSET ?"
+            f" ORDER BY {exact_first}belief_count DESC, linked_others ASC, e.name ASC LIMIT ? OFFSET ?"
         )
-        rows = [dict(r) for r in conn.execute(sql, [*params, lim, off]).fetchall()]
+        rows = [dict(r) for r in conn.execute(sql, [*params, *order_params, lim, off]).fetchall()]
+        from kazma_core.memory.entity_protection import is_core_entity
         from kazma_core.memory.self_hub import (
+            collect_self_entity_ids,
             graph_focus_id,
             is_self_entity,
             parse_aliases,
         )
 
+        self_ids = collect_self_entity_ids(conn, tid)
         for r in rows:
             r["empty"] = int(r.get("belief_count") or 0) == 0
             r["isolated"] = (
@@ -603,8 +629,10 @@ def _list_entities_sync(q: str, limit: int, offset: int, empty_only: bool, isola
                 and str(r.get("id") or "").lower() not in ("user", "assistant")
             )
             # ``core``: always protected, never unprotectable (the page shows
-            # no switch for it); ``protected``: core or the owner's flag.
-            r["core"] = str(r.get("id") or "").lower() in _PROTECTED_ENTITIES
+            # no switch for it) -- the hub, the agent and the owner's own
+            # names (entity_protection); ``protected``: core or the flag.
+            rid = str(r.get("id") or "")
+            r["core"] = is_core_entity(rid) or rid in self_ids
             r["protected"] = r["core"] or int(r.get("is_protected") or 0) == 1
             aliases = parse_aliases(r.get("aliases_json"))
             r["aliases"] = aliases
@@ -642,9 +670,9 @@ async def rename_entity(entity_id: str, request: Request) -> dict[str, Any]:
 
     Canonical ``id`` stays stable (links, subjects, objects keep working).
     Previous labels are kept in ``aliases_json`` so resolution still maps
-    nicknames (e.g. Mubder / You) onto the same node. Protected hub ids
-    like ``user`` may be renamed for the canvas label ("You" → "Mubder")
-    but cannot be deleted or merged away.
+    nicknames (the owner's name, "You") onto the same node. Protected hub
+    ids like ``user`` may be renamed for the canvas label ("You" → the
+    owner's name) but cannot be deleted or merged away.
 
     Missing rows are upserted so graph virtual nodes (and the hardcoded
     ``user`` hub) can receive a durable label on first rename.
@@ -719,7 +747,8 @@ def _rename_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
         )
 
         # Self person shells (User / You / ent_* backfill) drive the canvas hub
-        # label. Keep entities.id=user in sync so the graph shows Mubder not You.
+        # label. Keep entities.id=user in sync so the graph shows the owner's
+        # name, not You.
         was_self = is_self_entity(
             entity_id=eid,
             name=old_name,
@@ -765,25 +794,28 @@ def _rename_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
 async def protect_entity(entity_id: str, request: Request) -> dict[str, Any]:
     """F3: toggle the per-entity `is_protected` flag.
 
-    A protected entity cannot be deleted or used as a merge source. The
-    hardcoded floor (user/assistant/kazma/mubder) is always protected and
-    cannot be unprotected here. Body: ``{"protected": true|false}``.
+    A protected entity cannot be deleted or used as a merge source. The hub,
+    the agent and the owner's own names (``memory/entity_protection.py``) are
+    always protected and cannot be unprotected here. Body:
+    ``{"protected": true|false}``.
     """
     return await asyncio.to_thread(_protect_entity_sync, entity_id, await _read_json(request))
 
 
 def _protect_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
     """Blocking half of :func:`protect_entity` -- runs off the event loop."""
+    from kazma_core.memory.entity_protection import is_core_entity
+
     eid = (entity_id or "").strip()
     if not eid:
         return {"ok": False, "error": "entity_id required"}
     body = {} if payload is _INVALID_JSON else payload
     want = bool(body.get("protected"))
-    # The hardcoded floor is always protected — reject attempts to clear it
-    # via this route so the operator can't accidentally unprotect the hub.
+    # The core ids are always protected — reject attempts to clear them via
+    # this route so the operator can't accidentally unprotect the hub.
     # Checked before the row lookup so it holds even if the core entity has no
     # row yet (the core set is policy, not data-dependent).
-    if not want and str(eid).lower() in _PROTECTED_ENTITIES:
+    if not want and is_core_entity(eid):
         return {"ok": False, "error": f"cannot unprotect core entity: {eid}"}
     try:
         conn = _conn()
@@ -796,6 +828,10 @@ def _protect_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
         if not row:
             conn.close()
             return {"ok": False, "error": "not_found"}
+        # The owner's own names are the hub's data, protected whatever the flag.
+        if not want and _protection(conn, eid) == "self":
+            conn.close()
+            return {"ok": False, "error": f"cannot unprotect the hub's own entity: {eid}"}
         conn.execute(
             "UPDATE entities SET is_protected=? WHERE id=?", (1 if want else 0, eid)
         )
@@ -811,9 +847,9 @@ def _protect_entity_sync(entity_id: str, payload: Any) -> dict[str, Any]:
 async def set_major_entity(entity_id: str, request: Request) -> dict[str, Any]:
     """Mark/unmark an entity as a MAJOR node (bigger + distinct color on canvas).
 
-    The operator's mental model: Mubder is the master node; big projects
-    (kazma, shipx, kca) are MAJOR. This flag makes them render bigger and
-    with a distinct color, and grouped sub-nodes attach to them visually.
+    The operator's mental model: the hub (the owner) is the master node; big
+    projects are MAJOR. This flag makes them render bigger and with a
+    distinct color, and grouped sub-nodes attach to them visually.
     Body: ``{"major": true|false}``.
     """
     return await asyncio.to_thread(_set_major_entity_sync, entity_id, await _read_json(request))
@@ -855,14 +891,16 @@ def _delete_entity_sync(entity_id: str) -> dict[str, Any]:
     if not eid:
         return {"ok": False, "error": "entity_id required"}
     conn = _conn()
-    # F3: protection covers the hardcoded floor AND the per-row is_protected
-    # flag. Resolved against a connection so the per-row flag is read.
+    # Protection: the hub, the agent, the owner's own names and the per-row
+    # flag (entity_protection). Resolved against a connection: the hub's
+    # aliases and the flag are data.
     if not _entity_tenant_ok(conn, eid):
         conn.close()
         return {"ok": False, "error": "not_found"}
-    if _is_protected(conn, eid):
+    kind = _protection(conn, eid)
+    if kind:
         conn.close()
-        return {"ok": False, "error": f"protected entity: {eid}"}
+        return {"ok": False, "error": f"protected entity: {eid}", "protected": kind}
     try:
         row = conn.execute(
             "SELECT id, type, name, aliases_json, metadata_json, is_high_stakes, is_protected "
@@ -977,10 +1015,12 @@ def _merge_entities_sync(payload: Any) -> dict[str, Any]:
     if source_id == target_id:
         return {"ok": False, "error": "source and target must differ"}
     conn = _conn()
-    # F3: protection covers the hardcoded floor AND the per-row is_protected flag.
-    if _is_protected(conn, source_id):
+    # Protection (entity_protection): the hub, the agent, the owner's own
+    # names -- which may still go INTO the hub -- and the per-row flag.
+    kind = _merge_refusal(conn, source_id, target_id)
+    if kind:
         conn.close()
-        return {"ok": False, "error": f"cannot merge protected source {source_id}"}
+        return {"ok": False, "error": f"cannot merge protected source {source_id}", "protected": kind}
     try:
         src = conn.execute(
             "SELECT id, tenant_id, name, aliases_json FROM entities WHERE id=?", (source_id,)
@@ -2048,7 +2088,14 @@ def hygiene_preview() -> dict[str, Any]:
     SQLite. The install's own tenant ("default") sees the whole install, like
     every memory list; any other tenant sees its own rows only -- this listed
     every tenant's entities and notes until 2026-09-27.
+
+    ``empty_entities`` is what the purge removes: the plain empty shells
+    (``entity_retire.plain_empty_shells``), never a merge redirect, a
+    protected entity or one someone typed -- it listed every entity with no
+    live fact, redirects included, until 2026-10-03.
     """
+    from kazma_core.memory.entity_retire import plain_empty_shells
+
     tid = _memory_tenant_id()
     scoped = tid != "default"
     e_scope = " AND e.tenant_id = ?" if scoped else ""
@@ -2057,20 +2104,11 @@ def hygiene_preview() -> dict[str, Any]:
     conn = None
     try:
         conn = _conn()
-        empty = [
-            dict(r)
-            for r in conn.execute(
-                f"""
-                SELECT e.id, e.type, e.name, {_belief_count_sql()} AS belief_count
-                FROM entities e
-                WHERE {_belief_count_sql()} = 0
-                  AND LOWER(e.id) NOT IN ('user','assistant','kazma','mubder'){e_scope}
-                ORDER BY e.name
-                LIMIT 200
-                """,
-                tparams,
-            ).fetchall()
-        ]
+        empty = []
+        for _tenant, eid in plain_empty_shells(conn, tenant_id=tid if scoped else None, limit=200):
+            row = conn.execute("SELECT id, type, name FROM entities WHERE id = ?", (eid,)).fetchone()
+            if row is not None:
+                empty.append({**dict(row), "belief_count": 0})
         isolated = [
             dict(r)
             for r in conn.execute(
@@ -2140,6 +2178,29 @@ def hygiene_preview() -> dict[str, Any]:
     finally:
         if conn is not None:
             conn.close()
+
+
+def _purge_empty_entities_sync() -> dict[str, Any]:
+    """Remove what the preview lists: the caller's plain empty shells, by the
+    rule the automatic retire uses (``entity_retire``), each judged again at
+    its delete. It deleted every entity with no live fact, one route call at
+    a time, until 2026-10-03: merge redirects went with them, and the names
+    they redirected minted new entities again."""
+    from kazma_core.memory.entity_retire import plain_empty_shells, retire_empty_entities
+
+    tid = _memory_tenant_id()
+    conn = _conn()
+    try:
+        by_tenant: dict[str, list[str]] = {}
+        for tenant, eid in plain_empty_shells(conn, tenant_id=None if tid == "default" else tid):
+            by_tenant.setdefault(tenant, []).append(eid)
+        deleted: list[str] = []
+        for tenant, ids in by_tenant.items():
+            deleted.extend(retire_empty_entities(conn, ids, tenant_id=tenant))
+        conn.commit()
+        return {"deleted": deleted, "count": len(deleted)}
+    finally:
+        conn.close()
 
 
 def _invalidate_owned(belief_ids: list[str]) -> int:
@@ -2213,16 +2274,7 @@ async def hygiene_run(request: Request) -> dict[str, Any]:
     out: dict[str, Any] = {"ok": True, "actions": {}}
 
     if body.get("purge_empty_entities"):
-        preview = await asyncio.to_thread(hygiene_preview)
-        deleted = []
-        for e in preview.get("empty_entities") or []:
-            r = await delete_entity(e["id"])
-            if r.get("ok"):
-                deleted.append(e["id"])
-        out["actions"]["purge_empty_entities"] = {
-            "deleted": deleted,
-            "count": len(deleted),
-        }
+        out["actions"]["purge_empty_entities"] = await asyncio.to_thread(_purge_empty_entities_sync)
 
     if body.get("invalidate_near_dup_noted"):
         preview = await asyncio.to_thread(hygiene_preview)

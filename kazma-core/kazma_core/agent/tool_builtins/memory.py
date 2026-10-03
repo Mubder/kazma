@@ -192,13 +192,19 @@ def register_memory_tools(registry: Any) -> None:
             return "Error: source_id and target_id required"
         if src_id == tgt_id:
             return "Error: source and target must differ"
-        protected = {"user", "assistant"}
-        if src_id.lower() in protected:
-            return f"Error: cannot merge protected source {src_id}"
         try:
             conn = sqlite3.connect(primary_memory_db(), check_same_thread=False)
             conn.row_factory = sqlite3.Row
             ensure_primary_schema(conn)
+            # The page's rule (memory/entity_protection.py): the hub, the
+            # agent, the owner's own names (which may go INTO the hub) and the
+            # operator's flag. This tool kept a list of its own, user and
+            # assistant only.
+            from kazma_core.memory.entity_protection import merge_refusal
+
+            if merge_refusal(conn, src_id, tgt_id):
+                conn.close()
+                return f"Error: cannot merge protected source {src_id}"
             src = conn.execute(
                 "SELECT id, name, aliases_json FROM entities WHERE id=?", (src_id,)
             ).fetchone()
@@ -385,9 +391,6 @@ def register_memory_tools(registry: Any) -> None:
         eid = (entity_id or "").strip()
         if not eid:
             return "Error: entity_id required"
-        blocked = {"user", "assistant", "kazma", "mubder"}
-        if eid.lower() in blocked:
-            return f"Error: refusing to delete protected entity '{eid}'"
         try:
             conn = sqlite3.connect(
                 primary_memory_db(), check_same_thread=False
@@ -395,6 +398,13 @@ def register_memory_tools(registry: Any) -> None:
             conn.row_factory = sqlite3.Row
             ensure_primary_schema(conn)
             tenant = get_current_tenant_id()
+            # The page's rule (memory/entity_protection.py): the hub, the
+            # agent, the owner's own names and the operator's flag.
+            from kazma_core.memory.entity_protection import protection
+
+            if protection(conn, eid, tenant_id=tenant):
+                conn.close()
+                return f"Error: refusing to delete protected entity '{eid}'"
             row = conn.execute(
                 "SELECT id, type, name FROM entities WHERE id=? AND tenant_id=?",
                 (eid, tenant),
@@ -433,16 +443,20 @@ def register_memory_tools(registry: Any) -> None:
             logger.warning("[memory_delete_entity] failed: %s", exc)
             return f"Error: memory_delete_entity failed — {exc}"
     def _mem_purge_empty_entities(*, confirm: bool = False) -> str:
-        """Delete entity shells with zero active beliefs (safe clutter)."""
+        """Delete entity shells that hold nothing (safe clutter).
+
+        The rule the automatic retire and the Memory page's Hygiene use
+        (``entity_retire.plain_empty_shells``): no live fact and nothing but
+        the entity's own name. It deleted every entity with no live fact,
+        merge redirects and the owner's other names included.
+        """
         import sqlite3
 
+        from kazma_core.memory.entity_retire import plain_empty_shells, retire_empty_entities
         from kazma_core.memory.schema_v2 import ensure_primary_schema
         from kazma_core.paths import primary_memory_db
         from kazma_core.safety.hitl import get_current_tenant_id
 
-        # The ids no clean-up removes: one list, with the automatic one
-        # (memory/entity_retire.py).
-        from kazma_core.memory.entity_retire import PROTECTED_IDS as protected
         try:
             conn = sqlite3.connect(
                 primary_memory_db(), check_same_thread=False
@@ -450,28 +464,15 @@ def register_memory_tools(registry: Any) -> None:
             conn.row_factory = sqlite3.Row
             ensure_primary_schema(conn)
             tenant = get_current_tenant_id()
-            rows = conn.execute(
-                """
-                SELECT e.id, e.type, e.name,
-                       (
-                         SELECT COUNT(*) FROM beliefs b
-                         WHERE b.tenant_id = e.tenant_id
-                           AND b.valid_until IS NULL AND b.invalidated_at IS NULL
-                           AND (b.subject = e.id OR b.object = e.name
-                                OR b.object = e.id OR b.subject = e.name)
-                       ) AS belief_count
-                FROM entities e
-                WHERE e.tenant_id = ?
-                """,
-                (tenant,),
-            ).fetchall()
-            empty = [
-                dict(r)
-                for r in rows
-                if int(r["belief_count"] or 0) == 0
-                and str(r["id"] or "").lower() not in protected
-            ]
+            ids = [eid for _tenant, eid in plain_empty_shells(conn, tenant_id=tenant)]
             if not confirm:
+                empty = [
+                    {**dict(r), "belief_count": 0}
+                    for eid in ids
+                    for r in conn.execute(
+                        "SELECT id, type, name FROM entities WHERE id=?", (eid,)
+                    ).fetchall()
+                ]
                 conn.close()
                 return json.dumps(
                     {
@@ -484,27 +485,7 @@ def register_memory_tools(registry: Any) -> None:
                     ensure_ascii=False,
                     indent=2,
                 )
-            deleted: list[str] = []
-            for r in empty:
-                eid = r["id"]
-                try:
-                    from kazma_core.memory.entity_resolution import preserve_merge_ledger
-
-                    preserve_merge_ledger(conn, eid, reason="purge_empty")
-                except Exception:
-                    logger.debug(
-                        "[memory_purge_empty] merge-ledger archive skipped",
-                        exc_info=True,
-                    )
-                conn.execute(
-                    "DELETE FROM entity_merges WHERE source_entity_id=? OR target_entity_id=?",
-                    (eid, eid),
-                )
-                conn.execute(
-                    "DELETE FROM entities WHERE id=? AND tenant_id=?",
-                    (eid, tenant),
-                )
-                deleted.append(eid)
+            deleted = retire_empty_entities(conn, ids, tenant_id=tenant)
             conn.commit()
             conn.close()
             return json.dumps(
@@ -676,7 +657,7 @@ def register_memory_tools(registry: Any) -> None:
             "Graph cleanup: merge (id=source, target=keep), link (subject, predicate, object). "
             "Example hierarchy: link subject=user predicate=has_project object=kazma; "
             "link subject=kazma predicate=has_part object=kazma_framework. "
-            "Merge duplicate shells into one: merge id=mubder_kazma target=kazma. "
+            "Merge duplicate shells into one: merge id=kazma_app target=kazma. "
             "Delete junk entity true/false: delete_entity id=true. "
             "DO NOT use memory_store to restructure the graph — store only adds notes. "
             "Only for explicit user requests to maintain/clean memory — never "
@@ -719,7 +700,7 @@ def register_memory_tools(registry: Any) -> None:
                     ],
                     "examples": [
                         {"action": "list_entities", "q": "kazma"},
-                        {"action": "merge", "id": "mubder_kazma", "target": "kazma"},
+                        {"action": "merge", "id": "kazma_app", "target": "kazma"},
                         {
                             "action": "link",
                             "subject": "user",
@@ -735,7 +716,7 @@ def register_memory_tools(registry: Any) -> None:
                         {"action": "delete_entity", "id": "true"},
                         {"action": "purge_empty_entities", "confirm": True},
                     ],
-                    "graph_shape_goal": "user(Mubder) → has_project → kazma → has_part → …",
+                    "graph_shape_goal": "user → has_project → kazma → has_part → …",
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -764,8 +745,9 @@ def register_memory_tools(registry: Any) -> None:
     @registry.register(
         description=(
             "WRITE: Merge memory entity source into target. Beliefs rewired; "
-            "use for duplicate shells (mubder_kazma → kazma, kazma_framework → kazma). "
-            "Protected: cannot merge away user. Prefer over memory_store for cleanup."
+            "use for duplicate shells (kazma_app → kazma, acme_project → acme). "
+            "Protected: cannot merge away the hub (user), the agent, the owner's own "
+            "names or an entity the operator protected. Prefer over memory_store for cleanup."
         ),
         category="memory",
     )
@@ -842,7 +824,7 @@ def register_memory_tools(registry: Any) -> None:
             "Use when the user shares personal info, preferences, or important context "
             "that should be remembered across sessions. "
             "DO NOT use this to restructure/clean the entity graph — for merge shells, "
-            "link Mubder→Kazma→parts, or delete junk nodes (true/false) use "
+            "link user→kazma→parts, or delete junk nodes (true/false) use "
             "memory_merge_entities / memory_link_entities / memory_admin / memory_delete_entity. "
             "For rotating single-valued facts (e.g. 'my Grok next weekly reset is …', "
             "'ZCode next reset is …'), pass metadata JSON with "

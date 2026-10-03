@@ -133,8 +133,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "No libraries yet. Add one above, or from chat with /kb crawl <id> <url>.",
     },
     "knowledge.id_placeholder": {
-        "ar": "معرّف المكتبة (مثل shipx_whatsapp_api)",
-        "en": "Library ID (slug, e.g. shipx_whatsapp_api)",
+        "ar": "معرّف المكتبة (مثل whatsapp_api_docs)",
+        "en": "Library ID (slug, e.g. whatsapp_api_docs)",
     },
     "knowledge.ingest_page": {
         "ar": "ابتلاع صفحة واحدة",

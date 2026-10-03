@@ -1169,9 +1169,30 @@ drawing, the rest by extraction.
   (`entity_retire.retire_empty_entities`, from `invalidate_belief` and a
   supersede): a plain concept only -- own name and hash as aliases, no
   metadata, grouping, merge row or redirect onto it; not protected, major
-  or high-stakes. Declared in `tests/test_memory_deletes.py`. The ids no
-  clean-up removes are one list, `entity_retire.PROTECTED_IDS`, which
-  `purge_empty_entities` reads too.
+  or high-stakes. Declared in `tests/test_memory_deletes.py`.
+- **Which entities no delete, merge or purge takes is one answer**
+  (`memory/entity_protection.py`): core ids (`user`, `assistant`, `kazma`),
+  the hub's own names (`self_hub.collect_self_entity_ids`: an entity the
+  hub's aliases name, or one labelled you/me/user) and the operator's flag.
+  A self entity may still be merged INTO the hub. Five copies did not agree,
+  and four named Kazma's author: every install protected an entity called
+  "mubder" and none its own owner's other names. A store that cannot answer
+  refuses (the page's check answered "not protected" on a read error). Every
+  purge (the page's Hygiene, `memory_purge_empty_entities`) removes exactly
+  `entity_retire.plain_empty_shells`, and memory health's `empty` counts
+  that list: both purges deleted every entity with no live fact, merge
+  redirects included, and a redirect is how a merged name keeps reaching
+  its target (`canonical_entity_id`). Gates:
+  `tests/test_memory_entity_protection.py` (an install whose owner is
+  Layla; the old purge rule as the negative control) and
+  `tests/test_no_owner_identity_in_product.py` (no product string literal
+  names the author, none outside a docstring the author's projects; the
+  repository's address is the product's).
+- **The Entities search finds an entity by its id**
+  (`memory_api._fts_match_expr`): words split where the index splits them
+  (an underscore separates), the id matches even when the index holds no
+  word of the query, and an exact id or name comes first. `kazma_ai_admin`
+  became the one token `kazmaaiadmin` and found nothing.
 - **Memory health reports the clutter** (`v2_health` -> `graph`: empty,
   isolated, work-item and same-word duplicate entities, with examples).
   Read-only; the operator merges or deletes with the existing controls.

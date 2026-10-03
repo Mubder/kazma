@@ -914,7 +914,7 @@ async def _try_kb_command(
                 "No libraries yet. Ingest one:\n"
                 "`/kb add <id> <url>` — single page\n"
                 "`/kb crawl <id> <url>` — whole doc tree\n\n"
-                "Example: `/kb crawl shipx_whatsapp "
+                "Example: `/kb crawl whatsapp_api "
                 "https://developers.facebook.com/docs/whatsapp/cloud-api`",
             )
             return True

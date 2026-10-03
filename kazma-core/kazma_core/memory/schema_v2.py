@@ -429,8 +429,9 @@ def ensure_primary_schema(conn: Any) -> None:
             ("belief_count", "INTEGER DEFAULT -1"),
             ("graph_degree", "INTEGER DEFAULT -1"),
             # F3: per-entity protection flag — operator-marked undeletable and
-            # unmergeable-as-source. Extends the hardcoded _PROTECTED_ENTITIES set
-            # (user/assistant/kazma/mubder) to any entity the operator chooses.
+            # unmergeable-as-source. Extends the always-protected entities (the hub,
+            # the agent, the owner's own names: memory/entity_protection.py) to
+            # any entity the operator chooses.
             ("is_protected", "INTEGER DEFAULT 0"),
             # Major node flag: operator-marked important nodes (projects, hubs)
             # that render bigger + distinct color on the canvas.

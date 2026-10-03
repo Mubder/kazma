@@ -343,7 +343,7 @@ def _build_env_context_sync(workspace_id: str | None = None) -> str:
             "2. **Do not audit or edit another project** (including the Kazma agent "
             "framework host) unless *this* workspace root / Repository line is "
             "actually that project.",
-            "3. If the user names a repo (e.g. \"ShipX\"), it must match the "
+            "3. If the user names a repo (e.g. \"my-app\"), it must match the "
             "**Workspace name** or **Repository** lines above. If it does not match, "
             "**stop and ask** — do not invent findings for a different codebase.",
             "4. Before a multi-file audit, confirm identity: read this workspace's "

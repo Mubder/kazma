@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## Kazma learns who its owner is from memory, not from its code (2026-10-03)
+
+Five places decided which memory entities may not be deleted or merged
+away, and they did not agree. Four of them named the author of Kazma, so
+every install protected an entity called "mubder" and none protected its own
+owner's other names. The owner is now known from the memory hub: an entity
+the hub lists among its names is protected, on any install
+(`memory/entity_protection.py`). The hub, the agent and the entities you
+protect stay protected, and one of your old names can still be merged into
+the hub.
+
+The Memory page's "purge empty entities" and the agent's purge tool deleted
+every entity with no live fact. That included merge redirects: the row a
+merge leaves so that the old name keeps reaching the new one. Without it,
+the old name could come back as a new, separate entity. Both purges now take
+only plain empty shells (no facts, nothing but their own name), the same
+rule that removes them automatically, and memory health counts that list.
+
+The Entities search found nothing when given an entity's own ID, such as
+`kazma_ai_admin`: it joined the ID's words into one, `kazmaaiadmin`, which
+the index never holds. It now splits them as the index does, an ID always
+matches its own entity, and an exact match is listed first.
+
+Prompts and tool descriptions no longer use the author's name or projects as
+examples. A test fails if product code names them again.
+
 ## The memory graph shows what memory holds (2026-10-03)
 
 The Memory graph showed many nodes alone, and some looked like junk. Read
