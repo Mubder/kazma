@@ -242,6 +242,31 @@ Everything, in one list checked against the code: [What Kazma does](docs/FEATURE
 
 ---
 
+## Swarm Orchestration in 30 seconds
+
+```bash
+kazma swarm dispatch auto "Review the codebase's security posture and write a report"
+
+kazma swarm worker add researcher --role researcher
+kazma swarm worker add coder --role coder
+kazma swarm pipeline --workers researcher,coder "Research OAuth2 device flow, then implement a provider"
+kazma swarm fanout --workers researcher,coder --aggregation vote "Pick the best index for this schema"
+kazma swarm history
+```
+
+`auto` lets Kazma choose a worker, or spawn one from its templates, for the
+task. A fan-out's results are combined by `collect`, `first_valid`,
+`merge_all`, `vote` or `synthesize`. The web **Swarm Panel** (`/swarm`) shows
+live dispatches, worker status and task history, and the TUI has a Swarm tab.
+The engine is on in the shipped `kazma.yaml`:
+
+```yaml
+swarm:
+  enabled: true
+```
+
+---
+
 ## How it works
 
 ```mermaid

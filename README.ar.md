@@ -242,6 +242,31 @@ MCP. والانتقال إلى نموذج بديل يُعلَن دائمًا.
 
 ---
 
+## تنسيق السرب في 30 ثانية
+
+```bash
+kazma swarm dispatch auto "راجع أمان الشيفرة واكتب تقريرًا"
+
+kazma swarm worker add researcher --role researcher
+kazma swarm worker add coder --role coder
+kazma swarm pipeline --workers researcher,coder "ابحث في تدفق رمز الجهاز في OAuth2 ثم نفّذ مزوّدًا له"
+kazma swarm fanout --workers researcher,coder --aggregation vote "اختر أفضل فهرس لهذا المخطط"
+kazma swarm history
+```
+
+مع `auto` تختار كاظمه عاملًا للمهمة، أو تنشئ واحدًا من قوالبها. وتُجمع نتائج
+التفرّع بإحدى الطرق: `collect` أو `first_valid` أو `merge_all` أو `vote` أو
+`synthesize`. وتعرض **لوحة السرب** على الويب (`/swarm`) عمليات التوزيع الجارية
+وحالة العمّال وسجل المهام، وفي الواجهة الطرفية تبويب للسرب. والمحرّك مفعّل في
+ملف `kazma.yaml` المرفق:
+
+```yaml
+swarm:
+  enabled: true
+```
+
+---
+
 ## كيف تعمل
 
 ```mermaid
