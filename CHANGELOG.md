@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## "Allow for this chat" grants tools, not a card's label (2026-10-03)
+
+A card that asks about two tools at once is labelled "2 tools". Answering it
+with "allow for this chat" granted both tools, and also a tool called
+"2 tools", because the page sent the card's label as the tool to grant. The
+security log said "HITL GRANT tool=2 tools". The extra grant matched nothing,
+but it was noise in the grants and the log. A grant now covers only the tools
+the question asked about (`hitl_grants.tools_to_grant`), and the label has
+one definition, used where the card is made (`tool_batch_label`).
+
 ## A chat opened from another page shows its turn live (2026-10-03)
 
 On the live install, the owner opened the Memory page, clicked Chat in the

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -21,11 +22,51 @@ __all__ = [
     "grant_tool",
     "has_tool_grant",
     "list_grants",
+    "tool_batch_label",
+    "tools_to_grant",
 ]
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_GRANT_TTL = 30 * 60  # 30 minutes — shorter than YOLO default
+
+_BATCH_LABEL = re.compile(r"\d+ tools")
+
+
+def tool_batch_label(count: int) -> str:
+    """The ``tool`` of a gate that asks about several danger tools at once."""
+    return f"{int(count)} tools"
+
+
+def _is_tool_batch_label(name: Any) -> bool:
+    """True for :func:`tool_batch_label`'s text: a card's label, never a tool."""
+    return bool(_BATCH_LABEL.fullmatch(str(name or "").strip()))
+
+
+def tools_to_grant(
+    pending_tools: Any, pending_tool_name: str = "", explicit: str = ""
+) -> list[str]:
+    """The tools an "allow for this chat" answer grants: the ones its
+    question asked about.
+
+    *pending_tools* is the gate's list (``[{"name": ...}]``); a gate for one
+    tool may carry only *pending_tool_name*. *explicit* is the tool the page
+    named. A gate for several tools is labelled "2 tools", and the page sent
+    that label as the tool to grant, so a live grant was written for a tool
+    called "2 tools" (2026-10-03). The label is never granted, and when the
+    question's tools are known a named tool must be one of them.
+    """
+    asked: list[str] = []
+    for t in pending_tools or []:
+        if isinstance(t, dict) and t.get("name"):
+            asked.append(str(t["name"]))
+    if not asked and pending_tool_name and not _is_tool_batch_label(pending_tool_name):
+        asked.append(str(pending_tool_name))
+    chosen = list(asked)
+    named = str(explicit or "").strip()
+    if named and not _is_tool_batch_label(named) and (not asked or named in asked):
+        chosen.append(named)
+    return list(dict.fromkeys(chosen))
 
 
 def _ttl_seconds() -> int:
