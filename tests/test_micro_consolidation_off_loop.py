@@ -60,11 +60,11 @@ def test_only_the_llm_call_runs_on_the_loop(episode, monkeypatch):
         return real_schema(conn)
 
     async def extract(user_text, assistant_text="", *, use_llm=True, ignore_filler=False,
-                      vocabulary=None):
+                      vocabulary=None, entities=None):
         where["extract"] = _on_loop()
-        # The predicate names in use (W6) were read in the prepare half, off
-        # the loop, and arrive as a plain list.
-        where["vocabulary"] = isinstance(vocabulary, list)
+        # The predicate names and subjects in use (W6) were read in the
+        # prepare half, off the loop, and arrive as plain lists.
+        where["vocabulary"] = isinstance(vocabulary, list) and isinstance(entities, list)
         # The real extraction with the LLM off (heuristic path, no network).
         return await real_extract(user_text, assistant_text, use_llm=False, ignore_filler=ignore_filler)
 

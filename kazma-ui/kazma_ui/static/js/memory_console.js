@@ -1992,6 +1992,7 @@
         p.label = d.display.slice(0, 22);
         p.fullLabel = d.display;
         p.isVirtual = !!nd.isVirtual;
+        p.isValue = !!nd.isValue;
         p.isHighStakes = !!nd.isHighStakes;
         p.type = nd.type || p.type;
         // Keep tier in sync if the payload updated it (e.g. after a group op).
@@ -2048,6 +2049,8 @@
                 : (nd.isEpisode ? _v2gNodeBaseR - 1 : _v2gNodeBaseR)))
               + Math.min(8, Math.sqrt(bc) * 1.5),
           isVirtual: !!nd.isVirtual,
+          // One fact's literal value (true, 4): its id is not an entity.
+          isValue: !!nd.isValue,
           isEpisode: !!nd.isEpisode,
           tier: (typeof nd.tier === 'number' ? nd.tier : -1),
           pinned: pinned,
@@ -3661,7 +3664,9 @@
     var hubShortcut = !_v2gIsUser(p) && hubEdges.length > 0 && nonHubEdges.length > 0;
 
     // Node ops — phone keeps Link + Cut; extra actions sit behind More.
-    if (!p.isEpisode) {
+    // A value node is one fact's literal (id value:<belief>): there is no
+    // entity to link, merge, rename or group, so it shows its edges only.
+    if (!p.isEpisode && !p.isValue) {
       function _actBtn(act, cls, label, title) {
         return '<button type="button" class="btn btn-sm ' + cls + ' v2g-node-act" data-act="' + act +
           '" style="font-size:0.65rem;padding:2px 8px;" title="' + _v2gEsc(title) + '">' + _v2gEsc(label) + '</button>';

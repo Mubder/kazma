@@ -38,6 +38,10 @@ DECLARED = {
         "refused, facts stay, merge ledger preserved",
     ("kazma-core/kazma_core/agent/tool_builtins/memory.py", "_mem_purge_empty_entities"):
         "entity shells with no facts, danger-tier and confirm=true; merge ledger preserved",
+    ("kazma-core/kazma_core/memory/entity_retire.py", "retire_empty_entities"):
+        "an entity whose last fact was just invalidated, only a plain concept shell "
+        "(own name and hash as aliases, no metadata, grouping, merge row or redirect); "
+        "its facts stay as history and the next fact naming it mints it again",
     ("kazma-core/kazma_core/memory/eval_golden.py", "run_golden_eval"):
         "the golden eval's own private database; it refuses the live one",
 }

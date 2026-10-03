@@ -257,6 +257,14 @@ def build_v2_health(
 
         out["mirror"] = last_mirror_sync()
 
+        # How clean the graph is (graph_hygiene): read-only counts + examples.
+        try:
+            from kazma_core.memory.graph_hygiene import graph_hygiene_report
+
+            out["graph"] = graph_hygiene_report(primary_conn, tenant_id=tenant_id)
+        except sqlite3.Error:
+            logger.warning("[v2_health] graph hygiene counts unreadable", exc_info=True)
+
         # Entities + procedural DAGs
         out["entities"] = _safe_count(
             primary_conn, "SELECT COUNT(*) FROM entities WHERE 1=1" + tsql, tparams

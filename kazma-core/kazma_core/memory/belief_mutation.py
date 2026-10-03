@@ -476,10 +476,10 @@ def mutate_belief(
         # per-row correlated subqueries. Only on a real mutation (not noop).
         # The object is included even when it's a literal — recompute is a
         # no-op for ids with no entity row. Caller owns the commit.
+        affected = [sub, obj]
         try:
             from kazma_core.memory.entity_counts import recompute_entity_counts
 
-            affected = [sub, obj]
             # M-09: a supersede also DROPS the old row — its former object
             # entity (when it was an entity id) loses a belief that nobody
             # recomputed otherwise.
@@ -494,6 +494,15 @@ def mutate_belief(
             primary_conn.commit()
         except Exception:
             logger.debug("[belief_mutate] entity count recompute failed", exc_info=True)
+        # A superseded value's entity may now hold nothing (entity_retire).
+        if result.get("superseded_id"):
+            from kazma_core.memory.entity_retire import retire_empty_entities
+
+            try:
+                if retire_empty_entities(primary_conn, affected[2:], tenant_id=tenant_id):
+                    primary_conn.commit()
+            except sqlite3.Error:
+                logger.warning("[belief_mutate] empty-entity cleanup failed", exc_info=True)
 
         return result
     except Exception:
