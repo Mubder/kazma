@@ -69,6 +69,7 @@ __all__ = [
     "live_gates",
     "pending_gates",
     "recorded_decision_count",
+    "gate_outcomes_since",
     "expire_due_gates",
     "boot_sweep",
     "boot_sweep_async",
@@ -743,6 +744,34 @@ def recorded_decision_count() -> int:
         return int(conn.execute("SELECT COUNT(*) FROM hitl_gates WHERE decision != ''").fetchone()[0])
     finally:
         conn.close()
+
+
+def gate_outcomes_since(since: float) -> dict[str, int]:
+    """How the approval questions asked since *since* ended, counted.
+
+    One row is one question (§30), so this is what the daily digest shows.
+    It counted "HITL interrupt" log lines instead, and the WebSocket wrote
+    one more each time a page connected while a question waited. A
+    ``superseded`` row is the same pause under its second id and is not
+    counted. Keys: ``error`` (the answer's resume failed), ``timeout``, the
+    recorded decision (``approve``, ``deny``, ``orphaned`` ...), else
+    ``waiting``.
+    """
+    ensure_gate_schema()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT state, decision FROM hitl_gates "
+            "WHERE created_at >= ? AND state != 'superseded'",
+            (since,),
+        ).fetchall()
+    finally:
+        conn.close()
+    counts: dict[str, int] = {}
+    for state, decision in rows:
+        outcome = state if state in ("error", "timeout") else (decision or "waiting")
+        counts[outcome] = counts.get(outcome, 0) + 1
+    return counts
 
 
 def pending_gates(tenant_id: str | None = None, *, limit: int = 200) -> list[GateRow]:

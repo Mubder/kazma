@@ -2302,6 +2302,44 @@ restic started elsewhere (the restore listing too). A missed snapshot alerts
 Tests: `tests/test_restic_one_run_per_repo.py` (negative control: a lock per
 call overlaps).
 
+**E. The daily digest reads every source of its window**
+(`observability/daily_digest.py`, 2026-10-03). The live digest said "Turns
+completed: 0" over a day with four turns (three web, one Telegram that paused
+for an approval and finished), and "Needs attention: maintenance
+pauses: 2" over two `kazma update` pauses of 41 s and 11 s that had ended. It
+read only the live `kazma.log`, which rotates at local midnight (eight hours
+of its 24 at the 05:17 UTC send), and counted turns by "SSE turn complete",
+which only the web stream writes. Now:
+- the live log and its rotated siblings written in the window
+  (`_window_files`, as `firing_ledger._log_paths`);
+- turns by the line `close_turn` writes once per finished turn, from every
+  transport (`[turn] Turn finished: platform= key= failed=`;
+  `turn_runtime._note_finished_turn`): the key hashes thread, turn number and
+  question, and the digest counts distinct keys, so a close after a restart
+  is not a second turn. A turn that failed (`turn_failed`) needs attention;
+- approvals from the gate registry (`hitl_gates.gate_outcomes_since`, one row
+  per question, a `superseded` twin not counted), never from log lines: the
+  WebSocket logged one more each time a page connected while a question
+  waited. A registry that is off or unreadable is said;
+- reloads (`guard.operator_reload`) and maintenance pauses (paired
+  `maintenance.active` -> `maintenance.resumed`, with the longest) are
+  "Planned work", never a problem;
+- alerts from the line `alert()` writes for every occurrence
+  (`[ops_alert] <key> | <title>`, ` (throttled)` on a repeat held back),
+  never from `alert_state()`, which starts empty at every reload;
+- the day is stamped only when a channel took the digest
+  (`_deliver_digest` awaits `ops_alerts._deliver` on the server loop):
+  `failed` is tried again in an hour, `no_channel` (nothing takes ops
+  messages) waits for the next day. It was handed to the fire-and-forget
+  `_dispatch` and stamped whatever happened. The weekly report counts
+  "[digest] daily digest delivered" ("dispatched", the old line, kept for
+  the week of the change).
+Every marker and guard event it reads is checked against the lines the code
+writes (`tests/_emitted_lines.py`, shared with the weekly report's gate;
+"Detached turn completed" never counted anything: its line was removed the
+day the digest shipped, 2026-08-28).
+Tests: `tests/test_daily_digest.py` (each with the old code failing it).
+
 **Chaos injection is only real where it lands.** `InjectionTarget.LLM_PROVIDER`
 is injected INSIDE `resilient_chat`'s attempt loop. `ChaosInjectionError`
 carries `.transient` (408/429/5xx) so retry/failover actually run.

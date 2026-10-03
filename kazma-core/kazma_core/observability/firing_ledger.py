@@ -139,7 +139,9 @@ FIRING_SIGNATURES: tuple[Signature, ...] = (
               "restarting forever is worse than stopping and saying so", kind=SYMPTOM),
     Signature("orphan reap", r'"event": "(orphan|port)\.(reaping|reaped|reaping_holder|holder_reaped)"'),
     Signature("maintenance pause", r'"event": "maintenance\.(active|resumed)"'),
-    Signature("daily digest", r"\[digest\] daily digest dispatched",
+    # "dispatched" is the line before 2026-10-03, when the digest was handed
+    # off and never confirmed; it keeps the week of the change counted.
+    Signature("daily digest", r"\[digest\] daily digest (?:delivered|dispatched)",
               kind=ROUTINE, per_week=7),
     Signature("install restore", r"\[restore\] (RESTORED|FAILED):"),
     Signature("foreign server detection", r'"event": "child.foreign_server_holds_port"'),

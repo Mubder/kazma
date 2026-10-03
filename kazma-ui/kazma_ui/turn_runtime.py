@@ -14,7 +14,10 @@ gone). Transports remain pipes.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import threading
+from collections import OrderedDict
 from typing import Any
 
 __all__ = [
@@ -214,6 +217,56 @@ def _remember_finished_turn(snap: Any, thread_id: str) -> None:
         )
 
 
+#: Finished turns already logged by this process: close_turn runs after every
+#: settlement of a turn (the stream's end, a disconnect, a late settle).
+_finished_logged: OrderedDict[str, None] = OrderedDict()
+_finished_lock = threading.Lock()
+_FINISHED_LOGGED_MAX = 4096
+
+
+def _note_finished_turn(snap: Any, thread_id: str) -> None:
+    """Log one line per finished turn, whatever transport ran it.
+
+    The daily digest counted "SSE turn complete", which only the web stream
+    writes, and read only the current log file: on 2026-10-03 it reported
+    "Turns completed: 0" over a day with three web turns and a Telegram one.
+    The key names the turn the way memory does (thread, turn number,
+    question) without putting either in the log; the digest counts distinct
+    keys, so a close after a restart is not a second turn.
+    """
+    try:
+        from kazma_core.memory.consolidator import extract_turn_texts, user_turn_index
+
+        values = getattr(snap, "values", None) or {}
+        messages = list(values.get("messages") or [])
+        question, _answer = extract_turn_texts(messages)
+        ident = f"{thread_id}\x00{user_turn_index(messages)}\x00{question[:512]}"
+        key = hashlib.sha256(ident.encode("utf-8", "replace")).hexdigest()[:16]
+        with _finished_lock:
+            if key in _finished_logged:
+                return
+            _finished_logged[key] = None
+            while len(_finished_logged) > _FINISHED_LOGGED_MAX:
+                _finished_logged.popitem(last=False)
+        gateway = values.get("_gateway")
+        platform = str(gateway.get("platform") or "") if isinstance(gateway, dict) else ""
+        if not platform and str(thread_id).startswith("gw-"):
+            platform = str(thread_id).split("-", 2)[1]
+        # The daily digest reads this line (observability.daily_digest).
+        logger.info(
+            "[turn] Turn finished: platform=%s key=%s failed=%s",
+            platform or "other",
+            key,
+            "yes" if values.get("turn_failed") else "no",
+        )
+    except (TypeError, ValueError, KeyError, AttributeError, IndexError, ImportError):
+        logger.warning(
+            "[turn] finished turn not counted thread=%s",
+            (thread_id or "")[:12],
+            exc_info=True,
+        )
+
+
 async def close_turn(
     graph: Any = None,
     config: dict[str, Any] | None = None,
@@ -342,6 +395,7 @@ async def close_turn(
 
         if snap is not None and not paused and not interrupted:
             _remember_finished_turn(snap, thread_id)
+            _note_finished_turn(snap, thread_id)
 
         from kazma_ui.reply_sink import resolve_reply_text, resolve_reply_turn
 

@@ -142,7 +142,11 @@ def reset_alert_state() -> None:
 
 
 def alert_state() -> dict[str, dict]:
-    """Current throttle bookkeeping, for diagnostics and the daily digest."""
+    """Current throttle bookkeeping of this process, for diagnostics.
+
+    The daily digest counts alerts from the log instead: this state starts
+    empty at every restart.
+    """
     with _lock:
         return {k: v.snapshot() for k, v in _state.items()}
 
