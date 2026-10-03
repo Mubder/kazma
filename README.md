@@ -6,10 +6,11 @@
 
   **The self-hosted AI agent that asks before it acts.**
 
-  One agent you reach from the browser, the terminal, Telegram, Discord or Slack.
-  It edits your repository, messages your team and runs your schedule, pauses for
-  your approval before anything risky, remembers what you tell it, and says so
-  when it fails instead of inventing an answer.
+  One agent, bilingual in English and Arabic, that you reach from the browser,
+  the terminal, Telegram, Discord or Slack. It works in your repository,
+  researches, writes and posts, and runs your schedule; it pauses for your
+  approval before anything risky, remembers what you tell it, and says so when
+  it fails instead of inventing an answer.
 
   <p>
     <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Mubder/kazma/ci.yml?branch=main&style=flat-square&label=CI&logo=githubactions&logoColor=white" alt="CI status"></a>
@@ -198,6 +199,16 @@ index and patch review with per-hunk rollback, all behind the same approval
 gate. Steer a running task with `/steer` or stop it with `/abort`.
 → [Skills, MCP and tools](https://kazma.ai/docs/skills-mcp-and-tools/)
 
+**Knowledge Base and Deep Research.** Libraries of your own documents, pages
+and sites that the agent searches when a question needs them, or folds into
+every prompt for the libraries you choose. Deep Research runs a multi-source
+pipeline that ends in a full written report, not a quick search answer.
+→ [Knowledge Base](https://kazma.ai/docs/knowledge-base-and-rag/) · [Deep Research](https://kazma.ai/docs/web-research/)
+
+**X Studio.** Compose, schedule and manage X posts through the official API;
+a post the agent writes waits for your approval before it goes out.
+→ [X publisher](https://kazma.ai/docs/x-publisher/)
+
 **Swarm orchestration.** Six dispatch patterns (dispatch, broadcast,
 pipeline with checkpoints, fan-out with voting, consult, conditional),
 workers spawned from templates on demand, the best model per task, and
@@ -213,9 +224,10 @@ Azure OpenAI and AWS Bedrock, local Ollama and LM Studio, and tools from any
 MCP server. A fallback to another model is always announced.
 → [Configuration](https://kazma.ai/docs/configuration/)
 
-**Arabic-native.** A full Arabic interface laid out right to left, text that
-follows its own language in either interface, and Gulf dialect handling.
-→ [Arabic features](https://kazma.ai/docs/arabic-cultural-features/)
+**English and Arabic as equals.** A full Arabic interface laid out right to
+left, text that follows its own language in either interface, Gulf and
+Kuwaiti dialect handling, Arabic OCR and Arabic voice.
+→ [Arabic features](https://kazma.ai/docs/arabic-cultural-features/) · [Voice](https://kazma.ai/docs/voice-and-media/)
 
 **Runs itself.** A guard that restarts on real failure and rides out a
 database blip, encrypted offsite backups with a daily restore drill, a deep
