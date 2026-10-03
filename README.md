@@ -233,10 +233,10 @@ Everything, in one list checked against the code: [What Kazma does](docs/FEATURE
 ## How it works
 
 ```mermaid
-flowchart TB
-    U["Web UI · TUI · CLI · Telegram · Discord · Slack"] --> S
+flowchart LR
+    U["Web UI · TUI · CLI<br/>Telegram · Discord · Slack"] --> S
     S["LangGraph supervisor<br/>plans, calls tools, answers"]
-    S --> H{"Approval gate<br/>you decide"}
+    S --> H{{"Approval gate<br/>you decide"}}
     S --> C["Commitment layer<br/>checks intent against memory"]
     S --> T["Tools · MCP servers · skills<br/>IDE, web, shell, vault"]
     S --> W["Swarm engine<br/>dispatch patterns, autoscaling"]
