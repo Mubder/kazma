@@ -20,6 +20,7 @@ const sidebars = {
         'guide/web-research',
         'guide/knowledge-library',
         'guide/recent-features',
+        'guide/release-notes',
         'guide/email-integration',
         'guide/x-publisher',
         'guide/x-auto-reply',
