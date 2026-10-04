@@ -836,6 +836,30 @@ Full guide: [Email integration](email-integration).
 
 ---
 
+## Settings save failed {#settings-save-failed}
+
+**Symptom:** a settings save returns HTTP 503 with
+`code: config_store_unavailable`, or the server cannot start because settings
+storage is unavailable. This is a failed durability check, not a successful
+save into temporary memory.
+
+1. Check the configured storage backend and the readiness endpoint
+   `/health/ready`. For PostgreSQL, restore the database service and its
+   connectivity. For SQLite, check access permissions, free disk space and
+   competing write locks. Do not switch backends or delete the database to
+   bypass the error.
+2. Let the managed guard recover a failed boot. If an operator reload is
+   needed after storage is restored, use the guard with `--reload --when-idle`
+   as described in [Deployment](deployment); do not start a second server.
+3. Reload settings and compare their current values with the intended changes
+   before retrying. A lost acknowledgement may follow a committed write;
+   automatically replaying every failed request can repeat an action.
+
+The response includes `Retry-After: 5`, but the UI does not automatically
+resend the write. A save is confirmed only after durable storage accepts it.
+See [Configuration](configuration#settings-durability-and-outage-recovery)
+and the [operator runbook](https://github.com/Mubder/kazma/blob/main/docs/DURABLE_SETTINGS_AND_LIVE_EVAL.md).
+
 ## Documentation Audit Notes
 
 This file consolidates audits plus the former operator guide (`archive/docs-loose/TROUBLESHOOTING.md` — folded into §1.6–1.9 and §9–14). Gotchas:

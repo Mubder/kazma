@@ -584,6 +584,28 @@ See [Web research → Bulletproof scraping](web-research#bulletproof-scraping-pr
 
 ---
 
+## Settings durability and outage recovery {#settings-durability-and-outage-recovery}
+
+Settings must be stored in the configured SQLite or PostgreSQL database.
+If initialization fails, Kazma stops before workers or automation start;
+it does not substitute a writable memory store. The managed guard remains
+responsible for restarting the server once storage is available.
+
+An operational settings-write failure returns HTTP 503 with
+`code: config_store_unavailable` and `Retry-After: 5`. Save controls show the
+error and keep the entered values. They do not automatically resend writes.
+An acknowledgement can be lost after a commit, so the error does not prove
+that the database rolled back. Restore storage, reload the settings, review
+what was persisted, then retry only the changes still needed.
+
+For PostgreSQL, failed pool attempts are closed and pool retries are bounded;
+the settings initialization loop does not multiply them. Boot schema checkout
+and statements each have a five-second timeout. Normal queries retain their
+existing timeout policy. SQLite initialization makes up to four attempts.
+
+See [Settings save failed](troubleshooting-and-workarounds#settings-save-failed)
+and the [operator recovery and evaluation workflow](https://github.com/Mubder/kazma/blob/main/docs/DURABLE_SETTINGS_AND_LIVE_EVAL.md).
+
 ## Documentation Audit Notes
 
 - **Version drift:** `pyproject.toml` is `0.3.0`; `kazma.yaml` `agent.version` is `0.2.0`; the CLI `--help` text prints `v0.2.0`. These are independent and unsynchronized — a known wart.
