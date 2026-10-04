@@ -182,6 +182,11 @@ regression fixtures never qualify automatic publishing.
   blocking bilingual browser check, wheel/import checks and all other checks
   for the release commit in [CI](https://github.com/Mubder/kazma/actions/workflows/ci.yml).
   The newly added PostgreSQL race test runs against CI's isolated real service.
+- Release candidate `3f25172f` passed the full CI unit run (**12,904 passed,
+  112 skipped**), real PostgreSQL suite (**300 passed, 4 skipped**) and all
+  browser, wheel, security, import and syntax jobs. Its README metrics gate
+  found stale headline counts; those were regenerated before final deployment
+  acceptance. The final correction must also pass CI.
 - Bilingual mobile browser: **1 passed**, including composer/thread reload,
   keyboard focus and health display. Both X JavaScript behavior checks pass.
   The completion wave's **33 changed Python files** compile and pass Ruff
