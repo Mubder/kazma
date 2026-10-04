@@ -250,6 +250,8 @@ def _live_reason(cfg: Any, xcfg: Any) -> str:
         return "Auto-reply is OFF. Nothing will happen on X until you enable it and press Save."
     if cfg.mode == "off":
         return "Mode is 'off'. Pick draft or auto, then press Save."
+    if cfg.config_errors:
+        return "Subject policy needs correction before drafting: " + "; ".join(cfg.config_errors)
     if not cfg.summoners and cfg.summoner_policy != "anyone":
         return "No trusted handles saved, so nobody can summon it."
     if not _poller_running():

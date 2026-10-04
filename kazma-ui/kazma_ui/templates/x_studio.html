@@ -238,7 +238,7 @@
 
     <div class="xs-card">
       <h2>{{ t('x_studio.planner') }}</h2>
-      <span class="xs-meta" x-text="kazmaCount('x_studio.queue_count', queueCount)"></span>
+      <span class="xs-meta" x-text="kazmaCount('x_studio.queue_count', queueCount, {count: queueCount})"></span>
       <label><input type="checkbox" x-model="includeFinished" @change="loadQueue()"> {{ t('x_studio.show_finished') }}</label>
       <div class="xs-week">
         <template x-for="d in week" :key="d.key">

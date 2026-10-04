@@ -23,6 +23,37 @@ def test_legacy_card_keeps_draft_permission_but_does_not_gain_auto():
     assert cards[0]["allow_draft"] and not cards[0]["allow_auto"]
 
 
+def test_large_bilingual_keyword_inventory_survives_migration_and_save():
+    keywords = [f"topic{i}" for i in range(101)]
+    keywords[-1] = "الكويت"
+    migrated, errors = normalize_cards([card(match=keywords)])
+    assert not errors
+    saved, errors = normalize_cards(migrated)
+    assert not errors and saved[0]["match"] == keywords
+    assert saved[0]["allow_draft"] and not saved[0]["allow_auto"]
+    subject = _parse_subjects(saved)[0]
+    assert route_subject("عن الكويت", (subject,)).selected == subject
+
+
+def test_keyword_inventory_remains_bounded():
+    assert not normalize_cards([card(match=[f"topic{i}" for i in range(256)])])[1]
+    assert normalize_cards([card(match=[f"topic{i}" for i in range(257)])])[1]
+    assert normalize_cards([card(hard_lines=["A boundary"] * 41)])[1]
+
+
+def test_live_reason_reports_invalid_policy_instead_of_suggesting_restart():
+    from kazma_core.x_api.stance import get_reply_config
+    from kazma_ui.x_reply_api import _live_reason
+
+    class Connector:
+        def can_post(self):
+            return True
+
+    cfg = replace(get_reply_config(), enabled=True, mode="draft", config_errors=("Subject 1 has a duplicate id.",))
+    reason = _live_reason(cfg, Connector())
+    assert "duplicate id" in reason and "restart" not in reason
+
+
 @pytest.mark.parametrize("cards", [
     [card(), card(id="COFFEE")], [card(id="voice")], [card(id="post")],
     [card(schema_version=2, target="")], [card(allow_auto="yes")],
