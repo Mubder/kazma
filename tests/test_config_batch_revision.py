@@ -33,7 +33,7 @@ def test_independent_connections_allow_exactly_one_reviewed_batch(tmp_path):
 
 @pytest.mark.parametrize("in_memory", [False, True])
 def test_refused_batch_writes_nothing_and_announces_nothing(tmp_path, in_memory):
-    store = _InMemoryStore() if in_memory else ConfigStore(db_path=str(tmp_path / "settings.db"))
+    store = _InMemoryStore(writable=True) if in_memory else ConfigStore(db_path=str(tmp_path / "settings.db"))
     observed = []
     store.add_change_listener(observed.append)
     try:

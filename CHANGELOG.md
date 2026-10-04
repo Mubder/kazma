@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Durable settings and real-model evaluation (2026-10-04)
+
+Failed settings initialization now stops boot before workers or automation
+start, instead of accepting saves into RAM. Operational write failures return
+503 with a retry hint; temporary memory stores refuse writes by default.
+PostgreSQL retries are no longer multiplied by the settings retry loop,
+failed pools are closed, and boot schema locks have bounded waits.
+
+The new live evaluation CLI runs an explicitly selected provider/model through
+Kazma's supervisor graph in isolated processes with fixture tool effects.
+Bilingual reports capture tool attempts, model usage and mechanical results;
+accuracy remains unmeasured until human-labeled holdout answers are reviewed.
+Source-group separation and answer hashes guard the review workflow. Synthetic
+development examples never grant qualification or publishing permission.
+The first real-model development run exposed an unsupported readiness inference
+in an Arabic status answer; the default prompt now separates source facts from
+inferences and treats missing readiness/approval details as unknown.
+See `docs/DURABLE_SETTINGS_AND_LIVE_EVAL.md` for the operator workflow.
+
 ## X Studio: dataset editor and explicit subject scope (2026-10-04)
 
 Studio now has a bilingual dataset workspace for creating collections, collecting

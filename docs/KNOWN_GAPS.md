@@ -8,7 +8,23 @@ say against it. Every entry names the evidence, so a reader can check it rather
 than take our word — and so the gap stops being invisible when the person who
 found it forgets.
 
-**Reviewed 2026-09-27.** An entry with no date has not been re-checked since.
+**Reviewed 2026-10-04 for settings durability and model evaluation.** Other
+entries retain their original dates.
+
+**Settings outage recovery (closed 2026-10-04).** A failed PostgreSQL boot
+could latch a volatile settings store and ordinary saves returned 200 while
+values existed only in RAM. Production initialization now refuses that
+fallback, failed pool attempts are closed, PostgreSQL retries are not
+multiplied by the settings retry loop, and operational write failures return
+503. Gate: `tests/test_durable_config_outage.py`.
+
+**Live-model accuracy (measurement remains open).** The scripted eval pack
+does not measure actual model behavior. `scripts/live_eval.py` now runs real
+models through the supervisor graph with isolated stores and fixture tools,
+records decisions, and separates mechanical checks from human-reviewed
+bilingual holdout accuracy. The owner has no labeled holdout yet. Synthetic
+development examples are not accuracy evidence. Workflow:
+[durable settings and live evaluation](DURABLE_SETTINGS_AND_LIVE_EVAL.md).
 
 ## Where things stand (2026-09-27)
 
