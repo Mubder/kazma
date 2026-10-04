@@ -244,9 +244,13 @@ All Kazma stores use `PRAGMA busy_timeout=5000` + WAL. If you still see lock err
 - **Always use `get_config_store()`** — constructing `ConfigStore()` directly bypasses the singleton and can open a second connection.
 - **Don't share a connection across processes.** Kazma is single-process; if you fork workers, each gets its own connection and they'll contend on the same DB file.
 
-### 4.2 In-memory fallback silently active
+### 4.2 Settings storage cannot initialize {#42-in-memory-fallback-silently-active}
 
-If SQLite init fails, `get_config_store()` returns an `_InMemoryStore` (TTL eviction, 1-hour, 10k entries). **Settings then don't survive a restart.** Check startup logs for SQLite init errors.
+If SQLite or PostgreSQL initialization fails, `get_config_store()` raises an
+availability error and production boot stops before workers or automation
+start. The former writable memory fallback has been removed. Check startup
+logs and restore the configured storage; follow [Settings save failed](#settings-save-failed)
+before retrying any write.
 
 ---
 
@@ -835,6 +839,30 @@ Full guide: [Email integration](email-integration).
 **Fix:** Use **Microsoft Graph OAuth** (Settings → Email → OAuth).
 
 ---
+
+## Settings save failed {#settings-save-failed}
+
+**Symptom:** a settings save returns HTTP 503 with
+`code: config_store_unavailable`, or the server cannot start because settings
+storage is unavailable. This is a failed durability check, not a successful
+save into temporary memory.
+
+1. Check the configured storage backend and the readiness endpoint
+   `/health/ready`. For PostgreSQL, restore the database service and its
+   connectivity. For SQLite, check access permissions, free disk space and
+   competing write locks. Do not switch backends or delete the database to
+   bypass the error.
+2. Let the managed guard recover a failed boot. If an operator reload is
+   needed after storage is restored, use the guard with `--reload --when-idle`
+   as described in [Deployment](deployment); do not start a second server.
+3. Reload settings and compare their current values with the intended changes
+   before retrying. A lost acknowledgement may follow a committed write;
+   automatically replaying every failed request can repeat an action.
+
+The response includes `Retry-After: 5`, but the UI does not automatically
+resend the write. A save is confirmed only after durable storage accepts it.
+See [Configuration](configuration#settings-durability-and-outage-recovery)
+and the [operator runbook](https://github.com/Mubder/kazma/blob/main/docs/DURABLE_SETTINGS_AND_LIVE_EVAL.md).
 
 ## Documentation Audit Notes
 

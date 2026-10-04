@@ -7,6 +7,24 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 # Recent features guide
 
+**New in 2026-10-04 — durable settings and real-model evaluation.** If the
+settings database cannot initialize, Kazma stops before workers or automation
+start. A failed save returns HTTP 503 instead of reporting success for values
+held only in RAM. Restore storage, then reload and review the current settings
+before retrying: a lost acknowledgement does not prove a write rolled back.
+[Configuration](configuration#settings-durability-and-outage-recovery) and
+[Troubleshooting](troubleshooting-and-workarounds#settings-save-failed).
+
+The live evaluation CLI runs an explicitly selected provider/model through
+the supervisor graph with isolated stores and fixture tools. It records tool
+attempts, usage and mechanical checks separately from human-reviewed Arabic
+and English holdout accuracy. Synthetic examples do not establish accuracy
+or grant automatic-publishing qualification. The default agent prompt now
+separates source facts from inferences; missing readiness or approval details
+remain unknown. This improves grounding, but does not certify accuracy.
+See the [operator evaluation workflow](https://github.com/Mubder/kazma/blob/main/docs/DURABLE_SETTINGS_AND_LIVE_EVAL.md)
+and [X Studio dataset collection](x-evaluation-dataset).
+
 **New in 2026-09-30 — a database outage is not a restart.** When the
 database went away for two minutes (a Docker Desktop update), Kazma froze
 waiting on it and the guard restarted it. Now nothing waits on the database

@@ -36,7 +36,7 @@ flowchart LR
 - `export_yaml()` / `import_yaml()` round-trip every DB row merged into YAML; `kazma migrate` carries settings this way (`config_store.py:632, 650`). The Settings page's backup is a different file, below.
 - `reset_all()` deletes all DB rows → reverts to YAML defaults (`config_store.py:732`). No page offers it: it would also delete keys and sign-in.
 
-> **Singleton rule:** Always use `get_config_store()` (`config_store.py:760`), never `ConfigStore()` directly. On SQLite init failure it falls back to a thread-safe `_InMemoryStore` with TTL eviction (`config_store.py:777`) — settings then won't survive a restart.
+> **Singleton rule:** Always use `get_config_store()`, never construct `ConfigStore()` directly for shared settings. If SQLite or PostgreSQL initialization fails, production boot stops; no writable memory fallback is used. See [Settings durability and outage recovery](#settings-durability-and-outage-recovery).
 
 ### Backing up and restoring settings {#settings-backup}
 
@@ -583,6 +583,28 @@ active provider is re-read live on every fetch — no restart needed.
 See [Web research → Bulletproof scraping](web-research#bulletproof-scraping-proxy-provider-addon-ipua-rotation).
 
 ---
+
+## Settings durability and outage recovery {#settings-durability-and-outage-recovery}
+
+Settings must be stored in the configured SQLite or PostgreSQL database.
+If initialization fails, Kazma stops before workers or automation start;
+it does not substitute a writable memory store. The managed guard remains
+responsible for restarting the server once storage is available.
+
+An operational settings-write failure returns HTTP 503 with
+`code: config_store_unavailable` and `Retry-After: 5`. Save controls show the
+error and keep the entered values. They do not automatically resend writes.
+An acknowledgement can be lost after a commit, so the error does not prove
+that the database rolled back. Restore storage, reload the settings, review
+what was persisted, then retry only the changes still needed.
+
+For PostgreSQL, failed pool attempts are closed and pool retries are bounded;
+the settings initialization loop does not multiply them. Boot schema checkout
+and statements each have a five-second timeout. Normal queries retain their
+existing timeout policy. SQLite initialization makes up to four attempts.
+
+See [Settings save failed](troubleshooting-and-workarounds#settings-save-failed)
+and the [operator recovery and evaluation workflow](https://github.com/Mubder/kazma/blob/main/docs/DURABLE_SETTINGS_AND_LIVE_EVAL.md).
 
 ## Documentation Audit Notes
 
