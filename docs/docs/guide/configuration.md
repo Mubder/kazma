@@ -36,7 +36,7 @@ flowchart LR
 - `export_yaml()` / `import_yaml()` round-trip every DB row merged into YAML; `kazma migrate` carries settings this way (`config_store.py:632, 650`). The Settings page's backup is a different file, below.
 - `reset_all()` deletes all DB rows → reverts to YAML defaults (`config_store.py:732`). No page offers it: it would also delete keys and sign-in.
 
-> **Singleton rule:** Always use `get_config_store()` (`config_store.py:760`), never `ConfigStore()` directly. On SQLite init failure it falls back to a thread-safe `_InMemoryStore` with TTL eviction (`config_store.py:777`) — settings then won't survive a restart.
+> **Singleton rule:** Always use `get_config_store()`, never construct `ConfigStore()` directly for shared settings. If SQLite or PostgreSQL initialization fails, production boot stops; no writable memory fallback is used. See [Settings durability and outage recovery](#settings-durability-and-outage-recovery).
 
 ### Backing up and restoring settings {#settings-backup}
 

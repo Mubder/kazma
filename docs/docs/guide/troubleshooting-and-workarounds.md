@@ -244,9 +244,13 @@ All Kazma stores use `PRAGMA busy_timeout=5000` + WAL. If you still see lock err
 - **Always use `get_config_store()`** — constructing `ConfigStore()` directly bypasses the singleton and can open a second connection.
 - **Don't share a connection across processes.** Kazma is single-process; if you fork workers, each gets its own connection and they'll contend on the same DB file.
 
-### 4.2 In-memory fallback silently active
+### 4.2 Settings storage cannot initialize {#42-in-memory-fallback-silently-active}
 
-If SQLite init fails, `get_config_store()` returns an `_InMemoryStore` (TTL eviction, 1-hour, 10k entries). **Settings then don't survive a restart.** Check startup logs for SQLite init errors.
+If SQLite or PostgreSQL initialization fails, `get_config_store()` raises an
+availability error and production boot stops before workers or automation
+start. The former writable memory fallback has been removed. Check startup
+logs and restore the configured storage; follow [Settings save failed](#settings-save-failed)
+before retrying any write.
 
 ---
 
