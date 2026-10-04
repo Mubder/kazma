@@ -72,7 +72,11 @@ def _card_fields(source: dict[str, Any], version: int, label: str, errors: list[
             value = []
         items = [item.strip() for item in value if item.strip()]
         limit = 160 if key in ("match", "aliases", "exclusions") else 1000
-        if len(items) > 40 or any(len(item) > limit for item in items):
+        # Existing bilingual policies can have over 100 literal keywords.
+        # Preserve their routing vocabulary through legacy migration and saves;
+        # prose/check lists retain the smaller bound.
+        max_items = 256 if key in ("match", "aliases") else 40
+        if len(items) > max_items or any(len(item) > limit for item in items):
             errors.append(f"{label}: {key} exceeds its size limit.")
         card[key] = items
     return card

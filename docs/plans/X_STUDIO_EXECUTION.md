@@ -201,6 +201,13 @@ regression fixtures never qualify automatic publishing.
 
 Tests use fake X transports and isolated stores. Live acceptance uses the
 guard's idle reload and browser inspection; no test post/delete is required.
+Live inspection found legacy keyword inventories of 101 and 62 entries held
+by the original 40-item bound. The bound is now 256 for literal keywords and
+aliases; all four actual policies retain their full inventories and draft-only
+legacy permissions. Compatibility/status tests passed with their owning suites
+(85 tests), and the bilingual browser check passed with planner interpolation
+coverage. The guard served the merged release and the live UI retained all
+four cards, displayed the model overrides and enforced missing-evaluation holds.
 Account-read success does not attest write access. Browser dependency
 deprecations and Windows pipe cleanup warnings did not fail the browser check.
 Production recovery objectives and human accuracy qualification remain external

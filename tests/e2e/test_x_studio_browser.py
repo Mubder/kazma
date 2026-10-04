@@ -53,6 +53,7 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                     page.reload(wait_until="domcontentloaded")
                     _settle(page)
                     page.wait_for_function("() => Alpine.$data(document.querySelector('.xs-wrap'))._composerLoaded")
+                    assert "{count}" not in page.locator(".xs-meta").first.inner_text()
                     page.locator("#xs-tab-studio").focus()
                     page.keyboard.press("End")
                     assert page.locator("#xs-thread-0").input_value() == text + " 2"

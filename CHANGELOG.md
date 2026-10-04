@@ -19,6 +19,12 @@ deduplicated. Restores invalidate thread approvals and preserve unknown sends.
 The bilingual mobile browser test now runs in blocking CI and checks keyboard
 tab navigation, ordered draft reload and health rendering.
 
+Live acceptance found existing bilingual subject inventories above the new
+40-keyword limit. Keyword and alias inventories now allow up to 256 entries,
+preserving complete legacy policies without granting automatic permission.
+Invalid-policy status identifies the problem instead of suggesting a restart.
+The planner's localized booking count now interpolates its number correctly.
+
 ## X Studio: durable publication, scoped policy, independent models and review (2026-10-04)
 
 X writes now share transactional account-bound operations, quota reservations,
