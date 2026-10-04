@@ -16,6 +16,15 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
     from playwright.sync_api import sync_playwright
 
     with unified_turn_server() as harness, sync_playwright() as playwright:
+        from kazma_core.config_store import get_config_store
+
+        get_config_store().set("connectors.x.reply.subjects", [{"schema_version": 2,
+            "id": "coffee", "target": "Coffee sourcing", "match": ["coffee"],
+            "side": "support", "mood": "supportive", "allow_draft": True,
+            "scope": "Commercial sourcing", "exceptions": ["Concede verified harm"],
+            "allowed_moods": ["dry", "supportive"]}, {"schema_version": 2,
+            "id": "tea", "target": "Tea sourcing", "match": ["tea"],
+            "side": "against", "mood": "dry", "allow_draft": True}])
         browser = playwright.chromium.launch(headless=True)
         host = harness.base.split("//", 1)[1].split(":", 1)[0]
         try:
@@ -97,6 +106,20 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                     page.locator(".xd-case").first.wait_for()
                     assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth + 1")
                     assert not page_problems(page, "/x", errors)
+                    page.goto(harness.base + "/settings?tab=x", wait_until="domcontentloaded")
+                    _settle(page)
+                    page.get_by_role("button", name="coffee", exact=True).click()
+                    page.locator("#xr-mood-0").wait_for()
+                    assert page.locator("#xr-mood-0").input_value() == "supportive"
+                    assert page.locator("#xr-side-0").input_value() == "support"
+                    assert page.locator("#xr-scope-0").is_visible()
+                    assert page.locator("#xr-scope-0").input_value() == "Commercial sourcing"
+                    assert page.locator("#xr-tones-0").evaluate("e => Array.from(e.selectedOptions).map(o => o.value)") == ["dry", "supportive"]
+                    page.get_by_role("button", name="tea", exact=True).click()
+                    page.locator("#xr-mood-1").wait_for()
+                    assert page.locator("#xr-mood-1").input_value() == "dry"
+                    assert page.locator("#xr-side-1").input_value() == "against"
+                    assert not page_problems(page, "/settings?tab=x", errors)
                 finally:
                     context.close()
         finally:

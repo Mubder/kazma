@@ -15,6 +15,11 @@ actual scope, exceptions and counterexamples, closing a gap between drafting
 and independent verification. Real human evaluation remains necessary to measure
 model accuracy and qualify automatic replies.
 
+Live acceptance also found dynamically rendered mood options showing the first
+tone instead of the saved tone. Subject mood and allowed-tone options now display
+their saved values explicitly; bilingual browser coverage checks both support and
+opposition cards. Conditional permission badges remain hidden until hydrated.
+
 ## X Studio: isolated evaluation, policy review, ordered threads and health (2026-10-04)
 
 Real-case collection and an isolated shadow CLI now exercise the normal reply
