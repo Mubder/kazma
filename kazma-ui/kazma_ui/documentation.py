@@ -9,6 +9,7 @@ from kazma_ui.i18n import current_language
 
 router = APIRouter()
 _GUIDES = frozenset({"email-integration", "x-publisher", "x-auto-reply", "x-evaluation-dataset"})
+PUBLIC_GUIDE_PATHS = frozenset(f"/docs/guide/{guide}" for guide in _GUIDES)
 
 
 @router.get("/docs/guide/{guide}", include_in_schema=False)
