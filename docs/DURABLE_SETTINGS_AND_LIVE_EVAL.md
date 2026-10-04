@@ -78,12 +78,20 @@ python scripts/live_eval.py tests/fixtures/live_agent_eval_examples.json --provi
 An output file must be new; earlier reports and datasets are never overwritten.
 Results are saved after each case, so an interrupted batch retains completed
 cases. Each report records dataset and system-prompt hashes, code revision,
-requested model, returned model IDs, usage, elapsed time, transcript, tool
+whether tracked code was modified, requested model, returned model IDs,
+usage, elapsed time, transcript, tool
 attempts and mechanical checks. A failed or timed-out case remains a failure
 in the denominator. Provider errors expose a category rather than raw details.
 
 The examples are explicitly synthetic, unlabeled development cases. Their
 success rate must never be presented as human-reviewed accuracy.
+
+A first real-model run on `deepseek-flash` passed mechanical checks in all four cases,
+but its Arabic file-reading answer inferred initial readiness from a pending
+review status. That inference was unsupported. The default Kazma prompt now
+asks the model to separate source facts from labeled inferences and keep
+absent readiness, approval, completion and date details unknown. This is a
+prompt improvement, not proof of correctness across models or real tasks.
 
 ### Collect actual evaluation cases
 

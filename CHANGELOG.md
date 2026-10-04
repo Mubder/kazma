@@ -14,6 +14,9 @@ Bilingual reports capture tool attempts, model usage and mechanical results;
 accuracy remains unmeasured until human-labeled holdout answers are reviewed.
 Source-group separation and answer hashes guard the review workflow. Synthetic
 development examples never grant qualification or publishing permission.
+The first real-model development run exposed an unsupported readiness inference
+in an Arabic status answer; the default prompt now separates source facts from
+inferences and treats missing readiness/approval details as unknown.
 See `docs/DURABLE_SETTINGS_AND_LIVE_EVAL.md` for the operator workflow.
 
 ## X Studio: dataset editor and explicit subject scope (2026-10-04)

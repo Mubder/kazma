@@ -96,8 +96,10 @@ def run_cases(document: dict[str, Any], *, provider: str, model: str, output: Pa
         system_prompt = get_config_store().get("agent.system_prompt", "")
         source_root = str(data_dir().resolve())
     revision = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5).stdout.strip()
+    dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True, timeout=5).stdout.strip()
     report: dict[str, Any] = {
         "schema_version": 1, "provider": provider, "model": model, "revision": revision,
+        "working_tree_dirty": bool(dirty),
         "dataset_sha256": fingerprint(document), "results": [],
         "tool_effects": "fixtures_only", "max_iterations": 5, "max_model_calls": 12, "planned_cases": len(cases),
     }
