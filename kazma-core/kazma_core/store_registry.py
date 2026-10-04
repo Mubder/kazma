@@ -129,6 +129,7 @@ STORES: dict[str, Store] = {
         "the X post ledger: what was posted (duplicate and cap checks)", "bundle"),
     "x_scheduled.db": Store("scheduled X posts", "bundle"),
     "x_replies.db": Store("the X auto-reply queue", "bundle"),
+    "x_datasets.db": Store("X human annotation collections, recorded outcomes and split provenance", "bundle"),
     "x_audit.db": Store("the X API audit log", "bundle"),
     "x_publications.db": Store("X publication operations, quota reservations, decisions and projection repairs", "bundle"),
     # ── control plane: decisions, secrets, permissions, evidence ───────

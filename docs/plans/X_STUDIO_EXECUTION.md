@@ -215,6 +215,21 @@ acceptance work, as recorded below.
 
 ## Remaining roadmap and rollout gates
 
+The follow-up dataset workspace supplies the missing attended editor: collection
+creation/import, local observation collection, case labels, candidate inspection,
+human attestation and export. Tenant isolation and revision checks protect writes;
+review resets and durable conversation provenance protect release preparation.
+English/Arabic mobile coverage now includes create, save, reload and edit.
+Settings presents subject scope/exception controls visibly and explains that
+support/opposition must respect facts. Actual scope, exceptions and negative
+examples now reach the drafter as well as verification. These engineering checks
+do not replace the real human-labeled release evaluation.
+
+Follow-up validation: **662 focused X/JavaScript/storage tests passed**; the
+dataset-aware bilingual mobile browser passed create/save/reload/edit; translation,
+template, API caller and documentation gates passed. The full suite and release
+CI remain required for the commit that carries this follow-up.
+
 | Work | Status |
 |---|---|
 | W0 baseline | Source/callers and isolated reproductions delivered; connected-account capabilities and real evaluation baseline need operator data. |

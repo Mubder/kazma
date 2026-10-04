@@ -476,6 +476,15 @@ def _build_prompt(
                 "HARD LINES — breaking any of these is worse than being unfunny:",
             ]
     lines += [f"- {rule}" for rule in subject.all_hard_lines()]
+    # The actual scope/exception values must reach drafting, not just checking.
+    # Otherwise the checker can reject an exception the drafter never saw.
+    if subject.scope:
+        lines += ["", "APPLICABLE SCOPE:", subject.scope]
+    if subject.exceptions:
+        lines += ["", "POLICY EXCEPTIONS — do not defend or criticise excluded actions:",
+                  *[f"- {exception}" for exception in subject.exceptions]]
+    if subject.counterexamples:
+        lines += ["", "REPLIES TO AVOID:", *[f"- {example}" for example in subject.counterexamples[:3]]]
     if subject.examples:
         lines += ["", "Replies the operator has written before (match this voice):"]
         lines += [f"- {ex}" for ex in subject.examples[:3]]

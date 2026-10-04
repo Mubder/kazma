@@ -10,6 +10,23 @@ never grants unattended publication.
 
 ## Collect real examples
 
+Open **Settings → X → Manage Datasets**, or **X Studio → Datasets**.
+Create a named collection and choose its purpose: unassigned observations,
+tuning, or held-out release evaluation. Purpose stays fixed. **Collect Stored
+X Cases** reads retained local observations without calling X or a model.
+**Add Real Case** lets you enter original context, quotations, summon identity
+and conversation ID. Cases persist across reloads; concurrent edits are rejected
+instead of overwriting another reviewer. Each collection supports 1,000 cases
+and 2 MB, with up to 100 collections per tenant.
+
+The editor exposes language, failure categories, expected target, eligibility,
+evidence and safety labels, rationale and review notes. Unlabeled values stay
+unlabeled. Mark source completeness only after checking the original. A review
+attestation belongs to the signed-in human reviewer, and editing or importing a
+case clears it. Conversations used in a tuning collection remain excluded from
+held-out report export, even after their tuning cases are archived. Related
+cases count as one conversation; collect independent cases for release.
+
 Create two separate collections: a tuning set for improving policies/prompts,
 and a held-out release set that you do not use to tune them. Keep posts from
 the same conversation in one collection; paraphrases and repeated posts are
@@ -102,8 +119,14 @@ The runner preserves expected labels but always clears `human_reviewed` and
 leaves actual critical violations unset. A reviewer must inspect the actual
 candidate and complete those fields before qualification. Missing provider
 usage is reported, not estimated as zero; an incomplete measurement cannot
-qualify. A JSON editor or annotation sheet is sufficient; no model generates
-the human labels. Preserve the runner's measured outcomes when adding labels.
+qualify. Import the shadow report into a release collection in **Datasets**.
+Inspect each recorded candidate, complete the human labels and enter the actual
+critical-violation count, then attest your review. Model outcomes are read-only
+in the editor. Changing source or summon context clears its old outcome because
+it no longer describes that case. **Export Reviewed Outcomes** produces the
+report for the separate administrator qualification upload. A JSON editor or
+annotation sheet also works; no model generates the human labels. Preserve the
+runner's measured outcomes when adding labels.
 
 Record the pipeline fingerprint, exact model identities, candidate, all five
 check verdicts, auto-eligibility decision, target, measured latency, model calls

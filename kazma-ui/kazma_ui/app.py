@@ -1442,9 +1442,11 @@ class KazmaAppBuilder:
         try:
             from kazma_ui.x_api import protected_router as x_protected
             from kazma_ui.x_api import router as x_router
+            from kazma_ui.x_dataset_api import router as x_dataset_router
 
             self.app.include_router(x_router)
             self.app.include_router(x_protected)
+            self.app.include_router(x_dataset_router)
             logger.info("X API router mounted at /api/x/*")
         except Exception as e:
             logger.warning("X API router failed to mount: %s", e)

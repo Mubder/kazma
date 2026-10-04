@@ -42,6 +42,8 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                     page.wait_for_function("() => !Alpine.$data(document.querySelector('.xs-wrap')).loadStates.drafts.loading")
                     page.locator("#xs-tab-studio").focus()
                     page.keyboard.press("End")
+                    assert page.locator("#xs-tab-datasets").evaluate("element => element === document.activeElement")
+                    page.keyboard.press("ArrowRight" if language == "ar" else "ArrowLeft")
                     assert page.locator("#xs-tab-threads").evaluate("element => element === document.activeElement")
                     assert page.locator("#xs-tab-threads").get_attribute("aria-selected") == "true"
                     page.locator("#xs-thread-0").fill(text)
@@ -56,6 +58,7 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                     assert "{count}" not in page.locator(".xs-meta").first.inner_text()
                     page.locator("#xs-tab-studio").focus()
                     page.keyboard.press("End")
+                    page.keyboard.press("ArrowRight" if language == "ar" else "ArrowLeft")
                     assert page.locator("#xs-thread-0").input_value() == text + " 2"
                     assert page.locator("#xs-thread-1").input_value() == text
                     page.keyboard.press("Home")
@@ -64,6 +67,34 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                     page.locator("summary").filter(has_text=health).click()
                     page.wait_for_function("() => Alpine.$data(document.querySelector('.xs-wrap')).health !== null")
                     assert not page.evaluate("() => Alpine.$data(document.querySelector('.xs-wrap')).healthError")
+                    assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth + 1")
+                    assert not page_problems(page, "/x", errors)
+                    page.locator("#xs-tab-datasets").click()
+                    page.locator("#xd-name").fill("Browser annotation " + language)
+                    page.get_by_role("button", name="Create Collection" if language == "en" else "إنشاء مجموعة", exact=True).click()
+                    page.locator("#xd-search").wait_for()
+                    page.get_by_role("button", name="Add Real Case" if language == "en" else "إضافة حالة حقيقية", exact=True).click()
+                    page.locator("#xd-source-text").fill(text)
+                    page.locator("#xd-source-id").fill("browser-source-" + language)
+                    page.locator("#xd-language").select_option(language)
+                    page.locator("#xd-rationale").fill("Original context saved; human labels still pending.")
+                    assert page.locator(".xd-editor").evaluate("form => form.checkValidity()"), page.locator(".xd-editor").evaluate("form => Array.from(form.elements).filter(e => !e.validity.valid).map(e => [e.id, e.value, e.validationMessage])")
+                    assert not errors, errors
+                    with page.expect_response(lambda r: r.url.endswith("/case") and r.request.method == "PUT") as saved:
+                        page.get_by_role("button", name="Save Case" if language == "en" else "حفظ الحالة", exact=True).click()
+                    assert saved.value.status == 200, saved.value.text()
+                    page.locator(".xd-case").first.wait_for()
+                    page.reload(wait_until="domcontentloaded")
+                    _settle(page)
+                    assert page.locator("#xs-tab-datasets").get_attribute("aria-selected") == "true"
+                    page.locator(".xd-collection").filter(has_text="Browser annotation " + language).click()
+                    page.locator(".xd-case").first.click()
+                    assert page.locator("#xd-source-text").input_value() == text
+                    assert not page.locator("#xd-reviewed").is_checked()
+                    assert page.locator("#xd-auto").input_value() == ""
+                    page.locator("#xd-notes").fill("Reviewed context only; labels still pending.")
+                    page.get_by_role("button", name="Save Case" if language == "en" else "حفظ الحالة", exact=True).click()
+                    page.locator(".xd-case").first.wait_for()
                     assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth + 1")
                     assert not page_problems(page, "/x", errors)
                 finally:

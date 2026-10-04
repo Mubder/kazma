@@ -3934,16 +3934,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "topic",
     },
     "settings.xt.side": {
-        "ar": "الجانب — دائمًا هذا، والرمز التعبيري للنبرة فقط",
-        "en": "Side — always this, emoji is tone only",
+        "ar": "الموقف ضمن النطاق — النبرة لا تغيره",
+        "en": "Scoped Position — Tone Cannot Change It",
     },
     "settings.xt.side_against": {
-        "ar": "ضد — انتقد دائمًا",
-        "en": "against — always criticise",
+        "ar": "معارضة — نقد مدعوم بالأدلة",
+        "en": "Oppose — Evidence-Based Criticism",
     },
     "settings.xt.side_support": {
-        "ar": "مع — دافع دائمًا",
-        "en": "support — always defend",
+        "ar": "تأييد — دفاع مدعوم بالأدلة",
+        "en": "Support — Evidence-Based Defense",
     },
     "settings.xt.side_legacy": {
         "ar": "(قديم: استخدم نص الرأي)",
