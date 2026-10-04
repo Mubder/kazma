@@ -115,6 +115,11 @@ def role_allows(role: str, path: str, method: str = "GET") -> bool:
     if rank >= ROLE_RANK["admin"]:
         return True
     m = method.upper()
+    # Credentials and publication policy grant continuing authority. Operators
+    # can review individual drafts, but only administrators can change that grant.
+    if ((path.rstrip("/") in ("/api/x/reply", "/api/x/reply/qualification") and m == "PUT")
+            or path.rstrip("/") in ("/api/x/credentials", "/api/x/disconnect", "/api/x/resume")):
+        return False
     # Admin-only surfaces
     for p in _ADMIN_PREFIXES:
         if path == p or path.startswith(p + "/"):

@@ -37,6 +37,7 @@
     {"source": "docs/docs/guide/email-integration.md", "site": "email-integration"},
     {"source": "docs/docs/guide/x-publisher.md", "site": "x-publisher"},
     {"source": "docs/docs/guide/x-auto-reply.md", "site": "x-auto-reply"},
+    {"source": "docs/docs/guide/x-evaluation-dataset.md", "site": "x-evaluation-dataset"},
     {"source": "docs/docs/guide/document-intelligence.md", "site": "document-intelligence"},
     {"source": "docs/docs/guide/document-phases.md", "site": "document-phases"},
     {"source": "docs/docs/guide/document-rendering.md", "site": "document-rendering"},

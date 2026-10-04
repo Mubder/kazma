@@ -6,14 +6,13 @@ tenant-agnostic happy paths, and the same-origin CSRF guard on mutations.
 
 from __future__ import annotations
 
-from pathlib import Path
 import importlib
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
 from fastapi.testclient import TestClient
-
 from kazma_core.x_api.schedule import XScheduledStore
 
 _TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "kazma-ui" / "kazma_ui" / "templates"
@@ -252,7 +251,7 @@ def test_x_book_via_api(client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     ledger = XPostLedger(tmp_path / "x_posts.db")
     store = XScheduledStore(tmp_path / "x_sched_book.db")
     cfg = XConfig(
-        enabled=True, handle="@kazma",
+        enabled=True, handle="@kazma", account_id="123",
         credentials=XCredentials("k", "ks", "t", "ts"),
         max_posts_per_day=8, max_posts_per_month=80, max_mentions=2,
         max_cashtags=1, max_hashtags=4, max_chars=280,

@@ -20,24 +20,11 @@ Policy applied at booking:
 
 from __future__ import annotations
 
-import asyncio
-import logging
 import re
 import time
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 __all__ = ["book_x_post", "delete_x_post", "publish_x_post"]
-
-
-def _public_x_error(exc: BaseException) -> str:
-    """Chat/UI-safe failure text. Full exception stays in the log."""
-    from kazma_core.x_api.client import XApiError
-
-    if isinstance(exc, XApiError):
-        return str(exc)
-    return "X request failed. Details are in the server log."
 
 
 # The shared timing parser accepts one RECURRING form ("daily at 9am") and
@@ -77,6 +64,25 @@ def _parse_when(when: str) -> float:
             "same text cannot be republished on a schedule anyway."
         )
 
+    # Validate local civil time before the shared parser attaches the zone.
+    # A fold requires an explicit UTC offset; a gap has no corresponding instant.
+    from datetime import UTC, datetime
+
+    from kazma_core.cron.scheduler import get_cron_timezone
+
+    try:
+        civil = datetime.fromisoformat(raw)
+    except ValueError:
+        civil = None
+    if civil is not None and civil.tzinfo is None:
+        zone = get_cron_timezone()
+        possibilities = {civil.replace(tzinfo=zone, fold=fold).timestamp()
+                         for fold in (0, 1)
+                         if civil.replace(tzinfo=zone, fold=fold).astimezone(UTC).astimezone(zone).replace(tzinfo=None) == civil}
+        if not possibilities:
+            raise ValueError("This local time does not exist because the clock changes. Choose another time.")
+        if len(possibilities) > 1:
+            raise ValueError("This local time occurs twice. Include an explicit UTC offset to choose the intended instant.")
     dt = parse_timing(raw)
     epoch = dt.timestamp()
     if epoch <= time.time():
@@ -92,97 +98,39 @@ def book_x_post(
     tenant_id: str = "default",
     thread_id: str = "",
     delivery_target: str = "",
+    idempotency_key: str = "",
+    proposal_id: str = "",
 ) -> tuple[bool, dict[str, Any]]:
     """Validate + store a scheduled X post. Returns ``(ok, payload)``.
 
     ``payload`` is a JSON-ready dict: on success it carries ``scheduled``,
     ``id``, ``text``, ``fire_at``, ``tz``; on failure a single ``error``.
     """
-    from kazma_core.x_api.config import get_x_config
-    from kazma_core.x_api.ledger import get_ledger, text_hash
-    from kazma_core.x_api.policy import evaluate_post
-    from kazma_core.x_api.schedule import get_x_scheduled_store, x_schedule_enabled
+    from kazma_core.cron.scheduler import get_cron_timezone
+    from kazma_core.x_api.ownership import x_tenant_id
+    from kazma_core.x_api.publication_service import schedule
+    from kazma_core.x_api.schedule import x_schedule_enabled
 
     if not x_schedule_enabled():
-        return False, {
-            "error": "X post scheduling is disabled (KAZMA_X_SCHEDULE=0 or KAZMA_X_POST=0)."
-        }
-
-    cfg = get_x_config()
-    if not cfg.can_post():
-        return False, {
-            "error": "X connector is not configured. Save the four OAuth 1.0a keys in Settings → X first."
-        }
-
-    body = (text or "").strip()
-    decision = evaluate_post(body, cfg=cfg, reply_to_id=reply_to_id or "")
-    if not decision.allow:
-        return False, {"error": decision.reason}
-
+        return False, {"error": "X post scheduling is disabled (KAZMA_X_SCHEDULE / KAZMA_X_POST)."}
+    if tenant_id != x_tenant_id():
+        return False, {"error": "Scheduled publication tenant does not match authenticated context."}
     try:
         fire_at = _parse_when(when)
     except ValueError as exc:
         return False, {"error": str(exc)}
-
-    store = get_x_scheduled_store()
-    ledger = get_ledger()
-
-    # Reserve quota: pending scheduled posts count toward the caps too.
-    pending = store.count_pending(tenant_id=tenant_id)
-    now = time.time()
-    if ledger.count_since(now - 86400) + pending >= cfg.max_posts_per_day:
-        return False, {
-            "error": (
-                f"Daily cap reached ({cfg.max_posts_per_day}/day) counting both "
-                "posted and already-scheduled tweets."
-            )
-        }
-    if ledger.count_since(now - 30 * 86400) + pending >= cfg.max_posts_per_month:
-        return False, {
-            "error": (
-                f"Monthly cap reached ({cfg.max_posts_per_month}/30d) counting both "
-                "posted and already-scheduled tweets."
-            )
-        }
-
-    # Dedupe against pending drafts (the ledger only knows fired posts).
-    draft_hash = text_hash(body)
-    for p in store.list_all(tenant_id=tenant_id, limit=500):
-        if p.status == "pending" and text_hash(p.text) == draft_hash:
-            return False, {"error": f"An identical tweet is already scheduled (id {p.id})."}
-
-    tz_name = ""
-    try:
-        from kazma_core.cron.scheduler import get_cron_timezone
-
-        tz_name = str(get_cron_timezone())
-    except Exception:  # noqa: BLE001
-        tz_name = ""
-
-    post_id = store.add(
-        text=body, fire_at=fire_at, tz=tz_name,
-        reply_to_id=(reply_to_id or "").strip(),
-        thread_id=thread_id, delivery_target=delivery_target,
-        tenant_id=tenant_id,
-    )
-
-    from datetime import datetime
-
-    fire_iso = datetime.fromtimestamp(fire_at).astimezone().isoformat(timespec="seconds")
-    return True, {
-        "scheduled": True,
-        "id": post_id,
-        "text": body,
-        "fire_at": fire_iso,
-        "tz": tz_name,
-        "reply_to_id": reply_to_id or "",
-    }
+    return schedule(text=text, fire_at=fire_at, reply_to_id=reply_to_id or "", idempotency_key=idempotency_key,
+                    metadata={"thread_id": thread_id, "delivery_target": delivery_target,
+                              "tz": str(get_cron_timezone()), "proposal_id": proposal_id})
 
 
 async def publish_x_post(
     *,
     text: str,
     reply_to_id: str = "",
+    idempotency_key: str = "",
+    origin: str = "immediate",
+    metadata: dict[str, Any] | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Validate + POST /2/tweets once. Returns ``(ok, payload)``.
 
@@ -190,37 +138,9 @@ async def publish_x_post(
     The caller is responsible for HITL on the agent path; the Web studio
     treats the operator click as the approval, matching ``book_x_post``.
     """
-    from kazma_core.x_api.client import XApiError, XClient
-    from kazma_core.x_api.config import get_x_config
-    from kazma_core.x_api.ledger import get_ledger
-    from kazma_core.x_api.policy import evaluate_post
+    from kazma_core.x_api.publication_service import publish
 
-    cfg = await asyncio.to_thread(get_x_config)
-    body = (text or "").strip()
-    decision = evaluate_post(body, cfg=cfg, reply_to_id=reply_to_id or "")
-    if not decision.allow:
-        return False, {"posted": False, "error": decision.reason}
-    try:
-        tweet = await XClient(cfg.credentials).create_tweet(
-            body, reply_to_id=reply_to_id or ""
-        )
-    except XApiError as exc:
-        logger.warning("publish_x_post API error: %s", exc)
-        return False, {"posted": False, "error": _public_x_error(exc)}
-    except Exception as exc:
-        logger.exception("publish_x_post failed")
-        return False, {"posted": False, "error": _public_x_error(exc)}
-    tweet_id = str(tweet.get("id") or "")
-    if tweet_id:
-        get_ledger().record(tweet_id=tweet_id, text=body, handle=cfg.handle)
-    url = f"https://x.com/i/web/status/{tweet_id}" if tweet_id else ""
-    return True, {
-        "posted": True,
-        "tweet_id": tweet_id,
-        "url": url,
-        "text": body,
-        "policy": decision.reason,
-    }
+    return await publish(text=text, reply_to_id=reply_to_id, idempotency_key=idempotency_key, origin=origin, metadata=metadata)
 
 
 async def delete_x_post(*, tweet_id: str) -> tuple[bool, dict[str, Any]]:
@@ -229,25 +149,6 @@ async def delete_x_post(*, tweet_id: str) -> tuple[bool, dict[str, Any]]:
     Same no-retry contract as publish. Web Studio treats the operator click
     as approval; the chat tool stays always-HITL outside this function.
     """
-    from kazma_core.x_api.client import XApiError, XClient
-    from kazma_core.x_api.config import get_x_config
-    from kazma_core.x_api.ledger import get_ledger
-    from kazma_core.x_api.policy import evaluate_delete
+    from kazma_core.x_api.publication_service import delete
 
-    tid = (tweet_id or "").strip()
-    if not tid:
-        return False, {"deleted": False, "error": "tweet_id is required."}
-    cfg = await asyncio.to_thread(get_x_config)
-    decision = evaluate_delete(cfg=cfg)
-    if not decision.allow:
-        return False, {"deleted": False, "error": decision.reason}
-    try:
-        data = await XClient(cfg.credentials).delete_tweet(tid)
-    except XApiError as exc:
-        logger.warning("delete_x_post API error: %s", exc)
-        return False, {"deleted": False, "error": _public_x_error(exc), "tweet_id": tid}
-    except Exception as exc:
-        logger.exception("delete_x_post failed")
-        return False, {"deleted": False, "error": _public_x_error(exc), "tweet_id": tid}
-    get_ledger().mark_deleted(tid)
-    return True, {"deleted": True, "tweet_id": tid, "api": data}
+    return await delete(tweet_id=tweet_id)

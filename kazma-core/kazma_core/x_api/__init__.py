@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from kazma_core.x_api import stance as _stance
 from kazma_core.x_api.audit import log_x_event, query_x_audit, reset_x_audit
 from kazma_core.x_api.client import XApiError, XClient
 from kazma_core.x_api.config import XConfig, XCredentials, get_x_config
@@ -14,7 +15,12 @@ from kazma_core.x_api.reply import (
     handle_summon,
     retry_summon,
 )
-from kazma_core.x_api.stance import ReplyConfig, Subject, get_reply_config
+from kazma_core.x_api.stance import ReplyConfig, Subject
+
+
+def get_reply_config() -> ReplyConfig:
+    """Compatibility export resolves the current configuration accessor."""
+    return _stance.get_reply_config()
 
 __all__ = [
     "XApiError",

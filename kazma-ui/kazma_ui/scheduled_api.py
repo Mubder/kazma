@@ -25,8 +25,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
 from kazma_core.errors import safe_error, validation_error
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ class XScheduleBody(BaseModel):
     when: str = Field(..., min_length=1)
     reply_to_id: str = ""
     proposal_id: str = ""
+    idempotency_key: str = Field(default="", max_length=200)
 
 
 class XRescheduleBody(BaseModel):
@@ -76,24 +77,14 @@ async def _verify_same_origin(request: Request) -> None:
 
 
 def _tenant_id() -> str:
-    try:
-        from kazma_core.tenant_isolation import require_tenant_id
+    from kazma_core.x_api.ownership import x_tenant_id
 
-        return require_tenant_id() or "default"
-    except Exception:  # noqa: BLE001
-        return "default"
+    return x_tenant_id()
 
 
 def _tenant_filter() -> str | None:
     """Mirror CronScheduler.list_jobs: scope only in multi-user/production."""
-    try:
-        from kazma_core.tenant_isolation import multi_user_or_production, require_tenant_id
-
-        if multi_user_or_production():
-            return require_tenant_id()
-    except Exception:  # noqa: BLE001
-        pass
-    return None
+    return _tenant_id()
 
 
 def _iso(epoch: float | None) -> str:
@@ -313,6 +304,8 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             tenant_id=tenant,
             thread_id="",
             delivery_target="",
+            idempotency_key="proposal:" + proposal_ref if proposal_ref else body.idempotency_key,
+            proposal_id=proposal_ref,
         )
         if ok and proposal_ref:
             try:
@@ -331,26 +324,35 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
 
     @protected.put("/api/scheduled/x/{post_id}", dependencies=[Depends(_verify_same_origin)])
     def edit_x(post_id: int, body: XRescheduleBody) -> JSONResponse:
-        from kazma_core.cron.scheduler import parse_timing
-        from kazma_core.x_api.schedule import get_x_scheduled_store
         import time as _time
 
+        from kazma_core.x_api.booking import _parse_when
+        from kazma_core.x_api.schedule import get_x_scheduled_store
+
         store = get_x_scheduled_store()
-        post = store.get(post_id)
+        tenant = _tenant_id()
+        post = store.get(post_id, tenant_id=tenant)
         if post is None:
             return JSONResponse({"ok": False, "error": f"No scheduled post {post_id}."}, status_code=404)
-        if post.status != "pending":
+        if post.status not in ("pending", "managed"):
             return JSONResponse(
                 {"ok": False, "error": f"Post {post_id} is '{post.status}' and cannot be edited."},
                 status_code=400,
             )
         try:
-            new_fire = parse_timing(body.when.strip()).timestamp()
+            new_fire = _parse_when(body.when.strip())
         except ValueError as exc:
             return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
         if new_fire <= _time.time():
             return JSONResponse({"ok": False, "error": "New time is in the past."}, status_code=400)
-        store.set_fire_time(post_id, new_fire)
+        from kazma_core.x_api.publication_service import reschedule_legacy
+
+        try:
+            changed = reschedule_legacy(post_id, fire_at=new_fire)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=409)
+        if not changed:
+            return JSONResponse({"ok": False, "error": "Post changed while editing."}, status_code=409)
         return JSONResponse({"ok": True, "id": post_id, "fire_at": _iso(new_fire)})
 
     @protected.delete("/api/scheduled/x/{post_id}", dependencies=[Depends(_verify_same_origin)])
@@ -358,10 +360,13 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
         from kazma_core.x_api.schedule import get_x_scheduled_store
 
         store = get_x_scheduled_store()
-        cancelled = store.cancel(post_id)
+        tenant = _tenant_id()
+        from kazma_core.x_api.publication_service import cancel_schedule
+
+        cancelled = cancel_schedule(post_id)
         if cancelled:
             return JSONResponse({"ok": True, "cancelled": True, "id": post_id})
-        post = store.get(post_id)
+        post = store.get(post_id, tenant_id=tenant)
         if post is None:
             return JSONResponse({"ok": False, "error": f"No scheduled post {post_id}."}, status_code=404)
         return JSONResponse(

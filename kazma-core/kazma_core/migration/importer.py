@@ -28,9 +28,10 @@ import logging
 import os
 import shutil
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from kazma_core.migration.bundle import KazmaBundle, parse_meta_env
 from kazma_core.migration.exporter import _DATA_DIR_DBS as _EXPORTED_DATA_DIR_DBS
@@ -197,6 +198,21 @@ def _live_server_detected() -> tuple[bool, str]:
     return False, ""
 
 
+def _guard_restored_x(swapped: list[str], report: ImportReport) -> bool:
+    # Restoring a publishing database never restores unattended authority.
+    if any(name in swapped for name in ("x_publications.db", "x_scheduled.db", "x_replies.db")):
+        try:
+            from kazma_core.x_api.restore import pause_restored_publishing
+
+            pause_restored_publishing()
+            report.warn("X publishing is paused after restore. Verify the connected account and resume in X Studio; old queues remain held.")
+        except Exception as exc:
+            report.error(f"X publishing restore guard failed: {exc}")
+            return False
+
+    return True
+
+
 def import_bundle(
     bundle_path: str | Path,
     *,
@@ -353,7 +369,7 @@ def import_bundle(
     staged_data = staging / "data"
     staged_pg_dump = staged_data / "postgres.dump"
     if staged_pg_dump.exists():
-        from kazma_core.db.backend import is_postgres, get_database_url
+        from kazma_core.db.backend import get_database_url, is_postgres
 
         if not is_postgres():
             report.error(
@@ -458,6 +474,12 @@ def import_bundle(
             _log(f"  imported {n} config keys")
         except Exception as exc:
             report.warn(f"config import failed: {exc}")
+
+    if not _guard_restored_x(swapped, report):
+        _log("  X restore guard failed — rolling back installed SQLite files")
+        _rollback_sqlite_swap(backup_dir, swapped, paths, data_dir)
+        report.files_restored = []
+        return report
 
     # 7b. Merge the standalone workspaces table (from the bundle's
     # workspaces.db) into the restored settings.db, where WorkspaceStore

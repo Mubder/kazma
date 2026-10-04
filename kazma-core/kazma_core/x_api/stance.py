@@ -35,6 +35,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from kazma_core.x_api.model_selection import x_chat, x_model_call
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -201,20 +203,24 @@ def side_from_summon(text: str) -> str:
     Roast/angry/dry/👎 → against. Heart/clap/100/👍 → support.
     Words: against/roast/slam/ضد/هاجم vs support/defend/دافع/معاه.
     """
+    from kazma_core.x_api.routing import AmbiguousSubjectError, RoutingDecision
+    from kazma_core.x_api.subject_policy import normalize_match
+
     body = str(text or "")
-    low = body.lower()
-    for w in _SUPPORT_WORDS:
-        if re.search(rf"(?<!\w){re.escape(w)}(?!\w)", low):
-            return SIDE_SUPPORT
-    for w in _SUPPORT_AR:
-        if w in body:
-            return SIDE_SUPPORT
-    for w in _AGAINST_WORDS:
-        if re.search(rf"(?<!\w){re.escape(w)}(?!\w)", low):
-            return SIDE_AGAINST
-    for w in _AGAINST_AR:
-        if w in body:
-            return SIDE_AGAINST
+    low = normalize_match(body)
+    sides = set()
+    for side, words in ((SIDE_SUPPORT, (*_SUPPORT_WORDS, *_SUPPORT_AR, "ادعم", "تدعم", "تدافع", "تؤيد")),
+                        (SIDE_AGAINST, (*_AGAINST_WORDS, *_AGAINST_AR))):
+        for word in words:
+            for hit in re.finditer(rf"(?<!\w){re.escape(normalize_match(word))}(?!\w)", low):
+                prefix = low[max(0, hit.start() - 35):hit.start()]
+                if re.search(r"\b(?:don't|dont|do not|not|never|لا|مو|ما)\b", prefix):
+                    raise AmbiguousSubjectError(RoutingDecision("ambiguous", reason="Negated summon intent needs review; a negated support/against word is not an instruction to take that side."))
+                sides.add(side)
+    if len(sides) > 1:
+        raise AmbiguousSubjectError(RoutingDecision("ambiguous", reason="Conflicting support and against instructions need review."))
+    if sides:
+        return next(iter(sides))
     mood = mood_from_text(body)
     if mood == "supportive":
         return SIDE_SUPPORT
@@ -296,7 +302,7 @@ class Subject:
 
     id: str
     match: tuple[str, ...]
-    view: str
+    view: str = ""
     mood: str = "dry"
     register: str = ""
     hard_lines: tuple[str, ...] = ()
@@ -305,6 +311,22 @@ class Subject:
     #: that side on this subject. Emoji only changes tone (roast/angry/dry),
     #: never the side. Empty = legacy free-text ``view`` only.
     side: str = ""
+    schema_version: int = 2
+    revision: int = 1
+    target: str = ""
+    aliases: tuple[str, ...] = ()
+    exclusions: tuple[str, ...] = ()
+    scope: str = ""
+    exceptions: tuple[str, ...] = ()
+    allowed_moods: tuple[str, ...] = ()
+    allow_draft: bool = True
+    allow_auto: bool = False
+    evidence_policy: str = "required"
+    evidence_max_age_days: int = 30
+    required_checks: tuple[str, ...] = ("context", "target", "stance", "evidence", "safety")
+    counterexamples: tuple[str, ...] = ()
+    owner: str = ""
+    change_reason: str = ""
 
     def is_sided(self) -> bool:
         return self.side in _SIDES
@@ -368,12 +390,13 @@ class ReplyConfig:
     #: may summon on that thread. Empty = never: only trusted handles.
     open_thread_marker: str = ""
     close_thread_marker: str = ""
+    config_errors: tuple[str, ...] = ()
 
     def can_draft(self) -> bool:
         # Subjects are optional. Zero subjects = voice-only: reply to
         # whatever is summoned, emoji picks the tone. The original
         # "no subject means no reply" rule fought the actual UX.
-        return self.enabled and self.mode in (MODE_DRAFT, MODE_AUTO)
+        return self.enabled and not self.config_errors and self.mode in (MODE_DRAFT, MODE_AUTO)
 
     def is_trusted_summoner(self, handle: str) -> bool:
         """On the operator's explicit allowlist. Independent of policy."""
@@ -387,6 +410,8 @@ class ReplyConfig:
         parent_text: str = "",
         summon_text: str = "",
         conversation_closed: bool = False,
+        conversation_open: bool = False,
+        parent_trusted: bool = False,
     ) -> bool:
         """May this handle summon a reply at all?
 
@@ -403,11 +428,11 @@ class ReplyConfig:
             return True
         if conversation_closed:
             return False
-        if self.marker_in(self.close_thread_marker, parent_text, summon_text):
+        if parent_trusted and self.marker_in(self.close_thread_marker, parent_text):
             return False
         if self.summoner_policy == SUMMON_ANYONE:
             return bool((handle or "").strip())
-        return self.thread_is_open(parent_text, summon_text)
+        return conversation_open or (parent_trusted and self.thread_is_open(parent_text))
 
     def thread_is_open(self, *texts: str) -> bool:
         if self.marker_in(self.close_thread_marker, *texts):
@@ -442,8 +467,9 @@ class ReplyConfig:
 def _cs_get(key: str, default: Any = None) -> Any:
     try:
         from kazma_core.config_store import get_config_store
+        from kazma_core.x_api.ownership import x_config_key
 
-        val = get_config_store().get(key)
+        val = get_config_store().get(x_config_key(key))
         return default if val is None else val
     except Exception:
         logger.debug("[x-reply] ConfigStore read failed for %s", key, exc_info=True)
@@ -477,57 +503,21 @@ def _as_tuple(val: Any) -> tuple[str, ...]:
 
 
 def _parse_subjects(raw: Any) -> tuple[Subject, ...]:
-    """Build subjects from the stored list. A malformed entry is skipped loudly.
+    """Parse for display; configuration errors independently block runtime drafting."""
+    from kazma_core.x_api.subject_policy import normalize_cards
 
-    Skipping rather than failing the whole config is deliberate: one bad
-    subject should not silently disable every other one, and a subject that
-    fails to parse simply never matches, which is the safe direction.
-    """
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except Exception:
-            logger.warning("[x-reply] subjects is a string but not JSON — ignoring")
-            return ()
-    if not isinstance(raw, list):
-        return ()
+    cards, _ = normalize_cards(raw)
+    tuple_keys = ("match", "aliases", "exclusions", "exceptions", "hard_lines", "examples",
+                  "counterexamples", "allowed_moods", "required_checks")
+    return tuple(Subject(**{key: tuple(value) if key in tuple_keys else value for key, value in card.items()})
+                 for card in cards if card["id"] and (card["match"] or card["aliases"])
+                 and ("*" in card["match"] or card["side"] or card["view"]))
 
-    out: list[Subject] = []
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        sid = str(item.get("id") or "").strip()
-        view = str(item.get("view") or "").strip()
-        match = _as_tuple(item.get("match"))
-        side = str(item.get("side") or "").strip().lower()
-        if side not in _SIDES:
-            side = ""
-        catch_all = "*" in match
-        if not sid or not match:
-            logger.warning(
-                "[x-reply] subject %r skipped — id and match are required",
-                sid or "<unnamed>",
-            )
-            continue
-        if not catch_all and not side and not view:
-            logger.warning(
-                "[x-reply] subject %r skipped — set against/support, or a view",
-                sid,
-            )
-            continue
-        out.append(
-            Subject(
-                id=sid,
-                match=tuple(m.lower() for m in match),
-                view=view,
-                mood=str(item.get("mood") or "dry").strip().lower(),
-                register=str(item.get("register") or "").strip(),
-                hard_lines=_as_tuple(item.get("hard_lines")),
-                examples=_as_tuple(item.get("examples")),
-                side=side,
-            )
-        )
-    return tuple(out)
+
+def _subject_config_errors(raw: Any) -> tuple[str, ...]:
+    from kazma_core.x_api.subject_policy import normalize_cards
+
+    return normalize_cards(raw)[1]
 
 
 def _killed() -> bool:
@@ -554,6 +544,7 @@ def get_reply_config() -> ReplyConfig:
     killed = _killed()
     if killed:
         mode = MODE_OFF
+    raw_subjects = _cs_get("connectors.x.reply.subjects", [])
     return ReplyConfig(
         enabled=(not killed) and _as_bool(_cs_get("connectors.x.reply.enabled"), False),
         mode=mode,
@@ -577,7 +568,8 @@ def get_reply_config() -> ReplyConfig:
         poll_interval_s=_as_int(
             _cs_get("connectors.x.reply.poll_interval_s"), 600, lo=60, hi=3600
         ),
-        subjects=_parse_subjects(_cs_get("connectors.x.reply.subjects", [])),
+        subjects=_parse_subjects(raw_subjects),
+        config_errors=_subject_config_errors(raw_subjects),
         summoner_policy=(
             str(_cs_get("connectors.x.reply.summoner_policy", SUMMON_ALLOWLIST)
                 or SUMMON_ALLOWLIST).strip().lower()
@@ -636,35 +628,15 @@ def mood_from_text(text: str) -> str:
 # ── Classification ────────────────────────────────────────────────────────
 
 def _keyword_hit(text: str, subjects: tuple[Subject, ...]) -> Subject | None:
-    """First subject whose keyword appears as a WHOLE word in *text*.
+    from kazma_core.x_api.routing import AmbiguousSubjectError, route_subject
 
-    Whole-word, not substring: a substring match on "var" also fires on
-    "variable", "variance" and "Varsity" — a keyword short enough to be useful
-    is short enough to be a fragment of something unrelated.
-    Arabic and other non-Latin keywords have no ASCII word boundary, so they
-    fall back to a plain containment check.
-    """
-    low = (text or "").lower()
-    # Specific subjects first; a catch-all is the floor, never the ceiling.
-    specific = [s for s in subjects if not s.is_catch_all()]
-    for subject in specific:
-        for kw in subject.match:
-            if not kw:
-                continue
-            # 1–2 Arabic letters match almost every sentence (في، من، أو).
-            if not kw.isascii() and len(kw) < 3:
-                continue
-            if kw.isascii():
-                if re.search(rf"(?<!\w){re.escape(kw)}(?!\w)", low):
-                    return subject
-            elif kw in low:
-                return subject
-    for subject in subjects:
-        if subject.is_catch_all():
-            return subject
-    return None
+    decision = route_subject(text, subjects)
+    if decision.state in ("ambiguous", "needs_review", "rejected"):
+        raise AmbiguousSubjectError(decision)
+    return decision.selected
 
 
+@x_model_call
 async def _llm_pick(text: str, subjects: tuple[Subject, ...]) -> Subject | None:
     """Closed-set classification. Returns a declared subject or None.
 
@@ -675,64 +647,76 @@ async def _llm_pick(text: str, subjects: tuple[Subject, ...]) -> Subject | None:
     specifics = [s for s in subjects if not s.is_catch_all()]
     if not specifics:
         return None
-    catalogue = "\n".join(
-        f"- {s.id}: side={s.side or 'view'}; keywords={', '.join(s.match[:6])}; "
-        f"view={s.view[:180]}"
-        for s in specifics
-    )
-    try:
-        from kazma_core.safety.prompt_fence import format_untrusted_block
+    catalogue = json.dumps([{"id": s.id, "target": s.target or s.id,
+                             "aliases": list((*s.match, *s.aliases)), "scope": s.scope,
+                             "exceptions": list(s.exceptions)} for s in specifics], ensure_ascii=False)
+    from kazma_core.safety.prompt_fence import format_untrusted_block
 
-        fenced = format_untrusted_block(text[:1500], source="x_post")
-    except Exception:
-        fenced = text[:1500]
+    observed = text[:4000]
+    fenced = format_untrusted_block(observed, source="x_post")
     prompt = (
-        "Classify the post below into exactly ONE of these subject ids, or "
-        "'none' if it is not clearly ABOUT any of them.\n"
-        "If the post does not name that topic, answer none. Do not pick a "
-        "subject just because it is on the list or looks like the operator's "
-        "country. When unsure, none.\n\n"
+        "Identify the PRIMARY target of the post from the declared catalogue. "
+        "Distinguish the author from quoted speech and incidental mentions. "
+        "Multiple targets, negation or uncertain scope mean needs_review. "
+        "Do not invent an ID or infer a target from the operator's country.\n"
         f"Subjects:\n{catalogue}\n\n"
         f"Post:\n{fenced}\n\n"
-        "Answer with the id alone. No explanation."
+        'Return ONLY a JSON object with exactly these fields: '
+        '{"state":"ready|no_match|needs_review","subject_id":"declared ID or empty",'
+        '"evidence":"exact short passage copied from the post, or empty for no_match",'
+        '"reason":"concise applicability explanation"}. No markdown.'
     )
     try:
-        from kazma_core.model_registry import get_model_registry
-        from kazma_core.tenant_context import get_current_tenant_id, tenant_scope
+        from kazma_core.x_api.model_selection import get_x_client
 
         # Provider API keys are tenant-scoped vault rows; a context-less
         # caller resolves none of them and the registry silently substitutes
         # another vendor (audit 2026-09-17, and measured live: 0/4).
-        def _client():
-            return get_model_registry().get_client()
-
-        if get_current_tenant_id():
-            provider = _client()
-        else:
-            with tenant_scope("default"):
-                provider = _client()
+        provider = await get_x_client("classification")
         if provider is None:
-            return None
-        resp = await provider.chat(
+            raise ClassifierUnavailable("No LLM provider is configured for X classification.")
+        resp = await x_chat("classification",
             [{"role": "user", "content": prompt}],
             # A reasoning model emits reasoning before content; 16 tokens
             # is a ceiling it never gets past, and the classifier then
             # returns empty and silently means 'no subject matched'.
-            max_tokens=600,
+            max_tokens=1200,
             temperature=0.0,
         )
-        answer = str(getattr(resp, "content", "") or "").strip().lower()
+        answer = json.loads(str(getattr(resp, "content", "") or ""))
+        if (not isinstance(answer, dict) or set(answer) != {"state", "subject_id", "evidence", "reason"}
+                or any(not isinstance(value, str) for value in answer.values())
+                or answer["state"] not in ("ready", "no_match", "needs_review")
+                or len(answer["reason"]) > 1000 or len(answer["evidence"]) > 500):
+            raise ValueError("Classifier returned an invalid decision schema.")
+        selected = next((s for s in specifics if s.id == answer["subject_id"]), None)
+        if answer["state"] == "no_match":
+            if answer["subject_id"] or answer["evidence"]:
+                raise ValueError("No-match classifier decision contains a subject or evidence.")
+            return None
+        if not answer["evidence"] or answer["evidence"] not in observed:
+            raise ValueError("Classifier evidence is not an exact passage from the post.")
+        if answer["subject_id"] and selected is None:
+            raise ValueError("Classifier returned an undeclared subject.")
     except Exception as exc:
         # NOT a no-match. Swallowing this told the operator their subject did
         # not fit a post the classifier never read.
         logger.warning("[x-reply] subject classifier could not run: %s", exc)
         raise ClassifierUnavailable(str(exc)[:200]) from exc
 
-    answer = re.sub(r"[^a-z0-9_\-]", "", answer.split()[0] if answer.split() else "")
-    for subject in subjects:
-        if subject.id.lower() == answer:
-            return subject
-    return None
+    from kazma_core.x_api.routing import AmbiguousSubjectError, RoutingDecision, route_subject
+
+    candidate = {"subject_id": answer["subject_id"], "evidence": answer["evidence"], "reason": answer["reason"]}
+    if answer["state"] != "ready" or selected is None:
+        raise AmbiguousSubjectError(RoutingDecision("needs_review", candidates=(candidate,),
+                                                    reason="Classifier requires contextual review."))
+    # A model's confidence cannot expand an operator's aliases, exclusions or
+    # scope. Paraphrased targets may be reviewed; they cannot become auto-safe.
+    decision = route_subject(observed, (selected,))
+    if decision.state != "ready":
+        raise AmbiguousSubjectError(RoutingDecision("needs_review", candidates=(candidate,),
+                                                    reason="Classifier selection needs operator review against the card's scope and aliases."))
+    return selected
 
 
 async def classify(
@@ -760,15 +744,7 @@ async def classify(
         logger.info("[x-reply] subject %r matched on keyword", hit.id)
         return hit
     if allow_llm and not any(sub.is_catch_all() for sub in cfg.subjects):
-        try:
-            hit = await _llm_pick(text, cfg.subjects)
-        except ClassifierUnavailable as exc:
-            if cfg.unmatched == UNMATCHED_VOICE:
-                logger.warning(
-                    "[x-reply] classifier could not run (%s) — voice-only", exc,
-                )
-                return implicit_voice_subject()
-            raise
+        hit = await _llm_pick(text, cfg.subjects)
         if hit is not None:
             logger.info("[x-reply] subject %r matched via classifier", hit.id)
             return hit

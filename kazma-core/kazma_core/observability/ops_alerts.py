@@ -401,6 +401,21 @@ async def _deliver(text: str, outcome: dict[str, list[str]] | None = None) -> bo
     return direct
 
 
+async def deliver_acknowledged(text: str) -> bool:
+    """Await existing ops transport and require at least one confirmed route."""
+    if not ops_alerts_enabled():
+        return False
+    outcome: dict[str, list[str]] = {}
+    try:
+        await _deliver(text, outcome=outcome)
+    except asyncio.CancelledError:
+        raise
+    except (OSError, RuntimeError, ValueError):
+        logger.warning("[ops_alerts] acknowledged delivery failed", exc_info=True)
+        return False
+    return bool(outcome.get("sent"))
+
+
 def _has_any_sink() -> bool:
     """True if anything could actually receive an alert right now.
 

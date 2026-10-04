@@ -1189,7 +1189,7 @@
                 }
                 Object.assign(this.xStatus, data);
                 var who = data.verified_username ? (' @' + data.verified_username) : '';
-                showToast(_k('settings.int.x_api_ok', 'X API ok{who}. Read + Write user tokens work.', { who: who }), 'success');
+                showToast(_k('settings.int.x_api_ok', 'X account verified{who}. Confirm Write permission in the X developer console.', { who: who }), 'success');
             } catch (e) {
                 showToast(_k('settings.int.x_test_failed_2', 'X test failed: ') + e.message, 'error');
             } finally {
@@ -1234,8 +1234,14 @@
                 const data = await this._fetch('/api/x/reply');
                 if (data && data.ok !== false) {
                     Object.assign(this.xReply, data);
+                    this.xReplyRoleBindings = {};
+                    (data.ai_roles || []).forEach(role => {
+                        this.xReplyRoleBindings[role] = Object.assign({ selection: 'inherit', provider: '', model: '' }, ((data.ai || {}).roles || {})[role] || {});
+                    });
                     this.xReplySummonersText = (data.summoners || []).join(', ');
                     this.xReplyProblems = [];
+                    this.xReplyPolicyBaseline = JSON.parse(JSON.stringify(data.subjects || []));
+                    this.xReplyPolicyStaged = false;
                 }
             } catch (e) {
                 showToast(_k('settings.int.failed_to_load_auto_reply', 'Failed to load auto-reply settings: ') + e.message, 'error');
@@ -1261,10 +1267,84 @@
 
         xReplyAddSubject() {
             this.xReply.subjects.push({
-                id: '', match: [], view: '', mood: 'dry', side: 'against', register: '',
+                schema_version: 2, revision: 1, target: '', aliases: [], exclusions: [], scope: '',
+                exceptions: [], allowed_moods: [], allow_draft: true, allow_auto: false,
+                evidence_policy: 'required', evidence_max_age_days: 30, required_checks: ['context', 'target', 'stance', 'evidence', 'safety'],
+                id: '', match: [], view: '', mood: 'dry', side: '', register: '',
                 hard_lines: [], examples: [], _matchText: '', _hardText: '', _exText: '',
             });
             this.xReplyOpen = this.xReply.subjects.length - 1;
+        },
+
+        xReplyPolicyChanges() {
+            const before = new Map((this.xReplyPolicyBaseline || []).map(card => [card.id, card]));
+            const after = new Map(this.xReplySubjectPayload().map(card => [card.id, card]));
+            return Array.from(new Set([...before.keys(), ...after.keys()])).flatMap(id => {
+                const old = before.get(id), next = after.get(id);
+                if (!old || !next) return [{ id, fields: !old ? 'added' : 'removed', before: JSON.stringify(old || null, null, 2), after: JSON.stringify(next || null, null, 2) }];
+                const fields = Array.from(new Set([...Object.keys(old), ...Object.keys(next)]))
+                    .filter(key => key !== 'revision' && JSON.stringify(old[key]) !== JSON.stringify(next[key]));
+                return fields.length ? [{ id, fields: fields.join(', '),
+                    before: JSON.stringify(Object.fromEntries(fields.map(key => [key, old[key]])), null, 2),
+                    after: JSON.stringify(Object.fromEntries(fields.map(key => [key, next[key]])), null, 2) }] : [];
+            });
+        },
+
+        xReplyExportPolicy() {
+            const documentBody = { schema_version: 1, settings_revision: Number(this.xReply.settings_revision) || 0,
+                subjects: this.xReplySubjectPayload() };
+            const url = URL.createObjectURL(new Blob([JSON.stringify(documentBody, null, 2)], { type: 'application/json' }));
+            const link = document.createElement('a');
+            link.href = url; link.download = 'x-subject-policy.json'; link.click();
+            URL.revokeObjectURL(url);
+        },
+
+        async xReplyImportPolicy(event) {
+            const input = event.target, file = input.files && input.files[0];
+            if (!file || this.xReplySaving || this.xReplyLoading) return;
+            this.xReplyLoading = true;
+            try {
+                if (file.size > 256000) throw new Error('Policy file exceeds 256 KB.');
+                const incoming = JSON.parse(await file.text());
+                const response = await fetch('/api/x/reply/policy/validate', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify(incoming),
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) {
+                    this.xReplyProblems = data.problems || [];
+                    throw new Error(data.error || 'Invalid policy file.');
+                }
+                this.xReply.subjects = data.subjects;
+                this.xReply.mode = 'draft';
+                this.xReplyPolicyStaged = true;
+                this.xReplyOpen = null;
+                showToast(_k('settings.xt.policy_staged', 'Imported policy is staged. Review changes before saving; automatic permission is disabled.'), 'warning');
+            } catch (error) {
+                showToast(error.message, 'error');
+            } finally {
+                input.value = '';
+                this.xReplyLoading = false;
+            }
+        },
+
+        xReplyAIModels() {
+            const provider = (this.xReply.ai || {}).provider || '';
+            const row = (this.xReply.ai_options || []).find(function (p) { return p.provider === provider; });
+            return row ? (row.models || []) : [];
+        },
+
+        xReplyAIConfigPayload() {
+            const settings = Object.assign({}, this.xReply.ai);
+            if (this.xReplyRoleBindings && Object.keys(this.xReplyRoleBindings).length) {
+                settings.roles = {};
+                Object.keys(this.xReplyRoleBindings).forEach(role => {
+                    const pair = this.xReplyRoleBindings[role];
+                    if (pair.selection !== 'inherit') settings.roles[role] = Object.assign({}, pair);
+                });
+            }
+            return settings;
         },
 
         xReplyRemoveSubject(i) {
@@ -1284,7 +1364,7 @@
         xReplySubjectPayload() {
             const self = this;
             return this.xReply.subjects.map(function (s) {
-                return {
+                const card = {
                     id: (s.id || '').trim(),
                     match: s._matchText !== undefined ? self._xSplit(s._matchText, false) : (s.match || []),
                     view: s.view || '',
@@ -1294,19 +1374,34 @@
                     hard_lines: s._hardText !== undefined ? self._xSplit(s._hardText, true) : (s.hard_lines || []),
                     examples: s._exText !== undefined ? self._xSplit(s._exText, true) : (s.examples || []),
                 };
+                ['schema_version', 'revision', 'target', 'aliases', 'exclusions', 'scope', 'exceptions',
+                 'allowed_moods', 'allow_draft', 'allow_auto', 'evidence_policy', 'evidence_max_age_days', 'required_checks',
+                 'counterexamples', 'owner', 'change_reason'].forEach(function (key) {
+                    if (s[key] !== undefined) card[key] = s[key];
+                });
+                return card;
             });
         },
 
         async saveXReply() {
+            if (this.xReplySaving || this.xReplyLoading) return;
             this.xReplySaving = true;
             this.xReplyProblems = [];
             try {
+                const subjects = JSON.parse(JSON.stringify(this.xReplySubjectPayload()));
+                if (this.xReplyPolicyStaged && !await window.kazmaConfirm({
+                    title: _k('settings.xt.policy_apply', 'Save reviewed policy in draft mode'),
+                    message: this.xReplyPolicyChanges().map(change => change.id + ': ' + change.fields + '\n' + change.after).join('\n\n'),
+                })) return;
+                if (this.xReplyPolicyStaged) this.xReply.mode = 'draft';
                 const resp = await fetch('/api/x/reply', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     credentials: 'same-origin',
                     body: JSON.stringify({
+                        expected_revision: Number(this.xReply.settings_revision) || 0,
                         enabled: !!this.xReply.enabled,
+                        ai: this.xReplyAIConfigPayload(),
                         mode: this.xReply.mode || 'off',
                         summoners: this._xSplit(this.xReplySummonersText, false),
                         trigger: this.xReply.trigger || '',
@@ -1323,7 +1418,7 @@
                         knowledge_library: this.xReply.knowledge_library || '',
                         open_thread_marker: this.xReply.open_thread_marker || '',
                         close_thread_marker: this.xReply.close_thread_marker || '',
-                        subjects: this.xReplySubjectPayload(),
+                        subjects: subjects,
                     }),
                 });
                 const data = await resp.json().catch(function () { return {}; });
@@ -1334,6 +1429,8 @@
                 }
                 Object.assign(this.xReply, data);
                 this.xReplySummonersText = (data.summoners || []).join(', ');
+                this.xReplyPolicyBaseline = JSON.parse(JSON.stringify(data.subjects || []));
+                this.xReplyPolicyStaged = false;
                 // Warnings are advisory (e.g. anyone + auto): the save
                 // succeeded, the operator should know what they turned on.
                 (data.warnings || []).forEach(function (w) { showToast(w, 'warning'); });
@@ -1371,6 +1468,7 @@
                     // when nothing is expanded.
                     body: JSON.stringify({
                         parent_text: this.xReplyPreview.text,
+                        ai: this.xReplyAIConfigPayload(),
                         parent_handle: this.xReplyPreview.handle,
                         subject_id: this.xReplyPreview.subject_id,
                         mood: this.xReplyPreview.mood,

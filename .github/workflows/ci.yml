@@ -485,6 +485,13 @@ jobs:
         run: python -m pytest tests/e2e/test_pages_load_clean.py -q --timeout=600
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: X Studio bilingual composer and review
+        # X composer/review acceptance has its own isolated app fixture.
+        # It must run here because the chunked unit suite excludes e2e.
+        # Keep failures blocking, as with the other browser checks.
+        run: python -m pytest tests/e2e/test_x_studio_browser.py -q --timeout=300
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Every page reads in Arabic (2026-09-28)
         # Each nav page and Settings tab, and a chat turn paused at its
         # approval card and finished, with the Arabic cookie: no English

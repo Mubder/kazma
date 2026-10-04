@@ -77,6 +77,12 @@ async def x_status(recent: int = 5) -> str:
                 "Label the X account as Automated. Bearer tokens cannot post."
             ),
         }
+        from kazma_core.x_api.publication_service import operation_inventory
+
+        payload.update(await asyncio.to_thread(operation_inventory, limit=n_recent))
+        from kazma_core.x_api.ai_budget import budget_status
+
+        payload["ai_budget"] = await asyncio.to_thread(budget_status)
         return _json(payload)
     except Exception as exc:
         logger.exception("x_status failed")
@@ -92,7 +98,9 @@ async def x_post(text: str, reply_to_id: str = "", proposal_id: str = "") -> str
     ``save_proposal(kind, items)``, (2) call this ONCE PER ITEM with that
     item's proposal_id. One call must not fan out to multiple drafts.
     """
-    ok, payload = await publish_x_post(text=text, reply_to_id=reply_to_id or "")
+    ok, payload = await publish_x_post(text=text, reply_to_id=reply_to_id or "",
+                                     idempotency_key="proposal:" + proposal_id if proposal_id else "",
+                                     metadata={"proposal_id": proposal_id})
     payload["ok"] = ok
     if proposal_id:
         payload["proposal_id"] = proposal_id
@@ -115,13 +123,9 @@ async def x_delete_post(tweet_id: str) -> str:
 
 def _booking_identity() -> tuple[str, str, str]:
     """(tenant_id, thread_id, delivery_target) captured at booking time."""
-    tenant_id = "default"
-    try:
-        from kazma_core.tenant_isolation import require_tenant_id
+    from kazma_core.x_api.ownership import x_tenant_id
 
-        tenant_id = require_tenant_id() or "default"
-    except Exception:  # noqa: BLE001
-        pass
+    tenant_id = x_tenant_id()
     thread_id = ""
     try:
         from kazma_core.safety.hitl import get_current_thread_id
@@ -168,14 +172,10 @@ async def x_schedule_post(
         from kazma_core.x_api.booking import book_x_post
 
         tenant_id, thread_id, delivery_target = _booking_identity()
-        ok, payload = book_x_post(
-            text=text,
-            when=when,
-            reply_to_id=reply_to_id or "",
-            tenant_id=tenant_id,
-            thread_id=thread_id,
-            delivery_target=delivery_target,
-        )
+        ok, payload = await asyncio.to_thread(book_x_post, text=text, when=when,
+            reply_to_id=reply_to_id or "", tenant_id=tenant_id, thread_id=thread_id,
+            delivery_target=delivery_target, idempotency_key="proposal:" + proposal_id if proposal_id else "",
+            proposal_id=proposal_id)
         if ok:
             payload = dict(payload)
             payload["ok"] = True
@@ -199,8 +199,8 @@ async def x_list_scheduled() -> str:
     """
     try:
         tenant_id, _, _ = _booking_identity()
-        store = get_x_scheduled_store()
-        posts = store.list_all(tenant_id=tenant_id, limit=100)
+        store = await asyncio.to_thread(get_x_scheduled_store)
+        posts = await asyncio.to_thread(store.list_all, tenant_id=tenant_id, limit=100)
         from datetime import datetime
 
         out = []
@@ -215,7 +215,11 @@ async def x_list_scheduled() -> str:
                 "tweet_id": p.tweet_id,
                 "error": p.error,
             })
-        return _json({"ok": True, "count": len(out), "posts": out})
+        from kazma_core.x_api.publication_service import operation_inventory
+
+        inventory = await asyncio.to_thread(operation_inventory, limit=100)
+        inventory["operations"] = [r for r in inventory["operations"] if r["origin"] == "schedule"]
+        return _json({"ok": True, "count": len(out), "posts": out, **inventory})
     except Exception as exc:
         logger.exception("x_list_scheduled failed")
         return _json({"ok": False, "error": str(exc)})
@@ -236,10 +240,13 @@ async def x_cancel_scheduled_post(post_id: int) -> str:
         return _json({"ok": False, "cancelled": False, "error": "post_id must be a number."})
     try:
         store = get_x_scheduled_store()
-        cancelled = store.cancel(pid)
+        tenant_id, _, _ = _booking_identity()
+        from kazma_core.x_api.publication_service import cancel_schedule
+
+        cancelled = await asyncio.to_thread(cancel_schedule, pid)
         if cancelled:
             return _json({"ok": True, "cancelled": True, "id": pid})
-        existing = store.get(pid)
+        existing = store.get(pid, tenant_id=tenant_id)
         if existing is None:
             return _json({"ok": False, "cancelled": False, "error": f"No scheduled post with id {pid}."})
         return _json({

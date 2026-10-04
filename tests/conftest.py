@@ -14,6 +14,17 @@ import pathlib
 # ``t`` global) is applied before any test creates a Jinja2Templates instance.
 import kazma_ui.i18n  # noqa: F401
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolated_x_publications(tmp_path):
+    from kazma_core.x_api.publication_store import _PublicationStore, _set_publication_store_for_tests
+
+    _set_publication_store_for_tests(_PublicationStore(tmp_path / "x_publications.db"))
+    try:
+        yield
+    finally:
+        _set_publication_store_for_tests(None)
 from kazma_core.agent import AgentConfig, KazmaAgent
 
 

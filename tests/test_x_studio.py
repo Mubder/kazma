@@ -8,10 +8,8 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from kazma_core.x_api.config import XConfig, XCredentials
 from kazma_core.x_api.ledger import XPostLedger
-from kazma_core.x_api.policy import evaluate_post
 
 _CSRF = {"X-Requested-With": "XMLHttpRequest"}
 
@@ -30,6 +28,7 @@ def _cfg(**overrides) -> XConfig:
         max_chars=280,
         duplicate_window_days=30,
         kill_switch=False,
+        account_id="123",
     )
     base.update(overrides)
     return XConfig(**base)
@@ -161,8 +160,8 @@ def test_list_proposals_returns_saved_items(tmp_path: Path, monkeypatch: pytest.
 def test_post_now_rewrites_to_stored_proposal(
     client, studio_env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from kazma_core.agent.artifacts import ArtifactStore
     import kazma_core.agent.artifacts as art_mod
+    from kazma_core.agent.artifacts import ArtifactStore
 
     store = ArtifactStore(tmp_path / "artifacts.db")
     saved = store.save_proposal("default", "thread-a", "tweets", ["canonical draft"])
@@ -271,4 +270,10 @@ def test_bidi_js_pins_arabic_tweets_rtl() -> None:
     out = subprocess.run(
         ["node", str(script)], capture_output=True, text=True, timeout=20
     )
+    assert out.returncode == 0, out.stdout + out.stderr
+
+
+def test_studio_revision_and_loading_behavior() -> None:
+    script = Path(__file__).resolve().parents[1] / "tests" / "js" / "test_x_studio_revisions.js"
+    out = subprocess.run(["node", str(script)], capture_output=True, text=True, timeout=20)
     assert out.returncode == 0, out.stdout + out.stderr
