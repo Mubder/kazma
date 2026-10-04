@@ -23,6 +23,10 @@ X Studio and X settings now share branded blue checkboxes, theme-aware field
 surfaces and borders, a styled file picker, and visible keyboard focus. Native
 checkbox semantics and existing toggle switches stay intact; browser acceptance
 checks both themes, English/Arabic layouts and keyboard selection.
+The Studio composer, draft count, reply/schedule fields and draft/publication
+searches now use the shared form controls. Conversations has labeled, responsive
+search and status filters. Planner, draft and activity checkboxes use the same
+theme and keyboard focus treatment.
 
 ## X Studio: isolated evaluation, policy review, ordered threads and health (2026-10-04)
 

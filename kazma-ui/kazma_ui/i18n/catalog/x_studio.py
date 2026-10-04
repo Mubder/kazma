@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
+    "x_studio.filter_status": {"en": "Status", "ar": "الحالة"},
     "x_studio.health": {"en": "Operations health", "ar": "صحة التشغيل"},
     "x_studio.health_scope": {"en": "Tenant counters; heartbeats for this process. Mentions polling serves the default tenant. Last successful cycle is shown below.", "ar": "عدادات المستأجر؛ ونبضات هذه العملية. تخدم مراقبة الإشارات المستأجر الافتراضي. آخر دورة ناجحة موضحة أدناه."},
     "x_studio.health_running": {"en": "Running", "ar": "يعمل"},

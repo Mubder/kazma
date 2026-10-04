@@ -236,6 +236,10 @@ Arabic browser assertions for support/opposition cards and visible scope fields.
 The control styling follow-up adds Kazma blue checkboxes, themed fields and file
 pickers across both X surfaces. Bilingual mobile acceptance checks both light and
 dark modes, keyboard checkbox selection/focus and preservation of toggle switches.
+The Studio and Conversations sub-tabs also apply these shared controls to draft
+count, reply/schedule fields and all searches, with a labeled responsive status
+filter. Both themes and languages pass the mobile interaction check; 53 focused
+template/translation/Studio checks pass. Final release CI remains required.
 
 | Work | Status |
 |---|---|

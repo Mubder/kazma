@@ -207,27 +207,31 @@
         <button class="btn btn-secondary btn-sm" @click="loadComposer()">{{ t('x_studio.reload_saved_composer') }}</button>
       </div>
       <label for="xs-brief">{{ t('x_studio.draft_brief') }}</label>
-      <textarea id="xs-brief" x-model="draftBrief" maxlength="4000" :dir="textDir(draftBrief)"
+      <textarea id="xs-brief" class="form-input" x-model="draftBrief" maxlength="4000" :dir="textDir(draftBrief)"
                 placeholder="{{ t('x_studio.brief_placeholder') }}"></textarea>
-      <label for="xs-draft-count">{{ t('x_studio.alternatives') }}</label>
-      <select id="xs-draft-count" x-model="draftCount" :disabled="generateBusy">
-        <option value="1">1</option><option value="2">2</option><option value="3">3</option>
-      </select>
-      <button class="btn btn-secondary btn-sm" type="button" :disabled="generateBusy || !draftBrief.trim()"
-              @click="generateDrafts()" x-text="generateBusy ? t('x_studio.generating') : t('x_studio.generate')"></button>
+      <div class="xs-generation-actions">
+        <div class="form-group">
+          <label for="xs-draft-count">{{ t('x_studio.alternatives') }}</label>
+          <select id="xs-draft-count" class="form-select" x-model="draftCount" :disabled="generateBusy">
+            <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary btn-sm" type="button" :disabled="generateBusy || !draftBrief.trim()"
+                @click="generateDrafts()" x-text="generateBusy ? t('x_studio.generating') : t('x_studio.generate')"></button>
+      </div>
       <div class="xs-reason" x-show="generateError" x-cloak translate="no" :dir="textDir(generateError)" x-text="generateError" role="alert"></div>
       <template x-for="model in generatedModels" :key="model.provider + ':' + model.model">
         <div class="xs-meta" translate="no" x-text="model.provider + ' / ' + model.model"></div>
       </template>
       <label for="xs-text">{{ t('x_studio.public_text') }}</label>
-      <textarea id="xs-text" x-model="text" @input="onInput()" maxlength="2000"
+      <textarea id="xs-text" class="form-input" x-model="text" @input="onInput()" maxlength="2000"
                 :dir="textDir(text)"
                 x-effect="stampAr($el, text)"
                 placeholder="{{ t('x_studio.placeholder') }}"></textarea>
       <div class="xs-thread">
         <div class="grow">
           <label for="xs-reply">{{ t('x_studio.reply_to') }}</label>
-          <input id="xs-reply" type="text" x-model="replyToId"
+          <input id="xs-reply" class="form-input" type="text" x-model="replyToId"
                  @change="replyToId = parseTweetId(replyToId)">
         </div>
         <button class="btn btn-secondary btn-sm" type="button" x-show="replyToId" x-cloak
@@ -246,7 +250,7 @@
         <button class="btn btn-primary" :disabled="busy || !status.can_post" @click="postNow()">{{ t('x_studio.post_now') }}</button>
         <div class="when">
           <label for="xs-when">{{ t('x_studio.when') }}</label>
-          <input id="xs-when" type="datetime-local" x-model="when">
+          <input id="xs-when" class="form-input" type="datetime-local" x-model="when">
         </div>
         <button class="btn btn-secondary" :disabled="busy || !status.can_post" @click="schedule()">{{ t('x_studio.schedule') }}</button>
       </div>
@@ -256,7 +260,7 @@
     <div class="xs-card">
       <h2>{{ t('x_studio.planner') }}</h2>
       <span class="xs-meta" x-text="kazmaCount('x_studio.queue_count', queueCount, {count: queueCount})"></span>
-      <label><input type="checkbox" x-model="includeFinished" @change="loadQueue()"> {{ t('x_studio.show_finished') }}</label>
+      <label class="xs-checkbox-filter"><input id="xs-show-finished" type="checkbox" x-model="includeFinished" @change="loadQueue()"> {{ t('x_studio.show_finished') }}</label>
       <div class="xs-week">
         <template x-for="d in week" :key="d.key">
           <div class="xs-day" :class="d.count ? 'has' : ''">
@@ -279,7 +283,7 @@
             <div class="xs-reason" x-show="item.needs_reconciliation">{{ t('x_studio.verify_unknown') }}</div>
           </div>
           <div class="acts">
-            <input type="datetime-local" x-model="item.editWhen" x-show="item.can_reschedule" :aria-label="t('x_studio.when')">
+            <input class="form-input" type="datetime-local" x-model="item.editWhen" x-show="item.can_reschedule" :aria-label="t('x_studio.when')">
             <button class="btn btn-secondary btn-sm" x-show="item.can_reschedule" :disabled="!!queueBusy" @click="reschedule(item)">{{ t('x_studio.reschedule') }}</button>
             <button class="btn btn-danger btn-sm" x-show="item.can_cancel" :disabled="!!queueBusy" @click="cancel(item)">{{ t('x_studio.cancel') }}</button>
           </div>
@@ -297,15 +301,15 @@
     <div class="xs-card">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:.75rem;flex-wrap:wrap;">
         <h2 style="margin:0 0 .75rem;">{{ t('x_studio.drafts') }}</h2>
-        <label style="font-size:.72rem;color:var(--text-muted);display:flex;gap:.35rem;align-items:center;">
-          <input type="checkbox" x-model="showDismissed" @change="loadDrafts()">
+        <label class="xs-checkbox-filter">
+          <input id="xs-show-dismissed" type="checkbox" x-model="showDismissed" @change="loadDrafts()">
           {{ t('x_studio.show_dismissed') }}
         </label>
       </div>
       <div class="xs-empty" x-show="!drafts.length && !showDismissed && loadStates.drafts && !loadStates.drafts.loading && !loadStates.drafts.error" x-cloak>{{ t('x_studio.empty_drafts') }}</div>
       <div class="xs-empty" x-show="!drafts.length && showDismissed && loadStates.drafts && !loadStates.drafts.loading && !loadStates.drafts.error" x-cloak>{{ t('x_studio.empty_dismissed') }}</div>
       <label for="xs-draft-search">{{ t('common.search') }}</label>
-      <input id="xs-draft-search" type="search" x-model="draftQuery" @input.debounce.350ms="loadDrafts()" maxlength="200">
+      <input id="xs-draft-search" class="form-input xs-search" type="search" x-model="draftQuery" @input.debounce.350ms="loadDrafts()" maxlength="200">
       <template x-for="d in drafts" :key="d.id">
         <div class="xs-row" x-effect="stampAr($el, displayBody(d.text))">
           <div class="xs-body" translate="no">
@@ -337,7 +341,7 @@
       <p class="xs-meta">{{ t('x_studio.operation_history_hint') }}</p>
       <p x-show="loadStates.operations && loadStates.operations.loading">{{ t('x_studio.loading') }}</p>
       <label for="xs-operation-search">{{ t('common.search') }}</label>
-      <input id="xs-operation-search" type="search" x-model="operationQuery" @input.debounce.350ms="loadOperations()" maxlength="200">
+      <input id="xs-operation-search" class="form-input xs-search" type="search" x-model="operationQuery" @input.debounce.350ms="loadOperations()" maxlength="200">
       <template x-for="operation in operations" :key="operation.id">
         <div class="xs-row">
           <div class="xs-body">
@@ -360,8 +364,8 @@
     <div class="xs-card">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:.75rem;flex-wrap:wrap;">
         <h2 style="margin:0 0 .75rem;">{{ t('x_studio.activity') }}</h2>
-        <label style="font-size:.72rem;color:var(--text-muted);display:flex;gap:.35rem;align-items:center;">
-          <input type="checkbox" x-model="auditWritesOnly">
+        <label class="xs-checkbox-filter">
+          <input id="xs-writes-only" type="checkbox" x-model="auditWritesOnly">
           {{ t('x_studio.writes_only') }}
         </label>
       </div>
@@ -410,14 +414,21 @@
       <a href="/settings?tab=x" style="color:var(--accent);">{{ t('x_studio.auto_reply_settings') }}</a>.
     </p>
 
-    <label for="xs-conversation-search">{{ t('common.search') }}</label>
-    <input id="xs-conversation-search" type="search" x-model="conversationQuery" @input.debounce.350ms="loadConversations()" maxlength="200">
-    <select x-model="conversationState" @change="loadConversations()" aria-label="{{ t('x_studio.tab_conversations') }}">
-      <option value="">{{ t('x_studio.all_states') }}</option>
-      <option value="awaiting_approval">{{ t('x_studio.status_awaiting_approval') }}</option>
-      <option value="outcome_unknown">{{ t('x_studio.status_outcome_unknown') }}</option>
-      <option value="posted">{{ t('x_studio.status_posted') }}</option>
-    </select>
+    <div class="xs-filters">
+      <div class="form-group">
+        <label for="xs-conversation-search">{{ t('common.search') }}</label>
+        <input id="xs-conversation-search" class="form-input" type="search" x-model="conversationQuery" @input.debounce.350ms="loadConversations()" maxlength="200">
+      </div>
+      <div class="form-group">
+        <label for="xs-conversation-state">{{ t('x_studio.filter_status') }}</label>
+        <select id="xs-conversation-state" class="form-select" x-model="conversationState" @change="loadConversations()">
+          <option value="">{{ t('x_studio.all_states') }}</option>
+          <option value="awaiting_approval">{{ t('x_studio.status_awaiting_approval') }}</option>
+          <option value="outcome_unknown">{{ t('x_studio.status_outcome_unknown') }}</option>
+          <option value="posted">{{ t('x_studio.status_posted') }}</option>
+        </select>
+      </div>
+    </div>
     <template x-for="c in conversations" :key="c.summon_id">
       <div class="xs-conv">
         <div class="xs-turn">

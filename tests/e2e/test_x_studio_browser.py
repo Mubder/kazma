@@ -38,6 +38,28 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                     page.goto(harness.base + "/x", wait_until="domcontentloaded")
                     _settle(page)
                     page.wait_for_function("() => Alpine.$data(document.querySelector('.xs-wrap'))._composerLoaded")
+                    for theme in ("dark", "light"):
+                        if page.evaluate("() => document.documentElement.dataset.theme") != theme:
+                            page.locator(".theme-toggle:not(.lang-toggle)").click()
+                        page.wait_for_function("theme => document.documentElement.dataset.theme === theme", arg=theme)
+                        for selector in ("#xs-brief", "#xs-draft-count", "#xs-text", "#xs-reply", "#xs-when", "#xs-draft-search", "#xs-operation-search"):
+                            assert page.locator(selector).evaluate("e => {const s=getComputedStyle(e); return s.borderTopStyle === 'solid' && parseFloat(s.paddingLeft) >= 10 && parseFloat(s.minHeight) >= 42;}")
+                        finished = page.locator("#xs-show-finished")
+                        finished.focus()
+                        page.keyboard.press("Space")
+                        assert finished.is_checked()
+                        assert finished.evaluate("e => {const s=getComputedStyle(e); return s.appearance === 'none' && s.backgroundColor === s.borderTopColor && s.outlineStyle === 'solid';}")
+                        page.keyboard.press("Space")
+                        assert not finished.is_checked()
+                        page.locator("#xs-tab-conversations").click()
+                        page.locator("#xs-conversation-state").select_option("posted")
+                        page.wait_for_function("() => !Alpine.$data(document.querySelector('.xs-wrap')).convLoading")
+                        for selector in ("#xs-conversation-search", "#xs-conversation-state"):
+                            assert page.locator(selector).evaluate("e => {const s=getComputedStyle(e); return s.borderTopStyle === 'solid' && parseFloat(s.paddingLeft) >= 10;}")
+                        assert page.locator("#xs-conversation-state").input_value() == "posted"
+                        assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth + 1")
+                        page.locator("#xs-conversation-state").select_option("")
+                        page.locator("#xs-tab-studio").click()
                     page.locator("#xs-text").fill(text)
                     page.wait_for_function("() => {const s = Alpine.$data(document.querySelector('.xs-wrap')); return s.text && !s._composerSaving && s._composerSignature() === s._composerSaved;}")
                     page.reload(wait_until="domcontentloaded")
