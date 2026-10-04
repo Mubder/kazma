@@ -233,6 +233,9 @@ Live acceptance collected 14 real records into an unassigned starter collection
 with no human labels and 11 conversation groups. It exposed a saved-tone display
 mismatch in dynamic options; explicit option selection fixes it, with English and
 Arabic browser assertions for support/opposition cards and visible scope fields.
+The control styling follow-up adds Kazma blue checkboxes, themed fields and file
+pickers across both X surfaces. Bilingual mobile acceptance checks both light and
+dark modes, keyboard checkbox selection/focus and preservation of toggle switches.
 
 | Work | Status |
 |---|---|

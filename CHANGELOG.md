@@ -19,6 +19,10 @@ Live acceptance also found dynamically rendered mood options showing the first
 tone instead of the saved tone. Subject mood and allowed-tone options now display
 their saved values explicitly; bilingual browser coverage checks both support and
 opposition cards. Conditional permission badges remain hidden until hydrated.
+X Studio and X settings now share branded blue checkboxes, theme-aware field
+surfaces and borders, a styled file picker, and visible keyboard focus. Native
+checkbox semantics and existing toggle switches stay intact; browser acceptance
+checks both themes, English/Arabic layouts and keyboard selection.
 
 ## X Studio: isolated evaluation, policy review, ordered threads and health (2026-10-04)
 

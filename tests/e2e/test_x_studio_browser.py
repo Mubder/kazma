@@ -83,6 +83,27 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                     page.get_by_role("button", name="Create Collection" if language == "en" else "إنشاء مجموعة", exact=True).click()
                     page.locator("#xd-search").wait_for()
                     page.get_by_role("button", name="Add Real Case" if language == "en" else "إضافة حالة حقيقية", exact=True).click()
+                    colors = []
+                    for theme in ("dark", "light"):
+                        if page.evaluate("() => document.documentElement.dataset.theme") != theme:
+                            page.locator(".theme-toggle:not(.lang-toggle)").click()
+                        page.wait_for_function("theme => document.documentElement.dataset.theme === theme", arg=theme)
+                        check = page.locator(".xd-categories input").first
+                        check.focus()
+                        page.keyboard.press("Space")
+                        assert check.is_checked()
+                        checked = check.evaluate("e => {const s = getComputedStyle(e); return {appearance:s.appearance, background:s.backgroundColor, border:s.borderTopColor, outline:s.outlineStyle, tick:getComputedStyle(e, '::before').opacity};}")
+                        assert checked["appearance"] == "none"
+                        assert checked["background"] == checked["border"]
+                        assert checked["outline"] == "solid"
+                        assert checked["tick"] == "1"
+                        page.keyboard.press("Space")
+                        assert not check.is_checked()
+                        assert check.evaluate("e => getComputedStyle(e).backgroundColor") != checked["background"]
+                        colors.append(page.locator("#xd-source-text").evaluate("e => getComputedStyle(e).backgroundColor"))
+                        assert page.locator("#xd-import").evaluate("e => getComputedStyle(e, '::file-selector-button').borderTopColor") == checked["border"]
+                        assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth + 1")
+                    assert colors[0] != colors[1]
                     page.locator("#xd-source-text").fill(text)
                     page.locator("#xd-source-id").fill("browser-source-" + language)
                     page.locator("#xd-language").select_option(language)
@@ -115,6 +136,11 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                     assert page.locator("#xr-scope-0").is_visible()
                     assert page.locator("#xr-scope-0").input_value() == "Commercial sourcing"
                     assert page.locator("#xr-tones-0").evaluate("e => Array.from(e.selectedOptions).map(o => o.value)") == ["dry", "supportive"]
+                    page.locator(".x-policy-card").first.locator("details summary").click()
+                    draft_permission = page.locator(".x-policy-card .checkbox-label input").first
+                    assert draft_permission.is_checked()
+                    assert draft_permission.evaluate("e => {const s=getComputedStyle(e); return s.appearance === 'none' && s.backgroundColor === s.borderTopColor;}")
+                    assert page.locator(".x-controls .toggle input").first.evaluate("e => getComputedStyle(e).width") == "0px"
                     page.get_by_role("button", name="tea", exact=True).click()
                     page.locator("#xr-mood-1").wait_for()
                     assert page.locator("#xr-mood-1").input_value() == "dry"
