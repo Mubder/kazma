@@ -6690,7 +6690,7 @@ html.kazma-soft-nav #main-content {
 .x-controls select:not([multiple]) { cursor: pointer; }
 .x-controls select option { background: var(--bg-panel); color: var(--text-primary); }
 .x-controls select option:checked { background: var(--accent); color: #fff; }
-.x-controls :is(.checkbox-label, .xd-check) {
+.x-controls :is(.checkbox-label, .xd-check, .xs-checkbox-filter) {
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -6769,6 +6769,30 @@ html.kazma-soft-nav #main-content {
   color: var(--text-secondary);
 }
 .xd-workspace .xd-actions > label { margin: 0; }
+.xs-wrap .xs-search { width: 100%; margin-block-end: 12px; }
+.xs-wrap .xs-card > label[for] {
+  display: block;
+  margin-block: 12px 6px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.xs-wrap .xs-checkbox-filter { font-size: 0.8rem; }
+.x-controls .xs-compose textarea { min-height: 140px; }
+.x-controls .xs-compose #xs-brief { min-height: 96px; }
+.xs-generation-actions { display: flex; align-items: flex-end; gap: 12px; margin-block: 12px; }
+.xs-generation-actions .form-group { margin: 0; min-width: 80px; }
+.xs-generation-actions > button { min-height: 42px; }
+.xs-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 240px);
+  gap: 12px;
+  margin-block: 16px;
+}
+.xs-filters .form-group { min-width: 0; margin: 0; }
+@media (max-width: 700px) {
+  .xs-filters { grid-template-columns: minmax(0, 1fr); }
+}
 @media (forced-colors: active) {
   .x-controls input[type="checkbox"]:not(.toggle input) { appearance: auto; }
   .x-controls input[type="checkbox"]:not(.toggle input)::before { content: none; }
