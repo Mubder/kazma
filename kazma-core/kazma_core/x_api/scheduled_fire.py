@@ -73,13 +73,17 @@ async def stop_scheduled_x_loop() -> None:
 
 
 async def _loop(poll_interval: float) -> None:
+    from kazma_core.x_api.health import record_cycle
+
     while True:
         try:
             await _fire_due_posts()
+            await asyncio.to_thread(record_cycle, "scheduler", success=True, interval=poll_interval)
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("[x-schedule] poll error (loop continues)")
+            await asyncio.to_thread(record_cycle, "scheduler", success=False, interval=poll_interval)
         await asyncio.sleep(poll_interval)
 
 

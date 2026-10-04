@@ -357,6 +357,7 @@ Native skill `x-publisher`. Credentials live in Settings → X (vaulted ConfigSt
 | `KAZMA_X_POST` | unset (on if Settings enabled) | `0` hard-disables posting (Studio, chat, scheduled fire, and auto-reply publishes). |
 | `KAZMA_X_SCHEDULE` | unset (on) | `0` disables scheduling only (`book_x_post` / Studio Schedule). |
 | `KAZMA_X_REPLY` | unset (on if Settings enabled) | `0` disables mention auto-reply only. Scheduled posts still work. |
+| `KAZMA_X_SHADOW` | unset | Internal guard set by the isolated `scripts/x_shadow.py` evaluation worker. `1` blocks every X network request and notification delivery; use the evaluation CLI rather than setting it on a running install. |
 | `X_API_KEY` | unset | OAuth 1.0a consumer key (else `connectors.x.api_key`). |
 | `X_API_KEY_SECRET` | unset | Consumer secret. |
 | `X_ACCESS_TOKEN` | unset | User access token. |

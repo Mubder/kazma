@@ -96,18 +96,92 @@
     <p x-show="qualificationError" role="alert" x-cloak translate="no" :dir="textDir(qualificationError)" x-text="qualificationError"></p>
   </details>
 
-  <div class="xs-tabs" role="tablist">
-    <button role="tab" :class="tab === 'studio' ? 'on' : ''"
+  <div class="xs-tabs" role="tablist" @keydown="tabsKeydown($event)" aria-label="{{ t('x_studio.title') }}">
+    <button id="xs-tab-studio" role="tab" :tabindex="tab === 'studio' ? 0 : -1" :class="tab === 'studio' ? 'on' : ''"
+            aria-controls="xs-panel-studio"
             :aria-selected="tab === 'studio'"
-            @click="tab = 'studio'">{{ t('x_studio.title') }}</button>
-    <button role="tab" :class="tab === 'conversations' ? 'on' : ''"
+            @click="selectTab('studio')">{{ t('x_studio.title') }}</button>
+    <button id="xs-tab-conversations" role="tab" :tabindex="tab === 'conversations' ? 0 : -1" :class="tab === 'conversations' ? 'on' : ''"
+            aria-controls="xs-panel-conversations"
             :aria-selected="tab === 'conversations'"
-            @click="tab = 'conversations'; loadConversations()">{{ t('x_studio.tab_conversations') }}<span
+            @click="selectTab('conversations')">{{ t('x_studio.tab_conversations') }}<span
             class="count" x-show="conversations.length" x-cloak
             x-text="conversations.length"></span></button>
+    <button id="xs-tab-threads" role="tab" :tabindex="tab === 'threads' ? 0 : -1" :class="tab === 'threads' ? 'on' : ''" :aria-selected="tab === 'threads'"
+            aria-controls="xs-panel-threads" @click="selectTab('threads')">{{ t('x_studio.threads') }}</button>
   </div>
 
-  <div class="two-col-grid" x-show="tab === 'studio'" x-cloak>
+  <details class="xs-card" style="margin-bottom:12px;" @toggle="if ($event.target.open) loadHealth()">
+    <summary>{{ t('x_studio.health') }}</summary>
+    <button class="btn btn-secondary btn-sm" @click="loadHealth()" :disabled="healthBusy">{{ t('common.refresh') }}</button>
+    <p x-show="healthError" role="alert" x-text="healthError" translate="no" :dir="textDir(healthError)"></p>
+    <template x-if="health">
+      <div>
+        <p>{{ t('x_studio.health_scope') }}</p>
+        <template x-for="(loop, name) in health.loops" :key="name">
+          <p><strong x-text="t('x_studio.health_' + name)"></strong>: <span x-text="loop.running ? (loop.stale ? t('x_studio.health_stale') : t('x_studio.health_running')) : t('x_studio.health_stopped')"></span>
+            · <span x-text="convWhen(loop.last_success_at)"></span> · <span x-text="loop.failures || 0"></span></p>
+        </template>
+        <p>{{ t('x_studio.health_repairs') }}: <span x-text="health.publication.pending_repairs"></span> · <span x-text="convWhen(health.publication.oldest_repair_at)"></span></p>
+        <p>{{ t('x_studio.health_notifications') }}: <span x-text="health.publication.pending_notifications + health.replies.pending_notifications"></span></p>
+        <p>{{ t('x_studio.health_unknown') }}: <span x-text="health.publication.states.outcome_unknown || 0"></span></p>
+        <p>{{ t('x_studio.health_models') }}: <span x-text="health.replies.model_calls"></span> · <span x-text="health.replies.output_tokens"></span></p>
+        <p>{{ t('x_studio.health_usage_missing') }}: <span x-text="health.replies.missing_usage"></span></p>
+        <p>{{ t('x_studio.health_capabilities') }}</p>
+      </div>
+    </template>
+  </details>
+
+  <div id="xs-panel-threads" role="tabpanel" aria-labelledby="xs-tab-threads" x-show="tab === 'threads'" x-cloak>
+    <div class="xs-card">
+      <h2>{{ t('x_studio.threads') }}</h2>
+      <p>{{ t('x_studio.thread_description') }}</p>
+      <fieldset :disabled="threadBusy" style="border:0;padding:0;min-width:0;">
+        <template x-for="(segment, index) in threadSegments" :key="index">
+          <div style="margin-bottom:12px;">
+            <label :for="'xs-thread-' + index" x-text="t('x_studio.thread_segment') + ' ' + (index + 1)"></label>
+            <textarea :id="'xs-thread-' + index" class="form-input" x-model="threadSegments[index]" rows="3" maxlength="32000" style="width:100%;" :dir="textDir(segment)"></textarea>
+            <button class="btn btn-secondary btn-sm" @click="moveThreadSegment(index, -1)" :disabled="index === 0">{{ t('x_studio.thread_up') }}</button>
+            <button class="btn btn-secondary btn-sm" @click="moveThreadSegment(index, 1)" :disabled="index === threadSegments.length - 1">{{ t('x_studio.thread_down') }}</button>
+            <button class="btn btn-secondary btn-sm" @click="threadSegments.splice(index, 1)" :disabled="threadSegments.length <= 2">{{ t('common.remove') }}</button>
+          </div>
+        </template>
+        <button class="btn btn-secondary" @click="threadSegments.push('')" :disabled="threadSegments.length >= 25">{{ t('x_studio.thread_add') }}</button>
+        <button class="btn btn-primary" @click="stageThread()">{{ t('x_studio.thread_stage') }}</button>
+      </fieldset>
+      <p role="alert" x-show="threadError" x-text="threadError" :dir="textDir(threadError)"></p>
+    </div>
+    <template x-for="thread in threads" :key="thread.id">
+      <div class="xs-card" style="margin-top:12px;">
+        <p><strong x-text="t('x_studio.status_' + thread.state)"></strong> · <span x-text="thread.published_count + '/' + thread.segments.length"></span></p>
+        <ol>
+          <template x-for="segment in thread.segments" :key="segment.operation_id">
+            <li style="white-space:pre-wrap;overflow-wrap:anywhere;">
+              <p translate="no" :dir="textDir(segment.text)" x-text="segment.text"></p>
+              <span x-text="t('x_studio.status_' + segment.state)"></span>
+              <a x-show="segment.tweet_id" :href="'https://x.com/i/web/status/' + segment.tweet_id" target="_blank" rel="noopener" x-text="segment.tweet_id"></a>
+              <p translate="no" x-text="segment.reason" :dir="textDir(segment.reason)"></p>
+            </li>
+          </template>
+        </ol>
+        <button class="btn btn-primary" x-show="thread.can_resume" @click="threadAction(thread, 'publish')" :disabled="threadBusy">{{ t('x_studio.thread_publish') }}</button>
+        <button class="btn btn-secondary" x-show="thread.can_review" @click="threadAction(thread, 'review')" :disabled="threadBusy">{{ t('x_studio.thread_review') }}</button>
+        <button class="btn btn-secondary" x-show="thread.can_cancel" @click="threadAction(thread, 'cancel')" :disabled="threadBusy">{{ t('x_studio.thread_cancel') }}</button>
+        <details style="margin-top:8px;">
+          <summary>{{ t('x_studio.history') }}</summary>
+          <template x-for="(entry, index) in thread.history" :key="index">
+            <p><span x-text="convWhen(entry.at)"></span> · <span translate="no" x-text="entry.actor"></span> · <span x-text="t('x_studio.thread_event_' + entry.event)"></span></p>
+          </template>
+        </details>
+      </div>
+    </template>
+    <p role="alert" x-show="loadStates.threads && loadStates.threads.error" translate="no" :dir="textDir((loadStates.threads || {}).error)" x-text="(loadStates.threads || {}).error"></p>
+    <button class="btn btn-secondary" @click="loadThreads()">{{ t('common.refresh') }}</button>
+    <button class="btn btn-secondary" x-show="threadsNext" @click="loadThreads(true)" :disabled="loadStates.threads && loadStates.threads.loading">{{ t('x_studio.load_more') }}</button>
+  </div>
+
+  <div id="xs-panel-studio" role="tabpanel" aria-labelledby="xs-tab-studio" x-show="tab === 'studio'" x-cloak>
+  <div class="two-col-grid">
     <div class="xs-card xs-compose">
       <h2>{{ t('x_studio.composer') }}</h2>
       <p class="xs-meta" aria-live="polite" x-show="composerSavedAt && !composerError" x-cloak>{{ t('x_studio.composer_saved') }}</p>
@@ -302,7 +376,8 @@
        because a reply out of context reads as a non-sequitur. Skipped and
        failed summons are here too: "why didn't it reply?" is the most
        common question and the incoming post plus the reason IS the answer. -->
-  <div class="xs-card" x-show="tab === 'conversations'" x-cloak>
+  </div>
+  <div id="xs-panel-conversations" role="tabpanel" aria-labelledby="xs-tab-conversations" class="xs-card" x-show="tab === 'conversations'" x-cloak>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
       <h2 style="margin:0;">{{ t('x_studio.tab_conversations') }}</h2>
       <button class="btn btn-secondary btn-sm" @click="loadConversations({poll: true})"

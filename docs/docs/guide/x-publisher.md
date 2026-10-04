@@ -5,7 +5,7 @@ sidebar_label: X publisher
 description: Post to X through the official API v2 with OAuth 1.0a, vaulted keys, X Studio, always-on chat HITL, and ToU fail-safes.
 ---
 
-Kazma tweets **only** through the [official X API v2](https://developer.x.com/en/docs/twitter-api) using **OAuth 1.0a user context**. There is no scrape path, no Playwright/computer-use poster, and no app-only Bearer posting (Bearer can read; it cannot `POST /2/tweets`).
+Kazma tweets **only** through the [official X API v2](https://docs.x.com/x-api/posts/manage-tweets/introduction) using **OAuth 1.0a user context**. There is no scrape path, no Playwright/computer-use poster, and no app-only Bearer posting. X also supports OAuth 2.0 user tokens; this connector uses its four OAuth 1.0a credentials.
 
 ## What is official
 
@@ -27,15 +27,20 @@ Do **not** paste keys in chat. `vault_store` would put them in history. Settings
 | **Scheduled** | `/scheduled` | Mixed clock: cron jobs **and** X posts. X Studio's **All clocks** button opens this page on purpose. |
 | **Chat tools** | Telegram / Discord / Slack / Web chat | `x_post` / `x_schedule_post` / `x_delete_post` / `x_cancel_scheduled_post` — always HITL, even under YOLO. |
 
-Settings → X is credentials and caps only. Compose and plan on `/x`.
+Settings → X holds credentials, caps, independent X model bindings and reply
+subject policies. Compose, review and plan on `/x`.
 
 ## Setup
 
-1. [developer.x.com](https://developer.x.com) → Project + App (Free tier: 1 project / 1 app).
+1. [developer.x.com](https://developer.x.com) → create the application available to your account.
 2. User authentication settings → **Read and write**.
 3. Keys and tokens → API Key, API Key Secret, Access Token, Access Token Secret.
 4. Kazma **Settings → X** → paste the four values + your `@handle` → Save → Test (`GET /2/users/me`).
 5. Enable posting. Open **X Studio** (`/x`) to write and schedule.
+
+Test proves the authenticated account's identity. It does not prove write,
+mentions-read, media-upload or analytics access; confirm those capabilities in
+the developer console. Endpoint denials remain typed rejected outcomes.
 
 Optional env (overrides ConfigStore when set): `X_API_KEY`, `X_API_KEY_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`. Kill-switches: **`KAZMA_X_POST=0`** (all posting), **`KAZMA_X_SCHEDULE=0`** (scheduling only).
 
@@ -71,15 +76,15 @@ These are Kazma caps **on top of** X's own quota. They fail closed.
 | Official API only | `POST /2/tweets` | Automation must use the API, not the website. |
 | No extra verbs | no like / follow / DM / search | Stays inside posting. |
 | No write retry | network drop ≠ second POST | Avoids double-posts. |
-| Length | 280 chars | Free-tier text tweets. |
+| Length | 280 weighted characters | Kazma's conservative text limit; URLs and emoji use the server parser. |
 | @mentions | max 2 (excluding your handle) | Unsolicited mention spam. |
 | `$cashtags` | max 1 | Ticker spam. |
 | Hashtags | max 4 | Hashtag stuffing. |
 | Duplicate hash | 30 days | Identical automated copies. |
-| Volume | 8/day, 80/30d | Well under Free-tier ~500/month. Raise only if your dashboard quota allows. |
+| Volume | 8/day, 80/30d | Local rolling-window defaults, independent of X endpoint limits and billing. Raise only after checking your account's permissions and budget. |
 | User-Agent | `Kazma/<ver> (self-hosted; official X API v2)` | X requires a UA. |
 
-Media, polls, quote tweets, and v1.1 upload are **not** in this version (Free-tier media is often blocked; adding them later still goes through the same HITL + ledger).
+Media, polls, quote posts and analytics remain disabled pending individual capability verification. X's [create-post reference](https://docs.x.com/x-api/posts/create-post) currently restricts quote posts to Enterprise; the [pricing guide](https://docs.x.com/x-api/getting-started/pricing) describes usage credits. Check the Developer Console for your own access and budget before enabling a richer-content increment. Any such increment must retain the same approval and durable publication contracts.
 
 ## Tools
 
@@ -103,9 +108,67 @@ X has **no native scheduled-post API** — the `/2/broadcasts/scheduled` endpoin
 - **Double-post guard.** A failed fire is never auto-retried on an ambiguous error (we can't know whether it reached X). A 429 is deferred by the Retry-After window (bounded); anything else is marked failed and you're notified.
 - **Kill-switch.** `KAZMA_X_SCHEDULE=0` disables scheduling (and `KAZMA_X_POST=0` disables posting entirely).
 
-**Honest limitation:** a scheduled post fires only while the Kazma server is running. If the server is down at fire time, the post is caught up on the next boot. X cannot hold the schedule for you.
+**Timing limitation:** a scheduled post fires only while the Kazma server is
+running. After a missed time, it can run within the five-minute grace period;
+later work is held for review and rescheduling. There is no unlimited catch-up.
+The server owns the UTC clock and dispatch is best effort. Local daylight-saving
+gaps are refused; ambiguous local times need an explicit UTC offset.
 
 Manage the X content calendar in **X Studio** (`/x`). Open **All clocks** (or `/scheduled`) when you also need cron jobs. Chat tools stay in sync with both stores.
+
+## Ordered text threads
+
+The **Threads** tab stores 2–25 ordered text segments. Edits and reordering use
+the same server composer autosave and revision conflict checks. Save the thread
+for review; all segments reserve quota in one transaction. Insufficient quota
+or a duplicate rolls back the entire reservation.
+
+Approve the whole saved order and exact account revision. Each segment uses
+the ordinary publication service and the confirmed predecessor's post ID as
+its reply target, following the official [reply API](https://docs.x.com/x-api/posts/manage-tweets/introduction).
+A thread is several remote posts, so partial publication is possible. It stops
+on any failed or uncertain send. A new approval resumes only known unsent
+segments; confirmed posts are skipped. An uncertain segment blocks resending
+until exact receipt reconciliation proves its outcome. Similar text is not proof.
+
+Refresh review after an expired approval or interrupted execution. This grants
+no send permission. Cancel remaining posts to release unsent commitments;
+already published and uncertain posts remain recorded. Threads are attended
+immediate publication; their remaining segments are never dispatched by the
+schedule loop. To revise immutable reviewed text, cancel its unsent remainder
+and create a new thread. The review history retains actors and revisions.
+
+## Operations and recovery
+
+**Operations health** reports process loop heartbeats, last successful cycles,
+tenant operation/reply states, model usage, repair lag and undelivered notices.
+Three consecutive loop failures enqueue one incident notice; a recovery enqueues
+one recovery notice. Delivery uses existing ops routing and requires an
+acknowledgement. Missing routing leaves a visible retry backlog. Reported usage
+is historical measurement; it is not an attestation that a model is available now.
+
+| Incident | Operator action |
+|---|---|
+| Authentication or write denial | Check the account's app permissions; regenerate revoked credentials in Settings and Test the account identity. Re-review work bound to old credentials. |
+| Model/checker unavailable | Leave draft mode in place, fix the exact selected endpoint and rerun the candidate. Unknown checks cannot authorize auto publishing. |
+| Database refusal or repair backlog | Restore database availability and replay result projections. Never retry the remote send merely because a projection failed. |
+| Rate limiting | Review the stored defer-until time and account quota. Typed 429 refusals may defer schedules; uncertain requests cannot retry. |
+| Unknown send | Check exact correlated operation receipts. A missing search result or timeout cannot prove that nothing was posted. |
+| Stopped or stale loops | Check the process and health timestamps; restore the service through its managed guard. Late schedules remain held. |
+| Restore or rollback | Pause writes first. Restore the registered stores together; account Test and explicit resume are required. Restored thread approvals are invalidated and old work remains held. |
+
+The engineering restore rehearsal uses a real isolated bundle and verifies that
+published receipts survive, interrupted sends become unknown and queued work is
+held. Managed legacy projections are excluded from an older pending-only
+scheduler. This does not measure production recovery time or qualify an account.
+Before production rollback, back up the installation and keep writes disabled
+until its account and operation inventory have been reviewed.
+
+Media, alt text, quote-post approval, recurring campaign drafts and engagement
+analytics are a capability-gated roadmap. No enabled control claims these
+features are available. Verify the account's official endpoints first; future
+uploads must become durable dependencies and analytics must not be presented
+as proof of factual accuracy. The text Studio does not require those features.
 
 ## Audit log (2026-08)
 
@@ -122,7 +185,7 @@ blocks the call. Inspect with any SQLite browser or
 
 ## Honest limits
 
-- Free tier is tight. Your X developer dashboard is the source of truth for quota.
+- Your X Developer Console is the source of truth for account access, usage credits and spend; Kazma's local caps do not establish an X allowance.
 - An Automated label is **your** action in X settings; Kazma cannot flip it.
 - If keys leak, regenerate them in the dashboard, then Settings → X → Disconnect and save the new four.
 

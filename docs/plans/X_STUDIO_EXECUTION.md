@@ -3,11 +3,12 @@
 Date: 2026-10-04 (Asia/Kuwait).
 Plan: [Industrial improvement plan](X_STUDIO_INDUSTRIAL_IMPROVEMENT_PLAN.md).
 
-This release implements the publication safety foundation, subject/evidence
-pipeline, independent X model selection and principal text Studio workflows.
+This release implements the text Studio engineering scope: publication safety,
+subject/evidence checks, independent X models, isolated evaluation, policy review,
+ordered threads and operational health/recovery.
 Automatic replies remain unqualified without a real human-labeled evaluation.
-The complete roadmap is not declared finished; pending engineering and
-production qualification are listed below.
+Production qualification and capability-gated richer content are distinguished
+from completed engineering below; no account or human accuracy is certified.
 
 ## Delivered behavior
 
@@ -110,8 +111,23 @@ bilingual evaluation remains a release gate.
   filters, store totals and keyset paging. Full candidate text, verification
   reasons and retained conversation history are visible.
 - Loaders preserve the last good data on failure and reject stale responses.
-  EN/AR mobile composer reload/overflow checks pass. Complete keyboard/focus
-  accessibility qualification remains pending.
+  EN/AR mobile composer and ordered-thread reload/overflow checks pass.
+  Roving keyboard tab focus, Home/End navigation, labelled subject controls,
+  accessible disclosures and ordered-segment controls are covered by the
+  bilingual browser/static checks. Manual assistive-technology qualification
+  remains a deployment acceptance exercise.
+- Policy export contains subject cards only. Import validates and stages an
+  unsaved draft with automatic permission disabled. Before/after comparison
+  includes actual changed values; saving a staged import explicitly reviews
+  it and uses draft mode. Settings revision conflicts prevent overwrites.
+- Ordered 2–25 segment threads persist immutable reviewed manifests and reserve
+  every segment atomically. Whole-revision approval binds the account and
+  credentials. Segments use the ordinary publication service and confirmed
+  predecessor IDs; generic operation dispatch cannot bypass whole-thread review.
+- Partial threads stop. Fresh approval resumes only known unsent segments,
+  skips confirmed posts and blocks uncertain outcomes. Expired/crashed execution
+  requires refreshed review. Cancellation retains published/unknown segments.
+  Actors/revisions and segment results remain in the review/event history.
 
 ### Restore and automatic qualification
 
@@ -126,9 +142,21 @@ bilingual evaluation remains a release gate.
   unsupported/unchecked automatic decisions.
 - Changing only enabled/mode preserves an otherwise identical evaluated
   pipeline. Relevant policy/model/code changes invalidate it.
-- The CLI and protected Studio upload validate recorded reports. They do not
-  manufacture labels or run a full network shadow evaluation. No report was
-  installed and no automatic release was qualified.
+- The collection CLI exports real observed context with empty human labels.
+  The shadow CLI copies settings/knowledge/history into isolated per-case
+  child processes, runs the normal authority/check/publication-preflight path,
+  and records would-send intent while X transport and alert delivery are blocked.
+  Source stores stay unchanged. Calls may reach configured model endpoints.
+  Actual token measurements and missing usage are distinguished from budget
+  ceilings. No report was installed and no automatic release was qualified.
+- Operations health exposes bounded tenant counters, process loop heartbeats,
+  unknown outcomes, repair/notification lag and measured model usage. Three
+  consecutive loop failures and subsequent recovery generate transition notices
+  through the acknowledged alert outbox; superseded notices are suppressed.
+- A real isolated bundle restore rehearsal preserves published receipts,
+  converts interrupted sends to unknown, holds queued work and exercises the
+  older pending-only scheduler's managed-row fence. Thread approvals are
+  invalidated on restore. Production RTO/RPO is not inferred from small fixtures.
 
 The operator has no existing dataset. The
 [collection guide](../docs/guide/x-evaluation-dataset.md) explains real case
@@ -137,34 +165,41 @@ regression fixtures never qualify automatic publishing.
 
 ## Validation
 
-- The initial integrated repository run exposed 14 failures; applicable
-  compatibility fixtures and repository gates were corrected.
-- Focused suites exercise independent send/reservation claims, unknown
-  outcomes, approvals/source changes, notification replay, settings races,
-  paging, restore guards and weighted counting.
-- Latest source/approval/qualification verification: **107 passed**.
-- Final X-focused, settings concurrency and documentation/debt run:
-  **542 passed**. Restore rollback/import atomicity/debt recheck: **23 passed**.
-- Latest combined API-caller, Settings restore, i18n, Alpine and static gates:
-  **147 passed**. Debt gates also pass with lowered baselines.
-- Full-app browser navigation: **1 passed**. Bilingual mobile composer
-  autosave/reload: **1 passed**. JavaScript behavior checks passed.
-- Full repository run: **12,932 passed, 44 skipped, 3 failed** in 1,121 seconds.
-  The failures were the newly added guide's sidebar/example-file references
-  and duplicate Settings write-declaration keys. All were corrected; the exact
-  failed checks and affected static/API caller gates then passed together:
-  **140 passed**. The complete suite was not rerun after these metadata fixes.
-- All **114 changed Python files** compile. Ruff passes on changed first-party
-  Python files (existing N818 exception names excluded); vendored upstream
-  code is compile-checked. All six changed JavaScript files pass syntax checks;
-  both X JavaScript behavior checks pass. Git whitespace checks pass.
-- A built wheel contains the parser resources/license and passes emoji/CJK
-  weighted-text smoke checks from the wheel.
+- The foundation X/settings/concurrency/documentation run passed **542 tests**;
+  receipt, approval, qualification and rollback checks also passed.
+- Completion-wave integration: **106 passed**, covering isolated evaluation,
+  policy import, ordered threads, health, recovery, model selection, budgets
+  and notification acknowledgement.
+- Diagnostics, environment reference, template language/loading and recovery
+  fixes: **159 passed**. API/caller/docs/CI-wiring checks: **66 passed, 1 skipped**.
+- Final structural, thread, health, language and template checks: **43 passed**.
+  After making collection's subprocess entry point explicit, module reachability,
+  debt and the real CLI isolation/Arabic checks passed together: **19 passed**.
+- The latest full local candidate run passed **12,971 tests**, skipped 45 and
+  found one module-reachability failure in the inline collector subprocess.
+  The explicit worker above fixes that finding without a baseline exception.
+- Release acceptance requires the full repository and PostgreSQL suites,
+  blocking bilingual browser check, wheel/import checks and all other checks
+  for the release commit in [CI](https://github.com/Mubder/kazma/actions/workflows/ci.yml).
+  The newly added PostgreSQL race test runs against CI's isolated real service.
+- Bilingual mobile browser: **1 passed**, including composer/thread reload,
+  keyboard focus and health display. Both X JavaScript behavior checks pass.
+  The completion wave's **33 changed Python files** compile and pass Ruff
+  (existing N818 exception names excluded); all three changed page scripts
+  pass syntax checks. Git whitespace checks pass.
+- The foundation wheel contains the weighted parser resources/license and
+  passes emoji/CJK smoke checks from the wheel.
+- A read-only pre-deployment snapshot includes the live PostgreSQL settings,
+  X SQLite stores and vault/configuration. Snapshot hashes verify. The first
+  collection contains **14 actual stored cases** with empty human labels;
+  it is kept locally outside Git and does not qualify automatic publishing.
 
-Tests use fake X transports and isolated stores. No live post/delete, live
-setting mutation, production restart or deployment was performed. Browser
-tests emitted dependency deprecation warnings and a Windows async-pipe cleanup
-warning without test failures.
+Tests use fake X transports and isolated stores. Live acceptance uses the
+guard's idle reload and browser inspection; no test post/delete is required.
+Account-read success does not attest write access. Browser dependency
+deprecations and Windows pipe cleanup warnings did not fail the browser check.
+Production recovery objectives and human accuracy qualification remain external
+acceptance work, as recorded below.
 
 ## Remaining roadmap and rollout gates
 
@@ -174,12 +209,12 @@ warning without test failures.
 | W1 containment | Engineering delivered and regression-tested. |
 | W2 publication | Local execution/reservation/projection/notification delivered; production crash/filesystem topology exercise remains. |
 | W3 routing | Schema/conservative router delivered; real target/scope accuracy remains unqualified. |
-| W4 evaluation | Checks/budgets/report gate delivered; collection tooling and a full live-equivalent shadow runner remain engineering work, then human evaluation. |
+| W4 evaluation | Checks/budgets/report gate, real-case collector and isolated full-path shadow runner delivered; genuine human evaluation remains required. |
 | W5 approvals | Revision/role/account/source controls delivered; production operator workflow exercise remains. |
-| W6 Studio | Core text workflows delivered; policy import/export, revision comparison/staged activation and full keyboard/focus QA remain. |
-| W7 threads | Safe scheduling/late recovery delivered; approved ordered multi-segment threads and partial-thread recovery are not implemented. |
-| W8 rollout | Restore pause/diagnostics/alerts/runbook delivered; live restore/rollback drill, measured recovery objectives and draft/shadow canary remain unqualified. |
-| W9 richer content | Media/alt text, richer campaigns and analytics remain capability-gated P2 work after core gates. |
+| W6 Studio | Text workflows, policy import/export, staged review/value comparison and EN/AR keyboard/mobile acceptance delivered; manual assistive-technology acceptance remains deployment-specific. |
+| W7 threads | Scheduling/late recovery and approved ordered multi-segment threads with partial recovery delivered. |
+| W8 rollout | Health, transition alerts, restore/rollback fences and isolated bundle recovery rehearsal delivered. Live topology recovery objectives and real shadow canary require deployment data. |
+| W9 richer content | Disabled capability boundaries and subsequent roadmap documented. Media/alt text, richer campaigns and analytics require official account capability verification after text readiness; they are not text Studio prerequisites. |
 
 Keep production in draft/review during data collection. Investigate unknown
 sends against exact operation evidence; a timeout or similar text is not proof

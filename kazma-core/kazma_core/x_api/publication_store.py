@@ -17,7 +17,7 @@ import threading
 import time
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -90,6 +90,9 @@ class _PublicationStore:
             from kazma_core.x_api.composer import SCHEMA as COMPOSER_SCHEMA
 
             conn.executescript(COMPOSER_SCHEMA)
+            from kazma_core.x_api.thread_store import SCHEMA as THREAD_SCHEMA
+
+            conn.executescript(THREAD_SCHEMA)
             from kazma_core.db.sqlite_columns import add_missing_columns
 
             add_missing_columns(conn, "x_projection_outbox", (("operation_version", "INTEGER NOT NULL DEFAULT 1"),))
@@ -128,8 +131,18 @@ class _PublicationStore:
             enqueue(conn, tenant=row["tenant_id"], key=f"operation:{row['id']}:{row['version']}", message=message)
 
     def notification_current(self, notice: dict[str, Any]) -> bool:
-        _, ident, revision = notice["event_key"].split(":")
+        parts = notice["event_key"].split(":")
         with self._connection() as conn:
+            if parts[0] == "health" and len(parts) == 4 and parts[1] in ("mentions", "scheduler"):
+                latest = conn.execute("SELECT MAX(id) FROM x_notification_outbox WHERE tenant_id = ? AND event_key LIKE ?",
+                                      (notice["tenant_id"], f"health:{parts[1]}:%")).fetchone()[0]
+                return latest == notice["id"]
+            if len(parts) != 3 or parts[0] not in ("thread", "operation"):
+                return False
+            _, ident, revision = parts
+            if parts[0] == "thread":
+                row = conn.execute("SELECT revision, state FROM x_threads WHERE id = ? AND tenant_id = ?", (ident, notice["tenant_id"])).fetchone()
+                return bool(row and row["revision"] == int(revision) and row["state"] in ("published", "partial"))
             row = conn.execute("SELECT version, state FROM x_operations WHERE id = ? AND tenant_id = ?", (ident, notice["tenant_id"])).fetchone()
             return bool(row and row["version"] == int(revision))
 
@@ -168,7 +181,8 @@ class _PublicationStore:
                 max_day: int, max_month: int, duplicate_days: int,
                 origin: str, origin_ref: str = "", kind: str = "post",
                 metadata: dict[str, Any] | None = None, state: str = "scheduled",
-                reply_limits: dict[str, int] | None = None) -> dict[str, Any]:
+                reply_limits: dict[str, int] | None = None,
+                _conn: sqlite3.Connection | None = None) -> dict[str, Any]:
         """Validate commitments and create an operation in one write transaction."""
         from kazma_core.x_api.ledger import text_hash
 
@@ -178,7 +192,9 @@ class _PublicationStore:
             raise ValueError("Invalid publication kind, state or due time.")
         digest, content_hash = payload_hash(text, reply_to_id, kind), text_hash(text)
         now = time.time()
-        with self._connection(transaction=True) as conn:
+        if _conn is not None and not _conn.in_transaction:
+            raise ValueError("Compound reservation requires an active write transaction.")
+        with (nullcontext(_conn) if _conn is not None else self._connection(transaction=True)) as conn:
             existing = conn.execute("SELECT * FROM x_operations WHERE tenant_id = ? AND account_id = ? AND idempotency_key = ?",
                                     (tenant_id, account_id, idempotency_key)).fetchone()
             if existing:

@@ -27,7 +27,7 @@ def load(*, actor: str) -> dict[str, Any]:
         return {"revision": row["revision"], "content": json.loads(row["content"]), "updated_at": row["updated_at"]} if row else {"revision": 0, "content": {}, "updated_at": None}
 
 
-def save(*, actor: str, expected_revision: int, content: dict[str, str]) -> dict[str, Any]:
+def save(*, actor: str, expected_revision: int, content: dict[str, Any]) -> dict[str, Any]:
     from kazma_core.x_api.ownership import x_tenant_id
     from kazma_core.x_api.publication_store import PublicationConflictError, get_publication_store
 

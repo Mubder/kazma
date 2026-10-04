@@ -61,10 +61,49 @@ with external writes replaced by a recording transport in an isolated test
 installation. A production report needs actual recorded decisions from that
 workflow, not invented successes or predictions inferred from a fluent draft.
 
-The current release includes report validation and upload. A turnkey corpus
-annotation application and real-network shadow runner are not included. Until
-that workflow and real cases are available, continue draft mode; do not fill
-`actual` outcomes by guessing.
+Collect stored observations with the CLI from the installation whose policy
+you intend to evaluate:
+
+```powershell
+python scripts/x_shadow.py --collect collected.json --limit 1000
+```
+
+This exports tenant-scoped original context and observed candidates with empty
+labels. Archived records are included, so difficult or denied cases are not
+silently excluded. Fill the annotations, split by conversation, and save a
+separate held-out collection. Missing recorded context remains explicitly
+unverified. The collector never converts an old excerpt into verified context.
+
+Keep the master mode **draft**. Before freezing the release policy, grant
+`allow_auto` only to the small subject allowlist you plan to qualify; draft mode
+continues to require review. Changing these permissions after evaluation would
+invalidate its fingerprint. Then run:
+
+```powershell
+python scripts/x_shadow.py --evaluate held-out.json --output observed.json
+```
+
+The runner captures settings, knowledge and publication history in an isolated
+snapshot. Each case executes the real authority, drafting, five-check and
+publication-preflight path in a fresh child process. It simulates activation
+without changing the live settings, and records send intent after preflight;
+all X transport and alert delivery are blocked. Model endpoints may be called
+and charged normally. Local-only remains enforced. Keep indexing quiet during
+capture; a changing vector index or pipeline invalidates the snapshot.
+
+Each case starts from the same captured quota/history baseline. This measures
+independent decision eligibility, rather than a campaign's aggregate capacity.
+Existing published or uncertain cases retain their idempotency holds. Use new
+held-out cases for measuring future eligibility, and retain already handled
+cases as recovery tests. For checker-outage coverage, set a real case's `fault`
+to `checker_outage`; this deliberately makes verification unavailable.
+
+The runner preserves expected labels but always clears `human_reviewed` and
+leaves actual critical violations unset. A reviewer must inspect the actual
+candidate and complete those fields before qualification. Missing provider
+usage is reported, not estimated as zero; an incomplete measurement cannot
+qualify. A JSON editor or annotation sheet is sufficient; no model generates
+the human labels. Preserve the runner's measured outcomes when adding labels.
 
 Record the pipeline fingerprint, exact model identities, candidate, all five
 check verdicts, auto-eligibility decision, target, measured latency, model calls

@@ -228,7 +228,17 @@ def _reconcile_receipts() -> int:
 
 
 async def _send(client: Any, row: dict[str, Any]) -> str:
+    if row["origin"] == "thread":
+        from kazma_core.x_api.threads import thread_dispatch_allowed
+
+        if not await asyncio.to_thread(thread_dispatch_allowed, row):
+            raise XApiError("Thread revision or ordered execution permission changed; review before sending.", outcome="not_sent")
     from kazma_core.x_api.operation_context import operation_scope
+    from kazma_core.x_api.shadow import record_shadow_intent, shadow_transport_blocked
+
+    if shadow_transport_blocked():
+        record_shadow_intent(row)
+        raise XApiError("Shadow preflight recorded; no X request sent.", outcome="not_sent")
 
     with operation_scope(row["id"]):
         if row["kind"] == "delete":
@@ -261,6 +271,11 @@ async def _dispatch_operation(ident: str, *, cfg: XConfig | None = None) -> tupl
     row = await asyncio.to_thread(store.get, ident, tenant_id=tenant)
     if row is None:
         return False, {"posted": False, "outcome": "not_sent", "error": "Unknown publication operation."}
+    if row["origin"] == "thread":
+        from kazma_core.x_api.threads import thread_dispatch_allowed
+
+        if not await asyncio.to_thread(thread_dispatch_allowed, row):
+            return False, {"posted": False, "outcome": "not_sent", "error": "Use the reviewed whole-thread action to send this segment."}
     if row["state"] not in ("scheduled", "deferred"):
         repair = await asyncio.to_thread(_project_pending) if row["state"] == "published" else {}
         ok, result = _result(row, repair_needed=bool(repair.get("failed")))

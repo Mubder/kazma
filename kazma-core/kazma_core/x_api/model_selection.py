@@ -139,6 +139,9 @@ class _Session:
     started: float = field(default_factory=time.monotonic)
     calls: int = 0
     reserved_output_tokens: int = 0
+    output_tokens: int = 0
+    missing_usage: int = 0
+    failed_calls: int = 0
     input_bytes: int = 0
     limits: dict[str, int] | None = None
 
@@ -282,6 +285,8 @@ def current_x_selection() -> dict[str, Any] | None:
 def current_x_usage() -> dict[str, Any]:
     session = _session.get()
     return {"calls": session.calls, "reserved_output_tokens": session.reserved_output_tokens,
+            "output_tokens": session.output_tokens, "missing_usage": session.missing_usage,
+            "failed_calls": session.failed_calls,
             "input_bytes": session.input_bytes, "duration_ms": int((time.monotonic() - session.started) * 1000)} if session else {}
 
 
@@ -295,6 +300,10 @@ async def x_chat(role: str, messages: list[dict[str, Any]], *, max_tokens: int, 
     client = await get_x_client(role)
     if client is None:
         raise XModelUnavailableError("No X model is available for this role.")
+    from kazma_core.x_api.shadow import shadow_checker_outage
+
+    if "verification" in role and shadow_checker_outage():
+        raise XModelUnavailableError("Deliberately injected checker outage in isolated evaluation.")
     size = len(json.dumps(messages, ensure_ascii=False).encode("utf-8"))
     if type(max_tokens) is not int or max_tokens < 1:
         raise XBudgetUnavailable("X output token ceiling is invalid.")
@@ -329,13 +338,24 @@ async def x_chat(role: str, messages: list[dict[str, Any]], *, max_tokens: int, 
         raise
     if not acquired:
         raise XBudgetUnavailable("X AI concurrency limit reached. Work is held for retry or review.")
+    completed = False
     try:
         remaining = limits["deadline_seconds"] - (time.monotonic() - session.started)
         if remaining <= 0:
             raise XBudgetUnavailable("X decision deadline reached. Work is held.")
-        return await asyncio.wait_for(client.chat(messages, max_tokens=max_tokens, **kwargs),
-                                      timeout=min(remaining, limits["chat_timeout_seconds"]))
+        response = await asyncio.wait_for(client.chat(messages, max_tokens=max_tokens, **kwargs),
+                                         timeout=min(remaining, limits["chat_timeout_seconds"]))
+        completed = True
+        usage = getattr(response, "usage", None)
+        output = usage.get("completion_tokens", usage.get("output_tokens")) if isinstance(usage, dict) else None
+        if type(output) is int and output >= 0:
+            session.output_tokens += output
+        else:
+            session.missing_usage += 1
+        return response
     finally:
+        if not completed:
+            session.failed_calls += 1
         CALL_SLOTS.release()
 
 

@@ -28,6 +28,8 @@ def pause_restored_publishing() -> None:
                      "updated_at = ?, version = version + 1 WHERE state IN ('scheduled', 'deferred', 'sending')", (time.time(),))
         for row in conn.execute("SELECT * FROM x_operations WHERE reason LIKE 'Restored publication:%'").fetchall():
             store._event(conn, row)
+        conn.execute("UPDATE x_threads SET state = 'review', revision = revision + 1, token = '', expires_at = 0, "
+                     "owner = '', lease_until = 0, updated_at = ? WHERE state NOT IN ('published', 'cancelled')", (time.time(),))
 
     from kazma_core.x_api.schedule import get_x_scheduled_store
 

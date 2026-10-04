@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**264** variables are read by the product code; **264** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**265** variables are read by the product code; **265** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -277,6 +277,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_WS_EXTRA_ORIGINS` | (none) | `kazma_ui.auth` | yes |
 | `KAZMA_WS_ORIGIN_CHECK` | `""` | `kazma_ui.auth` | yes |
 | `KAZMA_X_POST` | (none) | `kazma_core.x_api.config`, `kazma_core.x_api.schedule`, `kazma_core.x_api.stance` | yes |
-| `KAZMA_X_REPLY` | (none) | `kazma_core.x_api.stance` | yes |
+| `KAZMA_X_REPLY` | (none) | `kazma_core.x_api.shadow`, `kazma_core.x_api.stance` | yes |
 | `KAZMA_X_SCHEDULE` | (none) | `kazma_core.x_api.schedule` | yes |
+| `KAZMA_X_SHADOW` | (none) | `kazma_core.x_api.shadow` | yes |
 | `KAZMA_YOLO_TTL_SECONDS` | (none) | `kazma_core.safety.yolo` | yes |

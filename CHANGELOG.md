@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## X Studio: isolated evaluation, policy review, ordered threads and health (2026-10-04)
+
+Real-case collection and an isolated shadow CLI now exercise the normal reply
+and publication-preflight path without X writes or live store changes. Reports
+record actual model usage and leave human judgments unset. Automatic replies
+remain held until real bilingual qualification passes.
+
+Settings adds policy import/export and before/after review. Imported cards are
+staged with automatic permission disabled and saved in draft mode. Studio adds
+ordered thread autosave, whole-revision approval, atomic quota reservations and
+partial recovery that skips confirmed posts and blocks uncertain outcomes.
+Thread review history records actors and retained segment results.
+
+Operations health shows process heartbeats, tenant counters, model usage,
+undelivered notices and repair backlog. Loop incident/recovery notices are
+deduplicated. Restores invalidate thread approvals and preserve unknown sends.
+The bilingual mobile browser test now runs in blocking CI and checks keyboard
+tab navigation, ordered draft reload and health rendering.
+
 ## X Studio: durable publication, scoped policy, independent models and review (2026-10-04)
 
 X writes now share transactional account-bound operations, quota reservations,

@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -62,6 +62,16 @@ class _XGenerateBody(BaseModel):
     subject_id: str = Field(default="", max_length=80)
 
 
+class _XThreadBody(BaseModel):
+    segments: list[str] = Field(..., min_length=2, max_length=25)
+    intent_key: str = Field(..., min_length=1, max_length=200)
+
+
+class _XThreadActionBody(BaseModel):
+    expected_revision: int = Field(..., ge=1, strict=True)
+    approval_token: str = Field(default="", max_length=64)
+
+
 class _XQueueActionBody(BaseModel):
     expected_version: int = Field(..., ge=1, strict=True)
     when: str = Field(default="", max_length=100)
@@ -74,6 +84,7 @@ class _XComposerBody(BaseModel):
     when: str = Field(default="", max_length=100)
     proposal_id: str = Field(default="", max_length=200)
     draft_text: str = Field(default="", max_length=32000)
+    thread_segments: list[Annotated[str, Field(max_length=32000)]] = Field(default_factory=lambda: ["", ""], min_length=2, max_length=25)
 
 
 def _is_production() -> bool:
@@ -560,3 +571,56 @@ def x_disconnect() -> JSONResponse:
         return JSONResponse(payload)
     except Exception as exc:
         return _safe_error(exc)
+
+
+@router.get("/threads")
+async def _x_threads(cursor: str = "") -> JSONResponse:
+    from kazma_core.x_api.thread_store import thread_page
+
+    try:
+        return JSONResponse({"ok": True, **await asyncio.to_thread(thread_page, cursor=cursor)})
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
+
+
+@router.get("/health")
+async def _x_health() -> JSONResponse:
+    from kazma_core.diagnostic_scope import read_only_diagnostic
+    from kazma_core.x_api.health import health_snapshot
+
+    with read_only_diagnostic("/api/x/health"):
+        return JSONResponse({"ok": True, **await asyncio.to_thread(health_snapshot)})
+
+
+@protected_router.post("/threads", dependencies=[Depends(_verify_same_origin)])
+async def _x_thread_stage(body: _XThreadBody, request: Request) -> JSONResponse:
+    from kazma_core.x_api.threads import prepare_thread
+
+    from kazma_ui.x_reply_api import _actor
+
+    try:
+        detail = await asyncio.to_thread(prepare_thread, body.segments, intent_key=body.intent_key, actor=_actor(request))
+        return JSONResponse({"ok": True, "thread": detail})
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
+
+
+@protected_router.post("/threads/{ident}/{action}", dependencies=[Depends(_verify_same_origin)])
+async def _x_thread_action(ident: str, action: str, body: _XThreadActionBody, request: Request) -> JSONResponse:
+    from kazma_core.x_api import thread_store
+    from kazma_core.x_api.threads import publish_thread
+
+    from kazma_ui.x_reply_api import _actor
+
+    try:
+        if action == "publish":
+            detail = await publish_thread(ident, revision=body.expected_revision, token=body.approval_token, actor=_actor(request))
+        elif action == "cancel":
+            detail = await asyncio.to_thread(thread_store.cancel_thread, ident, revision=body.expected_revision, token=body.approval_token, actor=_actor(request))
+        elif action == "review":
+            detail = await asyncio.to_thread(thread_store.review_thread, ident, revision=body.expected_revision, actor=_actor(request))
+        else:
+            raise ValueError("Unsupported thread action.")
+        return JSONResponse({"ok": True, "thread": detail})
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=409)

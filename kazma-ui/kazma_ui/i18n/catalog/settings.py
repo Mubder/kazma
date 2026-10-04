@@ -3901,6 +3901,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "+ إضافة موضوع",
         "en": "+ Add subject",
     },
+    "settings.xt.export_policy": {"ar": "تصدير السياسة", "en": "Export policy"},
+    "settings.xt.import_policy": {"ar": "استيراد للمراجعة", "en": "Import for review"},
+    "settings.xt.policy_changes": {"ar": "التغييرات منذ آخر حفظ", "en": "Changes since last save"},
+    "settings.xt.policy_unchanged": {"ar": "لا تغييرات على السياسة.", "en": "No policy changes."},
+    "settings.xt.policy_before": {"ar": "قبل", "en": "Before"},
+    "settings.xt.policy_after": {"ar": "بعد", "en": "After"},
+    "settings.xt.policy_apply": {"ar": "حفظ السياسة المراجعة بوضع المسودات", "en": "Save reviewed policy in draft mode"},
+    "settings.xt.policy_owner": {"ar": "صاحب السياسة", "en": "Policy owner"},
+    "settings.xt.change_reason": {"ar": "سبب التغيير", "en": "Reason for this revision"},
+    "settings.xt.allowed_moods": {"ar": "النبرات المسموحة", "en": "Allowed tones"},
+    "settings.xt.allowed_moods_hint": {"ar": "اختر النبرات المسموحة؛ تركها فارغة يسمح بكل النبرات المدرجة.", "en": "Select permitted tones; an empty selection permits all listed tones."},
+    "settings.xt.counterexamples": {"ar": "أمثلة مضادة — مثال في كل سطر", "en": "Counterexamples — one per line"},
+    "settings.xt.policy_staged": {
+        "ar": "السياسة المستوردة قيد المراجعة. راجع التغييرات قبل الحفظ؛ إذن النشر التلقائي معطّل.",
+        "en": "Imported policy is staged. Review changes before saving; automatic permission is disabled.",
+    },
     "settings.xt.no_subjects": {
         "ar": "لا مواضيع — لا بأس. يبقى Kazma يرد؛ ورمز الاستدعاء يحدد النبرة. أضف موضوعًا حين تريد أن يدافع عن رأي كتبته، أو أعطِ موضوعًا الكلمة المفتاحية <code>*</code> لتكتب الصوت بنفسك.",
         "en": "No subjects — that is fine. Kazma still replies; the summon emoji picks the tone. Add a subject when you want it to argue a view you wrote, or give one the keyword <code>*</code> to write the voice yourself.",
@@ -4198,8 +4214,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "{provider} {protocol} failed: {error}",
     },
     "settings.int.x_api_ok": {
-        "ar": "واجهة X تعمل{who}. رموز المستخدم للقراءة والكتابة تعمل.",
-        "en": "X API ok{who}. Read + Write user tokens work.",
+        "ar": "تم التحقق من حساب X{who}. تحقق من إذن الكتابة في لوحة مطوّري X.",
+        "en": "X account verified{who}. Confirm Write permission in the X developer console.",
     },
     "settings.int.server_name_is_required": {
         "ar": "اسم الخادم مطلوب",

@@ -40,6 +40,31 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                     assert not page_problems(page, "/x", errors)
                     page.locator("#xs-draft-search").fill("coffee")
                     page.wait_for_function("() => !Alpine.$data(document.querySelector('.xs-wrap')).loadStates.drafts.loading")
+                    page.locator("#xs-tab-studio").focus()
+                    page.keyboard.press("End")
+                    assert page.locator("#xs-tab-threads").evaluate("element => element === document.activeElement")
+                    assert page.locator("#xs-tab-threads").get_attribute("aria-selected") == "true"
+                    page.locator("#xs-thread-0").fill(text)
+                    page.locator("#xs-thread-1").fill(text + " 2")
+                    down = "Move down" if language == "en" else "نقل للأسفل"
+                    page.get_by_role("button", name=down, exact=True).first.focus()
+                    page.keyboard.press("Space")
+                    page.wait_for_function("() => {const s = Alpine.$data(document.querySelector('.xs-wrap')); return !s._composerSaving && s._composerSignature() === s._composerSaved;}")
+                    page.reload(wait_until="domcontentloaded")
+                    _settle(page)
+                    page.wait_for_function("() => Alpine.$data(document.querySelector('.xs-wrap'))._composerLoaded")
+                    page.locator("#xs-tab-studio").focus()
+                    page.keyboard.press("End")
+                    assert page.locator("#xs-thread-0").input_value() == text + " 2"
+                    assert page.locator("#xs-thread-1").input_value() == text
+                    page.keyboard.press("Home")
+                    assert page.locator("#xs-tab-studio").evaluate("element => element === document.activeElement")
+                    health = "Operations health" if language == "en" else "صحة التشغيل"
+                    page.locator("summary").filter(has_text=health).click()
+                    page.wait_for_function("() => Alpine.$data(document.querySelector('.xs-wrap')).health !== null")
+                    assert not page.evaluate("() => Alpine.$data(document.querySelector('.xs-wrap')).healthError")
+                    assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth + 1")
+                    assert not page_problems(page, "/x", errors)
                 finally:
                     context.close()
         finally:

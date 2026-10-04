@@ -100,5 +100,26 @@ const deferred = () => {
   assert.strictEqual(page.queue[1].state, "outcome_unknown");
   assert.strictEqual(page.queueCount, 2);
   assert.strictEqual(page.queueNext, "next");
+
+  page = xStudioPage();
+  const threadConfirm = deferred();
+  global.kazmaConfirm = () => threadConfirm.promise;
+  const thread = { id: "thread", revision: 7, approval_token: "reviewed-token",
+    segments: [{ index: 0, text: "Reviewed segment", state: "awaiting_approval" }] };
+  const threadRequests = [];
+  global.fetch = async (url, options) => {
+    if (options) threadRequests.push({ url, body: JSON.parse(options.body) });
+    return response(options ? { ok: true } : { ok: true, threads: [] });
+  };
+  const publishing = page.threadAction(thread, "publish");
+  await page.threadAction(thread, "publish");
+  assert.strictEqual(page.threadBusy, true);
+  thread.revision = 8; thread.approval_token = "changed-token";
+  threadConfirm.resolve(true);
+  await publishing;
+  assert.strictEqual(threadRequests.length, 1);
+  assert.strictEqual(threadRequests[0].body.expected_revision, 7);
+  assert.strictEqual(threadRequests[0].body.approval_token, "reviewed-token");
+  assert.strictEqual(page.threadBusy, false);
   console.log("X Studio retains stale data, ignores old responses, and binds confirmations to exact revisions.");
 })().catch(error => { console.error(error); process.exitCode = 1; });

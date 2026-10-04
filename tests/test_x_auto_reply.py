@@ -2044,7 +2044,7 @@ async def test_retry_reopens_a_stuck_draft(_no_llm, monkeypatch):
     from kazma_core.x_api.reply_store import STATUS_DRAFTING, get_reply_store
 
     _stub_draft(monkeypatch)
-    monkeypatch.setattr(reply_mod, "get_reply_config", lambda: _cfg())
+    monkeypatch.setattr(stance_mod, "get_reply_config", lambda: _cfg())
     store = get_reply_store()
     store.claim(
         summon_id="2100724737114599833", parent_id="2002854021749743923",
@@ -2073,7 +2073,7 @@ async def test_retry_reopens_a_skip(_no_llm, monkeypatch):
         target_followers=40, cfg=_cfg(summoner_policy=SUMMON_ANYONE),
     )
     assert first.action == "skipped"
-    monkeypatch.setattr(reply_mod, "get_reply_config", lambda: _cfg())
+    monkeypatch.setattr(stance_mod, "get_reply_config", lambda: _cfg())
     res = await retry_summon("r1")
     assert res.action == "awaiting_approval"
     assert res.draft

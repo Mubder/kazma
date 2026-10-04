@@ -48,3 +48,41 @@ def test_refused_batch_writes_nothing_and_announces_nothing(tmp_path, in_memory)
         assert store.get("subject") == "reviewed"
     finally:
         store.close()
+
+
+@pytest.mark.postgres
+def test_real_postgres_first_revision_has_one_winner(tmp_path):
+    import uuid
+
+    from kazma_core.db.backend import is_postgres
+
+    if not is_postgres():
+        pytest.skip("Requires the isolated CI Postgres service, never an operator database.")
+    prefix = "test.x.cas." + uuid.uuid4().hex
+    revision_key, value_key = prefix + ".revision", prefix + ".value"
+    stores = [ConfigStore(db_path=str(tmp_path / f"unused-{index}.db")) for index in range(2)]
+    barrier = Barrier(2)
+
+    def save(store, value):
+        barrier.wait(timeout=30)
+        try:
+            store.batch_set([(revision_key, 1, "test"), (value_key, value, "test")], expected=(revision_key, 0))
+            return value
+        except ConfigRevisionConflict:
+            return None
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(save, stores, ["first", "second"]))
+        assert outcomes.count(None) == 1
+        reader = ConfigStore(db_path=str(tmp_path / "unused-reader.db"))
+        try:
+            assert reader.get(revision_key) == 1
+            assert reader.get(value_key) == next(value for value in outcomes if value)
+        finally:
+            reader.delete(revision_key)
+            reader.delete(value_key)
+            reader.close()
+    finally:
+        for store in stores:
+            store.close()

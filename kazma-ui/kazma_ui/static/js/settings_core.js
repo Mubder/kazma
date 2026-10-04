@@ -512,6 +512,8 @@
         xReplyLoading: false,
         xReplySaving: false,
         xReplyProblems: [],
+        xReplyPolicyBaseline: [],
+        xReplyPolicyStaged: false,
         xReplyOpen: null,          // index of the expanded subject card
         xReplyPreview: { text: '', handle: '', subject_id: '', mood: '', result: null, busy: false },
         xReplyRecent: [],

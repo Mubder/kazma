@@ -62,6 +62,28 @@ def _no_llm(monkeypatch):
 
 # ── Validation names the problem ──────────────────────────────────────────
 
+
+async def test_policy_import_only_stages_valid_cards_without_granting_auto():
+    import json
+
+    from kazma_core.config_store import get_config_store
+    from kazma_ui.x_reply_api import _PolicyDocumentBody, _validate_policy_document
+
+    before = get_config_store().get("connectors.x.reply.subjects")
+    response = _validate_policy_document(_PolicyDocumentBody(subjects=[SubjectBody(
+        id="coffee", match=["coffee"], side="support", allow_auto=True)]))
+    data = json.loads(response.body)
+    assert data["staged"] and data["mode"] == "draft"
+    assert data["subjects"][0]["allow_auto"] is False
+    assert get_config_store().get("connectors.x.reply.subjects") == before
+
+
+async def test_policy_import_rejects_invalid_cards():
+    from kazma_ui.x_reply_api import _PolicyDocumentBody, _validate_policy_document
+
+    response = _validate_policy_document(_PolicyDocumentBody(subjects=[SubjectBody(id="missing")]))
+    assert response.status_code == 400
+
 def test_subject_without_side_or_view_is_rejected():
     problems = _validate_subjects([SubjectBody(id="var", match=["var"], view="")])
     assert problems and any("against or support" in p for p in problems)

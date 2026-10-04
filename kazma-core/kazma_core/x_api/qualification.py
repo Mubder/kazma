@@ -35,7 +35,7 @@ def pipeline_fingerprint(cfg: ReplyConfig) -> str:
     xcfg = get_x_config()
     modules = ("reply", "stance", "routing", "subject_policy", "verification", "context", "model_selection",
                "qualification", "ai_budget", "approval", "account_binding", "evidence", "text_length",
-               "policy", "thread_policy", "ownership", "publication_service")
+               "policy", "thread_policy", "ownership", "publication_service", "shadow")
     code = {name: hashlib.sha256(Path(__file__).with_name(name + ".py").read_bytes().replace(b"\r\n", b"\n")).hexdigest() for name in modules}
     knowledge = None
     if cfg.use_knowledge:
@@ -81,6 +81,8 @@ def _validate_case(case: Any, ids: set[str]) -> tuple[dict[str, Any], dict[str, 
     if len(case["id"]) > 200 or len(case["labeler"]) > 200:
         raise ValueError("Case identity and labeler fields exceed the bounded schema.")
     expected, actual = case.get("expected"), case.get("actual")
+    if isinstance(actual, dict) and actual.get("usage_complete") is False:
+        raise ValueError("Model usage measurements are incomplete; rerun with a provider that reports usage.")
     if (not isinstance(expected, dict) or not isinstance(actual, dict)
             or any(type(expected.get(key)) is not bool for key in ("auto", "evidence", "safety"))
             or type(actual.get("auto")) is not bool or not isinstance(expected.get("target"), str)

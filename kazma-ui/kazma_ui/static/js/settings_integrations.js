@@ -1189,7 +1189,7 @@
                 }
                 Object.assign(this.xStatus, data);
                 var who = data.verified_username ? (' @' + data.verified_username) : '';
-                showToast(_k('settings.int.x_api_ok', 'X API ok{who}. Read + Write user tokens work.', { who: who }), 'success');
+                showToast(_k('settings.int.x_api_ok', 'X account verified{who}. Confirm Write permission in the X developer console.', { who: who }), 'success');
             } catch (e) {
                 showToast(_k('settings.int.x_test_failed_2', 'X test failed: ') + e.message, 'error');
             } finally {
@@ -1240,6 +1240,8 @@
                     });
                     this.xReplySummonersText = (data.summoners || []).join(', ');
                     this.xReplyProblems = [];
+                    this.xReplyPolicyBaseline = JSON.parse(JSON.stringify(data.subjects || []));
+                    this.xReplyPolicyStaged = false;
                 }
             } catch (e) {
                 showToast(_k('settings.int.failed_to_load_auto_reply', 'Failed to load auto-reply settings: ') + e.message, 'error');
@@ -1272,6 +1274,59 @@
                 hard_lines: [], examples: [], _matchText: '', _hardText: '', _exText: '',
             });
             this.xReplyOpen = this.xReply.subjects.length - 1;
+        },
+
+        xReplyPolicyChanges() {
+            const before = new Map((this.xReplyPolicyBaseline || []).map(card => [card.id, card]));
+            const after = new Map(this.xReplySubjectPayload().map(card => [card.id, card]));
+            return Array.from(new Set([...before.keys(), ...after.keys()])).flatMap(id => {
+                const old = before.get(id), next = after.get(id);
+                if (!old || !next) return [{ id, fields: !old ? 'added' : 'removed', before: JSON.stringify(old || null, null, 2), after: JSON.stringify(next || null, null, 2) }];
+                const fields = Array.from(new Set([...Object.keys(old), ...Object.keys(next)]))
+                    .filter(key => key !== 'revision' && JSON.stringify(old[key]) !== JSON.stringify(next[key]));
+                return fields.length ? [{ id, fields: fields.join(', '),
+                    before: JSON.stringify(Object.fromEntries(fields.map(key => [key, old[key]])), null, 2),
+                    after: JSON.stringify(Object.fromEntries(fields.map(key => [key, next[key]])), null, 2) }] : [];
+            });
+        },
+
+        xReplyExportPolicy() {
+            const documentBody = { schema_version: 1, settings_revision: Number(this.xReply.settings_revision) || 0,
+                subjects: this.xReplySubjectPayload() };
+            const url = URL.createObjectURL(new Blob([JSON.stringify(documentBody, null, 2)], { type: 'application/json' }));
+            const link = document.createElement('a');
+            link.href = url; link.download = 'x-subject-policy.json'; link.click();
+            URL.revokeObjectURL(url);
+        },
+
+        async xReplyImportPolicy(event) {
+            const input = event.target, file = input.files && input.files[0];
+            if (!file || this.xReplySaving || this.xReplyLoading) return;
+            this.xReplyLoading = true;
+            try {
+                if (file.size > 256000) throw new Error('Policy file exceeds 256 KB.');
+                const incoming = JSON.parse(await file.text());
+                const response = await fetch('/api/x/reply/policy/validate', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify(incoming),
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) {
+                    this.xReplyProblems = data.problems || [];
+                    throw new Error(data.error || 'Invalid policy file.');
+                }
+                this.xReply.subjects = data.subjects;
+                this.xReply.mode = 'draft';
+                this.xReplyPolicyStaged = true;
+                this.xReplyOpen = null;
+                showToast(_k('settings.xt.policy_staged', 'Imported policy is staged. Review changes before saving; automatic permission is disabled.'), 'warning');
+            } catch (error) {
+                showToast(error.message, 'error');
+            } finally {
+                input.value = '';
+                this.xReplyLoading = false;
+            }
         },
 
         xReplyAIModels() {
@@ -1333,6 +1388,12 @@
             this.xReplySaving = true;
             this.xReplyProblems = [];
             try {
+                const subjects = JSON.parse(JSON.stringify(this.xReplySubjectPayload()));
+                if (this.xReplyPolicyStaged && !await window.kazmaConfirm({
+                    title: _k('settings.xt.policy_apply', 'Save reviewed policy in draft mode'),
+                    message: this.xReplyPolicyChanges().map(change => change.id + ': ' + change.fields + '\n' + change.after).join('\n\n'),
+                })) return;
+                if (this.xReplyPolicyStaged) this.xReply.mode = 'draft';
                 const resp = await fetch('/api/x/reply', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -1357,7 +1418,7 @@
                         knowledge_library: this.xReply.knowledge_library || '',
                         open_thread_marker: this.xReply.open_thread_marker || '',
                         close_thread_marker: this.xReply.close_thread_marker || '',
-                        subjects: this.xReplySubjectPayload(),
+                        subjects: subjects,
                     }),
                 });
                 const data = await resp.json().catch(function () { return {}; });
@@ -1368,6 +1429,8 @@
                 }
                 Object.assign(this.xReply, data);
                 this.xReplySummonersText = (data.summoners || []).join(', ');
+                this.xReplyPolicyBaseline = JSON.parse(JSON.stringify(data.subjects || []));
+                this.xReplyPolicyStaged = false;
                 // Warnings are advisory (e.g. anyone + auto): the save
                 // succeeded, the operator should know what they turned on.
                 (data.warnings || []).forEach(function (w) { showToast(w, 'warning'); });

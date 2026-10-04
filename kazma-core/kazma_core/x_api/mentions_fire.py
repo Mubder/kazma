@@ -110,6 +110,8 @@ async def ensure_mentions_loop() -> bool:
 
 
 async def _loop(poll_interval: float | None) -> None:
+    from kazma_core.x_api.health import record_cycle
+
     errors = 0
     while True:
         wait = poll_interval or _DEFAULT_POLL
@@ -128,10 +130,12 @@ async def _loop(poll_interval: float | None) -> None:
                 if cfg.can_draft():
                     await poll_once(cfg=cfg)
             errors = 0
+            await asyncio.to_thread(record_cycle, "mentions", success=True, interval=wait)
         except asyncio.CancelledError:
             raise
         except Exception:
             errors += 1
+            await asyncio.to_thread(record_cycle, "mentions", success=False, interval=wait)
             logger.exception("[x-mentions] poll error (%d consecutive)", errors)
             if errors >= _MAX_CONSECUTIVE_ERRORS:
                 logger.error(

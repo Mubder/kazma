@@ -96,4 +96,13 @@ async def test_provider_failure_retains_daily_reservation(provider, monkeypatch)
     async with x_model_scope():
         with pytest.raises(TimeoutError):
             await x_chat("drafting", [{"role": "user", "content": "brief"}], max_tokens=100)
+        assert current_x_usage()["failed_calls"] == 1
     assert get_config_store().get("connectors.x.ai_usage")["reserved_output_tokens"] == 100
+
+
+async def test_missing_usage_is_visible_not_invented_as_actual_tokens(provider):
+    async with x_model_scope():
+        await x_chat("drafting", [{"role": "user", "content": "brief"}], max_tokens=100)
+        usage = current_x_usage()
+        assert usage["missing_usage"] == 1 and usage["output_tokens"] == 0
+        assert usage["reserved_output_tokens"] == 100

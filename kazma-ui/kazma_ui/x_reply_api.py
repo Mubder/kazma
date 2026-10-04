@@ -75,6 +75,14 @@ class SubjectBody(BaseModel):
     change_reason: str = ""
 
 
+class _PolicyDocumentBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int = Field(default=1, strict=True, ge=1, le=1)
+    settings_revision: int = Field(default=0, strict=True, ge=0)
+    subjects: list[SubjectBody] = Field(default_factory=list, max_length=100)
+
+
 class _XAISelectionBody(BaseModel):
     """An exact X provider/model pair; credentials stay in the registry."""
 
@@ -154,6 +162,19 @@ def _validate_subjects(subjects: list[SubjectBody]) -> list[str]:
     from kazma_core.x_api.subject_policy import normalize_cards
 
     return list(normalize_cards([subject.model_dump(by_alias=True) for subject in subjects])[1])
+
+
+@protected_router.post("/policy/validate", dependencies=[Depends(_csrf)])
+def _validate_policy_document(body: _PolicyDocumentBody) -> JSONResponse:
+    """Import into an unsaved editor; imported files cannot grant auto permission."""
+    from kazma_core.x_api.subject_policy import normalize_cards
+
+    subjects = [subject.model_copy(update={"allow_auto": False}) for subject in body.subjects]
+    problems = _validate_subjects(subjects)
+    if problems:
+        return JSONResponse({"ok": False, "error": "Fix these first.", "problems": problems}, status_code=400)
+    cards, _ = normalize_cards([subject.model_dump(by_alias=True) for subject in subjects])
+    return JSONResponse({"ok": True, "subjects": cards, "mode": "draft", "staged": True})
 
 
 def _payload() -> dict[str, Any]:

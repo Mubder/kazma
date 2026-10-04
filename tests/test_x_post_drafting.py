@@ -10,7 +10,6 @@ import pytest
 
 @pytest.fixture
 def generation(monkeypatch):
-    from kazma_core.x_api import post_drafting
     from kazma_core.x_api.stance import ReplyConfig
 
     state = {"calls": [], "output": {"drafts": ["An opinion about coffee."]}}
@@ -37,7 +36,7 @@ def generation(monkeypatch):
     cfg = ReplyConfig(enabled=False, mode="draft", summoners=(), trigger="", max_replies_per_day=5,
                       max_replies_per_target_per_day=1, cooldown_per_thread_s=0, min_target_followers=0,
                       poll_interval_s=60)
-    monkeypatch.setattr(post_drafting, "get_reply_config", lambda: cfg)
+    monkeypatch.setattr("kazma_core.x_api.stance.get_reply_config", lambda: cfg)
     from kazma_core.config_store import get_config_store
     get_config_store().set("connectors.x.ai", {"selection": "global", "local_only": True,
                           "roles": {"post_drafting": {"selection": "specific", "provider": "local", "model": "studio-local"}}})

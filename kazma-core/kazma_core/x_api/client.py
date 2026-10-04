@@ -153,6 +153,10 @@ class XClient:
         audit_action: str = "",
         audit_tweet_id: str | None = None,
     ) -> dict[str, Any]:
+        from kazma_core.x_api.shadow import shadow_transport_blocked
+
+        if shadow_transport_blocked():
+            raise XApiError("X network requests are blocked in isolated shadow evaluation.", outcome="not_sent")
         # Audit hook (operator decision 2026-08-27): EVERY X API call —
         # request payload, full response/error body, HTTP status, duration,
         # local date/time — is appended to kazma-data/x_audit.db. Best-effort

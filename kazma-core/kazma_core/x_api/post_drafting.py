@@ -11,10 +11,11 @@ from typing import Any
 from kazma_core.llm_provider import LLMError
 from kazma_core.safety.prompt_fence import format_untrusted_block
 from kazma_core.x_api import model_selection as _models
+from kazma_core.x_api import stance as _stance
 from kazma_core.x_api.context import ContextSnapshot
 from kazma_core.x_api.model_selection import x_chat, x_model_turn
 from kazma_core.x_api.reply import DraftFailed, screen_draft
-from kazma_core.x_api.stance import Subject, get_reply_config, implicit_voice_subject
+from kazma_core.x_api.stance import Subject, implicit_voice_subject
 from kazma_core.x_api.verification import verify_candidate
 
 
@@ -34,7 +35,7 @@ async def draft_posts(brief: str, *, count: int = 1, subject_id: str = "") -> Po
     brief = (brief or "").strip()
     if not brief or len(brief) > 4000 or type(count) is not int or not 1 <= count <= 3:
         raise ValueError("Provide a brief of 1–4000 characters and request 1–3 alternatives.")
-    cfg = await asyncio.to_thread(get_reply_config)
+    cfg = await asyncio.to_thread(_stance.get_reply_config)
     if cfg.config_errors:
         raise ValueError("; ".join(cfg.config_errors))
     subject: Subject = implicit_voice_subject()

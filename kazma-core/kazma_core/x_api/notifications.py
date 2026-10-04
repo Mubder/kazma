@@ -76,6 +76,10 @@ async def _drain_store(store: Any, *, limit: int = 20) -> int:
 
 
 async def drain_notifications() -> int:
+    from kazma_core.x_api.shadow import shadow_transport_blocked
+
+    if shadow_transport_blocked():
+        return 0
     from kazma_core.x_api.publication_store import get_publication_store
     from kazma_core.x_api.reply_store import get_reply_store
 

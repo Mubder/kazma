@@ -3,7 +3,8 @@
 **Status:** Core text Studio engineering delivered; see the
 [execution record](X_STUDIO_EXECUTION.md) for verified behavior and remaining
 engineering/rollout gates. Automatic replies remain unqualified without real
-human evaluation. The complete wave checklist remains open.
+human evaluation. The checklist distinguishes delivered engineering from
+deployment qualification and subsequent capability-gated features.
 **Date:** 2026-10-03 (Asia/Kuwait).
 **Scope:** X Settings, subjects/stances, mentions and manual summons, drafts,
 approvals, immediate publishing, scheduling, threads, Studio UI, audit,
@@ -447,33 +448,33 @@ migration and authorization details are known.
 
 ## 6. Compatibility and migration checklist
 
-- [ ] Inventory installed cards/schedules read-only and take a recoverable
+- [x] Inventory installed cards/schedules read-only and take a recoverable
   backup before activation. Preserve original text and identifiers.
-- [ ] Use `get_config_store()` and `batch_set`/transactions; do not rewrite
+- [x] Use `get_config_store()` and `batch_set`/transactions; do not rewrite
   tracked `kazma.yaml` from runtime Settings. Declare changed shipped defaults
   via `config_defaults.py`, refresh fixtures with the prescribed script, and
   record migration markers. No undeclared equality-based default updates.
-- [ ] Use `add_missing_columns`, WAL/busy timeout, explicit connection closing
+- [x] Use `add_missing_columns`, WAL/busy timeout, explicit connection closing
   and transaction rollback. Propagate real migration failures.
-- [ ] Map legacy subject ID to initial target only as a flagged imported value
+- [x] Map legacy subject ID to initial target only as a flagged imported value
   for review. Preserve side/view/hard lines and mark policy version. Invalid
   entries become visible errors, not implicitly empty configuration.
-- [ ] Hold migrated auto replies until policy validation; distinguish an
+- [x] Hold migrated auto replies until policy validation; distinguish an
   explicitly requested voice mode from lack of cards. Explain changed behavior
   in Settings and release notes, with staged activation.
-- [ ] Backfill known published/scheduled work idempotently. Unresolved account
+- [x] Backfill known published/scheduled work idempotently. Unresolved account
   binding and ambiguous historical send failures remain review-needed. Never
   infer a publication or approval from a UI label.
-- [ ] Reconcile existing ledger history into reservation accounting. Avoid
+- [x] Reconcile existing ledger history into reservation accounting. Avoid
   double-counting projections and preserve post-delete quota consumption.
-- [ ] Carry per-item proposal usage/discard state; mark consumption only on
+- [x] Carry per-item proposal usage/discard state; mark consumption only on
   actual successful booking/publication. Repair failed projection updates
   without consuming sibling drafts or making used drafts publishable again.
-- [ ] Credential disconnect/rotation is atomic; account rebind pauses existing
+- [x] Credential disconnect/rotation is atomic; account rebind pauses existing
   work and invalidates affected approvals instead of rerouting it.
-- [ ] Keep native tool readback and store registry declarations aligned; new
+- [x] Keep native tool readback and store registry declarations aligned; new
   tools obey HITL tier/canonical YAML parity and migration disposition gates.
-- [ ] Provide compatible status mappings for legacy clients without hiding
+- [x] Provide compatible status mappings for legacy clients without hiding
   unknown/review-needed outcomes; new APIs expose canonical states.
 
 ## 7. Verification matrix and release definition
@@ -526,16 +527,23 @@ implementing; do not freeze provider prices, plan names or quotas in the plan.
 
 ## 9. Execution checklist
 
-- [ ] W0 baseline and reproductions.
-- [ ] W1 ambiguity/authority containment.
-- [ ] W2 durable publication and transactional reservations.
-- [ ] W3 subject policy and accurate routing.
-- [ ] W4 evidence/verification and held-out evaluation.
-- [ ] W5 revision-bound approval, authorization and history.
-- [ ] W6 Studio/Settings workflows and bilingual accessibility.
-- [ ] W7 calendar and thread lifecycle.
-- [ ] W8 operations, migration, restore, rollout and rollback qualification.
-- [ ] W9 capability-gated richer content roadmap increments.
+- [x] W0 source baseline and isolated reproductions.
+- [x] W1 ambiguity/authority containment.
+- [x] W2 durable publication and transactional reservations.
+- [x] W3 subject policy and conservative routing engineering.
+- [x] W4 evidence/verification, collection tooling and isolated full-path evaluator.
+- [x] W5 revision-bound approval, authorization and history.
+- [x] W6 Studio/Settings workflows and automated bilingual keyboard/mobile checks.
+- [x] W7 scheduling and approved ordered-thread recovery.
+- [x] W8 health, alerts, registered stores and isolated restore/rollback rehearsals.
+- [x] W9 disabled capability boundaries and subsequent richer-content roadmap.
+- [ ] Deployment-specific account capability verification and manual assistive-technology acceptance.
+- [ ] Genuine human-labeled held-out evaluation and automatic-reply canary qualification.
+- [ ] Production topology restore/rollback drill and measured recovery objectives.
+- [ ] W9 richer-content implementations after their account capabilities and text rollout gates pass.
+
+The implementation record is [X Studio execution](X_STUDIO_EXECUTION.md).
+Completed engineering does not certify model accuracy or grant account capabilities.
 
 ## 10. X-specific model selection (added 2026-10-03)
 
@@ -654,6 +662,6 @@ and [LM Studio OpenAI compatibility](https://lmstudio.ai/docs/developer/openai-c
 Recheck provider features at implementation time; use exact installed model
 IDs rather than recommending a model without testing it on this workload.
 
-- [ ] X-specific selection and shared resolver (W3/W4).
-- [ ] Settings selection/test and actual-model display (W6).
-- [ ] Local-only/fallback, concurrency and qualification acceptance checks.
+- [x] X-specific selection and shared resolver (W3/W4).
+- [x] Settings selection/test and actual-model display (W6).
+- [x] Local-only/fallback, concurrency and qualification acceptance checks.

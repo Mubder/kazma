@@ -195,8 +195,12 @@ not proof of publication or nonpublication.
 
 Local endpoint spelling does not establish offline inference. X endpoint
 capabilities and real bilingual model accuracy remain deployment-specific.
-Rich media/campaign analytics and an approved multi-segment thread composer
-are subsequent capabilities; replying under a confirmed post is supported.
+Rich media/campaign analytics remain capability-gated. The Studio Threads tab
+supports ordered text segments, whole-revision approval and partial recovery;
+see [X publisher](x-publisher.md). Settings supports policy import/export and
+before/after comparison. Import stages cards for review with automatic permission
+disabled; saving an imported policy uses draft mode. Relevant policy changes
+invalidate automatic qualification.
 
 ## Testing it safely
 

@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from kazma_core.x_api import model_selection as _models
+from kazma_core.x_api import stance as _stance
 from kazma_core.x_api.context import ContextSnapshot
 from kazma_core.x_api.model_selection import x_chat, x_model_call, x_model_turn
 from kazma_core.x_api.stance import (
@@ -48,7 +49,6 @@ from kazma_core.x_api.stance import (
     ReplyConfig,
     Subject,
     classify,
-    get_reply_config,
     mood_from_text,
     no_match_detail,
 )
@@ -782,7 +782,7 @@ async def handle_summon(
             ``draft`` so an operator typing the command by hand is always the
             approval, whatever the poller is configured to do.
     """
-    cfg = cfg or await asyncio.to_thread(get_reply_config)
+    cfg = cfg or await asyncio.to_thread(_stance.get_reply_config)
     mode = (force_mode or cfg.mode).strip().lower()
     if cfg.config_errors:
         return SummonResult(False, "failed", reason="; ".join(cfg.config_errors),
@@ -871,6 +871,7 @@ async def handle_summon(
             summoner=summoner, target_followers=target_followers,
             summon_text=summon_text, trusted=trusted,
             context=context,
+            summon_context={"conversation_id": conv_id, "target_followers": target_followers},
         )
     except asyncio.CancelledError:
         try:
@@ -911,6 +912,7 @@ async def _handle_summon_claimed(
     summon_text: str,
     trusted: bool,
     context: ContextSnapshot | None = None,
+    summon_context: dict[str, Any] | None = None,
 ) -> SummonResult:
     rail = await _rail_error(
         cfg,
@@ -1088,6 +1090,7 @@ async def _handle_summon_claimed(
 
     routing = route_subject(parent_text, cfg.subjects).to_dict()
     decision = {"routing": routing, "checks": list(check_data), "context": context.to_dict(), "evidence": grounding.to_dict(),
+                "summon_context": summon_context or {},
                 "models": list(current_x_models()), "subject_id": subject.id, "subject_revision": subject.revision,
                 "auto_hold": auto_hold, "approval_basis": approval_basis, "usage": current_x_usage()}
     await asyncio.to_thread(store.record_decision, summon_id, draft=draft, subject_id=subject.id, decision=decision)
@@ -1104,7 +1107,7 @@ async def _handle_summon_claimed(
         mode = MODE_DRAFT
         auto_hold = "The account or model binding is unavailable or changed. Verify Settings, then retry and review a fresh draft."
     if mode == MODE_AUTO:
-        fresh_cfg = await asyncio.to_thread(get_reply_config)
+        fresh_cfg = await asyncio.to_thread(_stance.get_reply_config)
         auto_hold = ("Reply policy changed during verification; review this draft again." if fresh_cfg != cfg
                      else await asyncio.to_thread(qualification_hold, fresh_cfg))
         if auto_hold:
@@ -1180,7 +1183,7 @@ async def preview_reply(
     *subject_id* forces a subject, so you can check how one reads against a
     post its keywords would not have matched.
     """
-    cfg = cfg or await asyncio.to_thread(get_reply_config)
+    cfg = cfg or await asyncio.to_thread(_stance.get_reply_config)
 
     # *subject_override* is the subject as it exists in the editor RIGHT NOW,
     if cfg.config_errors and subject_override is None:

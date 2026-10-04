@@ -38,6 +38,16 @@ function xStudioPage() {
     selectedOperation: null,
     operationError: '',
     deleteBusy: '',
+    threadSegments: ['', ''],
+    threads: [],
+    threadsNext: '',
+    threadBusy: false,
+    threadError: '',
+    _threadIntent: '',
+    _threadSignature: '',
+    health: null,
+    healthBusy: false,
+    healthError: '',
 
     _previewTimer: null,
     _composerTimer: null,
@@ -77,8 +87,101 @@ function xStudioPage() {
 
     t(key) { return (window.t && window.t(key)) || key; },
 
+    selectTab(name) {
+      this.tab = name;
+      if (name === 'threads') this.loadThreads();
+      if (name === 'conversations') this.loadConversations();
+    },
+
+    tabsKeydown(event) {
+      const names = ['studio', 'conversations', 'threads'];
+      const index = names.indexOf(this.tab);
+      const direction = document.documentElement.dir === 'rtl' ? -1 : 1;
+      const step = event.key === 'ArrowRight' ? direction : (event.key === 'ArrowLeft' ? -direction : 0);
+      const next = event.key === 'Home' ? 0 : (event.key === 'End' ? names.length - 1 : (index + step + names.length) % names.length);
+      if (!step && event.key !== 'Home' && event.key !== 'End') return;
+      event.preventDefault();
+      this.selectTab(names[next]);
+      document.getElementById('xs-tab-' + names[next]).focus();
+    },
+
+    async loadHealth() {
+      if (this.healthBusy) return;
+      this.healthBusy = true;
+      try {
+        const response = await fetch('/api/x/health', { credentials: 'same-origin' });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || this.t('x_studio.load_failed'));
+        this.health = data;
+        this.healthError = '';
+      } catch (error) { this.healthError = String(error.message || error); }
+      finally { this.healthBusy = false; }
+    },
+
+    async loadThreads(more) {
+      const url = '/api/x/threads' + (more && this.threadsNext ? '?cursor=' + encodeURIComponent(this.threadsNext) : '');
+      const data = await this._readSection('threads', url, 'threads', null, !!more);
+      if (data) this.threadsNext = data.next_cursor || '';
+    },
+
+    moveThreadSegment(index, direction) {
+      const destination = index + direction;
+      if (this.threadBusy || destination < 0 || destination >= this.threadSegments.length) return;
+      const copy = this.threadSegments.slice();
+      [copy[index], copy[destination]] = [copy[destination], copy[index]];
+      this.threadSegments = copy;
+      this.queueComposerSave();
+    },
+
+    async stageThread() {
+      if (this.threadBusy) return;
+      this.threadBusy = true;
+      const segments = this.threadSegments.slice();
+      const signature = JSON.stringify(segments);
+      if (signature !== this._threadSignature) {
+        this._threadSignature = signature;
+        this._threadIntent = crypto.randomUUID();
+      }
+      try {
+        const response = await fetch('/api/x/threads', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+          body: JSON.stringify({ segments, intent_key: this._threadIntent }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || this.t('x_studio.load_failed'));
+        this.threadSegments = ['', ''];
+        this.queueComposerSave();
+        this._threadIntent = ''; this._threadSignature = '';
+        await this.loadThreads();
+      } catch (error) { this.threadError = String(error.message || error); }
+      finally { this.threadBusy = false; }
+    },
+
+    async threadAction(thread, action) {
+      if (this.threadBusy) return;
+      this.threadBusy = true;
+      const frozen = JSON.parse(JSON.stringify(thread));
+      try {
+        if (action !== 'review' && !await window.kazmaConfirm({
+          title: this.t(action === 'publish' ? 'x_studio.thread_publish' : 'x_studio.thread_cancel'),
+          message: frozen.segments.map(segment => (segment.index + 1) + '. ' + segment.text + '\n' + this.t('x_studio.status_' + segment.state)).join('\n\n'),
+          confirmText: this.t(action === 'publish' ? 'x_studio.thread_publish' : 'x_studio.thread_cancel'),
+        })) return;
+        const response = await fetch('/api/x/threads/' + encodeURIComponent(frozen.id) + '/' + action, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+          body: JSON.stringify({ expected_revision: frozen.revision, approval_token: frozen.approval_token }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || this.t('x_studio.load_failed'));
+        await this.loadThreads();
+      } catch (error) { this.threadError = String(error.message || error); }
+      finally { this.threadBusy = false; }
+    },
+
     reloadSection(section) {
-      const actions = { status: 'loadStatus', queue: 'loadQueue', drafts: 'loadDrafts', audit: 'loadAudit', conversations: 'loadConversations', preview: 'refreshPreview', operations: 'loadOperations' };
+      const actions = { status: 'loadStatus', queue: 'loadQueue', drafts: 'loadDrafts', audit: 'loadAudit', conversations: 'loadConversations', preview: 'refreshPreview', operations: 'loadOperations', threads: 'loadThreads' };
       if (actions[section]) return this[actions[section]]();
     },
 
@@ -226,6 +329,7 @@ function xStudioPage() {
       if (this.$watch) {
         this.$watch('when', () => this.queueComposerSave());
         this.$watch('replyToId', () => { this.queueComposerSave(); this.onInput(); });
+        this.$watch('threadSegments', () => this.queueComposerSave());
       }
       this.onInput();
     },
@@ -237,8 +341,8 @@ function xStudioPage() {
     },
 
     _composerPayload() {
-      return { text: this.text || '', reply_to_id: this.replyToId || '', when: this.when || '',
-        proposal_id: this.proposalId || '', draft_text: this._draftText || '' };
+        return { text: this.text || '', reply_to_id: this.replyToId || '', when: this.when || '',
+          proposal_id: this.proposalId || '', draft_text: this._draftText || '', thread_segments: this.threadSegments.slice() };
     },
     _composerSignature() { return JSON.stringify(this._composerPayload()); },
 
@@ -255,6 +359,7 @@ function xStudioPage() {
         this.when = saved.when || this._defaultWhen();
         this.proposalId = saved.proposal_id || '';
         this._draftText = saved.draft_text || '';
+        this.threadSegments = saved.thread_segments || ['', ''];
         this._composerRevision = data.revision;
         this._composerSaved = this._composerSignature();
         this._composerLoaded = true;

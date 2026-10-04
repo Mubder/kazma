@@ -3291,6 +3291,23 @@
                 </p>
 
                 <!-- Subjects -->
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                    <button class="btn btn-sm btn-secondary" @click="xReplyExportPolicy()">{{ t('settings.xt.export_policy') }}</button>
+                    <label class="btn btn-sm btn-secondary" for="x-policy-import">{{ t('settings.xt.import_policy') }}</label>
+                    <input id="x-policy-import" type="file" accept="application/json,.json" @change="xReplyImportPolicy($event)" style="max-width:220px;">
+                </div>
+                <p x-show="xReplyPolicyStaged" x-cloak role="status">{{ t('settings.xt.policy_staged') }}</p>
+                <details style="margin-top:8px;">
+                    <summary>{{ t('settings.xt.policy_changes') }}</summary>
+                    <p x-show="!xReplyPolicyChanges().length" x-cloak>{{ t('settings.xt.policy_unchanged') }}</p>
+                    <template x-for="change in xReplyPolicyChanges()" :key="change.id">
+                        <details>
+                            <summary><strong x-text="change.id"></strong>: <span x-text="change.fields"></span></summary>
+                            <p>{{ t('settings.xt.policy_before') }}</p><pre translate="no" x-text="change.before" style="white-space:pre-wrap;overflow-wrap:anywhere;"></pre>
+                            <p>{{ t('settings.xt.policy_after') }}</p><pre translate="no" x-text="change.after" style="white-space:pre-wrap;overflow-wrap:anywhere;"></pre>
+                        </details>
+                    </template>
+                </details>
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;">
                     <h5 style="margin:0;">{{ t('settings.xt.subjects') }} <span style="color:var(--text-tertiary);font-weight:400;"
                         x-text="'(' + (xReply.subjects ? xReply.subjects.length : 0) + ')'"></span></h5>
@@ -3307,6 +3324,7 @@
                     <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:10px;">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <button class="btn btn-sm btn-secondary"
+                                    :aria-label="(s.id || t('settings.xt.unnamed'))" :aria-expanded="xReplyOpen === i"
                                     @click="xReplyOpen = (xReplyOpen === i ? null : i)"
                                     x-text="xReplyOpen === i ? '▾' : '▸'"></button>
                             <strong translate="no" x-text="s.id || t('settings.xt.unnamed')"></strong>
@@ -3318,8 +3336,8 @@
                         <div x-show="xReplyOpen === i" style="margin-top:12px;" x-cloak>
                             <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                                 <div class="form-group">
-                                    <label>{{ t('settings.xt.id') }}</label>
-                                    <input type="text" class="form-input" x-model="s.id"
+                                    <label :for="'xr-id-' + i">{{ t('settings.xt.id') }}</label>
+                                    <input :id="'xr-id-' + i" type="text" class="form-input" x-model="s.id"
                                            placeholder="{{ t('settings.xt.topic_ph') }}" autocomplete="off">
                                 </div>
                                 <div class="form-group">
@@ -3328,8 +3346,8 @@
                                     <p class="form-hint">{{ t('settings.xt.target_hint') }}</p>
                                 </div>
                                 <div class="form-group">
-                                    <label>{{ t('settings.xt.side') }}</label>
-                                    <select class="form-input" x-model="s.side">
+                                    <label :for="'xr-side-' + i">{{ t('settings.xt.side') }}</label>
+                                    <select :id="'xr-side-' + i" class="form-input" x-model="s.side">
                                         <option value="">{{ t('settings.xt.side_written') }}</option>
                                         <option value="against">{{ t('settings.xt.side_against') }}</option>
                                         <option value="support">{{ t('settings.xt.side_support') }}</option>
@@ -3338,16 +3356,16 @@
                                 </div>
                             </div>
                             <div class="form-group">
-                                <label>{{ t('settings.xt.fallback_mood') }}</label>
-                                <select class="form-input" x-model="s.mood">
+                                <label :for="'xr-mood-' + i">{{ t('settings.xt.fallback_mood') }}</label>
+                                <select :id="'xr-mood-' + i" class="form-input" x-model="s.mood">
                                     <template x-for="m in xReply.moods" :key="m">
                                         <option :value="m" x-text="tOr('settings.xt.mood_' + m, m)"></option>
                                     </template>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label>{{ t('settings.xt.keywords') }}</label>
-                                <input type="text" class="form-input"
+                                <label :for="'xr-match-' + i">{{ t('settings.xt.keywords') }}</label>
+                                <input :id="'xr-match-' + i" type="text" class="form-input"
                                        :value="s._matchText !== undefined ? s._matchText : (s.match || []).join(', ')"
                                        @input="s._matchText = $event.target.value"
                                        placeholder="{{ t('settings.xt.keywords_ph') }}" autocomplete="off">
@@ -3356,8 +3374,8 @@
                                 </p>
                             </div>
                             <div class="form-group">
-                                <label>{{ t('settings.xt.extra') }}</label>
-                                <textarea class="form-input" rows="3" x-model="s.view"
+                                <label :for="'xr-view-' + i">{{ t('settings.xt.extra') }}</label>
+                                <textarea :id="'xr-view-' + i" class="form-input" rows="3" x-model="s.view"
                                           placeholder="{{ t('settings.xt.extra_ph') }}"></textarea>
                                 <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
                                     {{ t('settings.xt.extra_hint') | safe }}
@@ -3365,6 +3383,25 @@
                             </div>
                             <details style="margin-bottom:16px;">
                                 <summary>{{ t('settings.xt.scope_permissions') }}</summary>
+                                <div class="form-group">
+                                    <label :for="'xr-owner-' + i">{{ t('settings.xt.policy_owner') }}</label>
+                                    <input :id="'xr-owner-' + i" class="form-input" x-model="s.owner" maxlength="200">
+                                </div>
+                                <div class="form-group">
+                                    <label :for="'xr-change-' + i">{{ t('settings.xt.change_reason') }}</label>
+                                    <textarea :id="'xr-change-' + i" class="form-input" x-model="s.change_reason" maxlength="1000" rows="2"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label :for="'xr-tones-' + i">{{ t('settings.xt.allowed_moods') }}</label>
+                                    <select :id="'xr-tones-' + i" class="form-input" multiple x-model="s.allowed_moods">
+                                        <template x-for="m in xReply.moods" :key="m"><option :value="m" x-text="tOr('settings.xt.mood_' + m, m)"></option></template>
+                                    </select>
+                                    <p class="form-hint">{{ t('settings.xt.allowed_moods_hint') }}</p>
+                                </div>
+                                <div class="form-group">
+                                    <label :for="'xr-counter-' + i">{{ t('settings.xt.counterexamples') }}</label>
+                                    <textarea :id="'xr-counter-' + i" class="form-input" rows="3" :value="(s.counterexamples || []).join('\n')" @input="s.counterexamples = _xSplit($event.target.value, true)"></textarea>
+                                </div>
                                 <div class="form-group">
                                     <label :for="'xr-aliases-' + i">{{ t('settings.xt.aliases') }}</label>
                                     <input :id="'xr-aliases-' + i" class="form-input" :value="(s.aliases || []).join(', ')" @input="s.aliases = _xSplit($event.target.value, false)">
@@ -3398,13 +3435,13 @@
                                 </div>
                             </details>
                             <div class="form-group">
-                                <label>{{ t('settings.xt.register') }}</label>
-                                <input type="text" class="form-input" x-model="s.register"
+                                <label :for="'xr-register-' + i">{{ t('settings.xt.register') }}</label>
+                                <input :id="'xr-register-' + i" type="text" class="form-input" x-model="s.register"
                                        placeholder="{{ t('settings.xt.register_ph') }}" autocomplete="off">
                             </div>
                             <div class="form-group">
-                                <label>{{ t('settings.xt.hard_lines') }}</label>
-                                <textarea class="form-input" rows="3"
+                                <label :for="'xr-hard-' + i">{{ t('settings.xt.hard_lines') }}</label>
+                                <textarea :id="'xr-hard-' + i" class="form-input" rows="3"
                                           :value="s._hardText !== undefined ? s._hardText : (s.hard_lines || []).join('\n')"
                                           @input="s._hardText = $event.target.value"
                                           placeholder="{{ t('settings.xt.hard_lines_ph') }}"></textarea>
@@ -3413,8 +3450,8 @@
                                 </p>
                             </div>
                             <div class="form-group">
-                                <label>{{ t('settings.xt.examples') }}</label>
-                                <textarea class="form-input" rows="3"
+                                <label :for="'xr-examples-' + i">{{ t('settings.xt.examples') }}</label>
+                                <textarea :id="'xr-examples-' + i" class="form-input" rows="3"
                                           :value="s._exText !== undefined ? s._exText : (s.examples || []).join('\n')"
                                           @input="s._exText = $event.target.value"
                                           placeholder="{{ t('settings.xt.examples_ph') }}"></textarea>
