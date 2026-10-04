@@ -6649,6 +6649,130 @@ html.kazma-soft-nav #main-content {
 .x-policy-card > div:first-child { flex-wrap:wrap; }
 .x-policy-summary { display:flex;gap:8px;flex-wrap:wrap;margin-top:12px; }
 .x-policy-summary span { font-size:.76rem;padding:4px 8px;border-radius:6px;background:var(--bg-elevated);color:var(--text-secondary);overflow-wrap:anywhere; }
+/* X settings and Studio share the Kazma palette, including native controls.
+   Keep real inputs for keyboard/assistive technology; toggle sliders retain
+   their existing markup and styling. */
+.x-controls :is(.form-input, .form-select, .form-textarea),
+.x-controls .xs-compose textarea,
+.x-controls .xs-actions input {
+  background: var(--bg-2);
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  min-height: 42px;
+  padding: 10px 12px;
+  font: inherit;
+  box-sizing: border-box;
+}
+[data-theme="light"] .x-controls :is(.form-input, .form-select, .form-textarea),
+[data-theme="light"] .x-controls .xs-compose textarea,
+[data-theme="light"] .x-controls .xs-actions input {
+  background: var(--bg-panel);
+}
+.x-controls :is(.form-input, .form-select, .form-textarea):hover:not(:disabled),
+.x-controls .xs-compose textarea:hover,
+.x-controls .xs-actions input:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.x-controls :is(.form-input, .form-select, .form-textarea):focus,
+.x-controls .xs-compose textarea:focus,
+.x-controls .xs-actions input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.x-controls :is(.form-input, .form-select, .form-textarea):disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.x-controls textarea { resize: vertical; line-height: 1.5; }
+.x-controls select:not([multiple]) { cursor: pointer; }
+.x-controls select option { background: var(--bg-panel); color: var(--text-primary); }
+.x-controls select option:checked { background: var(--accent); color: #fff; }
+.x-controls :is(.checkbox-label, .xd-check) {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  line-height: 1.5;
+  margin-block: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.x-controls input[type="checkbox"]:not(.toggle input) {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  padding: 0;
+  background: var(--bg-panel);
+  border: 1.5px solid var(--accent);
+  border-radius: var(--radius-xs);
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.x-controls input[type="checkbox"]:not(.toggle input)::before {
+  content: '';
+  width: 9px;
+  height: 5px;
+  border-inline-start: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: translateY(-1px) rotate(-45deg);
+  opacity: 0;
+}
+/* A tick is geometric, so its direction stays the same in Arabic. */
+[dir="rtl"] .x-controls input[type="checkbox"]:not(.toggle input)::before {
+  border-inline-start: 0;
+  border-right: 0;
+  border-left: 2px solid #fff;
+}
+.x-controls input[type="checkbox"]:not(.toggle input):checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.x-controls input[type="checkbox"]:not(.toggle input):checked::before { opacity: 1; }
+.x-controls input[type="checkbox"]:not(.toggle input):focus-visible,
+.x-controls input[type="file"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.x-controls .toggle input:focus-visible + .toggle-slider {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.x-controls input[type="checkbox"]:not(.toggle input):disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.x-controls input[type="file"] { color: var(--text-secondary); font: inherit; }
+.x-controls input[type="file"]::file-selector-button {
+  min-height: 42px;
+  padding: 10px 14px;
+  margin-inline-end: 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-subtle);
+  color: var(--accent-light);
+  font: inherit;
+  cursor: pointer;
+}
+.x-controls input[type="file"]:disabled { opacity: 0.6; }
+.x-controls input[type="file"]:disabled::file-selector-button { cursor: not-allowed; }
+.xd-workspace label:not(.xd-check) {
+  display: block;
+  margin-block: 8px 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.xd-workspace .xd-actions > label { margin: 0; }
+@media (forced-colors: active) {
+  .x-controls input[type="checkbox"]:not(.toggle input) { appearance: auto; }
+  .x-controls input[type="checkbox"]:not(.toggle input)::before { content: none; }
+}
 @media (max-width: 640px) {
   .turn-approvals-head { font-size: 0.76rem; padding: 4px 8px; }
   .turn-approvals-rows { padding: 6px; gap: 5px; }
