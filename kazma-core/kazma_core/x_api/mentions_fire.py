@@ -50,6 +50,7 @@ _loop_task: asyncio.Task | None = None
 #: cycle -- a request per 10 minutes forever, and two identical rows in
 #: the audit log for every poll, burying the posts.
 _identity: tuple[str, str] | None = None
+_identity_key = ""
 _DEFAULT_POLL = 600.0
 #: Consecutive failures before the loop backs off hard. A 429 or a revoked
 #: token should not mean one doomed request every ten minutes forever.
@@ -321,14 +322,21 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
     client = XClient(xcfg.credentials)
     store = get_reply_store()
 
-    global _identity
-    if _identity is None:
+    global _identity, _identity_key
+    import hashlib
+
+    from kazma_core.x_api.ownership import x_tenant_id
+
+    identity_key = x_tenant_id() + ":" + hashlib.sha256(repr(xcfg.credentials).encode("utf-8")).hexdigest()
+    if _identity is None or _identity_key != identity_key:
+        _identity = None
         try:
             me = await client.verify_credentials()
             _identity = (
                 str(me.get("id") or ""),
                 str(me.get("username") or "").lower(),
             )
+            _identity_key = identity_key
         except XApiError as exc:
             logger.warning("[x-mentions] identity lookup failed: %s", exc)
             return []
@@ -337,7 +345,11 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
         _identity = None
         return []
 
-    stored_since = await asyncio.to_thread(store.get_since_id)
+    from kazma_core.x_api.account_binding import record_account
+
+    await asyncio.to_thread(record_account, xcfg.credentials, {"id": uid, "username": my_handle})
+
+    stored_since = await asyncio.to_thread(store.get_since_id, account_id=uid)
     since_id = "" if ignore_cursor else stored_since
     start_time = _snowflake_start_time(since_id) if since_id else ""
     try:
@@ -354,8 +366,8 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
     except XApiError as exc:
         if exc.status in (401, 403):
             logger.error(
-                "[x-mentions] HTTP %d reading mentions. The Free tier cannot "
-                "read this endpoint — check the X API plan. Poller will keep "
+                "[x-mentions] HTTP %d reading mentions. Check X account access, "
+                "app permissions and endpoint entitlement. Poller will keep "
                 "retrying; disable it with connectors.x.reply.enabled=false.",
                 exc.status,
             )
@@ -440,7 +452,7 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
                 except XApiError as exc:
                     await _skip(f"parent unreadable: {exc}")
                     continue
-            parent_text = str((parent or {}).get("text") or "") or text
+            parent_text = str(((parent or {}).get("note_tweet") or {}).get("text") or (parent or {}).get("text") or "") or text
             p_users = _index_users(p_includes)
             p_author = p_users.get(str((parent or {}).get("author_id") or ""))
             parent_handle = str((p_author or {}).get("username") or summoner).lower()
@@ -458,7 +470,7 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
                 parent, p_includes = await _walk_off_ours(
                     client, parent or {}, p_includes, uid,
                 )
-                parent_text = str((parent or {}).get("text") or "") or text
+                parent_text = str(((parent or {}).get("note_tweet") or {}).get("text") or (parent or {}).get("text") or "") or text
                 p_users = _index_users(p_includes)
                 p_author = p_users.get(str((parent or {}).get("author_id") or ""))
                 parent_handle = str(
@@ -478,20 +490,31 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
             parent_id = tid
 
         conversation_id = str(tweet.get("conversation_id") or "")
-        closed = bool(conversation_id) and await asyncio.to_thread(
-            store.is_conversation_closed, conversation_id,
+        from kazma_core.x_api.thread_policy import thread_authority
+
+        opened, closed, trusted_parent = await thread_authority(
+            cfg, store, conversation_id=conversation_id, parent_text=parent_text,
+            parent_handle=parent_handle, summon_text=text, summoner=summoner,
+            parent_authorized=bool(p_author) and parent_handle == my_handle,
         )
         if not cfg.is_summoner(
             summoner,
             parent_text=parent_text,
             summon_text=text,
             conversation_closed=closed,
+            conversation_open=opened,
+            parent_trusted=trusted_parent,
         ):
             await _skip(
                 f"@{summoner} not a trusted summoner (thread closed or no open marker)"
             )
             continue
 
+        from kazma_core.x_api.context import ContextSnapshot
+
+        source_post = parent if source_id else tweet
+        source_includes = _index_tweets(p_includes) if source_id else included
+        context = ContextSnapshot.from_x(source_post or {}, parent_handle if p_author else "", source_includes)
         result = await handle_summon(
             summon_id=tid,
             parent_id=parent_id,
@@ -503,6 +526,8 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
             # The mention carries the emoji that dials the tone.
             summon_text=text,
             conversation_id=conversation_id,
+            parent_authorized=trusted_parent,
+            context=context,
         )
         row = result.to_dict()
         row["mention"] = tid
@@ -512,7 +537,7 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
             _notify_draft(result, parent_handle=parent_handle, summoner=summoner)
 
     if newest and newest != since_id:
-        await asyncio.to_thread(store.set_since_id, newest)
+        await asyncio.to_thread(store.set_since_id, newest, account_id=uid)
 
     acted = [r for r in results if r.get("action") not in ("skipped", None)]
     logger.info(
@@ -524,27 +549,8 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
 
 
 def _notify_draft(result: Any, *, parent_handle: str, summoner: str) -> None:
-    """Push the held draft to the operator. Best-effort; never raises.
+    """The held-record transaction already enqueued the full revision notice.
 
-    ``draft`` mode is worthless if the draft sits in a database nobody looks
-    at, so this goes out on the ops-alert bus (Telegram when configured).
-    Approval itself happens through ``/x approve <id>``.
+    The scheduled background cadence drains notices even with reply polling off.
     """
-    try:
-        from kazma_core.observability.ops_alerts import alert
-
-        alert(
-            key=f"x_reply_draft:{result.parent_id}",
-            title="X reply drafted — approval needed",
-            detail=(
-                f"subject: {result.subject_id}\n"
-                f"to: @{parent_handle or '?'} (summoned by @{summoner or '?'})\n"
-                f"post: https://x.com/i/web/status/{result.parent_id}\n\n"
-                f"{result.draft}\n\n"
-                f"Approve with:  /x approve {result.summon_id}"
-            ),
-            severity="info",
-            cooldown_s=0,
-        )
-    except Exception:  # noqa: BLE001
-        logger.debug("[x-mentions] draft notification failed", exc_info=True)
+    logger.debug("[x-mentions] durable review notice queued for %s", result.summon_id)

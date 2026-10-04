@@ -1234,6 +1234,10 @@
                 const data = await this._fetch('/api/x/reply');
                 if (data && data.ok !== false) {
                     Object.assign(this.xReply, data);
+                    this.xReplyRoleBindings = {};
+                    (data.ai_roles || []).forEach(role => {
+                        this.xReplyRoleBindings[role] = Object.assign({ selection: 'inherit', provider: '', model: '' }, ((data.ai || {}).roles || {})[role] || {});
+                    });
                     this.xReplySummonersText = (data.summoners || []).join(', ');
                     this.xReplyProblems = [];
                 }
@@ -1261,10 +1265,31 @@
 
         xReplyAddSubject() {
             this.xReply.subjects.push({
-                id: '', match: [], view: '', mood: 'dry', side: 'against', register: '',
+                schema_version: 2, revision: 1, target: '', aliases: [], exclusions: [], scope: '',
+                exceptions: [], allowed_moods: [], allow_draft: true, allow_auto: false,
+                evidence_policy: 'required', evidence_max_age_days: 30, required_checks: ['context', 'target', 'stance', 'evidence', 'safety'],
+                id: '', match: [], view: '', mood: 'dry', side: '', register: '',
                 hard_lines: [], examples: [], _matchText: '', _hardText: '', _exText: '',
             });
             this.xReplyOpen = this.xReply.subjects.length - 1;
+        },
+
+        xReplyAIModels() {
+            const provider = (this.xReply.ai || {}).provider || '';
+            const row = (this.xReply.ai_options || []).find(function (p) { return p.provider === provider; });
+            return row ? (row.models || []) : [];
+        },
+
+        xReplyAIConfigPayload() {
+            const settings = Object.assign({}, this.xReply.ai);
+            if (this.xReplyRoleBindings && Object.keys(this.xReplyRoleBindings).length) {
+                settings.roles = {};
+                Object.keys(this.xReplyRoleBindings).forEach(role => {
+                    const pair = this.xReplyRoleBindings[role];
+                    if (pair.selection !== 'inherit') settings.roles[role] = Object.assign({}, pair);
+                });
+            }
+            return settings;
         },
 
         xReplyRemoveSubject(i) {
@@ -1284,7 +1309,7 @@
         xReplySubjectPayload() {
             const self = this;
             return this.xReply.subjects.map(function (s) {
-                return {
+                const card = {
                     id: (s.id || '').trim(),
                     match: s._matchText !== undefined ? self._xSplit(s._matchText, false) : (s.match || []),
                     view: s.view || '',
@@ -1294,10 +1319,17 @@
                     hard_lines: s._hardText !== undefined ? self._xSplit(s._hardText, true) : (s.hard_lines || []),
                     examples: s._exText !== undefined ? self._xSplit(s._exText, true) : (s.examples || []),
                 };
+                ['schema_version', 'revision', 'target', 'aliases', 'exclusions', 'scope', 'exceptions',
+                 'allowed_moods', 'allow_draft', 'allow_auto', 'evidence_policy', 'evidence_max_age_days', 'required_checks',
+                 'counterexamples', 'owner', 'change_reason'].forEach(function (key) {
+                    if (s[key] !== undefined) card[key] = s[key];
+                });
+                return card;
             });
         },
 
         async saveXReply() {
+            if (this.xReplySaving || this.xReplyLoading) return;
             this.xReplySaving = true;
             this.xReplyProblems = [];
             try {
@@ -1306,7 +1338,9 @@
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     credentials: 'same-origin',
                     body: JSON.stringify({
+                        expected_revision: Number(this.xReply.settings_revision) || 0,
                         enabled: !!this.xReply.enabled,
+                        ai: this.xReplyAIConfigPayload(),
                         mode: this.xReply.mode || 'off',
                         summoners: this._xSplit(this.xReplySummonersText, false),
                         trigger: this.xReply.trigger || '',
@@ -1371,6 +1405,7 @@
                     // when nothing is expanded.
                     body: JSON.stringify({
                         parent_text: this.xReplyPreview.text,
+                        ai: this.xReplyAIConfigPayload(),
                         parent_handle: this.xReplyPreview.handle,
                         subject_id: this.xReplyPreview.subject_id,
                         mood: this.xReplyPreview.mood,

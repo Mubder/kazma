@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.config_store import apply_sqlite_pragmas
+from kazma_core.x_api.ownership import x_tenant_id as _tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +176,10 @@ class XAuditLog:
             conn = self._connect()
             try:
                 conn.executescript(_CREATE)
+                from kazma_core.db.sqlite_columns import add_missing_columns
+
+                add_missing_columns(conn, "x_audit_log", (("tenant_id", "TEXT NOT NULL DEFAULT 'default'"),
+                                                        ("operation_id", "TEXT NOT NULL DEFAULT ''")))
                 conn.commit()
             finally:
                 conn.close()
@@ -192,6 +197,7 @@ class XAuditLog:
         response_body: Any = None,
         duration_ms: int | None = None,
         ts: str | None = None,
+        operation_id: str = "",
     ) -> int | None:
         """Append one audit row. Returns the row id (or None on failure).
 
@@ -205,8 +211,8 @@ class XAuditLog:
                 cur = conn.execute(
                     "INSERT INTO x_audit_log "
                     "(ts, action, method, endpoint, status, http_status, tweet_id, "
-                    " request_body, response_body, duration_ms) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " request_body, response_body, duration_ms, tenant_id, operation_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         row_ts,
                         action,
@@ -218,6 +224,8 @@ class XAuditLog:
                         _dumps(request_body) if request_body is not None else None,
                         _dumps(response_body) if response_body is not None else None,
                         duration_ms,
+                        _tenant_id(),
+                        operation_id,
                     ),
                 )
                 conn.commit()
@@ -232,11 +240,12 @@ class XAuditLog:
         action: str | None = None,
         status: str | None = None,
         tweet_id: str | None = None,
+        operation_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Newest-first audit rows (dicts) for surfacing in tooling/UI."""
         sql = "SELECT * FROM x_audit_log"
-        clauses: list[str] = []
-        params: list[Any] = []
+        clauses: list[str] = ["tenant_id = ?"]
+        params: list[Any] = [_tenant_id()]
         if action:
             clauses.append("action = ?")
             params.append(action)
@@ -246,6 +255,9 @@ class XAuditLog:
         if tweet_id:
             clauses.append("tweet_id = ?")
             params.append(tweet_id)
+        if operation_id:
+            clauses.append("operation_id = ?")
+            params.append(operation_id)
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY id DESC LIMIT ?"
@@ -262,7 +274,7 @@ class XAuditLog:
         with self._lock:
             conn = self._connect()
             try:
-                cur = conn.execute("DELETE FROM x_audit_log WHERE ts < ?", (cutoff,))
+                cur = conn.execute("DELETE FROM x_audit_log WHERE ts < ? AND tenant_id = ?", (cutoff, _tenant_id()))
                 conn.commit()
                 return cur.rowcount or 0
             finally:
@@ -303,6 +315,7 @@ def log_x_event(
     request_body: Any = None,
     response_body: Any = None,
     duration_ms: int | None = None,
+    operation_id: str = "",
 ) -> None:
     """Best-effort audit append from the X client — never raises."""
     try:
@@ -316,6 +329,7 @@ def log_x_event(
             request_body=request_body,
             response_body=response_body,
             duration_ms=duration_ms,
+            operation_id=operation_id,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("[x-audit] failed to record %s: %s", action, exc)

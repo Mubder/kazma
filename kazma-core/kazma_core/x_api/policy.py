@@ -34,9 +34,12 @@ def evaluate_post(
     *,
     cfg: XConfig | None = None,
     reply_to_id: str = "",
+    check_history: bool = True,
 ) -> PolicyDecision:
     """Return allow/deny for a candidate tweet. No network."""
     cfg = cfg or get_x_config()
+    if cfg.restore_paused:
+        return PolicyDecision(False, "X publishing is paused after restore. Verify the account and explicitly resume in X Studio.")
     if cfg.kill_switch:
         return PolicyDecision(False, "X posting is disabled (KAZMA_X_POST=0).")
     if not cfg.enabled:
@@ -54,11 +57,14 @@ def evaluate_post(
     body = (text or "").strip()
     if not body:
         return PolicyDecision(False, "Tweet text is empty.")
-    if len(body) > cfg.max_chars:
+    from kazma_core.x_api.text_length import validate_text
+
+    length = validate_text(body, maximum=cfg.max_chars)
+    if not length.valid:
         return PolicyDecision(
             False,
-            f"Tweet is {len(body)} characters; cap is {cfg.max_chars} "
-            "(Free-tier text tweets are 280). Shorten it.",
+            f"Tweet has weighted length {length.weighted}; cap is {cfg.max_chars}. "
+            "Shorten it or remove invalid characters.",
         )
 
     mentions = tuple(_MENTION_RE.findall(body))
@@ -93,6 +99,9 @@ def evaluate_post(
             hashtags=hashtags,
         )
 
+    if not check_history:
+        return PolicyDecision(True, "Policy ok; quota reservation checked by publication service.",
+                              mentions=mentions, cashtags=cashtags, hashtags=hashtags)
     ledger = get_ledger()
     if ledger.has_duplicate(body, window_days=cfg.duplicate_window_days):
         return PolicyDecision(
@@ -138,6 +147,8 @@ def evaluate_post(
 
 def evaluate_delete(*, cfg: XConfig | None = None) -> PolicyDecision:
     cfg = cfg or get_x_config()
+    if cfg.restore_paused:
+        return PolicyDecision(False, "X publishing is paused after restore. Verify the account and explicitly resume in X Studio.")
     if cfg.kill_switch:
         return PolicyDecision(False, "X posting is disabled (KAZMA_X_POST=0).")
     if not cfg.enabled or not cfg.credentials.complete():

@@ -24,7 +24,7 @@
   .xs-row { display: flex; justify-content: space-between; gap: .75rem; padding: .55rem 0; border-top: 1px solid var(--border-subtle); font-size: .82rem; align-items: flex-start; }
   .xs-row:first-of-type { border-top: 0; }
   .xs-body { flex: 1; min-width: 0; }
-  .xs-row .txt { width: 100%; overflow: hidden; max-height: 4.6em; word-break: break-word; unicode-bidi: isolate; text-align: start; }
+  .xs-row .txt { width: 100%; overflow-wrap: anywhere; word-break: break-word; unicode-bidi: isolate; text-align: start; }
   .xs-row .kicker { font-size: .68rem; color: var(--text-muted); margin-bottom: 2px; }
   .xs-row .when { font-size: .72rem; color: var(--text-muted); white-space: nowrap; }
   .xs-draft-actions { display: flex; flex-direction: column; gap: .3rem; flex-shrink: 0; }
@@ -59,15 +59,42 @@
   <div class="xs-head">
     <div class="xs-meta">
       <span translate="no" x-text="status.handle || 'X'"></span>
-      <span class="xs-pill" x-text="((status.caps && status.caps.posts_today) || 0) + '/' + ((status.caps && status.caps.max_posts_per_day) || 8) + ' ' + t('x_studio.quota')"></span>
+      <span class="xs-pill" x-show="loadStates.status && loadStates.status.at" x-text="((status.caps && status.caps.posts_today) || 0) + '/' + ((status.caps && status.caps.max_posts_per_day) || 8) + ' ' + t('x_studio.quota')"></span>
+      <span class="xs-pill" x-show="status.ai_budget" x-cloak
+            x-text="status.ai_budget ? t('x_studio.model_budget').replace('{used}', status.ai_budget.usage.calls).replace('{limit}', status.ai_budget.limits.max_daily_calls) : ''"></span>
+      <span class="xs-pill" x-show="status.ai_budget" x-cloak
+            x-text="status.ai_budget ? t('x_studio.read_budget').replace('{used}', status.ai_budget.read_usage.calls).replace('{limit}', status.ai_budget.limits.max_daily_reads) : ''"></span>
     </div>
     <a class="btn btn-secondary btn-sm" href="/scheduled">{{ t('x_studio.all_clocks') }}</a>
+  </div>
+
+  <template x-for="section in Object.keys(loadStates)" :key="section">
+    <div class="xs-warn" x-show="loadStates[section].error" role="alert" x-cloak>
+      <span x-text="t('x_studio.load_failed').replace('{section}', t('x_studio.section_' + section))"></span>
+      <span translate="no" :dir="textDir(loadStates[section].error)" x-text="loadStates[section].error"></span>
+      <button class="btn btn-secondary btn-sm" @click="reloadSection(section)">{{ t('common.retry') }}</button>
+    </div>
+  </template>
+
+  <div class="xs-warn" x-show="status.restore_paused" role="alert" x-cloak>
+    {{ t('x_studio.restore_pause') }}
+    <button class="btn btn-secondary btn-sm" @click="resumePublishing()" :disabled="busy">{{ t('x_studio.resume_publishing') }}</button>
   </div>
 
   <div class="xs-warn" x-show="!status.can_post" x-cloak>
     {{ t('x_studio.connector_off') }}
     <a href="/settings?tab=x" style="color:var(--accent);margin-inline-start:.5rem;">{{ t('x_studio.open_settings') }}</a>
   </div>
+
+  <details class="xs-card" style="margin-bottom:1rem;">
+    <summary>{{ t('x_studio.qualification_title') }}</summary>
+    <p>{{ t('x_studio.qualification_description') }}</p>
+    <p x-show="qualification" x-cloak translate="no" x-text="qualification ? (qualification.qualified ? t('x_studio.qualification_passed') : qualification.reason) : ''"></p>
+    <code x-show="qualification" x-cloak translate="no" x-text="qualification ? qualification.fingerprint : ''" style="overflow-wrap:anywhere;"></code>
+    <label for="xs-qualification">{{ t('x_studio.qualification_upload') }}</label>
+    <input id="xs-qualification" type="file" accept="application/json,.json" @change="uploadQualification($event)" :disabled="qualificationBusy">
+    <p x-show="qualificationError" role="alert" x-cloak translate="no" :dir="textDir(qualificationError)" x-text="qualificationError"></p>
+  </details>
 
   <div class="xs-tabs" role="tablist">
     <button role="tab" :class="tab === 'studio' ? 'on' : ''"
@@ -83,14 +110,33 @@
   <div class="two-col-grid" x-show="tab === 'studio'" x-cloak>
     <div class="xs-card xs-compose">
       <h2>{{ t('x_studio.composer') }}</h2>
-      <textarea x-model="text" @input="onInput()" maxlength="2000"
+      <p class="xs-meta" aria-live="polite" x-show="composerSavedAt && !composerError" x-cloak>{{ t('x_studio.composer_saved') }}</p>
+      <div class="xs-warn" x-show="composerError" role="alert" x-cloak>
+        <span translate="no" :dir="textDir(composerError)" x-text="composerError"></span>
+        <button class="btn btn-secondary btn-sm" @click="loadComposer()">{{ t('x_studio.reload_saved_composer') }}</button>
+      </div>
+      <label for="xs-brief">{{ t('x_studio.draft_brief') }}</label>
+      <textarea id="xs-brief" x-model="draftBrief" maxlength="4000" :dir="textDir(draftBrief)"
+                placeholder="{{ t('x_studio.brief_placeholder') }}"></textarea>
+      <label for="xs-draft-count">{{ t('x_studio.alternatives') }}</label>
+      <select id="xs-draft-count" x-model="draftCount" :disabled="generateBusy">
+        <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+      </select>
+      <button class="btn btn-secondary btn-sm" type="button" :disabled="generateBusy || !draftBrief.trim()"
+              @click="generateDrafts()" x-text="generateBusy ? t('x_studio.generating') : t('x_studio.generate')"></button>
+      <div class="xs-reason" x-show="generateError" x-cloak translate="no" :dir="textDir(generateError)" x-text="generateError" role="alert"></div>
+      <template x-for="model in generatedModels" :key="model.provider + ':' + model.model">
+        <div class="xs-meta" translate="no" x-text="model.provider + ' / ' + model.model"></div>
+      </template>
+      <label for="xs-text">{{ t('x_studio.public_text') }}</label>
+      <textarea id="xs-text" x-model="text" @input="onInput()" maxlength="2000"
                 :dir="textDir(text)"
                 x-effect="stampAr($el, text)"
-                :disabled="!status.can_post" placeholder="{{ t('x_studio.placeholder') }}"></textarea>
+                placeholder="{{ t('x_studio.placeholder') }}"></textarea>
       <div class="xs-thread">
         <div class="grow">
           <label for="xs-reply">{{ t('x_studio.reply_to') }}</label>
-          <input id="xs-reply" type="text" x-model="replyToId" :disabled="!status.can_post"
+          <input id="xs-reply" type="text" x-model="replyToId"
                  @change="replyToId = parseTweetId(replyToId)">
         </div>
         <button class="btn btn-secondary btn-sm" type="button" x-show="replyToId" x-cloak
@@ -118,6 +164,8 @@
 
     <div class="xs-card">
       <h2>{{ t('x_studio.planner') }}</h2>
+      <span class="xs-meta" x-text="kazmaCount('x_studio.queue_count', queueCount)"></span>
+      <label><input type="checkbox" x-model="includeFinished" @change="loadQueue()"> {{ t('x_studio.show_finished') }}</label>
       <div class="xs-week">
         <template x-for="d in week" :key="d.key">
           <div class="xs-day" :class="d.count ? 'has' : ''">
@@ -126,7 +174,8 @@
           </div>
         </template>
       </div>
-      <div class="xs-empty" x-show="!queue.length" x-cloak>{{ t('x_studio.empty_queue') }}</div>
+      <div class="xs-empty" x-show="loadStates.queue && loadStates.queue.loading" x-cloak>{{ t('x_studio.loading') }}</div>
+      <div class="xs-empty" x-show="!queue.length && loadStates.queue && !loadStates.queue.loading && !loadStates.queue.error" x-cloak>{{ t('x_studio.empty_queue') }}</div>
       <template x-for="item in queue" :key="item.id">
         <div class="xs-row" x-effect="stampAr($el, displayBody(item.summary))">
           <div class="xs-body" translate="no">
@@ -134,14 +183,18 @@
                  x-text="item.kicker || displayKicker(item.summary)"></div>
             <div class="txt" x-text="displayBody(item.summary)"></div>
             <div class="when" x-text="fmtWhen(item.when)"></div>
+            <span class="xs-pill" x-text="item.state"></span>
+            <div class="xs-reason" x-show="item.reason" x-text="item.reason"></div>
+            <div class="xs-reason" x-show="item.needs_reconciliation">{{ t('x_studio.verify_unknown') }}</div>
           </div>
           <div class="acts">
-            <input type="datetime-local" x-model="item.editWhen">
-            <button class="btn btn-secondary btn-sm" @click="reschedule(item)">{{ t('x_studio.reschedule') }}</button>
-            <button class="btn btn-danger btn-sm" @click="cancel(item)">{{ t('x_studio.cancel') }}</button>
+            <input type="datetime-local" x-model="item.editWhen" x-show="item.can_reschedule" :aria-label="t('x_studio.when')">
+            <button class="btn btn-secondary btn-sm" x-show="item.can_reschedule" :disabled="!!queueBusy" @click="reschedule(item)">{{ t('x_studio.reschedule') }}</button>
+            <button class="btn btn-danger btn-sm" x-show="item.can_cancel" :disabled="!!queueBusy" @click="cancel(item)">{{ t('x_studio.cancel') }}</button>
           </div>
         </div>
       </template>
+      <button class="btn btn-secondary btn-sm" x-show="queueNext" :disabled="loadStates.queue && loadStates.queue.loading" @click="loadQueue(true)">{{ t('x_studio.load_more') }}</button>
     </div>
   </div>
 
@@ -158,14 +211,20 @@
           {{ t('x_studio.show_dismissed') }}
         </label>
       </div>
-      <div class="xs-empty" x-show="!drafts.length && !showDismissed" x-cloak>{{ t('x_studio.empty_drafts') }}</div>
-      <div class="xs-empty" x-show="!drafts.length && showDismissed" x-cloak>{{ t('x_studio.empty_dismissed') }}</div>
+      <div class="xs-empty" x-show="!drafts.length && !showDismissed && loadStates.drafts && !loadStates.drafts.loading && !loadStates.drafts.error" x-cloak>{{ t('x_studio.empty_drafts') }}</div>
+      <div class="xs-empty" x-show="!drafts.length && showDismissed && loadStates.drafts && !loadStates.drafts.loading && !loadStates.drafts.error" x-cloak>{{ t('x_studio.empty_dismissed') }}</div>
+      <label for="xs-draft-search">{{ t('common.search') }}</label>
+      <input id="xs-draft-search" type="search" x-model="draftQuery" @input.debounce.350ms="loadDrafts()" maxlength="200">
       <template x-for="d in drafts" :key="d.id">
         <div class="xs-row" x-effect="stampAr($el, displayBody(d.text))">
           <div class="xs-body" translate="no">
             <div class="kicker" x-show="displayKicker(d.text)" x-cloak
                  x-text="displayKicker(d.text)"></div>
             <div class="txt" x-text="displayBody(d.text)"></div>
+            <template x-for="check in ((d.review || {}).checks || [])" :key="check.check">
+              <span class="xs-pill" :class="check.verdict === 'pass' ? '' : 'bad'" :title="check.reason"
+                    x-text="t('x_studio.check_' + check.check) + ': ' + t('x_studio.verdict_' + check.verdict)"></span>
+            </template>
           </div>
           <div class="xs-draft-actions">
             <button class="btn btn-secondary btn-sm" x-show="!showDismissed" x-cloak
@@ -179,16 +238,43 @@
           </div>
         </div>
       </template>
+      <button class="btn btn-secondary btn-sm" x-show="draftsNext" :disabled="loadStates.drafts && loadStates.drafts.loading" @click="loadDrafts(true)">{{ t('x_studio.load_more') }}</button>
+    </div>
+    <div class="xs-card">
+      <h2>{{ t('x_studio.publication_history') }}</h2>
+      <button class="btn btn-secondary btn-sm" @click="loadOperations()">{{ t('common.refresh') }}</button>
+      <p class="xs-meta">{{ t('x_studio.operation_history_hint') }}</p>
+      <p x-show="loadStates.operations && loadStates.operations.loading">{{ t('x_studio.loading') }}</p>
+      <label for="xs-operation-search">{{ t('common.search') }}</label>
+      <input id="xs-operation-search" type="search" x-model="operationQuery" @input.debounce.350ms="loadOperations()" maxlength="200">
+      <template x-for="operation in operations" :key="operation.id">
+        <div class="xs-row">
+          <div class="xs-body">
+            <div class="txt" :dir="textDir(operation.text)" x-text="operation.text"></div>
+            <span x-text="t('x_studio.status_' + operation.state)"></span>
+            <span translate="no" :dir="textDir(operation.reason)" x-text="operation.reason"></span>
+            <a x-show="operation.tweet_id" :href="'https://x.com/i/web/status/' + operation.tweet_id" target="_blank" rel="noopener noreferrer">X</a>
+          </div>
+          <button class="btn btn-secondary btn-sm" @click="inspectOperation(operation)">{{ t('x_studio.history') }}</button>
+        </div>
+      </template>
+      <button class="btn btn-secondary btn-sm" x-show="operationsNext" :disabled="loadStates.operations && loadStates.operations.loading" @click="loadOperations(true)">{{ t('x_studio.load_more') }}</button>
+      <p x-show="operationError" role="alert" translate="no" :dir="textDir(operationError)" x-text="operationError"></p>
+      <div x-show="selectedOperation" x-cloak>
+        <template x-for="event in (selectedOperation ? selectedOperation.events : [])" :key="event.id">
+          <p class="xs-meta"><span x-text="fmtWhen(new Date(event.at * 1000).toISOString())"></span> · <span x-text="t('x_studio.status_' + event.state)"></span></p>
+        </template>
+      </div>
     </div>
     <div class="xs-card">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:.75rem;flex-wrap:wrap;">
-        <h2 style="margin:0 0 .75rem;">{{ t('x_studio.posted') }}</h2>
+        <h2 style="margin:0 0 .75rem;">{{ t('x_studio.activity') }}</h2>
         <label style="font-size:.72rem;color:var(--text-muted);display:flex;gap:.35rem;align-items:center;">
           <input type="checkbox" x-model="auditWritesOnly">
           {{ t('x_studio.writes_only') }}
         </label>
       </div>
-      <div class="xs-empty" x-show="!auditRows.length" x-cloak>{{ t('x_studio.empty_audit') }}</div>
+      <div class="xs-empty" x-show="!auditRows.length && loadStates.audit && loadStates.audit.at && !loadStates.audit.error" x-cloak>{{ t('x_studio.empty_audit') }}</div>
       <template x-for="e in auditRows" :key="e.id || (e.ts + e.action)">
         <div class="xs-row" x-effect="stampAr($el, displayBody(auditText(e)))">
           <div class="xs-body" translate="no">
@@ -226,12 +312,20 @@
     <p style="font-size:.76rem;color:var(--text-muted);margin:.4rem 0 0;">
       {{ t('x_studio.conv_refresh_hint') }}
     </p>
-    <p x-show="!convLoading && !conversations.length" x-cloak
+    <p x-show="!convLoading && !conversations.length && loadStates.conversations && !loadStates.conversations.error" x-cloak
        style="font-size:.84rem;color:var(--text-muted);margin-top:.75rem;">
       {{ t('x_studio.conv_empty') }}
       <a href="/settings?tab=x" style="color:var(--accent);">{{ t('x_studio.auto_reply_settings') }}</a>.
     </p>
 
+    <label for="xs-conversation-search">{{ t('common.search') }}</label>
+    <input id="xs-conversation-search" type="search" x-model="conversationQuery" @input.debounce.350ms="loadConversations()" maxlength="200">
+    <select x-model="conversationState" @change="loadConversations()" aria-label="{{ t('x_studio.tab_conversations') }}">
+      <option value="">{{ t('x_studio.all_states') }}</option>
+      <option value="awaiting_approval">{{ t('x_studio.status_awaiting_approval') }}</option>
+      <option value="outcome_unknown">{{ t('x_studio.status_outcome_unknown') }}</option>
+      <option value="posted">{{ t('x_studio.status_posted') }}</option>
+    </select>
     <template x-for="c in conversations" :key="c.summon_id">
       <div class="xs-conv">
         <div class="xs-turn">
@@ -249,17 +343,23 @@
         </div>
         <div class="xs-turn" x-show="!c.reply && c.reason" x-cloak>
           <span class="who">{{ t('x_studio.kazma_no_reply') }}</span>
-          <span class="what" translate="no" style="color:var(--text-muted);" x-text="c.reason"></span>
+          <span class="what" translate="no" style="color:var(--text-muted);" translate="no" :dir="textDir(c.reason)" x-text="c.reason"></span>
         </div>
         <div class="foot">
+          <span class="xs-meta" x-show="c.reason && c.reply" x-cloak translate="no" :dir="textDir(c.reason)" x-text="c.reason"></span>
+          <template x-for="check in (c.checks || [])" :key="check.check">
+            <span class="xs-pill" :class="check.verdict === 'pass' ? '' : 'bad'"
+                  :title="check.reason" x-text="t('x_studio.check_' + check.check) + ': ' + t('x_studio.verdict_' + check.verdict)"></span>
+          </template>
           <span class="xs-pill" :class="c.status === 'failed' ? 'bad' : ''" x-text="tOr('x_studio.status_' + c.status, c.status)"></span>
           <span x-show="c.subject" x-cloak translate="no" x-text="c.subject"></span>
           <span x-text="convWhen(c.at)"></span>
           <a x-show="c.url" x-cloak :href="c.url" target="_blank" rel="noopener"
              style="color:var(--accent);">{{ t('x_studio.open_on_x') }}</a>
           <span class="xs-row acts" style="margin-inline-start:auto;">
+            <button class="btn btn-secondary btn-sm" @click="loadHistory(c)" :aria-expanded="!!c.historyOpen">{{ t('x_studio.history') }}</button>
             <button class="btn btn-primary btn-sm"
-                    x-show="c.status === 'awaiting_approval' || (c.status === 'failed' && c.reply)" x-cloak
+                    x-show="c.can_approve" x-cloak
                     :disabled="convBusy === c.summon_id"
                     @click="convAction('approve', c)">{{ t('common.approve') }}</button>
             <button class="btn btn-danger btn-sm"
@@ -267,7 +367,7 @@
                     :disabled="convBusy === c.summon_id"
                     @click="convAction('deny', c)">{{ t('common.deny') }}</button>
             <button class="btn btn-secondary btn-sm"
-                    x-show="c.status === 'skipped' || c.status === 'failed' || c.status === 'awaiting_approval' || c.status === 'drafting'" x-cloak
+                    x-show="c.can_retry" x-cloak
                     :disabled="convBusy === c.summon_id"
                     @click="convAction('retry', c)">{{ t('common.retry') }}</button>
             <button class="btn btn-danger btn-sm"
@@ -275,8 +375,26 @@
                     @click="convAction('delete', c)">{{ t('common.delete') }}</button>
           </span>
         </div>
+        <div x-show="c.historyOpen" x-cloak>
+          <p class="xs-reason" x-show="c.historyError" x-text="c.historyError" role="alert"></p>
+          <p x-show="c.historyLoading">{{ t('x_studio.loading') }}</p>
+          <p class="xs-meta" x-show="!c.historyLoading && !c.historyError && !(c.history || []).length">{{ t('x_studio.no_history') }}</p>
+          <template x-for="(entry, index) in (c.history || [])" :key="index">
+            <div class="xs-turn">
+              <span class="who" x-text="t('x_studio.attempt').replace('{number}', entry.attempt_no)"></span>
+              <div class="what" :dir="textDir(entry.record.draft)">
+                <p translate="no" x-text="entry.record.draft || entry.record.reason"></p>
+                <span class="xs-meta" x-text="entry.event + ' · ' + (entry.actor || '') + ' · ' + entry.record.status + ' · ' + convWhen(entry.created_at)"></span>
+                <template x-for="check in (entry.record.decision.checks || [])" :key="check.check">
+                  <span class="xs-pill" :title="check.reason" x-text="check.check + ': ' + check.verdict"></span>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
       </div>
     </template>
+    <button class="btn btn-secondary btn-sm" x-show="conversationsNext" :disabled="convLoading" @click="loadConversations({more: true})">{{ t('x_studio.load_more') }}</button>
   </div>
 </div>
 {% endblock %}

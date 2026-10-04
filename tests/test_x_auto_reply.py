@@ -12,11 +12,10 @@ from __future__ import annotations
 import time
 
 import pytest
-
 from kazma_core.x_api import reply as reply_mod
 from kazma_core.x_api import stance as stance_mod
+from kazma_core.x_api.config import XCredentials
 from kazma_core.x_api.reply import (
-    SummonResult,
     handle_summon,
     parse_tweet_url,
     screen_draft,
@@ -37,12 +36,11 @@ from kazma_core.x_api.stance import (
     classify,
 )
 
-
 # A deliberately mundane subject. It still exercises everything the fixture
 # needs to: a strong stance, an ASCII keyword that is a substring of unrelated
 # words ("var" inside "variable"), and a non-ASCII keyword.
 VAR = Subject(
-    id="var",
+    id="var", allow_auto=True,
     match=("var", "offside", "تحكيم"),
     view="VAR has made football worse and the people defending it know it.",
     mood="roast",
@@ -51,6 +49,11 @@ VAR = Subject(
 COFFEE = Subject(
     id="coffee", match=("espresso",), view="Dark roast is a cover-up.", mood="dry"
 )
+
+
+def _approval_token(summon_id):
+    from kazma_core.x_api.reply_store import get_reply_store
+    return get_reply_store().get(summon_id).approval_token
 
 
 def _cfg(**over) -> ReplyConfig:
@@ -84,6 +87,9 @@ def _no_llm(monkeypatch):
         raise AssertionError("LLM classifier should not have been called")
 
     monkeypatch.setattr(stance_mod, "_llm_pick", _never)
+    # These tests stub publication; account and policy bindings have their own integration tests.
+    monkeypatch.setattr("kazma_core.x_api.approval.capture_basis", lambda cfg: {"unit_fixture": True})
+    monkeypatch.setattr("kazma_core.x_api.approval.binding_hold", lambda basis: "")
 
 
 def _stub_draft(monkeypatch, text="Four minutes to draw a line through a knee. Riveting stuff."):
@@ -360,9 +366,8 @@ async def test_classifier_cannot_invent_a_subject(monkeypatch):
         "kazma_core.model_registry.get_model_registry",
         lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: _Provider())})(),
     )
-    got = await classify("something unrelated entirely", _cfg())
-    assert got is None
-    assert got != "geopolitics"
+    with pytest.raises(stance_mod.ClassifierUnavailable):
+        await classify("something unrelated entirely", _cfg())
 
 
 # ── Gates ─────────────────────────────────────────────────────────────────
@@ -558,10 +563,10 @@ async def test_screened_draft_never_posts(_no_llm, monkeypatch):
 # ── auto mode ─────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_auto_mode_publishes_and_records(_no_llm, monkeypatch):
+async def test_unqualified_auto_mode_holds_then_manual_approval_records(_no_llm, monkeypatch):
     from kazma_core.x_api.reply_store import get_reply_store
 
-    async def _publish(*, text, reply_to_id=""):
+    async def _publish(*, text, reply_to_id="", **metadata):
         assert reply_to_id == "m13", "reply to the mention, not the parent"
         return True, {"posted": True, "tweet_id": "9001",
                       "url": "https://x.com/i/web/status/9001"}
@@ -575,6 +580,8 @@ async def test_auto_mode_publishes_and_records(_no_llm, monkeypatch):
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(mode=MODE_AUTO, stance_check=False),
     )
+    assert res.action == "awaiting_approval" and "mandatory verification" in res.reason
+    res = await reply_mod.approve_summon("m13", approval_token=_approval_token("m13"))
     assert res.action == "posted" and res.tweet_id == "9001"
     assert get_reply_store().get("m13").status == STATUS_POSTED
 
@@ -604,7 +611,7 @@ async def test_approve_posts_the_stored_draft(_no_llm, monkeypatch):
 
     sent = {}
 
-    async def _publish(*, text, reply_to_id=""):
+    async def _publish(*, text, reply_to_id="", **metadata):
         sent["text"] = text
         sent["reply_to_id"] = reply_to_id
         return True, {"tweet_id": "42", "url": "u"}
@@ -616,7 +623,7 @@ async def test_approve_posts_the_stored_draft(_no_llm, monkeypatch):
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(mode=MODE_DRAFT),
     )
-    res = await approve_summon("m15")
+    res = await approve_summon("m15", approval_token=_approval_token("m15"))
     assert res.action == "posted"
     assert sent["text"] == "the exact stored draft"
     assert sent["reply_to_id"] == "m15", "approve must reply to the mention"
@@ -642,7 +649,7 @@ async def test_approve_retries_a_wire_403(_no_llm, monkeypatch):
 
     sent = {}
 
-    async def _publish(*, text, reply_to_id=""):
+    async def _publish(*, text, reply_to_id="", **metadata):
         sent["reply_to_id"] = reply_to_id
         sent["text"] = text
         return True, {"tweet_id": "7", "url": "u"}
@@ -657,13 +664,14 @@ async def test_approve_retries_a_wire_403(_no_llm, monkeypatch):
         "2100705922142073166",
         draft="the held roast", subject_id="voice",
     )
-    store.mark_failed(
+    store.mark_publish_failure(
         "2100705922142073166",
         "X auth/permission error HTTP 403. You can only reply to or quote "
         "posts where you are mentioned or are the author.",
+        outcome="rejected",
     )
     monkeypatch.setattr("kazma_core.x_api.booking.publish_x_post", _publish)
-    res = await approve_summon("2100705922142073166")
+    res = await approve_summon("2100705922142073166", approval_token=_approval_token("2100705922142073166"))
     assert res.action == "posted"
     assert sent["reply_to_id"] == "2100705922142073166"
     assert sent["text"] == "the held roast"
@@ -683,7 +691,7 @@ async def test_screen_failure_is_not_republishable(_no_llm, monkeypatch):
     store.mark_awaiting("bad1", draft="they should die", subject_id="voice")
     store.mark_failed("bad1", "draft contains a banned construction ('should die')")
     monkeypatch.setattr("kazma_core.x_api.booking.publish_x_post", _publish)
-    res = await approve_summon("bad1")
+    res = await approve_summon("bad1", approval_token=_approval_token("bad1"))
     assert res.action == "skipped"
 
 
@@ -693,7 +701,7 @@ async def test_approve_is_not_replayable(_no_llm, monkeypatch):
 
     calls = {"n": 0}
 
-    async def _publish(*, text, reply_to_id=""):
+    async def _publish(*, text, reply_to_id="", **metadata):
         calls["n"] += 1
         return True, {"tweet_id": "43", "url": "u"}
 
@@ -704,8 +712,8 @@ async def test_approve_is_not_replayable(_no_llm, monkeypatch):
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(mode=MODE_DRAFT),
     )
-    assert (await approve_summon("m16")).action == "posted"
-    assert (await approve_summon("m16")).action == "skipped"
+    assert (await approve_summon("m16", approval_token=_approval_token("m16"))).action == "posted"
+    assert (await approve_summon("m16", approval_token=_approval_token("m16"))).action == "skipped"
     assert calls["n"] == 1
 
 
@@ -756,7 +764,6 @@ def test_universal_hard_lines_always_apply():
 # operator's own registers their reply arrives in.
 
 import pytest
-
 from kazma_core.x_api.stance import SUMMON_ANYONE, mood_from_text
 
 
@@ -1004,11 +1011,11 @@ def test_long_texts_are_bounded():
     store = get_reply_store()
     store.claim(
         summon_id="c3", parent_id="p3", target_handle="t", summoner="s",
-        parent_text="x" * 9000, summon_text="y" * 9000,
+        parent_text="x" * 18000, summon_text="y" * 9000,
     )
     rec = store.get("c3")
-    assert len(rec.parent_text) == 2000
-    assert len(rec.summon_text) == 500
+    assert len(rec.parent_text) == 16000
+    assert len(rec.summon_text) == 4000
 
 
 def test_older_stores_gain_the_columns(tmp_path):
@@ -1070,13 +1077,27 @@ def test_older_stores_gain_the_columns(tmp_path):
 # summoned to answer.
 
 def _verdict(monkeypatch, word):
-    """Stub the classifier to return one verdict."""
-    class _Resp:
-        content = word
-
+    """Stub strict checker responses, preserving malformed-verdict cases."""
     class _Provider:
-        async def chat(self, *a, **k):
-            return _Resp()
+        async def chat(self, messages, **k):
+            import json
+            from types import SimpleNamespace
+
+            if word not in ("argues", "contradicts", "fence"):
+                return SimpleNamespace(content=word)
+            prompt = messages[0]["content"]
+            names = json.loads(prompt.split("Requested checks: ", 1)[1].split(". Policy:", 1)[0])
+            candidate_block = messages[-1]["content"].split('source="x_candidate"', 1)[1]
+            candidate = candidate_block.split("--- BEGIN OBSERVATION ---\n", 1)[1].split("\n--- END OBSERVATION ---", 1)[0]
+            rows = []
+            for name in names:
+                failed = name == "stance" and word in ("contradicts", "fence")
+                reason = ("AGAINST the declared view" if word == "contradicts" else "sits on the fence") if failed else "Scoped position and context checked."
+                rows.append({"check": name, "verdict": "fail" if failed else "pass", "reason": reason,
+                             "evidence": candidate, "source_ids": [], "claims": [
+                                 {"text": candidate, "kind": "opinion", "status": "opinion", "source_ids": []}
+                             ] if name == "evidence" else []})
+            return SimpleNamespace(content=json.dumps({"checks": rows}))
 
     monkeypatch.setattr(
         "kazma_core.model_registry.get_model_registry",
@@ -1202,13 +1223,14 @@ async def test_draft_mode_does_not_offer_a_contradicting_draft(_no_llm, monkeypa
 
 @pytest.mark.asyncio
 async def test_the_check_can_be_switched_off(_no_llm, monkeypatch):
-    """An operator who does not want the extra call per reply can opt out."""
+    """The legacy toggle cannot bypass independent mandatory verification."""
     calls = {"n": 0}
 
     class _Provider:
         async def chat(self, *a, **k):
             calls["n"] += 1
-            raise AssertionError("stance check should not have run")
+            from kazma_core.llm_provider import LLMError
+            raise LLMError("checker unavailable", transient=False)
 
     _stub_draft(monkeypatch)
     monkeypatch.setattr(
@@ -1221,7 +1243,7 @@ async def test_the_check_can_be_switched_off(_no_llm, monkeypatch):
         cfg=_cfg(stance_check=False),
     )
     assert res.action == "awaiting_approval"
-    assert calls["n"] == 0
+    assert calls["n"] == 4, "The legacy toggle cannot disable the independent mandatory checks"
 
 
 @pytest.mark.asyncio
@@ -1462,14 +1484,15 @@ def test_ceilings_leave_room_for_reasoning_tokens():
     a model that does not use them, and they are the difference between the
     feature working and returning nothing on an entire class of model.
     """
+    import inspect
+
     from kazma_core.x_api import reply as r
     from kazma_core.x_api import stance as st
-    import inspect
 
     assert r._DRAFT_MAX_TOKENS >= 1000
     assert r._VERDICT_MAX_TOKENS >= 400
     src = inspect.getsource(st._llm_pick)
-    assert "max_tokens=600" in src, "the subject classifier ceiling regressed"
+    assert "max_tokens=1200" in src, "the structured classifier ceiling regressed"
 
 
 # ── "no match" and "never looked" are different answers ───────────────────
@@ -1639,6 +1662,9 @@ async def test_catch_all_never_costs_a_model_call(monkeypatch):
         raise AssertionError("a catch-all must not reach the classifier")
 
     monkeypatch.setattr(stance_mod, "_llm_pick", _never)
+    # These tests stub publication; account and policy bindings have their own integration tests.
+    monkeypatch.setattr("kazma_core.x_api.approval.capture_basis", lambda cfg: {"unit_fixture": True})
+    monkeypatch.setattr("kazma_core.x_api.approval.binding_hold", lambda basis: "")
     got = await classify("wholly unrelated", _cfg(subjects=(CATCH_ALL,)))
     assert got is not None and got.id == "general"
 
@@ -1716,17 +1742,7 @@ async def test_catch_all_skips_the_stance_check(_no_llm, monkeypatch):
 @pytest.mark.asyncio
 async def test_a_specific_subject_still_gets_the_stance_check(_no_llm, monkeypatch):
     """Skipping it for catch-alls must not skip it everywhere."""
-    class _Resp:
-        content = "contradicts"
-
-    class _Provider:
-        async def chat(self, *a, **k):
-            return _Resp()
-
-    monkeypatch.setattr(
-        "kazma_core.model_registry.get_model_registry",
-        lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: _Provider())})(),
-    )
+    _verdict(monkeypatch, "contradicts")
     _stub_draft(monkeypatch)
     res = await handle_summon(
         summon_id="cs2", parent_id="p2", parent_text="that VAR call",
@@ -1834,8 +1850,8 @@ def test_summon_against_prompt_does_not_name_settings_topics():
         "roast",
     )[0]["content"]
     assert "No Settings subject matched" in sysmsg
-    assert "criticise the main thing this post is about" in sysmsg
-    assert "Do not drift" in sysmsg
+    assert "Criticise the actual claim" in sysmsg
+    assert "never invent allegations" in sysmsg
 
 
 def test_against_side_never_asks_the_model_to_support():
@@ -1844,7 +1860,7 @@ def test_against_side_never_asks_the_model_to_support():
     iran = Subject(id="Iran", match=("iran",), view="", side=SIDE_AGAINST)
     roast = _build_prompt(iran, "Iran is great", "t", "roast")[0]["content"]
     assert "AGAINST Iran" in roast
-    assert "ALWAYS criticise" in roast
+    assert "opposition" in roast and "Do not escalate" in roast
     assert "HOW you speak" in roast
     assert "THE OPERATOR'S POSITION" not in roast
 
@@ -1855,26 +1871,27 @@ def test_support_side_angry_is_anger_at_critics():
     kw = Subject(id="Kuwait", match=("kuwait",), view="", side=SIDE_SUPPORT)
     angry = _build_prompt(kw, "Kuwait is a mess", "t", "angry")[0]["content"]
     assert "FOR Kuwait" in angry
-    assert "ALWAYS support" in angry
-    assert "anger AT critics of Kuwait" in angry
+    assert "support" in angry and "Concede supported" in angry
+    assert "within the card's scope" in angry
 
 
-def test_pundit_prompt_forbids_sympathy_for_the_other_side():
+def test_pundit_prompt_preserves_position_without_forcing_denial():
     from kazma_core.x_api.reply import _build_prompt
 
     sysmsg = _build_prompt(VAR, "a post", "t", "angry")[0]["content"]
-    assert "Never sound sympathetic" in sysmsg
+    assert "Acknowledge supported facts" in sysmsg
     assert "THE OPERATOR'S POSITION" in sysmsg
 
 
-def test_knowledge_notes_are_fenced_and_cannot_override_the_view():
+def test_knowledge_notes_are_fenced_and_policy_cannot_override_facts():
     from kazma_core.x_api.reply import _build_prompt
 
     sysmsg = _build_prompt(
         VAR, "a post", "t", knowledge_notes="<kazma:data source=\"knowledge\" untrusted=\"true\">\n- a fact\n"
     )[0]["content"]
     assert "source=\"knowledge\"" in sysmsg or "knowledge" in sysmsg
-    assert "position wins" in sysmsg.lower()
+    assert "does not override facts" in sysmsg.lower()
+    assert "position wins" not in sysmsg.lower()
 
 
 def test_kb_query_skips_synthetic_subject_ids():
@@ -1908,6 +1925,9 @@ async def test_knowledge_notes_fence_hits_and_stay_empty_on_miss(monkeypatch):
             return self.hits
 
     class _Store:
+        def get_chunks_by_ids(self, ids):
+            return {"chunk1": {"id": "chunk1", "library_id": "kw", "content": "The Kuwaiti dinar is KWD.", "document_title": "Currency"}} if "chunk1" in ids else {}
+
         def get_library_for_tenant(self, lib, tenant):
             return {"id": lib, "chunk_count": 4}
 
@@ -1916,7 +1936,7 @@ async def test_knowledge_notes_fence_hits_and_stay_empty_on_miss(monkeypatch):
 
     hits = [
         SimpleNamespace(
-            content="The Kuwaiti dinar is KWD.",
+            content="The Kuwaiti dinar is KWD.", chunk_id="chunk1",
             library_id="kw",
             document_title="Currency",
         )
@@ -2010,10 +2030,10 @@ async def test_deny_parks_a_draft(_no_llm, monkeypatch):
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(),
     )
-    res = await deny_summon("d1")
+    res = await deny_summon("d1", approval_token=_approval_token("d1"))
     assert res.ok and res.action == "skipped"
     assert get_reply_store().get("d1").status == STATUS_SKIPPED
-    again = await deny_summon("d1")
+    again = await deny_summon("d1", approval_token=_approval_token("d1"))
     assert again.action == "skipped" and "nothing to deny" in again.reason
 
 
@@ -2033,6 +2053,10 @@ async def test_retry_reopens_a_stuck_draft(_no_llm, monkeypatch):
         summon_text="@KazmaAI what do you think buddy? 😂",
     )
     assert store.get("2100724737114599833").status == STATUS_DRAFTING
+    # Only stale drafting can be reopened; a live generation still owns it.
+    assert (await retry_summon("2100724737114599833")).action == "skipped"
+    now = time.time()
+    monkeypatch.setattr("kazma_core.x_api.reply_store.time.time", lambda: now + 601)
     res = await retry_summon("2100724737114599833")
     assert res.action == "awaiting_approval"
     assert res.draft
@@ -2059,7 +2083,7 @@ async def test_retry_reopens_a_skip(_no_llm, monkeypatch):
 async def test_retry_will_not_repost(_no_llm, monkeypatch):
     from kazma_core.x_api.reply import retry_summon
 
-    async def _publish(*, text, reply_to_id=""):
+    async def _publish(*, text, reply_to_id="", **metadata):
         return True, {"tweet_id": "1", "url": "u"}
 
     _stub_draft(monkeypatch)
@@ -2069,6 +2093,7 @@ async def test_retry_will_not_repost(_no_llm, monkeypatch):
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(mode=MODE_AUTO, stance_check=False),
     )
+    assert (await reply_mod.approve_summon("r2", approval_token=_approval_token("r2"))).action == "posted"
     res = await retry_summon("r2")
     assert res.action == "skipped" and "already posted" in res.reason
 
@@ -2081,7 +2106,7 @@ async def test_poll_once_direct_mention_drafts(_no_llm, monkeypatch):
     class _Xcfg:
         def can_post(self):
             return True
-        credentials = None
+        credentials = XCredentials("k", "s", "t", "ts")
 
     class _Client:
         def __init__(self, *a, **k):
@@ -2122,7 +2147,7 @@ async def test_poll_once_ignore_cursor_does_not_pass_since_id(_no_llm, monkeypat
     class _Xcfg:
         def can_post(self):
             return True
-        credentials = None
+        credentials = XCredentials("k", "s", "t", "ts")
 
     class _Client:
         def __init__(self, *a, **k):
@@ -2136,7 +2161,7 @@ async def test_poll_once_ignore_cursor_does_not_pass_since_id(_no_llm, monkeypat
             seen["start_time"] = start_time
             return [], {}
 
-    get_reply_store().set_since_id("2100705922142073166")
+    get_reply_store().set_since_id("2100705922142073166", account_id="1")
     monkeypatch.setattr(mf, "_identity", None)
     monkeypatch.setattr("kazma_core.x_api.client.XClient", _Client)
     monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
@@ -2158,7 +2183,7 @@ async def test_a_deleted_cursor_cannot_hide_a_new_mention(_no_llm, monkeypatch):
     class _Xcfg:
         def can_post(self):
             return True
-        credentials = None
+        credentials = XCredentials("k", "s", "t", "ts")
 
     class _Client:
         def __init__(self, *a, **k):
@@ -2183,7 +2208,7 @@ async def test_a_deleted_cursor_cannot_hide_a_new_mention(_no_llm, monkeypatch):
             raise AssertionError("direct")
 
     store = get_reply_store()
-    store.set_since_id("2100705922142073166")
+    store.set_since_id("2100705922142073166", account_id="1")
     store.claim(
         summon_id="2100705922142073166", parent_id="p",
         target_handle="t", summoner="s",
@@ -2196,7 +2221,7 @@ async def test_a_deleted_cursor_cannot_hide_a_new_mention(_no_llm, monkeypatch):
     rows = await mf.poll_once(cfg=_cfg(subjects=()))
     assert calls == [("", "2026-09-17T21:58:15Z")], calls
     assert rows and rows[0]["mention"] == "2100999999999999999"
-    assert store.get_since_id() == "2100999999999999999"
+    assert store.get_since_id(account_id="1") == "2100999999999999999"
 
 
 @pytest.mark.asyncio
@@ -2215,7 +2240,7 @@ async def test_a_quiet_poll_reads_once_and_says_so_quietly(_no_llm, monkeypatch,
     class _Xcfg:
         def can_post(self):
             return True
-        credentials = None
+        credentials = XCredentials("k", "s", "t", "ts")
 
     class _Client:
         def __init__(self, *a, **k):
@@ -2240,7 +2265,7 @@ async def test_a_quiet_poll_reads_once_and_says_so_quietly(_no_llm, monkeypatch,
             raise AssertionError("a quiet poll fetches nothing else")
 
     store = get_reply_store()
-    store.set_since_id("2100705922142073166")
+    store.set_since_id("2100705922142073166", account_id="1")
     store.claim(
         summon_id="2100705922142073166", parent_id="p",
         target_handle="t", summoner="s",
@@ -2253,7 +2278,7 @@ async def test_a_quiet_poll_reads_once_and_says_so_quietly(_no_llm, monkeypatch,
     assert rows == []
     assert len(calls) == 1, calls
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING], caplog.text
-    assert store.get_since_id() == "2100705922142073166"
+    assert store.get_since_id(account_id="1") == "2100705922142073166"
 
 
 def test_the_cursor_time_is_read_from_the_id_itself():
@@ -2274,7 +2299,7 @@ async def test_poll_once_skips_replies_to_our_own_posts(_no_llm, monkeypatch):
     class _Xcfg:
         def can_post(self):
             return True
-        credentials = None
+        credentials = XCredentials("k", "s", "t", "ts")
 
     class _Client:
         def __init__(self, *a, **k):
@@ -2328,7 +2353,7 @@ async def test_poll_once_trusted_followup_walks_to_the_original(
     class _Xcfg:
         def can_post(self):
             return True
-        credentials = None
+        credentials = XCredentials("k", "s", "t", "ts")
 
     class _Client:
         def __init__(self, *a, **k):
@@ -2403,7 +2428,7 @@ async def test_poll_once_reacts_to_a_quoted_tweet_under_our_reply(
     class _Xcfg:
         def can_post(self):
             return True
-        credentials = None
+        credentials = XCredentials("k", "s", "t", "ts")
 
     class _Client:
         def __init__(self, *a, **k):
@@ -2466,7 +2491,7 @@ async def test_poll_once_reads_status_url_in_a_reply_to_us(_no_llm, monkeypatch)
     class _Xcfg:
         def can_post(self):
             return True
-        credentials = None
+        credentials = XCredentials("k", "s", "t", "ts")
 
     class _Client:
         def __init__(self, *a, **k):
@@ -2527,7 +2552,7 @@ async def test_forget_removes_a_log_row_without_calling_x(_no_llm, monkeypatch):
     store = get_reply_store()
     store.claim(summon_id="gone1", parent_id="p", target_handle="t", summoner="s")
     store.mark_skipped("gone1", "nope")
-    res = await forget_summon("gone1")
+    res = await forget_summon("gone1", approval_token=_approval_token("gone1"))
     assert res.ok and res.action == "deleted"
     assert store.get("gone1") is None
 
@@ -2548,7 +2573,7 @@ async def test_forget_deletes_the_posted_tweet(_no_llm, monkeypatch):
     store.claim(summon_id="p1", parent_id="p", target_handle="t", summoner="s")
     store.mark_awaiting("p1", draft="the reply", subject_id="voice")
     store.mark_posted("p1", tweet_id="777", draft="the reply")
-    res = await forget_summon("p1")
+    res = await forget_summon("p1", approval_token=_approval_token("p1"))
     assert res.ok and seen["id"] == "777"
     assert store.get("p1") is None
 

@@ -23,6 +23,7 @@ const sidebars = {
         'guide/email-integration',
         'guide/x-publisher',
         'guide/x-auto-reply',
+        'guide/x-evaluation-dataset',
         'guide/document-intelligence',
         'guide/document-phases',
         'guide/document-rendering',

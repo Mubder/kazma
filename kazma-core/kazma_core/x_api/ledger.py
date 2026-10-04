@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.config_store import apply_sqlite_pragmas
+from kazma_core.x_api.ownership import x_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,9 @@ class XPostLedger:
             conn = self._connect()
             try:
                 conn.executescript(_CREATE)
+                from kazma_core.db.sqlite_columns import add_missing_columns
+
+                add_missing_columns(conn, "x_posts", (("tenant_id", "TEXT NOT NULL DEFAULT 'default'"),))
                 conn.commit()
             finally:
                 conn.close()
@@ -81,8 +85,8 @@ class XPostLedger:
             conn = self._connect()
             try:
                 cur = conn.execute(
-                    "SELECT COUNT(*) FROM x_posts WHERE created_at >= ?",
-                    (epoch,),
+                    "SELECT COUNT(*) FROM x_posts WHERE created_at >= ? AND tenant_id = ?",
+                    (epoch, x_tenant_id()),
                 )
                 return int(cur.fetchone()[0])
             finally:
@@ -96,8 +100,8 @@ class XPostLedger:
             try:
                 cur = conn.execute(
                     "SELECT 1 FROM x_posts WHERE text_hash = ? "
-                    "AND created_at >= ? AND deleted_at IS NULL LIMIT 1",
-                    (h, since),
+                    "AND created_at >= ? AND deleted_at IS NULL AND tenant_id = ? LIMIT 1",
+                    (h, since, x_tenant_id()),
                 )
                 return cur.fetchone() is not None
             finally:
@@ -115,10 +119,10 @@ class XPostLedger:
             conn = self._connect()
             try:
                 conn.execute(
-                    "INSERT OR REPLACE INTO x_posts "
-                    "(tweet_id, text_hash, text_preview, handle, created_at, deleted_at) "
-                    "VALUES (?, ?, ?, ?, ?, NULL)",
-                    (tweet_id, text_hash(text), preview, handle, time.time()),
+                    "INSERT OR IGNORE INTO x_posts "
+                    "(tweet_id, text_hash, text_preview, handle, created_at, deleted_at, tenant_id) "
+                    "VALUES (?, ?, ?, ?, ?, NULL, ?)",
+                    (tweet_id, text_hash(text), preview, handle, time.time(), x_tenant_id()),
                 )
                 conn.commit()
             finally:
@@ -130,8 +134,8 @@ class XPostLedger:
             try:
                 cur = conn.execute(
                     "UPDATE x_posts SET deleted_at = ? WHERE tweet_id = ? "
-                    "AND deleted_at IS NULL",
-                    (time.time(), tweet_id),
+                    "AND deleted_at IS NULL AND tenant_id = ?",
+                    (time.time(), tweet_id, x_tenant_id()),
                 )
                 conn.commit()
                 return cur.rowcount > 0
@@ -151,8 +155,8 @@ class XPostLedger:
             conn = self._connect()
             try:
                 cur = conn.execute(
-                    "SELECT text_preview FROM x_posts WHERE tweet_id = ? LIMIT 1",
-                    (tid,),
+                    "SELECT text_preview FROM x_posts WHERE tweet_id = ? AND tenant_id = ? LIMIT 1",
+                    (tid, x_tenant_id()),
                 )
                 row = cur.fetchone()
                 return str(row["text_preview"] or "") if row is not None else ""
@@ -171,8 +175,8 @@ class XPostLedger:
             try:
                 row = conn.execute(
                     "SELECT tweet_id, created_at FROM x_posts WHERE text_hash = ? "
-                    "ORDER BY created_at ASC LIMIT 1",
-                    (h,),
+                    "AND tenant_id = ? ORDER BY created_at ASC LIMIT 1",
+                    (h, x_tenant_id()),
                 ).fetchone()
                 return dict(row) if row is not None else None
             finally:
@@ -185,10 +189,19 @@ class XPostLedger:
             try:
                 rows = conn.execute(
                     "SELECT tweet_id, text_preview, handle, created_at, deleted_at "
-                    "FROM x_posts ORDER BY created_at DESC LIMIT ?",
-                    (lim,),
+                    "FROM x_posts WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?",
+                    (x_tenant_id(), lim),
                 ).fetchall()
                 return [dict(r) for r in rows]
+            finally:
+                conn.close()
+
+    def publication_history(self) -> list[dict[str, Any]]:
+        """Full current-tenant receipts for idempotent reservation backfill."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                return [dict(r) for r in conn.execute("SELECT * FROM x_posts WHERE tenant_id = ?", (x_tenant_id(),)).fetchall()]
             finally:
                 conn.close()
 

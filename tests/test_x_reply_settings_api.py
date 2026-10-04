@@ -15,7 +15,6 @@ the two things being tuned (subject matching and the content screen).
 from __future__ import annotations
 
 import pytest
-
 from kazma_core.x_api import reply as reply_mod
 from kazma_core.x_api import stance as stance_mod
 from kazma_core.x_api.reply import preview_reply
@@ -177,7 +176,7 @@ async def test_preview_reports_knowledge_hits(monkeypatch, _no_llm):
         parent_text="VAR ruined that match", cfg=_cfg(use_knowledge=True)
     )
     assert res.action == "preview"
-    assert res.knowledge == {"used": True, "hits": 1, "libraries": ["kw"]}
+    assert res.knowledge["used"] and res.knowledge["hits"] == 1 and res.knowledge["libraries"] == ["kw"]
 
 
 @pytest.mark.asyncio
@@ -424,3 +423,20 @@ def test_live_reason_flags_a_stopped_poller(monkeypatch):
 def test_live_reason_says_live_when_it_is(monkeypatch):
     monkeypatch.setattr("kazma_ui.x_reply_api._poller_running", lambda: True)
     assert _reason().startswith("Live in draft mode")
+
+
+async def test_settings_save_rejects_stale_revision_and_retains_current_policy():
+    import json
+
+    from kazma_core.config_store import get_config_store
+    from kazma_ui.x_reply_api import x_reply_save
+
+    first = await x_reply_save(ReplyConfigBody(expected_revision=0, trigger="reviewed"))
+    assert first.status_code == 200
+    assert json.loads(first.body)["settings_revision"] == 1
+    stale = await x_reply_save(ReplyConfigBody(expected_revision=0, trigger="stale overwrite"))
+    assert stale.status_code == 409
+    assert get_config_store().get("connectors.x.reply.trigger") == "reviewed"
+    current = await x_reply_save(ReplyConfigBody(expected_revision=1, trigger="next revision"))
+    assert current.status_code == 200
+    assert json.loads(current.body)["settings_revision"] == 2

@@ -8,15 +8,49 @@ function xStudioPage() {
     replyToId: '',
     proposalId: '',
     _draftText: '',
+    _intentKey: '',
+    _intentSignature: '',
     preview: { chars: 0, max_chars: 280, allow: true, mentions: [], hashtags: [], cashtags: [], reason: '' },
     queue: [],
+    queueCount: 0,
+    queueNext: '',
+    queueBusy: '',
+    includeFinished: false,
     drafts: [],
+    draftsNext: '',
+    draftQuery: '',
     showDismissed: false,
     draftBusy: '',
     audit: [],
     week: [],
     busy: false,
+    draftBrief: '',
+    draftCount: 1,
+    generateBusy: false,
+    generateError: '',
+    generatedModels: [],
+    qualification: null,
+    qualificationBusy: false,
+    qualificationError: '',
+    operations: [],
+    operationsNext: '',
+    operationQuery: '',
+    selectedOperation: null,
+    operationError: '',
+    deleteBusy: '',
+
     _previewTimer: null,
+    _composerTimer: null,
+    _composerLoaded: false,
+    _composerSaving: false,
+    _composerSaved: '',
+    _composerRevision: 0,
+    composerError: '',
+    composerSavedAt: null,
+    _unloadHandler: null,
+    _previewSequence: 0,
+    _loadSequence: {},
+    loadStates: {},
 
     // Two tabs: the studio (what Kazma posted) and conversations (what it
     // was replying to). A reply read without its parent is a non-sequitur,
@@ -24,6 +58,9 @@ function xStudioPage() {
     // say that".
     tab: 'studio',
     conversations: [],
+    conversationsNext: '',
+    conversationQuery: '',
+    conversationState: '',
     convLoading: false,
     convBusy: '',
     // The poller now makes two read calls every cycle, so reads drown the
@@ -40,6 +77,11 @@ function xStudioPage() {
 
     t(key) { return (window.t && window.t(key)) || key; },
 
+    reloadSection(section) {
+      const actions = { status: 'loadStatus', queue: 'loadQueue', drafts: 'loadDrafts', audit: 'loadAudit', conversations: 'loadConversations', preview: 'refreshPreview', operations: 'loadOperations' };
+      if (actions[section]) return this[actions[section]]();
+    },
+
     async loadConversations(opts) {
       const poll = !!(opts && opts.poll);
       this.convLoading = true;
@@ -53,11 +95,10 @@ function xStudioPage() {
             window.showToast(pdata.message, 'success');
           }
         }
-        const r = await fetch('/api/x/reply/conversations?limit=30', {
-          credentials: 'same-origin',
-        });
-        const d = await r.json().catch(function () { return {}; });
-        this.conversations = (d && d.rows) || [];
+        const more = !!(opts && opts.more);
+        const url = '/api/x/reply/conversations?limit=30&query=' + encodeURIComponent(this.conversationQuery) + '&state=' + encodeURIComponent(this.conversationState) + (more && this.conversationsNext ? '&cursor=' + encodeURIComponent(this.conversationsNext) : '');
+        const data = await this._readSection('conversations', url, 'rows', null, more);
+        if (data) this.conversationsNext = data.next_cursor || '';
       } catch (e) {
         if (poll) window.showToast(String(e.message || e), 'error');
         this.conversations = this.conversations || [];
@@ -69,6 +110,9 @@ function xStudioPage() {
     async convAction(kind, row) {
       const id = row && row.summon_id;
       if (!id || this.convBusy) return;
+      this.convBusy = id;
+      const revision = row.approval_token || '';
+      try {
       if (kind === 'approve' || kind === 'deny' || kind === 'delete') {
         const posted = kind === 'delete' && row.status === 'posted' && row.tweet_id;
         const ok = await window.kazmaConfirm({
@@ -84,9 +128,8 @@ function xStudioPage() {
         });
         if (!ok) return;
       }
-      this.convBusy = id;
-      try {
-        const resp = await this._mutating('POST', '/api/x/reply/' + kind, { summon_id: id });
+        const resp = await this._mutating('POST', '/api/x/reply/' + kind,
+          { summon_id: id, approval_token: revision });
         const data = await resp.json().catch(function () { return {}; });
         if (resp.ok && data.ok !== false) {
           const msg = kind === 'approve' && data.url
@@ -102,6 +145,23 @@ function xStudioPage() {
         window.showToast(String(e.message || e), 'error');
       } finally {
         this.convBusy = '';
+      }
+    },
+
+    async loadHistory(row) {
+      row.historyOpen = !row.historyOpen;
+      if (!row.historyOpen || row.historyLoading) return;
+      row.historyLoading = true;
+      row.historyError = '';
+      try {
+        const response = await fetch('/api/x/reply/history/' + encodeURIComponent(row.summon_id), { credentials: 'same-origin' });
+        const data = await response.json();
+        if (!response.ok || data.ok !== true || !Array.isArray(data.rows)) throw new Error(data.error || this.t('common.request_failed'));
+        row.history = data.rows;
+      } catch (error) {
+        row.historyError = String(error.message || error);
+      } finally {
+        row.historyLoading = false;
       }
     },
 
@@ -156,8 +216,75 @@ function xStudioPage() {
 
     async init() {
       this.when = this._defaultWhen();
-      await Promise.all([this.loadStatus(), this.loadQueue(), this.loadDrafts(), this.loadAudit()]);
+      this._unloadHandler = (event) => {
+        if (this._composerLoaded && this._composerSignature() !== this._composerSaved) {
+          event.preventDefault(); event.returnValue = '';
+        }
+      };
+      window.addEventListener('beforeunload', this._unloadHandler);
+      await Promise.all([this.loadStatus(), this.loadQueue(), this.loadDrafts(), this.loadAudit(), this.loadComposer(), this.loadQualification(), this.loadOperations()]);
+      if (this.$watch) {
+        this.$watch('when', () => this.queueComposerSave());
+        this.$watch('replyToId', () => { this.queueComposerSave(); this.onInput(); });
+      }
       this.onInput();
+    },
+
+    destroy() {
+      clearTimeout(this._composerTimer);
+      clearTimeout(this._previewTimer);
+      if (this._unloadHandler) window.removeEventListener('beforeunload', this._unloadHandler);
+    },
+
+    _composerPayload() {
+      return { text: this.text || '', reply_to_id: this.replyToId || '', when: this.when || '',
+        proposal_id: this.proposalId || '', draft_text: this._draftText || '' };
+    },
+    _composerSignature() { return JSON.stringify(this._composerPayload()); },
+
+    async loadComposer() {
+      const before = this._composerSignature();
+      try {
+        const response = await fetch('/api/x/composer', { credentials: 'same-origin' });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || this.t('common.request_failed'));
+        if (before !== this._composerSignature()) throw new Error(this.t('x_studio.composer_load_changed'));
+        const saved = data.content || {};
+        this.text = saved.text || '';
+        this.replyToId = saved.reply_to_id || '';
+        this.when = saved.when || this._defaultWhen();
+        this.proposalId = saved.proposal_id || '';
+        this._draftText = saved.draft_text || '';
+        this._composerRevision = data.revision;
+        this._composerSaved = this._composerSignature();
+        this._composerLoaded = true;
+        this.composerError = '';
+        this.composerSavedAt = data.updated_at;
+      } catch (error) { this.composerError = String(error.message || error); }
+    },
+
+    queueComposerSave() {
+      if (!this._composerLoaded || this.composerError) return;
+      clearTimeout(this._composerTimer);
+      this._composerTimer = setTimeout(() => this.saveComposer(), 600);
+    },
+
+    async saveComposer() {
+      if (!this._composerLoaded || this._composerSaving || this.composerError) return;
+      const signature = this._composerSignature();
+      if (signature === this._composerSaved) return;
+      this._composerSaving = true;
+      try {
+        const payload = Object.assign({ expected_revision: this._composerRevision }, this._composerPayload());
+        const response = await this._mutating('PUT', '/api/x/composer', payload);
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || this.t('common.request_failed'));
+        this._composerRevision = data.revision;
+        this._composerSaved = signature;
+        this.composerSavedAt = data.updated_at;
+      } catch (error) { this.composerError = String(error.message || error); }
+      finally { this._composerSaving = false; }
+      if (this._composerSignature() !== this._composerSaved && !this.composerError) this.queueComposerSave();
     },
 
     _defaultWhen() {
@@ -178,6 +305,82 @@ function xStudioPage() {
       });
     },
 
+    async loadOperations(more) {
+      const url = '/api/x/operations?query=' + encodeURIComponent(this.operationQuery) + (more && this.operationsNext ? '&cursor=' + encodeURIComponent(this.operationsNext) : '');
+      const data = await this._readSection('operations', url, 'operations', null, !!more);
+      if (data) this.operationsNext = data.next_cursor || '';
+    },
+
+    async inspectOperation(operation) {
+      this.selectedOperation = null;
+      this.operationError = '';
+      try {
+        const response = await fetch('/api/x/operations/' + encodeURIComponent(operation.id), { credentials: 'same-origin' });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || this.t('common.request_failed'));
+        this.selectedOperation = data;
+      } catch (error) { this.operationError = String(error.message || error); }
+    },
+
+    async loadQualification() {
+      try {
+        const response = await fetch('/api/x/reply/qualification', { credentials: 'same-origin' });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || this.t('common.request_failed'));
+        this.qualification = data;
+        this.qualificationError = '';
+      } catch (error) { this.qualificationError = String(error.message || error); }
+    },
+
+    async uploadQualification(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file || this.qualificationBusy) return;
+      this.qualificationBusy = true;
+      try {
+        if (file.size > 2000000) throw new Error(this.t('x_studio.qualification_too_large'));
+        const report = JSON.parse(await file.text());
+        const response = await this._mutating('PUT', '/api/x/reply/qualification', { report: report });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || this.t('common.request_failed'));
+        await this.loadQualification();
+      } catch (error) { this.qualificationError = String(error.message || error); }
+      finally { this.qualificationBusy = false; event.target.value = ''; }
+    },
+
+    async resumePublishing() {
+      if (this.busy) return;
+      this.busy = true;
+      try {
+        const accepted = await window.kazmaConfirm({ title: this.t('x_studio.resume_publishing'),
+          message: this.t('x_studio.restore_pause'), confirmText: this.t('common.confirm') });
+        if (!accepted) return;
+        const response = await this._mutating('POST', '/api/x/resume', {});
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || this.t('common.request_failed'));
+        await this.loadStatus();
+      } catch (error) { window.showToast(String(error.message || error), 'error'); }
+      finally { this.busy = false; }
+    },
+
+    async generateDrafts() {
+      const brief = (this.draftBrief || '').trim();
+      if (!brief || this.generateBusy) return;
+      this.generateBusy = true;
+      this.generateError = '';
+      try {
+        const response = await this._mutating('POST', '/api/x/generate', { brief: brief, count: Number(this.draftCount) || 1 });
+        const data = await response.json();
+        if (!response.ok || !data || data.ok !== true) throw new Error((data && data.error) || this.t('common.request_failed'));
+        this.generatedModels = data.models || [];
+        await this.loadDrafts();
+        window.showToast(this.t('x_studio.generated_review'), 'success');
+      } catch (error) {
+        this.generateError = String(error.message || error);
+      } finally {
+        this.generateBusy = false;
+      }
+    },
+
     parseTweetId(raw) {
       const s = String(raw || '').trim();
       if (!s) return '';
@@ -186,16 +389,20 @@ function xStudioPage() {
     },
 
     onInput() {
+      this.queueComposerSave();
       if (this.proposalId && this._draftText && (this.text || '') !== this._draftText) {
         this.proposalId = '';
         this._draftText = '';
       }
-      this.preview.chars = (this.text || '').trim().length;
+      this._previewSequence += 1;
+      this.preview = Object.assign({}, this.preview, { allow: false });
       clearTimeout(this._previewTimer);
       this._previewTimer = setTimeout(() => this.refreshPreview(), 250);
     },
 
     async refreshPreview() {
+      const sequence = this._previewSequence;
+      this.loadStates.preview = { loading: true, error: '', at: (this.loadStates.preview || {}).at || '' };
       try {
         const resp = await fetch('/api/x/preview', {
           method: 'POST',
@@ -207,39 +414,61 @@ function xStudioPage() {
           }),
         });
         const data = await resp.json().catch(() => ({}));
-        if (data && data.ok) this.preview = data;
-      } catch (_e) { /* keep last preview */ }
+        if (!resp.ok || !data || data.ok !== true) throw new Error(data.error || this.t('common.request_failed'));
+        if (sequence !== this._previewSequence) return;
+        this.preview = data;
+        this.loadStates.preview = { loading: false, error: '', at: Date.now() };
+      } catch (error) {
+        if (sequence === this._previewSequence) this.loadStates.preview = { loading: false, error: String(error.message || error), at: (this.loadStates.preview || {}).at || '' };
+      }
+    },
+
+    async _readSection(name, url, field, transform, append) {
+      const sequence = (this._loadSequence[name] || 0) + 1;
+      this._loadSequence[name] = sequence;
+      this.loadStates[name] = { loading: true, error: '', at: (this.loadStates[name] || {}).at || '' };
+      try {
+        const response = await fetch(url, { credentials: 'same-origin' });
+        const data = await response.json();
+        if (!response.ok || !data || data.ok !== true || (field && !Array.isArray(data[field]))) throw new Error(data.error || this.t('common.request_failed'));
+        if (sequence !== this._loadSequence[name]) return null;
+        const value = transform ? transform(data) : data[field];
+        this[name] = append ? this[name].concat(value) : value;
+        this.loadStates[name] = { loading: false, error: '', at: Date.now() };
+        return data;
+      } catch (error) {
+        if (sequence === this._loadSequence[name]) this.loadStates[name] = { loading: false, error: String(error.message || error), at: (this.loadStates[name] || {}).at || '' };
+        return null;
+      }
     },
 
     // The status the page renders always has its shape: an error answer (a
     // store behind the route failing) kept the last one -- it used to become
     // the status, and the quota pill threw on every render (2026-09-27).
     async loadStatus() {
-      const data = await window.kazmaGetJson('/api/x/status');
-      if (!data || typeof data !== 'object' || data.ok === false) return;
-      const caps = (data.caps && typeof data.caps === 'object') ? data.caps : {};
-      this.status = Object.assign({ can_post: false, handle: '' }, data, { caps: caps });
+      await this._readSection('status', '/api/x/status', '', function (data) {
+        const caps = (data.caps && typeof data.caps === 'object') ? data.caps : {};
+        return Object.assign({ can_post: false, handle: '' }, data, { caps: caps });
+      });
     },
 
-    async loadQueue() {
-      try {
-        const resp = await fetch('/api/scheduled/tasks', { credentials: 'same-origin' });
-        const data = await resp.json();
-        const tasks = (data && data.tasks) || [];
-        this.queue = tasks.filter(function (task) {
-          return task.source === 'x' && (task.status === 'pending' || task.status === 'running');
-        }).map((task) => Object.assign({}, task, { editWhen: this.toLocalInput(task.when) }));
+    async loadQueue(more) {
+      const url = '/api/x/queue?include_finished=' + this.includeFinished + (more && this.queueNext ? '&cursor=' + encodeURIComponent(this.queueNext) : '');
+      const data = await this._readSection('queue', url, 'items', (data) => data.items.map((item) => {
+        const when = new Date(item.due_at * 1000).toISOString();
+        return Object.assign({}, item, { summary: item.text, when: when, editWhen: this.toLocalInput(when) });
+      }), !!more);
+      if (data) {
+        this.queueCount = data.count;
+        this.queueNext = data.next_cursor || '';
         this._buildWeek();
-      } catch (_e) { this.queue = []; }
+      }
     },
 
-    async loadDrafts() {
-      try {
-        const url = '/api/x/drafts' + (this.showDismissed ? '?dismissed=true' : '');
-        const resp = await fetch(url, { credentials: 'same-origin' });
-        const data = await resp.json();
-        this.drafts = (data && data.drafts) || [];
-      } catch (_e) { this.drafts = []; }
+    async loadDrafts(more) {
+      const url = '/api/x/drafts?dismissed=' + this.showDismissed + '&query=' + encodeURIComponent(this.draftQuery) + (more && this.draftsNext ? '&cursor=' + encodeURIComponent(this.draftsNext) : '');
+      const data = await this._readSection('drafts', url, 'drafts', null, !!more);
+      if (data) this.draftsNext = data.next_cursor || '';
     },
 
     // Dismiss retires an unused draft (it stops being offered here and to
@@ -272,11 +501,7 @@ function xStudioPage() {
     },
 
     async loadAudit() {
-      try {
-        const resp = await fetch('/api/x/audit?limit=20', { credentials: 'same-origin' });
-        const data = await resp.json();
-        this.audit = (data && data.entries) || [];
-      } catch (_e) { this.audit = []; }
+      await this._readSection('audit', '/api/x/audit?limit=20', 'entries');
     },
 
     _localKey(d) {
@@ -299,7 +524,8 @@ function xStudioPage() {
         counts[key] = (counts[key] || 0) + 1;
       });
       for (let i = 0; i < 7; i++) {
-        const d = new Date(now.getTime() + i * 86400000);
+        const d = new Date(now);
+        d.setDate(now.getDate() + i);
         const key = this._localKey(d);
         days.push({
           key: key,
@@ -308,6 +534,20 @@ function xStudioPage() {
         });
       }
       this.week = days;
+    },
+
+    _scheduleInstant(raw) {
+      const parsed = new Date(raw);
+      if (!Number.isFinite(parsed.getTime()) || this.toLocalInput(parsed.toISOString()) !== String(raw).slice(0, 16)) {
+        throw new Error(this.t('x_studio.time_gap'));
+      }
+      // Local datetime controls have no offset selector. Refuse both folds
+      // instead of silently choosing the browser's preferred occurrence.
+      for (const minutes of [-120, -90, -60, -30, 30, 60, 90, 120]) {
+        const alternative = new Date(parsed.getTime() + minutes * 60000);
+        if (this.toLocalInput(alternative.toISOString()) === String(raw).slice(0, 16)) throw new Error(this.t('x_studio.time_fold'));
+      }
+      return parsed.toISOString();
     },
 
     toLocalInput(iso) {
@@ -401,6 +641,13 @@ function xStudioPage() {
         reply_to_id: this.parseTweetId(this.replyToId),
       };
       if (this.proposalId) body.proposal_id = this.proposalId;
+      const signature = JSON.stringify(body);
+      if (!this._intentKey || this._intentSignature !== signature) {
+        this._intentSignature = signature;
+        this._intentKey = (window.crypto && window.crypto.randomUUID)
+          ? window.crypto.randomUUID() : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+      }
+      body.idempotency_key = this._intentKey;
       return body;
     },
 
@@ -408,29 +655,35 @@ function xStudioPage() {
       this.text = '';
       this.proposalId = '';
       this._draftText = '';
+      this._intentKey = '';
+      this._intentSignature = '';
       if (nextReplyId) this.replyToId = String(nextReplyId);
       this.onInput();
     },
 
     async postNow() {
+      if (this.busy) return;
+      const payload = this._payload();
       const body = (this.text || '').trim();
       if (!body) {
         window.showToast(this.t('x_studio.text_required'), 'error');
         return;
       }
+      this.busy = true;
+      try {
       const ok = await window.kazmaConfirm({
         title: this.t('x_studio.post_now'),
         message: this.t('x_studio.confirm_post') + '\n\n' + body,
         confirmText: this.t('x_studio.post_now'),
       });
       if (!ok) return;
-      this.busy = true;
-      try {
-        const resp = await this._mutating('POST', '/api/x/post', this._payload());
+      if (payload.text !== (this.text || '').trim() || payload.reply_to_id !== this.parseTweetId(this.replyToId)
+          || (payload.proposal_id || '') !== this.proposalId) return;
+        const resp = await this._mutating('POST', '/api/x/post', payload);
         const data = await resp.json().catch(() => ({}));
         if (resp.ok && data.ok) {
           window.showToast(this.t('x_studio.posted'), 'success');
-          this._resetComposer(data.tweet_id || '');
+          if (payload.text === (this.text || "").trim() && payload.reply_to_id === this.parseTweetId(this.replyToId)) this._resetComposer(data.tweet_id || "");
           await Promise.all([this.loadStatus(), this.loadAudit(), this.loadDrafts()]);
         } else {
           window.showToast(data.error || data.reason || this.t('x_studio.post_failed'), 'error');
@@ -443,6 +696,7 @@ function xStudioPage() {
     },
 
     async schedule() {
+      if (this.busy) return;
       const body = (this.text || '').trim();
       if (!body) {
         window.showToast(this.t('x_studio.text_required'), 'error');
@@ -454,14 +708,14 @@ function xStudioPage() {
       }
       this.busy = true;
       try {
-        const whenIso = new Date(this.when).toISOString();
+        const whenIso = this._scheduleInstant(this.when);
         const payload = this._payload();
         payload.when = whenIso;
         const resp = await this._mutating('POST', '/api/scheduled/x', payload);
         const data = await resp.json().catch(() => ({}));
         if (resp.ok && data.ok !== false) {
           window.showToast(this.t('x_studio.scheduled_ok'), 'success');
-          this._resetComposer(this.parseTweetId(this.replyToId));
+          if (payload.text === (this.text || "").trim() && payload.reply_to_id === this.parseTweetId(this.replyToId)) this._resetComposer(this.parseTweetId(this.replyToId));
           await Promise.all([this.loadQueue(), this.loadDrafts()]);
         } else {
           window.showToast(data.error || this.t('x_studio.schedule_failed'), 'error');
@@ -474,13 +728,15 @@ function xStudioPage() {
     },
 
     async reschedule(item) {
+      if (this.queueBusy || !item.can_reschedule) return;
       if (!(item.editWhen || '').trim()) {
         window.showToast(this.t('x_studio.timing_required'), 'error');
         return;
       }
+      this.queueBusy = item.id;
       try {
-        const whenIso = new Date(item.editWhen).toISOString();
-        const resp = await this._mutating('PUT', '/api/scheduled/x/' + item.id, { when: whenIso });
+        const whenIso = this._scheduleInstant(item.editWhen);
+        const resp = await this._mutating('POST', '/api/x/queue/' + item.id + '/reschedule', { when: whenIso, expected_version: item.version });
         const data = await resp.json().catch(() => ({}));
         if (resp.ok && data.ok) {
           window.showToast(this.t('x_studio.rescheduled'), 'success');
@@ -490,6 +746,8 @@ function xStudioPage() {
         }
       } catch (e) {
         window.showToast(this.t('x_studio.reschedule_failed') + ': ' + e.message, 'error');
+      } finally {
+        this.queueBusy = '';
       }
     },
 
@@ -502,7 +760,9 @@ function xStudioPage() {
 
     async deletePosted(entry) {
       const tid = this.parseTweetId((entry && entry.tweet_id) || '');
-      if (!tid) return;
+      if (!tid || this.deleteBusy) return;
+      this.deleteBusy = tid;
+      try {
       const ok = await window.kazmaConfirm({
         title: this.t('x_studio.delete_post'),
         message: this.t('x_studio.confirm_delete') + '\n\n' + (this.auditText(entry) || tid),
@@ -510,7 +770,6 @@ function xStudioPage() {
         danger: true,
       });
       if (!ok) return;
-      try {
         const resp = await this._mutating('POST', '/api/x/delete', { tweet_id: tid });
         const data = await resp.json().catch(() => ({}));
         if (resp.ok && data.ok) {
@@ -522,10 +781,14 @@ function xStudioPage() {
         }
       } catch (e) {
         window.showToast(this.t('x_studio.delete_failed') + ': ' + e.message, 'error');
-      }
+      } finally { this.deleteBusy = ''; }
     },
 
     async cancel(item) {
+      if (this.queueBusy || !item.can_cancel) return;
+      this.queueBusy = item.id;
+      const version = item.version;
+      try {
       const ok = await window.kazmaConfirm({
         title: this.t('x_studio.cancel'),
         message: item.summary || '',
@@ -533,8 +796,7 @@ function xStudioPage() {
         danger: true,
       });
       if (!ok) return;
-      try {
-        const resp = await this._mutating('DELETE', '/api/scheduled/x/' + item.id);
+        const resp = await this._mutating('POST', '/api/x/queue/' + item.id + '/cancel', { expected_version: version });
         const data = await resp.json().catch(() => ({}));
         if (resp.ok && data.ok) {
           await this.loadQueue();
@@ -543,6 +805,8 @@ function xStudioPage() {
         }
       } catch (e) {
         window.showToast(this.t('x_studio.cancel_failed') + ': ' + e.message, 'error');
+      } finally {
+        this.queueBusy = '';
       }
     },
   };

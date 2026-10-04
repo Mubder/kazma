@@ -11,13 +11,16 @@ import asyncio
 import functools
 import json
 import logging
+import math
 import time
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
 
+from kazma_core.x_api import config as _config
 from kazma_core.x_api.audit import log_x_event
-from kazma_core.x_api.config import XCredentials, get_x_config
+from kazma_core.x_api.config import XCredentials
 from kazma_core.x_api.oauth1 import oauth1_authorization_header, sign_request
 
 logger = logging.getLogger(__name__)
@@ -45,13 +48,13 @@ def _bounded_response(resp: httpx.Response, limit: int = _MAX_RESPONSE_BYTES) ->
     encoding = getattr(resp, "encoding", None) or "utf-8"
     try:
         text = chunk.decode(encoding, errors="replace")
-    except Exception:
+    except (LookupError, UnicodeError):
         text = chunk.decode("utf-8", errors="replace")
     payload: Any = None
     if text:
         try:
             payload = json.loads(text)
-        except Exception:
+        except ValueError:
             payload = None
     return payload, text, truncated
 
@@ -70,29 +73,59 @@ def _default_audit_action(method: str, path: str) -> str:
 @functools.lru_cache(maxsize=1)
 def user_agent() -> str:
     try:
-        from importlib.metadata import version
+        from importlib.metadata import PackageNotFoundError, version
 
         ver = version("kazma")
-    except Exception:
+    except PackageNotFoundError:
         ver = "0.10.0"
     return f"Kazma/{ver} (self-hosted; official X API v2)"
 
 
 async def _audit(**fields: Any) -> None:
     """``log_x_event`` appends to x_audit.db (SQLite): keep it off the loop."""
+    from kazma_core.x_api.operation_context import current_operation_id
+
+    fields["operation_id"] = current_operation_id()
     await asyncio.to_thread(log_x_event, **fields)
 
 
+def _rate_limit_hints(headers: Any) -> tuple[float | None, float | None]:
+    """Return Retry-After seconds and the reset epoch as distinct values."""
+    def number(value: Any) -> float | None:
+        try:
+            parsed = float(value)
+            return parsed if math.isfinite(parsed) and parsed >= 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    raw = headers.get("retry-after")
+    seconds = number(raw)
+    if seconds is None and raw:
+        try:
+            date = parsedate_to_datetime(raw)
+            seconds = max(0.0, date.timestamp() - time.time())
+        except (ValueError, TypeError, OverflowError):
+            pass
+    return seconds, number(headers.get("x-rate-limit-reset"))
+
+
 class XApiError(Exception):
-    def __init__(self, message: str, *, status: int = 0, transient: bool = False) -> None:
+    def __init__(
+        self, message: str, *, status: int = 0, transient: bool = False,
+        retry_after_seconds: float | None = None, rate_limit_reset: float | None = None,
+        outcome: str = "",
+    ) -> None:
         super().__init__(message)
         self.status = status
         self.transient = transient
+        self.retry_after_seconds = retry_after_seconds
+        self.rate_limit_reset = rate_limit_reset
+        self.outcome = outcome or ("rejected" if 400 <= status < 500 else "unknown")
 
 
 class XClient:
     def __init__(self, credentials: XCredentials | None = None) -> None:
-        self._creds = credentials or get_x_config().credentials
+        self._creds = credentials or _config.get_x_config().credentials
 
     def _headers(self, method: str, url: str) -> dict[str, str]:
         c = self._creds
@@ -126,6 +159,16 @@ class XClient:
         # inside log_x_event; never blocks or breaks the call itself.
         action = audit_action or _default_audit_action(method, path)
         started = time.monotonic()
+        if method.upper() == "GET":
+            from kazma_core.x_api.ai_budget import reserve_read
+
+            try:
+                await asyncio.to_thread(reserve_read)
+            except Exception as exc:
+                await _audit(action=action, method=method, endpoint=path, status="budget_hold",
+                             response_body={"error": "read_budget_unavailable"}, duration_ms=0)
+                raise XApiError("X read budget is exhausted or unavailable. No request was sent; review X usage settings.",
+                                outcome="not_sent") from exc
         url = f"{API_HOST}{path}"
         # user_agent() reads installed-package metadata on its first call
         # (then it is cached): stall-20260923-041456 caught that on the loop
@@ -150,7 +193,11 @@ class XClient:
                 request_body=json_body, response_body={"error": "timeout"},
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
-            raise XApiError("X API timed out. Did not retry (avoids double-post).", transient=True) from exc
+            unsent = isinstance(exc, (httpx.ConnectTimeout, httpx.PoolTimeout))
+            raise XApiError(
+                "X API timed out. Did not retry (avoids double-post).",
+                transient=True, outcome="not_sent" if unsent else "unknown",
+            ) from exc
         except httpx.HTTPError as exc:
             await _audit(
                 action=action, method=method, endpoint=path, status="network_error",
@@ -158,7 +205,10 @@ class XClient:
                 response_body={"error": type(exc).__name__},
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
-            raise XApiError(f"X API network error: {type(exc).__name__}. Did not retry.", transient=True) from exc
+            raise XApiError(
+                f"X API network error: {type(exc).__name__}. Did not retry.",
+                transient=True, outcome="not_sent" if isinstance(exc, httpx.ConnectError) else "unknown",
+            ) from exc
 
         duration_ms = int((time.monotonic() - started) * 1000)
 
@@ -217,13 +267,15 @@ class XClient:
         )
 
         if resp.status_code == 429:
-            retry_after = resp.headers.get("retry-after") or resp.headers.get("x-rate-limit-reset") or ""
+            retry_after, reset = _rate_limit_hints(resp.headers)
             raise XApiError(
                 "X rate limit (HTTP 429). Wait before retrying"
-                + (f" (Retry-After {retry_after})" if retry_after else "")
+                + (f" (Retry-After {retry_after:g}s)" if retry_after is not None else "")
                 + ". Kazma did not auto-retry.",
                 status=429,
                 transient=True,
+                retry_after_seconds=retry_after,
+                rate_limit_reset=reset,
             )
         if resp.status_code in (401, 403):
             low = detail.lower()
@@ -269,6 +321,9 @@ class XClient:
             audit_action="reply" if reply_to_id else "post",
         )
         tweet = data.get("data") or data
+        ident = str(tweet.get("id") or "") if isinstance(tweet, dict) else ""
+        if not ident.isascii() or not ident.isdigit():
+            raise XApiError("X accepted the request but did not return a valid tweet ID. Outcome unknown; do not resend.", outcome="unknown")
         return tweet
 
     async def get_mentions(
@@ -292,7 +347,7 @@ class XClient:
         """
         params = [
             f"max_results={max(5, min(100, int(max_results)))}",
-            "tweet.fields=author_id,conversation_id,referenced_tweets,created_at,text",
+            "tweet.fields=author_id,conversation_id,referenced_tweets,created_at,text,attachments,note_tweet",
             "expansions=author_id,referenced_tweets.id,referenced_tweets.id.author_id",
             "user.fields=username,public_metrics",
         ]
@@ -307,12 +362,12 @@ class XClient:
 
             params.append(f"start_time={quote(start, safe='')}")
         path = f"/2/users/{str(user_id).strip()}/mentions?" + "&".join(params)
-        data = await self._request("GET", path, audit_action="read_mentions")
+        data = await self._read_context(path, action="read_mentions")
         tweets = data.get("data")
         includes = data.get("includes")
         return (
-            list(tweets) if isinstance(tweets, list) else [],
-            dict(includes) if isinstance(includes, dict) else {},
+            [self._canonical_post(t) for t in tweets] if isinstance(tweets, list) else [],
+            self._canonical_includes(includes),
         )
 
     async def get_tweet(self, tweet_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -323,22 +378,65 @@ class XClient:
         feeds the small-account floor.
         """
         params = (
-            "tweet.fields=author_id,conversation_id,created_at,text,"
+            "tweet.fields=author_id,conversation_id,created_at,text,attachments,note_tweet,"
             "referenced_tweets"
             "&expansions=author_id,referenced_tweets.id,"
             "referenced_tweets.id.author_id"
             "&user.fields=username,public_metrics"
         )
-        data = await self._request(
-            "GET", f"/2/tweets/{str(tweet_id).strip()}?{params}",
-            audit_action="read_tweet", audit_tweet_id=str(tweet_id).strip(),
-        )
+        data = await self._read_context(f"/2/tweets/{str(tweet_id).strip()}?{params}",
+                                        action="read_tweet", tweet_id=str(tweet_id).strip())
         tweet = data.get("data")
         includes = data.get("includes")
         return (
-            dict(tweet) if isinstance(tweet, dict) else {},
-            dict(includes) if isinstance(includes, dict) else {},
+            self._canonical_post(tweet),
+            self._canonical_includes(includes),
         )
+
+    async def _read_context(self, path: str, *, action: str, tweet_id: str = "") -> dict[str, Any]:
+        """Bounded read-only negotiation for legacy/current long-form field names."""
+        try:
+            return await self._request("GET", path, audit_action=action, audit_tweet_id=tweet_id)
+        except XApiError as exc:
+            if exc.status != 400 or "field" not in str(exc).lower():
+                raise
+        try:
+            return await self._request("GET", path.replace("note_tweet", "note_post"),
+                                       audit_action=action, audit_tweet_id=tweet_id)
+        except XApiError as exc:
+            if exc.status != 400 or "field" not in str(exc).lower():
+                raise
+        data = await self._request("GET", path.replace(",note_tweet", ""), audit_action=action, audit_tweet_id=tweet_id)
+        posts = data.get("data")
+        for post in posts if isinstance(posts, list) else [posts]:
+            if isinstance(post, dict):
+                post["_kazma_context_incomplete"] = True
+        includes = data.get("includes") or {}
+        for post in includes.get("tweets", includes.get("posts", [])):
+            if isinstance(post, dict):
+                post["_kazma_context_incomplete"] = True
+        return data
+
+    @staticmethod
+    def _canonical_post(post: Any) -> dict[str, Any]:
+        if not isinstance(post, dict):
+            return {}
+        post = dict(post)
+        if "referenced_posts" in post and "referenced_tweets" not in post:
+            post["referenced_tweets"] = post["referenced_posts"]
+        if "note_post" in post and "note_tweet" not in post:
+            post["note_tweet"] = post["note_post"]
+        return post
+
+    @classmethod
+    def _canonical_includes(cls, includes: Any) -> dict[str, Any]:
+        if not isinstance(includes, dict):
+            return {}
+        result = dict(includes)
+        posts = includes.get("tweets", includes.get("posts"))
+        if isinstance(posts, list):
+            result["tweets"] = [cls._canonical_post(post) for post in posts]
+        return result
 
     async def delete_tweet(self, tweet_id: str) -> dict[str, Any]:
         tid = str(tweet_id).strip()
@@ -346,4 +444,7 @@ class XClient:
             "DELETE", f"/2/tweets/{tid}",
             audit_action="delete", audit_tweet_id=tid,
         )
-        return data.get("data") or data
+        result = data.get("data") or data
+        if not isinstance(result, dict) or result.get("deleted") is not True:
+            raise XApiError("X did not confirm deletion. Outcome unknown; verify on X.", outcome="unknown")
+        return result

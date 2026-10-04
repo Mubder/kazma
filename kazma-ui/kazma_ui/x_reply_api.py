@@ -21,11 +21,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from kazma_core.x_api.ownership import x_config_key, x_tenant_id
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +38,16 @@ protected_router = APIRouter(prefix="/api/x/reply", tags=["x"])
 _CATEGORY = "connectors"
 
 
+class _QualificationBody(BaseModel):
+    report: dict[str, Any]
+
+
 class SubjectBody(BaseModel):
     # `register` shadows a BaseModel attribute, so the field is named
     # `register_hint` and aliased back. The wire key stays `register` —
     # it matches the ConfigStore key and the docs, and renaming it to
     # dodge a Pydantic warning would be the tail wagging the dog.
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     id: str = Field(default="")
     match: list[str] = Field(default_factory=list)
@@ -50,9 +57,37 @@ class SubjectBody(BaseModel):
     hard_lines: list[str] = Field(default_factory=list)
     examples: list[str] = Field(default_factory=list)
     side: str = Field(default="")
+    schema_version: int = 1
+    revision: int = 1
+    target: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    exclusions: list[str] = Field(default_factory=list)
+    scope: str = ""
+    exceptions: list[str] = Field(default_factory=list)
+    allowed_moods: list[str] = Field(default_factory=list)
+    allow_draft: StrictBool = True
+    allow_auto: StrictBool = False
+    evidence_policy: str = "required"
+    evidence_max_age_days: int = Field(default=30, ge=1, le=3650, strict=True)
+    required_checks: list[str] = Field(default_factory=lambda: ["context", "target", "stance", "evidence", "safety"])
+    counterexamples: list[str] = Field(default_factory=list)
+    owner: str = ""
+    change_reason: str = ""
+
+
+class _XAISelectionBody(BaseModel):
+    """An exact X provider/model pair; credentials stay in the registry."""
+
+    model_config = ConfigDict(extra="forbid")
+    selection: str = Field(default="global", max_length=20)
+    provider: str = Field(default="", max_length=200)
+    model: str = Field(default="", max_length=300)
+    local_only: StrictBool = False
+    roles: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 class ReplyConfigBody(BaseModel):
+    expected_revision: int | None = Field(default=None, ge=0, strict=True)
     enabled: bool = Field(default=False)
     mode: str = Field(default="off")
     summoners: list[str] = Field(default_factory=list)
@@ -71,10 +106,12 @@ class ReplyConfigBody(BaseModel):
     open_thread_marker: str = Field(default="")
     close_thread_marker: str = Field(default="")
     subjects: list[SubjectBody] = Field(default_factory=list)
+    ai: _XAISelectionBody | None = Field(default=None)
 
 
 class SummonIdBody(BaseModel):
     summon_id: str = Field(default="")
+    approval_token: str = Field(default="", max_length=64)
 
 
 class PreviewBody(BaseModel):
@@ -87,6 +124,7 @@ class PreviewBody(BaseModel):
     parent_handle: str = Field(default="")
     subject_id: str = Field(default="")
     mood: str = Field(default="")
+    ai: _XAISelectionBody | None = Field(default=None)
 
 
 async def _csrf(request: Request) -> None:
@@ -104,58 +142,45 @@ def _safe_error(exc: Exception) -> JSONResponse:
     )
 
 
-def _validate_subjects(subjects: list[SubjectBody]) -> list[str]:
-    """Per-subject problems, in operator words. Empty list means clean."""
-    from kazma_core.x_api.stance import MOODS
+def _actor(request: Request) -> str:
+    from kazma_ui.auth import get_request_principal
 
-    problems: list[str] = []
-    seen: set[str] = set()
-    for i, s in enumerate(subjects, start=1):
-        label = s.id.strip() or f"#{i}"
-        if not s.id.strip():
-            problems.append(f"Subject {label}: needs an id (short, lowercase).")
-        elif s.id.strip() in seen:
-            problems.append(f"Subject {label}: duplicate id.")
-        else:
-            seen.add(s.id.strip())
-        kws = [m for m in s.match if m.strip()]
-        if not kws:
-            problems.append(
-                f"Subject {label}: needs at least one keyword, or it can never match."
-            )
-        catch_all = any(m.strip() == "*" for m in s.match)
-        side = (s.side or "").strip().lower()
-        if side and side not in ("against", "support"):
-            problems.append(
-                f"Subject {label}: side must be against or support, not {s.side!r}."
-            )
-        if not catch_all and side not in ("against", "support") and not s.view.strip():
-            problems.append(
-                f"Subject {label}: set against or support "
-                "(emoji is tone only — this is the side it always takes)."
-            )
-        if s.mood.strip().lower() not in MOODS:
-            problems.append(
-                f"Subject {label}: unknown mood {s.mood!r} "
-                f"(pick one of {', '.join(sorted(MOODS))})."
-            )
-    return problems
+    principal = get_request_principal(request) or {}
+    return str(principal.get("user_id") or principal.get("username") or "local-operator")
+
+
+def _validate_subjects(subjects: list[SubjectBody]) -> list[str]:
+    """Use the same versioned validator as runtime loading."""
+    from kazma_core.x_api.subject_policy import normalize_cards
+
+    return list(normalize_cards([subject.model_dump(by_alias=True) for subject in subjects])[1])
 
 
 def _payload() -> dict[str, Any]:
     """Current config plus the context the panel needs to explain itself."""
+    from kazma_core.config_store import get_config_store
     from kazma_core.tenant_context import tenant_scope
     from kazma_core.x_api.config import get_x_config
+    from kazma_core.x_api.model_selection import X_MODEL_ROLES, model_options, validate_selection
+    from kazma_core.x_api.qualification import qualification_hold
     from kazma_core.x_api.stance import MOOD_EMOJI, MOODS, get_reply_config
 
-    with tenant_scope("default"):
+    with tenant_scope(x_tenant_id()):
+        settings_revision = get_config_store().get(x_config_key("connectors.x.reply.settings_revision"), 0)
         cfg = get_reply_config()
         xcfg = get_x_config()
+        ai = validate_selection(get_config_store().get(x_config_key("connectors.x.ai")))
+        ai_options = model_options()
 
     return {
         "ok": True,
+        "settings_revision": settings_revision,
         "enabled": cfg.enabled,
         "mode": cfg.mode,
+        "ai": ai,
+        "ai_options": ai_options,
+        "ai_roles": list(X_MODEL_ROLES),
+        "auto_qualification_hold": qualification_hold(cfg),
         "summoners": list(cfg.summoners),
         "trigger": cfg.trigger,
         "max_replies_per_day": cfg.max_replies_per_day,
@@ -171,19 +196,7 @@ def _payload() -> dict[str, Any]:
         "knowledge_library": cfg.knowledge_library,
         "open_thread_marker": cfg.open_thread_marker,
         "close_thread_marker": cfg.close_thread_marker,
-        "subjects": [
-            {
-                "id": s.id,
-                "match": list(s.match),
-                "view": s.view,
-                "mood": s.mood,
-                "register": s.register,
-                "hard_lines": list(s.hard_lines),
-                "examples": list(s.examples),
-                "side": s.side,
-            }
-            for s in cfg.subjects
-        ],
+        "subjects": [asdict(subject) for subject in cfg.subjects],
         "moods": sorted(MOODS),
         # The panel shows the emoji legend rather than making the
         # operator guess which ones are wired.
@@ -257,7 +270,7 @@ def x_reply_recent(limit: int = 20) -> JSONResponse:
 
 
 @router.get("/conversations")
-def x_reply_conversations(limit: int = 30) -> JSONResponse:
+def x_reply_conversations(limit: int = 30, query: str = "", state: str = "", cursor: str = "") -> JSONResponse:
     """Whole exchanges, newest first — who summoned, what was said, what Kazma said.
 
     Distinct from ``/recent``, which is a state list for the settings panel.
@@ -271,11 +284,14 @@ def x_reply_conversations(limit: int = 30) -> JSONResponse:
     try:
         from kazma_core.x_api.reply_store import get_reply_store
 
-        rows = get_reply_store().recent(limit=max(1, min(100, int(limit))))
+        page = get_reply_store().conversation_page(limit=limit, query=query, state=state, cursor=cursor)
+        rows = page.pop("rows")
         out = []
         for r in rows:
             out.append({
                 "summon_id": r.summon_id,
+                "approval_token": r.approval_token,
+                "attempt_no": r.attempt_no,
                 "parent_id": r.parent_id,
                 # Who wrote the post being replied to.
                 "target": r.target_handle,
@@ -286,7 +302,15 @@ def x_reply_conversations(limit: int = 30) -> JSONResponse:
                 # What Kazma said, or why it did not.
                 "reply": r.draft_text,
                 "status": r.status,
+                "can_approve": bool(r.draft_text) and (r.status == "awaiting_approval" or
+                                                       (r.status == "failed" and r.publish_outcome in ("rejected", "not_sent"))),
+                "can_retry": r.status in ("skipped", "failed", "awaiting_approval", "retry_pending") or
+                             (r.status == "drafting" and r.updated_at < time.time() - 600),
+                "needs_reconciliation": r.status in ("sending", "outcome_unknown"),
                 "subject": r.subject_id,
+                "checks": r.decision.get("checks", []),
+                "context": r.decision.get("context", {}),
+                "models": r.decision.get("models", []),
                 "reason": (
                     r.reason
                     or (
@@ -302,7 +326,21 @@ def x_reply_conversations(limit: int = 30) -> JSONResponse:
                 ),
                 "at": r.created_at,
             })
-        return JSONResponse({"ok": True, "rows": out})
+        return JSONResponse({"ok": True, **page, "rows": out})
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except Exception as exc:  # noqa: BLE001
+        return _safe_error(exc)
+
+
+@router.get("/history/{summon_id}")
+def x_reply_history(summon_id: str) -> JSONResponse:
+    try:
+        from kazma_core.x_api.reply_store import ReplyRecord, get_reply_store
+
+        history = get_reply_store().history(summon_id, limit=200)
+        return JSONResponse({"ok": True, "rows": [{**entry, "actor": entry["record"].get("decision_actor", ""),
+                                                   "record": ReplyRecord(entry["record"]).to_dict()} for entry in history]})
     except Exception as exc:  # noqa: BLE001
         return _safe_error(exc)
 
@@ -310,10 +348,28 @@ def x_reply_conversations(limit: int = 30) -> JSONResponse:
 @protected_router.put("", dependencies=[Depends(_csrf)])
 async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
     try:
-        from kazma_core.config_store import get_config_store
+        from kazma_core.config_store import ConfigRevisionConflict, get_config_store
         from kazma_core.x_api.stance import MODE_AUTO, MODE_DRAFT, MODE_OFF
 
+        revision_key = x_config_key("connectors.x.reply.settings_revision")
+        revision = await asyncio.to_thread(get_config_store().get, revision_key, 0)
+        if body.expected_revision is not None and body.expected_revision != revision:
+            return JSONResponse({"ok": False, "error": "X settings changed. Reload and review before saving."}, status_code=409)
+
         problems = _validate_subjects(body.subjects)
+        ai = None
+        if body.ai is not None:
+            from kazma_core.x_api.model_selection import (
+                XModelUnavailableError,
+                validate_provider,
+                validate_selection,
+            )
+
+            try:
+                ai = validate_selection(body.ai.model_dump(exclude_unset=True))
+                await asyncio.to_thread(validate_provider, ai)
+            except XModelUnavailableError as exc:
+                problems.append(str(exc))
         if problems:
             return JSONResponse(
                 {"ok": False, "error": "Fix these first.", "problems": problems},
@@ -362,9 +418,8 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
         warnings: list[str] = []
         if body.enabled and mode == MODE_AUTO and not body.stance_check:
             warnings.append(
-                "Stance check is off and replies post unattended. Nothing "
-                "verifies a draft argues your view before it publishes — a "
-                "model that drifts will post the other side under your name."
+                "Stance check is off. Auto mode will hold drafts for approval; "
+                "mandatory verification and release qualification cannot be disabled."
             )
         if body.enabled and policy == SUMMON_ANYONE and mode == MODE_AUTO:
             warnings.append(
@@ -379,23 +434,12 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
                 "subject's own mood."
             )
 
-        subjects = [
-            {
-                "id": s.id.strip(),
-                "match": [m.strip() for m in s.match if m.strip()],
-                "view": s.view.strip(),
-                "mood": s.mood.strip().lower() or "dry",
-                "register": s.register_hint.strip(),
-                "hard_lines": [h.strip() for h in s.hard_lines if h.strip()],
-                "examples": [e.strip() for e in s.examples if e.strip()],
-                "side": (
-                    (s.side or "").strip().lower()
-                    if (s.side or "").strip().lower() in ("against", "support")
-                    else ""
-                ),
-            }
-            for s in body.subjects
-        ]
+        from kazma_core.x_api.subject_policy import normalize_cards, revise_cards
+
+        subjects, _ = normalize_cards([subject.model_dump(by_alias=True) for subject in body.subjects])
+        previous = await asyncio.to_thread(get_config_store().get, x_config_key("connectors.x.reply.subjects"), [])
+        subjects = revise_cards(previous, subjects)
+
 
         items: list[tuple[str, Any, str]] = [
             ("connectors.x.reply.enabled", bool(body.enabled), _CATEGORY),
@@ -469,7 +513,15 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
             ),
             ("connectors.x.reply.subjects", subjects, _CATEGORY),
         ]
-        await asyncio.to_thread(get_config_store().batch_set, items)
+        if ai is not None:
+            items.append(("connectors.x.ai", ai, _CATEGORY))
+        items.append(("connectors.x.reply.settings_revision", revision + 1, _CATEGORY))
+        try:
+            await asyncio.to_thread(get_config_store().batch_set,
+                                   [(x_config_key(key), value, category) for key, value, category in items],
+                                   expected=(revision_key, revision))
+        except ConfigRevisionConflict as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
 
         # Start/stop the poller now so Save is the action, not a restart.
         try:
@@ -521,7 +573,7 @@ async def x_reply_poll() -> JSONResponse:
         from kazma_core.x_api.mentions_fire import poll_once
         from kazma_core.x_api.stance import get_reply_config
 
-        with tenant_scope("default"):
+        with tenant_scope(x_tenant_id()):
             cfg = await asyncio.to_thread(get_reply_config)
             if not cfg.can_draft():
                 return JSONResponse(
@@ -552,7 +604,7 @@ async def x_reply_poll() -> JSONResponse:
 
 
 @protected_router.post("/approve", dependencies=[Depends(_csrf)])
-async def x_reply_approve(body: SummonIdBody) -> JSONResponse:
+async def x_reply_approve(body: SummonIdBody, request: Request) -> JSONResponse:
     sid = (body.summon_id or "").strip()
     if not sid:
         return JSONResponse({"ok": False, "error": "summon_id required"}, status_code=400)
@@ -560,8 +612,8 @@ async def x_reply_approve(body: SummonIdBody) -> JSONResponse:
         from kazma_core.tenant_context import tenant_scope
         from kazma_core.x_api.reply import approve_summon
 
-        with tenant_scope("default"):
-            result = await approve_summon(sid)
+        with tenant_scope(x_tenant_id()):
+            result = await approve_summon(sid, approval_token=body.approval_token, actor=await asyncio.to_thread(_actor, request))
         status = 200 if result.ok or result.action == "skipped" else 400
         return JSONResponse(_summon_payload(result), status_code=status)
     except Exception as exc:  # noqa: BLE001
@@ -578,8 +630,8 @@ async def x_reply_delete(body: SummonIdBody) -> JSONResponse:
         from kazma_core.tenant_context import tenant_scope
         from kazma_core.x_api.reply import forget_summon
 
-        with tenant_scope("default"):
-            result = await forget_summon(sid)
+        with tenant_scope(x_tenant_id()):
+            result = await forget_summon(sid, approval_token=body.approval_token)
         status = 200 if result.ok else 400
         return JSONResponse(_summon_payload(result), status_code=status)
     except Exception as exc:  # noqa: BLE001
@@ -587,7 +639,7 @@ async def x_reply_delete(body: SummonIdBody) -> JSONResponse:
 
 
 @protected_router.post("/deny", dependencies=[Depends(_csrf)])
-async def x_reply_deny(body: SummonIdBody) -> JSONResponse:
+async def x_reply_deny(body: SummonIdBody, request: Request) -> JSONResponse:
     sid = (body.summon_id or "").strip()
     if not sid:
         return JSONResponse({"ok": False, "error": "summon_id required"}, status_code=400)
@@ -595,8 +647,8 @@ async def x_reply_deny(body: SummonIdBody) -> JSONResponse:
         from kazma_core.tenant_context import tenant_scope
         from kazma_core.x_api.reply import deny_summon
 
-        with tenant_scope("default"):
-            result = await deny_summon(sid)
+        with tenant_scope(x_tenant_id()):
+            result = await deny_summon(sid, approval_token=body.approval_token, actor=await asyncio.to_thread(_actor, request))
         status = 200 if result.ok or result.action == "skipped" else 400
         return JSONResponse(_summon_payload(result), status_code=status)
     except Exception as exc:  # noqa: BLE001
@@ -604,7 +656,7 @@ async def x_reply_deny(body: SummonIdBody) -> JSONResponse:
 
 
 @protected_router.post("/retry", dependencies=[Depends(_csrf)])
-async def x_reply_retry(body: SummonIdBody) -> JSONResponse:
+async def x_reply_retry(body: SummonIdBody, request: Request) -> JSONResponse:
     """Re-run a skipped/failed/held summon against current config."""
     sid = (body.summon_id or "").strip()
     if not sid:
@@ -613,8 +665,8 @@ async def x_reply_retry(body: SummonIdBody) -> JSONResponse:
         from kazma_core.tenant_context import tenant_scope
         from kazma_core.x_api.reply import retry_summon
 
-        with tenant_scope("default"):
-            result = await retry_summon(sid)
+        with tenant_scope(x_tenant_id()):
+            result = await retry_summon(sid, actor=await asyncio.to_thread(_actor, request))
         status = 200 if result.ok or result.action in ("skipped", "awaiting_approval", "posted") else 400
         # failed drafts still 200 — the operator needs the reason, not a 400
         if result.action == "failed":
@@ -639,42 +691,58 @@ async def x_reply_preview(body: PreviewBody) -> JSONResponse:
 
         # Settings requests carry a tenant, but provider keys are tenant-scoped
         # vault rows and this is the one endpoint that spends a model call.
-        with tenant_scope("default"):
+        with tenant_scope(x_tenant_id()):
             override = None
             if body.subject is not None and (
                 body.subject.view.strip()
                 or (body.subject.side or "").strip().lower() in ("against", "support")
             ):
-                from kazma_core.x_api.stance import Subject
+                from kazma_core.x_api.stance import _parse_subjects
 
-                side = (body.subject.side or "").strip().lower()
-                if side not in ("against", "support"):
-                    side = ""
-                override = Subject(
-                    id=body.subject.id.strip() or "(unsaved)",
-                    match=tuple(
-                        m.strip().lower() for m in body.subject.match if m.strip()
-                    ),
-                    view=body.subject.view.strip(),
-                    mood=body.subject.mood.strip().lower() or "dry",
-                    register=body.subject.register_hint.strip(),
-                    hard_lines=tuple(
-                        h.strip() for h in body.subject.hard_lines if h.strip()
-                    ),
-                    examples=tuple(
-                        e.strip() for e in body.subject.examples if e.strip()
-                    ),
-                    side=side,
+                edited = body.subject.model_dump(by_alias=True)
+                edited["id"] = edited["id"].strip() or "unsaved"
+                edited["target"] = edited["target"].strip() or edited["id"]
+                from kazma_core.x_api.subject_policy import normalize_cards
+
+                _, errors = normalize_cards([edited])
+                if errors:
+                    return JSONResponse({"ok": False, "error": "; ".join(errors)}, status_code=400)
+                parsed = _parse_subjects([edited])
+                if parsed:
+                    override = parsed[0]
+            from kazma_core.x_api.model_selection import x_model_scope
+
+            # Unsaved model selection is tested without activating it.
+            async with x_model_scope(body.ai.model_dump(exclude_unset=True) if body.ai else None):
+                result = await preview_reply(
+                    parent_text=text,
+                    parent_handle=(body.parent_handle or "").strip().lstrip("@"),
+                    subject_id=(body.subject_id or "").strip(),
+                    mood=(body.mood or "").strip().lower(),
+                    subject_override=override,
                 )
-            result = await preview_reply(
-                parent_text=text,
-                parent_handle=(body.parent_handle or "").strip().lstrip("@"),
-                subject_id=(body.subject_id or "").strip(),
-                mood=(body.mood or "").strip().lower(),
-                subject_override=override,
-            )
         payload = result.to_dict()
+        payload["preview_scope"] = "card_only" if override is not None or body.subject_id else "full_policy"
+        payload["publishing_eligible"] = False
         payload["ok"] = result.ok
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
         return _safe_error(exc)
+
+
+@router.get("/qualification")
+def x_qualification_status() -> JSONResponse:
+    from kazma_core.x_api.qualification import qualification_status
+
+    return JSONResponse({"ok": True, **qualification_status()})
+
+
+@protected_router.put("/qualification", dependencies=[Depends(_csrf)])
+def x_qualification_install(body: _QualificationBody) -> JSONResponse:
+    from kazma_core.x_api.qualification import install_report
+
+    try:
+        metrics = install_report(body.report)
+    except (ValueError, TypeError, KeyError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "metrics": metrics})

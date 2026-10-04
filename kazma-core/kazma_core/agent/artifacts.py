@@ -29,8 +29,9 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from contextlib import AbstractContextManager
-from typing import Any, Callable
+from typing import Any
 
 __all__ = [
     "ArtifactStore",
@@ -210,6 +211,8 @@ class ArtifactStore:
         thread_id: str,
         kind: str,
         items: list[Any],
+        *,
+        reviews: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Persist an enumerated set of outbound drafts; returns stable IDs.
 
@@ -221,12 +224,15 @@ class ArtifactStore:
         clean = [str(i).strip() for i in (items or []) if str(i).strip()]
         if not clean:
             raise ValueError("save_proposal requires at least one non-empty item")
+        if reviews is not None and len(reviews) != len(clean):
+            raise ValueError("Each draft must have exactly one review record")
         proposal_id = f"prop_{uuid.uuid4().hex[:12]}"
         payload = {
             "proposal_id": proposal_id,
             "kind": str(kind or "drafts")[:40],
             "items": [
-                {"id": f"{proposal_id}:{n}", "text": t[:8000]}
+                {"id": f"{proposal_id}:{n}", "text": t[:8000],
+                 **({"review": reviews[n - 1]} if reviews is not None else {})}
                 for n, t in enumerate(clean, start=1)
             ],
             "created_at": time.time(),
@@ -382,9 +388,49 @@ class ArtifactStore:
                         "used_at": float(item.get("used_at") or 0) or None,
                         "used_via": str(item.get("used_via") or ""),
                         "used_ref": str(item.get("used_ref") or ""),
+                        **({"review": item["review"]} if isinstance(item.get("review"), dict) else {}),
                     }
                 )
         return out[:bounded]
+
+    def proposal_page(self, *, tenant_id: str, cursor: str = "", query: str = "", only_discarded: bool = False, limit: int = 50) -> dict[str, Any]:
+        """Page flattened items across the whole store, including old unused drafts."""
+        from kazma_core.db.keyset import decode_cursor, encode_cursor
+
+        boundary = decode_cursor(cursor, size=4)
+        if len(query) > 200:
+            raise ValueError("Search exceeds 200 characters")
+        cap = max(1, min(100, int(limit)))
+        # Invalid legacy JSON is ignored. JSON1 expands each set before LIMIT,
+        # so a partly used large set cannot hide unrelated older draft items.
+        relation = ("agent_artifacts a JOIN json_each(json_extract(CASE WHEN json_valid(a.value) THEN a.value ELSE '{}' END, '$.items')) j "
+                    "WHERE a.tenant_id = ? AND a.kind IN ('proposal', 'proposal_posted') AND j.type = 'object' "
+                    "AND trim(COALESCE(json_extract(j.value, '$.text'), '')) != '' ")
+        if only_discarded:
+            relation += "AND json_extract(j.value, '$.used_via') = 'discarded' "
+        else:
+            relation += "AND a.kind = 'proposal' AND NOT COALESCE(json_extract(j.value, '$.used_at'), 0) "
+        relation += "AND (? = '' OR instr(lower(json_extract(j.value, '$.text')), lower(?)) > 0) "
+        args = (tenant_id, query, query)
+        paging = "AND (a.updated_at, a.thread_id, a.key, CAST(j.key AS TEXT)) < (?, ?, ?, ?) " if boundary else ""
+        with self._connect() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM " + relation, args).fetchone()[0]
+            rows = conn.execute("SELECT a.thread_id, a.key, a.updated_at, a.value, a.kind, j.value, CAST(j.key AS TEXT) FROM " + relation + paging +
+                                "ORDER BY a.updated_at DESC, a.thread_id DESC, a.key DESC, CAST(j.key AS TEXT) DESC LIMIT ?",
+                                (*args, *(boundary or ()), cap + 1)).fetchall()
+        more = len(rows) > cap
+        items = []
+        for thread, key, at, payload, kind, item, index in rows[:cap]:
+            payload, item = json.loads(payload), json.loads(item)
+            items.append({"id": str(item.get("id") or ""), "proposal_id": str(payload.get("proposal_id") or ""),
+                          "text": str(item["text"]).strip(), "kind": str(payload.get("kind") or kind),
+                          "thread_id": thread, "created_at": float(payload.get("created_at") or at),
+                          "posted": self._item_used(item, kind), "used_at": float(item.get("used_at") or 0) or None,
+                          "used_via": str(item.get("used_via") or ""), "used_ref": str(item.get("used_ref") or ""),
+                          **({"review": item["review"]} if isinstance(item.get("review"), dict) else {})})
+        last = rows[cap - 1] if more else None
+        next_cursor = encode_cursor((last[2], last[0], last[1], last[6])) if last else ""
+        return {"drafts": items, "count": count, "next_cursor": next_cursor}
 
     def list_proposal_sets(
         self,

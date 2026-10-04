@@ -358,7 +358,7 @@ def get_kazma_secret() -> str:
         return _EPHEMERAL_SECRET
 
 
-def get_or_create_disclosure_key(store: "ConfigStore" | None = None) -> str:
+def get_or_create_disclosure_key(store: ConfigStore | None = None) -> str:
     """Get or create the disclosure HMAC key.
     
     If KAZMA_DISCLOSURE_KEY is set in environment, use it.
@@ -744,6 +744,10 @@ _BATCH_KEYS = _announces(
 _ANY_KEY_IF_WRITTEN = _announces(lambda result, _args, _kwargs: None if result else ())
 
 
+class ConfigRevisionConflict(ValueError):
+    """A conditional settings batch no longer matches its reviewed revision."""
+
+
 class ConfigStoreProtocol(Protocol):
     """Protocol defining the ConfigStore interface for type safety."""
 
@@ -752,7 +756,7 @@ class ConfigStoreProtocol(Protocol):
     def set(self, key: str, value: Any) -> None: ...
     def set_if_absent(self, key: str, value: Any, ttl: float | None = None, category: str = "general") -> bool: ...
     def atomic_update(self, key: str, updater: Callable[[Any], Any], category: str = "general") -> Any: ...
-    def batch_set(self, items: list[tuple[str, Any, str]]) -> int: ...
+    def batch_set(self, items: list[tuple[str, Any, str]], *, expected: tuple[str, int] | None = None) -> int: ...
     def transaction(self): ...
     def get_category(self, category: str) -> dict[str, Any]: ...
     def get_all(self) -> dict[str, dict[str, Any]]: ...
@@ -827,11 +831,18 @@ class _InMemoryStore(_ChangeNotices):
             return True
     
     @_BATCH_KEYS
-    def batch_set(self, items: list[tuple[str, Any, str]]) -> int:
+    def batch_set(self, items: list[tuple[str, Any, str]], *, expected: tuple[str, int] | None = None) -> int:
         for key, _value, _category in items:
             refuse_write("config", key)
+        if expected is not None and (type(expected[1]) is not int or expected[1] < 0
+                                    or not any(key == expected[0] and type(value) is int and value == expected[1] + 1
+                                               for key, value, _category in items)):
+            raise ValueError("A conditional batch must advance its nonnegative integer revision.")
         with self._lock:
             self._evict_expired()
+            current = self._data.get(expected[0], 0) if expected is not None else 0
+            if expected is not None and (type(current) is not int or current != expected[1]):
+                raise ConfigRevisionConflict("Settings changed. Reload and review before saving.")
             for key, value, _category in items:
                 if len(self._data) >= self._max_entries:
                     self._evict_oldest()
@@ -2079,7 +2090,7 @@ class ConfigStore(_ChangeNotices):
                     raise
 
     @_BATCH_KEYS
-    def batch_set(self, items: list[tuple[str, Any, str]]) -> int:
+    def batch_set(self, items: list[tuple[str, Any, str]], *, expected: tuple[str, int] | None = None) -> int:
         """Atomically set multiple keys in a single transaction.
 
         All writes succeed or all roll back — a crash or exception mid-batch
@@ -2106,6 +2117,12 @@ class ConfigStore(_ChangeNotices):
             prepared.append((key, to_store, category))
         if not prepared:
             return 0
+        if expected is not None:
+            revision_key, revision = expected
+            if (type(revision) is not int or revision < 0
+                    or not any(key == revision_key and type(value) is int and value == revision + 1
+                               for key, value, _category in prepared)):
+                raise ValueError("A conditional batch must advance its nonnegative integer revision.")
         now = datetime.now(UTC).isoformat()
         with self._lock:
             if self._use_postgres():
@@ -2114,6 +2131,20 @@ class ConfigStore(_ChangeNotices):
                     raise RuntimeError("Postgres pool unavailable")
                 with pool.connection() as conn:
                     with conn.cursor() as cur:
+                        if expected is not None:
+                            # Materialize the initial revision so two first saves
+                            # also contend on the same row. The connection context
+                            # rolls this back together with the batch on conflict.
+                            cur.execute(
+                                "INSERT INTO kazma_settings (key, value, category, updated_at) "
+                                "VALUES (%s, %s, %s, %s) ON CONFLICT (key) DO NOTHING",
+                                (revision_key, "0", "general", now),
+                            )
+                            cur.execute("SELECT value FROM kazma_settings WHERE key = %s FOR UPDATE", (revision_key,))
+                            current = cur.fetchone()["value"]
+                            current = json.loads(current) if isinstance(current, str) else current
+                            if type(current) is not int or current != revision:
+                                raise ConfigRevisionConflict("Settings changed. Reload and review before saving.")
                         for key, value, category in prepared:
                             cur.execute(
                                 """
@@ -2132,7 +2163,12 @@ class ConfigStore(_ChangeNotices):
             else:
                 conn = self._get_conn()
                 try:
-                    conn.execute("BEGIN")
+                    conn.execute("BEGIN IMMEDIATE" if expected is not None else "BEGIN")
+                    if expected is not None:
+                        row = conn.execute("SELECT value FROM settings WHERE key = ?", (revision_key,)).fetchone()
+                        current = json.loads(row[0]) if row is not None else 0
+                        if type(current) is not int or current != revision:
+                            raise ConfigRevisionConflict("Settings changed. Reload and review before saving.")
                     for key, value, category in prepared:
                         conn.execute(
                             """INSERT OR REPLACE INTO settings (key, value, category, updated_at)
@@ -2639,7 +2675,7 @@ def set_config_store(store: ConfigStore) -> None:
     _config_store = store
 
 
-def peek_config_store() -> "ConfigStore | None":
+def peek_config_store() -> ConfigStore | None:
     """Return the live singleton WITHOUT creating one (None if not yet made).
 
     Test harnesses capture-and-restore via this + :func:`set_config_store`;

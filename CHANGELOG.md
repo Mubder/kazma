@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## X Studio: durable publication, scoped policy, independent models and review (2026-10-04)
+
+X writes now share transactional account-bound operations, quota reservations,
+send claims, typed uncertain outcomes and replayable projections. Unknown sends
+remain held instead of being rebooked. Legacy bookings are fenced; restore
+pauses publishing and requires verified-account resume without releasing old work.
+
+Subject cards have explicit targets, scope, exceptions, evidence freshness and
+permissions. Routing gathers conflicts and original match spans. Drafts run five
+independent checks against context and authorized knowledge. Specific X model
+bindings can cover every drafting/checking role, including local endpoints,
+without changing Kazma's global model or silently falling back to cloud.
+
+Studio adds AI post drafts, revision-bound approvals/history, canonical queue
+states, publication diagnostics, composer autosave with conflict detection,
+weighted lengths, stale-response protection and EN/AR review states. Notices
+persist transactionally and retry only delivery; late schedules are held after
+five minutes. Qualification upload validates real report outcomes and coverage.
+No human-labeled production corpus was available during engineering; automatic
+reply eligibility remains held until deployment-specific qualification passes.
+
+
+## X replies can use their own model; rate-limit resets keep their units (2026-10-03)
+
+Settings → X → Auto-reply can now select an explicit configured provider/model
+for subject classification, reply drafting and stance checks, including a local
+Ollama or LM Studio model. Ordinary Kazma chat keeps its global model. Try it
+tests unsaved selections without posting, and previews report the model used.
+An unavailable explicit selection never falls back to the global model. A
+reply keeps its binding throughout the decision; one-off clients are released
+afterward. Provider-pinned clients now resolve environment credentials through
+the shared credential ladder and refuse disabled providers.
+
+The X scheduler now uses typed Retry-After seconds and rate-limit reset epochs.
+An epoch was previously printed as Retry-After and parsed as a delay, which
+could defer a rate-limited post for decades. HTTP-date Retry-After is supported;
+invalid hints fall back to a bounded wait. The full Studio plan remains in
+progress; subject/evidence hardening and durable publication recovery follow.
+
 ## The Memory page's numbers match what memory holds (2026-10-03)
 
 The Memory page's "empty" count included merge redirects, which no clean-up

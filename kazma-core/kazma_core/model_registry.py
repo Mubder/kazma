@@ -27,15 +27,15 @@ import json
 import logging
 import os
 import threading
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from kazma_core.http_tls import shared_ssl_context
 from kazma_core.llm_provider import LLMConfig, LLMProvider
 from kazma_core.provider_adapters import build_client
 from kazma_core.providers import PROVIDER_PRESETS
 from kazma_core.runtime.live_llm import coerce_api_key
-from kazma_core.http_tls import shared_ssl_context
 
 __all__ = ["ModelRegistry", "get_model_registry", "initialize_model_registry", "lookup_context_window", "peek_model_registry", "reset_model_registry"]
 
@@ -169,6 +169,7 @@ class ModelRegistry:
         # the swarm path that are NOT entered into _clients, so close() iterating
         # only _clients leaked their httpx connection pools (audit finding).
         self._all_clients: set[LLMProvider] = set()
+        self._client_providers: dict[LLMProvider, str] = {}
         self._active_provider: str = ""
         self._active_model: str = ""
         self._discovered_models: dict[str, list[str]] = {}
@@ -180,10 +181,27 @@ class ModelRegistry:
         # methods (e.g. set_active_* -> get_active_profile) re-enter.
         self._lock = threading.RLock()
 
-    def _track(self, client: LLMProvider) -> LLMProvider:
+    def _track(self, client: LLMProvider, provider: str = "") -> LLMProvider:
         """Register a built client for shutdown cleanup, returning it unchanged."""
-        self._all_clients.add(client)
+        with self._lock:
+            self._all_clients.add(client)
+            self._client_providers[client] = provider
         return client
+
+    def provider_for_client(self, client: LLMProvider) -> str:
+        """The provider actually used to build this client, including fallback."""
+        with self._lock:
+            return self._client_providers.get(client, "")
+
+    async def release_client(self, client: LLMProvider) -> None:
+        """Close a completed one-off client; cached global clients stay owned."""
+        with self._lock:
+            if any(client is cached for cached in self._clients.values()):
+                return
+        await client.close()
+        with self._lock:
+            self._all_clients.discard(client)
+            self._client_providers.pop(client, None)
 
     async def close(self) -> None:
         """Close all cached LLM clients (call on app shutdown)."""
@@ -197,6 +215,7 @@ class ModelRegistry:
                     pass
             self._clients.clear()
             self._all_clients.clear()
+            self._client_providers.clear()
 
     # ── Active profile management ──────────────────────────────────
 
@@ -623,7 +642,7 @@ class ModelRegistry:
             ):
                 self._clients[provider_name] = client
 
-            self._track(client)
+            self._track(client, provider_name)
             return client, outcome
 
     def get_model(self, model_id: str) -> LLMProvider:
@@ -645,7 +664,7 @@ class ModelRegistry:
                 "api_key": coerce_api_key(owner.get("api_key", "")),
                 "model": clean_id,
             })
-            return self._track(build_client(owner_name, config, owner))
+            return self._track(build_client(owner_name, config, owner), owner_name)
 
         # Fallback: use active profile with overridden model
         return self.get_client(model=clean_id)
@@ -661,7 +680,7 @@ class ModelRegistry:
         found or misconfigured.
         """
         entry = self.get_provider(provider_name)
-        if not entry:
+        if not entry or not entry.get("enabled", True):
             return None
         effective_model = model or str(entry.get("model", "") or "")
         if not effective_model:
@@ -671,12 +690,13 @@ class ModelRegistry:
             from kazma_core.providers import default_model_for
 
             effective_model = self._active_model or default_model_for(provider_name)
+        base_url, api_key = self.resolve_provider_credentials(provider_name)
         config = LLMConfig.from_dict({
-            "base_url": str(entry.get("base_url", "")),
-            "api_key": coerce_api_key(entry.get("api_key", "")),
+            "base_url": base_url,
+            "api_key": api_key,
             "model": effective_model,
         })
-        return self._track(build_client(provider_name, config, entry))
+        return self._track(build_client(provider_name, config, entry), provider_name)
 
     def find_provider_for_model(self, model_id: str) -> dict[str, Any] | None:
         """Return the provider entry that owns *model_id*.

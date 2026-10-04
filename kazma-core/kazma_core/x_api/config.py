@@ -74,11 +74,14 @@ class XConfig:
     max_chars: int
     duplicate_window_days: int
     kill_switch: bool
+    account_id: str = ""
+    restore_paused: bool = False
 
     def can_post(self) -> bool:
         return (
             self.enabled
             and not self.kill_switch
+            and not self.restore_paused
             and self.credentials.complete()
         )
 
@@ -97,8 +100,9 @@ def _env_flag(name: str) -> bool | None:
 def _cs_get(key: str) -> Any:
     try:
         from kazma_core.config_store import get_config_store
+        from kazma_core.x_api.ownership import x_config_key
 
-        return get_config_store().get(key)
+        return get_config_store().get(x_config_key(key))
     except Exception:
         logger.debug("[x_api] ConfigStore read failed for %s", key, exc_info=True)
         return None
@@ -123,9 +127,12 @@ def _int_cfg(key: str, default: int, *, lo: int, hi: int) -> int:
 
 
 def _load_credentials() -> XCredentials:
+    from kazma_core.x_api.ownership import x_tenant_id
+
     values = ["", "", "", ""]
     for i, env_name in enumerate(ENV_CREDENTIAL_KEYS):
-        values[i] = (os.environ.get(env_name) or "").strip()
+        if x_tenant_id() == "default":
+            values[i] = (os.environ.get(env_name) or "").strip()
     if not all(values):
         for i, key in enumerate(CREDENTIAL_KEYS):
             if values[i]:
@@ -156,15 +163,33 @@ def x_posting_enabled() -> bool:
 
 def get_x_config() -> XConfig:
     """Live-read config. Never raises."""
+    from kazma_core.x_api.ownership import x_tenant_id
+
+    x_tenant_id()
     kill = _env_flag("KAZMA_X_POST") is False
     enabled = False if kill else x_posting_enabled()
     handle = str(_cs_get("connectors.x.handle") or "").strip()
     if handle and not handle.startswith("@"):
         handle = "@" + handle.lstrip("@")
+    from kazma_core.x_api.account_binding import credential_revision
+
+    credentials = _load_credentials()
+    account = _cs_get("connectors.x.account") or {}
+    account_id = str(account.get("id") or "") if isinstance(account, dict) and account.get("credential_revision") == credential_revision(credentials) else ""
+    from kazma_core.config_store import get_config_store
+
+    restored_at = get_config_store().get("system.x.restore_verification_after", 0)
+    verified_at = account.get("verified_at", 0) if isinstance(account, dict) else 0
+    if type(verified_at) not in (int, float) or not verified_at >= restored_at:
+        account_id = ""
+    from kazma_core.x_api.restore import restore_paused
+
     return XConfig(
+        restore_paused=restore_paused(),
         enabled=enabled,
         handle=handle,
-        credentials=_load_credentials(),
+        credentials=credentials,
+        account_id=account_id if account_id.isascii() and account_id.isdigit() else "",
         max_posts_per_day=_int_cfg("connectors.x.max_posts_per_day", 8, lo=1, hi=50),
         max_posts_per_month=_int_cfg("connectors.x.max_posts_per_month", 80, lo=1, hi=500),
         max_mentions=_int_cfg("connectors.x.max_mentions", 2, lo=0, hi=5),

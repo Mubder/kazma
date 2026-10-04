@@ -7,191 +7,236 @@ description: Mention the account and Kazma drafts a reply — declared sides, su
 
 # X auto-reply
 
-Kazma can draft a reply when someone **mentions** the connected account on X. It is **off by default**. Credentials, ToU caps, and the audit log are the same as [X publisher](./x-publisher.md).
-
-A reply is always **one subject + one side**. Emoji is **tone** when a Settings card matches, and **side** when none does.
+X Studio composes and reviews posts, schedules approved text, and keeps
+conversations with their original sources. Automatic replies are off by
+default. Start in draft mode. Publishing uses the official X API and the
+same connector credentials and local caps as [X publisher](./x-publisher.md).
 
 ## How a summon is decided
 
-Walk this list. The first hit wins.
+Kazma gathers all matching subject cards before choosing a target. A specific
+card takes precedence over a catch-all, but card order never resolves two
+matching topics. Conflicting matches, exclusions, contextual scope or
+exceptions are held for review. Match evidence contains original passages and
+offsets. Unicode matching preserves distinct Arabic letters, removes
+vocalization/tatweel, and checks token boundaries; configure explicit aliases
+for other spellings.
 
-1. **Keyword on a Settings card** — whole word for ASCII, containment for other scripts. Cards are tried **top to bottom**. Put specific topics above broad ones.
-2. **Opinion ask** — `شرايك` / `what do you think` / a `?` / `؟` / how-what-why / both 👍 and 👎 (or ❤️ and 😂) in the same mention. Reacts to *this* post in voice. Does not pick a country card.
-3. **Summon side** — one polarity in the mention:
-   - 😂 🤣 💀 🔥 🤬 😡 🙄 👎 or `against` / `roast` / `ضد` / `هاجم` → **criticise this post**
-   - ❤️ 👏 💯 🙏 👍 or `support` / `defend` / `دافع` / `معاه` → **defend this post**
-4. **Stay silent** (default once any card exists). A `*` keyword still answers everything. “Reply anyway” is voice with no side.
-
-A Settings card **only applies when one of its keywords is in the post**. A classifier cannot pin an unrelated tweet on a card you wrote for something else.
-
-When a card matches, its **side** (against / support) is locked. A roast emoji cannot flip a support card. Angry on a support card is anger **at its critics**, never at the subject.
+A matching card declares the target and position. Facts constrain the public
+argument: conceding a supported fact or rejecting violence does not reverse a
+position. Emoji may select a permitted tone. Negated or conflicting summon
+instructions require review. Synthetic voice/summon cards remain draft-only;
+missing or invalid configuration never grants auto-publishing permission.
 
 ## What counts as a summon
 
-| Mention | What Kazma reads |
-|---|---|
-| Standalone `@handle 😂` | The mention itself |
-| Reply under someone else's post | That parent post |
-| Quote of someone else (even under Kazma's own tweet) | The **quoted** post |
-| `هذا` + `x.com/…/status/…` or `t.co/…` in a reply to Kazma | The linked post |
-| Bare reply under Kazma with no quote and no link | **You** (trusted): walks up to the original post and drafts. **Strangers**: ignored unless `#Open` |
+The mention is not proof that its author can open a conversation. Trusted
+operator/account actions establish open/closed permissions. A stranger's own
+`#Open` cannot authorize replies in a closed thread. `#Close` prevents further
+untrusted summons. Manual commands and polling share this authority policy.
+The resolved original, quotation, authorship and reply target are retained.
 
-X only lets this account **post** a reply on a tweet that mentions it or that it wrote. The public reply therefore sits **under your mention**, not under the original. The *text* it drafts against is still the original when a quote or link is present.
-
-Paid X plan required for the mentions poller (`GET /2/users/:id/mentions`). Free tier 403s; the poller logs that and backs off.
+Incomplete source context is shown explicitly. Missing quotations,
+media-dependent context, unresolved authorship, truncation and fallback text
+prevent unattended posting. X account read capabilities must be tested for
+the connected account; a historical pricing tier is not a capability check.
 
 ## Two ways to fire it
 
-**Paste (every X plan).** From chat:
-
-```
-/x roast https://x.com/someone/status/1234567890 | Their post text here
-```
-
-Always **draft** mode. Approve with `/x approve <id>`. Gateway login is the authorization — you do not need to be in `summoners`.
-
-**Mentions poller (paid plan).** Kazma polls its mentions. Save on Settings starts or stops the poller (no restart). **X Studio → Conversations → Refresh** is the same poll, and it ignores a stuck cursor. `/x poll` too.
+Mention polling and manual summon commands feed the same drafting pipeline.
+Studio's Conversations view loads the local log; explicit polling fetches X
+mentions and consumes the daily read budget. Previewing pasted text does not
+post to X. It can send that text to the selected model and consume model
+budgets, so model selection and locality still matter.
 
 ## Subjects
 
-Settings → Integrations → X → Auto-reply.
+Settings → X lets administrators edit targets, aliases, exclusions, positions,
+scope, exceptions, custom hard lines, tone permissions and evidence policy.
+Imported legacy cards preserve their text and side but default to draft-only.
+New cards do not silently default to an against position. Save validates the
+whole policy; malformed entries remain visible errors.
 
-Each card:
+Each content change increments the card revision. Per-card preview tests an
+unsaved card; complete-policy preview applies routing to all configured cards.
+The preview labels these scopes and shows the actual models and check results.
+A preview is never publication approval or auto qualification.
 
-| Field | Role |
-|---|---|
-| **Id** | Short name (`topic`) |
-| **Side** | `against` (always criticise) or `support` (always defend) |
-| **Keywords** | When this card fires. ASCII = whole word. `*` = catch-all (tried last) |
-| **Fallback mood** | Used if the mention has no emoji |
-| **Optional extra** | Colour (who / why) — not a second side |
-| **Hard lines** | Extra “never say”. Universal lines always apply |
-| **Examples** | Replies you actually wrote — strongest voice lever |
+### Choose an X-specific model
 
-Empty allowlist + `allowlist` policy = **nobody** can summon. `anyone` still has caps, follower floor, screen, and stance check.
+Use the global Kazma model or pin an enabled provider and exact model ID for
+X work. Advanced bindings can separately select classification, reply drafting,
+post drafting, context/target verification, stance verification, factual
+verification and safety verification. Bindings are fixed throughout each
+operation; changing X selection never switches Kazma's global profile.
 
-**Open-thread marker** (optional, e.g. `#Open`): put it in *your* mention. Without it, only trusted handles get a reply. With it, anyone who mentions Kazma on that post can get a reply. Hashtags match as a whole tag (`#Open` does not match `#OpenAI`).
-
-**Close-thread marker** (optional, e.g. `#Close`): mention `@KazmaAI #Close` in that conversation to stop strangers. You can still talk. The close is stored on the X conversation id so later polls stay closed.
-
-Trusted handles (you) can keep talking without extra emoji — thread cooldown and per-target caps do not apply to you, so a general question can be a back-and-forth.
-
-List order is priority: first card whose keyword appears wins.
+Specific bindings have no implicit fallback. A stopped local server or missing
+model produces a clear hold/error. Local-only checks the configured endpoint
+and all role bindings and uses lexical knowledge retrieval without cloud query
+embeddings. A localhost server can itself proxy cloud inference: verify its
+installed model and server configuration before treating it as offline.
+X publication still uses the remote X API.
 
 ### Modes
 
-| Mode | Behaviour |
-|---|---|
-| `draft` | Compose, hold, notify. You post with **Approve** (Conversations or `/x approve`) |
-| `auto` | Posts after rails + screen + stance check. Text you have not read, under your name |
-| `off` | Master off |
-
-`/x roast` is always draft.
+Off disables automated drafting. Draft retains candidates for review. Auto
+requires explicit permission on the card, complete context, every required
+check passing, live posting permission, budgets and a current evaluation report.
+Changing policies, models, relevant knowledge or pipeline code invalidates the
+report. Missing qualification retains drafts for approval rather than silently
+posting them. Installing a report never changes draft mode to auto.
 
 ## Stance check
 
-The length/threats screen does not know your side. After drafting, a short closed-set call asks **argues / contradicts / fence** (any language). Sympathy for the other side, “don't attack them”, or a summary with no side is **contradicts** or **fence** and is blocked.
+The pipeline runs five typed checks: context completeness, correct target,
+scoped position, factual evidence and universal/custom safety rules. Results are
+pass, fail or unknown, with observed passages and concise reasons. Malformed
+JSON, missing checks, fabricated source IDs, unsupported assertions or checker
+outages never become passes. Explicit failures are rejected; unavailable checks
+can retain a candidate with review reasons. The legacy stance-check toggle
+cannot disable the independent checks or make unattended work eligible.
 
-Catch-all `*` and unmatched **voice** skip this check (there is no claim to drift from). Content screen and hard lines still run.
-
-`auto` + a check that cannot run → **block**. `draft` + unusable check → **allow** (you read it).
+These model checks reduce risk; they do not prove truth. Correlated model
+errors remain possible and human qualification is required for unattended use.
 
 ## Knowledge Base (optional)
 
-Off by default. When on, each draft searches the Knowledge Library (hybrid lexical + semantic) and injects up to three **fenced** snippets as facts. If they conflict with the card’s **side**, **the side wins**. Empty or failed lookup does not skip the summon — it drafts without notes.
-
-Opinion-ask / voice-only summons search the **post text**, not a synthetic id (`post` / `voice`). A named Settings card (Kuwait, …) may prefix the query so a short tweet still hits.
-
-1. Ingest a library on **Knowledge** (`/knowledge`) until it has chunks.
-2. Settings → X → Auto-reply → **Ground drafts in the Knowledge Base**.
-3. Pick one library, or leave **All libraries with chunks**.
-4. **Try it** with a real post. The preview says how many snippets landed (`KB: 2 snippets from …` or `KB on, no snippets matched`).
-5. Approve from Conversations only if the draft used those facts the way you want.
+Only active libraries authorized for the current tenant can supply passages.
+There is no unscoped fallback. Records retain library/document/chunk and version
+identities, source URLs where available, content hashes, publication dates,
+retrieval times and truncation flags. Opinions are distinguished from factual
+assertions. Missing, stale, truncated or unbound factual support requires review.
+The per-card evidence age limit defaults to 30 days. A subject position cannot
+override contrary evidence or turn the source post's allegation into proof.
 
 ## Conversations
 
-**X Studio → Conversations** is the log of summons: parent text, mention, draft, skip reason.
+Review the full source, candidate, check reasons and exact target. Approve binds
+the stored text and monotonic revision to the tenant, verified account,
+credential revision and current pipeline. Approvals expire after 24 hours.
+Changed content, policy, account, models or relevant evidence requires a fresh
+decision. Simultaneous approve/deny/retry operations use conditional claims.
+Rejected and uncertain sends cannot be approved into a blind retry.
 
-| Button | Does |
-|---|---|
-| **Refresh** | Polls X (not a page reload) |
-| **Approve** | Posts the **stored** draft, as a reply to the mention |
-| **Deny** | Parks a held draft |
-| **Retry** | Re-runs skipped / failed / stuck `drafting` against current config (always holds for approval) |
-| **Delete** | Posted: delete on X and drop the row. Else: drop the row |
-
-Sort is **newest on X first** (tweet id), not last touch. A Retry of an old card does not jump it to the top.
+Decision history retains prior candidates, checks and approval/denial actors.
+Removing a row archives it; idempotency evidence remains. Deleting a posted
+reply requires confirmed deletion from X before archival. A 404 or unavailable
+post is not proof that deletion succeeded.
 
 ## Guardrails
 
-On top of ToU policy (length, mentions, duplicates, daily/monthly caps):
+All writes use a durable publication operation and one local database claim.
+Reservations atomically enforce rolling daily/30-day and reply limits, text
+duplicates and future scheduling commitments. Confirmation requires a valid
+numeric X identifier. A missing response or interrupted send remains unknown
+and retains its reservation; never resend it automatically.
 
-- Universal hard lines (no slurs, no threats, criticise institutions not peoples)
-- Post-generation screen on what the model wrote
-- Daily / per-target / per-thread caps
-- Follower floor (default 500) — `0` disables it knowingly
-- Reply is posted under the **mention** (X rule)
+Compatibility projections replay without sending again. Review and scheduled
+result notices are persisted beside their state transition, leased, retried
+with backoff and acknowledged only by a real ops delivery route. Notification
+delivery is at least once; a crash can repeat a notice, not its publication.
+
+Weighted character validation is shared by composer previews and publishing,
+including NFC, transformed URLs and recognized emoji sequences. Parser assets
+are pinned; newer unrecognized emoji may be conservatively overcounted.
 
 ## Turning it on
 
-1. Settings → X: four OAuth 1.0a values, **Test**, posting-ready.
-2. Auto-reply: trusted handles (or `anyone`), mode **`draft`**, Save (poller starts).
-3. Add cards only for topics you want a locked side on. One-offs use the mention emoji/word.
-4. **Try it** (dry run) until the voice is right.
-5. Real mention from another account, then Refresh or `/x poll`. Approve from Conversations.
+Configure and test the connected account in Settings. Choose the X models,
+review subject permissions, then start in draft mode. Composer autosave is
+scoped to the operator and tenant and detects conflicting browser tabs.
+Sending remains an explicit action. Scheduled work binds the account and exact
+payload. Local clock changes with missing/ambiguous civil times are refused;
+use an explicit UTC offset where supported. A schedule missed by more than
+five minutes is held for review and rescheduling instead of catching up on boot.
+
+A migration restore pauses publishing. Verify the account, explicitly resume
+new publishing in Studio, then separately review old held work. Resume never
+releases unknown or restored queued operations. Legacy account-unbound
+bookings remain held and must be cancelled/rebooked after review.
 
 ## Commands
 
-```
-/x roast <url> | <text>    draft a reply
-/x approve <summon_id>     publish a held draft
-/x deny <summon_id>        discard a held draft
-/x retry <summon_id>       re-run a skipped/failed summon
-/x delete <summon_id>      delete the posted reply on X (or drop the log row)
-/x list                    recent summons
-/x subjects                declared cards
-/x poll                    one mentions poll (paid plan; ignores stuck cursor)
-```
+`/x list` shows full held candidates and revision tokens. Copy the command
+for the revision you reviewed:
+
+- `/x approve <summon_id> <revision>` publishes the exact stored candidate.
+- `/x deny <summon_id> <revision>` denies that held revision.
+- `/x retry <summon_id>` generates a new candidate for review.
+- `/x delete <summon_id> <revision>` confirms deletion where applicable and archives.
+- `/x poll` fetches mentions; `/x roast <post>` creates a manual candidate.
+
+Native agent publishing tools retain their existing HITL and stored-proposal
+requirements. Administrators control credentials, ongoing policy grants,
+restore resume and qualification reports; operators review individual work.
 
 ## Kill switches
 
-`KAZMA_X_REPLY=0` stops auto-reply; scheduled posts still work.  
-`KAZMA_X_POST=0` stops every X write.
+`KAZMA_X_POST=0` disables publication. `KAZMA_X_SCHEDULE=0` disables scheduled
+execution. `KAZMA_X_REPLY=0` disables automatic replies. Switches are checked
+live before dispatch, independently of previously saved approval.
 
 ## Config keys
 
-`connectors.x.reply.*` in ConfigStore (Settings panel writes these).
-
-| key | default | meaning |
-|---|---|---|
-| `enabled` | `false` | master switch |
-| `mode` | `off` | `off` \| `draft` \| `auto` |
-| `summoner_policy` | `allowlist` | `allowlist` \| `anyone` |
-| `summoners` | empty | trusted handles; empty allowlist = nobody |
-| `allow_emoji_mood` | `true` | mention emoji may set tone (and unmatched side) |
-| `stance_check` | `true` | draft must argue the side |
-| `unmatched` | `skip` | `skip` \| `voice` when nothing matches and the mention sets no side |
-| `classify_llm` | `false` | guess a card when keywords miss (can misfire; leave off) |
-| `use_knowledge` | `false` | pull fenced KB snippets |
-| `knowledge_library` | empty | library id, or all |
-| `trigger` | empty | optional phrase in the mention |
-| `max_replies_per_day` | `5` | across targets |
-| `max_replies_per_target_per_day` | `1` | per account |
-| `cooldown_per_thread_s` | `3600` | one reply per thread per hour |
-| `min_target_followers` | `500` | floor; `0` off |
-| `poll_interval_s` | `600` | 60s floor |
-| `subjects` | `[]` | cards (`id`, `side`, `match`, optional extra) |
+X settings are stored under `connectors.x`, including `ai`, `ai_limits`,
+`reply.subjects`, `reply.mode` and `reply.qualification`. Daily AI/read budget
+usage is durable and resets by UTC day. Failed calls still consume reservations.
+The global restore pause is `system.x.restore_paused`. Runtime settings do not
+rewrite tracked `kazma.yaml`.
 
 ## Limitations
 
-- Mentions poller needs a paid X plan. Reads are metered per month.
-- Replies fire only while Kazma is running. A mention during downtime is picked up on the next poll if it is still in the mentions window.
-- Drafting is outside the supervisor graph: no tools, no chat memory, unless you turn on KB grounding.
-- The public reply cannot be attached to a tweet that does not mention this account (X API).
-- `drafting` with no buttons meant a stuck model call — Retry is shown on that status; `/x retry <id>` works even before a reload.
+SQLite coordination requires one publishing owner or processes sharing the same
+supported local database. Separate hosts with separate databases do not
+coordinate. Remote writes cannot be made exactly once across an ambiguous
+network failure. If both result persistence and audit fail after remote
+acceptance, operator investigation remains necessary. Similar text/timing is
+not proof of publication or nonpublication.
+
+Local endpoint spelling does not establish offline inference. X endpoint
+capabilities and real bilingual model accuracy remain deployment-specific.
+Rich media/campaign analytics and an approved multi-segment thread composer
+are subsequent capabilities; replying under a confirmed post is supported.
 
 ## Testing it safely
 
-1. **Try it** — nothing leaves the machine.
-2. **`/x roast`** — holds for approve.
-3. **Real mention** from another account, then Refresh. Score Conversations, not the model's table.
+Preview and isolated fake-transport tests do not publish. Test corpora generated
+by code verify mechanics; they are not human accuracy certification.
+
+Unattended qualification needs at least 200 held-out human-reviewed cases,
+including at least 40 English and 40 Arabic cases and at least five examples
+of each required category: Gulf Arabic, mixed scripts, sarcasm, negation,
+quotation, multiple entities, injection, source contradiction and checker outage.
+At least 50 cases must be predicted auto-eligible, with precision at least 98%.
+Any critical violation, unsupported fact, wrong-target or unchecked auto outcome
+blocks release. Reports expire after 14 days and bind the current fingerprint.
+
+A reviewed JSON report has `fingerprint`, `evaluated_at` (UTC epoch) and `cases`.
+Each case records `id`, `language` (`en`, `ar`, `mixed`), `labeler`,
+`human_reviewed: true`, `held_out: true`, `categories`, `expected` and `actual`.
+Expected labels contain `auto`, `target`, `evidence`, `safety`. Actual outcomes
+contain `auto`, `target`, `critical_violations`, all five `checks` with typed
+verdicts, `latency_ms`, `model_calls`, and `output_tokens`. Record actual shadow
+outcomes; never invent successful observations or label tuning data held-out.
+
+Studio exposes the current fingerprint and administrator report upload.
+Validate a collected report without installing it:
+
+```powershell
+python scripts/x_qualification.py --report reviewed.json
+```
+
+Add `--install` only to install a qualified report. With no report,
+the script prints readiness and required coverage. It neither labels cases nor
+posts. Metrics include denominators, hold/false-hold rates, p95 latency and
+model usage; token reservations are not billed monetary cost.
+
+For unknown sends, retain the operation and inspect correlated API receipts
+and the connected X account. Only exact validated operation receipts repair
+confirmation automatically. For disabled credentials, checker/DB outage or
+rate limiting, restore the dependency first; do not weaken policy to clear a
+hold. For notification failures, check ops routing and delivery status. For
+rollback, disable writes first and preserve the publication/reply databases;
+older builds must not fire managed or restored legacy rows.
+
+For collection and annotation instructions, see [Building an X evaluation dataset](x-evaluation-dataset.md).

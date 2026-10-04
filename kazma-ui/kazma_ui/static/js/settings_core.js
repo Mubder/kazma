@@ -493,6 +493,8 @@
         // problems instead of letting a typo become a subject that never
         // fires.
         xReply: {
+            auto_qualification_hold: '',
+            ai: { selection: 'global', provider: '', model: '' }, ai_options: [], ai_roles: [],
             enabled: false, mode: 'off', summoners: [], trigger: '',
             max_replies_per_day: 5, max_replies_per_target_per_day: 1,
             cooldown_per_thread_s: 3600, min_target_followers: 500,
@@ -504,6 +506,7 @@
             connector_ready: false, can_draft: false, handle: '',
             poller_running: false, live_reason: '',
         },
+        xReplyRoleBindings: {},
         xReplySummonersText: '',
         xReplyLibraries: [],
         xReplyLoading: false,

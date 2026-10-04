@@ -27,7 +27,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from kazma_core.settings_restore import KEY_RULES, _rule_for
 from kazma_core.settings_validation import _rules as validated_rules
 
@@ -48,6 +47,9 @@ _SKIP_FILES = frozenset({
 #: ``path::function`` of a write whose key the scan cannot read -> the key
 #: patterns it writes (each must be named by a rule), or why there are none.
 DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
+    "kazma-core/kazma_core/x_api/ai_budget.py::reserve_daily": ("connectors.x.ai_usage", "connectors.x.read_usage"),
+    "kazma-core/kazma_core/x_api/account_binding.py::record_account": ("connectors.x.",),
+    "kazma-core/kazma_core/x_api/qualification.py::install_report": ("connectors.x.reply.qualification",),
     "kazma-core/kazma_core/agent/tool_builtins/system.py::config_save": (
         "the agent's config_save writes the key it is handed; "
         "safety.protected_config refuses every key that is not a setting"
@@ -101,7 +103,7 @@ def _product_sources() -> dict[str, str]:
     }
 
 
-# ── reading a key from the source ──────────────────────────────────────────
+# â”€â”€ reading a key from the source â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _UNREAD = None
 
@@ -346,7 +348,7 @@ def _unnamed(patterns: set[str]) -> set[str]:
     return {p for p in patterns if _rule_for(p) is None}
 
 
-# ── the gate ────────────────────────────────────────────────────────────────
+# â”€â”€ the gate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def test_every_key_the_code_writes_is_named_by_a_rule() -> None:
@@ -417,7 +419,7 @@ def test_every_rule_names_a_key_kazma_has() -> None:
 
 
 def test_the_gate_sees_an_unnamed_key_and_an_unreadable_one() -> None:
-    """Negative controls (§28)."""
+    """Negative controls (Â§28)."""
     planted = {
         "kazma-x/kazma_x/m.py": (
             "_KEY = 'brand_new.cursor'\n"

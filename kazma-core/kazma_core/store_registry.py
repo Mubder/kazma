@@ -130,6 +130,7 @@ STORES: dict[str, Store] = {
     "x_scheduled.db": Store("scheduled X posts", "bundle"),
     "x_replies.db": Store("the X auto-reply queue", "bundle"),
     "x_audit.db": Store("the X API audit log", "bundle"),
+    "x_publications.db": Store("X publication operations, quota reservations, decisions and projection repairs", "bundle"),
     # ── control plane: decisions, secrets, permissions, evidence ───────
     "hitl_gates.db": Store(
         "approval decisions (the gate registry)", "bundle"),
@@ -353,9 +354,9 @@ class Write:
     targets: tuple[str, ...]
     readers: tuple[str, ...] = ()
     note: str = ""
-    also: tuple["Write", ...] = ()
+    also: tuple[Write, ...] = ()
 
-    def groups(self) -> tuple["Write", ...]:
+    def groups(self) -> tuple[Write, ...]:
         return (self, *self.also)
 
 
@@ -405,10 +406,10 @@ TOOL_WRITES: dict[str, Write] = {
     # ── X ──────────────────────────────────────────────────────────────
     # A publish also marks its saved draft used; that bookkeeping belongs to
     # the tool worker (mark_proposals_posted), and list_proposals shows it.
-    "x_post": Write(("external:x", "x_posts.db"), ("x_status",)),
-    "x_delete_post": Write(("external:x", "x_posts.db"), ("x_status",)),
-    "x_schedule_post": Write(("x_scheduled.db",), ("x_list_scheduled",)),
-    "x_cancel_scheduled_post": Write(("x_scheduled.db",), ("x_list_scheduled",)),
+    "x_post": Write(("external:x", "x_posts.db", "x_publications.db"), ("x_status",)),
+    "x_delete_post": Write(("external:x", "x_posts.db", "x_publications.db"), ("x_status",)),
+    "x_schedule_post": Write(("x_scheduled.db", "x_publications.db"), ("x_list_scheduled",)),
+    "x_cancel_scheduled_post": Write(("x_scheduled.db", "x_publications.db"), ("x_list_scheduled",)),
     # ── documents ──────────────────────────────────────────────────────
     "document_import": Write(
         ("documents.db",), ("document_status", "document_read", "document_search")),

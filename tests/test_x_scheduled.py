@@ -105,6 +105,7 @@ def _cfg(**overrides):
         max_chars=280,
         duplicate_window_days=30,
         kill_switch=False,
+        account_id="123",
     )
     base.update(overrides)
     return XConfig(**base)
@@ -258,14 +259,19 @@ class _FakeXClient:
 
 @pytest.fixture()
 def fire_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import kazma_core.x_api.client as client
+    import kazma_core.x_api.config as config
+    import kazma_core.x_api.ledger as ledger_module
+    import kazma_core.x_api.schedule as schedule_module
     import kazma_core.x_api.scheduled_fire as fire
     from kazma_core.x_api.ledger import XPostLedger
 
     ledger = XPostLedger(tmp_path / "x_posts.db")
     sched = XScheduledStore(tmp_path / "x_scheduled.db")
-    monkeypatch.setattr(fire, "XClient", _FakeXClient)
-    monkeypatch.setattr(fire, "get_x_config", lambda: _cfg())
-    monkeypatch.setattr(fire, "get_ledger", lambda: ledger)
+    monkeypatch.setattr(client, "XClient", _FakeXClient)
+    monkeypatch.setattr(config, "get_x_config", lambda: _cfg())
+    monkeypatch.setattr(ledger_module, "get_ledger", lambda: ledger)
+    monkeypatch.setattr(schedule_module, "get_x_scheduled_store", lambda: sched)
     monkeypatch.setattr(fire, "get_x_scheduled_store", lambda: sched)
     _FakeXClient.result = None
     _FakeXClient.exc = None
@@ -273,10 +279,23 @@ def fire_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return fire, ledger, sched
 
 
+def _book_due(sched, *, text):
+    """Create a current account-bound approval, then advance its test clock."""
+    from kazma_core.x_api.publication_service import schedule
+    from kazma_core.x_api.publication_store import get_publication_store
+
+    ok, result = schedule(text=text, fire_at=time.time() + 60)
+    assert ok
+    store = get_publication_store()
+    with store._connection() as conn:
+        conn.execute("UPDATE x_operations SET due_at = ? WHERE id = ?", (time.time() - 5, result["operation_id"]))
+    return result["id"]
+
+
 @pytest.mark.asyncio
 async def test_fire_loop_posts_due_and_records(fire_env) -> None:
     fire, ledger, sched = fire_env
-    pid = sched.add(text="fire me", fire_at=time.time() - 5)
+    pid = _book_due(sched, text="fire me")
 
     await fire._fire_due_posts()
 
@@ -293,31 +312,31 @@ async def test_fire_loop_429_defers_not_fails(fire_env) -> None:
     from kazma_core.x_api.client import XApiError
 
     fire, _, sched = fire_env
-    pid = sched.add(text="rate limited", fire_at=time.time() - 5)
+    pid = _book_due(sched, text="rate limited")
     _FakeXClient.exc = XApiError("X rate limit (HTTP 429). (Retry-After 30)", status=429, transient=True)
 
     await fire._fire_due_posts()
 
     got = sched.get(pid)
     # Still pending, deferred into the future, attempt bumped.
-    assert got.status == STATUS_PENDING
+    assert got.status == "managed"
     assert got.attempts == 1
     assert got.fire_at > time.time()
 
 
 @pytest.mark.asyncio
-async def test_fire_loop_ambiguous_failure_marks_failed_no_retry(fire_env) -> None:
+async def test_fire_loop_ambiguous_failure_stays_unknown_no_retry(fire_env) -> None:
     from kazma_core.x_api.client import XApiError
 
     fire, _, sched = fire_env
-    pid = sched.add(text="ambiguous", fire_at=time.time() - 5)
+    pid = _book_due(sched, text="ambiguous")
     _FakeXClient.exc = XApiError("X API timed out. Did not retry.", transient=True)
 
     await fire._fire_due_posts()
     await fire._fire_due_posts()  # a second poll must NOT retry
 
     got = sched.get(pid)
-    assert got.status == STATUS_FAILED
+    assert got.status == "outcome_unknown"
     # Only one send attempt — the double-post guard.
     assert _FakeXClient.calls == ["ambiguous"]
 
@@ -325,21 +344,22 @@ async def test_fire_loop_ambiguous_failure_marks_failed_no_retry(fire_env) -> No
 @pytest.mark.asyncio
 async def test_fire_loop_skips_when_connector_disabled(fire_env, monkeypatch: pytest.MonkeyPatch) -> None:
     fire, _, sched = fire_env
-    pid = sched.add(text="wont fire", fire_at=time.time() - 5)
-    monkeypatch.setattr(fire, "get_x_config", lambda: _cfg(enabled=False))
+    pid = _book_due(sched, text="wont fire")
+    monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _cfg(enabled=False))
 
     await fire._fire_due_posts()
 
     got = sched.get(pid)
-    assert got.status == STATUS_FAILED
+    assert got.status == "held"
     assert _FakeXClient.calls == []
 
 
 @pytest.mark.asyncio
 async def test_fire_loop_does_not_post_a_cancelled_item(fire_env) -> None:
     fire, _, sched = fire_env
-    pid = sched.add(text="cancelled before fire", fire_at=time.time() - 5)
-    assert sched.cancel(pid) is True
+    pid = _book_due(sched, text="cancelled before fire")
+    from kazma_core.x_api.publication_service import cancel_schedule
+    assert cancel_schedule(pid) is True
 
     await fire._fire_due_posts()
 

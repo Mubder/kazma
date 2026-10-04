@@ -3049,6 +3049,7 @@
                     </p>
                 </template>
 
+                <fieldset :disabled="xReplySaving || xReplyLoading" style="border:0;padding:0;margin:0;min-width:0;">
                 <label class="toggle-row">
                     <span class="toggle">
                         <input type="checkbox" x-model="xReply.enabled"
@@ -3057,6 +3058,66 @@
                     </span>
                     <span>{{ t('settings.xt.enable') }}</span>
                 </label>
+
+                <div class="form-group" style="margin-top:16px;">
+                    <label for="xr-ai-selection">{{ t('settings.xt.ai_title') }}</label>
+                    <select id="xr-ai-selection" class="form-input" x-model="xReply.ai.selection">
+                        <option value="global">{{ t('settings.xt.ai_global') }}</option>
+                        <option value="specific">{{ t('settings.xt.ai_specific') }}</option>
+                    </select>
+                    <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">{{ t('settings.xt.ai_hint') }}</p>
+                </div>
+                <div class="two-col-grid" x-show="xReply.ai.selection === 'specific'" x-cloak>
+                    <div class="form-group">
+                        <label for="xr-ai-provider">{{ t('settings.xt.ai_provider') }}</label>
+                        <select id="xr-ai-provider" class="form-input" x-model="xReply.ai.provider"
+                                @change="xReply.ai.model = ''">
+                            <option value="">{{ t('settings.xt.ai_choose') }}</option>
+                            <template x-for="p in xReply.ai_options" :key="p.provider">
+                                <option :value="p.provider" x-text="p.provider"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="xr-ai-model">{{ t('settings.xt.ai_model') }}</label>
+                        <input id="xr-ai-model" class="form-input" type="text" list="xr-ai-models"
+                               x-model="xReply.ai.model" autocomplete="off" translate="no">
+                        <datalist id="xr-ai-models">
+                            <template x-for="m in xReplyAIModels()" :key="m">
+                                <option :value="m"></option>
+                            </template>
+                        </datalist>
+                    </div>
+                </div>
+                <p x-show="xReplyPreview.result && xReplyPreview.result.models" x-cloak
+                   style="font-size:0.78rem;color:var(--text-tertiary);">
+                    {{ t('settings.xt.ai_used') }}:
+                    <span translate="no" x-text="((xReplyPreview.result || {}).models || []).map(m => m.provider + ' / ' + m.model).join(', ')"></span>
+                </p>
+                <details style="margin-bottom:16px;">
+                    <summary>{{ t('settings.xt.ai_advanced') }}</summary>
+                    <label class="checkbox-label"><input type="checkbox" x-model="xReply.ai.local_only"> {{ t('settings.xt.ai_local_only') }}</label>
+                    <p class="form-hint">{{ t('settings.xt.ai_local_only_hint') }}</p>
+                    <template x-for="role in xReply.ai_roles" :key="role">
+                        <div class="form-group">
+                            <label :for="'xr-role-' + role" x-text="tOr('settings.xt.role_' + role, role)"></label>
+                            <select :id="'xr-role-' + role" class="form-input" x-model="xReplyRoleBindings[role].selection">
+                                <option value="inherit">{{ t('settings.xt.ai_inherit') }}</option>
+                                <option value="global">{{ t('settings.xt.ai_global') }}</option>
+                                <option value="specific">{{ t('settings.xt.ai_specific') }}</option>
+                            </select>
+                            <div x-show="xReplyRoleBindings[role].selection === 'specific'" x-cloak>
+                                <label :for="'xr-role-provider-' + role">{{ t('settings.xt.ai_provider') }}</label>
+                                <select :id="'xr-role-provider-' + role" class="form-input" x-model="xReplyRoleBindings[role].provider">
+                                    <option value="">{{ t('settings.xt.ai_choose') }}</option>
+                                    <template x-for="p in xReply.ai_options" :key="p.provider"><option :value="p.provider" :disabled="xReply.ai.local_only && !p.local_capable" x-text="p.provider"></option></template>
+                                </select>
+                                <label :for="'xr-role-model-' + role">{{ t('settings.xt.ai_model') }}</label>
+                                <input :id="'xr-role-model-' + role" class="form-input" x-model="xReplyRoleBindings[role].model" autocomplete="off" translate="no">
+                            </div>
+                        </div>
+                    </template>
+                </details>
 
                 <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px;">
                     <div class="form-group">
@@ -3154,6 +3215,8 @@
                 </label>
                 <p style="font-size:0.78rem;color:var(--text-tertiary);margin:4px 0 12px;">
                     {{ t('settings.xt.stance_hint') }}
+                    <span x-show="xReply.mode === 'auto' && xReply.auto_qualification_hold" x-cloak
+                          style="display:block;color:var(--warning,#c80);" x-text="xReply.auto_qualification_hold"></span>
                     <span x-show="xReply.mode === 'auto' && !xReply.stance_check" x-cloak
                           style="color:var(--warning,#c80);">
                         {{ t('settings.xt.stance_off_warning') }}
@@ -3260,8 +3323,14 @@
                                            placeholder="{{ t('settings.xt.topic_ph') }}" autocomplete="off">
                                 </div>
                                 <div class="form-group">
+                                    <label :for="'xr-target-' + i">{{ t('settings.xt.target') }}</label>
+                                    <input :id="'xr-target-' + i" type="text" class="form-input" x-model="s.target" maxlength="200" autocomplete="off">
+                                    <p class="form-hint">{{ t('settings.xt.target_hint') }}</p>
+                                </div>
+                                <div class="form-group">
                                     <label>{{ t('settings.xt.side') }}</label>
                                     <select class="form-input" x-model="s.side">
+                                        <option value="">{{ t('settings.xt.side_written') }}</option>
                                         <option value="against">{{ t('settings.xt.side_against') }}</option>
                                         <option value="support">{{ t('settings.xt.side_support') }}</option>
                                         <option value="">{{ t('settings.xt.side_legacy') }}</option>
@@ -3294,6 +3363,40 @@
                                     {{ t('settings.xt.extra_hint') | safe }}
                                 </p>
                             </div>
+                            <details style="margin-bottom:16px;">
+                                <summary>{{ t('settings.xt.scope_permissions') }}</summary>
+                                <div class="form-group">
+                                    <label :for="'xr-aliases-' + i">{{ t('settings.xt.aliases') }}</label>
+                                    <input :id="'xr-aliases-' + i" class="form-input" :value="(s.aliases || []).join(', ')" @input="s.aliases = _xSplit($event.target.value, false)">
+                                </div>
+                                <div class="form-group">
+                                    <label :for="'xr-exclusions-' + i">{{ t('settings.xt.exclusions') }}</label>
+                                    <input :id="'xr-exclusions-' + i" class="form-input" :value="(s.exclusions || []).join(', ')" @input="s.exclusions = _xSplit($event.target.value, false)">
+                                </div>
+                                <div class="form-group">
+                                    <label :for="'xr-scope-' + i">{{ t('settings.xt.scope') }}</label>
+                                    <textarea :id="'xr-scope-' + i" class="form-input" rows="2" x-model="s.scope" maxlength="2000"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label :for="'xr-exceptions-' + i">{{ t('settings.xt.exceptions') }}</label>
+                                    <textarea :id="'xr-exceptions-' + i" class="form-input" rows="2" :value="(s.exceptions || []).join('\n')" @input="s.exceptions = _xSplit($event.target.value, true)"></textarea>
+                                </div>
+                                <label class="checkbox-label"><input type="checkbox" x-model="s.allow_draft"> {{ t('settings.xt.allow_draft') }}</label>
+                                <label class="checkbox-label"><input type="checkbox" x-model="s.allow_auto"> {{ t('settings.xt.allow_auto') }}</label>
+                                <p class="form-hint">{{ t('settings.xt.auto_checks_hint') }}</p>
+                                <div class="form-group">
+                                    <label :for="'xr-evidence-' + i">{{ t('settings.xt.evidence') }}</label>
+                                    <select :id="'xr-evidence-' + i" class="form-input" x-model="s.evidence_policy">
+                                        <option value="required">{{ t('settings.xt.evidence_required') }}</option>
+                                        <option value="opinion_only">{{ t('settings.xt.opinion_only') }}</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label :for="'xr-evidence-age-' + i">{{ t('settings.xt.evidence_age') }}</label>
+                                    <input :id="'xr-evidence-age-' + i" type="number" min="1" max="3650" class="form-input" x-model.number="s.evidence_max_age_days">
+                                    <p class="form-hint">{{ t('settings.xt.evidence_age_hint') }}</p>
+                                </div>
+                            </details>
                             <div class="form-group">
                                 <label>{{ t('settings.xt.register') }}</label>
                                 <input type="text" class="form-input" x-model="s.register"
@@ -3336,6 +3439,8 @@
                             x-text="xReplySaving ? '…' : t('settings.xt.save')"></button>
                     <button class="btn btn-secondary" @click="loadXReplyRecent()">{{ t('settings.xt.recent') }}</button>
                 </div>
+
+                </fieldset>
 
                 <!-- Dry run -->
                 <div style="margin-top:24px;padding:14px;border:1px dashed var(--border);border-radius:8px;">
@@ -3406,6 +3511,10 @@
                                style="margin-top:8px;font-size:0.82rem;"
                                :style="xReplyPreview.result.ok ? 'color:var(--text-tertiary)' : 'color:var(--warning,#c80)'"
                                x-text="xReplyPreview.result.reason" x-cloak></p>
+                            <template x-for="check in (xReplyPreview.result.checks || [])" :key="check.check">
+                                <p :title="check.reason" style="font-size:0.78rem;"
+                                   x-text="t('x_studio.check_' + check.check) + ': ' + t('x_studio.verdict_' + check.verdict)"></p>
+                            </template>
                         </div>
                     </template>
                 </div>

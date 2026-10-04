@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-import pytest
 
+import pytest
 from kazma_core.safety.hitl import (
     ALWAYS_HITL_TOOLS,
     CANONICAL_DANGER_TOOLS,
@@ -112,6 +112,7 @@ def _cfg(**overrides):
         max_chars=280,
         duplicate_window_days=30,
         kill_switch=False,
+        account_id="123",
     )
     base.update(overrides)
     return XConfig(**base)
