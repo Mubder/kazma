@@ -39,6 +39,8 @@ from fastapi.responses import JSONResponse
 # number for the boot warning below and the security report.
 from kazma_core.security.boot_guard import WEAK_SECRET_CHARS, env_flag
 
+from kazma_ui.documentation import PUBLIC_GUIDE_PATHS
+
 logger = logging.getLogger(__name__)
 
 # One-shot loud warning for KAZMA_DEMO_MODE (see auth_middleware_with_gate).
@@ -713,7 +715,7 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
     "/api/auth/status",
     "/api/auth/oidc/start",
     "/api/auth/oidc/callback",
-})
+}) | PUBLIC_GUIDE_PATHS
 
 #: Path prefixes that are always open (browser-redirect targets that
 #  cannot carry the X-Kazma-Secret header, e.g. the GitHub OAuth callback
