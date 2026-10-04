@@ -3344,7 +3344,7 @@
                             <span style="flex:1;"></span>
                             <button class="btn btn-sm btn-danger" @click="xReplyRemoveSubject(i)">{{ t('common.remove') }}</button>
                         </div>
-                        <div class="x-policy-summary"><span translate="no" x-text="s.target || s.id"></span><span x-show="s.allow_draft" x-text="t('settings.xt.draft_permission')"></span><span x-text="s.allow_auto ? t('settings.xt.auto_permission') : t('settings.xt.review_permission')"></span></div>
+                        <div class="x-policy-summary"><span translate="no" x-text="s.target || s.id"></span><span x-show="s.allow_draft" x-cloak x-text="t('settings.xt.draft_permission')"></span><span x-text="s.allow_auto ? t('settings.xt.auto_permission') : t('settings.xt.review_permission')"></span></div>
                         <div x-show="xReplyOpen === i" style="margin-top:12px;" x-cloak>
                             <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                                 <div class="form-group">
@@ -3371,7 +3371,7 @@
                                 <label :for="'xr-mood-' + i">{{ t('settings.xt.fallback_mood') }}</label>
                                 <select :id="'xr-mood-' + i" class="form-input" x-model="s.mood">
                                     <template x-for="m in xReply.moods" :key="m">
-                                        <option :value="m" x-text="tOr('settings.xt.mood_' + m, m)"></option>
+                                        <option :value="m" :selected="m === s.mood" x-text="tOr('settings.xt.mood_' + m, m)"></option>
                                     </template>
                                 </select>
                             </div>
@@ -3414,7 +3414,7 @@
                                 <div class="form-group">
                                     <label :for="'xr-tones-' + i">{{ t('settings.xt.allowed_moods') }}</label>
                                     <select :id="'xr-tones-' + i" class="form-input" multiple x-model="s.allowed_moods">
-                                        <template x-for="m in xReply.moods" :key="m"><option :value="m" x-text="tOr('settings.xt.mood_' + m, m)"></option></template>
+                                        <template x-for="m in xReply.moods" :key="m"><option :value="m" :selected="(s.allowed_moods || []).includes(m)" x-text="tOr('settings.xt.mood_' + m, m)"></option></template>
                                     </select>
                                     <p class="form-hint">{{ t('settings.xt.allowed_moods_hint') }}</p>
                                 </div>

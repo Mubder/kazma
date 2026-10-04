@@ -229,6 +229,10 @@ Follow-up validation: **662 focused X/JavaScript/storage tests passed**; the
 dataset-aware bilingual mobile browser passed create/save/reload/edit; translation,
 template, API caller and documentation gates passed. The full suite and release
 CI remain required for the commit that carries this follow-up.
+Live acceptance collected 14 real records into an unassigned starter collection
+with no human labels and 11 conversation groups. It exposed a saved-tone display
+mismatch in dynamic options; explicit option selection fixes it, with English and
+Arabic browser assertions for support/opposition cards and visible scope fields.
 
 | Work | Status |
 |---|---|
