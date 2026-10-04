@@ -89,12 +89,14 @@ function xStudioPage() {
 
     selectTab(name) {
       this.tab = name;
+      const url = new URL(window.location.href); url.searchParams.set('tab', name);
+      window.history.replaceState(null, '', url);
       if (name === 'threads') this.loadThreads();
       if (name === 'conversations') this.loadConversations();
     },
 
     tabsKeydown(event) {
-      const names = ['studio', 'conversations', 'threads'];
+      const names = ['studio', 'conversations', 'threads', 'datasets'];
       const index = names.indexOf(this.tab);
       const direction = document.documentElement.dir === 'rtl' ? -1 : 1;
       const step = event.key === 'ArrowRight' ? direction : (event.key === 'ArrowLeft' ? -direction : 0);
@@ -318,6 +320,8 @@ function xStudioPage() {
     },
 
     async init() {
+      const requestedTab = new URL(window.location.href).searchParams.get('tab');
+      if (['studio', 'conversations', 'threads', 'datasets'].includes(requestedTab)) this.tab = requestedTab;
       this.when = this._defaultWhen();
       this._unloadHandler = (event) => {
         if (this._composerLoaded && this._composerSignature() !== this._composerSaved) {
@@ -332,6 +336,8 @@ function xStudioPage() {
         this.$watch('threadSegments', () => this.queueComposerSave());
       }
       this.onInput();
+      if (this.tab === 'threads') await this.loadThreads();
+      if (this.tab === 'conversations') await this.loadConversations();
     },
 
     destroy() {

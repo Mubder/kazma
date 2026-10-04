@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## X Studio: dataset editor and explicit subject scope (2026-10-04)
+
+Studio now has a bilingual dataset workspace for creating collections, collecting
+retained X cases, importing shadow reports, editing labels and reviewing measured
+candidates. Versioned saves reject concurrent edits; imported reviews reset,
+source edits clear stale outcomes, and durable tuning provenance blocks held-out
+report export. Dataset edits never grant qualification or publish replies.
+
+Settings adds a control-room overview, direct dataset links and clearer subject
+cards. Support/opposition labels describe evidence-based positions, with scope
+and exceptions visible in the main card. The drafting prompt now receives the
+actual scope, exceptions and counterexamples, closing a gap between drafting
+and independent verification. Real human evaluation remains necessary to measure
+model accuracy and qualify automatic replies.
+
 ## X Studio: isolated evaluation, policy review, ordered threads and health (2026-10-04)
 
 Real-case collection and an isolated shadow CLI now exercise the normal reply

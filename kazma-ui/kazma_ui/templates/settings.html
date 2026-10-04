@@ -2926,6 +2926,10 @@
          TAB: X (official API)
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'x'" x-transition x-cloak>
+        <section class="x-control-hero">
+            <div><h2>{{ t('settings.xt.control_title') }}</h2><p>{{ t('settings.xt.control_intro') }}</p></div>
+            <nav aria-label="{{ t('settings.xt.control_title') }}"><a class="btn btn-primary" href="/x">{{ t('settings.xt.open_studio') }}</a><a class="btn btn-secondary" href="/x?tab=datasets">{{ t('settings.xt.open_datasets') }}</a></nav>
+        </section>
         <div class="settings-group">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
                 <div>
@@ -2953,28 +2957,30 @@
                 </p>
             </div>
 
+            <details :open="!xStatus.configured" style="margin-top:16px;">
+                <summary>{{ t('settings.xt.connection') }}</summary>
             <div class="form-group">
-                <label>{{ t('settings.x_handle') }}</label>
-                <input type="text" class="form-input" x-model="xForm.handle" placeholder="{{ t('settings.xt.handle_ph') }}" autocomplete="off">
+                <label for="x-account-handle">{{ t('settings.x_handle') }}</label>
+                <input id="x-account-handle" type="text" class="form-input" x-model="xForm.handle" placeholder="{{ t('settings.xt.handle_ph') }}" autocomplete="off">
             </div>
             <div class="form-row two-col-grid">
                 <div class="form-group">
-                    <label>{{ t('settings.x_api_key') }}</label>
-                    <input :type="xShowKeys ? 'text' : 'password'" class="form-input" x-model="xForm.api_key" :placeholder="xStatus.keys_set && xStatus.keys_set.api_key ? '********' : ''" autocomplete="off">
+                    <label for="x-account-api-key">{{ t('settings.x_api_key') }}</label>
+                    <input id="x-account-api-key" :type="xShowKeys ? 'text' : 'password'" class="form-input" x-model="xForm.api_key" :placeholder="xStatus.keys_set && xStatus.keys_set.api_key ? '********' : ''" autocomplete="off">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.x_api_key_secret') }}</label>
-                    <input :type="xShowKeys ? 'text' : 'password'" class="form-input" x-model="xForm.api_key_secret" :placeholder="xStatus.keys_set && xStatus.keys_set.api_key_secret ? '********' : ''" autocomplete="off">
+                    <label for="x-account-api-key-secret">{{ t('settings.x_api_key_secret') }}</label>
+                    <input id="x-account-api-key-secret" :type="xShowKeys ? 'text' : 'password'" class="form-input" x-model="xForm.api_key_secret" :placeholder="xStatus.keys_set && xStatus.keys_set.api_key_secret ? '********' : ''" autocomplete="off">
                 </div>
             </div>
             <div class="form-row two-col-grid">
                 <div class="form-group">
-                    <label>{{ t('settings.x_access_token') }}</label>
-                    <input :type="xShowKeys ? 'text' : 'password'" class="form-input" x-model="xForm.access_token" :placeholder="xStatus.keys_set && xStatus.keys_set.access_token ? '********' : ''" autocomplete="off">
+                    <label for="x-account-access-token">{{ t('settings.x_access_token') }}</label>
+                    <input id="x-account-access-token" :type="xShowKeys ? 'text' : 'password'" class="form-input" x-model="xForm.access_token" :placeholder="xStatus.keys_set && xStatus.keys_set.access_token ? '********' : ''" autocomplete="off">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.x_access_token_secret') }}</label>
-                    <input :type="xShowKeys ? 'text' : 'password'" class="form-input" x-model="xForm.access_token_secret" :placeholder="xStatus.keys_set && xStatus.keys_set.access_token_secret ? '********' : ''" autocomplete="off">
+                    <label for="x-account-access-token-secret">{{ t('settings.x_access_token_secret') }}</label>
+                    <input id="x-account-access-token-secret" :type="xShowKeys ? 'text' : 'password'" class="form-input" x-model="xForm.access_token_secret" :placeholder="xStatus.keys_set && xStatus.keys_set.access_token_secret ? '********' : ''" autocomplete="off">
                 </div>
             </div>
             <label class="toggle-row">
@@ -3011,6 +3017,8 @@
                 {{ t('settings.x_docs_hint') }}
                 <a href="/docs/guide/x-publisher" style="color:var(--accent);">{{ t('settings.x_docs_link') }}</a>
             </p>
+
+            </details>
 
             <!-- ── Auto-reply ─────────────────────────────────────
                  Subjects and the views Kazma argues from. Separate
@@ -3059,6 +3067,7 @@
                     <span>{{ t('settings.xt.enable') }}</span>
                 </label>
 
+                <h4 class="x-policy-heading">{{ t('settings.xt.model_section') }}</h4>
                 <div class="form-group" style="margin-top:16px;">
                     <label for="xr-ai-selection">{{ t('settings.xt.ai_title') }}</label>
                     <select id="xr-ai-selection" class="form-input" x-model="xReply.ai.selection">
@@ -3121,7 +3130,8 @@
 
                 <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px;">
                     <div class="form-group">
-                        <label for="xr-mode">{{ t('settings.xt.mode') }}</label>
+                    <h4 class="x-policy-heading">{{ t('settings.xt.runtime_section') }}</h4>
+                    <label for="xr-mode">{{ t('settings.xt.mode') }}</label>
                         <select id="xr-mode" class="form-input" x-model="xReply.mode">
                             <option value="off">{{ t('settings.xt.mode_off') }}</option>
                             <option value="draft">{{ t('settings.xt.mode_draft') }}</option>
@@ -3291,6 +3301,7 @@
                 </p>
 
                 <!-- Subjects -->
+                <section class="x-policy-contract"><h4>{{ t('settings.xt.subject_section') }}</h4><p>{{ t('settings.xt.position_contract') }}</p><a href="/x?tab=datasets">{{ t('settings.xt.open_datasets') }}</a></section>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                     <button class="btn btn-sm btn-secondary" @click="xReplyExportPolicy()">{{ t('settings.xt.export_policy') }}</button>
                     <label class="btn btn-sm btn-secondary" for="x-policy-import">{{ t('settings.xt.import_policy') }}</label>
@@ -3321,7 +3332,7 @@
                 </template>
 
                 <template x-for="(s, i) in xReply.subjects" :key="i">
-                    <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:10px;">
+                    <div class="x-policy-card">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <button class="btn btn-sm btn-secondary"
                                     :aria-label="(s.id || t('settings.xt.unnamed'))" :aria-expanded="xReplyOpen === i"
@@ -3333,6 +3344,7 @@
                             <span style="flex:1;"></span>
                             <button class="btn btn-sm btn-danger" @click="xReplyRemoveSubject(i)">{{ t('common.remove') }}</button>
                         </div>
+                        <div class="x-policy-summary"><span translate="no" x-text="s.target || s.id"></span><span x-show="s.allow_draft" x-text="t('settings.xt.draft_permission')"></span><span x-text="s.allow_auto ? t('settings.xt.auto_permission') : t('settings.xt.review_permission')"></span></div>
                         <div x-show="xReplyOpen === i" style="margin-top:12px;" x-cloak>
                             <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                                 <div class="form-group">
@@ -3365,10 +3377,10 @@
                             </div>
                             <div class="form-group">
                                 <label :for="'xr-match-' + i">{{ t('settings.xt.keywords') }}</label>
-                                <input :id="'xr-match-' + i" type="text" class="form-input"
+                                <textarea :id="'xr-match-' + i" rows="3" class="form-input"
                                        :value="s._matchText !== undefined ? s._matchText : (s.match || []).join(', ')"
                                        @input="s._matchText = $event.target.value"
-                                       placeholder="{{ t('settings.xt.keywords_ph') }}" autocomplete="off">
+                                       placeholder="{{ t('settings.xt.keywords_ph') }}" autocomplete="off"></textarea>
                                 <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
                                     {{ t('settings.xt.keywords_hint') | safe }}
                                 </p>
@@ -3381,6 +3393,14 @@
                                     {{ t('settings.xt.extra_hint') | safe }}
                                 </p>
                             </div>
+                                <div class="form-group">
+                                    <label :for="'xr-scope-' + i">{{ t('settings.xt.scope') }}</label>
+                                    <textarea :id="'xr-scope-' + i" class="form-input" rows="2" x-model="s.scope" maxlength="2000"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label :for="'xr-exceptions-' + i">{{ t('settings.xt.exceptions') }}</label>
+                                    <textarea :id="'xr-exceptions-' + i" class="form-input" rows="2" :value="(s.exceptions || []).join('\n')" @input="s.exceptions = _xSplit($event.target.value, true)"></textarea>
+                                </div>
                             <details style="margin-bottom:16px;">
                                 <summary>{{ t('settings.xt.scope_permissions') }}</summary>
                                 <div class="form-group">
@@ -3409,14 +3429,6 @@
                                 <div class="form-group">
                                     <label :for="'xr-exclusions-' + i">{{ t('settings.xt.exclusions') }}</label>
                                     <input :id="'xr-exclusions-' + i" class="form-input" :value="(s.exclusions || []).join(', ')" @input="s.exclusions = _xSplit($event.target.value, false)">
-                                </div>
-                                <div class="form-group">
-                                    <label :for="'xr-scope-' + i">{{ t('settings.xt.scope') }}</label>
-                                    <textarea :id="'xr-scope-' + i" class="form-input" rows="2" x-model="s.scope" maxlength="2000"></textarea>
-                                </div>
-                                <div class="form-group">
-                                    <label :for="'xr-exceptions-' + i">{{ t('settings.xt.exceptions') }}</label>
-                                    <textarea :id="'xr-exceptions-' + i" class="form-input" rows="2" :value="(s.exceptions || []).join('\n')" @input="s.exceptions = _xSplit($event.target.value, true)"></textarea>
                                 </div>
                                 <label class="checkbox-label"><input type="checkbox" x-model="s.allow_draft"> {{ t('settings.xt.allow_draft') }}</label>
                                 <label class="checkbox-label"><input type="checkbox" x-model="s.allow_auto"> {{ t('settings.xt.allow_auto') }}</label>

@@ -16,7 +16,6 @@ from kazma_core.x_api.context import ContextSnapshot
 from kazma_core.x_api.model_selection import x_chat, x_model_turn
 from kazma_core.x_api.reply import DraftFailed, screen_draft
 from kazma_core.x_api.stance import Subject, implicit_voice_subject
-from kazma_core.x_api.verification import verify_candidate
 
 
 @dataclass(frozen=True)
@@ -32,6 +31,8 @@ class PostDraftResult:
 @x_model_turn
 async def draft_posts(brief: str, *, count: int = 1, subject_id: str = "") -> PostDraftResult:
     """Generate bounded alternatives for human review without changing chat's model."""
+    from kazma_core.x_api.verification import verify_candidate
+
     brief = (brief or "").strip()
     if not brief or len(brief) > 4000 or type(count) is not int or not 1 <= count <= 3:
         raise ValueError("Provide a brief of 1–4000 characters and request 1–3 alternatives.")

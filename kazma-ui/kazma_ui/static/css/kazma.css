@@ -6637,6 +6637,18 @@ html.kazma-soft-nav #main-content {
 /* The cards keep their own styling; inside the region they lose the outer
    margin that spaced them as siblings of the answer. */
 .turn-approvals-rows > .hitl-approval-card { margin: 0; }
+.x-control-hero { display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;padding:24px;margin-bottom:18px;border:1px solid var(--border);border-radius:14px;background:var(--bg-elevated); }
+.x-control-hero h2 { margin:0 0 8px;text-wrap:balance; }
+.x-control-hero p { max-width:65ch;margin:0;color:var(--text-secondary); }
+.x-control-hero nav { display:flex;gap:10px;flex-wrap:wrap; }
+.x-policy-heading { border-top:1px solid var(--border);padding-top:18px;margin-top:24px; }
+.x-policy-contract { margin:20px 0;padding:18px;border:1px solid var(--accent);border-radius:12px;background:var(--bg-elevated); }
+.x-policy-contract h4 { margin:0 0 8px; }
+.x-policy-contract p { color:var(--text-secondary);max-width:85ch; }
+.x-policy-card { border:1px solid var(--border);border-radius:12px;padding:18px;margin-top:12px; }
+.x-policy-card > div:first-child { flex-wrap:wrap; }
+.x-policy-summary { display:flex;gap:8px;flex-wrap:wrap;margin-top:12px; }
+.x-policy-summary span { font-size:.76rem;padding:4px 8px;border-radius:6px;background:var(--bg-elevated);color:var(--text-secondary);overflow-wrap:anywhere; }
 @media (max-width: 640px) {
   .turn-approvals-head { font-size: 0.76rem; padding: 4px 8px; }
   .turn-approvals-rows { padding: 6px; gap: 5px; }

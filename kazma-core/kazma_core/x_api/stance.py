@@ -307,9 +307,9 @@ class Subject:
     register: str = ""
     hard_lines: tuple[str, ...] = ()
     examples: tuple[str, ...] = ()
-    #: ``against`` | ``support`` | ``""``. When set, the reply ALWAYS takes
-    #: that side on this subject. Emoji only changes tone (roast/angry/dry),
-    #: never the side. Empty = legacy free-text ``view`` only.
+    #: ``against`` | ``support`` | ``""``. The declared scoped position.
+    #: Evidence, exceptions and safety still apply. Emoji changes tone,
+    #: never the position. Empty = legacy free-text ``view`` only.
     side: str = ""
     schema_version: int = 2
     revision: int = 1

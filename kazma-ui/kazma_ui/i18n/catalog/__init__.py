@@ -17,6 +17,7 @@ from kazma_ui.i18n.catalog import swarm as _swarm
 from kazma_ui.i18n.catalog import tool as _tool
 from kazma_ui.i18n.catalog import workspace as _workspace
 from kazma_ui.i18n.catalog import x_studio as _x_studio
+from kazma_ui.i18n.catalog import x_dataset as _x_dataset
 
 __all__ = ["CATALOG_MODULES", "merged"]
 
@@ -36,6 +37,7 @@ CATALOG_MODULES = (
     _tool,
     _workspace,
     _x_studio,
+    _x_dataset,
 )
 
 

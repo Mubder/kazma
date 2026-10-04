@@ -38,6 +38,21 @@
   .xs-tabs button { background: none; border: 0; border-bottom: 2px solid transparent; padding: .5rem .9rem; font: inherit; font-size: .85rem; color: var(--text-muted); cursor: pointer; }
   .xs-tabs button.on { color: var(--text-primary); border-bottom-color: var(--accent); font-weight: 600; }
   .xs-tabs .count { font-size: .68rem; color: var(--text-muted); margin-inline-start: .3rem; }
+  .xd-layout { display:grid;grid-template-columns:minmax(160px,240px) minmax(0,1fr);gap:16px;margin-top:16px; }
+  .xd-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:12px 0; }
+  .xd-actions,.xd-metrics { display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0; }
+  .xd-metrics { padding:12px;background:var(--bg-elevated);border-radius:8px;font-variant-numeric:tabular-nums; }
+  .xd-case,.xd-collection { display:flex;flex-direction:column;gap:6px;text-align:start;width:100%;padding:12px;margin:8px 0;border:1px solid var(--border);border-radius:8px;background:var(--bg-elevated);color:var(--text-primary);cursor:pointer;overflow-wrap:anywhere; }
+  .xd-case span { display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden; }
+  .xd-collection[aria-pressed=true] { border-color:var(--accent);box-shadow:inset 3px 0 var(--accent); }
+  .xd-workspace input[type=file] { max-width:100%; }
+  .xd-workspace .form-input { width:100%; }
+  .xd-check { display:flex;align-items:start;gap:8px;margin:10px 0; }
+  .xd-editor { border-top:1px solid var(--border);padding-top:16px;margin-top:24px; }
+  .xd-categories { border:1px solid var(--border);border-radius:8px;margin:12px 0; }
+  .xd-observation,.xd-quote { padding:12px;border:1px solid var(--border);border-radius:8px;margin:12px 0; }
+  .xd-workspace pre,.xd-workspace p { white-space:pre-wrap;overflow-wrap:anywhere; }
+  @media(max-width:700px) { .xd-layout,.xd-grid { grid-template-columns:minmax(0,1fr); } }
   .xs-conv { border-top: 1px solid var(--border-subtle); padding: .8rem 0; }
   .xs-conv:first-of-type { border-top: 0; }
   .xs-turn { display: flex; gap: .6rem; padding: .3rem 0; font-size: .84rem; }
@@ -109,6 +124,7 @@
             x-text="conversations.length"></span></button>
     <button id="xs-tab-threads" role="tab" :tabindex="tab === 'threads' ? 0 : -1" :class="tab === 'threads' ? 'on' : ''" :aria-selected="tab === 'threads'"
             aria-controls="xs-panel-threads" @click="selectTab('threads')">{{ t('x_studio.threads') }}</button>
+    <button id="xs-tab-datasets" role="tab" :tabindex="tab === 'datasets' ? 0 : -1" :class="tab === 'datasets' ? 'on' : ''" :aria-selected="tab === 'datasets'" aria-controls="xs-panel-datasets" @click="selectTab('datasets')">{{ t('x_dataset.title') }}</button>
   </div>
 
   <details class="xs-card" style="margin-bottom:12px;" @toggle="if ($event.target.open) loadHealth()">
@@ -132,6 +148,7 @@
     </template>
   </details>
 
+  {% include 'partials/x_datasets.html' %}
   <div id="xs-panel-threads" role="tabpanel" aria-labelledby="xs-tab-threads" x-show="tab === 'threads'" x-cloak>
     <div class="xs-card">
       <h2>{{ t('x_studio.threads') }}</h2>
@@ -475,5 +492,6 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/x_datasets.js?v={{ js_version() }}"></script>
 <script src="/static/js/x_studio.js?v={{ js_version() }}"></script>
 {% endblock %}
