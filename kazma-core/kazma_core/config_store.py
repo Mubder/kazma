@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
 import yaml
 
+from kazma_core.config_availability import ConfigStoreUnavailableError, durable_settings_write
 from kazma_core.diagnostic_scope import refuse_write, writes_suppressed
 from kazma_core.security.url_credentials import (
     mask_urls_in_text,
@@ -720,7 +721,10 @@ def _announces(
     def decorate(method: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(method)
         def wrapper(self: _ChangeNotices, *args: Any, **kwargs: Any) -> Any:
-            result = method(self, *args, **kwargs)
+            if getattr(self, "_read_only", False):
+                raise ConfigStoreUnavailableError()
+            with durable_settings_write():
+                result = method(self, *args, **kwargs)
             keys = keys_of(result, args, kwargs)
             if keys is None or keys:
                 self._announce(keys)
@@ -769,14 +773,15 @@ class ConfigStoreProtocol(Protocol):
 
 
 class _InMemoryStore(_ChangeNotices):
-    """Thread-safe in-memory fallback with TTL eviction.
-    
-    Implements ConfigStoreProtocol for use when SQLite is unavailable.
-    Uses threading.Lock for thread safety (not asyncio.Lock) to match
-    ConfigStore's synchronous interface.
+    """Read-only volatile sentinel, or an explicitly writable test double.
+
+    Production initialization never substitutes this for durable settings.
+    TTL eviction and the synchronous lock are retained for test fixtures.
     """
     
-    def __init__(self, max_entries: int = 10_000, ttl_seconds: int = 3600) -> None:
+    def __init__(self, max_entries: int = 10_000, ttl_seconds: int = 3600, *, writable: bool = False) -> None:
+        # Writable memory is an explicit test double, never a boot fallback.
+        self._read_only = not writable
         self._data: dict[str, Any] = {}
         self._timestamps: dict[str, float] = {}
         self._max_entries = max_entries
@@ -872,6 +877,8 @@ class _InMemoryStore(_ChangeNotices):
 
     def transaction(self):
         """Volatile store is already atomic per-call — a no-op context."""
+        if self._read_only:
+            raise ConfigStoreUnavailableError()
         import contextlib
 
         return contextlib.nullcontext(self)
@@ -991,7 +998,13 @@ class ConfigStore(_ChangeNotices):
         # unchanged (local writes still invalidate immediately).
         self._cache_at: dict[str, float] = {}
         self._pg = None  # lazy PostgresPool
-        self._init_db()
+        try:
+            self._init_db()
+        except (sqlite3.Error, OSError, RuntimeError, ValueError, ImportError):
+            # An unsuccessful constructor must not leave a SQLite handle
+            # alive while the next attempt tries the same database.
+            self.close()
+            raise
 
     def _use_postgres(self) -> bool:
         try:
@@ -2199,7 +2212,7 @@ class ConfigStore(_ChangeNotices):
         """
         refuse_write("config", "<raw transaction>")
         committed = False
-        with self._lock:
+        with durable_settings_write(), self._lock:
             conn = self._get_conn()
             conn.execute("BEGIN")
             try:
@@ -2612,14 +2625,10 @@ def get_config_store() -> ConfigStore:
     share one SQLite connection and one ``threading.Lock`` for write
     coordination.
 
-    On SQLite initialization failure, retries with a short backoff (a
-    transient lock at boot must not make the whole process volatile), then
-    falls back to an in-memory store rather than returning None, preventing
-    downstream AttributeError. ``is_config_store_volatile()`` reports
-    whether the fallback is active — surfaces in /health/deep so a
-    volatile process cannot silently swallow every settings save (live
-    2026-09-04: a process ran for hours accepting 200-OK saves into RAM
-    while the failure reason went to a console nobody read).
+    SQLite failures get four short retries; PostgreSQL uses its own bounded
+    pool retry loop once. Exhaustion raises ConfigStoreUnavailableError and
+    leaves the singleton unset so a later boot can recover. Never accept
+    settings or start automation on temporary defaults after storage fails.
     """
     global _config_store
     if _config_store is None:
@@ -2628,7 +2637,12 @@ def get_config_store() -> ConfigStore:
             # constructs the singleton (audit finding).
             if _config_store is None:
                 last_exc: Exception | None = None
-                for attempt in range(_INIT_ATTEMPTS):
+                from kazma_core.db.backend import is_postgres
+
+                # PostgreSQL already retries in its pool: do not multiply
+                # its five attempts by four more store attempts.
+                attempts = 1 if is_postgres() else _INIT_ATTEMPTS
+                for attempt in range(attempts):
                     try:
                         _config_store = ConfigStore()
                         last_exc = None
@@ -2636,22 +2650,17 @@ def get_config_store() -> ConfigStore:
                     except Exception as e:
                         last_exc = e
                         logger.warning(
-                            "ConfigStore init attempt %d/%d failed: %s",
-                            attempt + 1, _INIT_ATTEMPTS, e,
+                            "ConfigStore init attempt %d/%d failed (%s)",
+                            attempt + 1, attempts, type(e).__name__,
                         )
-                        if attempt < _INIT_ATTEMPTS - 1:
+                        if attempt < attempts - 1:
                             time.sleep(_INIT_RETRY_BACKOFF_S)
                 if last_exc is not None:
-                    logger.critical(
-                        "ConfigStore (SQLite) initialization FAILED after %d "
-                        "attempts: %s. SAFETY-CRITICAL data (path grants, HITL "
-                        "approvals, YOLO state, task grants) will NOT persist "
-                        "across restarts — using volatile in-memory fallback "
-                        "with 1-hour TTL. Fix: check kazma-data/ permissions, "
-                        "disk space, and that settings.db is not locked.",
-                        _INIT_ATTEMPTS, last_exc,
-                    )
-                    _config_store = _InMemoryStore()  # type: ignore[assignment]
+                    error = ConfigStoreUnavailableError()
+                    logger.critical("ConfigStore initialization failed: %s", error)
+                    # Leave the singleton unset. The guard's next boot, or
+                    # a later caller, can recover against the real database.
+                    raise error from last_exc
     return _config_store
 
 
@@ -2663,8 +2672,7 @@ def is_volatile_store(store: Any) -> bool:
 def is_config_store_volatile() -> bool:
     """True when the process runs on the in-memory settings fallback.
 
-    Every settings write in this state is silently non-durable. Polled by
-    the deep health canary and the app startup banner.
+    Retained for explicit volatile test stores and health diagnostics.
     """
     return is_volatile_store(get_config_store())
 

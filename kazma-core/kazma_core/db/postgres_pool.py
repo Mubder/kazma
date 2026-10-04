@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, Generator
+from typing import Any
 
 from kazma_core.db.backend import get_database_url, is_postgres, require_postgres_driver
 
@@ -106,8 +107,8 @@ class PostgresPool:
         )
 
     @contextmanager
-    def connection(self) -> Generator[Any, None, None]:
-        with self._pool.connection() as conn:
+    def connection(self, *, timeout: float | None = None) -> Generator[Any, None, None]:
+        with self._pool.connection(timeout=timeout) as conn:
             yield conn
 
     def execute(self, sql: str, params: tuple | list | dict | None = None) -> list[dict]:
@@ -182,8 +183,8 @@ def get_postgres_pool() -> PostgresPool | None:
 
             import time
 
-            attempts = int(os_env("KAZMA_PG_POOL_RETRIES", "5"))
-            delay = float(os_env("KAZMA_PG_POOL_RETRY_DELAY", "1.0"))
+            attempts = max(1, min(int(os_env("KAZMA_PG_POOL_RETRIES", "5")), 5))
+            delay = max(0.0, min(float(os_env("KAZMA_PG_POOL_RETRY_DELAY", "1.0")), 5.0))
             last_exc: Exception | None = None
             for attempt in range(1, attempts + 1):
                 try:
@@ -195,11 +196,13 @@ def get_postgres_pool() -> PostgresPool | None:
                     # half-built pool and retry — the DB may be mid-startup.
                     last_exc = exc
                     logger.warning(
-                        "[PostgresPool] attempt %d/%d failed: %s",
+                        "[PostgresPool] attempt %d/%d failed (%s)",
                         attempt,
                         attempts,
-                        exc,
+                        type(exc).__name__,
                     )
+                    if _pool is not None:
+                        _pool.close()
                     _pool = None
                     if attempt < attempts:
                         time.sleep(delay)
@@ -207,7 +210,7 @@ def get_postgres_pool() -> PostgresPool | None:
                 # All retries exhausted — surface the underlying cause so
                 # callers see WHY (not just "pool unavailable").
                 raise RuntimeError(
-                    f"Postgres pool unreachable after {attempts} attempts: {last_exc}"
+                    f"Postgres pool unreachable after {attempts} attempts"
                 ) from last_exc
         return _pool
 
@@ -283,8 +286,11 @@ def _ensure_core_schema(pool: PostgresPool) -> None:
     CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated ON kazma_chat_sessions(updated_at);
     CREATE INDEX IF NOT EXISTS idx_swarm_tasks_status ON kazma_swarm_tasks(status);
     """
-    with pool.connection() as conn:
+    with pool.connection(timeout=5.0) as conn:
         with conn.cursor() as cur:
+            # Boot schema locks must not turn a bounded connection retry
+            # into an unlimited wait. Scoped to this transaction only.
+            cur.execute("SET LOCAL statement_timeout = '5s'")
             cur.execute(ddl)
             # Idempotent column migrations for pre-existing databases
             # (CREATE TABLE IF NOT EXISTS only helps fresh installs). IF NOT

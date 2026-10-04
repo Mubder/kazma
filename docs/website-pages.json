@@ -10,6 +10,7 @@
     "sync_record": "src/data/docs-sync.json"
   },
   "pages": [
+    {"source": "docs/DURABLE_SETTINGS_AND_LIVE_EVAL.md", "site": null, "why": "maintainer implementation record and CLI evaluation runbook; production accuracy requires the owner's private reviewed holdout"},
     {"source": "docs/docs/intro.md", "site": "index", "adapted": true, "why": "the site's docs home is its own landing page (cards, what is new): written from this page, docs/FEATURES.md and CHANGELOG.md, not copied, so its structure is not compared with this page"},
     {"source": "docs/docs/guide/quickstart.md", "site": "quickstart"},
     {"source": "docs/docs/guide/recent-features.md", "site": "recent-features"},

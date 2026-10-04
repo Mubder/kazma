@@ -207,7 +207,7 @@ def test_each_write_tells_the_listeners_what_it_changed(store) -> None:
 
 
 def test_the_in_memory_store_announces_too() -> None:
-    fallback = _InMemoryStore()
+    fallback = _InMemoryStore(writable=True)
     heard: list[frozenset[str] | None] = []
     fallback.add_change_listener(heard.append)
     fallback.set("a.one", 1)

@@ -7,15 +7,18 @@ WebSocket endpoints, static files, and template engine.
 from __future__ import annotations
 
 import warnings
+
 warnings.filterwarnings("ignore", category=FutureWarning, module="typing_extensions")
 
 import os
+
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
 import asyncio
 import logging
 import time
+
 logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 
 from contextlib import asynccontextmanager
@@ -235,9 +238,13 @@ class KazmaAppBuilder:
         self._adopt_process_environment()
 
         from kazma_core.agent import KazmaAgent, load_config
-        from kazma_core.config_store import ConfigStore, set_config_store
-        from kazma_core.model_registry import initialize_model_registry, ModelRegistry
+        from kazma_core.config_store import ConfigStore, get_config_store, set_config_store
+        from kazma_core.model_registry import ModelRegistry, initialize_model_registry
         from kazma_core.service_container import get_container
+
+        # Abort before vault migration, worker wiring or automation can use
+        # defaults from a failed settings backend. The guard retries boot.
+        get_config_store()
 
         # Ensure KAZMA_SECRET is configured
         import sys
@@ -492,6 +499,9 @@ class KazmaAppBuilder:
         )
 
         # Register services in Dependency Injection Container
+        from kazma_ui.config_errors import install_config_error_handler
+
+        install_config_error_handler(self.app)
         container = get_container()
         container.register(ConfigStore, self.config_store)
         container.register(ModelRegistry, self.registry)
@@ -610,7 +620,9 @@ class KazmaAppBuilder:
 
         # i18n
         import contextvars
-        from kazma_ui.i18n import make_translator as _make_translator, TRANSLATIONS
+
+        from kazma_ui.i18n import TRANSLATIONS
+        from kazma_ui.i18n import make_translator as _make_translator
         from kazma_ui.i18n import plural_forms as _plural_forms
         from kazma_ui.i18n import t_plural as _t_plural
 
@@ -1231,11 +1243,11 @@ class KazmaAppBuilder:
         """Create and mount FastAPI routers."""
         from kazma_ui.agents import create_agents_router
         from kazma_ui.chat import create_chat_router
+        from kazma_ui.health import router as health_router
         from kazma_ui.mcp_ui import create_mcp_router
         from kazma_ui.providers import create_providers_router
         from kazma_ui.settings import create_settings_router
         from kazma_ui.skills_ui import create_skills_router
-        from kazma_ui.health import router as health_router
 
         chat_router = create_chat_router(self.agent, self.templates)
         settings_router = create_settings_router(self.agent, self.config_store, self.templates)
@@ -1356,6 +1368,7 @@ class KazmaAppBuilder:
         # ── Telemetry SSE Route ──
         try:
             from kazma_core.telemetry import HardwareMonitor
+
             from kazma_ui.telemetry_route import create_telemetry_router
 
             hw_monitor = HardwareMonitor()
@@ -1586,18 +1599,16 @@ class KazmaAppBuilder:
             if is_config_store_volatile():
                 logger.critical(
                     "[Startup] SETTINGS STORE IS VOLATILE (in-memory fallback) — "
-                    "every settings save in this process is NON-DURABLE and will "
-                    "be lost on restart. Check kazma-data/settings.db locks and "
-                    "permissions, then restart via the guard."
+                    "settings writes are refused. Restore the configured "
+                    "database, then restart via the guard."
                 )
                 from kazma_core.observability.ops_alerts import alert
 
                 alert(
                     "config_store.volatile",
                     "Settings saves are NOT persisting",
-                    "The settings store fell back to in-memory at boot — every "
-                    "save returns OK but is lost on restart. Restart the server "
-                    "via the guard after checking kazma-data/settings.db.",
+                    "The settings store is volatile; writes are refused. "
+                    "Restore the configured database and restart via the guard.",
                     severity="critical",
                 )
         except Exception:  # noqa: BLE001 — never block boot
@@ -2167,6 +2178,7 @@ class KazmaAppBuilder:
         try:
             from kazma_core.background import spawn_background
             from kazma_core.lifecycle_notifier import announce_started
+
             from kazma_ui.health import get_build_info
 
             _gateway = self.gateway

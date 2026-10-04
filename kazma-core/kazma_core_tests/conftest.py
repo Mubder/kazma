@@ -40,7 +40,7 @@ def in_memory_store():
     """Create an in-memory store for testing."""
     from kazma_core.config_store import _InMemoryStore
     
-    store = _InMemoryStore(max_entries=100, ttl_seconds=60)
+    store = _InMemoryStore(max_entries=100, ttl_seconds=60, writable=True)
     yield store
     # Cleanup handled by store.clear() in tests
 

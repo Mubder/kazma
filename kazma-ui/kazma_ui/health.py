@@ -68,22 +68,21 @@ def check_config_store() -> dict[str, Any]:
         from kazma_core.config_store import get_config_store, is_config_store_volatile
 
         store = get_config_store()
-        # Test read
-        _ = store.get("health.check", "ok")
         if is_config_store_volatile():
             return {
                 "status": "failed",
                 "component": "config_store",
                 "error": (
                     "settings store is the VOLATILE in-memory fallback — "
-                    "saves do not persist (check kazma-data/settings.db "
-                    "locks/permissions)"
+                    "writes are refused; restore the configured database and restart"
                 ),
                 # The fallback is for the life of the process: a boot while
                 # the database was away stays volatile after it is back. The
                 # guard rides out a dependency outage but must restart this.
                 "restart_required": True,
             }
+        # Durability first: a readable temporary store is not healthy.
+        _ = store.get("health.check", "ok")
         return {"status": "ok", "component": "config_store"}
     except Exception as e:
         logger.error("ConfigStore health check failed: %s", e)

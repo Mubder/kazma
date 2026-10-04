@@ -13,22 +13,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 import aiosqlite
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from kazma_core.authority import ContextAuthority, create_authority
+from kazma_core.config_schema import TracingConfig
+from kazma_core.config_store import apply_sqlite_pragmas_async
 from kazma_core.cost_breaker import create_cost_breaker
 from kazma_core.llm_provider import LLMProvider
 from kazma_core.mcp.manager import UnifiedToolExecutor
 from kazma_core.state import AgentState
 from kazma_core.tracing import KazmaTracer
-from kazma_core.config_schema import TracingConfig
-
-from kazma_core.config_store import apply_sqlite_pragmas_async
 
 __all__ = ["AgentConfig", "CHECKPOINT_DB", "CONFIG_FILE", "KazmaAgent", "MAX_ITERATIONS", "load_config", "main", "run_agent"]
 
@@ -173,6 +173,11 @@ class KazmaAgent:
     """
 
     def __init__(self, config: AgentConfig | None = None) -> None:
+        from kazma_core.config_store import get_config_store
+
+        # Applies to CLI and gateway entry points as well as the web app.
+        # Do not create workers or snapshot stores after a failed settings boot.
+        get_config_store()
         self.config = config or load_config()
         self._running = False
 
@@ -1146,7 +1151,7 @@ class KazmaAgent:
             "recursion_limit": _run_recursion,
         }
 
-        from kazma_core.safety.hitl import set_current_thread_id, reset_current_thread_id
+        from kazma_core.safety.hitl import reset_current_thread_id, set_current_thread_id
 
         token = set_current_thread_id(self._thread_id)
         try:

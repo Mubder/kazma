@@ -129,6 +129,37 @@ def test_a_connection_the_server_closed_is_replaced_at_checkout():
 
 
 @pytest.mark.postgres
+def test_a_boot_schema_lock_fails_bounded_then_recovers(monkeypatch):
+    """Hold a lock in the test database, never stop a production dependency."""
+    import time
+
+    import kazma_core.config_store as settings
+    from kazma_core.config_availability import ConfigStoreUnavailableError
+    from kazma_core.db.postgres_pool import get_postgres_pool, reset_postgres_pool
+
+    dsn = _dsn()
+    psycopg = pytest.importorskip("psycopg")
+    get_postgres_pool()
+    reset_postgres_pool()
+    monkeypatch.setattr(settings, "_config_store", None)
+    monkeypatch.setenv("KAZMA_PG_POOL_RETRIES", "1")
+    with psycopg.connect(dsn) as blocker:
+        blocker.execute("LOCK TABLE kazma_chat_sessions IN ACCESS EXCLUSIVE MODE")
+        started = time.monotonic()
+        with pytest.raises(ConfigStoreUnavailableError):
+            settings.get_config_store()
+        assert time.monotonic() - started < 20
+        assert settings.peek_config_store() is None
+        blocker.rollback()
+    store = settings.get_config_store()
+    store.set("test.boot_lock_recovery", "durable", category="test")
+    try:
+        assert store.get("test.boot_lock_recovery") == "durable"
+    finally:
+        store.delete("test.boot_lock_recovery")
+
+
+@pytest.mark.postgres
 def test_the_checkpointers_pool_replaces_a_closed_connection():
     import asyncio
     import sys

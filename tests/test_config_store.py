@@ -143,6 +143,10 @@ test:
 
 
 class TestVolatileFallback:
+    @pytest.fixture(autouse=True)
+    def sqlite_boot(self, monkeypatch):
+        monkeypatch.setenv("KAZMA_DB_BACKEND", "sqlite")
+
     def test_init_retries_then_succeeds(self, monkeypatch, tmp_path):
         import kazma_core.config_store as cs_mod
 
@@ -172,7 +176,7 @@ class TestVolatileFallback:
         finally:
             cs_mod.set_config_store(None)  # type: ignore[arg-type]
 
-    def test_persistent_failure_falls_back_and_is_reported(self, monkeypatch):
+    def test_persistent_failure_refuses_boot_and_can_recover(self, monkeypatch):
         import kazma_core.config_store as cs_mod
 
         class DeadStore:
@@ -183,9 +187,11 @@ class TestVolatileFallback:
         monkeypatch.setattr(cs_mod, "_config_store", None)
         monkeypatch.setattr(cs_mod, "_INIT_RETRY_BACKOFF_S", 0.0)
         try:
-            store = cs_mod.get_config_store()
-            assert isinstance(store, cs_mod._InMemoryStore)
-            assert cs_mod.is_config_store_volatile() is True
+            from kazma_core.config_availability import ConfigStoreUnavailableError
+
+            with pytest.raises(ConfigStoreUnavailableError):
+                cs_mod.get_config_store()
+            assert cs_mod.peek_config_store() is None
         finally:
             cs_mod.set_config_store(None)  # type: ignore[arg-type]
 
