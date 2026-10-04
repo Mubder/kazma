@@ -3,7 +3,7 @@
     <div class="xs-card">
       <h2>{{ t('x_dataset.title') }}</h2>
       <p>{{ t('x_dataset.intro') }}</p>
-      <a href="/docs/guide/x-evaluation-dataset">{{ t('x_dataset.guide') }}</a>
+      <a href="https://kazma.ai{{ '/ar' if lang() == 'ar' else '' }}/docs/x-evaluation-dataset/">{{ t('x_dataset.guide') }}</a>
       <div class="xd-grid" style="margin-top:16px;">
         <div><label for="xd-name">{{ t('x_dataset.name') }}</label><input id="xd-name" name="dataset_name" autocomplete="off" maxlength="120" class="form-input" x-model="name" :disabled="busy"></div>
         <div><label for="xd-purpose">{{ t('x_dataset.purpose') }}</label><select id="xd-purpose" class="form-input" x-model="purpose" :disabled="busy">
