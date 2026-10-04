@@ -543,6 +543,10 @@ class KazmaAppBuilder:
         _STATIC_DIR.mkdir(parents=True, exist_ok=True)
         self.app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
+        from kazma_ui.documentation import router as documentation_router
+
+        self.app.include_router(documentation_router)
+
         # Browsers always request /favicon.ico (ignores <link rel="icon"> alone)
         _favicon = _STATIC_DIR / "img" / "favicon.png"
         if not _favicon.is_file():
