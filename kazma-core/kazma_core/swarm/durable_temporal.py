@@ -11,6 +11,7 @@ from typing import Any
 
 try:
     from temporalio import activity, workflow
+    from temporalio.common import RetryPolicy
 except ImportError:  # pragma: no cover
     activity = None  # type: ignore[assignment]
     workflow = None  # type: ignore[assignment]
@@ -33,6 +34,10 @@ if activity is not None and workflow is not None:
                 kazma_swarm_dispatch,
                 payload,
                 start_to_close_timeout=timedelta(seconds=max(timeout, 60.0) + 120.0),
+                # The activity wraps an entire agent task, whose arbitrary
+                # external effects are not universally idempotent. A crashed
+                # activity must be inspected, not replayed from the beginning.
+                retry_policy=RetryPolicy(maximum_attempts=1),
             )
 
 else:  # pragma: no cover

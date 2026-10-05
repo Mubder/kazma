@@ -14,49 +14,46 @@ Usage::
     result = await manager.dispatch("core", "Fix the auth bug")
 """
 
-from kazma_core.swarm.aggregator import ResultAggregator
-from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
-from kazma_core.swarm.bus import (
-    ApprovalRequest,
-    BusAdapter,
-    BusMessage,
-    FanOutBusAdapter,
-    NullBusAdapter,
-    SwarmMessageBus,
-    SwarmReport,
-    get_message_bus,
-)
-from kazma_core.swarm.checkpoint import HITLCheckpoint, HITLCheckpointHandler
-from kazma_core.swarm.config import SwarmConfig, WorkerConfig
-from kazma_core.swarm.engine import SwarmEngine, get_swarm_engine, set_swarm_engine
-from kazma_core.swarm.handoff import HandoffRequest, request_handoff
-from kazma_core.swarm.manager import SwarmManager
-from kazma_core.swarm.metrics import MetricsCollector, WorkerMetricSnapshot
-from kazma_core.swarm.registry import WorkerEntry, WorkerRegistry
-from kazma_core.swarm.reliability import (
-    BoundedConcurrency,
-    CircuitBreaker,
-    CircuitBreakerOpenError,
-    CircuitState,
-    FallbackChain,
-    OutputValidator,
-    RetryPolicy,
-    TimeoutGuard,
-)
-from kazma_core.routing_engine import UnifiedRouter, NoCapableWorkersError
-from kazma_core.swarm.safety import SafetyMiddleware, SafetyViolationError, get_safety
-from kazma_core.swarm.task import (
-    HandoffRecord,
-    SwarmTask,
-    TaskResult,
-    TaskStatus,
-    TaskType,
-    WorkerCapabilities,
-    WorkerResult,
-)
-from kazma_core.swarm.task_store import TaskStore
-from kazma_core.swarm.tracing import InMemorySpanExporter, Span, TracingEmitter
-from kazma_core.swarm.worker import InProcessWorker, SwarmWorker
+from __future__ import annotations
+
+import importlib
+from typing import Any
+
+# Importing a workflow leaf must not boot the swarm, its provider clients or
+# memory libraries inside Temporal's deterministic sandbox. Exports retain
+# their defining-module identity and are resolved only when requested.
+_EXPORT_GROUPS = {
+    "kazma_core.swarm.aggregator": ("ResultAggregator",),
+    "kazma_core.swarm.blackboard": ("BlackboardStore", "SwarmDispatchContext"),
+    "kazma_core.swarm.bus": ("ApprovalRequest", "BusAdapter", "BusMessage", "FanOutBusAdapter", "NullBusAdapter", "SwarmMessageBus", "SwarmReport", "get_message_bus"),
+    "kazma_core.swarm.checkpoint": ("HITLCheckpoint", "HITLCheckpointHandler"),
+    "kazma_core.swarm.config": ("SwarmConfig", "WorkerConfig"),
+    "kazma_core.swarm.engine": ("SwarmEngine", "get_swarm_engine", "set_swarm_engine"),
+    "kazma_core.swarm.handoff": ("HandoffRequest", "request_handoff"),
+    "kazma_core.swarm.manager": ("SwarmManager",),
+    "kazma_core.swarm.metrics": ("MetricsCollector", "WorkerMetricSnapshot"),
+    "kazma_core.swarm.registry": ("WorkerEntry", "WorkerRegistry"),
+    "kazma_core.swarm.reliability": ("BoundedConcurrency", "CircuitBreaker", "CircuitBreakerOpenError", "CircuitState", "FallbackChain", "OutputValidator", "RetryPolicy", "TimeoutGuard"),
+    "kazma_core.routing_engine": ("UnifiedRouter", "NoCapableWorkersError"),
+    "kazma_core.swarm.safety": ("SafetyMiddleware", "SafetyViolationError", "get_safety"),
+    "kazma_core.swarm.task": ("HandoffRecord", "SwarmTask", "TaskResult", "TaskStatus", "TaskType", "WorkerCapabilities", "WorkerResult"),
+    "kazma_core.swarm.task_store": ("TaskStore",),
+    "kazma_core.swarm.tracing": ("InMemorySpanExporter", "Span", "TracingEmitter"),
+    "kazma_core.swarm.worker": ("InProcessWorker", "SwarmWorker"),
+}
+_EXPORTS = {name: module for module, names in _EXPORT_GROUPS.items() for name in names}
+
+
+def __getattr__(name: str) -> Any:
+    """Load a public export without loading every sibling subsystem."""
+    module = _EXPORTS.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return getattr(importlib.import_module(module), name)
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))
 
 __all__ = [
     "ApprovalRequest",

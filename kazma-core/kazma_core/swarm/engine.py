@@ -336,6 +336,18 @@ class SwarmEngine:
 
     async def dispatch(self, task: SwarmTask) -> TaskResult:
         """Dispatch a swarm task to a single worker (or broadcast to all)."""
+        from kazma_core.swarm.durable import (
+            durable_enabled,
+            durable_required,
+            in_durable_activity,
+            run_via_durable,
+        )
+
+        # Refuse before admission/persistence: an unavailable required backend
+        # must not leave a task marked RUNNING without any executor.
+        if durable_required() and not durable_enabled() and not in_durable_activity():
+            return await run_via_durable(self, task, perf_counter(), None)
+
         # Sweep stale tasks before checking capacity
         self.reap_stale_tasks()
 
@@ -408,6 +420,8 @@ class SwarmEngine:
             # _active_tasks until the watchdog reaped it, with no
             # task_completed SSE (deep-audit 2026-08-19).
             try:
+                if (durable_enabled() or durable_required()) and not in_durable_activity():
+                    return await run_via_durable(self, task, started, None)
                 return await self.broadcast(task)
             except asyncio.TimeoutError:
                 logger.warning(
@@ -457,13 +471,7 @@ class SwarmEngine:
             # before step 1 finished (2026-08-15 audit). Only single-worker
             # DISPATCH keeps the whole-task deadline as its safety net.
             # (The set lives at module level: _PER_STEP_PATTERN_TYPES.)
-            from kazma_core.swarm.durable import (
-                durable_enabled,
-                in_durable_activity,
-                run_via_durable,
-            )
-
-            if durable_enabled() and not in_durable_activity():
+            if (durable_enabled() or durable_required()) and not in_durable_activity():
                 return await run_via_durable(self, task, started, task_span)
             if (
                 task.timeout
@@ -672,6 +680,8 @@ class SwarmEngine:
 
     async def _dispatch_inner(self, task: SwarmTask, started: float, task_span: Any) -> TaskResult:
         """Inner dispatch logic, wrapped by dispatch() for catch-all safety."""
+        if task.type == TaskType.BROADCAST:
+            return await self.broadcast(task)
         from kazma_core.swarm.dispatch_inner import dispatch_inner as _dispatch_inner_impl
 
         return await _dispatch_inner_impl(self, task, started, task_span)

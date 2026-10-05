@@ -170,6 +170,11 @@ it anyway. If that variable is set, there is no jail; there is a subprocess.
 `shell_exec` runs **on the host** after approval. It is not containerized, and
 the HITL card says so in those words.
 
+Production, multi-user and forced Docker profiles refuse it by default.
+An operator can explicitly restore it with `KAZMA_HOST_SHELL=1`; that grant
+restores all of the residual host capability described here. A failure to
+read the execution policy refuses host fallback rather than granting it.
+
 What constrains it:
 
 - **A binary allowlist**, not a denylist: `ls`, `cat`, `grep`, `find`, `git`,
@@ -231,7 +236,7 @@ the above applies. Check yours:
 | `KAZMA_CODE_EXEC_ALLOW_LOCAL=1` | Local fallback re-enabled **even in production** |
 | `KAZMA_E2B_API_KEY` set | The only real isolation boundary here |
 | `KAZMA_ALLOW_YOLO=1` | Section 1 is off for canonical danger tools |
-| `KAZMA_PRODUCTION=1` | Bans local `python_exec`, turns on the strict shell allowlist, and requires `KAZMA_WORKSPACE_ROOT`. For MCP it only ignores a server marked `trust: trusted` unless `KAZMA_MCP_TRUSTED_IN_PROD=1`. It does not close a safe-looking MCP name: that call runs when the name is on `KAZMA_MCP_SAFE_ALLOWLIST` or this call was approved, with or without this flag |
+| `KAZMA_PRODUCTION=1` | Bans local `python_exec`, denies host shell unless `KAZMA_HOST_SHELL=1`, turns on the strict shell allowlist, and requires `KAZMA_WORKSPACE_ROOT`. For MCP it only ignores a server marked `trust: trusted` unless `KAZMA_MCP_TRUSTED_IN_PROD=1`. It does not close a safe-looking MCP name: that call runs when the name is on `KAZMA_MCP_SAFE_ALLOWLIST` or this call was approved, with or without this flag |
 | `KAZMA_SHELL_STRICT=0` | Relaxes PATH restriction and binary resolution |
 
 A single-operator box with `DOCKER=0`, `ALLOW_LOCAL=1` and `ALLOW_YOLO=1` is a

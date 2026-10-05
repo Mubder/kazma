@@ -14,7 +14,7 @@ description: Kazma Deployment — code-audited reference (unified docs, v0.9+)
 |---|---|---|
 | **Docker Compose** (`docker-compose.yml` + `Dockerfile`) | The main Kazma agent + Web UI (uvicorn). | ✅ Primary, production-ready. |
 | **Windows native** (`setup.ps1`) | Local dev venv bootstrap. | ✅ Active. |
-| **Kubernetes** | No manifest ships; build one from the `Dockerfile`. | ⚠ See §4. |
+| **Kubernetes** | Single-owner StatefulSet template with database ownership and a fenced state volume. | ⚠ Requires target-cluster qualification; see §4. |
 | **Cloudflare Pages / edge workers** | — | ❌ Not applicable. Kazma is a Python/uvicorn server, not an edge deployment. |
 | **Bare uvicorn** | The main agent. | ✅ `kazma serve` / `kazma-web`. |
 
@@ -64,7 +64,69 @@ Verify:
 curl -s http://localhost:9090/health/ready
 ```
 
-### 2.4 `.dockerignore`
+### 2.4 Runtime ownership and readiness
+
+Run one server process per data directory, including when relational state
+uses Postgres. A local OS writer lock refuses a second owner and releases on
+process death. Never delete its lock file to force takeover. Shared local
+volumes, process-owned turn delivery and remaining SQLite stores prevent a
+cross-host HA claim; WAL contention is not fencing. Do not use NFS or scale
+the application replicas for this deployment.
+
+The Postgres recipe in `docker-compose.ha.yml` now specifies one runtime,
+mounts its state at `/app/kazma-data`, and exposes it through nginx. The
+filename is historical: this is a single-owner recovery baseline. Restart
+the stopped owner on the same local state, keep verified backups, and
+qualify restore before replacing its host. PostgreSQL alone does not make
+the whole framework safe for multiple active runtimes.
+
+Readiness requires settings, database, registry, agent, provider and a graph
+bound to its initialized saver. Optional failures remain visible. Add
+deployment dependencies in the configuration:
+
+```yaml
+health:
+  required_capabilities: [mcp, swarm_engine, code_execution]
+```
+
+Unknown or malformed requirements refuse readiness. Supported additions are
+`mcp`, `swarm_engine`, `cron`, `schedulers`, `temporal`, and `code_execution`.
+Required Temporal also needs its running worker. Code execution checks the
+Docker daemon without pulling an image, or reports E2B SDK/credential presence;
+the latter does not verify the remote service. Run a controlled execution
+acceptance test before rollout. Keep liveness separate from readiness so a
+database outage is answered with 503 rather than a restart loop.
+
+Production host shell is off unless explicitly granted. Deploying inside
+Docker does not itself provide the Docker daemon required for nested code
+execution; configure an isolated execution backend rather than exposing the
+host's privileged Docker socket to the agent.
+
+For a recovery drill, keep the application stopped while restoring both
+Postgres and the complete local data directory, together with their vault
+key. Test on a separate host or isolated directory first. Verify settings,
+workspace identity, paused approvals and turn history before reopening
+traffic. Do not restore only Postgres and assume the local stores match it.
+
+If a Temporal result says `execution_outcome: unknown`, use the reported
+workflow ID to inspect its history and actual effects. Resubmitting that same
+task ID recovers its existing workflow; creating a new task ID can repeat
+effects. Whole-agent activities intentionally have one attempt. Add effect
+identities and per-step recovery before enabling automatic activity retries.
+
+If an approval returns 503, restore decision storage before acting again;
+the graph remains paused. A claimed/resuming decision after a crash needs
+checkpoint reconciliation and the normal orphan sweep, rather than an
+automatic second approval. Old platform buttons are bound to their interrupt
+and cannot decide a later pause. Use the current card after recovery.
+
+After a workspace switch, a failed MCP reconnect leaves the binding
+unverified. Reconnect the affected server and confirm its current workspace
+before dispatching tools; do not suppress the scope guard. Scoped instances
+have a bounded cache, and all-busy capacity refuses new dispatch instead of
+closing a request in flight.
+
+### 2.5 `.dockerignore`
 
 Excludes `archive/`, `__pycache__/`, `.venv/`, `.git/`, `tests/`, `kazma-data/`, `docs/`, `*.md`, `.env`, `*.db`, build caches — keeping the image lean and secrets out.
 
@@ -108,23 +170,66 @@ kazma serve
 
 ## 4. Kubernetes
 
-No Kubernetes manifest ships with Kazma. The `kubernetes/` directory used to
-hold manifests for a separate "Hub API" image (`kazma/hub-api`) that this
-repository never built; its probes pointed at paths the service did not serve,
-and nothing configured the API outside tests. They were removed on 2026-09-23
-rather than left looking deployable.
+`deploy/kubernetes/runtime.yaml` prepares the main agent for active/passive
+recovery. It runs **one** StatefulSet replica on port 8000, with a
+`ReadWriteOncePod` PVC holding data, vectors, user state and installed skills
+at stable paths under `/state`. UID/GID 10001 match the Docker image. Its
+150-second termination budget allows the application's 120-second shutdown
+ceiling to finish before storage moves. It mounts no Docker socket or
+Kubernetes credentials. Provide an isolated code execution service separately.
 
-To run the **main agent** on Kubernetes, write a manifest around this repo's
-`Dockerfile` with:
+Before applying, choose a supported replicated block CSI driver whose
+detach/reattach fencing you can verify. Replace the storage class placeholder
+and the image placeholder with a built, scanned release digest. Create
+`kazma-runtime-secrets` containing `database-url`, `auth-secret`, `vault-key`
+and `trusted-proxies`. Use a managed HA PostgreSQL **direct endpoint** or
+session pooling; transaction pooling is incompatible with the ownership lock.
+Set ingress proxy addresses narrowly and require TLS. Supply provider and
+platform credentials through the normal protected configuration workflow.
 
-- liveness `GET /health/live` and readiness `GET /health/ready` (port 9090);
-- an explicit `KAZMA_SECRET` from a `Secret`, and `KAZMA_HOST=0.0.0.0` only
-  behind an ingress, with `KAZMA_TRUSTED_PROXIES` naming it (§3);
-- a PVC for `kazma-data/` and the vector path — state lives there, so run one
-  replica unless you have moved shared state to Postgres
-  (`KAZMA_DB_BACKEND=postgres`, see the Postgres guide);
-- at least 1 Gi of memory if the RAG extras (sentence-transformers, ChromaDB)
-  are installed.
+```bash
+kubectl kustomize deploy/kubernetes
+# Review the rendered resources after replacing both placeholders.
+kubectl apply --dry-run=server -k deploy/kubernetes
+kubectl apply -k deploy/kubernetes
+```
+
+`KAZMA_RUNTIME_HA=1` acquires a dedicated Postgres session advisory lock
+before constructing services. A second runtime on another directory or host
+is refused. The database records the volume's `.runtime-state-id`; a different
+or blank volume cannot take over that database. Pair the **authoritative**
+volume on the first HA boot, after backing up the database and complete state.
+The monitor never reconnects: session loss exits the entire process (75),
+including workers that are still running while the event loop is stalled.
+The Kubernetes controller may restart it after database connectivity returns.
+
+The lock supplements storage fencing. PostgreSQL releasing a lost session
+does not itself stop a partitioned host's SQLite writes or external effects.
+Keep one replica; never force-delete the old StatefulSet pod to accelerate
+failover until its node and volume have been fenced. Protect the database's
+volume identity table from manual edits. Restore the database, complete PVC
+snapshot and vault key as a coordinated set. Do not copy only the identity
+file to authorize an unrelated volume.
+
+Qualification remains **open** until the target cluster passes these drills:
+
+1. Gracefully replace the pod and verify readiness, paused approval identity,
+   settings, workspace, vectors and committed turn history on the same PVC.
+2. Terminate the ownership database session and verify the old process exits,
+   traffic stops and one successor acquires ownership; no pending effect is
+   silently replayed. Duplicate/unknown external effects require reconciliation.
+3. Lose the node and separately partition its network. Prove storage fencing
+   stops the former owner before the successor can attach; record RTO and RPO.
+4. Attempt a second runtime and a blank/mismatched volume. Both must refuse
+   admission without changing business state.
+5. Restore paired PostgreSQL/PVC backups into an isolated environment and
+   verify approvals, vault access, history and isolation before accepting traffic.
+
+Local disposable-Postgres tests cover admission, mismatched volumes, process
+death and database-session loss. They do not certify a CSI driver or cross-host
+recovery. Keep deployment approval conditional on measured results from the
+actual cluster. See Kubernetes' [StatefulSet guidance](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/)
+and [force-deletion warning](https://kubernetes.io/docs/tasks/run-application/force-delete-stateful-set-pod/).
 
 ---
 
