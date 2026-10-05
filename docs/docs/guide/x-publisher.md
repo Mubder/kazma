@@ -17,11 +17,21 @@ figures, reports tracked changes, and refuses a measurement if the source
 changes while it runs. A wheel installation without the source checkout
 reports that measurements are unavailable.
 
-The tool does not import tests or run pytest. **Test functions are not collected
-tests or passing tests.** Omit the collected-test figure when it is unavailable;
-the other verified numbers can still support a post. Runtime-collected counts
-come from the trusted CLI/CI generator. Do not enable a general shell
-interpreter to refresh metrics. Posting still requires the normal X approval.
+The tool does not import tests or run pytest on the live server. It returns
+**`collected_tests`**, including parameterized cases, from a collection receipt
+produced by a successful trusted development/CI run. The receipt must match a
+SHA-256 fingerprint of the tracked source, tests, fixtures and collection
+configuration. Merge-only commits and checkout line endings do not invalidate
+it. The result reports the collecting environment and time.
+
+Use the verified collected count for the test headline. **Test functions are
+source definitions, not the headline test count; collected cases are not tests
+passed.** A missing or stale receipt means omit the test count, not replace it
+with function definitions. To refresh it in the development checkout, stage
+new source/test files, run `python scripts/generate_metrics.py --write --require-collected`,
+and commit its outputs. A pre-commit/CI gate rejects a stale shipped receipt.
+Do not enable a general shell interpreter to refresh metrics. Posting still
+requires the normal X approval.
 
 ## What is official
 

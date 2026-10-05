@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "input_sha256": "5e961155a5e78d24ca68ff5677f05aadb187259c1caa950403a73a2d7b491e7a",
+  "collected_tests": 13124,
+  "source_commit": "44e62c1990afcc5da08c1c7126026e17cbc6e92d",
+  "measured_at": "2026-10-05T14:52:11.302882+00:00",
+  "python": "3.12.9",
+  "platform": "Windows",
+  "command": "pytest --collect-only -q -p no:cacheprovider --ignore=tests/e2e",
+  "meaning": "Collected cases, including parameterization; not passing tests."
+}

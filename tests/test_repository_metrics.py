@@ -1,6 +1,7 @@
 """Fresh metrics use the official static collector, not old files or test imports."""
 from __future__ import annotations
 
+import importlib.util
 import json
 import shutil
 import subprocess
@@ -35,7 +36,7 @@ async def test_fresh_static_counts_ignore_stale_snapshot_and_do_not_import_tests
     assert first["tracked_changes"] is False
     assert first["upstream"] is None
     assert first["installation_history_commits"] == 1
-    assert "NOT collected tests" in first["claim_rules"]
+    assert "Never substitute test_functions" in first["claim_rules"]
     (source / "kazma-core/app.py").write_text("def current():\n    return 1\n\ndef another():\n    return 2\n", encoding="utf-8")
     second = json.loads(await metrics.repository_metrics())
     assert second["python"]["total"] == first["python"]["total"] + 3
@@ -50,6 +51,38 @@ async def test_installation_merges_are_not_reported_as_upstream_commits(source):
     result = json.loads(await metrics.repository_metrics())
     assert result["upstream"]["commits"] == 1
     assert result["installation_history_commits"] == 2
+
+
+@pytest.mark.parametrize("damage", [None, "source", "fixture", "invalid", "partial"])
+async def test_collected_cases_require_matching_receipt_without_importing_tests(source, damage):
+    spec = importlib.util.spec_from_file_location("fixture_generator", source / "scripts/generate_metrics.py")
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    fixture = source / "tests/example.txt"
+    fixture.write_text("initial", encoding="utf-8")
+    subprocess.run(["git", "-C", str(source), "add", "."], check=True)
+    receipt = generator.collection_receipt({"tests": {"collected": 13}, "commit": {"sha": "fixture"}}, generator.collection_fingerprint())
+    target = source / generator.COLLECTION_RECEIPT
+    target.parent.mkdir(parents=True)
+    target.write_text(json.dumps(receipt), encoding="utf-8")
+    if damage == "source":
+        (source / "kazma-core/app.py").write_text("changed", encoding="utf-8")
+    elif damage == "fixture":
+        fixture.write_text("changed", encoding="utf-8")
+    elif damage == "invalid":
+        target.write_text("broken json", encoding="utf-8")
+    elif damage == "partial":
+        receipt["collected_tests"] = 0
+        target.write_text(json.dumps(receipt), encoding="utf-8")
+    else:
+        # Checkout line endings and merge-only history must not invalidate the receipt.
+        file = source / "kazma-core/app.py"
+        file.write_bytes(file.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+        subprocess.run(["git", "-C", str(source), "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "merge history"], check=True, capture_output=True)
+    result = json.loads(await metrics.repository_metrics())
+    assert result["ok"]
+    assert result["collected_tests"] == (13 if damage is None else None)
+    assert (result["collection_receipt_status"] == "verified_inputs") == (damage is None)
 
 
 async def test_changed_source_during_measurement_refuses_claims(source, monkeypatch):

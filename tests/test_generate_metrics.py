@@ -323,6 +323,15 @@ def test_a_collection_reports_its_count(monkeypatch):
     assert gm.count_collected_tests() == (11_376, "")
 
 
+def test_partial_collection_is_not_a_verified_count(monkeypatch):
+    def run(cmd, **kw):
+        return subprocess.CompletedProcess(cmd, 2, "13000 tests collected, 1 error in 4s", "")
+
+    monkeypatch.setattr(gm, "subprocess", _fake_subprocess(run))
+    count, problem = gm.count_collected_tests()
+    assert count == 0 and "partial counts are not accepted" in problem
+
+
 def test_a_failed_collection_says_why(monkeypatch):
     """The workflow's job without the project installed got 0 for two months
     and nothing said why."""

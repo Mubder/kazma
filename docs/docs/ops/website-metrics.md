@@ -51,11 +51,20 @@ commit count. If the source changes during measurement, the tool refuses the
 figures and asks for a retry. Tracked changes mean working-tree measurements,
 not a pristine committed release.
 
-Source test functions are **not collected tests or passing tests**. The
-read-only chat tool deliberately skips pytest collection and returns no
-collected-test count. A post can use the other fresh figures and omit that
-count; do not relabel test functions as tests passed. The trusted CLI/CI
-generator remains the path for runtime-collected counts. X publishing still
+The tool returns **`collected_tests`** from the tracked collection receipt
+written by a successful `python scripts/generate_metrics.py --write --require-collected`
+run in development/CI. Its SHA-256 fingerprint must match the current tracked
+source, tests, fixtures and collection configuration. Checkout line endings
+and merge-only commits do not invalidate identical inputs. Provenance includes
+the collection time, source commit, Python version and platform. The native
+tool never runs pytest on the live server.
+
+Use that verified count for the headline, including parameterized cases.
+Source test functions are definitions, not a replacement for collected cases;
+neither count proves tests passed. If the receipt is missing or stale, omit
+the test headline and refresh through the trusted generator. Stage new inputs
+before generation, then commit the receipt with the source changes. The
+pre-commit and CI receipt gate reject mismatched inputs. X publishing still
 uses the normal approval gate.
 
 An old snapshot's commit and the current HEAD can differ because of merge
