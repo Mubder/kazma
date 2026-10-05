@@ -128,6 +128,7 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
             interrupt_id=_iid,
             session_id=session_id,
             turn_id=turn_id,
+            require_durable=True,
         )
 
         try:

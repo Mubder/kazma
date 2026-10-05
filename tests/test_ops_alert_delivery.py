@@ -174,10 +174,12 @@ def test_the_app_binds_and_unbinds_its_loop() -> None:
     tree = ast.parse((Path(__file__).resolve().parents[1] / "kazma-ui/kazma_ui/app.py").read_text(encoding="utf-8"))
     hooks = {
         n.name: [ast.unparse(c) for c in ast.walk(n) if isinstance(c, ast.Call) and ast.unparse(c.func) == "bind_server_loop"]
-        for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name in ("_on_startup", "_on_shutdown")
+        for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name in ("_on_startup", "_on_shutdown", "_shutdown_services")
     }
     assert hooks["_on_startup"] == ["bind_server_loop(asyncio.get_running_loop())"]
-    assert hooks["_on_shutdown"] and set(hooks["_on_shutdown"]) == {"bind_server_loop(None)"}
+    shutdown = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "_on_shutdown")
+    assert any(isinstance(n, ast.Call) and ast.unparse(n.func) == "self._shutdown_services" for n in ast.walk(shutdown))
+    assert hooks["_shutdown_services"] and set(hooks["_shutdown_services"]) == {"bind_server_loop(None)"}
 
 
 # ── the Settings test alert (Adapters & Routes -> Send a test alert) ───

@@ -8,7 +8,7 @@ description: How main is protected, which checks it requires, and why no bot wri
 # Protecting `main`
 
 **State since 2026-09-27:** `main` is protected by the ruleset
-`KazmaLatestRule` (section 2): the eleven CI checks below must pass, force
+`KazmaLatestRule` (section 2): the original eleven CI checks must pass, force
 pushes and deletion are blocked, and the repository admin may bypass. Only the
 owner (and the agent working with the owner's credentials) pushes to `main`;
 no workflow writes to it (section 3). Before that day `main` had no protection
@@ -35,6 +35,21 @@ checks for `.github/workflows/ci.yml`:
 | `Lint (Ruff)` | advisory findings reported; the step itself must pass |
 | `Security Scan` | bandit HIGH gate over product, `tests/`, `scripts/` |
 | `Shipped wheel and locked dependencies` | the wheel builds and its pins resolve |
+| `Temporal recovery drill` | real Temporal protocol and workflow sandbox, including acknowledgement loss |
+| `Runtime hardening (ubuntu-latest, Python 3.11)` | recovery, workspace isolation, approvals and review |
+| `Runtime hardening (ubuntu-latest, Python 3.12)` | the same acceptance set on Python 3.12 |
+| `Runtime hardening (ubuntu-latest, Python 3.13)` | the same acceptance set on Python 3.13 |
+| `Runtime hardening (ubuntu-latest, Python 3.14)` | the same acceptance set on Python 3.14 |
+| `Runtime hardening (windows-latest, Python 3.11)` | Windows ownership and runtime acceptance |
+| `Runtime hardening (windows-latest, Python 3.12)` | the same Windows acceptance set on Python 3.12 |
+| `Runtime hardening (windows-latest, Python 3.13)` | the same Windows acceptance set on Python 3.13 |
+| `Runtime hardening (windows-latest, Python 3.14)` | the same Windows acceptance set on Python 3.14 |
+
+The nine recovery and compatibility checks were added on 2026-10-05. Their
+remote results must pass and the owner must add their exact reported names
+to the ruleset before they are required. This page does not change repository
+settings. Matrix templates are expanded here: a literal `${{ matrix.os }}`
+is not a check name GitHub will report.
 
 ## 2. The ruleset
 
@@ -45,7 +60,7 @@ checks for `.github/workflows/ci.yml`:
   the way this repository works (AGENTS.md, and the agent pushes with the
   owner's credentials) — while everyone else must pass the checks.
 - **Rules:** Restrict deletions; Block force pushes; Require status checks
-  to pass, with the eleven check NAMES in the table above, each added with
+  to pass, with the check NAMES in the table above, each added with
   the GitHub Actions source. Leave "require branches to be up to date" off:
   with direct pushes it would force a rebase-and-wait on every push for no
   extra safety (the checks run on the pushed commit itself).

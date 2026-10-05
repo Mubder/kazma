@@ -1,8 +1,10 @@
 """Durable swarm execution — Temporal when configured, in-process otherwise.
 
 The swarm *planner* (DAG, HITL, breakers, phonebook) stays in Kazma.
-This module only wraps ``SwarmEngine._dispatch_inner`` so a process crash
-can resume a long task instead of dropping it.
+This module wraps ``SwarmEngine._dispatch_inner`` with a durable workflow
+identity and result. An entire agent activity is not replay-safe: a lost
+acknowledgement is held for inspection, never retried locally or as a new
+activity. Step-level recovery requires idempotency in the effecting tools.
 
 Default: in-process asyncio (one trusted operator).
 Opt-in: ``KAZMA_TEMPORAL_HOST`` (or ``TEMPORAL_ADDRESS``) +
@@ -89,11 +91,16 @@ async def run_via_durable(
 ) -> Any:
     """Start a Temporal workflow for this swarm task and wait for the result.
 
-    On SDK/server failure: in-process fallback unless ``KAZMA_TEMPORAL_REQUIRED=1``.
+    Fallback is safe only before submission. Once submitted, a lost reply is
+    an unknown outcome, never permission to execute host effects again.
     """
     from kazma_core.swarm.task import TaskResult
 
-    if in_durable_activity() or not durable_enabled():
+    if in_durable_activity():
+        return await engine._dispatch_inner(task, started, task_span)
+    if not durable_enabled():
+        if durable_required():
+            return TaskResult(task_id=task.id, status="failed", error="Required Temporal is disabled or has no host.")
         return await engine._dispatch_inner(task, started, task_span)
 
     if not _sdk_available():
@@ -106,8 +113,11 @@ async def run_via_durable(
         logger.warning("[durable] %s Falling back to in-process.", msg)
         return await engine._dispatch_inner(task, started, task_span)
 
+    submission_attempted = False
+    workflow_id = f"kazma-swarm-{task.id}"
     try:
         from temporalio.client import Client
+        from temporalio.common import WorkflowIDReusePolicy
 
         from kazma_core.swarm.durable_temporal import KazmaSwarmTask
 
@@ -120,15 +130,19 @@ async def run_via_durable(
             "task": task.to_dict(),
             "started": float(started),
         }
-        handle = await client.start_workflow(
-            KazmaSwarmTask.run,
-            payload,
-            id=f"kazma-swarm-{task.id}",
-            task_queue=(
-                os.environ.get("KAZMA_TEMPORAL_QUEUE") or TASK_QUEUE
-            ).strip()
-            or TASK_QUEUE,
-        )
+        submission_attempted = True
+        try:
+            handle = await client.start_workflow(
+                KazmaSwarmTask.run,
+                payload,
+                id=workflow_id,
+                id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
+                task_queue=(os.environ.get("KAZMA_TEMPORAL_QUEUE") or TASK_QUEUE).strip() or TASK_QUEUE,
+            )
+        except Exception:
+            # Both an already-started ID and a lost Start acknowledgement
+            # are recovered by reading the original workflow, never a new run.
+            handle = client.get_workflow_handle(workflow_id)
         raw = await handle.result()
         if isinstance(raw, dict):
             result = TaskResult.from_dict(raw)
@@ -137,6 +151,14 @@ async def run_via_durable(
             return result
         return raw
     except Exception as exc:
+        if submission_attempted:
+            logger.error("[durable] Workflow %s outcome unknown; local replay refused", workflow_id, exc_info=True)
+            return TaskResult(
+                task_id=task.id,
+                status="failed",
+                error=f"Temporal outcome unknown for {workflow_id}. Inspect that workflow before retrying; local replay was refused.",
+                metadata={"durable": "temporal", "workflow_id": workflow_id, "execution_outcome": "unknown"},
+            )
         if durable_required():
             logger.error("[durable] Temporal failed (required): %s", exc)
             return TaskResult(

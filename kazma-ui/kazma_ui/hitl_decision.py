@@ -12,12 +12,11 @@ them used to record the decision its own way, and each missed something:
   transcript nor told the journal, so a browser watching that thread never
   saw the decision.
 
-:func:`record_gate_decision` is the one writer. The order is load-bearing:
-transcript stamp, registry CAS, THEN the journal frame -- the broker stamps
-the gate's view onto the frame from the registry, and emitting before the
-CAS painted a pending view on a decided frame ("No longer pending",
-2026-09-20). Every step is best-effort and logged: recording must never
-stop the resume that follows it.
+:func:`record_gate_decision` is the one writer. Execution paths require the
+durable registry CAS and resuming intent BEFORE painting the transcript or
+journal. Failure keeps the graph paused. The remaining projections are
+best-effort: their failure cannot erase the recorded decision. Legacy
+projection-only callers retain their stamp/CAS/frame ordering.
 """
 
 from __future__ import annotations
@@ -30,7 +29,11 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["DECISIONS", "record_gate_decision"]
+__all__ = ["DECISIONS", "GateDecisionUnavailable", "record_gate_decision"]
+
+
+class GateDecisionUnavailable(RuntimeError):
+    """Execution stays paused because the decision could not be persisted."""
 
 #: decision -> (transcript/journal state, registry decision)
 DECISIONS: dict[str, tuple[str, str]] = {
@@ -127,11 +130,12 @@ async def record_gate_decision(
     interrupt_id: str = "",
     session_id: str = "",
     turn_id: str = "",
+    require_durable: bool = False,
 ) -> str:
     """Write one gate decision everywhere it is read; returns the gate id used.
 
-    A failed step is logged and the next still runs; an unknown ``decision``
-    is a programmer error and raises ValueError.
+    Projection failures are logged. With ``require_durable``, a failed claim
+    stops the caller before execution. An unknown decision raises ValueError.
     """
     if decision not in DECISIONS:
         raise ValueError(f"unknown gate decision {decision!r}")
@@ -168,6 +172,7 @@ async def record_gate_decision(
         )
 
     async def _claim() -> None:
+        nonlocal iid
         # 2. The registry: decision truth (AGENTS.md §30).
         from kazma_ui.hitl_gate_bridge import (
             gate_claimed,
@@ -176,14 +181,25 @@ async def record_gate_decision(
         )
 
         if iid:
-            await gate_claimed(thread_id, iid, registry_decision, actor,
-                               tool=tool, payload=body or None)
-            await gate_resuming(iid)
+            if require_durable:
+                await gate_claimed(thread_id, iid, registry_decision, actor,
+                                   tool=tool, payload=body or None, strict=True)
+                await gate_resuming(iid, strict=True)
+            else:
+                await gate_claimed(thread_id, iid, registry_decision, actor,
+                                   tool=tool, payload=body or None)
+                await gate_resuming(iid)
         else:
             # Platform cards carry no interrupt id: the oldest pending gate
             # on the thread is the one they asked about.
-            await gate_claimed_for_thread(thread_id, registry_decision, actor,
-                                          tool=tool, payload=body or None)
+            if require_durable:
+                iid = await gate_claimed_for_thread(thread_id, registry_decision, actor,
+                                                   tool=tool, payload=body or None, strict=True)
+                body["interrupt_id"] = iid
+                await gate_resuming(iid, strict=True)
+            else:
+                await gate_claimed_for_thread(thread_id, registry_decision, actor,
+                                              tool=tool, payload=body or None)
 
     async def _tell() -> None:
         # 3. The journal: every open tab, whichever tab (or platform) decided.
@@ -203,8 +219,19 @@ async def record_gate_decision(
             },
         })
 
-    await _step("transcript stamp", _stamp)
-    await _step("registry claim", _claim)
+    if require_durable:
+        from kazma_core.safety.hitl_gates import TransitionConflict
+
+        try:
+            await _claim()
+        except TransitionConflict:
+            raise
+        except Exception as exc:
+            raise GateDecisionUnavailable("Approval remains paused: durable decision recording is unavailable") from exc
+        await _step("transcript stamp", _stamp)
+    else:
+        await _step("transcript stamp", _stamp)
+        await _step("registry claim", _claim)
     await _step("journal frame", _tell)
     logger.info("[gate-decision] %s thread=%s gate=%s by %s",
                 state, thread_id[:12], iid[:12] or "?", actor)

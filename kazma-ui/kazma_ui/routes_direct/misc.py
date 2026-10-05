@@ -16,6 +16,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.responses import JSONResponse as _JSONResponse
 
 from kazma_ui.rate_limit import rate_limit
+from kazma_ui.hitl_decision import GateDecisionUnavailable
+from kazma_core.safety.hitl_gates import TransitionConflict
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +227,33 @@ def _approve_lock_for(thread_id: str) -> asyncio.Lock:
         _approve_locks[thread_id] = lock
     _approve_locks_activity[thread_id] = now
     return lock
+
+
+def _apply_scope_grants(
+    thread_id: str, approved: bool, scope: str, actor: str,
+    pending_tools: list[Any], pending_tool_name: str, requested_tool: str,
+) -> str:
+    """Apply longer-lived grants only after a durable claim; run off the loop."""
+    if approved and scope == "yolo":
+        try:
+            from kazma_core.safety.yolo import try_enable_yolo
+
+            result = try_enable_yolo(thread_id, actor=actor)
+            if result.get("downgraded"):
+                return "once"
+        except Exception:
+            logger.exception("[HITL] failed to enable YOLO scope")
+            return "once"
+    elif approved and scope == "tool":
+        try:
+            from kazma_core.safety.hitl_grants import grant_tool, tools_to_grant
+
+            for name in tools_to_grant(pending_tools, pending_tool_name, requested_tool):
+                grant_tool(thread_id, name, actor=actor)
+        except Exception:
+            logger.exception("[HITL] failed to apply tool grant")
+            return "once"
+    return scope
 
 
 def register_misc_routes(self: Any) -> None:
@@ -661,7 +690,6 @@ def register_misc_routes(self: Any) -> None:
                 actor = "web:anon"
             # Never trust a client-supplied actor label.
             body.pop("actor", None)
-            grant_info: dict[str, Any] | None = None
 
             # Phase 3/§4.3: build the resume Command via the single chokepoint
             # (build_resume_command). Semantic interrupts need {tcid: option_id};
@@ -820,31 +848,6 @@ def register_misc_routes(self: Any) -> None:
                         status_code=409,
                     )
 
-                # Grants only after the claim. Extra clicks on a stale card
-                # used to write hitl_grant then 409 (cleanup 2026-09-01).
-                if approved and scope == "yolo":
-                    try:
-                        from kazma_core.safety.yolo import try_enable_yolo
-
-                        grant_info = try_enable_yolo(thread_id, actor=actor)
-                    except Exception:
-                        logger.exception("[HITL] failed to enable YOLO scope")
-                        scope = "once"
-                elif approved and scope == "tool":
-                    try:
-                        from kazma_core.safety.hitl_grants import grant_tool, tools_to_grant
-
-                        grant_info = {"tools": []}
-                        for tname in tools_to_grant(
-                            pending_tools,
-                            pending_tool_name,
-                            body.get("tool") or body.get("grant_tool") or "",
-                        ):
-                            st = grant_tool(thread_id, tname, actor=actor)
-                            grant_info["tools"].append(st)
-                    except Exception:
-                        logger.exception("[HITL] failed to apply tool grant")
-
                 # Chat-store reads and a write: off the loop (Postgres when
                 # the session is not cached). resolve_session_id logs and
                 # answers "" on a failure, as this block did.
@@ -921,10 +924,8 @@ def register_misc_routes(self: Any) -> None:
                         ),
                         status_code=409,
                     )
-                # The one writer for a decision: transcript stamp, registry
-                # CAS, THEN the journal frame (the broker stamps the gate's
-                # view from the registry; emit-before-CAS painted "No longer
-                # pending" on an approved card, 2026-09-20).
+                # Persist the decision and resume intent before projecting it
+                # or spawning execution. A registry outage leaves the pause.
                 from kazma_ui.hitl_decision import record_gate_decision
 
                 await record_gate_decision(
@@ -936,7 +937,14 @@ def register_misc_routes(self: Any) -> None:
                     interrupt_id=_live_iid,
                     session_id=_resume_session_id,
                     turn_id=_resume_turn,
+                    require_durable=True,
                 )
+                scope = await asyncio.to_thread(
+                    _apply_scope_grants, thread_id, approved, scope, actor,
+                    pending_tools, pending_tool_name, body.get("tool") or body.get("grant_tool") or "",
+                )
+                if isinstance(resume_cmd.resume, dict) and "scope" in resume_cmd.resume:
+                    resume_cmd.resume["scope"] = scope
                 _resume_inflight.add(thread_id)
                 _resume_task = asyncio.create_task(
                     _drive_graph_to_journal(
@@ -977,6 +985,19 @@ def register_misc_routes(self: Any) -> None:
                         state_hint="approved" if approved else "denied",
                     )
                 )
+        except GateDecisionUnavailable:
+            return _JSONResponse(
+                {"error": "Approval remains paused: decision storage unavailable", "code": "gate_decision_unavailable"},
+                status_code=503, headers={"Retry-After": "5"},
+            )
+        except TransitionConflict as conflict:
+            return _JSONResponse(
+                _attach_hitl_view(
+                    {"error": "Approval no longer pending", "reason": "not_pending", "thread_id": thread_id,
+                     "hitl_state": "inflight" if conflict.actual in ("claimed", "resuming") else conflict.actual},
+                    thread_id, _body_interrupt_id(body),
+                ), status_code=409,
+            )
         except Exception:
             logger.exception("[HITL] Failed to resume graph for thread=%s", thread_id)
             return _JSONResponse({"error": "Internal error"}, status_code=500)

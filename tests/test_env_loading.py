@@ -156,6 +156,7 @@ ENV_FREE_ENTRY_POINTS: dict[str, str] = {
     "scripts/check_docs_sync.py": "compares the docs with the code; reads no install",
     "scripts/generate_tools_catalog.py": "generates the catalog from the code",
     "scripts/injection_report.py": "scores the defenses offline against the fixture corpus",
+    "scripts/agent_eval_review.py": "offline human review and evidence hashes; never loads credentials or install settings",
     "scripts/certify_documents.py": "bounded certification corpus: the same verdict everywhere",
     "scripts/verify_documents.py": "verifies the document layer against built-in samples",
     "scripts/verify_docx_rtl.py": "renders built-in RTL samples",

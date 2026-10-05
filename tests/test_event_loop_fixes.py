@@ -176,7 +176,10 @@ def test_ready_database_ping_runs_offloop(monkeypatch):
         lambda: {"status": "ok", "component": "llm_provider"},
     )
 
-    resp = asyncio.run(health_mod.readiness())
+    from starlette.requests import Request
+    from fastapi import FastAPI
+
+    resp = asyncio.run(health_mod.readiness(Request({"type": "http", "app": FastAPI()})))
     assert seen["database"] != main_ident
     body = resp.body if hasattr(resp, "body") else None
     if body:

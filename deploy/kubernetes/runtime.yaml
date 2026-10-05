@@ -1,0 +1,155 @@
+# Preparation template: substitute the image digest and fenced CSI class,
+# create kazma-runtime-secrets, then perform the deployment guide's drills.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kazma
+spec:
+  selector:
+    app: kazma
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kazma-headless
+spec:
+  clusterIP: None
+  selector:
+    app: kazma
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kazma
+spec:
+  serviceName: kazma-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kazma
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: kazma
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 150
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kazma
+          image: ghcr.io/mubder/kazma:REPLACE_WITH_RELEASE
+          imagePullPolicy: IfNotPresent
+          args:
+            - python
+            - -m
+            - uvicorn
+            - kazma_ui.app:create_app
+            - --factory
+            - --no-proxy-headers
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            - --timeout-graceful-shutdown
+            - "135"
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: KAZMA_RUNTIME_HA
+              value: "1"
+            - name: KAZMA_DB_BACKEND
+              value: postgres
+            - name: KAZMA_PRODUCTION
+              value: "1"
+            - name: KAZMA_ALLOW_HOST_SHELL
+              value: "0"
+            - name: KAZMA_AUTO_MIGRATE
+              value: "0"
+            - name: KAZMA_DATA_DIR
+              value: /state/data
+            - name: KAZMA_USER_HOME
+              value: /state/home
+            - name: KAZMA_SKILLS_HOME
+              value: /state/skills
+            - name: KAZMA_VECTOR_PATH
+              value: /state/vector_memory
+            - name: KAZMA_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kazma-runtime-secrets
+                  key: database-url
+            - name: KAZMA_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: kazma-runtime-secrets
+                  key: auth-secret
+            - name: KAZMA_VAULT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kazma-runtime-secrets
+                  key: vault-key
+            - name: KAZMA_TRUSTED_PROXIES
+              valueFrom:
+                secretKeyRef:
+                  name: kazma-runtime-secrets
+                  key: trusted-proxies
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 5
+            failureThreshold: 120
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 6
+            failureThreshold: 2
+          volumeMounts:
+            - name: state
+              mountPath: /state
+  volumeClaimTemplates:
+    - metadata:
+        name: state
+      spec:
+        accessModes: [ReadWriteOncePod]
+        storageClassName: REPLACE_WITH_FENCED_CSI_CLASS
+        resources:
+          requests:
+            storage: 100Gi

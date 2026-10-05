@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from kazma_gateway.adapters.callback_store import encode_callback_data
+
 __all__ = [
     "discord_approval_components",
     "discord_model_components",
@@ -34,13 +36,13 @@ def discord_approval_components(request_id: str) -> list[dict[str, Any]]:
                     "type": 2,
                     "style": 3,
                     "label": "Approve",
-                    "custom_id": f"hitl:approve:{request_id}",
+                    "custom_id": encode_callback_data(f"hitl:approve:{request_id}", max_bytes=100),
                 },
                 {
                     "type": 2,
                     "style": 4,
                     "label": "Deny",
-                    "custom_id": f"hitl:deny:{request_id}",
+                    "custom_id": encode_callback_data(f"hitl:deny:{request_id}", max_bytes=100),
                 },
             ],
         },
@@ -51,7 +53,7 @@ def discord_approval_components(request_id: str) -> list[dict[str, Any]]:
                     "type": 2,
                     "style": 1,
                     "label": "Approve for task",
-                    "custom_id": f"hitl:approve_task:{request_id}",
+                    "custom_id": encode_callback_data(f"hitl:approve_task:{request_id}", max_bytes=100),
                 },
             ],
         },
@@ -234,7 +236,7 @@ def discord_semantic_components(request_id: str, options: list[dict]) -> list[di
         label = (opt.get("label", oid) or "")[:80]
         buttons.append({
             "type": 2, "style": 4 if oid == "cancel" else 3,
-            "label": label, "custom_id": f"hitl:opt:{oid}:{request_id}",
+            "label": label, "custom_id": encode_callback_data(f"hitl:opt:{oid}:{request_id}", max_bytes=100),
         })
     rows = [{"type": 1, "components": buttons[i:i + 5]} for i in range(0, len(buttons), 5)]
     return rows or discord_approval_components(request_id)

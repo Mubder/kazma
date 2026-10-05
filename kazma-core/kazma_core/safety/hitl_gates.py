@@ -28,9 +28,9 @@ connections (same pattern as ``memory/task_queue.py`` / ``commitment/store.py``)
 Sync core + thin async wrappers via ``asyncio.to_thread`` (§23 — never block
 the SelectorEventLoop).
 
-Kill-switch: ``KAZMA_GATE_REGISTRY=0`` (env, checked live) reverts every
-consumer to legacy derivation. Mirrors the ``get_hitl_config`` live-read
-pattern.
+Kill-switch: ``KAZMA_GATE_REGISTRY=0`` (env, checked live) reverts readers
+to legacy derivation. Execution decisions require durable recording and
+remain paused while the registry is disabled.
 """
 
 from __future__ import annotations
@@ -538,7 +538,7 @@ def _conflict(conn: sqlite3.Connection, gate_id: str, expected: str) -> Transiti
     return TransitionConflict(gate_id, expected, r["state"], r["decision"], r["actor"])
 
 
-def claim_gate(gate_id: str, decision: str, actor: str) -> GateRow:
+def claim_gate(gate_id: str, decision: str, actor: str, *, allow_reclaim: bool = True) -> GateRow:
     """CAS ``pending → claimed``. Exactly one winner.
 
     Idempotent: re-claiming an already-claimed gate with the SAME decision
@@ -555,7 +555,7 @@ def claim_gate(gate_id: str, decision: str, actor: str) -> GateRow:
         if not ok:
             conflict = _conflict(conn, gate_id, "pending")
             if (
-                conflict.actual in ("claimed", "resuming")
+                allow_reclaim and conflict.actual in ("claimed", "resuming")
                 and conflict.decision == decision
             ):
                 row = _get(conn, gate_id)
@@ -834,8 +834,8 @@ async def register_gate_async(gate: GateRow, *, ttl_seconds: float | None = None
     return await asyncio.to_thread(register_gate, gate, ttl_seconds=ttl_seconds)
 
 
-async def claim_gate_async(gate_id: str, decision: str, actor: str) -> GateRow:
-    return await asyncio.to_thread(claim_gate, gate_id, decision, actor)
+async def claim_gate_async(gate_id: str, decision: str, actor: str, *, allow_reclaim: bool = True) -> GateRow:
+    return await asyncio.to_thread(claim_gate, gate_id, decision, actor, allow_reclaim=allow_reclaim)
 
 
 async def mark_resuming_async(gate_id: str) -> GateRow:

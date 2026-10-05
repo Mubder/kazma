@@ -118,16 +118,19 @@ def test_supervisor_route_uses_defaults_without_yaml_router():
     assert client is not None
 
 
-def test_nginx_ha_has_websocket_and_sticky():
+def test_single_owner_nginx_has_websocket_and_dynamic_resolution():
     conf = (_ROOT / "deploy" / "nginx-ha.conf").read_text(encoding="utf-8")
-    assert "ip_hash" in conf
+    assert "resolver 127.0.0.11" in conf
+    assert "zone kazma_backend" in conf
+    assert "server kazma:8000 resolve;" in conf
     assert "Upgrade $http_upgrade" in conf
     assert "location /ws/" in conf
 
 
 def test_ha_compose_is_labelled_demo_not_full_ha():
     text = (_ROOT / "docker-compose.ha.yml").read_text(encoding="utf-8")
-    assert "not full ha" in text.lower()
+    assert "not qualified cross-host ha" in text.lower()
+    assert "replicas: 1" in text
     assert "kazma_data" in text
 
 

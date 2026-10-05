@@ -62,22 +62,30 @@ async def peek_interrupt(graph: Any, config: dict[str, Any]) -> dict[str, Any] |
     for task in getattr(snapshot, "tasks", []) or []:
         for intr in getattr(task, "interrupts", []) or []:
             payload = getattr(intr, "value", None)
+            interrupt_id = getattr(intr, "id", None)
             if payload is None and isinstance(intr, dict):
                 payload = intr.get("value", intr)
+                interrupt_id = intr.get("id")
             if isinstance(payload, (list, tuple)) and payload:
                 payload = payload[0]
             if isinstance(payload, dict) and payload.get("type") == "hitl_approval":
-                return payload
+                result = dict(payload)
+                if interrupt_id:
+                    result["interrupt_id"] = str(interrupt_id)
+                return result
             if isinstance(payload, dict) and (
                 "tool" in payload or "args" in payload or "tools" in payload
             ):
-                return {
+                result = {
                     "type": "hitl_approval",
                     "tool": payload.get("tool", "unknown"),
                     "args": payload.get("args", payload.get("arguments", {})),
                     "tools": payload.get("tools") or [],
                     "message": payload.get("message", ""),
                 }
+                if interrupt_id:
+                    result["interrupt_id"] = str(interrupt_id)
+                return result
     return None
 
 

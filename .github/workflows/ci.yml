@@ -551,6 +551,64 @@ jobs:
         env:
           KAZMA_DB_BACKEND: sqlite
 
+  temporal-recovery-drill:
+    name: Temporal recovery drill
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -e ".[test,durable]"
+      - name: Exercise lost acknowledgements against a disposable Temporal server
+        run: python -m pytest tests/test_temporal_local_drill.py -q --timeout=180 --junitxml=temporal-results.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: temporal-recovery-results
+          path: temporal-results.xml
+          if-no-files-found: error
+
+  runtime-compatibility:
+    name: Runtime hardening (${{ matrix.os }}, Python ${{ matrix.python }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install runtime and Temporal SDK
+        run: pip install -e ".[test,durable]"
+      - name: Verify the durable SDK is exercised
+        run: python -c "from temporalio.common import RetryPolicy, WorkflowIDReusePolicy; from kazma_core.swarm.durable_temporal import workflow; assert workflow is not None; assert RetryPolicy(maximum_attempts=1).maximum_attempts == 1"
+      - name: Run recovery, isolation, approval and review regressions
+        run: >-
+          python -m pytest
+          tests/test_temporal_execution_recovery.py tests/test_mcp_binding_recovery.py
+          tests/test_platform_gate_identity.py tests/test_approval_storage_outage_route.py
+          tests/test_lazy_package_exports.py
+          tests/test_runtime_writer_fence.py tests/test_required_capability_readiness.py
+          tests/test_runtime_ownership.py tests/test_kubernetes_runtime_contract.py
+          tests/test_swarm_recovery_no_replay.py
+          tests/test_durable_gate_decisions.py tests/test_evaluation_review.py
+          tests/test_execution_policy_failures.py tests/test_config_store_close_race.py
+          tests/test_text_newlines.py tests/test_shutdown_builds_nothing.py
+          -q --timeout=120 --junitxml=runtime-results.xml
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Preserve compatibility results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ matrix.os }}-${{ matrix.python }}
+          path: runtime-results.xml
+          if-no-files-found: error
+
   js-check:
     name: JS Syntax Check
     runs-on: ubuntu-latest

@@ -74,15 +74,17 @@ def accessors_that_build(hook: ast.AST) -> list[str]:
 
 
 def test_the_shutdown_hook_builds_nothing():
-    hook = _method(APP.read_text(encoding="utf-8"), "KazmaAppBuilder", "_on_shutdown")
-    assert accessors_that_build(hook) == [], (
-        "_on_shutdown calls an accessor that builds on a miss; use the peek_* one"
-    )
+    source = APP.read_text(encoding="utf-8")
+    for name in ("_on_shutdown", "_shutdown_services"):
+        hook = _method(source, "KazmaAppBuilder", name)
+        assert accessors_that_build(hook) == [], (
+            f"{name} calls an accessor that builds on a miss; use the peek_* one"
+        )
 
 
 def test_the_gate_sees_the_hooks_accessors():
     """Not blind: the hook's accessors are found and resolved."""
-    hook = _method(APP.read_text(encoding="utf-8"), "KazmaAppBuilder", "_on_shutdown")
+    hook = _method(APP.read_text(encoding="utf-8"), "KazmaAppBuilder", "_shutdown_services")
     names = {
         node.func.id
         for node in ast.walk(hook)

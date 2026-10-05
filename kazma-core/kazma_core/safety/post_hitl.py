@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 def host_shell_allowed() -> bool:
-    """False when attention-profile Docker jail is forced and HOST_SHELL is off.
+    """Host shell requires an explicit grant in production or multi-user mode.
 
     ``KAZMA_CODE_EXEC_DOCKER=force|required`` means python_exec is containerized.
     Host ``shell_exec`` is then an escape hatch: opt in with ``KAZMA_HOST_SHELL=1``.
@@ -43,9 +43,11 @@ def host_shell_allowed() -> bool:
     if raw in ("0", "false", "off", "no"):
         return False
     docker = (os.environ.get("KAZMA_CODE_EXEC_DOCKER") or "").strip().lower()
-    if docker in ("force", "required"):
+    if docker in ("force", "required", "1", "true", "on", "yes", "docker"):
         return False
-    return True
+    from kazma_core.tools.code_exec import _production_or_multi_user
+
+    return not _production_or_multi_user()
 
 
 def is_production() -> bool:

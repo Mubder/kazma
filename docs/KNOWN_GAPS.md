@@ -8,8 +8,39 @@ say against it. Every entry names the evidence, so a reader can check it rather
 than take our word — and so the gap stops being invisible when the person who
 found it forgets.
 
-**Reviewed 2026-10-04 for settings durability and model evaluation.** Other
+**Reviewed 2026-10-05 for runtime recovery and evaluation review.** Other
 entries retain their original dates.
+
+**Runtime hardening (2026-10-05).** Temporal acknowledgement loss no longer
+falls back to a second local execution; activity retries are disabled until
+effects have individual idempotency. A real local-server drill found and fixed
+package imports that prevented the workflow loading in its sandbox.
+Crash-orphaned swarm tasks and legacy pending recovery rows also refuse
+automatic whole-agent replay and report unknown effects for reconciliation.
+MCP checks verified per-handle roots and holds scoped requests against eviction. Approvals
+persist their strict claim/resume intent before execution, and registry outages
+leave them paused. Readiness requires the actual graph/saver binding. Evidence:
+the recovery, binding, durable-decision, writer-fence and readiness regression
+tests, plus the real Temporal drill.
+
+**Cross-host HA remains open.** The local writer fence prevents concurrent
+servers on one local data directory, including Postgres deployments. The
+Compose recipe permits one owner and corrects the data-volume mount. The
+optional HA profile adds dedicated-session Postgres ownership, fail-stop on
+session loss and database/state-volume pairing. A single-owner Kubernetes
+template requires a ReadWriteOncePod volume. Disposable Postgres drills prove
+admission, wrong-volume refusal, process-death recovery and session-loss exit.
+These do not qualify a replicated CSI driver's fencing or cross-host delivery
+recovery. Node-loss, partition and paired-restore drills remain required on
+the actual cluster; do not infer HA from the database lock. Whole-agent activity
+replay also needs step-level effect identities before retries can be enabled.
+
+**CI coverage expanded, qualification pending.** Recovery regressions are now
+configured on Windows/Linux with Python 3.11–3.14, and a separate real Temporal
+drill exercises protocol behavior. Those remote matrix runs must pass before
+claiming compatibility. The Postgres suite still covers its explicitly marked
+tests rather than complete backend parity. These new checks need to be included
+in release acceptance and branch protection before relying on them as merge gates.
 
 **Settings outage recovery (closed 2026-10-04).** A failed PostgreSQL boot
 could latch a volatile settings store and ordinary saves returned 200 while
@@ -25,6 +56,10 @@ records decisions, and separates mechanical checks from human-reviewed
 bilingual holdout accuracy. The owner has no labeled holdout yet. Synthetic
 development examples are not accuracy evidence. Workflow:
 [durable settings and live evaluation](DURABLE_SETTINGS_AND_LIVE_EVAL.md).
+The offline review CLI now prepares empty intake, freezes human-labeled real
+holdout cases, creates unanswered review packets and rejects changed evidence,
+partial reviews or missing failed turns. A complete review is permission for
+human comparison, never automatic production qualification.
 
 ## Where things stand (2026-09-27)
 

@@ -102,6 +102,7 @@ def run_cases(document: dict[str, Any], *, provider: str, model: str, output: Pa
         "working_tree_dirty": bool(dirty),
         "dataset_sha256": fingerprint(document), "results": [],
         "tool_effects": "fixtures_only", "max_iterations": 5, "max_model_calls": 12, "planned_cases": len(cases),
+        "case_manifest": [{"id": case["id"], "case_sha256": fingerprint(case)} for case in cases],
     }
     script = str(Path(__file__).resolve())
     with tempfile.TemporaryDirectory(prefix="kazma-live-eval-") as temporary:
@@ -121,6 +122,8 @@ def run_cases(document: dict[str, Any], *, provider: str, model: str, output: Pa
                 result = {"id": case["id"], "language": case["language"], "split": case["split"],
                           "group_id": case["group_id"], "case_sha256": fingerprint(case),
                           "human_labeled": case["human_labeled"], "rubric": case["rubric"],
+                          "source": case["source"], "source_kind": case.get("source_kind", "unspecified"),
+                          "label_reviewer": case.get("label_reviewer"),
                           "answer": "", "answer_sha256": fingerprint(""), "error": "worker_failed_or_timed_out",
                           "checks": {"turn_succeeded": False}, "review": None}
             report["results"].append(result)

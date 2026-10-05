@@ -218,7 +218,8 @@ def _production_or_multi_user() -> bool:
 
         return bool(multi_user_enabled())
     except Exception:
-        return False
+        logger.warning("[code_exec] execution policy unavailable; refusing host fallback", exc_info=True)
+        return True
 
 
 def local_exec_forbidden() -> bool:

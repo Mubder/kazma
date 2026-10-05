@@ -123,6 +123,37 @@ duplicates. The dataset owner must review those before a release comparison.
 
 ### Review candidate answers
 
+Use the offline review commands to preserve reports and bind reviews to both
+the case and answer hashes. Start with an empty collection, add sanitized
+real cases and name their human label reviewer, then freeze the collection:
+
+```powershell
+python scripts/agent_eval_review.py init --output reports/intake.json
+python scripts/agent_eval_review.py freeze --dataset reports/intake.json --output reports/frozen-holdout.json
+python scripts/live_eval.py reports/frozen-holdout.json --provider YOUR_PROVIDER --model YOUR_MODEL --output reports/candidate.json
+python scripts/agent_eval_review.py packet --report reports/candidate.json --output reports/review-packet.json
+```
+
+The empty intake is a collection form, not an evaluation dataset. Freezing
+requires actual cases; holdout cases must declare real provenance, human
+labels and a named label reviewer. Have a person fill every packet's reviewer,
+four Boolean judgments and notes, including failed turns. Keep the evidence
+and hashes unchanged. Apply that packet to a new report:
+
+```powershell
+python scripts/agent_eval_review.py apply --report reports/candidate.json --packet reports/review-packet.json --output reports/reviewed-candidate.json
+python scripts/agent_eval_review.py check --report reports/reviewed-candidate.json --dataset reports/frozen-holdout.json
+```
+
+The check requires complete hash-bound reviews and at least 30 real holdout
+cases per language by default. That floor prepares a human comparison; it
+does not establish statistical confidence or certify accuracy. A changed
+answer, case, dataset or packet evidence invalidates the review. Keep a
+baseline and candidate on the same frozen dataset and inspect regressions.
+
+For an existing report that predates review packets, the manual format below
+remains readable by the summarizer. New runs should use the packet workflow.
+
 Open the report and inspect each answer and tool trace against its rubric.
 Replace that result's `review: null` with the following object. Copy the
 result's `answer_sha256`; changing the answer afterwards invalidates review.

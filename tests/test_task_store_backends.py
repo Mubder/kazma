@@ -196,19 +196,19 @@ def test_a_task_is_deleted_by_id_and_only_that_task(store):
     assert store.delete_task(doomed.id) is False, "an id already gone deletes nothing"
 
 
-def test_orphaned_running_tasks_are_requeued_then_failed(store):
-    """A task left 'running' by a crash is requeued a bounded number of times."""
+def test_orphaned_running_tasks_have_unknown_effects_and_are_never_replayed(store):
+    """A worker crash cannot authorize repeating effects that may have committed."""
     orphan = _put(store, worker=f"orphan-{_uid()}", status=TaskStatus.RUNNING)
-
-    for attempt in (1, 2):
-        report = store.requeue_orphaned_running(max_recovery=2)
-        assert orphan.id in report["requeued"]
-        task = store.get_task(orphan.id)
-        assert task.status == TaskStatus.PENDING
-        assert task.metadata["recovery_count"] == attempt
-        task.status = TaskStatus.RUNNING  # it crashed again
-        store.persist_task(task)
-
-    report = store.requeue_orphaned_running(max_recovery=2)
+    paused = _put(store, worker=f"paused-{_uid()}", status=TaskStatus.PAUSED)
+    report = store.requeue_orphaned_running(max_recovery=100)
+    assert report["requeued"] == []
     assert orphan.id in report["failed"]
-    assert store.get_task(orphan.id).status == TaskStatus.FAILED
+    saved = store.get_task(orphan.id)
+    assert saved.status == TaskStatus.FAILED
+    assert saved.metadata["execution_outcome"] == "unknown"
+    assert saved.result.metadata["execution_outcome"] == "unknown"
+    assert "Automatic replay was refused" in saved.result.error
+    assert store.get_task(paused.id).status == TaskStatus.PAUSED
+    again = store.requeue_orphaned_running()
+    assert orphan.id not in again["failed"]
+    assert store.get_task(orphan.id).metadata["recovery_count"] == 1

@@ -571,17 +571,10 @@ class TaskStore:
     def requeue_orphaned_running(self, max_recovery: int = 3) -> dict[str, list[str]]:
         """Recover tasks orphaned in 'running' state by a process crash.
 
-        A task left with ``status='running'`` at startup belongs to a dead
-        process — no worker will ever finish it. Each orphan is either:
-
-        * requeued (``status='pending'``, ``started_at`` cleared) when its
-          ``metadata.recovery_count`` is below *max_recovery*, or
-        * terminally failed (``status='failed'``) once the cap is hit, so a
-          task that keeps crashing its worker cannot loop forever.
-
-        Idempotent and crash-safe: each row is updated individually via
-        :meth:`persist_task`; if the process dies mid-recovery the remaining
-        orphans are still 'running' and will be picked up on the next boot.
+        A crash cannot prove whether a running task's external effects finished.
+        Record a failed result with ``execution_outcome=unknown`` for inspection;
+        never requeue whole-agent work. ``max_recovery`` is retained for caller
+        compatibility, but cannot authorize unsafe effect replay.
 
         Returns:
             ``{"requeued": [...ids], "failed": [...ids]}``.
@@ -610,19 +603,21 @@ class TaskStore:
             count = int(metadata.get("recovery_count", 0) or 0) + 1
             metadata["recovery_count"] = count
             task.metadata = metadata
-            if count <= max_recovery:
-                task.status = TaskStatus.PENDING
-                task.started_at = None
-                requeued.append(task.id)
-            else:
-                task.status = TaskStatus.FAILED
-                metadata["recovery_error"] = (
-                    f"Exceeded max recovery attempts ({max_recovery}); "
-                    "task kept crashing its worker."
-                )
-                failed.append(task.id)
+            task.status = TaskStatus.FAILED
+            task.completed_at = datetime.now(UTC).isoformat()
+            metadata["execution_outcome"] = "unknown"
+            metadata["recovery_error"] = (
+                "Interrupted by process exit; external effects may already have completed. "
+                "Inspect checkpoints, Temporal history and actual effects before resubmitting. "
+                "Automatic replay was refused."
+            )
+            task.result = TaskResult(
+                task_id=task.id, status="failed", error=metadata["recovery_error"],
+                metadata=dict(metadata),
+            )
             try:
                 self.persist_task(task)
+                failed.append(task.id)
             except Exception as exc:  # noqa: BLE001 — recovery must not abort boot
                 logger.warning(
                     "[TaskStore] Failed to requeue orphaned task %s: %s", task.id, exc

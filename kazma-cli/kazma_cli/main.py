@@ -199,7 +199,13 @@ def _run_serve(port: int) -> None:
         )
         sys.exit(1)
 
-    app = create_app()
+    from kazma_core.runtime_writer import RuntimeWriterBusy
+
+    try:
+        app = create_app()
+    except RuntimeWriterBusy as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(2)
     import os as _os_cli
     import socket as _socket
 

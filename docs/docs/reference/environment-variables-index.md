@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**265** variables are read by the product code; **265** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**266** variables are read by the product code; **266** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -220,6 +220,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_RESEARCH_SOFT_NUDGE` | (none) | `kazma_core.agent.research_policy` | yes |
 | `KAZMA_RESEARCH_SYNTH_MAX_IN` | `48000` | `kazma_core.tools.research_synthesize` | yes |
 | `KAZMA_RESTIC_PASSWORD` | `""` | `kazma_core.backup.restic_repo` | yes |
+| `KAZMA_RUNTIME_HA` | `"0"` | `kazma_core.runtime_ownership` | yes |
 | `KAZMA_SEARXNG_URL` | (none) | `kazma_core.tools.research_readiness`, `kazma_core.tools.web_search` | yes |
 | `KAZMA_SECRET` | `""` | `kazma_cli.main`, `kazma_core.config_store`, `kazma_core.runtime.local_api` +4 | yes |
 | `KAZMA_SELF_IMPROVEMENT` | (none) | `kazma_core.skills.self_improvement` | yes |

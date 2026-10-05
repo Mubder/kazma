@@ -103,34 +103,9 @@ async def _check_graph_interrupt(graph: Any, config: dict[str, Any]) -> dict[str
     leaves the graph paused at a checkpoint. This inspects the snapshot
     for a pending ``hitl_approval`` task and returns its payload.
     """
-    try:
-        snapshot = await graph.aget_state(config)
-    except Exception as exc:
-        logger.debug("[HITL] aget_state unavailable: %s", exc)
-        return None
-    if not getattr(snapshot, "next", None):
-        return None  # graph completed normally
-    for task in getattr(snapshot, "tasks", []) or []:
-        for intr in getattr(task, "interrupts", []) or []:
-            payload = getattr(intr, "value", None)
-            if payload is None and isinstance(intr, dict):
-                payload = intr.get("value", intr)
-            if isinstance(payload, (list, tuple)) and payload:
-                payload = payload[0]
-            if isinstance(payload, dict) and payload.get("type") == "hitl_approval":
-                return payload
-            # Fallback: tool/args shape without type tag
-            if isinstance(payload, dict) and (
-                "tool" in payload or "args" in payload or "tools" in payload
-            ):
-                return {
-                    "type": "hitl_approval",
-                    "tool": payload.get("tool", "unknown"),
-                    "args": payload.get("args", payload.get("arguments", {})),
-                    "tools": payload.get("tools") or [],
-                    "message": payload.get("message", ""),
-                }
-    return None
+    from kazma_core.agent.turn import peek_interrupt
+
+    return await peek_interrupt(graph, config)
 
 
 #: Approval cards sent per thread, newest last:
@@ -501,6 +476,12 @@ def _format_args_for_approval(
     return text[:budget] + warning
 
 
+def _gate_request_id(thread_id: str, payload: dict[str, Any]) -> str:
+    """Bind a platform control to its checkpoint interrupt when available."""
+    gate_id = str(payload.get("interrupt_id") or "")
+    return f"{thread_id}~{gate_id}" if gate_id else thread_id
+
+
 def _build_approval_prompt(
     payload: dict[str, Any],
     thread_id: str,
@@ -512,6 +493,7 @@ def _build_approval_prompt(
     All platforms share the ``hitl:approve|deny:<id>`` action vocabulary
     (Telegram keyboards, Discord components, Slack Block Kit).
     """
+    request_id = _gate_request_id(thread_id, payload)
     tool = payload.get("tool", "unknown")
     args = payload.get("args", {})
     # Redact known-sensitive keys before stringifying into the chat-visible
@@ -585,8 +567,8 @@ def _build_approval_prompt(
         lines.extend(
             [
                 "",
-                f"Reply: hitl approve {thread_id}",
-                f"   or: hitl deny {thread_id}",
+                f"Reply: hitl approve {request_id}",
+                f"   or: hitl deny {request_id}",
             ]
         )
         text_multi = "\n".join(lines)
@@ -596,15 +578,15 @@ def _build_approval_prompt(
             if plat_multi == "telegram":
                 from kazma_gateway.adapters.telegram import TelegramAdapter
 
-                markup_multi = TelegramAdapter.build_approval_keyboard(thread_id)
+                markup_multi = TelegramAdapter.build_approval_keyboard(request_id)
             elif plat_multi == "discord":
                 from kazma_gateway.adapters.discord import DiscordAdapter
 
-                markup_multi = DiscordAdapter.build_approval_keyboard(thread_id)
+                markup_multi = DiscordAdapter.build_approval_keyboard(request_id)
             elif plat_multi == "slack":
                 from kazma_gateway.adapters.slack import SlackAdapter
 
-                markup_multi = SlackAdapter.build_approval_keyboard(thread_id)
+                markup_multi = SlackAdapter.build_approval_keyboard(request_id)
         except Exception as exc:
             logger.debug(
                 "Approval keyboard build failed for platform=%s: %s",
@@ -626,19 +608,19 @@ def _build_approval_prompt(
         if plat == "telegram":
             try:
                 from kazma_gateway.adapters.telegram_keyboards import build_semantic_keyboard
-                markup = build_semantic_keyboard(thread_id, options)
+                markup = build_semantic_keyboard(request_id, options)
             except Exception:
                 pass
         elif plat == "discord":
             try:
                 from kazma_gateway.adapters.platform_keyboards import discord_semantic_components
-                markup = discord_semantic_components(thread_id, options)
+                markup = discord_semantic_components(request_id, options)
             except Exception:
                 pass
         elif plat == "slack":
             try:
                 from kazma_gateway.adapters.platform_keyboards import slack_semantic_blocks
-                markup = slack_semantic_blocks(thread_id, question, options)
+                markup = slack_semantic_blocks(request_id, question, options)
             except Exception:
                 pass
         return {"text": text, "markup": markup, "platform": plat}
@@ -647,8 +629,8 @@ def _build_approval_prompt(
         f"Tool: {tool}\n"
         f"Args: {args_str}\n\n"
         + ("\n".join(proposal_lines) + "\n" if proposal_lines else "")
-        + f"Reply: hitl approve {thread_id}\n"
-        f"   or: hitl deny {thread_id}"
+        + f"Reply: hitl approve {request_id}\n"
+        f"   or: hitl deny {request_id}"
     )
     markup = None
     plat = (platform or "telegram").lower()
@@ -656,15 +638,15 @@ def _build_approval_prompt(
         if plat == "telegram":
             from kazma_gateway.adapters.telegram import TelegramAdapter
 
-            markup = TelegramAdapter.build_approval_keyboard(thread_id)
+            markup = TelegramAdapter.build_approval_keyboard(request_id)
         elif plat == "discord":
             from kazma_gateway.adapters.discord import DiscordAdapter
 
-            markup = DiscordAdapter.build_approval_keyboard(thread_id)
+            markup = DiscordAdapter.build_approval_keyboard(request_id)
         elif plat == "slack":
             from kazma_gateway.adapters.slack import SlackAdapter
 
-            markup = SlackAdapter.build_approval_keyboard(thread_id)
+            markup = SlackAdapter.build_approval_keyboard(request_id)
     except Exception as exc:
         logger.debug(
             "Approval keyboard build failed for platform=%s: %s",
@@ -715,6 +697,14 @@ def apply_hitl_approval_markup(
     elif plat == "slack":
         out["blocks"] = markup
     return out
+
+
+def _approval_card_is_stale(msg: IncomingMessage, requested_gate: str, pending: dict[str, Any]) -> bool:
+    """An interactive decision must identify the currently paused interrupt."""
+    context = msg.context_metadata or {}
+    interactive = bool(context.get("callback_query_id") or context.get("interaction"))
+    live_gate = str(pending.get("interrupt_id") or "")
+    return bool((requested_gate and requested_gate != live_gate) or (interactive and not requested_gate))
 
 
 async def _handle_hitl_resume(
@@ -768,6 +758,7 @@ async def _handle_hitl_resume(
         # The target thread_id defaults to the current sender's thread but can
         # be overridden by the third argument (for cross-thread approvals).
         target_thread = parts[2] if len(parts) >= 3 else thread_id
+    target_thread, _separator, requested_gate = target_thread.partition("~")
     resume_config = {"configurable": {"thread_id": target_thread, "checkpoint_ns": ""}}
 
     # Delivery MUST come from the inbound message. SessionStore TTL is 5 min
@@ -888,6 +879,14 @@ async def _handle_hitl_resume(
                     )
                 return True
 
+            if _approval_card_is_stale(msg, requested_gate, pending):
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text="This approval card is stale. Use the current card or a new /hitl command for the pending request.",
+                    context_metadata=ctx,
+                ))
+                return True
+
             logger.info(
                 "[HITL] Resume: thread=%s approved=%s action=%s",
                 target_thread, approved, action,
@@ -906,9 +905,16 @@ async def _handle_hitl_resume(
                     tool=str(_pending.get("tool") or ""),
                     payload=_pending,
                     interrupt_id=str(_pending.get("interrupt_id") or ""),
+                    require_durable=True,
                 )
             except Exception:
-                logger.debug("[HITL] gate decision record skipped", exc_info=True)
+                logger.warning("[HITL] decision storage unavailable; graph remains paused", exc_info=True)
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text="Approval remains paused: decision storage is unavailable. Retry after storage recovers.",
+                    context_metadata=ctx,
+                ))
+                return True
             # Mark successful resume so a late second callback stays quiet.
             try:
                 import time as _time

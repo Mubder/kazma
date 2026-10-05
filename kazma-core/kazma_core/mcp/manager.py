@@ -436,6 +436,9 @@ class MCPServerHandle:
     timeout: float = 60.0
     # trust level: "trusted" (no HITL), "approval_required" (HITL for danger tools)
     trust: str = "approval_required"
+    # Verified only after a successful workspace-bound handshake.
+    workspace_root: Path | None = None
+    in_flight: int = 0
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -548,6 +551,7 @@ class AsyncMCPManager:
         # LRU of (server_name, resolved_root) → handle. Not listed in
         # list_servers(); execute_mcp_tool routes to them internally.
         self._scoped: OrderedDict[tuple[str, str], MCPServerHandle] = OrderedDict()
+        self._scoped_lock = asyncio.Lock()
 
     def oauth_challenge(self, name: str) -> str | None:
         """Return the captured OAuth challenge header for *name*, if any."""
@@ -638,6 +642,9 @@ class AsyncMCPManager:
                     failed[name] = f"unsupported transport '{transport}'"
                     continue
                 total_tools += count
+                handle = self._servers.get(name)
+                if handle is not None and handle.connected and cfg.get("_resolved_workspace"):
+                    handle.workspace_root = Path(cfg["_resolved_workspace"]).resolve()
                 self._connection_errors.pop(name, None)
             except Exception as exc:
                 # Shown on the MCP pages and logged: an HTTP failure quotes its
@@ -674,6 +681,9 @@ class AsyncMCPManager:
                 )
             except Exception:
                 pass
+        from kazma_core.workspace.mcp_rebind import record_verified_mcp_binding
+
+        record_verified_mcp_binding(self)
         if raise_on_error and failed:
             details = "; ".join(f"{name}: {message}" for name, message in failed.items())
             raise MCPBridgeError(f"MCP connection failed: {details}")
@@ -726,6 +736,9 @@ class AsyncMCPManager:
         """
         self._connection_errors.pop(name, None)
         handle = self._servers.pop(name, None)
+        from kazma_core.workspace.mcp_rebind import record_verified_mcp_binding
+
+        record_verified_mcp_binding(self)
         if handle is None:
             return False
         await self._close_handle(handle)
@@ -896,8 +909,6 @@ class AsyncMCPManager:
 
     async def read_resource(self, server_name: str, uri: str) -> dict[str, Any]:
         """``resources/read`` — body is prompt-fenced untrusted data."""
-        from kazma_core.mcp.spec_client import extract_resource_text, fence_resource
-
         handle = self._servers.get(server_name)
         if handle is None or not handle.connected:
             return {
@@ -908,6 +919,16 @@ class AsyncMCPManager:
         if scope_err is not None:
             return scope_err
         handle = routed
+        handle.in_flight += 1
+        try:
+            return await self._read_resource_on_handle(handle, server_name, uri)
+        finally:
+            handle.in_flight -= 1
+
+    async def _read_resource_on_handle(self, handle: MCPServerHandle, server_name: str, uri: str) -> dict[str, Any]:
+        """Keep the scoped resource transport reserved across the path check."""
+        from kazma_core.mcp.spec_client import extract_resource_text, fence_resource
+
         target = (uri or "").strip()
         if not target:
             return {"content": "uri is required", "is_error": True}
@@ -936,6 +957,11 @@ class AsyncMCPManager:
             handle = self._servers.get(name)
             if handle is None or not handle.connected:
                 continue
+            routed, scope_err = await self._route_workspace_scope(name, handle)
+            if scope_err is not None:
+                logger.debug("[MCP] prompts/list skipped: %s", scope_err.get("content"))
+                continue
+            handle = routed
             try:
                 result = await self._send(handle, "prompts/list", {})
                 prompts = result.get("prompts") if isinstance(result, dict) else []
@@ -964,6 +990,10 @@ class AsyncMCPManager:
                 "content": f"MCP server '{server_name}' not connected.",
                 "is_error": True,
             }
+        routed, scope_err = await self._route_workspace_scope(server_name, handle)
+        if scope_err is not None:
+            return scope_err
+        handle = routed
         prompt_name = (name or "").strip()
         if not prompt_name:
             return {"content": "prompt name is required", "is_error": True}
@@ -1023,21 +1053,28 @@ class AsyncMCPManager:
                 return handle, None
 
             from kazma_core.ide.workspace_scope import resolve_workspace_root
-            from kazma_core.workspace.binding import get_bound_mcp_root
+            from kazma_core.workspace import binding
 
             scoped_root = resolve_workspace_root()
-            bound_root = get_bound_mcp_root()
-            if scoped_root is None or bound_root is None:
-                return handle, None
-            if Path(bound_root).resolve() == Path(scoped_root).resolve():
-                return handle, None
-
             template = self._server_templates.get(server_name)
             if template is not None:
                 from kazma_core.workspace.mcp_rebind import is_workspace_bound_server
 
                 if not is_workspace_bound_server(template):
                     return handle, None
+                if scoped_root is None:
+                    scoped_root = await asyncio.to_thread(binding.resolve_active_root)
+                bound_root = handle.workspace_root
+                if bound_root is None:
+                    return handle, {"content": f"MCP server '{server_name}' has no verified workspace binding; reconnect it before use.", "is_error": True}
+            else:
+                # Legacy handles have no saved template; retain their existing
+                # fail-closed mismatch check. Configured handles never use this.
+                bound_root = binding.get_bound_mcp_root()
+                if scoped_root is None or bound_root is None:
+                    return handle, None
+            if Path(bound_root).resolve() == Path(scoped_root).resolve():
+                return handle, None
 
             scoped = await self._get_or_spawn_scoped(server_name, Path(scoped_root))
             if scoped is not None and scoped.connected:
@@ -1074,7 +1111,12 @@ class AsyncMCPManager:
         server_name: str,
         scoped_root: Path,
     ) -> MCPServerHandle | None:
-        """Spawn (or reuse) an LRU-capped clone rooted at *scoped_root*."""
+        """Serialize clone creation and eviction; concurrent callers share it."""
+        async with self._scoped_lock:
+            return await self._spawn_scoped_locked(server_name, scoped_root)
+
+    async def _spawn_scoped_locked(self, server_name: str, scoped_root: Path) -> MCPServerHandle | None:
+        """Spawn an LRU-capped clone while holding the scoped lifecycle lock."""
         try:
             root_key = str(Path(scoped_root).resolve())
         except Exception:
@@ -1103,6 +1145,12 @@ class AsyncMCPManager:
             return None
         if not is_workspace_bound_server(template):
             return None
+        while len(self._scoped) >= self._MAX_SCOPED:
+            idle = next((key for key, h in self._scoped.items() if not h.in_flight), None)
+            if idle is None:
+                logger.warning("[MCP] scoped capacity busy; refusing a new instance")
+                return None
+            await self._close_handle(self._scoped.pop(idle))
 
         digest = hashlib.sha256(root_key.encode("utf-8", errors="replace")).hexdigest()[:8]
         alias = f"{server_name}__scoped_{digest}"
@@ -1129,12 +1177,7 @@ class AsyncMCPManager:
         spawned = self._servers.pop(alias, None)
         if spawned is None or not spawned.connected:
             return None
-        while len(self._scoped) >= self._MAX_SCOPED:
-            _old_key, old_handle = self._scoped.popitem(last=False)
-            try:
-                await self._close_handle(old_handle)
-            except Exception:
-                logger.debug("[MCP] LRU evict scoped handle failed", exc_info=True)
+        spawned.workspace_root = Path(scoped_root).resolve()
         self._scoped[cache_key] = spawned
         logger.info(
             "[MCP] scoped instance server=%s root=%s alias=%s",
@@ -1176,6 +1219,18 @@ class AsyncMCPManager:
             return scope_err
         handle = routed
 
+        # Reserve across the off-loop path check, not only the transport send:
+        # a scoped LRU eviction must not close a request preparing to dispatch.
+        handle.in_flight += 1
+        try:
+            return await self._execute_tool_on_handle(handle, server_name, tool_name, arguments)
+        finally:
+            handle.in_flight -= 1
+
+    async def _execute_tool_on_handle(
+        self, handle: MCPServerHandle, server_name: str, tool_name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Run path checks and the tool call while holding its scoped reservation."""
         # Strip the mcp__<server>__ namespace prefix if present — the LLM
         # emits the namespaced form (to avoid collisions), but the server
         # only knows its own raw tool names.
@@ -1231,7 +1286,9 @@ class AsyncMCPManager:
                     content, source=f"mcp_tool:{server_name}/{raw_tool_name}"
                 )
             except Exception:
-                logger.debug("[MCP] prompt fence unavailable — raw content", exc_info=True)
+                logger.error("[MCP] prompt fence unavailable; withholding tool output", exc_info=True)
+                return {"content": "MCP tool output withheld: the untrusted-content fence is unavailable.",
+                        "is_error": True, "outcome": "hard"}
 
             logger.info(
                 "[MCP] Tool '%s' on '%s' → %.0fms (error=%s)",
@@ -1699,12 +1756,15 @@ class AsyncMCPManager:
         """
         request = _jsonrpc_request(method, params)
         raw = json.dumps(request) + "\n"
-
-        if handle.transport == "stdio":
-            return await self._send_stdio(handle, raw, timeout=timeout)
-        if handle.transport == "streamable_http":
-            return await self._send_streamable_http(handle, raw)
-        return await self._send_sse(handle, raw)
+        handle.in_flight += 1
+        try:
+            if handle.transport == "stdio":
+                return await self._send_stdio(handle, raw, timeout=timeout)
+            if handle.transport == "streamable_http":
+                return await self._send_streamable_http(handle, raw)
+            return await self._send_sse(handle, raw)
+        finally:
+            handle.in_flight -= 1
 
     @staticmethod
     def _resolve_timeout(
@@ -2171,8 +2231,8 @@ class UnifiedToolExecutor:
         try:
             from kazma_core.workspace.mcp_rebind import install_mcp_workspace_rebind
 
-            # It records the active root, a workspace-store read: off the
-            # loop. It pinned the server here too, on the loop.
+            # Listener registration is thread-safe; successful handshakes,
+            # rather than installation, record the verified roots.
             await asyncio.to_thread(install_mcp_workspace_rebind, self)
         except Exception as exc:  # noqa: BLE001 -- the server still connects
             logger.debug("[Unified] workspace MCP rebind not installed: %s", exc)

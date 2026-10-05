@@ -364,8 +364,10 @@ def test_http_approve_once_does_not_grant() -> None:
     fn = src.split("async def approve_tool", 1)[1].split(
         "async def list_pending_approvals", 1
     )[0]
-    assert 'elif approved and scope == "tool":' in fn
-    before_tool, after_tool = fn.split('elif approved and scope == "tool":', 1)
+    assert "_apply_scope_grants" in fn
+    assert fn.index("await record_gate_decision(") < fn.index("_apply_scope_grants")
+    helper = src.split("def _apply_scope_grants(", 1)[1].split("def register_misc_routes", 1)[0]
+    before_tool, after_tool = helper.split('elif approved and scope == "tool":', 1)
     assert "grant_tool(" not in before_tool
     assert "grant_tool(" in after_tool
 

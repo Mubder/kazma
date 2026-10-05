@@ -170,13 +170,13 @@ and extras `kazma[sandbox]` / `kazma[durable]`.
 |----------|---------|----------------|---------|
 | `KAZMA_E2B_API_KEY` / `E2B_API_KEY` | unset | Untrusted / multi-user code | E2B Firecracker for HITL-approved `python_exec`. |
 | `KAZMA_E2B` | auto if key set | No | `0` keeps Docker/local even with a key. |
-| `KAZMA_CODE_EXEC_DOCKER` | `auto` | Single-operator jail | `1`/`force` Docker; `0` local (ignored when production forbids local). `force` also blocks host `shell_exec` unless `KAZMA_HOST_SHELL=1`. |
-| `KAZMA_HOST_SHELL` | unset | Escape hatch | `1` allows host `shell_exec` even when `KAZMA_CODE_EXEC_DOCKER=force`. |
+| `KAZMA_CODE_EXEC_DOCKER` | `auto` | Single-operator jail | `1`/`true`/`on`/`yes`/`docker`/`force`/`required` require Docker without local fallback and block host shell unless explicitly granted. `0` requests local execution, which production/multi-user policy still refuses. |
+| `KAZMA_HOST_SHELL` | unset | Escape hatch | Production, multi-user and forced Docker profiles deny host shell by default. `1` explicitly grants it after HITL; this restores host capability, not isolation. Policy lookup failures deny it. |
 | `KAZMA_CODE_EXEC_IMAGE` | `python:3.12-slim` | No | Image for the Docker jail that runs `python_exec` / `code_exec` (no network, read-only work mount, tmpfs `/tmp`, memory cap). |
 | `KAZMA_LIVE_EVAL` | unset | No | `1` runs the opt-in live-model eval (`tests/test_hands_live.py`). CI skips. |
 | `KAZMA_TEMPORAL_HOST` / `TEMPORAL_ADDRESS` | unset | Multi-hour swarm | Temporal frontend (`localhost:7233`). Wraps swarm `_dispatch_inner`. |
 | `KAZMA_TEMPORAL` | auto if host set | No | `0` keeps in-process swarm. |
-| `KAZMA_TEMPORAL_REQUIRED` | unset | Strict HA | `1` = fail the task if Temporal/SDK is down (no in-process fallback). |
+| `KAZMA_TEMPORAL_REQUIRED` | unset | Required durable execution | `1` = fail the task if Temporal/SDK is disabled or down; readiness also requires the running worker. After submission, no profile permits local fallback. Whole-task activities do not retry arbitrary effects. |
 | `KAZMA_TEMPORAL_NAMESPACE` | `default` | No | Temporal namespace. |
 | `KAZMA_TEMPORAL_QUEUE` | `kazma-swarm` | No | Task queue for the in-process Temporal worker. |
 | `KAZMA_CODE_INDEX` | on | No | `0` disables the workspace symbol index + `codebase_search`. |
@@ -433,7 +433,7 @@ build if the code reads one of these and it is missing from **both**
 | `KAZMA_UNRESTRICTED_TTL_SECONDS` | `3600` | How long `/unrestricted` (mission mode, and every danger tool without approval) stays on after the last user message. `0` / `off` keep it on until `/unrestricted off`; other numbers are at least 60. | Short values; never `0` on an install other people can message. |
 | `KAZMA_SHELL_STRICT` | on in production | `0` in production lets an approved `shell_exec` look up its (allowlisted) program on the whole process PATH instead of the system directories, so a same-named executable planted earlier in any PATH directory runs instead. `1` turns strict lookup on outside production. | Never `0` in production. |
 | `KAZMA_SHELL_ALLOW_ARCHIVE` | unset | Puts `tar`, `gzip`, `gunzip`, `zip` and `unzip` back on the `shell_exec` allowlist in production strict mode. An archive can write outside the working directory through absolute or `../` member paths. | You need archives in production and accept extraction anywhere the process can write. |
-| `KAZMA_GATE_REGISTRY` | on | `0` turns off the approval registry (one row per approval, answered once). The gate-identity check on `/api/approve` goes with it, so a retried Approve can decide a question the human has not seen; approvals fall back to the bare checkpoint. | Only briefly, to rule the registry out while diagnosing it. |
+| `KAZMA_GATE_REGISTRY` | on | `0` turns off approval lifecycle projections. Web, platform and timeout execution decisions then stay paused because durable decision recording is required. | Diagnosis only; restoring the registry is necessary before resuming tools. |
 | `KAZMA_COMMITMENT_ENABLED` | on | `0` removes the commitment layer: reminders are no longer checked against memory (a date the model invented is scheduled as written), the exec denylist no longer stops catastrophic commands before the approval card, protected settings keys and the outbound allowlist stop applying, and swarm workers lose their scope cap. | Never on a real install; it exists to rule the layer out while diagnosing. |
 | `KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE` | on | `0` lifts the cap on dispatched swarm workers: they may then attempt exec, outbound, config and identity acts, Soul changes included (approval cards still apply). | Never with workers you did not write. |
 | `KAZMA_COMMITMENT_SOUL_REQUIRES_CONFIRM` | off; on in production / multi-user | `0` in production or multi-user mode lets self-improvement Soul changes apply without an operator confirming them. `1` requires the confirmation anywhere. | A single-operator install that reviews Soul changes another way. |
@@ -636,10 +636,11 @@ Under Docker, `KAZMA_TRUSTED_PROXIES` is the proxy **container's** address on
 the bridge network (often `172.17.0.1` or the compose network's gateway), not
 `127.0.0.1`.
 
-### Multi-replica SaaS
+### Active/passive runtime
 
 ```bash
 KAZMA_DATABASE_URL=postgresql://…
+KAZMA_RUNTIME_HA=1
 KAZMA_PRODUCTION=1
 KAZMA_SECRET=…
 KAZMA_VAULT_KEY=…
@@ -647,6 +648,14 @@ KAZMA_PUBLIC_URL=https://…
 KAZMA_TRUSTED_PROXIES=<load-balancer / ingress address>
 # optional OIDC_*
 ```
+
+`KAZMA_RUNTIME_HA` defaults to `0`. Set `1` for database ownership admission
+before services start: a dedicated Postgres session holds the runtime lock,
+and session loss exits the process without reconnecting. The database is
+paired with the complete state volume through its `.runtime-state-id`.
+Use a direct database endpoint or session pooling, never transaction pooling.
+This requires one runtime and a storage system with verified fencing; it
+does not enable multiple active replicas. See [Deployment](../guide/deployment#4-kubernetes).
 
 ---
 

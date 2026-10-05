@@ -10,6 +10,7 @@ GitHub then blocks every push to ``main``.
 from __future__ import annotations
 
 import re
+from itertools import product
 from pathlib import Path
 
 import yaml
@@ -21,7 +22,16 @@ RUNBOOK = REPO / "docs" / "docs" / "ops" / "branch-protection.md"
 
 def ci_check_names(ci_text: str) -> set[str]:
     jobs = (yaml.safe_load(ci_text) or {}).get("jobs") or {}
-    return {str(job.get("name") or key) for key, job in jobs.items()}
+    names: set[str] = set()
+    for key, job in jobs.items():
+        template = str(job.get("name") or key)
+        matrix = (job.get("strategy") or {}).get("matrix") or {}
+        axes = {axis: values for axis, values in matrix.items() if axis not in ("include", "exclude")}
+        for values in product(*axes.values()):
+            variables = dict(zip(axes, values))
+            names.add(re.sub(r"\$\{\{\s*matrix\.(\w+)\s*\}\}",
+                             lambda match: str(variables[match.group(1)]), template))
+    return names
 
 
 def runbook_check_names(runbook_text: str) -> set[str]:
@@ -41,3 +51,8 @@ def test_the_comparison_sees_a_missing_job():
     ci_text = "jobs:\n  a:\n    name: Alpha\n  b:\n    name: Beta\n"
     runbook = "## 1. The checks to require\n\n| Check | What |\n|---|---|\n| `Alpha` | a |\n\n## 2. Next\n"
     assert ci_check_names(ci_text) - runbook_check_names(runbook) == {"Beta"}
+
+
+def test_matrix_checks_use_actual_reported_names():
+    ci = 'jobs:\n  a:\n    name: Check (${{ matrix.os }}, ${{ matrix.python }})\n    strategy:\n      matrix:\n        os: [linux, windows]\n        python: ["3.11", "3.12"]\n'
+    assert ci_check_names(ci) == {f"Check ({os}, {python})" for os in ("linux", "windows") for python in ("3.11", "3.12")}

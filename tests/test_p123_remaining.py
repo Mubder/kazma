@@ -112,7 +112,8 @@ def test_ci_ruff_syntax_is_a_gate():
 
 def test_ha_compose_shares_kazma_data():
     text = (_ROOT / "docker-compose.ha.yml").read_text(encoding="utf-8")
-    assert "- kazma_data:/home/kazma/.kazma/kazma-data" in text
+    assert "- kazma_data:/app/kazma-data" in text
+    assert 'KAZMA_DATA_DIR: "/app/kazma-data"' in text
     assert "# - kazma_data:" not in text
 
 

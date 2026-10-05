@@ -170,6 +170,8 @@ async def evaluate_case(case: dict[str, Any], client: Any, *, model: str, system
         "id": case["id"], "language": case["language"], "split": case["split"],
         "group_id": case["group_id"], "case_sha256": fingerprint(case),
         "human_labeled": case["human_labeled"], "rubric": case["rubric"],
+        "source": case["source"], "source_kind": case.get("source_kind", "unspecified"),
+        "label_reviewer": case.get("label_reviewer"),
         "answer": answer, "answer_sha256": fingerprint(answer), "attempted_tools": attempted,
         "fixture_calls": executed, "messages": messages, "llm_calls": usage,
         "model_call_attempts": model_calls,

@@ -361,6 +361,8 @@ def test_the_app_sends_the_card_in_the_background_with_the_adapters():
 
     startup = inspect.getsource(KazmaAppBuilder._on_startup)
     shutdown = inspect.getsource(KazmaAppBuilder._on_shutdown)
+    assert "await self._shutdown_services()" in shutdown
+    shutdown += inspect.getsource(KazmaAppBuilder._shutdown_services)
     assert 'notify_lifecycle("starting")' in startup, "the boot is recorded"
     assert 'notify_lifecycle("shutting_down")' in shutdown, "the stop is recorded"
     card = startup[startup.index("spawn_background(\n                announce_started("):]
