@@ -805,9 +805,22 @@ async def x_reply_model_test(body: PreviewBody) -> JSONResponse:
     """Test selected X roles on a fixed opinion-only sample without any X write."""
     sample = SubjectBody(id="model_check", target="Coffee proposal", match=["coffee"],
                          side="support", mood="professional", evidence_policy="opinion_only")
-    return await x_reply_preview(PreviewBody(subject=sample,
-                                            parent_text="The coffee proposal seems sensible to me.",
-                                            ai=body.ai, reply_style=body.reply_style))
+    response = await x_reply_preview(PreviewBody(subject=sample,
+                                                parent_text="The coffee proposal seems sensible to me.",
+                                                ai=body.ai, reply_style=body.reply_style))
+    if response.status_code != 200:
+        return response
+    import json
+
+    payload = json.loads(response.body)
+    # Pasted context intentionally has no verified X identity; compatibility
+    # still requires all four content checks, never an unavailable checker.
+    checks = {item["check"]: item["verdict"] for item in payload.get("checks", [])}
+    compatible = payload.get("ok") is True and all(checks.get(name) == "pass" for name in ("target", "stance", "evidence", "safety"))
+    payload.update(compatible=compatible, ok=compatible, publishing_eligible=False)
+    if not compatible:
+        payload["reason"] = "X model sample did not pass all content checks. Inspect the check reasons; compatibility remains unconfirmed."
+    return JSONResponse(payload)
 
 
 @router.get("/qualification")

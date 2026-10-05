@@ -8,6 +8,8 @@ One slice of the translation catalog, extracted from the former
 from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
+    "settings.xt.model_sample_pass": {"en": "Sample content checks passed; production qualification is still required", "ar": "نجحت فحوص محتوى العينة؛ وما زال تأهيل الإنتاج مطلوبًا"},
+    "settings.xt.model_sample_hold": {"en": "Model compatibility unconfirmed — inspect the check reasons", "ar": "توافق النموذج غير مؤكّد — راجع أسباب الفحوص"},
     "settings.xt.example_target": {"en": "this proposal", "ar": "هذا المقترح"},
     "settings.xt.example_praise": {"en": "I think {target} is a good idea.", "ar": "أرى أن {target} فكرة جيدة."},
     "settings.xt.example_criticism": {"en": "I disagree with {target}. Its reasoning seems weak to me.", "ar": "أختلف مع {target}. أرى أن حجته ضعيفة."},

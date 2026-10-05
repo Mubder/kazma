@@ -127,17 +127,34 @@ async def verify_candidate(draft: str, subject: Subject, *, context: ContextSnap
                           format_untrusted_block(draft, source="x_candidate"),
                           format_untrusted_block(source_text, source="x_evidence")))
         try:
-            response = await asyncio.wait_for(x_chat(role, [{"role": "system", "content": prompt},
-                                                             {"role": "user", "content": user}],
-                                                            max_tokens=1800, temperature=0.0), timeout=15)
+            # x_chat owns the configured call timeout and shared decision deadline.
+            response = await x_chat(role, [{"role": "system", "content": prompt},
+                                           {"role": "user", "content": user}],
+                                    max_tokens=1800, temperature=0.0,
+                                    response_format={"type": "json_object"})
             results.extend(parse_checks(str(getattr(response, "content", "") or ""), names,
                                         draft=draft, observed=observed, sources=sources,
                                         max_source_age_days=subject.evidence_max_age_days))
         except asyncio.CancelledError:
             raise
-        except (LLMError, OSError, RuntimeError, ValueError, TypeError, KeyError):
+        except (LLMError, OSError, RuntimeError, ValueError, TypeError, KeyError) as exc:
             logger.debug("[x-checks] %s unavailable", role, exc_info=True)
-            results.extend(CheckResult(name, "unknown", "Verification unavailable or invalid; human review required.") for name in names)
+            from kazma_core.x_api.ai_budget import XBudgetUnavailable
+            from kazma_core.x_api.model_selection import XModelUnavailableError
+
+            if isinstance(exc, TimeoutError):
+                reason = "Verifier timed out; select a faster verifier or review the X decision limits."
+            elif isinstance(exc, XBudgetUnavailable):
+                reason = str(exc)
+            elif isinstance(exc, XModelUnavailableError):
+                reason = "Selected verifier is unavailable; check its X model binding and connection."
+            elif isinstance(exc, json.JSONDecodeError):
+                reason = "Verifier did not return valid JSON; check structured-output compatibility and token limits."
+            elif isinstance(exc, (ValueError, TypeError, KeyError)):
+                reason = "Verifier returned an invalid check or evidence link; human review required."
+            else:
+                reason = "Verifier request failed; check the selected provider connection. Human review required."
+            results.extend(CheckResult(name, "unknown", f"{role}: {reason}") for name in names)
     if context.missing():
         results = [CheckResult("context", "unknown", "Incomplete source context: " + ", ".join(context.missing())) if r.check == "context" and r.verdict != "fail" else r for r in results]
     if subject.evidence_policy == "opinion_only":

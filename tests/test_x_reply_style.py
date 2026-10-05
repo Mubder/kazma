@@ -26,6 +26,13 @@ def test_effective_tone_matches_card_permissions_and_never_reports_invalid_input
     assert effective_mood(subject, "unknown") == "professional"
 
 
+def test_opinion_only_reaches_drafting_before_verification():
+    subject = Subject(id="coffee", match=("coffee",), side="support", evidence_policy="opinion_only")
+    prompt = _build_prompt(subject, "I like coffee.", "author")[0]["content"]
+    assert "EVIDENCE POLICY: opinions only" in prompt
+    assert "Do not add material factual assertions" in prompt
+
+
 @pytest.mark.parametrize("raw", [None, [], {"allow_uncensored_language": "false"},
                                      {"language": []}, {"profanity": "strong"},
                                      {"dialect": 3}, {"disable_safety": True}])

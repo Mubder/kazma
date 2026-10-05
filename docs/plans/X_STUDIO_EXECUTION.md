@@ -302,3 +302,11 @@ JavaScript behavior tests cover stable identity, explicit model binding and
 delayed-save/test races. Browser dependency/Windows pipe-cleanup warnings did
 not fail the browser run. These are engineering results, not human accuracy
 or production capability attestation.
+
+Live model acceptance exposed verifier truncation and a hidden 15-second timeout.
+The follow-up delegates timing to the configured X limits, requests JSON output,
+adds safe diagnostic reasons and requires four passing content checks before
+reporting sample compatibility. Opinion-only drafting now receives its evidence
+restriction. Unknown verification still holds publication. The first release CI
+also identified missing initial-cloak attributes; both X templates now preserve
+the hydration gate. Final follow-up CI remains required.

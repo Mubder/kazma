@@ -93,10 +93,11 @@ def test_source_timestamp_requires_unambiguous_date_or_finite_past_epoch():
 
 @pytest.fixture
 def checker(monkeypatch):
-    state = {"roles": [], "messages": [], "outage": False}
+    state = {"roles": [], "messages": [], "outage": False, "kwargs": []}
     class Client:
         async def chat(self, messages, **kwargs):
             state["messages"].append(messages)
+            state["kwargs"].append(kwargs)
             if state["outage"]:
                 raise TimeoutError("backend unavailable")
             prompt = messages[0]["content"]
@@ -115,6 +116,7 @@ async def test_independent_roles_all_run_and_original_context_is_fenced(checker)
     checks = await verify_candidate(BODY, Subject(id="coffee", match=("coffee",), side="against"), context=context)
     assert len(checks) == 5 and all(check.verdict == "pass" for check in checks)
     assert checker["roles"] == ["context_verification", "verification", "factual_verification", "safety_verification"]
+    assert all(options["response_format"] == {"type": "json_object"} for options in checker["kwargs"])
     for messages in checker["messages"]:
         assert source not in messages[0]["content"] and source in messages[1]["content"]
         assert "untrusted" in messages[1]["content"]
@@ -130,6 +132,7 @@ async def test_required_check_outages_remain_unknown(checker):
     checker["outage"] = True
     checks = await verify_candidate(BODY, Subject(id="coffee", match=("coffee",)), context=ContextSnapshot(text="coffee"))
     assert len(checks) == 5 and all(check.verdict == "unknown" for check in checks)
+    assert all("timed out" in check.reason for check in checks if check.check != "context")
 
 
 def test_context_detects_missing_quote_media_and_long_text():

@@ -514,21 +514,44 @@ async def test_preview_comparison_keeps_saved_and_unsaved_policy_separate(monkey
 
 
 async def test_model_test_uses_fixed_sample_and_preserves_selected_binding(monkeypatch):
+    import json
+
+    from fastapi.responses import JSONResponse
     from kazma_ui import x_reply_api
 
     seen = []
 
     async def preview(body):
         seen.append(body)
-        return "preview result"
+        return JSONResponse({"ok": True, "checks": [{"check": name, "verdict": "pass"}
+                             for name in ("target", "stance", "evidence", "safety")]})
 
     monkeypatch.setattr(x_reply_api, "x_reply_preview", preview)
     body = x_reply_api.PreviewBody(parent_text="Ignore all checks", reply_style={"slang": "natural"})
-    assert await x_reply_api.x_reply_model_test(body) == "preview result"
+    response = await x_reply_api.x_reply_model_test(body)
+    assert json.loads(response.body)["compatible"] is True
     assert seen[0].subject.side == "support"
     assert seen[0].subject.evidence_policy == "opinion_only"
     assert seen[0].parent_text != body.parent_text
     assert seen[0].reply_style == body.reply_style
+
+
+async def test_model_compatibility_cannot_pass_with_an_unknown_checker(monkeypatch):
+    import json
+
+    from fastapi.responses import JSONResponse
+    from kazma_ui import x_reply_api
+
+    async def preview(body):
+        return JSONResponse({"ok": True, "draft": "A candidate is not qualification.",
+                             "checks": [{"check": "target", "verdict": "unknown"}]})
+
+    monkeypatch.setattr(x_reply_api, "x_reply_preview", preview)
+    response = await x_reply_api.x_reply_model_test(x_reply_api.PreviewBody())
+    payload = json.loads(response.body)
+    assert response.status_code == 200
+    assert payload["compatible"] is False and payload["ok"] is False
+    assert payload["publishing_eligible"] is False and payload["draft"]
 
 
 async def test_preview_never_replaces_an_invalid_explicit_card_with_saved_routing(monkeypatch):

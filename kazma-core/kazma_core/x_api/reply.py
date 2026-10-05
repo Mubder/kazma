@@ -485,6 +485,12 @@ def _build_prompt(
             ]
     lines += [f"- {rule}" for rule in subject.all_hard_lines()]
     lines += ["", stance_contract(subject.side, name), style_contract(subject)]
+    if subject.evidence_policy == "opinion_only":
+        lines += ["", "EVIDENCE POLICY: opinions only. Do not add material factual assertions, "
+                  "statistics or claims about results. Express the position as an opinion."]
+    else:
+        lines += ["", "EVIDENCE POLICY: material factual assertions need verified authorized evidence. "
+                  "If none is available, express an opinion or omit the factual assertion."]
     # The actual scope/exception values must reach drafting, not just checking.
     # Otherwise the checker can reject an exception the drafter never saw.
     if subject.scope:
