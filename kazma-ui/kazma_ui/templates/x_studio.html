@@ -74,7 +74,7 @@
   <div class="xs-head">
     <div class="xs-meta">
       <span translate="no" x-text="status.handle || 'X'"></span>
-      <span class="xs-pill" x-show="loadStates.status && loadStates.status.at" x-text="((status.caps && status.caps.posts_today) || 0) + '/' + ((status.caps && status.caps.max_posts_per_day) || 8) + ' ' + t('x_studio.quota')"></span>
+      <span class="xs-pill" x-show="loadStates.status && loadStates.status.at" x-text="((status.caps && status.caps.posts_today) || 0) + '/' + ((status.caps && status.caps.max_posts_per_day) || 8) + ' ' + t('x_studio.quota')" x-cloak></span>
       <span class="xs-pill" x-show="status.ai_budget" x-cloak
             x-text="status.ai_budget ? t('x_studio.model_budget').replace('{used}', status.ai_budget.usage.calls).replace('{limit}', status.ai_budget.limits.max_daily_calls) : ''"></span>
       <span class="xs-pill" x-show="status.ai_budget" x-cloak
@@ -130,7 +130,7 @@
   <details class="xs-card" style="margin-bottom:12px;" @toggle="if ($event.target.open) loadHealth()">
     <summary>{{ t('x_studio.health') }}</summary>
     <button class="btn btn-secondary btn-sm" @click="loadHealth()" :disabled="healthBusy">{{ t('common.refresh') }}</button>
-    <p x-show="healthError" role="alert" x-text="healthError" translate="no" :dir="textDir(healthError)"></p>
+    <p x-show="healthError" role="alert" x-text="healthError" translate="no" :dir="textDir(healthError)" x-cloak></p>
     <template x-if="health">
       <div>
         <p>{{ t('x_studio.health_scope') }}</p>
@@ -166,7 +166,7 @@
         <button class="btn btn-secondary" @click="threadSegments.push('')" :disabled="threadSegments.length >= 25">{{ t('x_studio.thread_add') }}</button>
         <button class="btn btn-primary" @click="stageThread()">{{ t('x_studio.thread_stage') }}</button>
       </fieldset>
-      <p role="alert" x-show="threadError" x-text="threadError" :dir="textDir(threadError)"></p>
+      <p role="alert" x-show="threadError" x-text="threadError" :dir="textDir(threadError)" x-cloak></p>
     </div>
     <template x-for="thread in threads" :key="thread.id">
       <div class="xs-card" style="margin-top:12px;">
@@ -176,14 +176,14 @@
             <li style="white-space:pre-wrap;overflow-wrap:anywhere;">
               <p translate="no" :dir="textDir(segment.text)" x-text="segment.text"></p>
               <span x-text="t('x_studio.status_' + segment.state)"></span>
-              <a x-show="segment.tweet_id" :href="'https://x.com/i/web/status/' + segment.tweet_id" target="_blank" rel="noopener" x-text="segment.tweet_id"></a>
+              <a x-show="segment.tweet_id" :href="'https://x.com/i/web/status/' + segment.tweet_id" target="_blank" rel="noopener" x-text="segment.tweet_id" x-cloak></a>
               <p translate="no" x-text="segment.reason" :dir="textDir(segment.reason)"></p>
             </li>
           </template>
         </ol>
-        <button class="btn btn-primary" x-show="thread.can_resume" @click="threadAction(thread, 'publish')" :disabled="threadBusy">{{ t('x_studio.thread_publish') }}</button>
-        <button class="btn btn-secondary" x-show="thread.can_review" @click="threadAction(thread, 'review')" :disabled="threadBusy">{{ t('x_studio.thread_review') }}</button>
-        <button class="btn btn-secondary" x-show="thread.can_cancel" @click="threadAction(thread, 'cancel')" :disabled="threadBusy">{{ t('x_studio.thread_cancel') }}</button>
+        <button class="btn btn-primary" x-show="thread.can_resume" @click="threadAction(thread, 'publish')" :disabled="threadBusy" x-cloak>{{ t('x_studio.thread_publish') }}</button>
+        <button class="btn btn-secondary" x-show="thread.can_review" @click="threadAction(thread, 'review')" :disabled="threadBusy" x-cloak>{{ t('x_studio.thread_review') }}</button>
+        <button class="btn btn-secondary" x-show="thread.can_cancel" @click="threadAction(thread, 'cancel')" :disabled="threadBusy" x-cloak>{{ t('x_studio.thread_cancel') }}</button>
         <details style="margin-top:8px;">
           <summary>{{ t('x_studio.history') }}</summary>
           <template x-for="(entry, index) in thread.history" :key="index">
@@ -192,9 +192,9 @@
         </details>
       </div>
     </template>
-    <p role="alert" x-show="loadStates.threads && loadStates.threads.error" translate="no" :dir="textDir((loadStates.threads || {}).error)" x-text="(loadStates.threads || {}).error"></p>
+    <p role="alert" x-show="loadStates.threads && loadStates.threads.error" translate="no" :dir="textDir((loadStates.threads || {}).error)" x-text="(loadStates.threads || {}).error" x-cloak></p>
     <button class="btn btn-secondary" @click="loadThreads()">{{ t('common.refresh') }}</button>
-    <button class="btn btn-secondary" x-show="threadsNext" @click="loadThreads(true)" :disabled="loadStates.threads && loadStates.threads.loading">{{ t('x_studio.load_more') }}</button>
+    <button class="btn btn-secondary" x-show="threadsNext" @click="loadThreads(true)" :disabled="loadStates.threads && loadStates.threads.loading" x-cloak>{{ t('x_studio.load_more') }}</button>
   </div>
 
   <div id="xs-panel-studio" role="tabpanel" aria-labelledby="xs-tab-studio" x-show="tab === 'studio'" x-cloak>
@@ -279,17 +279,17 @@
             <div class="txt" x-text="displayBody(item.summary)"></div>
             <div class="when" x-text="fmtWhen(item.when)"></div>
             <span class="xs-pill" x-text="item.state"></span>
-            <div class="xs-reason" x-show="item.reason" x-text="item.reason"></div>
-            <div class="xs-reason" x-show="item.needs_reconciliation">{{ t('x_studio.verify_unknown') }}</div>
+            <div class="xs-reason" x-show="item.reason" x-text="item.reason" x-cloak></div>
+            <div class="xs-reason" x-show="item.needs_reconciliation" x-cloak>{{ t('x_studio.verify_unknown') }}</div>
           </div>
           <div class="acts">
-            <input class="form-input" type="datetime-local" x-model="item.editWhen" x-show="item.can_reschedule" :aria-label="t('x_studio.when')">
-            <button class="btn btn-secondary btn-sm" x-show="item.can_reschedule" :disabled="!!queueBusy" @click="reschedule(item)">{{ t('x_studio.reschedule') }}</button>
-            <button class="btn btn-danger btn-sm" x-show="item.can_cancel" :disabled="!!queueBusy" @click="cancel(item)">{{ t('x_studio.cancel') }}</button>
+            <input class="form-input" type="datetime-local" x-model="item.editWhen" x-show="item.can_reschedule" :aria-label="t('x_studio.when')" x-cloak>
+            <button class="btn btn-secondary btn-sm" x-show="item.can_reschedule" :disabled="!!queueBusy" @click="reschedule(item)" x-cloak>{{ t('x_studio.reschedule') }}</button>
+            <button class="btn btn-danger btn-sm" x-show="item.can_cancel" :disabled="!!queueBusy" @click="cancel(item)" x-cloak>{{ t('x_studio.cancel') }}</button>
           </div>
         </div>
       </template>
-      <button class="btn btn-secondary btn-sm" x-show="queueNext" :disabled="loadStates.queue && loadStates.queue.loading" @click="loadQueue(true)">{{ t('x_studio.load_more') }}</button>
+      <button class="btn btn-secondary btn-sm" x-show="queueNext" :disabled="loadStates.queue && loadStates.queue.loading" @click="loadQueue(true)" x-cloak>{{ t('x_studio.load_more') }}</button>
     </div>
   </div>
 
@@ -316,8 +316,8 @@
             <div class="kicker" x-show="displayKicker(d.text)" x-cloak
                  x-text="displayKicker(d.text)"></div>
             <div class="txt" x-text="displayBody(d.text)"></div>
-            <span class="xs-pill" x-show="(d.review || {}).effective_policy" x-text="tOr('settings.xt.side_' + (((d.review || {}).effective_policy || {}).side || 'written'), '')"></span>
-            <span class="xs-pill" x-show="(d.review || {}).effective_policy" x-text="tOr('settings.xt.mood_' + (((d.review || {}).effective_policy || {}).mood || 'professional'), '')"></span>
+            <span class="xs-pill" x-show="(d.review || {}).effective_policy" x-text="tOr('settings.xt.side_' + (((d.review || {}).effective_policy || {}).side || 'written'), '')" x-cloak></span>
+            <span class="xs-pill" x-show="(d.review || {}).effective_policy" x-text="tOr('settings.xt.mood_' + (((d.review || {}).effective_policy || {}).mood || 'professional'), '')" x-cloak></span>
             <template x-for="check in ((d.review || {}).checks || [])" :key="check.check">
               <span class="xs-pill" :class="check.verdict === 'pass' ? '' : 'bad'" :title="check.reason"
                     x-text="t('x_studio.check_' + check.check) + ': ' + t('x_studio.verdict_' + check.verdict)"></span>
@@ -335,13 +335,13 @@
           </div>
         </div>
       </template>
-      <button class="btn btn-secondary btn-sm" x-show="draftsNext" :disabled="loadStates.drafts && loadStates.drafts.loading" @click="loadDrafts(true)">{{ t('x_studio.load_more') }}</button>
+      <button class="btn btn-secondary btn-sm" x-show="draftsNext" :disabled="loadStates.drafts && loadStates.drafts.loading" @click="loadDrafts(true)" x-cloak>{{ t('x_studio.load_more') }}</button>
     </div>
     <div class="xs-card">
       <h2>{{ t('x_studio.publication_history') }}</h2>
       <button class="btn btn-secondary btn-sm" @click="loadOperations()">{{ t('common.refresh') }}</button>
       <p class="xs-meta">{{ t('x_studio.operation_history_hint') }}</p>
-      <p x-show="loadStates.operations && loadStates.operations.loading">{{ t('x_studio.loading') }}</p>
+      <p x-show="loadStates.operations && loadStates.operations.loading" x-cloak>{{ t('x_studio.loading') }}</p>
       <label for="xs-operation-search">{{ t('common.search') }}</label>
       <input id="xs-operation-search" class="form-input xs-search" type="search" x-model="operationQuery" @input.debounce.350ms="loadOperations()" maxlength="200">
       <template x-for="operation in operations" :key="operation.id">
@@ -350,13 +350,13 @@
             <div class="txt" :dir="textDir(operation.text)" x-text="operation.text"></div>
             <span x-text="t('x_studio.status_' + operation.state)"></span>
             <span translate="no" :dir="textDir(operation.reason)" x-text="operation.reason"></span>
-            <a x-show="operation.tweet_id" :href="'https://x.com/i/web/status/' + operation.tweet_id" target="_blank" rel="noopener noreferrer">X</a>
+            <a x-show="operation.tweet_id" :href="'https://x.com/i/web/status/' + operation.tweet_id" target="_blank" rel="noopener noreferrer" x-cloak>X</a>
           </div>
           <button class="btn btn-secondary btn-sm" @click="inspectOperation(operation)">{{ t('x_studio.history') }}</button>
         </div>
       </template>
-      <button class="btn btn-secondary btn-sm" x-show="operationsNext" :disabled="loadStates.operations && loadStates.operations.loading" @click="loadOperations(true)">{{ t('x_studio.load_more') }}</button>
-      <p x-show="operationError" role="alert" translate="no" :dir="textDir(operationError)" x-text="operationError"></p>
+      <button class="btn btn-secondary btn-sm" x-show="operationsNext" :disabled="loadStates.operations && loadStates.operations.loading" @click="loadOperations(true)" x-cloak>{{ t('x_studio.load_more') }}</button>
+      <p x-show="operationError" role="alert" translate="no" :dir="textDir(operationError)" x-text="operationError" x-cloak></p>
       <div x-show="selectedOperation" x-cloak>
         <template x-for="event in (selectedOperation ? selectedOperation.events : [])" :key="event.id">
           <p class="xs-meta"><span x-text="fmtWhen(new Date(event.at * 1000).toISOString())"></span> · <span x-text="t('x_studio.status_' + event.state)"></span></p>
@@ -470,9 +470,9 @@
         </div>
         <div class="foot">
           <span class="xs-meta" x-show="c.reason && c.reply" x-cloak translate="no" :dir="textDir(c.reason)" x-text="c.reason"></span>
-          <span class="xs-pill" x-show="(c.effective_policy || {}).side !== undefined" x-text="tOr('settings.xt.side_' + ((c.effective_policy || {}).side || 'written'), '')"></span>
-          <span class="xs-pill" x-show="(c.effective_policy || {}).mood" x-text="tOr('settings.xt.mood_' + ((c.effective_policy || {}).mood || 'professional'), '')"></span>
-          <span x-show="(c.effective_policy || {}).target" translate="no" dir="auto" x-text="(c.effective_policy || {}).target"></span>
+          <span class="xs-pill" x-show="(c.effective_policy || {}).side !== undefined" x-text="tOr('settings.xt.side_' + ((c.effective_policy || {}).side || 'written'), '')" x-cloak></span>
+          <span class="xs-pill" x-show="(c.effective_policy || {}).mood" x-text="tOr('settings.xt.mood_' + ((c.effective_policy || {}).mood || 'professional'), '')" x-cloak></span>
+          <span x-show="(c.effective_policy || {}).target" translate="no" dir="auto" x-text="(c.effective_policy || {}).target" x-cloak></span>
           <template x-for="check in (c.checks || [])" :key="check.check">
             <span class="xs-pill" :class="check.verdict === 'pass' ? '' : 'bad'"
                   :title="check.reason" x-text="t('x_studio.check_' + check.check) + ': ' + t('x_studio.verdict_' + check.verdict)"></span>
@@ -502,9 +502,9 @@
           </span>
         </div>
         <div x-show="c.historyOpen" x-cloak>
-          <p class="xs-reason" x-show="c.historyError" x-text="c.historyError" role="alert"></p>
-          <p x-show="c.historyLoading">{{ t('x_studio.loading') }}</p>
-          <p class="xs-meta" x-show="!c.historyLoading && !c.historyError && !(c.history || []).length">{{ t('x_studio.no_history') }}</p>
+          <p class="xs-reason" x-show="c.historyError" x-text="c.historyError" role="alert" x-cloak></p>
+          <p x-show="c.historyLoading" x-cloak>{{ t('x_studio.loading') }}</p>
+          <p class="xs-meta" x-show="!c.historyLoading && !c.historyError && !(c.history || []).length" x-cloak>{{ t('x_studio.no_history') }}</p>
           <template x-for="(entry, index) in (c.history || [])" :key="index">
             <div class="xs-turn">
               <span class="who" x-text="t('x_studio.attempt').replace('{number}', entry.attempt_no)"></span>
@@ -520,7 +520,7 @@
         </div>
       </div>
     </template>
-    <button class="btn btn-secondary btn-sm" x-show="conversationsNext" :disabled="convLoading" @click="loadConversations({more: true})">{{ t('x_studio.load_more') }}</button>
+    <button class="btn btn-secondary btn-sm" x-show="conversationsNext" :disabled="convLoading" @click="loadConversations({more: true})" x-cloak>{{ t('x_studio.load_more') }}</button>
   </div>
 </div>
 {% endblock %}

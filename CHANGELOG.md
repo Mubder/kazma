@@ -12,7 +12,10 @@ Reply style adds language, dialect, slang, length and per-card overrides.
 “Allow uncensored language” is off by default and permits selected ordinary
 profanity without removing hard lines, evidence checks or publication gates.
 Saved-versus-proposed previews and a bounded X model compatibility test make
-no X writes. Stale previews are discarded; saving cannot overwrite newer local
+no X writes. Compatibility requires passing content checks; verifier failures
+show actionable reasons. Verification requests JSON output within configured
+X limits instead of a hidden shorter timeout. Opinion-only cards now constrain
+the drafting prompt as well as verification. Stale previews are discarded; saving cannot overwrite newer local
 edits. Conversations show and filter recorded effective positions and tones.
 
 Real human-reviewed evaluation and deployment-specific acceptance remain

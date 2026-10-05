@@ -255,6 +255,12 @@ before/after comparison. Import stages cards for review with automatic permissio
 disabled; saving an imported policy uses draft mode. Relevant policy changes
 invalidate automatic qualification.
 
+The X model test reports compatibility only when target, stance, evidence and
+safety checks all pass. A generated draft alone is insufficient. Pasted sample
+context remains unverified and never grants publishing permission. Verification
+uses configured X call limits and the shared decision deadline; invalid JSON,
+evidence links, provider errors and exhausted limits remain review holds.
+
 ## Testing it safely
 
 Preview and isolated fake-transport tests do not publish. Test corpora generated

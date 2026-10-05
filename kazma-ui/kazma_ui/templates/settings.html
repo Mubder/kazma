@@ -3080,7 +3080,9 @@
                 <p class="form-hint">{{ t('settings.xt.test_model_hint') }}</p>
                 <template x-if="xReplyModelResult">
                     <div role="status">
+                        <p x-show="xReplyModelResult.compatible !== undefined" x-text="xReplyModelResult.compatible ? t('settings.xt.model_sample_pass') : t('settings.xt.model_sample_hold')" x-cloak></p>
                         <p translate="no" dir="auto" x-text="xReplyModelResult.draft || xReplyModelResult.error || xReplyModelResult.reason"></p>
+                        <p x-show="xReplyModelResult.draft && xReplyModelResult.reason && !xReplyModelResult.compatible" translate="no" dir="auto" x-text="xReplyModelResult.reason" x-cloak></p>
                         <template x-for="check in (xReplyModelResult.checks || [])" :key="check.check">
                             <p :title="check.reason" x-text="t('x_studio.check_' + check.check) + ': ' + t('x_studio.verdict_' + check.verdict)"></p>
                         </template>
@@ -3385,7 +3387,7 @@
                                 </div>
                             </div>
                             <p class="form-hint" x-text="s.side === 'support' ? t('settings.xt.support_contract') : s.side === 'against' ? t('settings.xt.against_contract') : t('settings.xt.side_written')"></p>
-                            <p class="form-hint" x-show="!Object.keys(s.reply_style || {}).length">{{ t('settings.xt.style_inherited') }}</p>
+                            <p class="form-hint" x-show="!Object.keys(s.reply_style || {}).length" x-cloak>{{ t('settings.xt.style_inherited') }}</p>
                             <label class="checkbox-label">
                                 <input type="checkbox" :checked="Object.keys(s.reply_style || {}).length > 0" @change="xReplyOverrideStyle(s, $event.target.checked)">
                                 {{ t('settings.xt.style_override') }}
