@@ -2080,6 +2080,39 @@ async def test_retry_reopens_a_skip(_no_llm, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("historical,mismatched", [(False, False), (True, False), (True, True)])
+async def test_retry_retains_exact_observed_context(_no_llm, monkeypatch, historical, mismatched):
+    from kazma_core.x_api.context import ContextSnapshot
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    store = get_reply_store()
+    store.claim(summon_id="observed", parent_id="source", target_handle="author", summoner="balfaris",
+                parent_text="Complete source", summon_text="support")
+    original = ContextSnapshot(source_id="source", author_handle="author", text="Complete source",
+                               verified_source=True, author_resolved=True, media_present=True)
+    saved = original.to_dict()
+    if mismatched:
+        saved["text"] = "A different source"
+    store.record_decision("observed", draft="draft", subject_id="post", decision={"context": saved})
+    store.mark_failed("observed", "checker outage")
+    if historical:
+        assert store.release("observed")
+        store.record_decision("observed", draft="draft", subject_id="post", decision={})
+    captured = {}
+    async def handle(**kwargs):
+        captured.update(kwargs)
+        return reply_mod.SummonResult(True, "awaiting_approval")
+    monkeypatch.setattr(reply_mod, "handle_summon", handle)
+    await reply_mod.retry_summon("observed")
+    if mismatched:
+        assert captured["context"] is None
+    else:
+        assert captured["context"] == original
+        assert captured["context"].missing() == ("unresolved_media",)
+    assert captured["force_mode"] == "draft"
+
+
+@pytest.mark.asyncio
 async def test_retry_will_not_repost(_no_llm, monkeypatch):
     from kazma_core.x_api.reply import retry_summon
 

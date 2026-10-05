@@ -347,3 +347,12 @@ claim rows in non-evidence checks and invalid decisions in the remaining checks;
 role-specific prompts now request claims only for factual verification, and
 validation failures identify the offending field category without exposing
 provider content. The human-created summon remains unreviewed evaluation data.
+
+The retry passed stance but revealed invented citation IDs and lost source
+verification flags. Prompts now enumerate the only permitted independent IDs,
+requiring empty citation arrays when none exist. Retry reuses an exact matching
+stored context snapshot (including missing-media/quote flags), with history
+recovery for older text-only retries; text alone never establishes verification.
+Regression coverage rejects mismatched snapshots and retains incomplete-context
+holds. The starter collection now contains 15 observations and zero human
+reviews. The live test reply remains held while these changes are validated.

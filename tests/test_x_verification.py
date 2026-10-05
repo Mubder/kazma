@@ -148,6 +148,8 @@ async def test_schema_diagnostic_is_specific_without_exposing_provider_content(c
     assert '"check": "context"' in prompt and '"check": "target"' in prompt
     assert '"check":"requested name"' not in prompt
     assert 'Every row MUST contain "claims":[]' in prompt
+    assert 'The ONLY allowed source_ids are []' in prompt
+    assert 'including inside claims, MUST be []' in prompt
     assert '"kind":"fact|opinion"' not in prompt
     factual_prompt = checker["messages"][2][0]["content"]
     assert '"kind":"fact|opinion"' in factual_prompt
