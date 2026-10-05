@@ -13644,7 +13644,7 @@ Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.
 - Add kazma.ai + localhost:4321/4322 to default CORS origins
   ([`241f397`](https://github.com/Mubder/kazma/commit/241f39747817f9199a4f58e10b33b3272aeeb6d6))
 
-The live demo page (kazma.ai/live) calls kazma-demo.fly.dev/api/chat/stream cross-origin. Without
+The former demo page called the demo server's /api/chat/stream endpoint cross-origin. Without
   kazma.ai in the CORS allowlist, the browser blocks the request. Added kazma.ai, www.kazma.ai, and
   the Astro dev server ports (4321, 4322) to the default origins.
 

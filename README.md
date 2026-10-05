@@ -25,7 +25,6 @@
   <b><a href="https://kazma.ai/docs/">Documentation</a></b> ·
   <b><a href="#what-you-get">Features</a></b> ·
   <b><a href="#measured-not-asserted">Security</a></b> ·
-  <b><a href="https://kazma-demo.fly.dev/">Live demo</a></b> ·
   <b><a href="README.ar.md">العربية</a></b>
 
 </div>
@@ -37,7 +36,7 @@
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase | Test suite | History | Talk to it from |
 |---|---|---|---|
-| **~573K LOC** (456K Python code + 43K JS) | **13,203 tests** (968 test files) | **4,183+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
+| **~573K LOC** (456K Python code + 43K JS) | **13,203 tests** (968 test files) | **4,185+ commits** across 6 packages | Web · TUI · CLI · Telegram · Discord · Slack |
 
 ---
 
@@ -390,7 +389,7 @@ instead of brittle pipelines.
 - **Security reports:** [SECURITY.md](SECURITY.md), a
   [private advisory](https://github.com/Mubder/kazma/security/advisories/new),
   or [admin@kazma.ai](mailto:admin@kazma.ai)
-- **Website:** [kazma.ai](https://kazma.ai) · **Live demo:** [kazma-demo.fly.dev](https://kazma-demo.fly.dev/)
+- **Website:** [kazma.ai](https://kazma.ai)
 - **Pilots and partnerships:** [admin@kazma.ai](mailto:admin@kazma.ai)
 
 ## License

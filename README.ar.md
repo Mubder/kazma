@@ -23,7 +23,6 @@
   <b><a href="https://kazma.ai/ar/docs/">التوثيق</a></b> ·
   <b><a href="#ما-تحصل-عليه">الميزات</a></b> ·
   <b><a href="#الأمان-بالأرقام">الأمان</a></b> ·
-  <b><a href="https://kazma-demo.fly.dev/">عرض مباشر</a></b> ·
   <b><a href="README.md">English</a></b>
 
 </div>
@@ -403,7 +402,7 @@ pytest tests/test_static_gates.py  # بوابات الفئات وحدها
 - **بلاغات الأمان:** [SECURITY.md](SECURITY.md)، أو
   [بلاغ خاص](https://github.com/Mubder/kazma/security/advisories/new)، أو
   [admin@kazma.ai](mailto:admin@kazma.ai)
-- **الموقع:** [kazma.ai](https://kazma.ai/ar/) · **عرض مباشر:** [kazma-demo.fly.dev](https://kazma-demo.fly.dev/)
+- **الموقع:** [kazma.ai](https://kazma.ai/ar/)
 - **التجارب والشراكات:** [admin@kazma.ai](mailto:admin@kazma.ai)
 
 ## الترخيص
