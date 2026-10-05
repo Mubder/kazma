@@ -137,6 +137,15 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                     page.locator("#xd-source-id").fill("browser-source-" + language)
                     page.locator("#xd-language").select_option(language)
                     page.locator("#xd-rationale").fill("Original context saved; human labels still pending.")
+                    page.get_by_role("checkbox", name="Sarcasm" if language == "en" else "السخرية", exact=True).check()
+                    page.locator("#xd-followers").fill("-1")
+                    page.get_by_role("button", name="Save Case" if language == "en" else "حفظ الحالة", exact=True).click()
+                    alert = page.locator(".xd-editor [role=alert]")
+                    alert.wait_for(state="visible")
+                    assert ("Could not save" if language == "en" else "تعذر الحفظ") in alert.inner_text()
+                    assert ("Follower Count" if language == "en" else "المتابعين") in alert.inner_text()
+                    assert page.locator("#xd-source-text").input_value() == text
+                    page.locator("#xd-followers").fill("")
                     assert page.locator(".xd-editor").evaluate("form => form.checkValidity()"), page.locator(".xd-editor").evaluate("form => Array.from(form.elements).filter(e => !e.validity.valid).map(e => [e.id, e.value, e.validationMessage])")
                     assert not errors, errors
                     with page.expect_response(lambda r: r.url.endswith("/case") and r.request.method == "PUT") as saved:
@@ -149,8 +158,15 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                     page.locator(".xd-collection").filter(has_text="Browser annotation " + language).click()
                     page.locator(".xd-case").first.click()
                     assert page.locator("#xd-source-text").input_value() == text
+                    assert page.get_by_role("checkbox", name="Sarcasm" if language == "en" else "السخرية", exact=True).is_checked()
                     assert not page.locator("#xd-reviewed").is_checked()
                     assert page.locator("#xd-auto").input_value() == ""
+                    page.locator("#xd-reviewed").check()
+                    page.get_by_role("button", name="Save Case" if language == "en" else "حفظ الحالة", exact=True).click()
+                    page.locator(".xd-editor [role=alert]").wait_for(state="visible")
+                    assert ("uncheck" if language == "en" else "أزل علامة") in page.locator(".xd-editor [role=alert]").inner_text()
+                    assert page.locator("#xd-reviewed").is_checked()
+                    page.locator("#xd-reviewed").uncheck()
                     page.locator("#xd-notes").fill("Reviewed context only; labels still pending.")
                     page.get_by_role("button", name="Save Case" if language == "en" else "حفظ الحالة", exact=True).click()
                     page.locator(".xd-case").first.wait_for()

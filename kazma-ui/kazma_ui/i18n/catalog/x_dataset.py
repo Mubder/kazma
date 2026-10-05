@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 TRANSLATIONS = {
+    "x_dataset.review_incomplete": {"en": "Could not save as human reviewed. Complete: {fields}. To save only your edits, uncheck the personal review checkbox and save again.", "ar": "تعذر الحفظ كمراجعة بشرية. أكمل: {fields}. لحفظ تعديلاتك فقط، أزل علامة إقرار المراجعة الشخصية ثم احفظ مجددًا."},
+    "x_dataset.invalid_field": {"en": "Could not save. Check {field}.", "ar": "تعذر الحفظ. تحقق من حقل {field}."},
+    "x_dataset.invalid_response": {"en": "Could not save or load the dataset (HTTP {status}). Check your connection and sign-in, then retry. Your edits are still here.", "ar": "تعذر حفظ أو تحميل المجموعة (HTTP {status}). تحقق من الاتصال وتسجيل الدخول ثم أعد المحاولة. تعديلاتك ما زالت هنا."},
     "x_dataset.title": {"en": "Datasets", "ar": "مجموعات التقييم"},
     "x_dataset.intro": {"en": "Collect real posts, annotate expected behavior, and review recorded model outcomes. This workspace never publishes or enables automatic replies.", "ar": "اجمع منشورات حقيقية، وحدد السلوك المتوقع، وراجع نتائج النموذج المسجلة. هذه المساحة لا تنشر ولا تفعّل الردود التلقائية."},
     "x_dataset.guide": {"en": "Collection and evaluation guide", "ar": "دليل جمع الحالات وتقييمها"},

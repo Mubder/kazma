@@ -45,7 +45,7 @@
           <div class="xd-actions"><button class="btn btn-secondary" @click="page--" :disabled="page === 0 || busy">{{ t('x_dataset.previous') }}</button><span x-text="page + 1"></span>
             <button class="btn btn-secondary" @click="page++" :disabled="(page + 1) * 20 >= filtered.length || busy">{{ t('x_dataset.next') }}</button></div>
         </div></template>
-        <template x-if="form"><form @submit.prevent="save()" class="xd-editor">
+        <template x-if="form"><form @submit.prevent="save()" @invalid.capture.prevent="invalidField($event)" class="xd-editor">
           <h3>{{ t('x_dataset.edit') }}</h3>
           <fieldset :disabled="busy" style="border:0;padding:0;min-width:0;">
             <label for="xd-source-text">{{ t('x_dataset.original') }}</label><textarea id="xd-source-text" name="source_text" class="form-input" x-model="form.case.context.text" rows="5" maxlength="32000" :dir="/\p{Script=Arabic}/u.test(form.case.context.text) ? 'rtl' : 'ltr'"></textarea>
@@ -91,7 +91,7 @@
             </div>
             <label class="xd-check"><input id="xd-reviewed" type="checkbox" x-model="reviewed">{{ t('x_dataset.attestation') }}</label>
             <p>{{ t('x_dataset.review_help') }}</p>
-            <p x-show="error" role="alert" translate="no" x-text="error"></p>
+            <p x-show="error" x-cloak x-ref="saveError" tabindex="-1" role="alert" translate="no" dir="auto" x-text="error"></p>
             <div class="xd-actions"><button type="submit" class="btn btn-primary">{{ t('x_dataset.save_case') }}</button><span x-show="dirty">{{ t('x_dataset.unsaved') }}</span></div>
           </fieldset>
         </form></template>

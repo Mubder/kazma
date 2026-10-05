@@ -6,6 +6,21 @@ function xDatasetPage() {
     categories: ['gulf_arabic', 'mixed_scripts', 'sarcasm', 'negation', 'quotation', 'multiple_entities', 'injection', 'source_contradiction', 'checker_outage'],
     _saved: '', _sequence: 0, _unload: null,
     t(key) { return window.t('x_dataset.' + key); },
+    showSaveError(message) {
+      this.error = message;
+      this.$nextTick(() => {
+        const alert = this.$refs && this.$refs.saveError;
+        if (alert) { alert.scrollIntoView({ block: 'center' }); alert.focus(); }
+      });
+    },
+    invalidField(event) {
+      const input = event.target;
+      const label = input.id && document.querySelector('label[for="' + input.id + '"]');
+      const field = label ? label.textContent.trim() : this.t('edit');
+      this.notice = '';
+      this.showSaveError(this.t('invalid_field').replace('{field}', field)
+        + ' ' + (input.validationMessage || this.t('request_failed')));
+    },
     signature() { return JSON.stringify({form: this.form, reviewed: this.reviewed, critical: this.critical}); },
     get dirty() { return !!this.form && this.signature() !== this._saved; },
     get filtered() {
@@ -30,8 +45,17 @@ function xDatasetPage() {
       const response = await fetch(url, { method: method || 'GET', credentials: 'same-origin',
         headers: body ? { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } : {},
         body: body ? JSON.stringify(body) : undefined });
-      const data = await response.json();
-      if (!response.ok || !data.ok) throw new Error(data.error || this.t('request_failed'));
+      let data;
+      try { data = await response.json(); }
+      catch (_) { throw new Error(this.t('invalid_response').replace('{status}', String(response.status))); }
+      if (!data || typeof data !== 'object') {
+        throw new Error(this.t('invalid_response').replace('{status}', String(response.status)));
+      }
+      if (!response.ok || !data.ok) {
+        const detail = typeof data.detail === 'string' ? data.detail : Array.isArray(data.detail)
+          ? data.detail.map(item => (item.loc || []).join('.') + ': ' + item.msg).join('; ') : '';
+        throw new Error(data.error || detail || this.t('invalid_response').replace('{status}', String(response.status)));
+      }
       return data.dataset;
     },
     async load() {
@@ -103,6 +127,22 @@ function xDatasetPage() {
     },
     async save() {
       if (this.busy || !this.form) return;
+      if (this.reviewed) {
+        const missing = [];
+        if (!['en', 'ar', 'mixed'].includes(this.form.case.language)) missing.push(this.t('language'));
+        if (!this.form.case.categories.length) missing.push(this.t('categories'));
+        if (!this.form.targetLabeled) missing.push(this.t('target_labeled'));
+        for (const label of ['auto', 'evidence', 'safety']) {
+          if (!['true', 'false'].includes(this.form[label])) missing.push(this.t('expected_' + label));
+        }
+        if (!this.form.case.rationale.trim()) missing.push(this.t('rationale'));
+        if (this.form.case.actual && this.critical === '') missing.push(this.t('critical'));
+        if (missing.length) {
+          this.notice = '';
+          this.showSaveError(this.t('review_incomplete').replace('{fields}', missing.join('; ')));
+          return;
+        }
+      }
       const frozen = JSON.parse(JSON.stringify(this.form));
       const c = frozen.case;
       c.fault = c.fault || null;
@@ -117,7 +157,8 @@ function xDatasetPage() {
       try {
         this.dataset = await this.request('/api/x/datasets/' + this.dataset.id + '/case', 'PUT', body);
         this.form = null; await this.load(); this.notice = this.t('saved');
-      } catch (e) { this.error = String(e.message || e); }
+        if (window.showToast) window.showToast(this.notice, 'success');
+      } catch (e) { this.showSaveError(String(e.message || e)); }
       finally { this.busy = false; }
     },
     async download(report) {
