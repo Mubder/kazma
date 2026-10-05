@@ -1505,6 +1505,31 @@ async def retry_summon(summon_id: str, *, actor: str = "operator") -> SummonResu
             False, "skipped", reason="could not reopen this summon",
             parent_id=rec.parent_id, summon_id=summon_id,
         )
+    # Reuse the captured observation, never infer verification from stored text.
+    # History also recovers observations lost by older text-only retry versions.
+    decisions = [rec.decision]
+    history = await asyncio.to_thread(store.history, summon_id)
+    decisions.extend(item.get("record", {}).get("decision", {}) for item in history)
+    context = None
+    for decision in decisions:
+        saved = decision.get("context", {}) if isinstance(decision, dict) else {}
+        if (not isinstance(saved, dict) or saved.get("source_id") != rec.parent_id
+                or saved.get("text") != rec.parent_text or saved.get("author_handle") != rec.target_handle):
+            continue
+        candidate = ContextSnapshot(
+            source_id=rec.parent_id, text=rec.parent_text, author_handle=rec.target_handle,
+            verified_source=saved.get("verified_source") is True,
+            author_resolved=saved.get("author_resolved") is True,
+            truncated=saved.get("truncated") is True,
+            media_present=saved.get("media_present") is True,
+            missing_quote=saved.get("missing_quote") is True,
+            fallback_text=saved.get("fallback_text") is True,
+            quotes=tuple(saved.get("quotes") or ()),
+        )
+        if context is None or (candidate.verified_source and candidate.author_resolved):
+            context = candidate
+        if candidate.verified_source and candidate.author_resolved:
+            break
     return await handle_summon(
         summon_id=rec.summon_id,
         parent_id=rec.parent_id or rec.summon_id,
@@ -1514,6 +1539,7 @@ async def retry_summon(summon_id: str, *, actor: str = "operator") -> SummonResu
         summon_text=rec.summon_text,
         trusted=True,
         target_followers=None,
+        context=context,
         # Operator-initiated: always hold for approval, even if live mode
         # is auto. Retrying the three skipped @KazmaAI summons must not
         # publish unread.
