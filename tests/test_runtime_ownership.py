@@ -38,7 +38,7 @@ def pg_dsn():
     dsn = get_database_url()
     if not is_postgres() or not dsn:
         pytest.skip("requires disposable Postgres with KAZMA_TEST_ALLOW_REAL_DB=1")
-    import psycopg
+    psycopg = pytest.importorskip("psycopg")
 
     with psycopg.connect(dsn, autocommit=True) as conn:
         conn.execute("DROP TABLE IF EXISTS kazma_runtime_volume")
@@ -73,7 +73,7 @@ def test_database_refuses_second_root_then_wrong_volume(pg_dsn, tmp_path):
 
 @pytest.mark.postgres
 def test_session_loss_calls_fail_stop_without_reconnecting(pg_dsn, tmp_path):
-    import psycopg
+    psycopg = pytest.importorskip("psycopg")
 
     lost = threading.Event()
     owner = _PostgresRuntimeLease(pg_dsn, tmp_path, on_loss=lost.set)
@@ -135,7 +135,7 @@ owner.release()
 
 @pytest.mark.postgres
 def test_default_loss_action_exits_entire_process(pg_dsn, tmp_path):
-    import psycopg
+    psycopg = pytest.importorskip("psycopg")
 
     core = str(Path(__file__).resolve().parents[1] / "kazma-core")
     code = """
