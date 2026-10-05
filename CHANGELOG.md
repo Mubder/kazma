@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## X Studio: simpler subjects and explicit reply language (2026-10-05)
+
+X Settings now separates basic subject authoring from advanced policy fields,
+generates stable card IDs, preserves advanced values, and displays saved/unsaved
+state. Support/Against use a shared versioned contract across replies, posts and
+verification. Professional, Friendly and Humorous join the existing tones;
+Supportive wording retains the declared side.
+
+Reply style adds language, dialect, slang, length and per-card overrides.
+“Allow uncensored language” is off by default and permits selected ordinary
+profanity without removing hard lines, evidence checks or publication gates.
+Saved-versus-proposed previews and a bounded X model compatibility test make
+no X writes. Stale previews are discarded; saving cannot overwrite newer local
+edits. Conversations show and filter recorded effective positions and tones.
+
+Real human-reviewed evaluation and deployment-specific acceptance remain
+required. No synthetic examples qualify automatic replies, and media/analytics
+remain unavailable pending their separate capability and readiness gates.
+
 ## Durable settings and real-model evaluation (2026-10-04)
 
 Failed settings initialization now stops boot before workers or automation

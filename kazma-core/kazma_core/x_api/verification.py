@@ -93,16 +93,19 @@ async def verify_candidate(draft: str, subject: Subject, *, context: ContextSnap
                            sources: tuple[dict[str, Any], ...] = ()) -> tuple[CheckResult, ...]:
     """Four bounded calls; no regeneration, first-word parsing or outage approval."""
     source_text = json.dumps(list(sources), ensure_ascii=False)
+    from kazma_core.x_api.reply_style import stance_contract, style_contract
     observed = context.text + "\n" + draft + "\n" + "\n".join(str(s.get("content") or "") for s in sources) + "\n" + "\n".join(q["text"] for q in context.quotes)
     policy = {"target": subject.target or subject.id, "side": subject.side, "view": subject.view,
               "scope": subject.scope, "exceptions": subject.exceptions, "hard_lines": subject.all_hard_lines(),
-              "evidence_policy": subject.evidence_policy, "evidence_max_age_days": subject.evidence_max_age_days}
+              "evidence_policy": subject.evidence_policy, "evidence_max_age_days": subject.evidence_max_age_days,
+              "stance_contract": stance_contract(subject.side, subject.target or subject.id),
+              "language_contract": style_contract(subject)}
     instructions = {
         "context": "Does the source provide complete context? Missing quotes/media, truncation or unresolved authorship mean unknown.",
         "target": "Does the draft address the primary target and author's actual claim, distinguishing quotations, negation and incidental entities?",
         "stance": "Does the draft express the scoped declared position? Conceding supported facts is allowed. Voice has no required side; a sided catch-all still does.",
         "evidence": "Enumerate every material assertion in claims. Opinions use kind/status opinion, with no sources. Facts need exact source IDs and supported status. The source post's allegation is not independent proof. Check numbers, quotes, qualifiers, freshness and attribution. Unsupported claims mean unknown or fail.",
-        "safety": "Check universal and custom hard lines, harassment, slurs, threats, unsupported allegations and escalation in English or Arabic. Tone never excuses violations.",
+        "safety": "Check universal and custom hard lines, harassment, slurs, threats, unsupported allegations and escalation in English or Arabic. Also enforce the language contract, profanity level, dialect, slang and length. Disguised profanity is still profanity; dialect alone is not profanity. Permission for profanity never permits slurs or threats. Tone never excuses violations.",
     }
     groups = (("context_verification", ("context", "target")), ("verification", ("stance",)),
               ("factual_verification", ("evidence",)), ("safety_verification", ("safety",)))

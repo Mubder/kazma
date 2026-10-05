@@ -1,0 +1,45 @@
+{% macro style_controls(model, prefix) %}
+<div class="two-col-grid">
+    <div class="form-group">
+        <label :for="{{ prefix }} + '-language'">{{ t('settings.xt.style_language') }}</label>
+        <select :id="{{ prefix }} + '-language'" class="form-input" x-model="{{ model }}.language">
+            <option value="source">{{ t('settings.xt.style_source') }}</option>
+            <option value="en">{{ t('settings.xt.style_en') }}</option>
+            <option value="ar">{{ t('settings.xt.style_ar') }}</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label :for="{{ prefix }} + '-dialect'">{{ t('settings.xt.style_dialect') }}</label>
+        <input :id="{{ prefix }} + '-dialect'" class="form-input" x-model="{{ model }}.dialect" maxlength="120" dir="auto" autocomplete="off">
+    </div>
+    <div class="form-group">
+        <label :for="{{ prefix }} + '-slang'">{{ t('settings.xt.style_slang') }}</label>
+        <select :id="{{ prefix }} + '-slang'" class="form-input" x-model="{{ model }}.slang">
+            <option value="none">{{ t('settings.xt.style_none') }}</option>
+            <option value="natural">{{ t('settings.xt.style_natural') }}</option>
+            <option value="strong">{{ t('settings.xt.style_strong') }}</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label :for="{{ prefix }} + '-length'">{{ t('settings.xt.style_length') }}</label>
+        <select :id="{{ prefix }} + '-length'" class="form-input" x-model="{{ model }}.length">
+            <option value="short">{{ t('settings.xt.style_short') }}</option>
+            <option value="standard">{{ t('settings.xt.style_standard') }}</option>
+        </select>
+    </div>
+</div>
+<label class="checkbox-label" :for="{{ prefix }} + '-uncensored'">
+    <input :id="{{ prefix }} + '-uncensored'" type="checkbox" x-model="{{ model }}.allow_uncensored_language"
+           @change="if (!{{ model }}.allow_uncensored_language) {{ model }}.profanity = 'none'">
+    {{ t('settings.xt.allow_uncensored_language') }}
+</label>
+<p class="form-hint">{{ t('settings.xt.uncensored_hint') }}</p>
+<div class="form-group" x-show="{{ model }}.allow_uncensored_language" x-cloak>
+    <label :for="{{ prefix }} + '-profanity'">{{ t('settings.xt.style_profanity') }}</label>
+    <select :id="{{ prefix }} + '-profanity'" class="form-input" x-model="{{ model }}.profanity">
+        <option value="none">{{ t('settings.xt.style_none') }}</option>
+        <option value="mild">{{ t('settings.xt.style_mild') }}</option>
+        <option value="strong">{{ t('settings.xt.style_strong') }}</option>
+    </select>
+</div>
+{% endmacro %}

@@ -35,7 +35,7 @@ def pipeline_fingerprint(cfg: ReplyConfig) -> str:
     xcfg = get_x_config()
     modules = ("reply", "stance", "routing", "subject_policy", "verification", "context", "model_selection",
                "qualification", "ai_budget", "approval", "account_binding", "evidence", "text_length",
-               "policy", "thread_policy", "ownership", "publication_service", "shadow")
+               "policy", "thread_policy", "ownership", "publication_service", "shadow", "reply_style")
     code = {name: hashlib.sha256(Path(__file__).with_name(name + ".py").read_bytes().replace(b"\r\n", b"\n")).hexdigest() for name in modules}
     knowledge = None
     if cfg.use_knowledge:

@@ -71,6 +71,8 @@ function xStudioPage() {
     conversationsNext: '',
     conversationQuery: '',
     conversationState: '',
+    conversationSide: '',
+    conversationMood: '',
     convLoading: false,
     convBusy: '',
     // The poller now makes two read calls every cycle, so reads drown the
@@ -201,7 +203,7 @@ function xStudioPage() {
           }
         }
         const more = !!(opts && opts.more);
-        const url = '/api/x/reply/conversations?limit=30&query=' + encodeURIComponent(this.conversationQuery) + '&state=' + encodeURIComponent(this.conversationState) + (more && this.conversationsNext ? '&cursor=' + encodeURIComponent(this.conversationsNext) : '');
+        const url = '/api/x/reply/conversations?limit=30&query=' + encodeURIComponent(this.conversationQuery) + '&state=' + encodeURIComponent(this.conversationState) + '&side=' + encodeURIComponent(this.conversationSide) + '&mood=' + encodeURIComponent(this.conversationMood) + (more && this.conversationsNext ? '&cursor=' + encodeURIComponent(this.conversationsNext) : '');
         const data = await this._readSection('conversations', url, 'rows', null, more);
         if (data) this.conversationsNext = data.next_cursor || '';
       } catch (e) {

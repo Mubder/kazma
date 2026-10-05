@@ -54,11 +54,18 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                         page.locator("#xs-tab-conversations").click()
                         page.locator("#xs-conversation-state").select_option("posted")
                         page.wait_for_function("() => !Alpine.$data(document.querySelector('.xs-wrap')).convLoading")
-                        for selector in ("#xs-conversation-search", "#xs-conversation-state"):
+                        for selector in ("#xs-conversation-search", "#xs-conversation-state", "#xs-conversation-side", "#xs-conversation-mood"):
                             assert page.locator(selector).evaluate("e => {const s=getComputedStyle(e); return s.borderTopStyle === 'solid' && parseFloat(s.paddingLeft) >= 10;}")
                         assert page.locator("#xs-conversation-state").input_value() == "posted"
+                        page.locator("#xs-conversation-side").select_option("support")
+                        page.locator("#xs-conversation-mood").select_option("professional")
+                        page.wait_for_function("() => !Alpine.$data(document.querySelector('.xs-wrap')).convLoading")
+                        assert page.locator("#xs-conversation-side").input_value() == "support"
+                        assert page.locator("#xs-conversation-mood").input_value() == "professional"
                         assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth + 1")
                         page.locator("#xs-conversation-state").select_option("")
+                        page.locator("#xs-conversation-side").select_option("")
+                        page.locator("#xs-conversation-mood").select_option("")
                         page.locator("#xs-tab-studio").click()
                     page.locator("#xs-text").fill(text)
                     page.wait_for_function("() => {const s = Alpine.$data(document.querySelector('.xs-wrap')); return s.text && !s._composerSaving && s._composerSignature() === s._composerSaved;}")
@@ -151,22 +158,59 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                     assert not page_problems(page, "/x", errors)
                     page.goto(harness.base + "/settings?tab=x", wait_until="domcontentloaded")
                     _settle(page)
-                    page.get_by_role("button", name="coffee", exact=True).click()
+                    page.get_by_role("button", name="Coffee sourcing", exact=True).click()
                     page.locator("#xr-mood-0").wait_for()
                     assert page.locator("#xr-mood-0").input_value() == "supportive"
                     assert page.locator("#xr-side-0").input_value() == "support"
+                    assert not page.locator("#xr-id-0").is_visible()
+                    page.get_by_role("button", name="Advanced subject settings" if language == "en" else "إعدادات الموضوع المتقدمة", exact=True).click()
+                    page.locator("#xr-scope-0").wait_for(state="visible")
                     assert page.locator("#xr-scope-0").is_visible()
                     assert page.locator("#xr-scope-0").input_value() == "Commercial sourcing"
                     assert page.locator("#xr-tones-0").evaluate("e => Array.from(e.selectedOptions).map(o => o.value)") == ["dry", "supportive"]
                     page.locator(".x-policy-card").first.locator("details summary").click()
-                    draft_permission = page.locator(".x-policy-card .checkbox-label input").first
+                    draft_permission = page.locator(".x-policy-card input[x-model='s.allow_draft']").first
                     assert draft_permission.is_checked()
                     assert draft_permission.evaluate("e => {const s=getComputedStyle(e); return s.appearance === 'none' && s.backgroundColor === s.borderTopColor;}")
                     assert page.locator(".x-controls .toggle input").first.evaluate("e => getComputedStyle(e).width") == "0px"
-                    page.get_by_role("button", name="tea", exact=True).click()
+                    page.get_by_role("button", name="Tea sourcing", exact=True).click()
                     page.locator("#xr-mood-1").wait_for()
                     assert page.locator("#xr-mood-1").input_value() == "dry"
                     assert page.locator("#xr-side-1").input_value() == "against"
+                    language_freedom = page.locator("#xr-style-global-uncensored")
+                    assert not language_freedom.is_checked()
+                    language_freedom.focus()
+                    page.keyboard.press("Space")
+                    assert language_freedom.is_checked()
+                    page.locator("#xr-style-global-profanity").select_option("strong")
+                    language_freedom.uncheck()
+                    assert page.locator("#xr-style-global-profanity").input_value() == "none"
+                    target = "Browser policy " + language
+                    page.get_by_role("button", name="+ Add subject" if language == "en" else "+ إضافة موضوع", exact=True).click()
+                    # The new card asks for a human target; its stable ID stays advanced.
+                    card = page.locator(".x-policy-card").last
+                    card.locator("input[id^='xr-target-']").fill(target)
+                    card.locator("select[id^='xr-side-']").select_option("support")
+                    card.locator("select[id^='xr-mood-']").select_option("professional")
+                    assert not card.locator("input[id^='xr-id-']").is_visible()
+                    card.get_by_text("Customize language for this subject" if language == "en" else "تخصيص اللغة لهذا الموضوع", exact=True).click()
+                    card.locator("select[id$='-language']").select_option(language)
+                    with page.expect_response(lambda response: response.url.endswith("/api/x/reply") and response.request.method == "PUT") as policy_saved:
+                        page.get_by_role("button", name="Save auto-reply" if language == "en" else "حفظ الرد التلقائي", exact=True).click()
+                    assert policy_saved.value.status == 200, policy_saved.value.text()
+                    saved_card = next(s for s in policy_saved.value.json()["subjects"] if s["target"] == target)
+                    assert saved_card["match"] == [target]
+                    assert saved_card["reply_style"]["language"] == language
+                    assert not saved_card["allow_auto"]
+                    page.reload(wait_until="domcontentloaded")
+                    _settle(page)
+                    page.get_by_role("button", name=target, exact=True).click()
+                    card = page.locator(".x-policy-card").filter(has=page.get_by_role("button", name=target, exact=True))
+                    assert card.locator("select[id$='-language']").input_value() == language
+                    assert card.locator("input[id^='xr-target-']").input_value() == target
+                    preserved = get_config_store().get("connectors.x.reply.subjects")[0]
+                    assert preserved["scope"] == "Commercial sourcing"
+                    assert preserved["allowed_moods"] == ["dry", "supportive"]
                     assert not page_problems(page, "/settings?tab=x", errors)
                 finally:
                     context.close()

@@ -73,6 +73,7 @@ class SubjectBody(BaseModel):
     counterexamples: list[str] = Field(default_factory=list)
     owner: str = ""
     change_reason: str = ""
+    reply_style: dict[str, Any] = Field(default_factory=dict)
 
 
 class _PolicyDocumentBody(BaseModel):
@@ -115,6 +116,7 @@ class ReplyConfigBody(BaseModel):
     close_thread_marker: str = Field(default="")
     subjects: list[SubjectBody] = Field(default_factory=list)
     ai: _XAISelectionBody | None = Field(default=None)
+    reply_style: dict[str, Any] | None = Field(default=None)
 
 
 class SummonIdBody(BaseModel):
@@ -133,6 +135,8 @@ class PreviewBody(BaseModel):
     subject_id: str = Field(default="")
     mood: str = Field(default="")
     ai: _XAISelectionBody | None = Field(default=None)
+    reply_style: dict[str, Any] | None = Field(default=None)
+    compare_saved: StrictBool = False
 
 
 async def _csrf(request: Request) -> None:
@@ -192,6 +196,7 @@ def _payload() -> dict[str, Any]:
         xcfg = get_x_config()
         ai = validate_selection(get_config_store().get(x_config_key("connectors.x.ai")))
         ai_options = model_options()
+        auto_hold = qualification_hold(cfg)
 
     return {
         "ok": True,
@@ -201,7 +206,7 @@ def _payload() -> dict[str, Any]:
         "ai": ai,
         "ai_options": ai_options,
         "ai_roles": list(X_MODEL_ROLES),
-        "auto_qualification_hold": qualification_hold(cfg),
+        "auto_qualification_hold": auto_hold,
         "summoners": list(cfg.summoners),
         "trigger": cfg.trigger,
         "max_replies_per_day": cfg.max_replies_per_day,
@@ -218,6 +223,7 @@ def _payload() -> dict[str, Any]:
         "open_thread_marker": cfg.open_thread_marker,
         "close_thread_marker": cfg.close_thread_marker,
         "subjects": [asdict(subject) for subject in cfg.subjects],
+        "reply_style": cfg.reply_style,
         "moods": sorted(MOODS),
         # The panel shows the emoji legend rather than making the
         # operator guess which ones are wired.
@@ -231,11 +237,11 @@ def _payload() -> dict[str, Any]:
         # config would allow it; this says whether the loop exists, which is a
         # different question after a config change without a restart.
         "poller_running": _poller_running(),
-        "live_reason": _live_reason(cfg, xcfg),
+        "live_reason": _live_reason(cfg, xcfg, auto_hold=auto_hold),
     }
 
 
-def _live_reason(cfg: Any, xcfg: Any) -> str:
+def _live_reason(cfg: Any, xcfg: Any, *, auto_hold: str | None = None) -> str:
     """One sentence: is this thing actually going to do anything, and if not, why.
 
     An operator can have a working dry run and a completely inert feature at
@@ -260,6 +266,15 @@ def _live_reason(cfg: Any, xcfg: Any) -> str:
             "running — Save again to start it, or restart Kazma. /x roast works meanwhile."
         )
     n = len(cfg.subjects)
+    if cfg.mode == "auto":
+        if auto_hold is None:
+            from kazma_core.x_api.qualification import qualification_hold
+
+            auto_hold = qualification_hold(cfg)
+        if auto_hold:
+            return "Mentions poller running; automatic publishing held. " + auto_hold
+        if not any(subject.allow_auto for subject in cfg.subjects):
+            return "Mentions poller running; every subject requires review before publishing."
     if n == 0:
         return (
             f"Live in {cfg.mode} mode, poller running, voice-only — "
@@ -293,7 +308,8 @@ def x_reply_recent(limit: int = 20) -> JSONResponse:
 
 
 @router.get("/conversations")
-def x_reply_conversations(limit: int = 30, query: str = "", state: str = "", cursor: str = "") -> JSONResponse:
+def x_reply_conversations(limit: int = 30, query: str = "", state: str = "", cursor: str = "",
+                          side: str = "", mood: str = "") -> JSONResponse:
     """Whole exchanges, newest first — who summoned, what was said, what Kazma said.
 
     Distinct from ``/recent``, which is a state list for the settings panel.
@@ -307,7 +323,8 @@ def x_reply_conversations(limit: int = 30, query: str = "", state: str = "", cur
     try:
         from kazma_core.x_api.reply_store import get_reply_store
 
-        page = get_reply_store().conversation_page(limit=limit, query=query, state=state, cursor=cursor)
+        page = get_reply_store().conversation_page(limit=limit, query=query, state=state, cursor=cursor,
+                                                   side=side, mood=mood)
         rows = page.pop("rows")
         out = []
         for r in rows:
@@ -332,6 +349,7 @@ def x_reply_conversations(limit: int = 30, query: str = "", state: str = "", cur
                 "needs_reconciliation": r.status in ("sending", "outcome_unknown"),
                 "subject": r.subject_id,
                 "checks": r.decision.get("checks", []),
+                "effective_policy": r.decision.get("effective_policy", {}),
                 "context": r.decision.get("context", {}),
                 "models": r.decision.get("models", []),
                 "reason": (
@@ -462,6 +480,14 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
         subjects, _ = normalize_cards([subject.model_dump(by_alias=True) for subject in body.subjects])
         previous = await asyncio.to_thread(get_config_store().get, x_config_key("connectors.x.reply.subjects"), [])
         subjects = revise_cards(previous, subjects)
+        from kazma_core.x_api.reply_style import normalize_style
+
+        style = None
+        if body.reply_style is not None:
+            try:
+                style = normalize_style(body.reply_style)
+            except ValueError as exc:
+                return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
 
         items: list[tuple[str, Any, str]] = [
@@ -538,6 +564,8 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
         ]
         if ai is not None:
             items.append(("connectors.x.ai", ai, _CATEGORY))
+        if style is not None:
+            items.append(("connectors.x.reply.style", style, _CATEGORY))
         items.append(("connectors.x.reply.settings_revision", revision + 1, _CATEGORY))
         try:
             await asyncio.to_thread(get_config_store().batch_set,
@@ -716,10 +744,7 @@ async def x_reply_preview(body: PreviewBody) -> JSONResponse:
         # vault rows and this is the one endpoint that spends a model call.
         with tenant_scope(x_tenant_id()):
             override = None
-            if body.subject is not None and (
-                body.subject.view.strip()
-                or (body.subject.side or "").strip().lower() in ("against", "support")
-            ):
+            if body.subject is not None:
                 from kazma_core.x_api.stance import _parse_subjects
 
                 edited = body.subject.model_dump(by_alias=True)
@@ -733,7 +758,19 @@ async def x_reply_preview(body: PreviewBody) -> JSONResponse:
                 parsed = _parse_subjects([edited])
                 if parsed:
                     override = parsed[0]
+            from dataclasses import replace
+
             from kazma_core.x_api.model_selection import x_model_scope
+            from kazma_core.x_api.reply_style import normalize_style
+            from kazma_core.x_api.stance import get_reply_config
+
+            cfg = await asyncio.to_thread(get_reply_config)
+            saved_cfg = cfg
+            if body.reply_style is not None:
+                try:
+                    cfg = replace(cfg, reply_style=normalize_style(body.reply_style))
+                except ValueError as exc:
+                    return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
             # Unsaved model selection is tested without activating it.
             async with x_model_scope(body.ai.model_dump(exclude_unset=True) if body.ai else None):
@@ -743,14 +780,34 @@ async def x_reply_preview(body: PreviewBody) -> JSONResponse:
                     subject_id=(body.subject_id or "").strip(),
                     mood=(body.mood or "").strip().lower(),
                     subject_override=override,
+                    cfg=cfg,
                 )
+            original = None
+            if body.compare_saved:
+                async with x_model_scope():
+                    original = await preview_reply(parent_text=text,
+                                                   parent_handle=(body.parent_handle or "").strip().lstrip("@"),
+                                                   subject_id=override.id if override and saved_cfg.subject_by_id(override.id) else "",
+                                                   cfg=saved_cfg)
         payload = result.to_dict()
         payload["preview_scope"] = "card_only" if override is not None or body.subject_id else "full_policy"
         payload["publishing_eligible"] = False
+        if original is not None:
+            payload["saved_comparison"] = original.to_dict()
         payload["ok"] = result.ok
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
         return _safe_error(exc)
+
+
+@protected_router.post("/model-test", dependencies=[Depends(_csrf)])
+async def x_reply_model_test(body: PreviewBody) -> JSONResponse:
+    """Test selected X roles on a fixed opinion-only sample without any X write."""
+    sample = SubjectBody(id="model_check", target="Coffee proposal", match=["coffee"],
+                         side="support", mood="professional", evidence_policy="opinion_only")
+    return await x_reply_preview(PreviewBody(subject=sample,
+                                            parent_text="The coffee proposal seems sensible to me.",
+                                            ai=body.ai, reply_style=body.reply_style))
 
 
 @router.get("/qualification")

@@ -7,6 +7,15 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 # Recent features guide
 
+**New in 2026-10-05 — X subject and reply-language controls.** Start with a
+target and Support/Against; Advanced preserves scope, matching and permissions.
+Choose a tone independently of stance, and set language, dialect, slang and
+length. Allow uncensored language is off by default and permits selected
+ordinary profanity while retaining factual checks, hard lines and approvals.
+Compare saved/proposed previews and test the X model without posting.
+Conversations show the applied position and tone. These controls change the
+evaluation fingerprint; real reviewed cases still qualify unattended replies.
+
 **New in 2026-10-04 — durable settings and real-model evaluation.** If the
 settings database cannot initialize, Kazma stops before workers or automation
 start. A failed save returns HTTP 503 instead of reporting success for values

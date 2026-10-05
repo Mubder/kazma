@@ -62,6 +62,54 @@ unsaved card; complete-policy preview applies routing to all configured cards.
 The preview labels these scopes and shows the actual models and check results.
 A preview is never publication approval or auto qualification.
 
+### Simple setup and advanced policy
+
+Use the Connection, Model, Subjects, Reply style and Publishing links in
+Settings → X. Add a subject, enter its target and choose Support or Against.
+The card generates a stable internal ID and initially matches the exact target
+you entered. Confirm additional matching terms in Advanced before saving;
+Kazma does not guess or silently enable aliases. Changing an existing target
+does not erase its matching terms, exceptions or permissions.
+
+Support defends the scoped target and challenges unsupported criticism while
+acknowledging substantiated failings. Against challenges the target's actual
+claim or public conduct while conceding supported facts. Neither side permits
+invented claims, denial of evidence or criticism redirected at an incidental
+entity. Quotes, sarcasm, negation and competing targets can produce a hold.
+Additional instructions are optional. Explicit commands to reverse the chosen
+side are rejected; contextual verification checks subtler conflicts.
+
+Advanced retains scope, exceptions, evidence requirements, aliases, exclusions,
+examples, hard lines, tone permissions and publication permissions. Hiding
+these fields does not reset them. Unsaved changes are indicated beside Save;
+validation failures stay visible. If you edit while a save is running, the
+newer local edits remain unsaved instead of being overwritten by its response.
+
+### Reply style and language
+
+Choose Professional, Friendly, Humorous, Roast, Angry, Dry, Deadpan or Supportive
+on the card. Supportive means constructive wording; it never turns Against
+into Support. Global Reply style sets source/English/Arabic language, optional
+dialect, slang intensity and short/standard length. The card can override
+language settings for one card; otherwise it inherits the global defaults.
+Permitted summon emoji can override tone, subject to the card's allowed tones.
+
+**Allow uncensored language** is off by default. Enable it and select None,
+Mild or Strong profanity to allow ordinary strong language; it never requires
+profanity. A local model may still refuse particular wording. Turning it off
+restores clean language. Dialect and slang are separate from profanity.
+Hard lines, factual checks, threat/slur restrictions, approvals, weighted X
+length limits and publication safeguards remain active at every level.
+Known-term screening and contextual model checks can hold a candidate; they
+cannot guarantee detection of every slang or disguised expression.
+
+Preview shows the effective target, side, tone, language controls, model roles
+and verification results. Compare saved settings with proposed changes on the
+same input without saving or posting. Changing input/settings while it runs
+discards the stale result. Conversations show recorded effective positions and
+tones and can filter them; historical rows without those snapshots remain in
+the unfiltered view. Policy/style changes invalidate automatic qualification.
+
 ### Choose an X-specific model
 
 Use the global Kazma model or pin an enabled provider and exact model ID for
@@ -69,6 +117,11 @@ X work. Advanced bindings can separately select classification, reply drafting,
 post drafting, context/target verification, stance verification, factual
 verification and safety verification. Bindings are fixed throughout each
 operation; changing X selection never switches Kazma's global profile.
+
+Test the X model runs a bounded, fixed opinion-only sample through drafting
+and structured verification using the selected unsaved binding and language
+controls. It changes no settings and posts nothing. Passing proves that sample's
+compatibility, not model accuracy or production qualification.
 
 Specific bindings have no implicit fallback. A stopped local server or missing
 model produces a clear hold/error. Local-only checks the configured endpoint

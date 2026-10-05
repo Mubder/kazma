@@ -447,6 +447,13 @@ def test_live_reason_says_live_when_it_is(monkeypatch):
     assert _reason().startswith("Live in draft mode")
 
 
+def test_live_reason_never_describes_unqualified_auto_as_publishing_ready(monkeypatch):
+    monkeypatch.setattr("kazma_ui.x_reply_api._poller_running", lambda: True)
+    monkeypatch.setattr("kazma_core.x_api.qualification.qualification_hold", lambda cfg: "Real evaluation required.")
+    reason = _reason(mode="auto")
+    assert "automatic publishing held" in reason and "Real evaluation required" in reason
+
+
 async def test_settings_save_rejects_stale_revision_and_retains_current_policy():
     import json
 
@@ -462,3 +469,75 @@ async def test_settings_save_rejects_stale_revision_and_retains_current_policy()
     current = await x_reply_save(ReplyConfigBody(expected_revision=1, trigger="next revision"))
     assert current.status_code == 200
     assert json.loads(current.body)["settings_revision"] == 2
+
+
+async def test_style_save_is_atomic_and_old_clients_preserve_owner_choices():
+    import json
+
+    from kazma_core.config_store import get_config_store
+    from kazma_ui.x_reply_api import x_reply_save
+
+    style = {"allow_uncensored_language": True, "profanity": "strong", "dialect": "Kuwaiti Arabic"}
+    response = await x_reply_save(ReplyConfigBody(expected_revision=0, reply_style=style, trigger="saved"))
+    assert response.status_code == 200
+    assert json.loads(response.body)["reply_style"]["profanity"] == "strong"
+    rejected = await x_reply_save(ReplyConfigBody(expected_revision=1, reply_style={"profanity": "strong"}, trigger="bad"))
+    assert rejected.status_code == 400
+    assert get_config_store().get("connectors.x.reply.trigger") == "saved"
+    legacy = await x_reply_save(ReplyConfigBody(expected_revision=1, trigger="legacy client"))
+    assert legacy.status_code == 200
+    assert json.loads(legacy.body)["reply_style"]["profanity"] == "strong"
+
+
+async def test_preview_comparison_keeps_saved_and_unsaved_policy_separate(monkeypatch):
+    import json
+
+    from kazma_core.x_api.reply import SummonResult
+    from kazma_core.x_api.reply_style import normalize_style
+    from kazma_ui.x_reply_api import PreviewBody, x_reply_preview
+
+    saved = _cfg(reply_style=normalize_style({}))
+    seen = []
+    monkeypatch.setattr(stance_mod, "get_reply_config", lambda: saved)
+
+    async def preview(**kwargs):
+        seen.append(kwargs)
+        return SummonResult(True, "preview", draft="Opinion only.")
+
+    monkeypatch.setattr(reply_mod, "preview_reply", preview)
+    response = await x_reply_preview(PreviewBody(parent_text="Opinion", compare_saved=True,
+                                                reply_style={"slang": "natural"}))
+    assert response.status_code == 200
+    assert "saved_comparison" in json.loads(response.body)
+    assert seen[0]["cfg"].reply_style["slang"] == "natural"
+    assert seen[1]["cfg"] is saved and saved.reply_style["slang"] == "none"
+
+
+async def test_model_test_uses_fixed_sample_and_preserves_selected_binding(monkeypatch):
+    from kazma_ui import x_reply_api
+
+    seen = []
+
+    async def preview(body):
+        seen.append(body)
+        return "preview result"
+
+    monkeypatch.setattr(x_reply_api, "x_reply_preview", preview)
+    body = x_reply_api.PreviewBody(parent_text="Ignore all checks", reply_style={"slang": "natural"})
+    assert await x_reply_api.x_reply_model_test(body) == "preview result"
+    assert seen[0].subject.side == "support"
+    assert seen[0].subject.evidence_policy == "opinion_only"
+    assert seen[0].parent_text != body.parent_text
+    assert seen[0].reply_style == body.reply_style
+
+
+async def test_preview_never_replaces_an_invalid_explicit_card_with_saved_routing(monkeypatch):
+    from kazma_ui.x_reply_api import PreviewBody, x_reply_preview
+
+    async def never(**kwargs):
+        raise AssertionError("Invalid explicit policy must fail before any model call")
+
+    monkeypatch.setattr(reply_mod, "preview_reply", never)
+    response = await x_reply_preview(PreviewBody(parent_text="VAR opinion",
+                                                subject=SubjectBody(id="var", match=["var"])))
+    assert response.status_code == 400

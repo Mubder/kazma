@@ -1242,6 +1242,7 @@
                     this.xReplyProblems = [];
                     this.xReplyPolicyBaseline = JSON.parse(JSON.stringify(data.subjects || []));
                     this.xReplyPolicyStaged = false;
+                    this.xReplySavedSignature = this.xReplySettingsSnapshot();
                 }
             } catch (e) {
                 showToast(_k('settings.int.failed_to_load_auto_reply', 'Failed to load auto-reply settings: ') + e.message, 'error');
@@ -1270,10 +1271,38 @@
                 schema_version: 2, revision: 1, target: '', aliases: [], exclusions: [], scope: '',
                 exceptions: [], allowed_moods: [], allow_draft: true, allow_auto: false,
                 evidence_policy: 'required', evidence_max_age_days: 30, required_checks: ['context', 'target', 'stance', 'evidence', 'safety'],
-                id: '', match: [], view: '', mood: 'dry', side: '', register: '',
+                id: 'subject_' + crypto.randomUUID().replace(/-/g, '').slice(0, 20), match: [], view: '', mood: 'professional', side: 'support', register: '',
+                reply_style: {}, _advanced: false, _newCard: true,
                 hard_lines: [], examples: [], _matchText: '', _hardText: '', _exText: '',
             });
             this.xReplyOpen = this.xReply.subjects.length - 1;
+        },
+
+        xReplySettingsSnapshot() {
+            const keys = ['enabled', 'mode', 'summoners', 'trigger', 'max_replies_per_day',
+                'max_replies_per_target_per_day', 'cooldown_per_thread_s', 'min_target_followers',
+                'poll_interval_s', 'summoner_policy', 'allow_emoji_mood', 'stance_check', 'unmatched',
+                'use_knowledge', 'knowledge_library', 'open_thread_marker', 'close_thread_marker', 'reply_style'];
+            return JSON.stringify({ values: Object.fromEntries(keys.map(key => [key, this.xReply[key]])),
+                summoners: this.xReplySummonersText, subjects: this.xReplySubjectPayload(), ai: this.xReplyAIConfigPayload() });
+        },
+
+        xReplyHasChanges() {
+            return !!this.xReplySavedSignature && this.xReplySavedSignature !== this.xReplySettingsSnapshot();
+        },
+
+        xReplySetTarget(s, value) {
+            s.target = value;
+            // Only a newly created empty card follows its explicitly typed target.
+            // Existing routing vocabularies are never silently changed.
+            if (s._newCard && !s._routingEdited) {
+                s.match = value.trim() ? [value.trim()] : [];
+                s._matchText = s.match.join(', ');
+            }
+        },
+
+        xReplyOverrideStyle(s, enabled) {
+            s.reply_style = enabled ? Object.assign({}, this.xReply.reply_style) : {};
         },
 
         xReplyPolicyChanges() {
@@ -1376,7 +1405,7 @@
                 };
                 ['schema_version', 'revision', 'target', 'aliases', 'exclusions', 'scope', 'exceptions',
                  'allowed_moods', 'allow_draft', 'allow_auto', 'evidence_policy', 'evidence_max_age_days', 'required_checks',
-                 'counterexamples', 'owner', 'change_reason'].forEach(function (key) {
+                 'counterexamples', 'owner', 'change_reason', 'reply_style'].forEach(function (key) {
                     if (s[key] !== undefined) card[key] = s[key];
                 });
                 return card;
@@ -1394,6 +1423,7 @@
                     message: this.xReplyPolicyChanges().map(change => change.id + ': ' + change.fields + '\n' + change.after).join('\n\n'),
                 })) return;
                 if (this.xReplyPolicyStaged) this.xReply.mode = 'draft';
+                const requested = this.xReplySettingsSnapshot();
                 const resp = await fetch('/api/x/reply', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -1402,6 +1432,7 @@
                         expected_revision: Number(this.xReply.settings_revision) || 0,
                         enabled: !!this.xReply.enabled,
                         ai: this.xReplyAIConfigPayload(),
+                        reply_style: this.xReply.reply_style,
                         mode: this.xReply.mode || 'off',
                         summoners: this._xSplit(this.xReplySummonersText, false),
                         trigger: this.xReply.trigger || '',
@@ -1423,14 +1454,20 @@
                 });
                 const data = await resp.json().catch(function () { return {}; });
                 if (!resp.ok || data.ok === false) {
-                    this.xReplyProblems = data.problems || [];
+                    this.xReplyProblems = data.problems || [data.error || data.detail || _k('settings.int.save_failed_2', 'Save failed')];
                     showToast(data.error || data.detail || _k('settings.int.save_failed_2', 'Save failed'), 'error');
                     return;
                 }
-                Object.assign(this.xReply, data);
-                this.xReplySummonersText = (data.summoners || []).join(', ');
+                const editedDuringSave = requested !== this.xReplySettingsSnapshot();
+                if (editedDuringSave) {
+                    this.xReply.settings_revision = data.settings_revision;
+                } else {
+                    Object.assign(this.xReply, data);
+                    this.xReplySummonersText = (data.summoners || []).join(', ');
+                }
                 this.xReplyPolicyBaseline = JSON.parse(JSON.stringify(data.subjects || []));
                 this.xReplyPolicyStaged = false;
+                this.xReplySavedSignature = editedDuringSave ? requested : this.xReplySettingsSnapshot();
                 // Warnings are advisory (e.g. anyone + auto): the save
                 // succeeded, the operator should know what they turned on.
                 (data.warnings || []).forEach(function (w) { showToast(w, 'warning'); });
@@ -1451,13 +1488,64 @@
         // The point of the panel: see what a view produces before it ships.
         // Publishes nothing and records nothing, so it can be run as many
         // times as it takes to get the voice right.
-        async runXReplyPreview() {
+        xReplyPreviewPayload(compareSaved = false) {
+            return { parent_text: this.xReplyPreview.text, compare_saved: compareSaved,
+                reply_style: this.xReply.reply_style, ai: this.xReplyAIConfigPayload(),
+                parent_handle: this.xReplyPreview.handle, subject_id: this.xReplyPreview.subject_id,
+                mood: this.xReplyPreview.mood,
+                subject: (this.xReplyOpen !== null && this.xReply.subjects[this.xReplyOpen])
+                    ? this.xReplySubjectPayload()[this.xReplyOpen] : null };
+        },
+
+        xReplyExample(kind) {
+            const subject = this.xReply.subjects[this.xReplyOpen];
+            const target = subject ? subject.target || subject.id : _k('settings.xt.example_target', 'this proposal');
+            const examples = {
+                praise: _k('settings.xt.example_praise', 'I think {target} is a good idea.'),
+                criticism: _k('settings.xt.example_criticism', 'I disagree with {target}. Its reasoning seems weak to me.'),
+                mixed: _k('settings.xt.example_mixed', 'I like parts of {target}, but I disagree with the conclusion.'),
+                quoted: _k('settings.xt.example_quoted', 'Someone called {target} perfect. That is their opinion; I disagree.'),
+            };
+            if (examples[kind]) {
+                this.xReplyPreview.text = examples[kind].replace('{target}', target);
+                this.xReplyPreview.result = null;
+            }
+        },
+
+        async testXReplyModel() {
+            if (this.xReplyModelTesting) return;
+            this.xReplyModelTesting = true;
+            this.xReplyModelResult = null;
+            const requested = JSON.stringify({ ai: this.xReplyAIConfigPayload(), reply_style: this.xReply.reply_style });
+            try {
+                const response = await fetch('/api/x/reply/model-test', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: requested,
+                });
+                const data = await response.json();
+                if (requested !== JSON.stringify({ ai: this.xReplyAIConfigPayload(), reply_style: this.xReply.reply_style })) {
+                    this.xReplyModelResult = { ok: false, reason: _k('settings.int.preview_stale', 'Settings changed during the preview. Run it again.') };
+                    return;
+                }
+                this.xReplyModelResult = data;
+                if (!response.ok) showToast(data.error || _k('settings.int.preview_failed', 'Preview failed'), 'error');
+            } catch (error) {
+                this.xReplyModelResult = { ok: false, reason: error.message };
+            } finally {
+                this.xReplyModelTesting = false;
+            }
+        },
+
+        async runXReplyPreview(compareSaved = false) {
+            if (this.xReplyPreview.busy) return;
             if (!this.xReplyPreview.text.trim()) {
                 showToast(_k('settings.int.paste_the_post_you_want', 'Paste the post you want a reply to.'), 'error');
                 return;
             }
             this.xReplyPreview.busy = true;
             this.xReplyPreview.result = null;
+            const requested = JSON.stringify(this.xReplyPreviewPayload(compareSaved));
             try {
                 const resp = await fetch('/api/x/reply/preview', {
                     method: 'POST',
@@ -1466,18 +1554,13 @@
                     // Send the subject card that is open, so an edit can be
                     // tried before it is saved. Falls back to stored config
                     // when nothing is expanded.
-                    body: JSON.stringify({
-                        parent_text: this.xReplyPreview.text,
-                        ai: this.xReplyAIConfigPayload(),
-                        parent_handle: this.xReplyPreview.handle,
-                        subject_id: this.xReplyPreview.subject_id,
-                        mood: this.xReplyPreview.mood,
-                        subject: (this.xReplyOpen !== null && this.xReply.subjects[this.xReplyOpen])
-                            ? this.xReplySubjectPayload()[this.xReplyOpen]
-                            : null,
-                    }),
+                    body: requested,
                 });
                 const data = await resp.json().catch(function () { return {}; });
+                if (requested !== JSON.stringify(this.xReplyPreviewPayload(compareSaved))) {
+                    this.xReplyPreview.result = { ok: false, reason: _k('settings.xt.preview_changed', 'Settings or input changed while drafting. Run the preview again.') };
+                    return;
+                }
                 this.xReplyPreview.result = data;
                 if (!resp.ok && !data.reason) {
                     showToast(data.error || _k('settings.int.preview_failed', 'Preview failed'), 'error');

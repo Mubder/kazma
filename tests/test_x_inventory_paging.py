@@ -54,6 +54,28 @@ def test_conversation_paging_search_and_archival(tmp_path, monkeypatch):
         assert store.conversation_page()["count"] == 0
 
 
+def test_conversation_policy_filters_page_before_limit_and_keep_legacy_visible(tmp_path):
+    from kazma_core.x_api.reply_store import XReplyStore
+
+    store = XReplyStore(tmp_path / "styles.db")
+    for tenant in ("one", "two"):
+        with tenant_scope(tenant):
+            for i, side in enumerate(("support", "against", "support", "", "legacy")):
+                store.claim(summon_id=str(i), parent_id="parent", target_handle="owner", summoner="reviewer")
+                if side != "legacy":
+                    store.record_decision(str(i), draft="Text", subject_id="card",
+                                          decision={"effective_policy": {"side": side, "mood": "professional"}})
+    with tenant_scope("one"):
+        first = store.conversation_page(side="support", mood="professional", limit=1)
+        rows = collect(first, lambda cursor: store.conversation_page(side="support", mood="professional",
+                                                                     limit=1, cursor=cursor), "rows")
+        assert first["count"] == 2 and {row.summon_id for row in rows} == {"0", "2"}
+        assert store.conversation_page(side="written")["count"] == 1
+        assert store.conversation_page()["count"] == 5
+        with pytest.raises(ValueError):
+            store.conversation_page(mood="anything")
+
+
 def test_draft_paging_is_per_item_and_reaches_old_sets(tmp_path, monkeypatch):
     from kazma_core.agent.artifacts import ArtifactStore
     monkeypatch.setattr("kazma_core.agent.artifacts.time.time", lambda: 1000)

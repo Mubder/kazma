@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kazma_core.x_api.model_selection import x_chat, x_model_call
+from kazma_core.x_api.reply_style import TONES
 
 logger = logging.getLogger(__name__)
 
@@ -81,13 +82,7 @@ _MODES = (MODE_OFF, MODE_DRAFT, MODE_AUTO)
 
 #: Tone presets. These only steer wording — they never widen *what* may be
 #: said, which is fixed by the subject's ``view`` and ``hard_lines``.
-MOODS: dict[str, str] = {
-    "roast": "Mocking and sharp. Punch at the argument, not the person's identity.",
-    "angry": "Blunt and indignant. Short sentences. No slurs, no threats.",
-    "dry": "Deadpan understatement. Let the fact do the work.",
-    "deadpan": "Deadpan understatement. Let the fact do the work.",
-    "supportive": "Agreeing and additive. Add one thing the post missed.",
-}
+MOODS: dict[str, str] = TONES
 
 #: Emoji in the summon that dial the TONE. "what do you think Kazma? 😂" and
 #: the same sentence with 🤬 should not produce the same reply — the emoji is
@@ -327,6 +322,7 @@ class Subject:
     counterexamples: tuple[str, ...] = ()
     owner: str = ""
     change_reason: str = ""
+    reply_style: dict[str, Any] = field(default_factory=dict)
 
     def is_sided(self) -> bool:
         return self.side in _SIDES
@@ -391,6 +387,7 @@ class ReplyConfig:
     open_thread_marker: str = ""
     close_thread_marker: str = ""
     config_errors: tuple[str, ...] = ()
+    reply_style: dict[str, Any] = field(default_factory=dict)
 
     def can_draft(self) -> bool:
         # Subjects are optional. Zero subjects = voice-only: reply to
@@ -545,6 +542,14 @@ def get_reply_config() -> ReplyConfig:
     if killed:
         mode = MODE_OFF
     raw_subjects = _cs_get("connectors.x.reply.subjects", [])
+    from kazma_core.x_api.reply_style import normalize_style
+
+    style_errors: tuple[str, ...] = ()
+    try:
+        reply_style = normalize_style(_cs_get("connectors.x.reply.style", {}))
+    except ValueError as exc:
+        style_errors = (str(exc),)
+        reply_style = normalize_style({})
     return ReplyConfig(
         enabled=(not killed) and _as_bool(_cs_get("connectors.x.reply.enabled"), False),
         mode=mode,
@@ -569,7 +574,8 @@ def get_reply_config() -> ReplyConfig:
             _cs_get("connectors.x.reply.poll_interval_s"), 600, lo=60, hi=3600
         ),
         subjects=_parse_subjects(raw_subjects),
-        config_errors=_subject_config_errors(raw_subjects),
+        config_errors=_subject_config_errors(raw_subjects) + style_errors,
+        reply_style=reply_style,
         summoner_policy=(
             str(_cs_get("connectors.x.reply.summoner_policy", SUMMON_ALLOWLIST)
                 or SUMMON_ALLOWLIST).strip().lower()

@@ -728,17 +728,25 @@ class XReplyStore:
         recs.sort(key=lambda r: _mention_recency_key(r), reverse=True)
         return recs[:cap]
 
-    def conversation_page(self, *, cursor: str = "", query: str = "", state: str = "", limit: int = 30) -> dict[str, Any]:
+    def conversation_page(self, *, cursor: str = "", query: str = "", state: str = "", limit: int = 30,
+                          side: str = "", mood: str = "") -> dict[str, Any]:
         """Search all active conversations; each page has a stable creation boundary."""
         from kazma_core.db.keyset import decode_cursor, encode_cursor
 
         boundary = decode_cursor(cursor, size=2)
         if len(query) > 200:
             raise ValueError("Search exceeds 200 characters")
+        from kazma_core.x_api.reply_style import TONES
+
+        if side not in ("", "support", "against", "written") or (mood and mood not in TONES):
+            raise ValueError("Unknown stance or tone filter")
         cap = max(1, min(100, int(limit)))
         where = ("tenant_id = ? AND archived_at IS NULL AND (? = '' OR status = ?) "
-                 "AND (? = '' OR instr(lower(parent_text || ' ' || draft_text || ' ' || summon_id || ' ' || target_handle), lower(?)) > 0)")
-        args = (x_tenant_id(), state, state, query, query)
+                 "AND (? = '' OR instr(lower(parent_text || ' ' || draft_text || ' ' || summon_id || ' ' || target_handle), lower(?)) > 0) "
+                 "AND (? = '' OR json_extract(CASE WHEN json_valid(decision_json) THEN decision_json ELSE '{}' END, '$.effective_policy.side') = ? "
+                 "OR (? = 'written' AND json_extract(CASE WHEN json_valid(decision_json) THEN decision_json ELSE '{}' END, '$.effective_policy.side') = '')) "
+                 "AND (? = '' OR json_extract(CASE WHEN json_valid(decision_json) THEN decision_json ELSE '{}' END, '$.effective_policy.mood') = ?)")
+        args = (x_tenant_id(), state, state, query, query, side, side, side, mood, mood)
         paging = " AND (created_at < ? OR (created_at = ? AND summon_id < ?))" if boundary else ""
         with self._lock:
             conn = self._connect()

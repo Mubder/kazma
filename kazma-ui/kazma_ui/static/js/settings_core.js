@@ -493,6 +493,7 @@
         // problems instead of letting a typo become a subject that never
         // fires.
         xReply: {
+            reply_style: { language: 'source', dialect: '', slang: 'none', length: 'standard', allow_uncensored_language: false, profanity: 'none' },
             auto_qualification_hold: '',
             ai: { selection: 'global', provider: '', model: '' }, ai_options: [], ai_roles: [],
             enabled: false, mode: 'off', summoners: [], trigger: '',
@@ -502,11 +503,13 @@
             summoner_policy: 'allowlist', allow_emoji_mood: true,
             stance_check: true, unmatched: 'skip', use_knowledge: false,
             knowledge_library: '', open_thread_marker: '', close_thread_marker: '', mood_emoji: {},
-            moods: ['roast', 'angry', 'dry', 'deadpan', 'supportive'],
+            moods: ['professional', 'friendly', 'humorous', 'roast', 'angry', 'dry', 'deadpan', 'supportive'],
             connector_ready: false, can_draft: false, handle: '',
             poller_running: false, live_reason: '',
         },
         xReplyRoleBindings: {},
+        xReplyModelTesting: false,
+        xReplyModelResult: null,
         xReplySummonersText: '',
         xReplyLibraries: [],
         xReplyLoading: false,
@@ -514,6 +517,7 @@
         xReplyProblems: [],
         xReplyPolicyBaseline: [],
         xReplyPolicyStaged: false,
+        xReplySavedSignature: '',
         xReplyOpen: null,          // index of the expanded subject card
         xReplyPreview: { text: '', handle: '', subject_id: '', mood: '', result: null, busy: false },
         xReplyRecent: [],

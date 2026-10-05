@@ -109,6 +109,7 @@ Every line below describes that setup.
 |---|---|---|
 | Reminders and scheduled tasks, delivered to the chat you asked from | Shipped | `/scheduled` |
 | X (Twitter): drafts, schedule, post through the official API, reply to mentions | Shipped | `/x` |
+| X subject setup, scoped Support/Against, reply language and optional profanity; previews and model compatibility tests | Shipped | Settings → X; `/x` Conversations |
 | Email (Gmail, Outlook) and calendar (Google, Microsoft) | Shipped | Settings → Email |
 | More than one mail account (several Gmail, Outlook or IMAP), each with its own calendar, named in chat by name or address | Shipped | Settings → Email → Other accounts |
 | Skills from the open agentskills.io ecosystem: search, install from GitHub, signed and verified | Shipped | `/skills` |
