@@ -27,7 +27,23 @@ and 2 MB, with up to 100 collections per tenant.
 
 The editor exposes language, failure categories, expected target, eligibility,
 evidence and safety labels, rationale and review notes. Unlabeled values stay
-unlabeled. Mark source completeness only after checking the original. A review
+unlabeled. You can save partial annotations: for example, select **Sarcasm**
+and leave the other judgments blank. Keep the personal-review checkbox
+unchecked and use **Save Case**. If it is already checked, **Save Without
+Review** saves your edits without certifying a completed human review.
+
+Fields marked **Required for review** are required only for that certification:
+language, at least one category, the expected-subject confirmation, all three
+yes/no judgments, and a rationale. Confirm the expected subject even when its
+ID is blank because no subject applies. A recorded model outcome also requires
+the actual critical-violation count after inspection. Saving without review
+keeps your annotations and clears any previous human-review status. Partial
+cases do not count toward release qualification.
+
+Save failures retain your edits and show an error beside Save, including missing
+review fields, invalid values and server errors. A successful save closes the
+editor and displays a confirmation. Mark source completeness only after
+checking the original. A review
 attestation belongs to the signed-in human reviewer, and editing or importing a
 case clears it. Conversations used in a tuning collection remain excluded from
 held-out report export, even after their tuning cases are archived. Related
