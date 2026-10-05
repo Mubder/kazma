@@ -26,6 +26,13 @@
 repos:
   - repo: local
     hooks:
+      - id: kazma-metrics-receipt
+        name: kazma collected-test receipt matches source inputs
+        entry: python scripts/run_gates.py tests/test_metrics_receipt_current.py
+        language: system
+        pass_filenames: false
+        files: '(\.py$|^tests/|^loadtests/|^(pyproject\.toml|pytest\.ini|setup\.cfg|tox\.ini)$)'
+        stages: [pre-commit]
       - id: kazma-import-gates
         name: kazma import gates (every module imports + no dangling refs)
         entry: python scripts/run_gates.py tests/test_imports.py

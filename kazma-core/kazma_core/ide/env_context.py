@@ -389,8 +389,9 @@ def _build_env_context_sync(workspace_id: str | None = None) -> str:
     lines.append(
         "Kazma metrics requests: call `repository_metrics` first for fresh measured "
         "figures and provenance. `METRICS.md` is a cached snapshot, not current truth. "
-        "Do not bypass interpreter restrictions to refresh it. Source test functions "
-        "are not collected/passing tests; omit unavailable counts rather than blocking "
+        "Use verified collected_tests (including parameterized cases) for the test "
+        "headline; never substitute source test_functions or claim tests passed. "
+        "Do not bypass interpreter restrictions to refresh it. Omit unavailable counts rather than blocking "
         "a post using other verified metrics. X approval still applies."
     )
     lines.append("")

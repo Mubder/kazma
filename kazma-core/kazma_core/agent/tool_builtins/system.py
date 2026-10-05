@@ -931,7 +931,9 @@ def register_system_tools(registry: Any) -> None:
             "Get fresh verified metrics for the installed Kazma source repository. "
             "Use FIRST for Kazma metrics posts, LOC/files/package/test-function counts; "
             "never substitute cached METRICS.md. Reuses the official generator without "
-            "writes, shell interpreters or pytest collection. Includes exact commit, "
+            "writes, shell interpreters or live pytest execution. Returns the verified "
+            "runtime-collected test count when its receipt matches the current inputs; "
+            "never substitute source test functions for that count. Includes exact commit, "
             "measurement time and claim limits. This measures Kazma, not an arbitrary workspace."
         ),
         category="diagnostics",

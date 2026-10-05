@@ -46,6 +46,23 @@ def _measure() -> dict:
     module.git = lambda *args: _git(root, *args)
     module._count_contributors_via_api = lambda: None
     measured = module.collect(runtime_tests=False)
+    collected_tests = None
+    receipt_status = "missing"
+    receipt = None
+    receipt_path = root / module.COLLECTION_RECEIPT
+    if receipt_path.is_file() and receipt_path.stat().st_size <= 10000:
+        try:
+            candidate = json.loads(receipt_path.read_text(encoding="utf-8"))
+            count = candidate.get("collected_tests")
+            if (candidate.get("schema_version") == 1 and type(count) is int and 0 < count < 10**7
+                    and candidate.get("input_sha256") == module.collection_fingerprint()):
+                collected_tests = count
+                receipt = candidate
+                receipt_status = "verified_inputs"
+            else:
+                receipt_status = "stale_or_invalid"
+        except (OSError, ValueError, AttributeError):
+            receipt_status = "invalid"
     upstream = None
     try:
         upstream_sha = _git(root, "rev-parse", "--verify", "refs/remotes/origin/main")
@@ -63,9 +80,10 @@ def _measure() -> dict:
         "package_count": len(measured["packages"]),
         "test_files": measured["tests"]["files"],
         "test_functions": measured["tests"]["test_functions_total"],
-        "collected_tests": None, "upstream": upstream,
+        "collected_tests": collected_tests, "collection_receipt_status": receipt_status,
+        "collection_provenance": receipt, "upstream": upstream,
         "installation_history_commits": measured["git"]["commits"],
-        "claim_rules": "Use these newly measured figures, not METRICS.md. Test functions are source definitions, NOT collected tests or passing tests. Runtime collection is deliberately not executed by this read-only tool; omit that figure when unavailable. Tracked changes mean working-tree counts, not pristine commit counts. Installation history includes local merges: do not claim it as the public repository commit count or as metrics drift. Upstream counts describe the last fetched origin/main at its reported SHA, not a fresh GitHub lookup. Publishing still requires the normal X approval.",
+        "claim_rules": "Use collected_tests for the test-count headline when the collection receipt is verified. It includes parameterized cases, NOT tests passed. Never substitute test_functions for the headline test count; they are only source definitions. A verified receipt matches the tracked collection inputs and reports the collecting environment/time; pytest is not run on this live server. If the receipt is missing/stale, omit the test headline and refresh through the trusted generator in development/CI. Use fresh measured figures, not METRICS.md. Tracked changes mean working-tree counts. Installation history includes local merges: do not claim it as the public repository commit count or as metrics drift. Upstream counts describe the last fetched origin/main at its reported SHA. Publishing still requires normal X approval.",
     }
 
 
