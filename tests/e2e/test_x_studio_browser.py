@@ -112,6 +112,8 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                     page.get_by_role("button", name="Create Collection" if language == "en" else "إنشاء مجموعة", exact=True).click()
                     page.locator("#xd-search").wait_for()
                     page.get_by_role("button", name="Add Real Case" if language == "en" else "إضافة حالة حقيقية", exact=True).click()
+                    assert page.locator(".xd-required").count() == 8
+                    assert ("save a partial case" if language == "en" else "حفظ حالة غير مكتملة") in page.locator(".xd-editor").inner_text()
                     colors = []
                     for theme in ("dark", "light"):
                         if page.evaluate("() => document.documentElement.dataset.theme") != theme:
@@ -166,10 +168,12 @@ def test_composer_survives_reload_and_mobile_bilingual_layout():
                     page.locator(".xd-editor [role=alert]").wait_for(state="visible")
                     assert ("uncheck" if language == "en" else "أزل علامة") in page.locator(".xd-editor [role=alert]").inner_text()
                     assert page.locator("#xd-reviewed").is_checked()
-                    page.locator("#xd-reviewed").uncheck()
                     page.locator("#xd-notes").fill("Reviewed context only; labels still pending.")
-                    page.get_by_role("button", name="Save Case" if language == "en" else "حفظ الحالة", exact=True).click()
+                    page.get_by_role("button", name="Save Without Review" if language == "en" else "حفظ دون اعتماد المراجعة", exact=True).click()
                     page.locator(".xd-case").first.wait_for()
+                    page.locator(".xd-case").first.click()
+                    assert page.locator("#xd-notes").input_value() == "Reviewed context only; labels still pending."
+                    assert not page.locator("#xd-reviewed").is_checked()
                     assert page.evaluate("() => document.documentElement.scrollWidth <= innerWidth + 1")
                     assert not page_problems(page, "/x", errors)
                     page.goto(harness.base + "/settings?tab=x", wait_until="domcontentloaded")

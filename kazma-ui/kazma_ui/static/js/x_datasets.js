@@ -125,9 +125,9 @@ function xDatasetPage() {
       this.reviewed = false; this.critical = ''; this._saved = this.signature();
       this.$nextTick(() => document.getElementById('xd-source-text').focus());
     },
-    async save() {
+    async save(asReviewed = this.reviewed) {
       if (this.busy || !this.form) return;
-      if (this.reviewed) {
+      if (asReviewed) {
         const missing = [];
         if (!['en', 'ar', 'mixed'].includes(this.form.case.language)) missing.push(this.t('language'));
         if (!this.form.case.categories.length) missing.push(this.t('categories'));
@@ -151,7 +151,7 @@ function xDatasetPage() {
         evidence: frozen.evidence === '' ? null : frozen.evidence === 'true',
         safety: frozen.safety === '' ? null : frozen.safety === 'true' };
       c.summon.target_followers = frozen.followers === '' ? null : Number(frozen.followers);
-      const body = { expected_revision: this.dataset.revision, case: c, reviewed: this.reviewed,
+      const body = { expected_revision: this.dataset.revision, case: c, reviewed: asReviewed,
         critical_violations: this.critical === '' ? null : Number(this.critical) };
       this.busy = true; this.error = ''; this.notice = '';
       try {

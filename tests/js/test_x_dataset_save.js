@@ -57,9 +57,14 @@ async function main() {
 
   let toast;
   context.window.showToast = (message, type) => { toast = { message, type }; };
-  context.fetch = async url => ({ ok: true, status: 200,
-    json: async () => ({ ok: true, dataset: url.endsWith('/case') ? { id: 'practice', revision: 4 } : [] }) });
-  await editor.save();
+  let submitted;
+  editor.reviewed = true;
+  context.fetch = async (url, options) => { if (options.body) submitted = JSON.parse(options.body); return { ok: true, status: 200,
+    json: async () => ({ ok: true, dataset: url.endsWith('/case') ? { id: 'practice', revision: 4 } : [] }) }; };
+  await editor.save(false);
+  assert.equal(submitted.reviewed, false);
+  assert.deepEqual(submitted.case.categories, ['sarcasm']);
+  assert.equal(submitted.case.expected.auto, null);
   assert.equal(editor.form, null);
   assert.equal(editor.dirty, false);
   assert.equal(editor.error, '');

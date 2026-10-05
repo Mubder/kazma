@@ -47,6 +47,7 @@
         </div></template>
         <template x-if="form"><form @submit.prevent="save()" @invalid.capture.prevent="invalidField($event)" class="xd-editor">
           <h3>{{ t('x_dataset.edit') }}</h3>
+          <p>{{ t('x_dataset.partial_help') }}</p>
           <fieldset :disabled="busy" style="border:0;padding:0;min-width:0;">
             <label for="xd-source-text">{{ t('x_dataset.original') }}</label><textarea id="xd-source-text" name="source_text" class="form-input" x-model="form.case.context.text" rows="5" maxlength="32000" :dir="/\p{Script=Arabic}/u.test(form.case.context.text) ? 'rtl' : 'ltr'"></textarea>
             <div class="xd-grid">
@@ -74,25 +75,25 @@
               <button class="btn btn-secondary btn-sm" type="button" @click="form.case.context.quotes.push({id:'',author_id:'',text:''})" :disabled="form.case.context.quotes.length >= 10">{{ t('x_dataset.add_quote') }}</button>
             </details>
             <div class="xd-grid">
-              <div><label for="xd-language">{{ t('x_dataset.language') }}</label><select id="xd-language" class="form-input" x-model="form.case.language"><option value="">{{ t('x_dataset.unlabeled') }}</option><option value="en">{{ t('x_dataset.english') }}</option><option value="ar">{{ t('x_dataset.arabic') }}</option><option value="mixed">{{ t('x_dataset.mixed') }}</option></select></div>
+              <div><label for="xd-language">{{ t('x_dataset.language') }} <span class="xd-required">{{ t('x_dataset.required_review') }}</span></label><select id="xd-language" class="form-input" x-model="form.case.language" :aria-required="reviewed"><option value="">{{ t('x_dataset.unlabeled') }}</option><option value="en">{{ t('x_dataset.english') }}</option><option value="ar">{{ t('x_dataset.arabic') }}</option><option value="mixed">{{ t('x_dataset.mixed') }}</option></select></div>
               <div><label for="xd-fault">{{ t('x_dataset.fault') }}</label><select id="xd-fault" class="form-input" x-model="form.case.fault"><option value="">{{ t('x_dataset.no_fault') }}</option><option value="checker_outage">{{ t('x_dataset.checker_outage') }}</option></select></div>
             </div>
-            <fieldset class="xd-categories"><legend>{{ t('x_dataset.categories') }}</legend><template x-for="category in categories" :key="category"><label class="xd-check"><input type="checkbox" :value="category" x-model="form.case.categories"><span x-text="t('category_' + category)"></span></label></template></fieldset>
-            <label class="xd-check"><input type="checkbox" x-model="form.targetLabeled">{{ t('x_dataset.target_labeled') }}</label>
+            <fieldset class="xd-categories"><legend>{{ t('x_dataset.categories') }} <span class="xd-required">{{ t('x_dataset.required_review') }}</span></legend><template x-for="category in categories" :key="category"><label class="xd-check"><input type="checkbox" :value="category" x-model="form.case.categories"><span x-text="t('category_' + category)"></span></label></template></fieldset>
+            <label class="xd-check"><input type="checkbox" x-model="form.targetLabeled">{{ t('x_dataset.target_labeled') }} <span class="xd-required">{{ t('x_dataset.required_review') }}</span></label>
             <label for="xd-target">{{ t('x_dataset.target') }}</label><input id="xd-target" class="form-input" x-model="form.target" :disabled="!form.targetLabeled" autocomplete="off" maxlength="200">
-            <div class="xd-grid"><template x-for="label in ['auto','evidence','safety']" :key="label"><div><label :for="'xd-' + label" x-text="t('expected_' + label)"></label><select :id="'xd-' + label" class="form-input" x-model="form[label]"><option value="">{{ t('x_dataset.unlabeled') }}</option><option value="true">{{ t('x_dataset.yes') }}</option><option value="false">{{ t('x_dataset.no') }}</option></select></div></template></div>
-            <label for="xd-rationale">{{ t('x_dataset.rationale') }}</label><textarea id="xd-rationale" class="form-input" x-model="form.case.rationale" rows="3" maxlength="4000"></textarea>
+            <div class="xd-grid"><template x-for="label in ['auto','evidence','safety']" :key="label"><div><label :for="'xd-' + label" ><span x-text="t('expected_' + label)"></span> <span class="xd-required">{{ t('x_dataset.required_review') }}</span></label><select :id="'xd-' + label" class="form-input" x-model="form[label]" :aria-required="reviewed"><option value="">{{ t('x_dataset.unlabeled') }}</option><option value="true">{{ t('x_dataset.yes') }}</option><option value="false">{{ t('x_dataset.no') }}</option></select></div></template></div>
+            <label for="xd-rationale">{{ t('x_dataset.rationale') }} <span class="xd-required">{{ t('x_dataset.required_review') }}</span></label><textarea id="xd-rationale" class="form-input" x-model="form.case.rationale" rows="3" maxlength="4000" :aria-required="reviewed"></textarea>
             <label for="xd-notes">{{ t('x_dataset.notes') }}</label><textarea id="xd-notes" class="form-input" x-model="form.case.review_notes" rows="2" maxlength="4000"></textarea>
             <label class="xd-check"><input type="checkbox" x-model="form.case.held_out" :disabled="dataset.purpose !== 'release'">{{ t('x_dataset.held_out') }}</label>
             <div class="xd-observation" x-show="form.case.actual">
               <h4>{{ t('x_dataset.outcome') }}</h4><p>{{ t('x_dataset.outcome_help') }}</p><p translate="no" x-text="form.case.candidate || form.case.observed_candidate || ''"></p>
               <pre translate="no" x-text="JSON.stringify(form.case.actual, null, 2)"></pre>
-              <label for="xd-critical">{{ t('x_dataset.critical') }}</label><input id="xd-critical" type="number" min="0" max="1000" class="form-input" x-model="critical">
+              <label for="xd-critical">{{ t('x_dataset.critical') }} <span class="xd-required">{{ t('x_dataset.required_review') }}</span></label><input id="xd-critical" type="number" min="0" max="1000" class="form-input" x-model="critical" :aria-required="reviewed && !!form.case.actual">
             </div>
             <label class="xd-check"><input id="xd-reviewed" type="checkbox" x-model="reviewed">{{ t('x_dataset.attestation') }}</label>
             <p>{{ t('x_dataset.review_help') }}</p>
             <p x-show="error" x-cloak x-ref="saveError" tabindex="-1" role="alert" translate="no" dir="auto" x-text="error"></p>
-            <div class="xd-actions"><button type="submit" class="btn btn-primary">{{ t('x_dataset.save_case') }}</button><span x-show="dirty">{{ t('x_dataset.unsaved') }}</span></div>
+            <div class="xd-actions"><button type="submit" class="btn btn-primary">{{ t('x_dataset.save_case') }}</button><button type="button" class="btn btn-secondary" x-show="reviewed" x-cloak @click="save(false)">{{ t('x_dataset.save_partial') }}</button><span x-show="dirty">{{ t('x_dataset.unsaved') }}</span></div>
           </fieldset>
         </form></template>
       </div>
