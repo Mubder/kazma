@@ -29,7 +29,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from kazma_core.x_api import model_selection as _models
@@ -97,7 +97,7 @@ _URL_RE = re.compile(
 #: in the prompt. A regex cannot understand a slur it has not seen; the HITL
 #: card in ``draft`` mode is what catches the rest.
 _BANNED_PATTERNS = (
-    r"\bkill\s+(?:them|him|her|all)\b",
+    r"\bkill\s+(?:them|him|her|all|yourself)\b",
     r"\b(?:should|must)\s+(?:die|be\s+killed|be\s+shot)\b",
     r"\bgas\s+the\b",
     r"\bdeserve\s+to\s+die\b",
@@ -131,6 +131,7 @@ class SummonResult:
     context: dict[str, Any] | None = None
     usage: dict[str, Any] | None = None
     approval_token: str = ""
+    effective_policy: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -157,6 +158,8 @@ class SummonResult:
             out["knowledge"] = self.knowledge
         if self.models:
             out["models"] = list(self.models)
+        if self.effective_policy is not None:
+            out["effective_policy"] = self.effective_policy
         return out
 
 
@@ -270,6 +273,11 @@ def screen_draft(text: str, subject: Subject) -> str | None:
     body = (text or "").strip()
     if not body:
         return "model returned an empty draft"
+    from kazma_core.x_api.reply_style import language_hold
+
+    style_hold = language_hold(body, subject)
+    if style_hold:
+        return style_hold
     hit = _BANNED_RE.search(body)
     if hit:
         return f"draft contains a banned construction ({hit.group(0)!r})"
@@ -357,9 +365,9 @@ def _build_prompt(
     knowledge_notes: str = "",
     source_context: ContextSnapshot | None = None,
 ) -> list[dict[str, str]]:
-    if subject.allowed_moods and mood and mood not in subject.allowed_moods:
-        mood = subject.mood
-    tone = MOODS.get((mood or subject.mood).strip().lower(), subject.mood_hint())
+    from kazma_core.x_api.reply_style import effective_mood, stance_contract, style_contract
+
+    tone = MOODS[effective_mood(subject, mood)]
     voice_only = subject.is_catch_all() and not subject.is_sided()
     name = subject.target or subject.id
     if subject.id == SUMMON_SUBJECT_ID and subject.side == SIDE_AGAINST:
@@ -476,6 +484,7 @@ def _build_prompt(
                 "HARD LINES — breaking any of these is worse than being unfunny:",
             ]
     lines += [f"- {rule}" for rule in subject.all_hard_lines()]
+    lines += ["", stance_contract(subject.side, name), style_contract(subject)]
     # The actual scope/exception values must reach drafting, not just checking.
     # Otherwise the checker can reject an exception the drafter never saw.
     if subject.scope:
@@ -1039,6 +1048,9 @@ async def _handle_summon_claimed(
             return SummonResult(False, "skipped", reason=reason,
                                 parent_id=parent_id, summon_id=summon_id)
 
+    from kazma_core.x_api.reply_style import CONTRACT_VERSION, bind_style, effective_mood
+
+    subject = bind_style(subject, cfg)
     if not subject.allow_draft:
         await asyncio.to_thread(store.mark_skipped, summon_id, "Drafting is disabled for this subject.")
         return SummonResult(False, "skipped", reason="Drafting is disabled for this subject.", summon_id=summon_id, parent_id=parent_id)
@@ -1093,7 +1105,8 @@ async def _handle_summon_claimed(
     from kazma_core.x_api.model_selection import current_x_models, current_x_usage
     from kazma_core.x_api.verification import verify_candidate
 
-    checks = await verify_candidate(draft, subject, context=context, sources=grounding.sources)
+    checks = await verify_candidate(draft, replace(subject, mood=effective_mood(subject, mood)),
+                                    context=context, sources=grounding.sources)
     check_data = tuple(check.to_dict() for check in checks)
     from kazma_core.x_api.routing import route_subject
 
@@ -1101,7 +1114,10 @@ async def _handle_summon_claimed(
     decision = {"routing": routing, "checks": list(check_data), "context": context.to_dict(), "evidence": grounding.to_dict(),
                 "summon_context": summon_context or {},
                 "models": list(current_x_models()), "subject_id": subject.id, "subject_revision": subject.revision,
-                "auto_hold": auto_hold, "approval_basis": approval_basis, "usage": current_x_usage()}
+                "auto_hold": auto_hold, "approval_basis": approval_basis, "usage": current_x_usage(),
+                "effective_policy": {"side": subject.side, "target": subject.target or subject.id,
+                                     "mood": effective_mood(subject, mood), "reply_style": subject.reply_style,
+                                     "contract_version": CONTRACT_VERSION}}
     await asyncio.to_thread(store.record_decision, summon_id, draft=draft, subject_id=subject.id, decision=decision)
     failures = [check for check in checks if check.verdict == "fail"]
     if failures:
@@ -1261,6 +1277,9 @@ async def preview_reply(
         )
     kd = grounding.to_dict() if cfg.use_knowledge else None
 
+    from kazma_core.x_api.reply_style import CONTRACT_VERSION, bind_style, effective_mood
+
+    subject = bind_style(subject, cfg)
     # *mood* is passed straight in here (the panel has a picker), rather than
     # read off a summon — a preview has no summoner to trust.
     try:
@@ -1285,7 +1304,8 @@ async def preview_reply(
     from kazma_core.x_api.verification import verify_candidate
 
     context = ContextSnapshot(text=parent_text, author_handle=parent_handle)
-    checks = await verify_candidate(draft, subject, context=context, sources=grounding.sources)
+    checks = await verify_candidate(draft, replace(subject, mood=effective_mood(subject, mood)),
+                                    context=context, sources=grounding.sources)
     check_data = tuple(check.to_dict() for check in checks)
     failures = [check for check in checks if check.verdict == "fail"]
     if failures:
@@ -1296,6 +1316,9 @@ async def preview_reply(
         reason="preview only — nothing was posted or recorded",
         knowledge=kd,
         checks=check_data, context=context.to_dict(),
+        effective_policy={"side": subject.side, "target": subject.target or subject.id,
+                          "mood": effective_mood(subject, mood), "reply_style": subject.reply_style,
+                          "contract_version": CONTRACT_VERSION},
     )
 
 

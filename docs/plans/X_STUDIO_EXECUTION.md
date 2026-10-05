@@ -215,6 +215,21 @@ acceptance work, as recorded below.
 
 ## Remaining roadmap and rollout gates
 
+### Deferred production qualification (2026-10-05)
+
+The operator asked to save these next steps for later: label genuine
+English/Arabic cases and build at least 200 held-out evaluation cases; run
+shadow evaluation for the selected X models and subject policies; rehearse
+backup, restore, rollback and interrupted-publication recovery on the actual
+deployment; verify connected-account capabilities and perform manual
+accessibility/operator acceptance. Richer media, alt text, campaigns and
+analytics follow text readiness and verified account capabilities. Keep X in
+draft/review during qualification and do not publish live X content as testing.
+
+This records the earlier deferred work list, not completed acceptance or
+automatic-reply qualification. The 2026-10-05 request to proceed through S1–S10
+reactivates it; engineering tests cannot replace its human/deployment evidence.
+
 The follow-up dataset workspace supplies the missing attended editor: collection
 creation/import, local observation collection, case labels, candidate inspection,
 human attestation and export. Tenant isolation and revision checks protect writes;
@@ -258,3 +273,32 @@ Keep production in draft/review during data collection. Investigate unknown
 sends against exact operation evidence; a timeout or similar text is not proof
 of absence. Automatic rollout needs a small qualified subject allowlist before
 expansion.
+
+
+## S1–S10 implementation and acceptance (2026-10-05)
+
+The latest operator request reactivates all ten sprints. This release delivers
+the following engineering increments without declaring external acceptance:
+
+| Sprint | Delivered or remaining |
+|---|---|
+| S1 settings | Section navigation, target-first cards, stable generated IDs, basic tone/language overrides, advanced policy preservation, inline failures and saved-state indicators. Initial matching uses the explicitly entered target; aliases remain operator-confirmed. |
+| S2 stance | Shared versioned Support/Against contract in replies/posts/checkers; explicit opposite-side additions rejected. Existing ambiguity, quotations, exceptions and evidence holds remain active. Actual accuracy needs genuine evaluation. |
+| S3 language | Eight tones, language/dialect/slang/length defaults and overrides; Allow uncensored language off by default, explicit profanity levels, independent safety/factual/publication gates. Effective style enters audit and qualification identity. |
+| S4 preview | Saved/proposed comparison, illustrative opinion/quotation inputs, actual effective-policy/model/check display and stale-result rejection. No preview writes to X or installs qualification. |
+| S5 models | Bounded unsaved-binding compatibility test through drafting and structured verification; existing role snapshots/local-only/no-implicit-fallback retained. Passing a sample is not production qualification. |
+| S6 review | Effective position/tone on generated drafts and conversations, tenant-scoped filters before keyset pagination, preserved composer/review/thread recovery. Edits during a settings save are retained. |
+| S7 release | EN/AR UI and guides, matching website translations, compile/syntax/lint and browser checks; final commit, CI and guard deployment evidence recorded after release. No shipped YAML default was changed; additive style fields preserve old cards and old-client saves preserve owner style choices. |
+| S8 evaluation | Collection/editor/shadow/report tooling remains available. Live collection: 14 genuine observations, zero human reviews. No 200-case held-out release exists; accuracy and automatic canary remain unqualified. |
+| S9 acceptance | Read-only live health showed both loops running, zero pending repairs/notices/unknown outcomes. Isolated recovery regressions pass. This does not measure production recovery objectives, prove all account capabilities or replace manual assistive-technology acceptance. |
+| S10 richer content | Media/alt-text uploads, richer campaigns and external analytics are not implemented. Their prerequisite text qualification and verified account capabilities remain unmet; the existing disabled boundaries are retained. |
+
+Validation: the full runner completed with 13,054 passed, 46 skipped and one
+structural-helper exposure failure; making the module-only helper private fixed
+that gate, with 91 release checks and 42 structural/style checks passing.
+The final X/UI/docs run passed 665 checks. The expanded EN/AR mobile browser
+flow passed creation, save/reload, both themes and preserved advanced policy.
+JavaScript behavior tests cover stable identity, explicit model binding and
+delayed-save/test races. Browser dependency/Windows pipe-cleanup warnings did
+not fail the browser run. These are engineering results, not human accuracy
+or production capability attestation.

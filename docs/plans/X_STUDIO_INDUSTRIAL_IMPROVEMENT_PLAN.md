@@ -665,3 +665,155 @@ IDs rather than recommending a model without testing it on this workload.
 - [x] X-specific selection and shared resolver (W3/W4).
 - [x] Settings selection/test and actual-model display (W6).
 - [x] Local-only/fallback, concurrency and qualification acceptance checks.
+
+## 11. Next sprint roadmap — simpler settings and dependable stance (2026-10-05)
+
+The operator requested implementation of S1–S10 on 2026-10-05. The execution
+record below distinguishes delivered controls from pending acceptance gates.
+The operator prioritizes
+easy setup, dependable Support/Against defaults, optional additions and explicit
+reply-language freedom. Production qualification requires real evidence as recorded in
+[the execution record](X_STUDIO_EXECUTION.md#deferred-production-qualification-2026-10-05).
+
+### S1 — Simplify Settings and subject creation
+
+- Organize X Settings into Connection, Model, Subjects, Reply style and
+  Publishing. Show connection/model/readiness state without requiring a save.
+- Basic subject creation asks for target, Support/Against, language/style and
+  optional additional instructions. Generate a stable internal ID. Explain
+  what each side means with a short sample; do not require a written manifesto.
+- Keep scope, exceptions, matching, sources, checks, budgets and permissions
+  behind a clearly labeled advanced editor. Display inherited effective defaults
+  so hiding a control never hides its effect.
+- Offer matching suggestions, but require operator confirmation before enabling
+  new aliases or widening scope. A topic name alone cannot determine all entity
+  aliases or the intended position on every subtopic.
+- Preserve existing card IDs, aliases, scopes, exclusions, examples, permissions
+  and custom values on migration. Simple-mode edits must not erase advanced data.
+- Show inline validation, unsaved/saved state, actionable failures and a preview
+  of the effective policy; retain established atomic save and revision handling.
+
+Exit: a bilingual keyboard/mobile user can create, preview, save and reload a
+basic card; advanced existing cards round-trip without losing any field.
+
+### S2 — Industrial Support/Against defaults
+
+- Define one versioned stance contract shared by reply/post drafting, preview
+  and verification. Preserve a scoped position without requiring extra prose.
+- Support defends the actual target, corrects unsupported criticism, acknowledges
+  substantiated failings and never invents achievements or excuses harm.
+- Against challenges the actual claim or public conduct, can concede valid facts
+  and never invents allegations or redirects criticism to an incidental entity.
+- Handle praise, criticism, mixed claims, quotes, negation, sarcasm, multiple
+  subjects, Arabic aliases, exceptions and missing context explicitly.
+- Ambiguity holds with a specific reason; do not choose by card order or reverse
+  the declared side because of an emoji, source post or requested tone.
+- Treat additions as optional refinements. Reject contradictory side instructions
+  at save/preview with an explanation; do not silently ignore or apply them.
+- Record matched target, scope, stance revision and hold reasons. Separate
+  opinion from factual assertions and retain evidence requirements.
+
+Exit: contextual bilingual regression cases prove target/side preservation,
+fact concessions, exceptions and fail-closed ambiguity. Synthetic regressions
+prove engineering behavior; only genuine held-out cases qualify model accuracy.
+
+### S3 — Clear reply style and language freedom
+
+- Add explicit Professional, Friendly, Humorous, Sarcastic/Roast, Angry,
+  Dry/Deadpan and Supportive style presets, with validated API/schema/UI parity.
+- Separate stance, tone, language/dialect, slang intensity and reply length.
+  A supportive tone must not change an Against card's position.
+- Add “Allow uncensored language”, off by default. Explain that it permits
+  profanity/strong slang rather than removing all limits or model refusals.
+  Keep hard lines, approvals, factual checks and publication safeguards active.
+- Allow an explicit profanity level when enabled and an optional custom register.
+  Validate output against the selected language policy, including English/Arabic
+  and contextual uses; do not treat all dialect as profanity.
+- Studio inherits defaults; subject overrides and permitted summon-emoji overrides
+  have a visible precedence. Restrict emoji overrides to allowed tones.
+- Extend decision snapshots, audit and qualification fingerprints to every new
+  effective style/language setting, including future preset-version changes.
+
+Exit: saving and reloading every preset preserves behavior; strong language does
+not change stance, leak into filtered mode or disable a publication gate.
+
+### S4 — Policy preview and diagnostics
+
+- One “Test this subject” panel uses the production decision path without posting.
+  Show actual target, side, effective style, models, sources, checks and reasons.
+- Compare original settings with unsaved proposed changes using the same input;
+  isolate preview state so it cannot modify active policy or qualification.
+- Offer illustrative edge-case inputs and collection of real operator-provided
+  cases. Do not present generated inputs as human evaluation evidence.
+- Explain held outcomes with a concrete fix, such as clarify target, add a source,
+  resolve overlapping subjects or reconnect a required model.
+
+Exit: EN/AR previews handle model/retrieval outages and stale responses visibly,
+leave production config unchanged and make zero publishing calls.
+
+### S5 — Model setup and dependable local operation
+
+- Simplify existing X model selection to Global or Specific; show configured
+  providers/models and one bounded Test action. Put role overrides in Advanced.
+- Make local-only provenance, fallback consent, verifier availability and model
+  failures understandable. Reuse existing provider resolution and lifecycle.
+- Include style and structured-verdict compatibility in tests. Never replace an
+  unavailable local binding with a cloud model without the configured permission.
+
+Exit: ordinary Kazma chat retains its global model while all X roles honor their
+snapshot; outage/invalid checker holds, credentials stay private and no settings
+read stalls the event loop.
+
+### S6 — Review, queue and conversation usability
+
+- Make drafts easy to scan by subject, side, style and reason. Explain held,
+  rejected, approved, scheduled, posted and unknown outcomes distinctly.
+- Improve edit/recheck/approve flows, unsaved-work recovery, accessible filters
+  and conversation context. Edits continue to invalidate old approvals.
+- Improve thread partial-recovery and reschedule explanations using the durable
+  publication service; never create a second publishing path or blind resend.
+
+Exit: bilingual mobile/keyboard and API-failure checks cover actual operator
+flows, durable reload, stale revisions and duplicate-action races.
+
+### S7 — Migration, documentation and end-to-end release
+
+- Migrate new fields idempotently, retaining explicit owner choices; declare
+  changed shipped defaults through the existing defaults migration mechanism.
+- Update guides, screenshots, EN/AR strings, website copies and troubleshooting.
+- Run applicable focused/integration/PostgreSQL/browser/security gates and
+  compile/syntax checks; verify the deployed UI with no live X test publishing.
+
+Exit: old cards survive upgrade, documented rollback is safe, both repos remain
+in sync and release CI validates the final commit.
+
+### S8 — Genuine evaluation and controlled text rollout (acceptance pending)
+
+Label real conversation cases, isolate at least 200 held-out cases, evaluate the
+actual model/policy/style bindings and review failures. Start with qualified
+subjects in shadow mode and a small explicit automatic-reply allowlist. Settings
+that change behavior require fresh qualification rather than silent continuation.
+
+Exit: authentic human attestation, release thresholds and canary evidence satisfy
+the existing gate; absence of data keeps automatic publishing unqualified.
+
+### S9 — Production operational acceptance (acceptance pending)
+
+Verify account capabilities, manual assistive-technology/operator flows and the
+actual deployment's backup/restore/rollback/crash topology. Measure recovery
+objectives and exercise unknown-send resolution and alert delivery.
+
+Exit: deployment-specific evidence supports the operational claims, with external
+limitations recorded rather than inferred from isolated tests.
+
+### S10 — Richer content and campaign capabilities (subsequent)
+
+After text readiness and verified account capabilities, implement media uploads,
+alt text, richer campaigns and analytics as separate accepted increments. Extend
+the same evidence, revision/approval and durable recovery contracts to each.
+
+“Set and forget” means strong defaults, clear exceptions and visible drift or
+failure handling. It never means guaranteed correct replies in every situation.
+Recommended order: S1–S4 first, then S5–S7. The latest request reactivates
+S8–S9; their genuine human/deployment evidence is still required. S10 depends
+on the applicable text readiness and verified account capability gates.

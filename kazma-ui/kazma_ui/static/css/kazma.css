@@ -6785,7 +6785,7 @@ html.kazma-soft-nav #main-content {
 .xs-generation-actions > button { min-height: 42px; }
 .xs-filters {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(140px, 240px);
+  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(130px, 1fr));
   gap: 12px;
   margin-block: 16px;
 }

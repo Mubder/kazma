@@ -8,6 +8,12 @@ manual post drafting and attended review before you have a dataset. Keep
 `allow_auto` disabled on subject cards while you tune them. Missing evaluation
 never grants unattended publication.
 
+Changing Support/Against policy, tone, language, slang or the Allow uncensored
+language controls changes evaluation behavior. Include each intended style in
+real review cases, including examples where strong wording should still be
+held. Re-evaluate the exact saved configuration before enabling unattended
+replies; a successful model connection test does not replace this review.
+
 ## Collect real examples
 
 Open **Settings → X → Manage Datasets**, or **X Studio → Datasets**.

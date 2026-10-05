@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% set active_page = "settings" %}
+{% from 'components/x_reply_style.html' import style_controls with context %}
 {% block title %}Kazma — {{ t('settings.title') }}{% endblock %}
 {% block page_title %}{{ t('settings.title') }}{% endblock %}
 
@@ -2926,6 +2927,13 @@
          TAB: X (official API)
          ═══════════════════════════════════════════════════════════════ -->
     <div class="x-controls" x-show="tab === 'x'" x-transition x-cloak>
+        <nav aria-label="{{ t('settings.xt.setup_sections') }}" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+            <a class="btn btn-sm btn-secondary" href="#xr-connection-section">{{ t('settings.xt.connection_section') }}</a>
+            <a class="btn btn-sm btn-secondary" href="#xr-model-section">{{ t('settings.xt.model_section') }}</a>
+            <a class="btn btn-sm btn-secondary" href="#xr-subjects-section">{{ t('settings.xt.subjects') }}</a>
+            <a class="btn btn-sm btn-secondary" href="#xr-style-section">{{ t('settings.xt.style_title') }}</a>
+            <a class="btn btn-sm btn-secondary" href="#xr-publishing-section">{{ t('settings.xt.runtime_section') }}</a>
+        </nav>
         <section class="x-control-hero">
             <div><h2>{{ t('settings.xt.control_title') }}</h2><p>{{ t('settings.xt.control_intro') }}</p></div>
             <nav aria-label="{{ t('settings.xt.control_title') }}"><a class="btn btn-primary" href="/x">{{ t('settings.xt.open_studio') }}</a><a class="btn btn-secondary" href="/x?tab=datasets">{{ t('settings.xt.open_datasets') }}</a></nav>
@@ -2933,7 +2941,7 @@
         <div class="settings-group">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
                 <div>
-                    <h3 style="margin:0;">{{ t('settings.x_title') }}</h3>
+                    <h3 style="margin:0;" id="xr-connection-section">{{ t('settings.x_title') }}</h3>
                     <p style="font-size:0.85rem;color:var(--text-muted);margin:6px 0 0 0;">{{ t('settings.x_subtitle') }}</p>
                 </div>
                 <button class="btn btn-sm btn-secondary" @click="loadXStatus()" :disabled="xLoading" x-text="xLoading ? '…' : t('settings.x_refresh')"></button>
@@ -3047,7 +3055,7 @@
                            ? 'background:var(--bg-secondary);border-inline-start:3px solid var(--accent);'
                            : 'background:var(--bg-secondary);border-inline-start:3px solid var(--warning,#c80);'"
                    style="margin:0 0 16px;padding:10px 12px;border-radius:6px;font-size:0.84rem;">
-                    <strong x-text="(xReply.poller_running && xReply.can_draft) ? t('settings.xt.live') : t('settings.xt.not_live')"></strong>
+                    <strong x-text="xReply.mode === 'auto' && xReply.auto_qualification_hold ? t('settings.xt.review_held') : (xReply.poller_running && xReply.can_draft) ? t('settings.xt.live') : t('settings.xt.not_live')"></strong>
                     <span translate="no" x-text="' — ' + xReply.live_reason"></span>
                 </p>
 
@@ -3067,7 +3075,17 @@
                     <span>{{ t('settings.xt.enable') }}</span>
                 </label>
 
-                <h4 class="x-policy-heading">{{ t('settings.xt.model_section') }}</h4>
+                <h4 class="x-policy-heading" id="xr-model-section">{{ t('settings.xt.model_section') }}</h4>
+                <button class="btn btn-secondary btn-sm" @click="testXReplyModel()" :disabled="xReplyModelTesting || xReplyLoading">{{ t('settings.xt.test_model') }}</button>
+                <p class="form-hint">{{ t('settings.xt.test_model_hint') }}</p>
+                <template x-if="xReplyModelResult">
+                    <div role="status">
+                        <p translate="no" dir="auto" x-text="xReplyModelResult.draft || xReplyModelResult.error || xReplyModelResult.reason"></p>
+                        <template x-for="check in (xReplyModelResult.checks || [])" :key="check.check">
+                            <p :title="check.reason" x-text="t('x_studio.check_' + check.check) + ': ' + t('x_studio.verdict_' + check.verdict)"></p>
+                        </template>
+                    </div>
+                </template>
                 <div class="form-group" style="margin-top:16px;">
                     <label for="xr-ai-selection">{{ t('settings.xt.ai_title') }}</label>
                     <select id="xr-ai-selection" class="form-input" x-model="xReply.ai.selection">
@@ -3130,7 +3148,7 @@
 
                 <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px;">
                     <div class="form-group">
-                    <h4 class="x-policy-heading">{{ t('settings.xt.runtime_section') }}</h4>
+                    <h4 class="x-policy-heading" id="xr-publishing-section">{{ t('settings.xt.runtime_section') }}</h4>
                     <label for="xr-mode">{{ t('settings.xt.mode') }}</label>
                         <select id="xr-mode" class="form-input" x-model="xReply.mode">
                             <option value="off">{{ t('settings.xt.mode_off') }}</option>
@@ -3320,7 +3338,7 @@
                     </template>
                 </details>
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;">
-                    <h5 style="margin:0;">{{ t('settings.xt.subjects') }} <span style="color:var(--text-tertiary);font-weight:400;"
+                    <h5 style="margin:0;" id="xr-subjects-section">{{ t('settings.xt.subjects') }} <span style="color:var(--text-tertiary);font-weight:400;"
                         x-text="'(' + (xReply.subjects ? xReply.subjects.length : 0) + ')'"></span></h5>
                     <button class="btn btn-sm btn-secondary" @click="xReplyAddSubject()">{{ t('settings.xt.add_subject') }}</button>
                 </div>
@@ -3335,10 +3353,10 @@
                     <div class="x-policy-card">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <button class="btn btn-sm btn-secondary"
-                                    :aria-label="(s.id || t('settings.xt.unnamed'))" :aria-expanded="xReplyOpen === i"
+                                    :aria-label="(s.target || s.id || t('settings.xt.unnamed'))" :aria-expanded="xReplyOpen === i"
                                     @click="xReplyOpen = (xReplyOpen === i ? null : i)"
                                     x-text="xReplyOpen === i ? '▾' : '▸'"></button>
-                            <strong translate="no" x-text="s.id || t('settings.xt.unnamed')"></strong>
+                            <strong translate="no" dir="auto" x-text="s.target || s.id || t('settings.xt.unnamed')"></strong>
                             <span style="color:var(--text-tertiary);font-size:0.8rem;"
                                   x-text="(s.side ? tOr('settings.xt.side_value_' + s.side, s.side) + ' · ' : '') + (s.mood ? tOr('settings.xt.mood_' + s.mood, s.mood) : '')"></span>
                             <span style="flex:1;"></span>
@@ -3347,14 +3365,14 @@
                         <div class="x-policy-summary"><span translate="no" x-text="s.target || s.id"></span><span x-show="s.allow_draft" x-cloak x-text="t('settings.xt.draft_permission')"></span><span x-text="s.allow_auto ? t('settings.xt.auto_permission') : t('settings.xt.review_permission')"></span></div>
                         <div x-show="xReplyOpen === i" style="margin-top:12px;" x-cloak>
                             <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-                                <div class="form-group">
+                                <div class="form-group" x-show="s._advanced" x-cloak>
                                     <label :for="'xr-id-' + i">{{ t('settings.xt.id') }}</label>
                                     <input :id="'xr-id-' + i" type="text" class="form-input" x-model="s.id"
                                            placeholder="{{ t('settings.xt.topic_ph') }}" autocomplete="off">
                                 </div>
                                 <div class="form-group">
                                     <label :for="'xr-target-' + i">{{ t('settings.xt.target') }}</label>
-                                    <input :id="'xr-target-' + i" type="text" class="form-input" x-model="s.target" maxlength="200" autocomplete="off">
+                                    <input :id="'xr-target-' + i" type="text" class="form-input" :value="s.target" @input="xReplySetTarget(s, $event.target.value)" maxlength="200" autocomplete="off" dir="auto">
                                     <p class="form-hint">{{ t('settings.xt.target_hint') }}</p>
                                 </div>
                                 <div class="form-group">
@@ -3363,10 +3381,19 @@
                                         <option value="">{{ t('settings.xt.side_written') }}</option>
                                         <option value="against">{{ t('settings.xt.side_against') }}</option>
                                         <option value="support">{{ t('settings.xt.side_support') }}</option>
-                                        <option value="">{{ t('settings.xt.side_legacy') }}</option>
                                     </select>
                                 </div>
                             </div>
+                            <p class="form-hint" x-text="s.side === 'support' ? t('settings.xt.support_contract') : s.side === 'against' ? t('settings.xt.against_contract') : t('settings.xt.side_written')"></p>
+                            <p class="form-hint" x-show="!Object.keys(s.reply_style || {}).length">{{ t('settings.xt.style_inherited') }}</p>
+                            <label class="checkbox-label">
+                                <input type="checkbox" :checked="Object.keys(s.reply_style || {}).length > 0" @change="xReplyOverrideStyle(s, $event.target.checked)">
+                                {{ t('settings.xt.style_override') }}
+                            </label>
+                            <template x-if="Object.keys(s.reply_style || {}).length > 0">
+                                <div>{{ style_controls('s.reply_style', "'xr-style-' + i") }}</div>
+                            </template>
+                            <button class="btn btn-sm btn-secondary" type="button" :aria-expanded="!!s._advanced" @click="s._advanced = !s._advanced">{{ t('settings.xt.advanced_subject') }}</button>
                             <div class="form-group">
                                 <label :for="'xr-mood-' + i">{{ t('settings.xt.fallback_mood') }}</label>
                                 <select :id="'xr-mood-' + i" class="form-input" x-model="s.mood">
@@ -3375,11 +3402,11 @@
                                     </template>
                                 </select>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group" x-show="s._advanced" x-cloak>
                                 <label :for="'xr-match-' + i">{{ t('settings.xt.keywords') }}</label>
                                 <textarea :id="'xr-match-' + i" rows="3" class="form-input"
                                        :value="s._matchText !== undefined ? s._matchText : (s.match || []).join(', ')"
-                                       @input="s._matchText = $event.target.value"
+                                       @input="s._matchText = $event.target.value; s._routingEdited = true"
                                        placeholder="{{ t('settings.xt.keywords_ph') }}" autocomplete="off"></textarea>
                                 <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
                                     {{ t('settings.xt.keywords_hint') | safe }}
@@ -3393,7 +3420,7 @@
                                     {{ t('settings.xt.extra_hint') | safe }}
                                 </p>
                             </div>
-                                <div class="form-group">
+                                <div class="form-group" x-show="s._advanced" x-cloak>
                                     <label :for="'xr-scope-' + i">{{ t('settings.xt.scope') }}</label>
                                     <textarea :id="'xr-scope-' + i" class="form-input" rows="2" x-model="s.scope" maxlength="2000"></textarea>
                                 </div>
@@ -3401,7 +3428,7 @@
                                     <label :for="'xr-exceptions-' + i">{{ t('settings.xt.exceptions') }}</label>
                                     <textarea :id="'xr-exceptions-' + i" class="form-input" rows="2" :value="(s.exceptions || []).join('\n')" @input="s.exceptions = _xSplit($event.target.value, true)"></textarea>
                                 </div>
-                            <details style="margin-bottom:16px;">
+                            <details x-show="s._advanced" x-cloak style="margin-bottom:16px;">
                                 <summary>{{ t('settings.xt.scope_permissions') }}</summary>
                                 <div class="form-group">
                                     <label :for="'xr-owner-' + i">{{ t('settings.xt.policy_owner') }}</label>
@@ -3446,12 +3473,12 @@
                                     <p class="form-hint">{{ t('settings.xt.evidence_age_hint') }}</p>
                                 </div>
                             </details>
-                            <div class="form-group">
+                            <div class="form-group" x-show="s._advanced" x-cloak>
                                 <label :for="'xr-register-' + i">{{ t('settings.xt.register') }}</label>
                                 <input :id="'xr-register-' + i" type="text" class="form-input" x-model="s.register"
                                        placeholder="{{ t('settings.xt.register_ph') }}" autocomplete="off">
                             </div>
-                            <div class="form-group">
+                            <div class="form-group" x-show="s._advanced" x-cloak>
                                 <label :for="'xr-hard-' + i">{{ t('settings.xt.hard_lines') }}</label>
                                 <textarea :id="'xr-hard-' + i" class="form-input" rows="3"
                                           :value="s._hardText !== undefined ? s._hardText : (s.hard_lines || []).join('\n')"
@@ -3461,7 +3488,7 @@
                                     {{ t('settings.xt.hard_lines_hint') }}
                                 </p>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group" x-show="s._advanced" x-cloak>
                                 <label :for="'xr-examples-' + i">{{ t('settings.xt.examples') }}</label>
                                 <textarea :id="'xr-examples-' + i" class="form-input" rows="3"
                                           :value="s._exText !== undefined ? s._exText : (s.examples || []).join('\n')"
@@ -3483,7 +3510,14 @@
                     </ul>
                 </template>
 
+                <section id="xr-style-section" aria-labelledby="xr-style-title" style="margin-top:20px;">
+                    <h4 id="xr-style-title" class="x-policy-heading">{{ t('settings.xt.style_title') }}</h4>
+                    <p class="form-hint">{{ t('settings.xt.style_defaults_hint') }}</p>
+                    {{ style_controls('xReply.reply_style', "'xr-style-global'") }}
+                </section>
+
                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;">
+                    <span role="status" class="form-hint" x-text="xReplyLoading ? t('common.loading') : xReplyHasChanges() ? t('settings.xt.unsaved_changes') : t('settings.xt.saved_settings')"></span>
                     <button class="btn btn-primary" @click="saveXReply()" :disabled="xReplySaving"
                             x-text="xReplySaving ? '…' : t('settings.xt.save')"></button>
                     <button class="btn btn-secondary" @click="loadXReplyRecent()">{{ t('settings.xt.recent') }}</button>
@@ -3503,20 +3537,26 @@
                             {{ t('settings.xt.try_voice_only') }}
                         </span>
                     </p>
+                    <p class="form-hint">{{ t('settings.xt.example_hint') }}</p>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+                        {% for kind in ['praise', 'criticism', 'mixed', 'quoted'] %}
+                        <button class="btn btn-sm btn-secondary" type="button" @click="xReplyExample('{{ kind }}')">{{ t('settings.xt.sample_' + kind) }}</button>
+                        {% endfor %}
+                    </div>
                     <div class="form-group">
-                        <label>{{ t('settings.xt.post_text') }}</label>
-                        <textarea class="form-input" rows="3" x-model="xReplyPreview.text"
+                        <label for="xr-preview-text">{{ t('settings.xt.post_text') }}</label>
+                        <textarea class="form-input" id="xr-preview-text" rows="3" x-model="xReplyPreview.text"
                                   placeholder="{{ t('settings.xt.post_ph') }}"></textarea>
                     </div>
                     <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                         <div class="form-group">
-                            <label>{{ t('settings.xt.their_handle') }}</label>
-                            <input type="text" class="form-input" x-model="xReplyPreview.handle"
+                            <label for="xr-preview-handle">{{ t('settings.xt.their_handle') }}</label>
+                            <input type="text" class="form-input" id="xr-preview-handle" x-model="xReplyPreview.handle"
                                    placeholder="{{ t('x_studio.someone') }}" autocomplete="off">
                         </div>
                         <div class="form-group">
-                            <label>{{ t('settings.xt.tone') }}</label>
-                            <select class="form-input" x-model="xReplyPreview.mood">
+                            <label for="xr-preview-mood">{{ t('settings.xt.tone') }}</label>
+                            <select class="form-input" id="xr-preview-mood" x-model="xReplyPreview.mood">
                                 <option value="">{{ t('settings.xt.tone_default') }}</option>
                                 <template x-for="m in xReply.moods" :key="m">
                                     <option :value="m" x-text="tOr('settings.xt.mood_' + m, m)"></option>
@@ -3535,9 +3575,26 @@
                     </div>
                     <button class="btn btn-secondary" @click="runXReplyPreview()" :disabled="xReplyPreview.busy"
                             x-text="xReplyPreview.busy ? t('settings.xt.drafting') : t('settings.xt.draft_reply')"></button>
+                    <button class="btn btn-secondary" @click="runXReplyPreview(true)" :disabled="xReplyPreview.busy">{{ t('settings.xt.compare_saved') }}</button>
 
                     <template x-if="xReplyPreview.result">
                         <div style="margin-top:12px;">
+                            <template x-if="xReplyPreview.result.effective_policy">
+                                <p class="form-hint"><bdi translate="no" x-text="xReplyPreview.result.effective_policy.target"></bdi>
+                                    <span x-text="xReplyPreview.result.effective_policy.side ? t('settings.xt.side_value_' + xReplyPreview.result.effective_policy.side) : t('settings.xt.side_written')"></span>
+                                    <span x-text="t('settings.xt.mood_' + xReplyPreview.result.effective_policy.mood)"></span>
+                                </p>
+                            </template>
+                            <template x-if="xReplyPreview.result.saved_comparison">
+                                <section style="margin-bottom:12px;padding:12px;border:1px solid var(--border);border-radius:8px;">
+                                    <h5>{{ t('settings.xt.saved_result') }}</h5>
+                                    <p translate="no" dir="auto" x-text="xReplyPreview.result.saved_comparison.draft || xReplyPreview.result.saved_comparison.reason"></p>
+                                    <template x-for="check in (xReplyPreview.result.saved_comparison.checks || [])" :key="check.check">
+                                        <p :title="check.reason" x-text="t('x_studio.check_' + check.check) + ': ' + t('x_studio.verdict_' + check.verdict)"></p>
+                                    </template>
+                                    <h5>{{ t('settings.xt.proposed_result') }}</h5>
+                                </section>
+                            </template>
                             <template x-if="xReplyPreview.result.draft">
                                 <div>
                                     <p style="font-size:0.78rem;color:var(--text-tertiary);margin:0 0 4px;">

@@ -316,6 +316,8 @@
             <div class="kicker" x-show="displayKicker(d.text)" x-cloak
                  x-text="displayKicker(d.text)"></div>
             <div class="txt" x-text="displayBody(d.text)"></div>
+            <span class="xs-pill" x-show="(d.review || {}).effective_policy" x-text="tOr('settings.xt.side_' + (((d.review || {}).effective_policy || {}).side || 'written'), '')"></span>
+            <span class="xs-pill" x-show="(d.review || {}).effective_policy" x-text="tOr('settings.xt.mood_' + (((d.review || {}).effective_policy || {}).mood || 'professional'), '')"></span>
             <template x-for="check in ((d.review || {}).checks || [])" :key="check.check">
               <span class="xs-pill" :class="check.verdict === 'pass' ? '' : 'bad'" :title="check.reason"
                     x-text="t('x_studio.check_' + check.check) + ': ' + t('x_studio.verdict_' + check.verdict)"></span>
@@ -428,6 +430,24 @@
           <option value="posted">{{ t('x_studio.status_posted') }}</option>
         </select>
       </div>
+      <div class="form-group">
+        <label for="xs-conversation-side">{{ t('x_studio.filter_side') }}</label>
+        <select id="xs-conversation-side" class="form-select" x-model="conversationSide" @change="loadConversations()">
+          <option value="">{{ t('x_studio.all_sides') }}</option>
+          <option value="support">{{ t('settings.xt.side_support') }}</option>
+          <option value="against">{{ t('settings.xt.side_against') }}</option>
+          <option value="written">{{ t('settings.xt.side_written') }}</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="xs-conversation-mood">{{ t('x_studio.filter_mood') }}</label>
+        <select id="xs-conversation-mood" class="form-select" x-model="conversationMood" @change="loadConversations()">
+          <option value="">{{ t('x_studio.all_moods') }}</option>
+          {% for mood in ['professional', 'friendly', 'humorous', 'roast', 'angry', 'dry', 'deadpan', 'supportive'] %}
+          <option value="{{ mood }}">{{ t('settings.xt.mood_' + mood) }}</option>
+          {% endfor %}
+        </select>
+      </div>
     </div>
     <template x-for="c in conversations" :key="c.summon_id">
       <div class="xs-conv">
@@ -450,6 +470,9 @@
         </div>
         <div class="foot">
           <span class="xs-meta" x-show="c.reason && c.reply" x-cloak translate="no" :dir="textDir(c.reason)" x-text="c.reason"></span>
+          <span class="xs-pill" x-show="(c.effective_policy || {}).side !== undefined" x-text="tOr('settings.xt.side_' + ((c.effective_policy || {}).side || 'written'), '')"></span>
+          <span class="xs-pill" x-show="(c.effective_policy || {}).mood" x-text="tOr('settings.xt.mood_' + ((c.effective_policy || {}).mood || 'professional'), '')"></span>
+          <span x-show="(c.effective_policy || {}).target" translate="no" dir="auto" x-text="(c.effective_policy || {}).target"></span>
           <template x-for="check in (c.checks || [])" :key="check.check">
             <span class="xs-pill" :class="check.verdict === 'pass' ? '' : 'bad'"
                   :title="check.reason" x-text="t('x_studio.check_' + check.check) + ': ' + t('x_studio.verdict_' + check.verdict)"></span>

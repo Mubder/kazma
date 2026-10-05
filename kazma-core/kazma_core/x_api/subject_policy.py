@@ -7,10 +7,12 @@ import re
 import unicodedata
 from typing import Any
 
+from kazma_core.x_api.reply_style import TONES, contradictory_additions, normalize_style
+
 SCHEMA_VERSION = 2
 RESERVED_IDS = frozenset({"voice", "post", "none", "__voice__", "__post__"})
 CHECKS = frozenset({"context", "target", "stance", "evidence", "safety"})
-MOODS = frozenset({"roast", "angry", "dry", "deadpan", "supportive"})
+MOODS = frozenset(TONES)
 _ARABIC_MARKS = re.compile("[\u0610-\u061a\u064b-\u065f\u0670\u0640]")
 
 
@@ -126,8 +128,15 @@ def normalize_cards(raw: Any) -> tuple[list[dict[str, Any]], tuple[str, ...]]:
                 errors.append(f"{label}: catch-all must use '*' alone.")
         card["side"] = str(source.get("side") or "").strip().lower()
         card["mood"] = str(source.get("mood") or "dry").strip().lower()
+        try:
+            card["reply_style"] = normalize_style(source.get("reply_style", {}), partial=True)
+        except ValueError as exc:
+            errors.append(f"{label}: {exc}")
+            card["reply_style"] = {}
         if card["side"] not in ("", "against", "support"):
             errors.append(f"{label} has an invalid side.")
+        if contradictory_additions(card["side"], card["target"], card["view"]):
+            errors.append(f"{label}: additional instructions contradict the selected side.")
         if not catchall and not card["side"] and not card["view"]:
             errors.append(f"{label} needs a position: set against or support, or a view.")
         if card["mood"] not in MOODS or set(card["allowed_moods"]) - MOODS:
