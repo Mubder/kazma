@@ -310,3 +310,31 @@ reporting sample compatibility. Opinion-only drafting now receives its evidence
 restriction. Unknown verification still holds publication. The first release CI
 also identified missing initial-cloak attributes; both X templates now preserve
 the hydration gate. Final follow-up CI remains required.
+
+## Authorized live acceptance follow-up (2026-10-05)
+
+The operator authorized neutral public test posts with a visible automated-test
+disclaimer and cleanup after testing. A WSL shutdown interrupted the live
+installation before testing. Ubuntu was started; restarting the existing database
+container restored its host port, and the guard recovered Kazma. The existing
+tunnel returned HTTP 200, and authenticated X Studio loaded normally. No server
+process was started or killed by hand.
+
+Test XS-20261005-1253 published successfully through the normal Studio approval
+and durable publication path, with receipt 2107091849777201632. Its exact text
+and Published state survived a browser reload. Permanent cleanup confirmation
+is pending; do not treat this post as human evaluation or automatic qualification.
+
+The latest live PostgreSQL archive (pg_shared_1791195707.dump) restored with
+full data into a prefixed scratch database on the actual database server in
+21 seconds: 20 tables, 47 indexes, one extension. The scratch database was
+removed afterwards. Production rows were not restored or replaced. This proves
+that archive and PostgreSQL path, not universal-bundle recovery or a production
+RTO/RPO guarantee. The live Backup page also showed two completed offsite
+backups with PostgreSQL included. No new offsite upload was triggered.
+
+Verifier prompts now supply explicit per-role check names rather than a
+placeholder. Controlled schema errors expose the exact validation failure to
+the operator without returning provider output or source content. All rejected
+responses still hold publication. Genuine human reviews and S10 capability
+acceptance remain open.

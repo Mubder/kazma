@@ -93,7 +93,7 @@ def test_source_timestamp_requires_unambiguous_date_or_finite_past_epoch():
 
 @pytest.fixture
 def checker(monkeypatch):
-    state = {"roles": [], "messages": [], "outage": False, "kwargs": []}
+    state = {"roles": [], "messages": [], "outage": False, "kwargs": [], "extra_field": False}
     class Client:
         async def chat(self, messages, **kwargs):
             state["messages"].append(messages)
@@ -102,7 +102,10 @@ def checker(monkeypatch):
                 raise TimeoutError("backend unavailable")
             prompt = messages[0]["content"]
             names = json.loads(prompt.split("Requested checks: ", 1)[1].split(". Policy:", 1)[0])
-            return SimpleNamespace(content=json.dumps({"checks": [row(name) for name in names]}))
+            rows = [row(name) for name in names]
+            if state["extra_field"]:
+                rows[0]["unexpected"] = "private provider content"
+            return SimpleNamespace(content=json.dumps({"checks": rows}))
     async def client(role):
         state["roles"].append(role)
         return Client()
@@ -133,6 +136,17 @@ async def test_required_check_outages_remain_unknown(checker):
     checks = await verify_candidate(BODY, Subject(id="coffee", match=("coffee",)), context=ContextSnapshot(text="coffee"))
     assert len(checks) == 5 and all(check.verdict == "unknown" for check in checks)
     assert all("timed out" in check.reason for check in checks if check.check != "context")
+
+
+async def test_schema_diagnostic_is_specific_without_exposing_provider_content(checker):
+    checker["extra_field"] = True
+    checks = await verify_candidate(BODY, Subject(id="coffee", match=("coffee",)), context=ContextSnapshot(text="coffee"))
+    assert all(check.verdict == "unknown" for check in checks)
+    assert all("Invalid check fields" in check.reason for check in checks if check.check != "context")
+    assert all("private provider content" not in check.reason for check in checks)
+    prompt = checker["messages"][0][0]["content"]
+    assert '"check": "context"' in prompt and '"check": "target"' in prompt
+    assert '"check":"requested name"' not in prompt
 
 
 def test_context_detects_missing_quote_media_and_long_text():
