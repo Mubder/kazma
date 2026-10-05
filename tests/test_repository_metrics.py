@@ -33,6 +33,8 @@ async def test_fresh_static_counts_ignore_stale_snapshot_and_do_not_import_tests
     assert first["test_functions"] == 1
     assert first["collected_tests"] is None
     assert first["tracked_changes"] is False
+    assert first["upstream"] is None
+    assert first["installation_history_commits"] == 1
     assert "NOT collected tests" in first["claim_rules"]
     (source / "kazma-core/app.py").write_text("def current():\n    return 1\n\ndef another():\n    return 2\n", encoding="utf-8")
     second = json.loads(await metrics.repository_metrics())
@@ -40,6 +42,14 @@ async def test_fresh_static_counts_ignore_stale_snapshot_and_do_not_import_tests
     assert second["tracked_changes"] is True
     assert second["commit"] == first["commit"]
     assert (source / "METRICS.md").read_text(encoding="utf-8") == "Outdated: 999999 files and tests"
+
+
+async def test_installation_merges_are_not_reported_as_upstream_commits(source):
+    subprocess.run(["git", "-C", str(source), "update-ref", "refs/remotes/origin/main", "HEAD"], check=True)
+    subprocess.run(["git", "-C", str(source), "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "installation only"], check=True, capture_output=True)
+    result = json.loads(await metrics.repository_metrics())
+    assert result["upstream"]["commits"] == 1
+    assert result["installation_history_commits"] == 2
 
 
 async def test_changed_source_during_measurement_refuses_claims(source, monkeypatch):

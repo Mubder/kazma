@@ -23,6 +23,7 @@ def _git(root: Path, *args: str) -> str:
     return subprocess.check_output(
         ["git", "-c", "core.fsmonitor=false", *args], cwd=root,
         env=tool_child_env(), text=True, errors="replace", timeout=20,
+        stderr=subprocess.DEVNULL,
     ).strip()
 
 
@@ -45,6 +46,13 @@ def _measure() -> dict:
     module.git = lambda *args: _git(root, *args)
     module._count_contributors_via_api = lambda: None
     measured = module.collect(runtime_tests=False)
+    upstream = None
+    try:
+        upstream_sha = _git(root, "rev-parse", "--verify", "refs/remotes/origin/main")
+        upstream = {"ref": "origin/main", "sha": upstream_sha,
+                    "commits": int(_git(root, "rev-list", "--count", upstream_sha))}
+    except subprocess.CalledProcessError:
+        pass  # A checkout without a fetched upstream still has source counts.
     if before != _stamp(root) or before[0] != measured["commit"]["sha"]:
         return {"ok": False, "error": "The source changed during measurement. Retry repository_metrics; no numbers from this run are verified."}
     return {
@@ -55,8 +63,9 @@ def _measure() -> dict:
         "package_count": len(measured["packages"]),
         "test_files": measured["tests"]["files"],
         "test_functions": measured["tests"]["test_functions_total"],
-        "collected_tests": None, "commits": measured["git"]["commits"],
-        "claim_rules": "Use these newly measured figures, not METRICS.md. Test functions are source definitions, NOT collected tests or passing tests. Runtime collection is deliberately not executed by this read-only tool; omit that figure when unavailable. Tracked changes mean working-tree counts, not pristine commit counts. Publishing still requires the normal X approval.",
+        "collected_tests": None, "upstream": upstream,
+        "installation_history_commits": measured["git"]["commits"],
+        "claim_rules": "Use these newly measured figures, not METRICS.md. Test functions are source definitions, NOT collected tests or passing tests. Runtime collection is deliberately not executed by this read-only tool; omit that figure when unavailable. Tracked changes mean working-tree counts, not pristine commit counts. Installation history includes local merges: do not claim it as the public repository commit count or as metrics drift. Upstream counts describe the last fetched origin/main at its reported SHA, not a fresh GitHub lookup. Publishing still requires the normal X approval.",
     }
 
 
