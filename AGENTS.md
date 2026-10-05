@@ -2567,11 +2567,13 @@ verifies the body's `interrupt_id` against the registry BEFORE resuming
 (`_gate_not_pending`, `routes_direct/misc.py`). Only a `pending` row may
 be resumed; `claimed`/`resuming`/terminal answer 409 `not_pending` with
 the server's actual view, and a row owned by another thread answers 409
-`foreign`. Absence is not an objection — no row, no id, registry off or
-registry unreadable all fall through to the route's existing liveness
-check, because the dashboard, TUI and gateway reach this route with ids
-the registry may not carry and a human is waiting behind every call.
-Fail open on plumbing, never on a recorded decision. **Why (2026-09-20,
+`foreign`. A missing row or id can still reach the checkpoint liveness
+check for legacy dashboard/TUI/platform clients, but execution now requires
+`record_gate_decision(..., require_durable=True)` (2026-10-05). It backfills
+the verified gate, strictly claims it once and records resuming before any
+projection or drive. Registry off/unreadable answers 503 and stays paused;
+a repeated identical claim answers 409. Legacy `claim_gate` idempotency is
+retained only for projection callers (`allow_reclaim=True`). **Why (2026-09-20,
 `tests/e2e/test_unified_turn_concurrency.py`):** the route's only test
 was "is this THREAD paused". A resume pauses again at the next gate, so
 a retried Approve — a double-click, a lost 200, a stale tab — decided
@@ -4777,6 +4779,16 @@ new *guard* (its own code, or other OS-level variables) still needs the
 `KazmaAgent` task restarted.
 
 ## Testing & Validation
+
+- **Runtime ownership:** `KazmaAppBuilder` acquires `RuntimeOwnership` before
+  services construct and releases only after complete shutdown. Its local
+  OS fence is always on. `KAZMA_RUNTIME_HA=1` additionally holds a dedicated
+  Postgres session, paired to the complete volume's `.runtime-state-id`.
+  Never reconnect that lease or release it while workers still run: session
+  loss stops the process. Keep one runtime and qualify CSI storage fencing;
+  advisory ownership alone cannot fence a partitioned host's effects.
+  Drills: `tests/test_runtime_ownership.py` (marked real Postgres tests),
+  deployment contract: `tests/test_kubernetes_runtime_contract.py`.
 
 - **A test run never touches an install's data** (2026-09-27). The root
   `conftest.py` pins `KAZMA_DATA_DIR` and `KAZMA_USER_HOME` to fresh temp

@@ -43,7 +43,7 @@ def wired(monkeypatch):
     async def _claimed_for_thread(thread_id, decision, actor, **kw):
         rec.calls.append(("claim_thread", (thread_id, decision, actor)))
 
-    async def _resuming(iid):
+    async def _resuming(iid, **kw):
         rec.calls.append(("resuming", iid))
 
     class _Broker:

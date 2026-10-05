@@ -99,10 +99,22 @@ class KazmaAppBuilder:
         self._documents_maintenance = None
         self._env_files_loaded: list[str] = []
         self._env_load_error = ""
+        self._server_lease = None
 
     def build(self) -> FastAPI:
         """Execute all phases of application construction and return the FastAPI instance."""
-        self._bootstrap_environment()
+        built = False
+        try:
+            self._bootstrap_environment()
+            app = self._build_surfaces()
+            built = True
+            return app
+        finally:
+            if not built and self._server_lease is not None:
+                self._server_lease.release()
+
+    def _build_surfaces(self) -> FastAPI:
+        """Mount services only while this process owns the local runtime stores."""
         self._setup_templates_and_middlewares()
         self._setup_swarm()
         self._setup_gateway_and_bus()
@@ -140,6 +152,11 @@ class KazmaAppBuilder:
             logger.debug("[env] Failed to load .env: %s", e)
             # Logging has no file yet; _adopt_process_environment repeats it.
             self._env_load_error = f"{type(e).__name__}: {e}"[:300]
+        from kazma_core.paths import data_dir
+        from kazma_core.runtime_ownership import RuntimeOwnership
+
+        self._server_lease = RuntimeOwnership(data_dir())
+        self._server_lease.acquire()
         self._bootstrap_services()
 
     @staticmethod
@@ -497,6 +514,7 @@ class KazmaAppBuilder:
             redoc_url=None if _prod else "/redoc",
             openapi_url=None if _prod else "/openapi.json",
         )
+        self.app.state.kazma_runtime = self
 
         # Register services in Dependency Injection Container
         from kazma_ui.config_errors import install_config_error_handler
@@ -901,8 +919,8 @@ class KazmaAppBuilder:
 
             # Orphan recovery: tasks left in 'running' state by a crashed/
             # killed process would otherwise be stranded forever (audit §2.1).
-            # Requeue them (bounded by metadata.recovery_count) so long-
-            # horizon swarm work survives restarts.
+            # Their effects are uncertain. Hold them for reconciliation;
+            # whole-agent replay can repeat writes that already committed.
             try:
                 store = self.swarm_manager.engine.task_store
                 if store is not None:
@@ -913,8 +931,7 @@ class KazmaAppBuilder:
                             len(recovery["requeued"]),
                             len(recovery["failed"]),
                         )
-                    # Consume what the recovery produced (audit H-9): the
-                    # requeued PENDING rows used to have no reader at all.
+                    # Reconcile legacy PENDING recovery rows without replay.
                     self.swarm_manager.engine.redispatch_recovered_tasks()
             except Exception as e:
                 logger.warning("[Swarm] Orphan task recovery failed: %s", e)
@@ -2197,6 +2214,13 @@ class KazmaAppBuilder:
         # (VectorMemory degradation-alert flush removed with the V1 stack.)
 
     async def _on_shutdown(self) -> None:
+        """Release only after teardown finishes; process death fences failures."""
+        await self._shutdown_services()
+        lease = getattr(self, "_server_lease", None)
+        if lease is not None:
+            await asyncio.to_thread(lease.release)
+
+    async def _shutdown_services(self) -> None:
         """Application shutdown: flag, cron, swarm, agent, stores, gateway."""
         # ── Lifecycle: the stop is recorded ("shutting down") ────────
         # FIRST, before any teardown: stamps the marker the next start card

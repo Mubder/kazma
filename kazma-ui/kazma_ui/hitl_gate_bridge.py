@@ -8,11 +8,10 @@ execution fallback**: a live checkpoint interrupt is pending (live card),
 never an inferred Approved stamp. ``created_missing`` / ``orphaned``
 counters remain the residual drift signal.
 
-Every write here is **best-effort and exception-proof**: a registry
-failure logs + increments the mismatch metric and NEVER blocks the
-user-facing action. All entry points are async (`asyncio.to_thread` under
-the hood — §23, the server loop must not block) and no-op instantly when
-the ``KAZMA_GATE_REGISTRY`` kill-switch is off.
+Rendering and lifecycle writes remain best-effort. Execution entry points
+claim and mark resuming with ``strict=True``: registry failures propagate,
+and an unavailable or disabled registry keeps execution paused. All entry
+points are async (`asyncio.to_thread` under the hood — §23).
 
 Alias convergence (two-id rule): both this bridge and any pre-pause
 registration compute the SAME deterministic alias via
@@ -197,12 +196,15 @@ async def gate_claimed(
     *,
     tool: str = "",
     payload: dict[str, Any] | None = None,
-) -> None:
+    strict: bool = False,
+) -> str:
     """Record the human decision. Missing row ⇒ create-then-claim (the
     crash-between-interrupt-and-write case — checkpoint said it existed,
     the approve endpoint verified it, so the registry must reflect it)."""
     if not registry_on():
-        return
+        if strict:
+            raise RuntimeError("Durable approval recording is disabled")
+        return ""
     try:
         from kazma_core.metrics import (
             record_hitl_gate,
@@ -232,8 +234,14 @@ async def gate_claimed(
             row = await register_gate_async(create)
             record_hitl_gate_reconciled("created_missing")
         try:
-            claimed = await claim_gate_async(row.gate_id, decision, actor)
+            if strict:
+                if row.thread_id != thread_id:
+                    raise ValueError("Approval belongs to a different thread")
+                claimed = await claim_gate_async(row.gate_id, decision, actor, allow_reclaim=False)
+            else:
+                claimed = await claim_gate_async(row.gate_id, decision, actor)
             record_hitl_gate(claimed.state, claimed.mechanism)
+            return claimed.gate_id
         except TransitionConflict as tc:
             # The endpoint verified a real pending interrupt but the
             # registry disagrees — exactly the drift the parity counter
@@ -244,14 +252,21 @@ async def gate_claimed(
                 "(parity mismatch recorded)", row.gate_id, tc.actual,
             )
             _mismatch("claim")
+            if strict:
+                raise
     except Exception:
         logger.warning("[GateBridge] claim failed (user action unaffected)", exc_info=True)
         _mismatch("claim")
+        if strict:
+            raise
+    return ""
 
 
-async def gate_resuming(interrupt_id: str) -> None:
+async def gate_resuming(interrupt_id: str, *, strict: bool = False) -> None:
     """CAS claimed→resuming when the resume drive is spawned."""
     if not registry_on() or not interrupt_id:
+        if strict:
+            raise RuntimeError("Durable approval recording is unavailable")
         return
     try:
         from kazma_core.metrics import record_hitl_gate
@@ -264,14 +279,20 @@ async def gate_resuming(interrupt_id: str) -> None:
         row = await gate_for_async(str(interrupt_id))
         if row is None:
             _mismatch("resuming")
+            if strict:
+                raise RuntimeError("Approval claim was not persisted")
             return
         try:
             r = await mark_resuming_async(row.gate_id)
             record_hitl_gate(r.state, r.mechanism)
         except TransitionConflict:
             _mismatch("resuming")
+            if strict:
+                raise
     except Exception:
         logger.warning("[GateBridge] mark_resuming failed", exc_info=True)
+        if strict:
+            raise
 
 
 async def abort_thread_hitl(thread_id: str, *, session_id: str = "") -> None:
@@ -390,11 +411,14 @@ async def gate_claimed_for_thread(
     *,
     tool: str = "",
     payload: dict[str, Any] | None = None,
-) -> None:
+    strict: bool = False,
+) -> str:
     """Claim the OLDEST pending gate on a thread (gateway/platform path —
     platform cards are per-thread, they carry no interrupt id)."""
     if not registry_on() or not thread_id:
-        return
+        if strict:
+            raise RuntimeError("Durable approval recording is unavailable")
+        return ""
     try:
         from kazma_core.safety.hitl_gates import live_gates_async
 
@@ -404,16 +428,19 @@ async def gate_claimed_for_thread(
                 target = row.gate_id
                 break
         if target:
-            await gate_claimed(
-                thread_id, target, decision, actor, tool=tool, payload=payload
+            return await gate_claimed(
+                thread_id, target, decision, actor, tool=tool, payload=payload, strict=strict
             )
         else:
             # Legacy verified a real pending interrupt the registry missed.
-            await gate_claimed(
-                thread_id, "", decision, actor, tool=tool, payload=payload
+            return await gate_claimed(
+                thread_id, "", decision, actor, tool=tool, payload=payload, strict=strict
             )
     except Exception:
         logger.warning("[GateBridge] thread claim failed", exc_info=True)
+        if strict:
+            raise
+    return ""
 
 
 def gate_row_to_pending_item(row: Any) -> dict[str, Any]:

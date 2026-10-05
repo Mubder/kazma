@@ -190,7 +190,7 @@ async def rebind_workspace_mcp_servers(
     ex = executor if executor is not None else _executor_ref
     if ex is None:
         logger.debug("[MCP-Rebind] no executor registered; skip rebind reason=%s", reason)
-        set_bound_mcp_root(root)
+        set_bound_mcp_root(None)
         return 0
 
     lock = _get_rebind_lock()
@@ -204,13 +204,15 @@ async def rebind_workspace_mcp_servers(
         # Prefer stored configs on the executor / async manager.
         configs = _collect_bound_server_configs(ex)
         if not configs:
-            set_bound_mcp_root(root)
+            set_bound_mcp_root(None)
             logger.info(
                 "[MCP-Rebind] no workspace-bound servers connected; recorded root=%s",
                 root,
             )
             return 0
 
+        # None means transition/uncertain, never a verified new binding.
+        set_bound_mcp_root(None)
         rebound = 0
         for name, cfg in configs:
             try:
@@ -220,7 +222,11 @@ async def rebind_workspace_mcp_servers(
                 if hasattr(ex, "connect_server"):
                     await ex.connect_server(new_cfg)
                 elif hasattr(ex, "_mcp") and hasattr(ex._mcp, "connect_from_config"):
-                    await ex._mcp.connect_from_config([new_cfg])
+                    await ex._mcp.connect_from_config([new_cfg], raise_on_error=True)
+                else:
+                    raise RuntimeError("Executor has no MCP connection method")
+                if hasattr(ex, "is_server_connected") and not ex.is_server_connected(name):
+                    raise RuntimeError("MCP reconnect returned without a connected server")
                 rebound += 1
                 logger.info(
                     "[MCP-Rebind] rebound server '%s' → %s (reason=%s)",
@@ -236,7 +242,8 @@ async def rebind_workspace_mcp_servers(
                     exc,
                 )
 
-        set_bound_mcp_root(root)
+        if rebound == len(configs):
+            set_bound_mcp_root(root)
         return rebound
 
 
@@ -289,7 +296,7 @@ def _on_root_changed(root: Path, reason: str) -> Any:
             root,
             reason,
         )
-        set_bound_mcp_root(root)
+        set_bound_mcp_root(None)
         return None
 
     return rebind_workspace_mcp_servers(
@@ -300,9 +307,8 @@ def _on_root_changed(root: Path, reason: str) -> Any:
 def install_mcp_workspace_rebind(executor: Any) -> None:
     """Register *executor* for rebinds and subscribe to workspace changes.
 
-    Idempotent: safe to call on every agent/MCP connect. The connect calls
-    it in a worker thread (the root read below is a workspace-store read),
-    so the subscription is made under a lock.
+    Idempotent: safe to call on every agent/MCP connect. The subscription
+    is made under a lock; installation makes no speculative root claim.
     """
     global _executor_ref, _installed
     with _install_lock:
@@ -311,8 +317,21 @@ def install_mcp_workspace_rebind(executor: Any) -> None:
             subscribe_root_changed(_on_root_changed)
             _installed = True
             logger.info("[MCP-Rebind] workspace rebind installed")
-    # Record current root for health
-    try:
-        set_bound_mcp_root(resolve_active_root())
-    except Exception:
-        pass
+    # The successful handshake records each handle's binding. Installing a
+    # listener must never claim that an unstarted server already moved.
+
+
+def record_verified_mcp_binding(manager: Any) -> None:
+    """Aggregate only the registered executor's verified base-server roots."""
+    executor = _executor_ref
+    if executor is None or getattr(executor, "_mcp", None) is not manager:
+        return
+    configs = _collect_bound_server_configs(executor)
+    roots: set[Path] = set()
+    for name, _config in configs:
+        handle = manager._servers.get(name)
+        if handle is None or not handle.connected or handle.workspace_root is None:
+            set_bound_mcp_root(None)
+            return
+        roots.add(handle.workspace_root)
+    set_bound_mcp_root(next(iter(roots)) if len(roots) == 1 else None)

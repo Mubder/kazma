@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## Runtime recovery and evaluation review (2026-10-05)
+
+Temporal submission and result uncertainty no longer replay agent effects
+locally. Stable workflow IDs reject reuse, and whole-task activities have one
+attempt. A real local Temporal drill exposed eager package imports preventing
+worker startup; core and swarm exports now load lazily while retaining their API.
+Crash-orphaned local tasks and legacy recovery rows now record unknown effects
+for reconciliation instead of automatically replaying whole-agent work.
+
+MCP routing checks each connected handle's actual workspace, serializes scoped
+creation and retains busy handles across dispatch preparation. Failed rebinds
+cannot claim success. A failed output fence withholds external tool content.
+
+Web, platform and timeout approvals persist their decision and resume intent
+before projecting or executing it. Concurrent identical decisions have one
+claim owner. Readiness requires the initialized agent, provider, graph and saver;
+deployments can add required capabilities. Required Temporal needs its worker.
+Approval grants follow the durable claim, and platform buttons carry the
+interrupt identity so an old card cannot approve a new pause.
+
+A local OS writer fence prevents two server processes owning the same data
+directory. The optional active/passive profile also holds a dedicated Postgres
+ownership session, pairs the database with its complete state volume and exits
+on session loss without reacquiring ownership. Disposable Postgres drills cover
+admission, mismatched volumes, process death and session loss. A single-owner
+StatefulSet template preserves all state on a ReadWriteOncePod volume. Actual
+cluster storage fencing and cross-host HA remain unqualified. Production host
+shell now needs an explicit grant.
+
+The offline evaluation CLI prepares empty intake, freezes labeled cases and
+binds human judgments to unchanged candidate evidence. Failed turns remain in
+comparisons. No human holdout or production accuracy is invented. CI adds real
+Temporal recovery and Windows/Linux regressions on Python 3.11–3.14.
+
 ## X Studio: simpler subjects and explicit reply language (2026-10-05)
 
 X Settings now separates basic subject authoring from advanced policy fields,

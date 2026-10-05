@@ -390,10 +390,13 @@ async def activity(request: Request):
 
 
 @router.get("/health/ready")
-async def readiness():
+async def readiness(request: Request):
     """Readiness probe; the checks are in :func:`_readiness`."""
     with read_only_diagnostic("/health/ready"):
-        return await _readiness()
+        runtime = getattr(request.app.state, "kazma_runtime", None)
+        configured = (getattr(getattr(runtime, "config", None), "raw", {}) or {}).get("health", {})
+        required = configured.get("required_capabilities", []) if isinstance(configured, dict) else ["invalid_health_configuration"]
+        return await _readiness(runtime=runtime, required=required)
 
 
 async def _offloaded_check(check: Any, component: str, timeout_s: float) -> dict[str, Any]:
@@ -413,7 +416,52 @@ async def _offloaded_check(check: Any, component: str, timeout_s: float) -> dict
         }
 
 
-async def _readiness():
+def _check_chat_runtime(runtime: Any) -> dict[str, Any]:
+    """Inspect the running graph and saver; imports alone cannot prove readiness."""
+    graph = (getattr(runtime, "_graph_holder", {}) or {}).get("graph")
+    checkpointer = getattr(runtime, "_checkpointer", None)
+    checkpoint_bound = checkpointer is not None and getattr(graph, "checkpointer", None) is checkpointer
+    ready = graph is not None and checkpoint_bound
+    return {"status": "ok" if ready else "not_initialized", "component": "chat_runtime",
+            "graph_ready": graph is not None, "checkpointer_ready": checkpointer is not None,
+            "checkpoint_bound": checkpoint_bound}
+
+
+def _check_temporal_runtime() -> dict[str, Any]:
+    """Inspect the existing worker; never construct a worker during a probe."""
+    from kazma_core.swarm import durable
+
+    worker = durable._worker_task
+    running = durable.durable_enabled() and worker is not None and not worker.done()
+    return {"status": "ok" if running else "not_initialized", "component": "temporal"}
+
+
+def _check_code_execution() -> dict[str, Any]:
+    """Check the local jail daemon without running code or pulling an image."""
+    from kazma_core.sandbox.e2b import e2b_available
+    from kazma_core.security.child_env import tool_child_env
+    from kazma_core.tools import code_exec
+
+    if e2b_available():
+        return {"status": "ok", "component": "code_execution", "backend": "e2b",
+                "check_mode": "sdk_and_credentials_present", "remote_service_verified": False}
+    if not code_exec.local_exec_forbidden():
+        return {"status": "ok", "component": "code_execution", "backend": "trusted_host",
+                "isolated": False}
+    docker = code_exec._docker_cli()
+    if docker is not None and code_exec.use_docker_jail():
+        try:
+            probe = subprocess.run([docker, "info", "--format", "{{.ServerVersion}}"],
+                                   capture_output=True, text=True, timeout=2, env=tool_child_env())
+            if probe.returncode == 0 and probe.stdout.strip():
+                return {"status": "ok", "component": "code_execution", "backend": "docker",
+                        "check_mode": "daemon_only", "image_verified": False}
+        except (OSError, subprocess.TimeoutExpired):
+            logger.warning("[Health] code execution daemon probe failed", exc_info=True)
+    return {"status": "failed", "component": "code_execution", "error": "No available isolated execution backend"}
+
+
+async def _readiness(*, runtime: Any = None, required: Any = None):
     """Readiness probe - returns 200 if all critical dependencies are healthy.
     
     Checks:
@@ -450,6 +498,15 @@ async def _readiness():
         ("schedulers", check_schedulers, 3.0),
         ("llm_provider", check_llm_provider, 5.0),
     )
+    if runtime is not None:
+        plan += (("chat_runtime", lambda: _check_chat_runtime(runtime), 3.0),)
+    from kazma_core.swarm.durable import durable_required
+
+    temporal_required = durable_required()
+    if temporal_required or (isinstance(required, (list, tuple)) and "temporal" in required):
+        plan += (("temporal", _check_temporal_runtime, 3.0),)
+    if isinstance(required, (list, tuple)) and "code_execution" in required:
+        plan += (("code_execution", _check_code_execution, 3.0),)
     results = await asyncio.gather(
         *(_offloaded_check(check, name, cap) for name, check, cap in plan),
         # One check that raises fails itself, never the whole probe.
@@ -462,19 +519,29 @@ async def _readiness():
             result = {"status": "failed", "component": name, "error": "check failed"}
         checks[name] = result
     
-    # Determine overall status — database + config_store are critical
+    # The minimum admits chat only when its graph and durable saver are ready.
+    critical = {"config_store", "database", "model_registry", "agent_runner", "llm_provider"}
+    if runtime is not None:
+        critical.add("chat_runtime")
+    if temporal_required:
+        critical.add("temporal")
+    if isinstance(required, (list, tuple)):
+        critical.update(str(name) for name in required)
+    elif required is not None:
+        critical.add("invalid_required_capabilities_configuration")
     critical_failed = [
         name
         for name, check in checks.items()
-        if name in ("config_store", "database") and check.get("status") == "failed"
+        if name in critical and check.get("status") != "ok"
     ]
+    critical_failed.extend(sorted(critical - checks.keys()))
     failed = [name for name, check in checks.items() if check.get("status") == "failed"]
     not_initialized = [name for name, check in checks.items() if check.get("status") == "not_initialized"]
     
     if critical_failed:
         overall_status = "not_ready"
         http_status = 503
-    elif failed:
+    elif failed or any(c.get("status") in ("degraded", "stopped") for c in checks.values()):
         overall_status = "degraded"
         http_status = 200  # non-critical failure still accepts traffic
     elif not_initialized:
@@ -488,6 +555,8 @@ async def _readiness():
         "status": overall_status,
         "timestamp": time.time(),
         "checks": checks,
+        "required_capabilities": sorted(critical),
+        "unavailable_capabilities": critical_failed,
     }
     # A failure that only a restart can clear (the volatile settings store):
     # the guard restarts on it instead of riding it out as an outage.

@@ -49,13 +49,14 @@ RUN freshclam --quiet || true
 # Copy monorepo
 COPY . .
 
-# Install with RAG + Postgres extras (multi-replica ready)
+# Install with RAG + Postgres extras (one runtime owner)
 # document-platform brings pymupdf + pypdfium2, without which convert and
 # redact return 503 in a container that otherwise reports healthy.
 RUN pip install --no-cache-dir -e ".[rag,postgres,document-platform]"
 
 # Create non-root user for security (least-privilege)
-RUN useradd -r -m -d /home/kazma -s /bin/bash kazma \
+RUN groupadd -g 10001 kazma \
+    && useradd -r -u 10001 -g kazma -m -d /home/kazma -s /bin/bash kazma \
     && mkdir -p /app/kazma-data /home/kazma/.kazma/vector_memory \
     && chown -R kazma:kazma /app /home/kazma \
     && chmod +x /app/scripts/docker-entrypoint.sh
