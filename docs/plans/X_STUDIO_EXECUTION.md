@@ -338,3 +338,12 @@ placeholder. Controlled schema errors expose the exact validation failure to
 the operator without returning provider output or source content. All rejected
 responses still hold publication. Genuine human reviews and S10 capability
 acceptance remain open.
+
+Real trusted summon 2107095391284220057 reached the test post, selected Support
+and the configured heart-emoji supportive tone, and produced an English draft
+held for approval. The operator phrase requesting professional wording did not
+replace the emoji mapping. No automatic reply was sent. Diagnostics showed
+claim rows in non-evidence checks and invalid decisions in the remaining checks;
+role-specific prompts now request claims only for factual verification, and
+validation failures identify the offending field category without exposing
+provider content. The human-created summon remains unreviewed evaluation data.
