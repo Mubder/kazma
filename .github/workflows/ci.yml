@@ -594,6 +594,7 @@ jobs:
           tests/test_lazy_package_exports.py
           tests/test_runtime_writer_fence.py tests/test_required_capability_readiness.py
           tests/test_runtime_ownership.py tests/test_kubernetes_runtime_contract.py
+          tests/test_swarm_recovery_no_replay.py
           tests/test_durable_gate_decisions.py tests/test_evaluation_review.py
           tests/test_execution_policy_failures.py tests/test_config_store_close_race.py
           tests/test_text_newlines.py tests/test_shutdown_builds_nothing.py

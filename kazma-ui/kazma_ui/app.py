@@ -919,8 +919,8 @@ class KazmaAppBuilder:
 
             # Orphan recovery: tasks left in 'running' state by a crashed/
             # killed process would otherwise be stranded forever (audit §2.1).
-            # Requeue them (bounded by metadata.recovery_count) so long-
-            # horizon swarm work survives restarts.
+            # Their effects are uncertain. Hold them for reconciliation;
+            # whole-agent replay can repeat writes that already committed.
             try:
                 store = self.swarm_manager.engine.task_store
                 if store is not None:
@@ -931,8 +931,7 @@ class KazmaAppBuilder:
                             len(recovery["requeued"]),
                             len(recovery["failed"]),
                         )
-                    # Consume what the recovery produced (audit H-9): the
-                    # requeued PENDING rows used to have no reader at all.
+                    # Reconcile legacy PENDING recovery rows without replay.
                     self.swarm_manager.engine.redispatch_recovered_tasks()
             except Exception as e:
                 logger.warning("[Swarm] Orphan task recovery failed: %s", e)

@@ -113,6 +113,9 @@ workflow ID to inspect its history and actual effects. Resubmitting that same
 task ID recovers its existing workflow; creating a new task ID can repeat
 effects. Whole-agent activities intentionally have one attempt. Add effect
 identities and per-step recovery before enabling automatic activity retries.
+Running swarm tasks interrupted by process exit, including legacy pending
+recovery rows, now fail with an unknown execution outcome. Inspect their actual
+effects before explicitly resubmitting; startup does not automatically replay them.
 
 If an approval returns 503, restore decision storage before acting again;
 the graph remains paused. A claimed/resuming decision after a crash needs

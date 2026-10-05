@@ -14,8 +14,10 @@ entries retain their original dates.
 **Runtime hardening (2026-10-05).** Temporal acknowledgement loss no longer
 falls back to a second local execution; activity retries are disabled until
 effects have individual idempotency. A real local-server drill found and fixed
-package imports that prevented the workflow loading in its sandbox. MCP checks
-verified per-handle roots and holds scoped requests against eviction. Approvals
+package imports that prevented the workflow loading in its sandbox.
+Crash-orphaned swarm tasks and legacy pending recovery rows also refuse
+automatic whole-agent replay and report unknown effects for reconciliation.
+MCP checks verified per-handle roots and holds scoped requests against eviction. Approvals
 persist their strict claim/resume intent before execution, and registry outages
 leave them paused. Readiness requires the actual graph/saver binding. Evidence:
 the recovery, binding, durable-decision, writer-fence and readiness regression

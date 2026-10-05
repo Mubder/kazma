@@ -6,6 +6,8 @@ Temporal submission and result uncertainty no longer replay agent effects
 locally. Stable workflow IDs reject reuse, and whole-task activities have one
 attempt. A real local Temporal drill exposed eager package imports preventing
 worker startup; core and swarm exports now load lazily while retaining their API.
+Crash-orphaned local tasks and legacy recovery rows now record unknown effects
+for reconciliation instead of automatically replaying whole-agent work.
 
 MCP routing checks each connected handle's actual workspace, serializes scoped
 creation and retains busy handles across dispatch preparation. Failed rebinds

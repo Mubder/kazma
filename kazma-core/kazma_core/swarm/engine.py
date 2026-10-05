@@ -593,12 +593,11 @@ class SwarmEngine:
         return reaped
 
     def redispatch_recovered_tasks(self, max_tasks: int = 5) -> int:
-        """Re-dispatch crash-recovered PENDING tasks from the TaskStore.
+        """Reconcile legacy recovery rows without replaying uncertain effects.
 
-        ``requeue_orphaned_running`` (boot) rewrites crash-orphaned 'running'
-        rows to 'pending' — but nothing ever consumed them, so the recovery
-        was decorative (audit H-9). This dispatches them again in the
-        background, bounded by *max_tasks* per boot.
+        Older versions requeued interrupted whole-agent tasks. Keep the public
+        entry point, but finalize those rows as unknown outcomes for inspection.
+        Ordinary pending work and active/paused tasks are never changed here.
         """
         if self._task_store is None:
             return 0
@@ -616,27 +615,18 @@ class SwarmEngine:
                 continue
             if task.id in self._active_tasks:
                 continue
+            task.metadata = dict(task.metadata or {})
+            task.metadata["execution_outcome"] = "unknown"
+            self._finalize_task(
+                task, worker_results=[], status="failed", duration_seconds=0,
+                error=("Interrupted task has uncertain external effects; automatic replay refused. "
+                       "Inspect checkpoints, Temporal history and actual effects before resubmitting."),
+                metadata=task.metadata,
+            )
             count += 1
-
-            async def _redispatch(t: SwarmTask = task) -> None:
-                try:
-                    # Fresh dispatch resets status/started_at; recovery_count
-                    # stays for the bounded-crash-loop cap in the store.
-                    t.status = TaskStatus.PENDING
-                    await self.dispatch(t)
-                except Exception:
-                    logger.warning(
-                        "[SwarmEngine] recovered-task re-dispatch failed for %s",
-                        t.id,
-                        exc_info=True,
-                    )
-
-            from kazma_core.background import spawn_background
-
-            spawn_background(_redispatch(), name=f"swarm-recover:{task.id}")
         if count:
-            logger.info("[SwarmEngine] Re-dispatching %d crash-recovered task(s)", count)
-        return count
+            logger.warning("[SwarmEngine] Held %d interrupted task(s) for effect reconciliation", count)
+        return 0  # no task was re-dispatched
 
     def start_maintenance_loop(self, interval_seconds: float = 60.0) -> None:
         """Start the background watchdog (stale-task reap + idle reap).
