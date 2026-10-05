@@ -35,6 +35,34 @@ README's test count is the one pytest collects, the figure the site shows as
 "tests", so the gate collects too (seconds); a collection that fails fails the
 gate with pytest's reason.
 
+## Fresh metrics in Kazma chat and X posts
+
+For a new Kazma metrics post, use the native **`repository_metrics`** tool
+first. It measures the source installation containing Kazma with the same
+`scripts/generate_metrics.py` collector used by the website. It does not read
+the cached `METRICS.md`, change repository files, import tests, or loosen the
+shell interpreter restrictions. It measures Kazma, even when your active
+workspace is another project; a wheel installation without the source checkout
+reports that these measurements are unavailable.
+
+The result includes the exact commit, measurement time, tracked-change status,
+Python file/line counts, package count, test files, source test functions and
+commit count. If the source changes during measurement, the tool refuses the
+figures and asks for a retry. Tracked changes mean working-tree measurements,
+not a pristine committed release.
+
+Source test functions are **not collected tests or passing tests**. The
+read-only chat tool deliberately skips pytest collection and returns no
+collected-test count. A post can use the other fresh figures and omit that
+count; do not relabel test functions as tests passed. The trusted CLI/CI
+generator remains the path for runtime-collected counts. X publishing still
+uses the normal approval gate.
+
+An old snapshot's commit and the current HEAD can differ because of merge
+history or the commit carrying that snapshot. Counting intervening commits
+does not prove that every metric changed. Fresh measurement is the evidence
+for a current post.
+
 ## What fails, and how it shows
 
 | Failure | What happens |

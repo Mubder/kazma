@@ -7,6 +7,22 @@ description: Post to X through the official API v2 with OAuth 1.0a, vaulted keys
 
 Kazma tweets **only** through the [official X API v2](https://docs.x.com/x-api/posts/manage-tweets/introduction) using **OAuth 1.0a user context**. There is no scrape path, no Playwright/computer-use poster, and no app-only Bearer posting. X also supports OAuth 2.0 user tokens; this connector uses its four OAuth 1.0a credentials.
 
+## Posting fresh Kazma repository metrics
+
+Ask Kazma to call **`repository_metrics`** before drafting a metrics post.
+The read-only tool measures its own source installation with the official
+generator and returns the commit, timestamp and fresh file, line, package,
+test-file, test-function and commit counts. It ignores cached `METRICS.md`
+figures, reports tracked changes, and refuses a measurement if the source
+changes while it runs. A wheel installation without the source checkout
+reports that measurements are unavailable.
+
+The tool does not import tests or run pytest. **Test functions are not collected
+tests or passing tests.** Omit the collected-test figure when it is unavailable;
+the other verified numbers can still support a post. Runtime-collected counts
+come from the trusted CLI/CI generator. Do not enable a general shell
+interpreter to refresh metrics. Posting still requires the normal X approval.
+
 ## What is official
 
 | You do | Kazma does |

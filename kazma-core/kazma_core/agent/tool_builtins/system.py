@@ -248,6 +248,7 @@ def register_system_tools(registry: Any) -> None:
     )
     async def shell_exec(command: str, timeout: int = 30) -> str:
         import shlex
+
         from kazma_core.safety.post_hitl import host_shell_allowed
 
         if not host_shell_allowed():
@@ -878,9 +879,9 @@ def register_system_tools(registry: Any) -> None:
             started_iso = getattr(task, "started_at", None)
             if started_iso:
                 try:
-                    from datetime import datetime, timezone
+                    from datetime import datetime
                     dt = datetime.fromisoformat(started_iso.replace("Z", "+00:00"))
-                    elapsed = (datetime.now(timezone.utc) - dt).total_seconds()
+                    elapsed = (datetime.now(UTC) - dt).total_seconds()
                     tot_timeout = getattr(task, "timeout", None) or 300.0
                     elapsed_str = f" (elapsed: {elapsed:.1f}s, timeout: {tot_timeout:.0f}s)"
                 except Exception:
@@ -925,6 +926,21 @@ def register_system_tools(registry: Any) -> None:
         from kazma_core.tools.code_exec import python_exec as _exec
 
         return await _exec(code=code, timeout=timeout)
+    @registry.register(
+        description=(
+            "Get fresh verified metrics for the installed Kazma source repository. "
+            "Use FIRST for Kazma metrics posts, LOC/files/package/test-function counts; "
+            "never substitute cached METRICS.md. Reuses the official generator without "
+            "writes, shell interpreters or pytest collection. Includes exact commit, "
+            "measurement time and claim limits. This measures Kazma, not an arbitrary workspace."
+        ),
+        category="diagnostics",
+    )
+    async def repository_metrics() -> str:
+        from kazma_core.tools.repository_metrics import repository_metrics as _metrics
+
+        return await _metrics()
+
     # ── Context window indicator ──────────────────────────────
     @registry.register(
         description=(
