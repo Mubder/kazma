@@ -356,3 +356,19 @@ recovery for older text-only retries; text alone never establishes verification.
 Regression coverage rejects mismatched snapshots and retains incomplete-context
 holds. The starter collection now contains 15 observations and zero human
 reviews. The live test reply remains held while these changes are validated.
+
+### Latest operator acceptance
+
+The second candidate was subsequently approved through Telegram and published
+as reply 2107097710473928858. This proves the attended gateway approval and
+publication receipt path, not automatic eligibility. It is not retried after
+publication. Commit 45023a26 is pushed and deployed through the guard; the
+server reports ready. Its unpublished Settings model test passes target,
+stance, evidence and safety. Pasted context remains unverified as intended.
+The changed reply/check paths passed 182 focused checks, with six additional
+retry checks covering exact observation/history recovery and mismatched-source
+rejection. Final CI is still pending at this observation.
+
+The [remaining operator steps](X_STUDIO_OPERATOR_ACCEPTANCE.md) separate human
+labels/account authorization from engineering work and start with five genuine
+case reviews. The agent does not supply human attestation or declare S10 shipped.
