@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 TRANSLATIONS = {
+    "x_dataset.partial_help": {"en": "You can save a partial case: choose only what you know and leave the rest blank. Fields marked ‘Required for review’ are needed only when you mark the case as fully reviewed.", "ar": "يمكنك حفظ حالة غير مكتملة: اختر ما تعرفه فقط واترك الباقي فارغًا. الحقول المميزة بعبارة «مطلوب للمراجعة» تلزم فقط عند اعتماد الحالة كمراجعة مكتملة."},
+    "x_dataset.required_review": {"en": "Required for review", "ar": "مطلوب للمراجعة"},
+    "x_dataset.save_partial": {"en": "Save Without Review", "ar": "حفظ دون اعتماد المراجعة"},
     "x_dataset.review_incomplete": {"en": "Could not save as human reviewed. Complete: {fields}. To save only your edits, uncheck the personal review checkbox and save again.", "ar": "تعذر الحفظ كمراجعة بشرية. أكمل: {fields}. لحفظ تعديلاتك فقط، أزل علامة إقرار المراجعة الشخصية ثم احفظ مجددًا."},
     "x_dataset.invalid_field": {"en": "Could not save. Check {field}.", "ar": "تعذر الحفظ. تحقق من حقل {field}."},
     "x_dataset.invalid_response": {"en": "Could not save or load the dataset (HTTP {status}). Check your connection and sign-in, then retry. Your edits are still here.", "ar": "تعذر حفظ أو تحميل المجموعة (HTTP {status}). تحقق من الاتصال وتسجيل الدخول ثم أعد المحاولة. تعديلاتك ما زالت هنا."},
@@ -83,7 +86,7 @@ TRANSLATIONS = {
     "x_dataset.outcome_help": {"en": "These measured decisions are read-only. Import an isolated shadow report to add outcomes. Inspect the exact candidate before reviewing it.", "ar": "القرارات المقاسة للقراءة فقط. استورد تقرير التقييم المعزول لإضافة النتائج. افحص الرد نفسه قبل اعتماده."},
     "x_dataset.critical": {"en": "Actual Critical Violations — enter 0 only after inspection", "ar": "المخالفات الحرجة الفعلية — أدخل 0 فقط بعد الفحص"},
     "x_dataset.attestation": {"en": "I personally checked the real original, labels and any recorded candidate", "ar": "فحصت بنفسي الأصل الحقيقي والتصنيفات وأي رد مسجل"},
-    "x_dataset.review_help": {"en": "Saving without this attestation clears human review. Model-generated labels never count as human review.", "ar": "الحفظ دون هذا الإقرار يلغي حالة المراجعة البشرية. تصنيفات النموذج لا تُحتسب مراجعة بشرية."},
+    "x_dataset.review_help": {"en": "Optional: check this only after completing the required review fields and personally checking the case. Leave it unchecked to save partial edits. Saving without review clears any previous human-review status; it keeps your annotations. Model-generated labels never count as human review.", "ar": "اختياري: ضع العلامة فقط بعد إكمال حقول المراجعة المطلوبة وفحص الحالة بنفسك. اتركه دون تحديد لحفظ تعديلات غير مكتملة. الحفظ دون اعتماد المراجعة يلغي حالة المراجعة البشرية السابقة ويحفظ تصنيفاتك. تصنيفات النموذج لا تُحتسب مراجعة بشرية."},
     "x_dataset.save_case": {"en": "Save Case", "ar": "حفظ الحالة"},
     "x_dataset.saved": {"en": "Saved. No publishing permissions changed.", "ar": "تم الحفظ. لم تتغير صلاحيات النشر."},
     "x_dataset.save_before_export": {"en": "Save your case edits before exporting the stored collection.", "ar": "احفظ تعديلات الحالة قبل تصدير المجموعة المخزنة."},
