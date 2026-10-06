@@ -237,8 +237,8 @@ def resolve_gate_views(
     ``authoritative=False`` (registry unread / kill-switch / missing list)
     omits every gate — honest empty, not a lying card.
 
-    ``live_rows`` is the ``LIVE_STATES`` snapshot (pending / claimed /
-    resuming). Historical settled gates have no covering row; their label
+    ``live_rows`` is the display snapshot (live questions plus failed
+    resumes). Historical settled gates have no covering row; their label
     comes from the part stamp inside this function, never from the client.
     """
     if not authoritative:
@@ -408,7 +408,7 @@ def attach_view_to_hitl_frame(frame: dict[str, Any], thread_id: str) -> dict[str
     live and refresh agree without a second JS table.
     """
     try:
-        from kazma_core.safety.hitl_gates import live_gates
+        from kazma_core.safety.hitl_gates import display_gates
         from kazma_ui.hitl_gate_bridge import registry_on
 
         if not thread_id or not registry_on():
@@ -424,7 +424,7 @@ def attach_view_to_hitl_frame(frame: dict[str, Any], thread_id: str) -> dict[str
             "tool": str(src.get("tool") or ""),
             "payload": src,
         }
-        rows = list(live_gates(thread_id) or [])
+        rows = list(display_gates(thread_id) or [])
         rows_for_this = rows
         if str(part_state).lower() in _DECISION_FRAME_STATES and iid:
             rows_for_this = [
@@ -496,11 +496,11 @@ def live_snapshot(thread_id: str) -> tuple[list[Any], bool]:
         return [], False
     try:
         from kazma_ui.hitl_gate_bridge import registry_on
-        from kazma_core.safety.hitl_gates import live_gates
+        from kazma_core.safety.hitl_gates import display_gates
 
         if not registry_on():
             return [], False
-        return list(live_gates(thread_id)), True
+        return list(display_gates(thread_id)), True
     except Exception:
         logger.debug("[gate_view] live snapshot failed", exc_info=True)
         return [], False
@@ -511,11 +511,11 @@ async def live_snapshot_async(thread_id: str) -> tuple[list[Any], bool]:
         return [], False
     try:
         from kazma_ui.hitl_gate_bridge import registry_on
-        from kazma_core.safety.hitl_gates import live_gates_async
+        from kazma_core.safety.hitl_gates import display_gates_async
 
         if not registry_on():
             return [], False
-        return list(await live_gates_async(thread_id)), True
+        return list(await display_gates_async(thread_id)), True
     except Exception:
         logger.debug("[gate_view] live snapshot failed", exc_info=True)
         return [], False

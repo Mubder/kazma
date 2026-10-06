@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## Tool receipts and interrupted approvals (2026-10-06)
+
+Graph tool effects now reserve a durable invocation receipt before dispatch
+and save the result before checkpointing. A checkpoint replay reuses a saved
+result; an interrupted dispatch or uncommitted result stops with an explicit
+warning instead of repeating an unknown action or synthesizing success.
+Receipts use WAL with full commit durability and travel with the state bundle.
+This does not enable whole-agent retries or make external APIs atomic.
+The local registry retries classified reads only. Mutating failures after
+invocation carry explicit uncertainty, stop the graph and remain held on replay;
+validation failures before invocation can still be corrected.
+Failed MCP mutator dispatches carry the same uncertainty through output hooks.
+
+Startup holds interrupted approval resumes as execution errors while keeping
+the original human decision and actor. Failed resumes override stale Approved
+transcript labels with a bilingual uncertainty notice. The same terminal
+interrupt cannot reappear as a live approval; unanswered gates survive restart.
+These recovery regressions join the Windows/Linux Python 3.11–3.14 matrix.
+
+The chat session list now ignores responses from older refreshes or the other
+view. A deterministic browser regression reproduces active chats appearing
+under Archived and verifies both late successful and failed responses.
+
+Live acceptance exposed an approval card labeling a Deny resume as Approved
+while it was in flight. The card now says Applying decision in both languages.
+Agent guidance names the actual Python tool and no longer offers the retired
+`code_exec` tool name; a tool name alone does not establish isolation.
+The HA runbook now describes the supported single-owner active/passive profile,
+cluster discovery, storage fencing and evidence required from real node drills.
+
 ## Runtime recovery and evaluation review (2026-10-05)
 
 Temporal submission and result uncertainty no longer replay agent effects

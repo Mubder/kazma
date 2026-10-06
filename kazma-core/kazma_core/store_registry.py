@@ -105,6 +105,8 @@ STORES: dict[str, Store] = {
         "saved drafts (save_proposal) and scratchpad findings", "bundle"),
     "task_ledgers.db": Store(
         "task ledgers: each chat's goal, plan steps and findings", "bundle"),
+    "tool_effects.db": Store(
+        "graph tool invocation receipts and interrupted effects", "bundle"),
     "memory_state.db": Store(
         "long-term memory: beliefs, entities and episodes", "bundle"),
     "memory_ops.db": Store(

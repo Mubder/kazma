@@ -108,7 +108,7 @@ class TestToolRetry:
         call_count = 0
 
         @registry.register(description="Flaky tool", category="test")
-        async def flaky_tool() -> str:
+        async def flaky_read_tool() -> str:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -120,7 +120,7 @@ class TestToolRetry:
             "kazma_core.retry.load_retry_config", return_value={"max_attempts": 3, "min_wait": 0.01, "max_wait": 0.05}
         ):
             with patch("asyncio.sleep", new_callable=AsyncMock):
-                result = await registry.execute("flaky_tool", {})
+                result = await registry.execute("flaky_read_tool", {})
 
         assert result["content"] == "success"
         assert result["is_error"] is False

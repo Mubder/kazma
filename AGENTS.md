@@ -2628,8 +2628,13 @@ reasons).
 **E. Reconciler — every crash window has one behavior.**
 Approve-on-missing-row backfills (`created_missing`); `close_turn` settles
 pending rows whose checkpoint is NOT paused as `orphaned` (in seconds);
-`boot_sweep()` (app startup) orphans stale claimed/resuming rows past grace
-and NEVER touches pending (the card must survive a restart); TTL sweep rides
+`boot_sweep()` holds interrupted claimed/resuming rows as `error`, preserving
+the human's decision and actor. The exclusive runtime owner sweeps with zero
+grace at startup, so a fresh claim cannot remain stuck forever. It NEVER
+touches pending (the card must survive a restart). `display_gates` includes
+error rows to override stale Approved transcript stamps; `live_gates` remains
+the lifecycle reader. A terminal registry row for the exact checkpoint
+interrupt cannot become pending through the thin fallback. TTL sweep rides
 the 15-min commitment GC cadence in `worker_bootstrap.py` (no new scheduler
 loop). Metrics: `kazma_hitl_gates_total{state,mechanism}`,
 `kazma_hitl_gate_parity_mismatch_total{site}` (must trend to zero),
@@ -2639,6 +2644,28 @@ loop). Metrics: `kazma_hitl_gates_total{state,mechanism}`,
 turn journal) — no multi-replica claims; a Postgres backend goes next to §21
 when needed. The registry cannot stop the model narrating while paused —
 that is handled by close_turn keeping the turn open on any pending row.
+
+**G. Graph tool receipts (2026-10-06).** `agent/effect_journal.py` reserves a
+mutating call before dispatch and commits its result before the graph's next
+checkpoint, on `tool_effects.db` (WAL, synchronous FULL; carried in migration
+bundles and on the complete state volume). Identity binds tenant, thread,
+turn timestamp, iteration, provider call ID and tool; the request hash also
+binds arguments and workspace. A completed replay returns the recorded result;
+a started receipt, timeout or result-commit failure stops the turn with an
+honest assistant warning and no synthesis. Never reset an unknown receipt
+or enable whole-agent retries on this basis. Reads are not cached. Legacy
+states without thread/turn scope have no receipt, and direct IDE/swarm bus
+execution remains outside this graph fence. `tests/test_effect_journal.py`
+includes real child-process death, concurrent admission and visible warnings.
+
+`LocalToolRegistry.execute` retries only classified reads. Mutating and unknown
+tools have one invocation attempt; a failure after invocation carries
+`effect_uncertain=True`, which the journal persists and holds on replay.
+Argument validation before invocation is still correctable. Do not turn a
+post-invocation error into a retryable ordinary result.
+`UnifiedToolExecutor` carries the same uncertainty for a failed MCP mutator
+dispatch, preserving the original failure through output hooks. Read errors
+remain correctable. This does not make the external server transactional.
 
 Tests: `tests/test_hitl_gates.py`, `test_hitl_gate_bridge.py`,
 `test_hitl_gate_read_cutover.py`, `test_hitl_gate_swarm_pipeline.py`,
