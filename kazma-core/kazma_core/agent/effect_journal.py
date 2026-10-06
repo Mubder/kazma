@@ -209,12 +209,14 @@ def main() -> int:
     """Operator inspection only; unknown effects are never reset or replayed."""
     import argparse
 
+    from kazma_core.env_files import load_env_files
     from kazma_core.paths import data_dir
 
     parser = argparse.ArgumentParser(description="Inspect graph tool receipt metadata without replaying effects.")
     parser.add_argument("--thread", required=True)
     parser.add_argument("--limit", type=int, default=200)
     args = parser.parse_args()
+    load_env_files()
     print(json.dumps(EffectJournal(data_dir() / "tool_effects.db").inspect(
         args.thread, limit=args.limit,
     ), ensure_ascii=False, indent=2))

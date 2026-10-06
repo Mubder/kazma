@@ -61,6 +61,9 @@ kubectl get storageclasses
 kubectl get csidrivers
 ```
 
+See [Google's cluster-access guide](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/cluster-access-for-kubectl)
+for the required authentication plugin and credential command.
+
 If sign-in cannot refresh automatically, the owner must complete the interactive
 login. If no suitable cluster exists, provisioning requires a chosen project,
 region, spending limit and the storage/backup plan above. A local Docker or kind
