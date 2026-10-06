@@ -80,10 +80,9 @@ class TestWave7GatewayConsistency:
         assert hasattr(gw_graph, "SESSION_TTL_SECONDS")
         assert gw_graph.SESSION_TTL_SECONDS == SESSION_TTL_SECONDS
 
-        import kazma_gateway.agent_handler.hitl as gw_hitl
-
-        src = inspect.getsource(gw_hitl)
-        assert "SESSION_TTL_SECONDS" in src
+        # HITL authorization uses durable ownership and therefore no longer
+        # depends on the delivery cache's TTL. Restart/expired-cache decisions
+        # are exercised in test_gateway_approval_authorization.py.
 
     def test_l9_card_storm_pruning_and_bounding(self) -> None:
         import time

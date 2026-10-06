@@ -1945,20 +1945,29 @@ class ConfigStore(_ChangeNotices):
                             if not is_expired:
                                 return False
 
-                        cur.execute(
-                            """
-                            INSERT INTO kazma_settings (key, value, category, updated_at)
-                            VALUES (%s, %s, %s, %s)
-                            ON CONFLICT (key) DO UPDATE SET
-                              value = EXCLUDED.value,
-                              category = EXCLUDED.category,
-                              updated_at = EXCLUDED.updated_at
-                            """,
-                            (key, json.dumps(to_store), category, now_iso),
-                        )
+                        if row is None:
+                            # FOR UPDATE cannot lock an absent row. A competing
+                            # insert must retain its value and be our winner.
+                            cur.execute(
+                                """INSERT INTO kazma_settings (key, value, category, updated_at)
+                                   VALUES (%s, %s, %s, %s)
+                                   ON CONFLICT (key) DO NOTHING RETURNING key""",
+                                (key, json.dumps(to_store), category, now_iso),
+                            )
+                            acquired = cur.fetchone() is not None
+                        else:
+                            # The expired row is locked by this transaction.
+                            cur.execute(
+                                """UPDATE kazma_settings
+                                   SET value = %s, category = %s, updated_at = %s
+                                   WHERE key = %s""",
+                                (json.dumps(to_store), category, now_iso, key),
+                            )
+                            acquired = True
                     conn.commit()
-                self._invalidate_key(key)
-                return True
+                if acquired:
+                    self._invalidate_key(key)
+                return acquired
             else:
                 conn = self._get_conn()
                 try:

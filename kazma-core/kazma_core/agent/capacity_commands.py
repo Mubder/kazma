@@ -56,6 +56,15 @@ def is_capacity_command(text: str, *, require_slash: bool = True) -> bool:
     return bare in ("long", "mission", "unrestricted")
 
 
+def capacity_command_enables_yolo(text: str, *, require_slash: bool = True) -> bool:
+    """Whether applying this command would increase approval-bypass privileges."""
+    if not is_capacity_command(text, require_slash=require_slash):
+        return False
+    command, _body = _split_command_and_body(text)
+    parsed = _parse(command)
+    return bool(parsed and parsed.get("action") == "on" and parsed.get("yolo"))
+
+
 def _command_arity(parts: list[str]) -> int:
     """How many leading tokens are the capacity command. 0 = do not split
     (unknown sub → help on the whole string)."""

@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## Gateway approval and IDE Git safety (2026-10-06)
+
+Gateway text approvals now require an administrator who owns the thread,
+using durable ownership rather than the short-lived delivery cache. Approval
+commands cannot create ownership, unreadable ownership storage refuses the
+decision, and authorized owners can resume after cache expiry or restart.
+YOLO activation is authorized before its early
+handler, including unrestricted and long-YOLO commands; status and disabling
+remain available.
+
+IDE Git reads now allow explicit options, refuse output-file writes and
+outside-workspace paths, disable fsmonitor/external diff/textconv and
+clean/smudge/process-filter execution,
+and pin the working tree so local configuration or inherited Git environment
+variables cannot redirect reads.
+Branch mutations retain the existing tool-registry approval path. Ordinary
+status and diff reads remain available without approval and preserve operator
+newline configuration.
+
+Partial-clone reads cannot automatically fetch missing objects and execute
+configured remote helpers. Git must support `--no-lazy-fetch`; an older version
+refuses the read with an upgrade hint. Missing objects require an approved
+fetch before retrying.
+
+Discord admin checks recognize the user in the adapter's `user:channel` actor
+while approvals still require full channel-specific ownership. Postgres
+first-owner acquisition now has exactly one winner when concurrent connections
+observe a missing key; expired lease replacement retains its row lock.
+
 ## Tool receipts and interrupted approvals (2026-10-06)
 
 Fresh settings reconciliation now persists shipped YAML merged with local

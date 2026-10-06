@@ -87,31 +87,12 @@ def _lang_for_path(path: Path) -> str:
 
 def _is_readonly_git(subcommand: str) -> bool:
     """True for git verbs that do not mutate the repo or remotes."""
-    import shlex
-
+    from kazma_core.ide.git_policy import read_operands, split_git_command
     try:
-        parts = shlex.split(subcommand.strip())
+        read_operands(split_git_command(subcommand))
+        return True
     except ValueError:
         return False
-    if not parts:
-        return False
-    cmd, rest = parts[0], parts[1:]
-    if cmd in {
-        "status", "log", "diff", "show", "rev-parse", "blame",
-        "ls-files", "describe", "rev-list", "shortlog", "version",
-    }:
-        return True
-    if cmd == "branch" and not any(
-        a in ("-d", "-D", "-m", "-M", "--delete", "--move") for a in rest
-    ):
-        return True
-    if cmd == "stash" and rest and rest[0] in ("list", "show"):
-        return True
-    if cmd == "remote" and (
-        not rest or rest[0] in ("-v", "--verbose", "show", "get-url")
-    ):
-        return True
-    return False
 
 
 class IdeService:
@@ -598,34 +579,85 @@ class IdeService:
         if not subcommand or not subcommand.strip():
             return {"ok": False, "error": "Empty git subcommand", "output": ""}
         sub = subcommand.strip()
-        if _is_readonly_git(sub):
+        from kazma_core.ide.git_policy import is_read_request, split_git_command
+        try:
+            parts = split_git_command(sub)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc), "output": ""}
+        if is_read_request(parts):
             return await self._git_read(sub, timeout=timeout)
         return await self.run(f"git {sub}", timeout=timeout)
 
     async def _git_read(self, subcommand: str, timeout: int = 60) -> dict[str, Any]:
         import asyncio
         import os
-        import shlex
         import subprocess
 
+        from kazma_core.ide.git_policy import split_git_command, validate_read_paths
+        from kazma_core.safety.post_hitl import resolve_shell_binary, system_path_dirs
         from kazma_core.security.child_env import tool_child_env
 
-        cwd = str(await asyncio.to_thread(lambda: self.root))
+        root = await asyncio.to_thread(lambda: self.root)
+        cwd = str(root)
         try:
-            argv = ["git", *shlex.split(subcommand, posix=os.name != "nt")]
+            parts = split_git_command(subcommand)
+            await asyncio.to_thread(validate_read_paths, parts, root)
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "output": ""}
 
+        binary = await asyncio.to_thread(
+            resolve_shell_binary, "git",
+            restricted_path=os.pathsep.join(system_path_dirs()),
+        )
+        if not binary:
+            return {"ok": False, "error": "Git could not be resolved on the trusted tool PATH", "output": ""}
+        parts = list(parts)
+        if parts[0] in ("diff", "log", "show", "blame") or parts[:2] == ["stash", "show"]:
+            index = 2 if parts[:2] == ["stash", "show"] else 1
+            parts[index:index] = ["--no-ext-diff", "--no-textconv"] if parts[0] != "blame" else ["--no-textconv"]
+        # The flag is also a capability requirement: older Git must refuse
+        # before a read, rather than silently ignoring a new environment key.
+        base_argv = [binary, "--no-pager", "--no-lazy-fetch", "-c", "core.fsmonitor=false", f"--work-tree={cwd}"]
+
         def _run() -> subprocess.CompletedProcess[str]:
+            import time
+
+            deadline = time.monotonic() + max(1, int(timeout))
+            # Keep operator newline configuration while dropping process-level
+            # repo/config injections and trace paths from the scrubbed builder.
+            env = tool_child_env()
+            config_paths = {"GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL"}
+            for key in list(env):
+                if key.upper().startswith("GIT_") and key.upper() not in config_paths:
+                    env.pop(key)
+            env.update({
+                "GIT_OPTIONAL_LOCKS": "0",
+                "GIT_CEILING_DIRECTORIES": str(root.parent),
+                "GIT_NO_LAZY_FETCH": "1",
+            })
+            # Clean/process filters also execute programs during work-tree
+            # comparisons. Query names only, then disable each configured
+            # driver while preserving unrelated operator Git configuration.
+            filters = subprocess.run(
+                [*base_argv, "config", "--null", "--name-only", "--get-regexp",
+                 r"^filter\..*\.(clean|smudge|process|required)$"],
+                cwd=cwd, env=env, capture_output=True, text=True,
+                timeout=max(0.001, deadline - time.monotonic()),
+            )
+            if filters.returncode not in (0, 1):
+                return filters
+            overrides: list[str] = []
+            for key in filters.stdout.split("\0"):
+                if key:
+                    value = "false" if key.endswith(".required") else ""
+                    overrides.extend(["-c", f"{key}={value}"])
             return subprocess.run(
-                argv,
+                [*base_argv, *overrides, *parts],
                 cwd=cwd,
-                # Read-only git still runs the repo's configured programs
-                # (core.fsmonitor, textconv): no server secrets for them.
-                env=tool_child_env(),
+                env=env,
                 capture_output=True,
                 text=True,
-                timeout=max(1, int(timeout)),
+                timeout=max(0.001, deadline - time.monotonic()),
                 check=False,
             )
 
@@ -636,6 +668,12 @@ class IdeService:
         except OSError as exc:
             return {"ok": False, "error": str(exc), "output": ""}
         out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        if proc.returncode and "unknown option" in out.lower() and "no-lazy-fetch" in out:
+            return {
+                "ok": False,
+                "error": "Read-only Git requires --no-lazy-fetch support; upgrade Git or use approved terminal execution",
+                "output": out,
+            }
         return {
             "ok": proc.returncode == 0,
             "error": None if proc.returncode == 0 else (out or f"exit {proc.returncode}"),
