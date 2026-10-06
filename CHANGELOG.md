@@ -1,5 +1,55 @@
 # CHANGELOG
 
+## Tool receipts and interrupted approvals (2026-10-06)
+
+Fresh settings reconciliation now persists shipped YAML merged with local
+overrides. Local provider/model choices survive workspace alignment, while
+saved settings keep precedence. Declared default migrations run before new
+keys are seeded, preserving deliberate local choices of retired values.
+
+An isolated PostgreSQL proxy-partition drill exposed an ownership query that
+could hang while the local proxy kept TCP alive. An independent watchdog now
+exits the runtime with code 75 after eight seconds without verified ownership.
+Late replies cannot revive ownership; shutdown retains the volume fence if
+the native query has not stopped. Storage fencing remains required for takeover.
+
+Cloud restart testing exposed an ephemeral default workspace: a fresh HA
+container selected its nonempty application directory instead of the paired
+state volume. HA workspace initialization now keeps the persistent default
+sandbox across boots. Explicit operator workspace registrations remain intact;
+operators must include their storage in the paired backup.
+
+Graph tool effects now reserve a durable invocation receipt before dispatch
+and save the result before checkpointing. A checkpoint replay reuses a saved
+result; an interrupted dispatch or uncommitted result stops with an explicit
+warning instead of repeating an unknown action or synthesizing success.
+Receipts use WAL with full commit durability and travel with the state bundle.
+This does not enable whole-agent retries or make external APIs atomic.
+The local registry retries classified reads only. Mutating failures after
+invocation carry explicit uncertainty, stop the graph and remain held on replay;
+validation failures before invocation can still be corrected.
+Failed MCP mutator dispatches carry the same uncertainty through output hooks.
+
+Startup holds interrupted approval resumes as execution errors while keeping
+the original human decision and actor. Failed resumes override stale Approved
+transcript labels with a bilingual uncertainty notice. The same terminal
+interrupt cannot reappear as a live approval; unanswered gates survive restart.
+These recovery regressions join the Windows/Linux Python 3.11–3.14 matrix.
+
+The chat session list now ignores responses from older refreshes or the other
+view. A deterministic browser regression reproduces active chats appearing
+under Archived and verifies both late successful and failed responses.
+
+Live acceptance exposed an approval card labeling a Deny resume as Approved
+while it was in flight. The card now says Applying decision in both languages.
+Agent guidance names the actual Python tool and no longer offers the retired
+`code_exec` tool name; a tool name alone does not establish isolation.
+The HA runbook now describes the supported single-owner active/passive profile,
+cluster discovery, storage fencing and evidence required from real node drills.
+Sequential approval and stream-recovery fixtures now use executable targets
+inside their own workspace. Successful ordering tests use harmless allowed
+commands; a separate real-graph control proves refused mutators stop the turn.
+
 ## Runtime recovery and evaluation review (2026-10-05)
 
 Temporal submission and result uncertainty no longer replay agent effects

@@ -279,17 +279,21 @@ Copy `.env`, `kazma.yaml` and `kazma-data/` into the install root, or point
 
 ---
 
-## 4. Multi-replica / Postgres (Phase 4.3)
+## 4. Postgres and the complete state volume
 
 When `KAZMA_DATABASE_URL=postgresql://…` is set:
 
 | Component | Backend | Notes |
 |-----------|---------|-------|
-| Shared settings / sessions / platform users schema | Postgres (`kazma_core.db`) | Required for multi-replica consistency |
-| Local caches, Chroma, per-node temp | Local disk | Do **not** share SQLite files over NFS |
+| Settings / sessions / platform users schema | Postgres (`kazma_core.db`) | These backends do not move every runtime store to Postgres |
+| SQLite stores, Chroma and persistent files | Complete fenced state volume | Preserve alongside Postgres; do **not** share SQLite files over NFS |
 | Checkpoints | Prefer Postgres checkpointer when configured | See env below |
 
-### Env for multi-replica
+The HA preparation profile permits one active runtime owner. Restore Postgres
+and the complete state volume together; receipts and approval decisions remain
+on that volume. See [Multi-Region & HA](./multi-region) for ownership and drills.
+
+### Postgres environment
 
 ```bash
 KAZMA_DATABASE_URL=postgresql://kazma:…@db:5432/kazma
@@ -366,6 +370,45 @@ which is the half that rots unnoticed.
 ---
 
 ## 7. Incident contacts
+
+### Interrupted tools and approval resumes
+
+After a crash, a recorded approval proves only the human's decision. Startup
+preserves that decision and actor, marks an interrupted resume as execution
+unconfirmed, and withholds the old approval buttons. A question that was still
+unanswered keeps its checkpoint and approval card.
+
+Graph mutating tools reserve a receipt before dispatch in `tool_effects.db`.
+The receipt identity binds the tenant, thread, turn, iteration, tool call and
+tool; its request hash also binds arguments and the workspace. Completed
+receipts supply their saved result on checkpoint replay. Started receipts
+hold an unknown outcome and stop the turn without synthesis or another
+dispatch. A saved error with `result_uncertain` also holds the turn: completed
+means the receipt was committed, not that the action succeeded. The local
+registry invokes mutating and unknown tools once; only classified reads receive
+automatic retries. A post-invocation error is uncertain because an action may
+have completed partially. Reads are not cached.
+Failed MCP mutator dispatches also carry uncertainty, including when an output
+hook rewrites the error. This fence does not cover legacy checkpoints
+without turn identity, direct IDE calls or the separate swarm bus path.
+
+Inspect metadata from the install's environment with its thread ID:
+
+```powershell
+python -m kazma_core.agent.effect_journal --thread THREAD_ID
+```
+
+The command shows receipt identities, tool names, state and timestamps. It
+does not print arguments or returned content, change a receipt, or replay
+anything. Inspect the actual target and its external audit trail before
+starting a new request. Do not delete or reset an unknown receipt to force a
+retry. Keep receipts, checkpoints and approval decisions together during
+backup and restore; restoring an older receipt store can repeat newer effects.
+
+External APIs are not atomic with this local store. Whole-agent Temporal
+activities still have one attempt; automatic activity retries remain
+unqualified. The receipt uses SQLite WAL with full commit durability and
+must stay on the complete fenced state volume.
 
 | Event | Action |
 |-------|--------|

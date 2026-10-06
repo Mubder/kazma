@@ -594,7 +594,7 @@ class TestToolWorkerIntegration:
 
     @pytest.mark.asyncio
     async def test_worker_handles_tool_crash(self):
-        """A crashing tool doesn't take down the whole worker."""
+        """A crashing mutator is contained and ends the turn with unknown effects."""
         from kazma_core.agent.graph_builder import tool_worker_node
         from kazma_core.agent.state import PendingToolCall, initial_supervisor_state
         from kazma_core.tracing import KazmaTracer
@@ -623,10 +623,10 @@ class TestToolWorkerIntegration:
         assert len(result["tool_calls_done"]) == 2
         results_by_id = {r["tool_call_id"]: r for r in result["tool_calls_done"]}
         assert results_by_id["tc_bad"]["is_error"] is True
-        # Tool errors deliberately surface the actual exception so the model
-        # can self-correct (tool_registry.py argument/error handlers) — the key
-        # guarantee here is that the crash is contained to this one call.
+        # Unknown mutator effects stop the turn rather than invite a retry.
+        # Calls already dispatched in this batch still report their results.
         assert "crasher" in results_by_id["tc_bad"]["content"]
-        assert "failed" in results_by_id["tc_bad"]["content"].lower()
+        assert "effects are unknown" in results_by_id["tc_bad"]["content"].lower()
+        assert result["turn_failed"] is True
         assert results_by_id["tc_good"]["is_error"] is False
         assert results_by_id["tc_good"]["content"] == "ok"

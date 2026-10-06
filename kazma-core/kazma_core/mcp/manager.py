@@ -2419,13 +2419,22 @@ class UnifiedToolExecutor:
 
                 logger.debug("[Unified] Routing '%s' → MCP server '%s'", tool_name, server_name)
                 _mcp_result = await self._mcp.execute_mcp_tool(server_name, tool_name, arguments)
+                _was_error = bool(_mcp_result.get("is_error"))
                 try:
                     from kazma_core.agent.tool_hooks import apply_post_tool_hooks
 
-                    return await apply_post_tool_hooks(tool_name, arguments, _mcp_result)
+                    _mcp_result = await apply_post_tool_hooks(tool_name, arguments, _mcp_result)
                 except Exception:
                     logger.debug("[Unified] post-tool hook failed", exc_info=True)
-                    return _mcp_result
+                if _was_error or _mcp_result.get("is_error"):
+                    from kazma_core.safety.side_effects import is_read_only
+
+                    _mutating = not is_read_only(tool_name)
+                    if _mutating:
+                        # A server error does not prove its write never happened.
+                        # Keep this fact even if an output hook rewrites the error.
+                        _mcp_result["effect_uncertain"] = True
+                return _mcp_result
 
         # ── Not found ──────────────────────────────────────────────
         available_local = []

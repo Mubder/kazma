@@ -28,7 +28,6 @@ pauses, so its turn never closes.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterator
 
 import pytest
@@ -51,14 +50,14 @@ PROMPT = "Fire nine approval cards so I can check the gate."
 #: well as the ordering one. Distinct per step: if they merge wrongly the
 #: text says which ones survived.
 _NARRATION = [
-    "Card {n} of nine — preparing the call and explaining myself first, "
+    f"Card {i + 1} of nine — preparing the call and explaining myself first, "
     "because a gate with no reason attached is a gate the reader has to "
-    "guess at.".format(n=i + 1)
+    "guess at."
     for i in range(12)
 ]
 
 
-def _nine_gate_script(tmp_dir: str) -> Script:
+def _nine_gate_script() -> Script:
     """The reported turn's shape, not just its gate count.
 
     Nine gates alone did not reproduce anything. Two ingredients of the
@@ -68,21 +67,20 @@ def _nine_gate_script(tmp_dir: str) -> Script:
       They emit activity but no gate, so nothing folds the narration in
       front of them — the shape that could leave a single fragment in
       the thoughts.
-    * calls that FAIL AFTER APPROVAL. The report has three shell_exec
-      calls approved and then rejected by the allowlist ("could not
-      resolve 'ls' under restricted PATH"), all before the fifth card.
-      An approved gate whose execution fails is a different sequence
-      from one that succeeds.
+    * three approved shell calls before later cards. The historical report
+      used allowlist refusals. An unconfirmed mutator failure now stops a
+      turn, so this ordering fixture uses successful harmless Git probes;
+      the real-graph failure control checks that refusals end the turn.
     """
     plan = [
         ("file_write", {"path": "probe_1.txt", "content": "one"}),
         ("file_read", {"path": "probe_1.txt"}),                  # read tier
-        ("shell_exec", {"command": "definitely-not-on-the-allowlist"}),
+        ("shell_exec", {"command": "git --version"}),
         ("file_list", {"path": "."}),                            # read tier
-        ("shell_exec", {"command": "also-not-allowlisted"}),
+        ("shell_exec", {"command": "git --version"}),
         ("file_write", {"path": "probe_2.txt", "content": "two"}),
         ("file_read", {"path": "probe_2.txt"}),                  # read tier
-        ("shell_exec", {"command": "still-not-allowlisted"}),
+        ("shell_exec", {"command": "git --version"}),
         ("file_write", {"path": "probe_3.txt", "content": "three"}),
         ("file_list", {"path": "."}),                            # read tier
         ("file_write", {"path": "probe_4.txt", "content": "four"}),
@@ -90,20 +88,14 @@ def _nine_gate_script(tmp_dir: str) -> Script:
     ]
     steps = []
     for i, (tool, args) in enumerate(plan):
-        a = dict(args)
-        if "path" in a:
-            a["path"] = os.path.join(tmp_dir, str(a["path"]))
-        steps.append(Step(tool=tool, args=a, narration=_NARRATION[i % len(_NARRATION)]))
+        steps.append(Step(tool=tool, args=dict(args), narration=_NARRATION[i % len(_NARRATION)]))
     return Script(steps=steps, final="All cards fired.")
 
 
 @pytest.fixture
 def harness() -> Iterator[Harness]:
-    import tempfile
-
-    with tempfile.TemporaryDirectory(prefix="utb-nine-") as tmp:
-        with unified_turn_server(_nine_gate_script(tmp)) as h:
-            yield h
+    with unified_turn_server(_nine_gate_script()) as h:
+        yield h
 
 
 @pytest.fixture

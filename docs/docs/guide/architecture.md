@@ -81,7 +81,7 @@ flowchart LR
 
 - **Checkpointer:** `AsyncSqliteSaver` on `kazma-data/checkpoints.db`, or Postgres `checkpoints*` when `KAZMA_DATABASE_URL` is set (those tables are in `KAZMA_PG_TABLES`).
 - **Thread identity:** `thread_id` from sender (e.g. `gw-telegram-12345`) or UUID — `agent_handler/store.py`. Platform IDs never enter graph state.
-- **Crash recovery:** graph HITL pauses live in the checkpointer; swarm pauses in `CheckpointManager.restore_paused_tasks()`. Registry `boot_sweep()` orphans stale claimed/resuming rows and **never** touches pending (the card must survive restart).
+- **Crash recovery:** graph HITL pauses live in the checkpointer; swarm pauses in `CheckpointManager.restore_paused_tasks()`. At exclusive-owner startup, registry `boot_sweep()` holds interrupted claimed/resuming rows as execution errors while preserving their decision and actor. It **never** touches pending (the card must survive restart). Graph tool receipts reuse completed results and hold unknown effects for inspection.
 - **Shutdown:** `_on_shutdown()` must stop cron first, then drain swarm `_task_handles` / `stop_all()`, then close stores / HTTP pool / gateway. Hard-kill can corrupt SQLite.
 - **Time travel:** `/replay` and `/fork` (slash); snapshots in `kazma-data/snapshots.db` (LRU 50 per thread). `/fork` writes a **new** thread and must not overwrite `active_thread.{sender}`.
 

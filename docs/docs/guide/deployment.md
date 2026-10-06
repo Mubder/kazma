@@ -190,6 +190,12 @@ session pooling; transaction pooling is incompatible with the ownership lock.
 Set ingress proxy addresses narrowly and require TLS. Supply provider and
 platform credentials through the normal protected configuration workflow.
 
+Fresh HA installs register the default workspace inside the persistent data
+directory, rather than the container's application directory. Existing active
+workspace registrations are preserved: verify that every writable workspace
+is on storage included in the paired backup. A workspace under `/app` loses
+its files when a pod is replaced, even when database and PVC recovery succeed.
+
 ```bash
 kubectl kustomize deploy/kubernetes
 # Review the rendered resources after replacing both placeholders.
@@ -204,6 +210,10 @@ or blank volume cannot take over that database. Pair the **authoritative**
 volume on the first HA boot, after backing up the database and complete state.
 The monitor never reconnects: session loss exits the entire process (75),
 including workers that are still running while the event loop is stalled.
+An independent watchdog also exits 75 if ownership cannot be verified for
+eight seconds. This covers a proxy that keeps the local TCP connection alive
+while its upstream query hangs; database statement timeouts and TCP keepalives
+alone cannot bound that case. A late response never revives an expired owner.
 The Kubernetes controller may restart it after database connectivity returns.
 
 The lock supplements storage fencing. PostgreSQL releasing a lost session

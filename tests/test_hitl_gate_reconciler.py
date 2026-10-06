@@ -9,7 +9,6 @@ from __future__ import annotations
 import time
 
 import pytest
-
 from kazma_core.safety import hitl_gates as hg
 from kazma_core.safety.hitl_gates import (
     GateRow,
@@ -48,7 +47,9 @@ def test_boot_sweep_orphans_stale_claimed_rows():
     out = boot_sweep(grace_seconds=300)
     assert out["orphaned"] == 1
     row = gate_for("g1")
-    assert row.state == "settled" and row.decision == "orphaned"
+    assert row.state == "error" and row.decision == "approve"
+    assert row.actor == "web:me"
+    assert "execution is unconfirmed" in row.message
 
 
 def test_boot_sweep_keeps_fresh_claimed_rows():
@@ -87,7 +88,8 @@ def test_boot_sweep_orphans_stale_resuming_too():
     conn.commit()
     conn.close()
     assert boot_sweep(grace_seconds=300)["orphaned"] == 1
-    assert gate_for("g4").state == "settled"
+    assert gate_for("g4").state == "error"
+    assert gate_for("g4").decision == "approve"
 
 
 def test_boot_sweep_runs_ttl_expiry():
@@ -98,6 +100,66 @@ def test_boot_sweep_runs_ttl_expiry():
     out = boot_sweep()
     assert out["expired"] == 1
     assert gate_for("g5").state == "timeout"
+
+
+@pytest.mark.parametrize("decision", ["approve", "deny"])
+def test_exclusive_boot_holds_fresh_claims_and_emits_once(decision):
+    events = []
+    hg.gate_events.subscribe(lambda event, row: events.append((event, row.state)))
+    register_gate(GateRow(gate_id="fresh", thread_id="fresh-thread", tool="file_write"))
+    claim_gate("fresh", decision, "web:reviewer")
+    mark_resuming("fresh")
+    assert boot_sweep(grace_seconds=0)["orphaned"] == 1
+    assert boot_sweep(grace_seconds=0)["orphaned"] == 0
+    row = gate_for("fresh")
+    assert (row.state, row.decision, row.actor) == ("error", decision, "web:reviewer")
+    assert events.count(("gate_settled", "error")) == 1
+
+
+async def test_failed_resume_does_not_resurrect_same_pause_but_new_pause_survives():
+    from types import SimpleNamespace
+
+    from kazma_ui.hitl_gate_bridge import gate_not_pending
+
+    register_gate(GateRow(gate_id="old-pause", thread_id="restarted", tool="file_write"))
+    claim_gate("old-pause", "approve", "web:reviewer")
+    boot_sweep(grace_seconds=0)
+    snap = SimpleNamespace(next=("tool_worker",), values={}, tasks=[
+        SimpleNamespace(interrupts=[SimpleNamespace(
+            id="old-pause", value={"type": "hitl_approval", "tool": "file_write", "args": {}}
+        )])
+    ])
+    assert await hitl_thread_status("restarted", snapshot=snap) == "idle"
+    assert await gate_not_pending("restarted", "old-pause") == "error"
+    from kazma_ui.gate_view import live_snapshot_async, stamp_parts_for_read
+
+    rows, authoritative = await live_snapshot_async("restarted")
+    stamped = stamp_parts_for_read([
+        {"type": "hitl", "interrupt_id": "old-pause", "state": "approved", "tool": "file_write"}
+    ], rows, authoritative=authoritative)
+    assert stamped[0]["view"]["state"] == "error"
+    assert stamped[0]["view"]["interactive"] is False
+    assert live_gates("restarted") == []
+    # Negative control: a different, unregistered interrupt is a live question.
+    snap.tasks[0].interrupts[0].id = "new-pause"
+    assert await hitl_thread_status("restarted", snapshot=snap) == "pending"
+
+
+async def test_startup_reconciles_before_services_and_stops_on_failure(monkeypatch):
+    from unittest.mock import AsyncMock, Mock
+
+    from kazma_core import http_tls
+    from kazma_ui.app import KazmaAppBuilder
+
+    monkeypatch.setenv("KAZMA_GATE_REGISTRY", "1")
+    sweep = AsyncMock(side_effect=OSError("receipt store unavailable"))
+    prewarm = Mock()
+    monkeypatch.setattr(hg, "boot_sweep_async", sweep)
+    monkeypatch.setattr(http_tls, "prewarm", prewarm)
+    with pytest.raises(OSError, match="receipt store unavailable"):
+        await KazmaAppBuilder()._on_startup()
+    sweep.assert_awaited_once_with(grace_seconds=0)
+    prewarm.assert_not_called()
 
 
 # ── registry DB unreachable — readers degrade to legacy, never crash ───────

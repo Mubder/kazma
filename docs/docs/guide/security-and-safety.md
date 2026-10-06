@@ -98,7 +98,12 @@ Behind a reverse proxy, **peer address is not a credential**. Set `KAZMA_TRUSTED
 
 `POST /api/approve/{thread_id}` (`kazma_ui/routes_direct/misc.py` `approve_tool`) — not `app.py`. Claims the registry row, then `graph.ainvoke(Command(resume=…), config)`. Ownership mismatch → **403**. The WebSocket takes no approvals (it refuses `approve_tool`).
 
-Paused turns persist in the **checkpointer**. Registry `boot_sweep()` orphans stale claimed/resuming rows and **never** touches pending (the card must survive restart).
+Paused turns persist in the **checkpointer**. At exclusive-owner startup,
+registry `boot_sweep()` holds interrupted claimed/resuming rows as execution
+errors while preserving their decision and actor. It **never** touches pending
+(the card must survive restart). A failed resume cannot display as Approved
+or reopen the same approval card. Graph tool receipts hold unknown effects
+for inspection; they do not authorize automatic retries.
 
 ---
 

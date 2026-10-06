@@ -130,6 +130,15 @@ def test_the_archived_view_keeps_the_count_and_offers_no_new_chat(harness: Harne
                 "() => document.querySelector('#session-list').innerText.includes('Kept chat')",
                 timeout=30000,
             )
+            # A refresh started in the active view may finish after the
+            # archive request. Hold it so this race is deterministic.
+            held: list = []
+            pg.route("**/api/chat/sessions", lambda route: held.append(route))
+            pg.evaluate("() => { window.__lateSessionList = window.KazmaChat.refreshSessions(); }")
+            deadline = time.monotonic() + 15
+            while not held and time.monotonic() < deadline:
+                pg.wait_for_timeout(50)
+            assert held, "the refresh never requested its sessions"
             pg.evaluate("() => window.KazmaChat.toggleArchivedView()")
             pg.wait_for_function(
                 "() => document.querySelector('#session-list').innerText.includes('No archived sessions')",
@@ -137,6 +146,14 @@ def test_the_archived_view_keeps_the_count_and_offers_no_new_chat(harness: Harne
             )
             assert pg.inner_text("#sessions-title") == "Archived"
             assert pg.locator("#session-empty-new").count() == 0
+
+            with pg.expect_response(lambda response: response.url.endswith("/api/chat/sessions")) as late:
+                held[0].continue_()
+            late.value.finished()
+            pg.evaluate("() => window.__lateSessionList")
+            assert "No archived sessions" in pg.inner_text(LIST)
+            assert "Kept chat" not in pg.inner_text(LIST)
+            pg.unroute("**/api/chat/sessions")
 
             pg.evaluate("() => window.KazmaChat.toggleArchivedView()")
             pg.wait_for_function(
@@ -147,6 +164,29 @@ def test_the_archived_view_keeps_the_count_and_offers_no_new_chat(harness: Harne
             # The count element survived the round trip (it was deleted).
             assert pg.locator("#session-count").count() == 1
             assert pg.inner_text("#session-count").strip() == "(1)"
+
+            # Cover the reverse race, including a stale HTTP error. Neither
+            # an old archive response nor its error may replace active chats.
+            for status in (200, 503):
+                held.clear()
+                pg.route("**/api/chat/sessions/archived", lambda route: held.append(route))
+                pg.evaluate("() => { window.__lateSessionList = window.KazmaChat.toggleArchivedView(); }")
+                deadline = time.monotonic() + 15
+                while not held and time.monotonic() < deadline:
+                    pg.wait_for_timeout(50)
+                assert held, "the archive view never requested its sessions"
+                pg.evaluate("() => window.KazmaChat.toggleArchivedView()")
+                pg.wait_for_function(
+                    "() => document.querySelector('#session-list').innerText.includes('Kept chat')",
+                    timeout=15000,
+                )
+                with pg.expect_response(lambda response: response.url.endswith("/api/chat/sessions/archived")) as late:
+                    held[0].fulfill(status=status, content_type="application/json", body="[]")
+                late.value.finished()
+                pg.evaluate("() => window.__lateSessionList")
+                assert "Kept chat" in pg.inner_text(LIST)
+                assert pg.inner_text("#session-count").strip() == "(1)"
+                pg.unroute("**/api/chat/sessions/archived")
         finally:
             context.close()
             browser.close()

@@ -1366,8 +1366,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Already resolved",
     },
     "chat.hitl_no_longer_pending": {
-        "ar": "لم يعد معلّقًا",
-        "en": "No longer pending",
+        "ar": "التنفيذ غير مؤكّد — تحقّق من نتيجة الأداة قبل بدء عمل جديد.",
+        "en": "Execution unconfirmed — inspect the tool target before starting new work.",
     },
     "chat.hitl_status_denied": {
         "ar": "رُفض",
@@ -1378,8 +1378,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Approved",
     },
     "chat.hitl_status_running": {
-        "ar": "تمت الموافقة — جارٍ التنفيذ…",
-        "en": "Approved — running…",
+        "ar": "جارٍ تطبيق القرار…",
+        "en": "Applying decision…",
     },
     "chat.no_response_md": {
         "ar": "_لم يصل رد._ راجع سجلات الخادم أو الموافقات المعلّقة.",

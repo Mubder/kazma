@@ -15,6 +15,7 @@ Concurrency model
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 import threading
 import uuid
@@ -108,10 +109,13 @@ class WorkspaceStore:
                 from kazma_core.workspace.binding import default_sandbox_root
 
                 sandbox = default_sandbox_root().resolve()
+                # An HA container's application directory is ephemeral. The
+                # complete paired volume owns the default coding workspace.
+                ha_runtime = os.environ.get("KAZMA_RUNTIME_HA") == "1"
 
                 if row and row["count"] == 0:
                     # Prefer CWD if CWD is a real project directory (contains files or .git)
-                    if cwd != sandbox and (cwd.joinpath(".git").exists() or any(cwd.iterdir())):
+                    if not ha_runtime and cwd != sandbox and (cwd.joinpath(".git").exists() or any(cwd.iterdir())):
                         ws_id = str(uuid.uuid4())
                         name = cwd.name or "Project Workspace"
                         root_path = str(cwd)
@@ -134,7 +138,7 @@ class WorkspaceStore:
                 # If store only has a blank Default Workspace sandbox and CWD is a real project, auto-register CWD
                 else:
                     rows = conn.execute("SELECT id, name, root_path FROM workspaces").fetchall()
-                    if len(rows) == 1 and rows[0]["name"] == "Default Workspace":
+                    if not ha_runtime and len(rows) == 1 and rows[0]["name"] == "Default Workspace":
                         sandbox_path = Path(rows[0]["root_path"]).resolve()
                         if cwd != sandbox_path and (cwd.joinpath(".git").exists() or any(cwd.iterdir())):
                             ws_id = str(uuid.uuid4())

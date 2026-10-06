@@ -14,17 +14,18 @@ Kazma resolves configuration from three layers. For the generic `ConfigStore.get
 
 ```mermaid
 flowchart LR
-    C[In-process cache] -->|miss| DB[(SQLite settings.db)]
-    DB -->|miss / child-merge| YAML[(kazma.yaml)]
+    C[In-process cache] -->|miss| DB[(SQLite or PostgreSQL settings)]
+    DB -->|miss / child-merge| YAML["kazma.yaml + kazma.local.yaml"]
     YAML -->|fallback| DEFAULT[hardcoded default]
 ```
 
 | # | Layer | Wins? | Notes |
 |---|---|---|---|
 | 1 | **Env var** | Only in specific helpers (`get_kazma_secret`, `get_or_create_disclosure_key`) — **not** in the generic `get()`. | e.g. `KAZMA_SECRET` |
-| 2 | **ConfigStore DB** (`kazma-data/settings.db`) | **Yes** for runtime reads via `get()`. | DB overrides YAML. |
-| 3 | **`kazma.yaml`** | Baseline on first boot. | `reconcile_from_yaml()` seeds DB only for keys not already present. |
-| 4 | **Hardcoded default** | Last resort. | e.g. `gpt-4o-mini`, `DEFAULT_DANGER_TOOLS`. |
+| 2 | **ConfigStore DB** (SQLite or PostgreSQL) | **Yes** for runtime reads via `get()`. | Saved settings override YAML. |
+| 3 | **`kazma.local.yaml`** | Overrides shipped YAML. | Optional machine-local file; its values seed missing settings on first boot. |
+| 4 | **`kazma.yaml`** | Shipped baseline. | Merged with local YAML before `reconcile_from_yaml()` seeds missing keys. |
+| 5 | **Hardcoded default** | Last resort. | e.g. `gpt-4o-mini`, `DEFAULT_DANGER_TOOLS`. |
 
 ### Override precedence (detailed) {#override-precedence}
 
@@ -32,7 +33,8 @@ flowchart LR
 - `ConfigStore.set(key, value)` writes one row and **clears the cache** for that key (`config_store.py:518-536`).
 - `ConfigStore.batch_set(items)` is the **atomic** multi-key write — single `BEGIN`/`COMMIT`, rollback on any failure (`config_store.py:538-568`). Always prefer it for multi-key updates.
 - `ConfigStore.transaction()` is a `@contextmanager` yielding the raw connection for caller-driven multi-op transactions (`config_store.py:572`).
-- `reconcile_from_yaml()` seeds DB with `kazma.yaml` leaf values for keys **not already in DB** — it never overwrites existing DB keys (`config_store.py:678-685`). This is the startup step that makes ConfigStore authoritative.
+- `reconcile_from_yaml()` seeds missing DB keys from shipped YAML merged with `kazma.local.yaml`, using the same precedence as fallback reads. Local provider/model choices remain stored when startup aligns the active workspace. A local-only file can seed settings even without shipped YAML. Existing saved settings continue to win; later YAML edits do not replace them.
+- Declared one-time migrations in `config_defaults.RETIRED_DEFAULTS` update pre-existing copies of retired shipped defaults before new keys are seeded. They use the shipped baseline, not local overrides. A fresh local choice that equals an old default is preserved. Retirement is deferred when no valid shipped mapping is available.
 - `export_yaml()` / `import_yaml()` round-trip every DB row merged into YAML; `kazma migrate` carries settings this way (`config_store.py:632, 650`). The Settings page's backup is a different file, below.
 - `reset_all()` deletes all DB rows → reverts to YAML defaults (`config_store.py:732`). No page offers it: it would also delete keys and sign-in.
 

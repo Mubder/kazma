@@ -7,6 +7,7 @@ import logging
 import time
 from typing import Any
 
+from kazma_core.agent.effect_journal import EffectUncertain, execute_effect
 from kazma_core.agent.graph_helpers import (
     _format_hitl_message,
     _resolve_tool_timeout,
@@ -955,22 +956,35 @@ async def tool_worker_node(
             try:
                 if _tool_timeout and _tool_timeout > 0:
                     result = await asyncio.wait_for(
-                        tool_executor.execute(tc["name"], _args),
+                        execute_effect(tool_executor, state, tc, _args),
                         timeout=_tool_timeout,
                     )
                 else:
-                    result = await tool_executor.execute(tc["name"], _args)
-            except asyncio.TimeoutError:
+                    result = await execute_effect(tool_executor, state, tc, _args)
+            except (EffectUncertain, asyncio.TimeoutError) as exc:
                 duration_ms = (time.monotonic() - start) * 1000
-                logger.error(
-                    "[ToolWorker] %s timed out after %.0fs — returning tool error",
-                    tc["name"],
-                    _tool_timeout,
-                )
+                uncertain_effect = isinstance(exc, EffectUncertain)
+                if not uncertain_effect and state.get("created_at") and state.get("thread_id"):
+                    from kazma_core.safety.side_effects import is_read_only
+
+                    uncertain_effect = not is_read_only(tc["name"])
+                if uncertain_effect:
+                    state["turn_failed"] = True
+                    state["error_message"] = (
+                        f"⚠️ {tc['name']}: {exc}" if isinstance(exc, EffectUncertain) else
+                        f"⚠️ Tool '{tc['name']}' timed out. Its effects are unknown; "
+                        "verify the target before starting new work. The call must not be repeated."
+                    )
+                    logger.error("[ToolWorker] effect withheld for %s: %s", tc["name"], state["error_message"])
+                else:
+                    logger.error(
+                        "[ToolWorker] %s timed out after %.0fs — returning tool error",
+                        tc["name"], _tool_timeout,
+                    )
                 tracer.trace_tool_execution(
                     tool_name=tc["name"],
                     input_data=tc["arguments"],
-                    output_data={"error": "timeout"},
+                    output_data={"error": "effect_uncertain" if uncertain_effect else "timeout"},
                     duration_ms=duration_ms,
                     success=False,
                 )
@@ -980,7 +994,7 @@ async def tool_worker_node(
                             "end",
                             tc["name"],
                             call_id=str(tc.get("id") or ""),
-                            error=f"timed out after {_tool_timeout:.0f}s",
+                            error=state["error_message"] if uncertain_effect else f"timed out after {_tool_timeout:.0f}s",
                             thread_id=str(state.get("thread_id") or ""),
                         )
                     except Exception:
@@ -989,6 +1003,7 @@ async def tool_worker_node(
                     tool_call_id=tc["id"],
                     name=tc["name"],
                     content=(
+                        state["error_message"] if uncertain_effect else
                         f"Error: Tool '{tc['name']}' timed out after "
                         f"{_tool_timeout:.0f}s and was aborted. Do NOT retry the "
                         "same call unchanged — narrow the request (smaller scope, "
@@ -996,6 +1011,7 @@ async def tool_worker_node(
                     ),
                     is_error=True,
                     duration_ms=duration_ms,
+                    outcome="terminal" if uncertain_effect else "error",
                 )
             duration_ms = (time.monotonic() - start) * 1000
 
@@ -1580,6 +1596,11 @@ async def tool_worker_node(
             # If the breaker just tripped or max consecutive failures hit, force RESPOND
             "next_node": NodeName.RESPOND if (breaker_tripped_now or consecutive_failures >= 3 or _terminal_now) else NodeName.SUPERVISOR,
         }
+        if state.get("turn_failed"):
+            out["turn_failed"] = True
+            out["error_message"] = state.get("error_message") or "⚠️ A tool effect needs reconciliation."
+            out["messages"].append({"role": "assistant", "content": out["error_message"]})
+            out["next_node"] = NodeName.RESPOND
         if state.get("_research_depth_nudged"):
             out["_research_depth_nudged"] = True
         if state.get("_research_pipeline_nudged"):
