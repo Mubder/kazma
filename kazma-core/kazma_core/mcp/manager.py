@@ -2429,10 +2429,7 @@ class UnifiedToolExecutor:
                 if _was_error or _mcp_result.get("is_error"):
                     from kazma_core.safety.side_effects import is_read_only
 
-                    try:
-                        _mutating = not is_read_only(tool_name)
-                    except Exception:
-                        _mutating = True
+                    _mutating = not is_read_only(tool_name)
                     if _mutating:
                         # A server error does not prove its write never happened.
                         # Keep this fact even if an output hook rewrites the error.

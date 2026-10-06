@@ -622,12 +622,9 @@ class LocalToolRegistry:
         # An exception can arrive AFTER an external write. Retrying inside
         # one receipt would repeat that effect invisibly. Reads keep backoff;
         # mutating/unknown tools have one attempt on every execution path.
-        try:
-            from kazma_core.safety.side_effects import is_read_only
+        from kazma_core.safety.side_effects import is_read_only
 
-            _read_only = is_read_only(tool_name)
-        except Exception:
-            _read_only = False
+        _read_only = is_read_only(tool_name)
         if not _read_only:
             max_attempts = 1
 

@@ -40,6 +40,11 @@ not prove safe recovery from an unreachable node. See the
 
 ## Find an existing staging cluster
 
+Google Cloud is optional; an existing Kazma installation does not need a cloud
+account to keep running. Sign in with an account that can access the chosen
+project. A personal account can own a development project; use organization
+ownership and separate staging/production projects for an organization deployment.
+
 These PowerShell commands discover access without creating cloud resources:
 
 ```powershell
@@ -68,6 +73,22 @@ If sign-in cannot refresh automatically, the owner must complete the interactive
 login. If no suitable cluster exists, provisioning requires a chosen project,
 region, spending limit and the storage/backup plan above. A local Docker or kind
 cluster can exercise pod recovery but cannot qualify cross-host HA.
+
+## Keep qualification cost small
+
+Begin with the local ownership, Postgres session-loss and real-graph restart
+tests. These require no new cloud resources. Record cluster/node fencing as
+unqualified until it is tested on separate hosts with the intended storage.
+
+When cross-host qualification is needed, use a dedicated, temporary staging
+project. Estimate the regional cluster, at least two Linux worker nodes in
+different zones, HA Postgres, replicated CSI state storage, backups and any
+network charges for a defined test window. Check the selected region in the
+[Google Cloud pricing calculator](https://cloud.google.com/products/calculator)
+before creating resources. A single cheap VM or several local containers cannot
+substitute for this failure-domain test. Stop/delete the test resources and
+verify remaining disks, snapshots and database instances after collecting the
+evidence; keep the production installation separate.
 
 ## Prepare the deployment
 

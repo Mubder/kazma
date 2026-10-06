@@ -961,55 +961,30 @@ async def tool_worker_node(
                     )
                 else:
                     result = await execute_effect(tool_executor, state, tc, _args)
-            except EffectUncertain as exc:
-                logger.error("[ToolWorker] effect withheld for %s: %s", tc["name"], exc)
-                state["turn_failed"] = True
-                state["error_message"] = f"⚠️ {tc['name']}: {exc}"
+            except (EffectUncertain, asyncio.TimeoutError) as exc:
                 duration_ms = (time.monotonic() - start) * 1000
-                tracer.trace_tool_execution(
-                    tool_name=tc["name"], input_data=tc["arguments"],
-                    output_data={"error": "effect_uncertain"},
-                    duration_ms=duration_ms, success=False,
-                )
-                if _activity is not None:
-                    try:
-                        _activity(
-                            "end", tc["name"], call_id=str(tc.get("id") or ""),
-                            error=state["error_message"],
-                            thread_id=str(state.get("thread_id") or ""),
-                        )
-                    except Exception:
-                        pass
-                return ToolResult(
-                    tool_call_id=tc["id"], name=tc["name"],
-                    content=state["error_message"], is_error=True,
-                    duration_ms=duration_ms, outcome="terminal",
-                )
-            except asyncio.TimeoutError:
-                duration_ms = (time.monotonic() - start) * 1000
-                uncertain_effect = False
-                if state.get("created_at") and state.get("thread_id"):
+                uncertain_effect = isinstance(exc, EffectUncertain)
+                if not uncertain_effect and state.get("created_at") and state.get("thread_id"):
                     from kazma_core.safety.side_effects import is_read_only
 
-                    try:
-                        uncertain_effect = not is_read_only(tc["name"])
-                    except Exception:
-                        uncertain_effect = True
+                    uncertain_effect = not is_read_only(tc["name"])
                 if uncertain_effect:
                     state["turn_failed"] = True
                     state["error_message"] = (
+                        f"⚠️ {tc['name']}: {exc}" if isinstance(exc, EffectUncertain) else
                         f"⚠️ Tool '{tc['name']}' timed out. Its effects are unknown; "
                         "verify the target before starting new work. The call must not be repeated."
                     )
-                logger.error(
-                    "[ToolWorker] %s timed out after %.0fs — returning tool error",
-                    tc["name"],
-                    _tool_timeout,
-                )
+                    logger.error("[ToolWorker] effect withheld for %s: %s", tc["name"], state["error_message"])
+                else:
+                    logger.error(
+                        "[ToolWorker] %s timed out after %.0fs — returning tool error",
+                        tc["name"], _tool_timeout,
+                    )
                 tracer.trace_tool_execution(
                     tool_name=tc["name"],
                     input_data=tc["arguments"],
-                    output_data={"error": "timeout"},
+                    output_data={"error": "effect_uncertain" if uncertain_effect else "timeout"},
                     duration_ms=duration_ms,
                     success=False,
                 )
@@ -1019,7 +994,7 @@ async def tool_worker_node(
                             "end",
                             tc["name"],
                             call_id=str(tc.get("id") or ""),
-                            error=f"timed out after {_tool_timeout:.0f}s",
+                            error=state["error_message"] if uncertain_effect else f"timed out after {_tool_timeout:.0f}s",
                             thread_id=str(state.get("thread_id") or ""),
                         )
                     except Exception:

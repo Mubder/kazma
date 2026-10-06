@@ -10,7 +10,7 @@ import sys
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from kazma_core.agent.effect_journal import EffectJournal, EffectUncertain, execute_effect
+from kazma_core.agent.effect_journal import EffectUncertain, _EffectJournal, execute_effect
 from kazma_core.agent.state import NodeName, initial_supervisor_state
 
 
@@ -91,7 +91,7 @@ async def test_concurrent_replay_has_one_dispatch():
 
 @pytest.mark.asyncio
 async def test_reservation_failure_prevents_dispatch(monkeypatch):
-    monkeypatch.setattr(EffectJournal, "begin", Mock(side_effect=sqlite3.OperationalError("locked")))
+    monkeypatch.setattr(_EffectJournal, "begin", Mock(side_effect=sqlite3.OperationalError("locked")))
     executor = Mock(execute=AsyncMock())
     call = _call()
     with pytest.raises(EffectUncertain, match="dispatch was withheld"):
@@ -103,7 +103,7 @@ async def test_reservation_failure_prevents_dispatch(monkeypatch):
 async def test_result_commit_failure_never_reexecutes(monkeypatch):
     executor = Mock(execute=AsyncMock(return_value={"content": "written"}))
     call = _call()
-    monkeypatch.setattr(EffectJournal, "finish", Mock(side_effect=sqlite3.OperationalError("locked")))
+    monkeypatch.setattr(_EffectJournal, "finish", Mock(side_effect=sqlite3.OperationalError("locked")))
     with pytest.raises(EffectUncertain, match="not committed"):
         await execute_effect(executor, _state(), call, call["arguments"])
     with pytest.raises(EffectUncertain, match="effects are unknown"):
@@ -227,8 +227,8 @@ def test_real_process_death_preserves_receipt_and_never_repeats(tmp_path, comple
     script = """
 import os, sys
 from pathlib import Path
-from kazma_core.agent.effect_journal import EffectJournal
-journal = EffectJournal(sys.argv[1])
+from kazma_core.agent.effect_journal import _EffectJournal
+journal = _EffectJournal(sys.argv[1])
 journal.begin('effect', 'request', 'thread', 'file_append')
 Path(sys.argv[2]).write_text('one', encoding='utf-8')
 if sys.argv[3] == 'True':
@@ -238,7 +238,7 @@ os._exit(75)
     result = subprocess.run([sys.executable, "-c", script, str(db), str(marker), str(completed)],
                             env=os.environ.copy(), capture_output=True, timeout=30)
     assert result.returncode == 75, result.stderr.decode(errors="replace")
-    journal = EffectJournal(db)
+    journal = _EffectJournal(db)
     if completed:
         assert journal.begin("effect", "request", "thread", "file_append") == {"content": "written"}
     else:
@@ -253,7 +253,7 @@ async def test_worker_ends_uncertain_turn_and_respond_does_not_synthesize(monkey
     from kazma_core.agent.graph_tool_worker import tool_worker_node
 
     monkeypatch.setenv("KAZMA_COMMITMENT_ENABLED", "0")
-    monkeypatch.setattr(EffectJournal, "finish", Mock(side_effect=sqlite3.OperationalError("locked")))
+    monkeypatch.setattr(_EffectJournal, "finish", Mock(side_effect=sqlite3.OperationalError("locked")))
     state = initial_supervisor_state(thread_id="held-effect")
     state["messages"] = [{"role": "user", "content": "remember this fixture"}]
     state["tool_calls_pending"] = [{"id": "remember-1", "name": "memory_store",
@@ -274,7 +274,7 @@ async def test_worker_ends_uncertain_turn_and_respond_does_not_synthesize(monkey
 def test_receipts_require_full_durability(tmp_path):
     from contextlib import closing
 
-    with closing(EffectJournal(tmp_path / "effects.db")._connect()) as conn:
+    with closing(_EffectJournal(tmp_path / "effects.db")._connect()) as conn:
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         assert conn.execute("PRAGMA synchronous").fetchone()[0] == 2
 
@@ -300,7 +300,7 @@ async def test_cancelled_dispatch_holds_receipt():
 
 
 def test_inspection_excludes_results_and_preserves_state(tmp_path):
-    journal = EffectJournal(tmp_path / "effects.db")
+    journal = _EffectJournal(tmp_path / "effects.db")
     assert journal.inspect("thread") == []
     assert not journal.path.exists()
     journal.begin("one", "request", "thread", "file_append")

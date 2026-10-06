@@ -29,6 +29,9 @@ Agent guidance names the actual Python tool and no longer offers the retired
 `code_exec` tool name; a tool name alone does not establish isolation.
 The HA runbook now describes the supported single-owner active/passive profile,
 cluster discovery, storage fencing and evidence required from real node drills.
+Sequential approval and stream-recovery fixtures now use executable targets
+inside their own workspace. Successful ordering tests use harmless allowed
+commands; a separate real-graph control proves refused mutators stop the turn.
 
 ## Runtime recovery and evaluation review (2026-10-05)
 

@@ -41,7 +41,7 @@ class EffectUncertain(RuntimeError):
     """An effect cannot be safely dispatched or repeated."""
 
 
-def effect_identity(state: dict[str, Any], call: dict[str, Any]) -> str:
+def _effect_identity(state: dict[str, Any], call: dict[str, Any]) -> str:
     """Stable across checkpoint resumes, distinct across turns/iterations.
 
     Production entry points initialize ``created_at`` for every new turn.
@@ -60,7 +60,7 @@ def effect_identity(state: dict[str, Any], call: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(parts, ensure_ascii=False).encode()).hexdigest()
 
 
-class EffectJournal:
+class _EffectJournal:
     """Short-lived connections; atomic insert admits exactly one caller."""
 
     def __init__(self, path: Path | str) -> None:
@@ -69,6 +69,7 @@ class EffectJournal:
     def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.path, timeout=5)
+        ready = False
         try:
             apply_sqlite_pragmas(conn)
             # The admission/result fence must survive a power loss after commit,
@@ -77,10 +78,11 @@ class EffectJournal:
                 raise sqlite3.OperationalError("Effect receipts require WAL support")
             conn.execute("PRAGMA synchronous=FULL")
             conn.executescript(_SCHEMA)
+            ready = True
             return conn
-        except BaseException:
-            conn.close()
-            raise
+        finally:
+            if not ready:
+                conn.close()
 
     def begin(self, effect_id: str, request_hash: str, thread_id: str, tool: str) -> dict[str, Any] | None:
         with closing(self._connect()) as conn:
@@ -149,17 +151,14 @@ async def execute_effect(
     from kazma_core.safety.side_effects import is_read_only
 
     name = str(call.get("name") or "")
-    try:
-        read_only = is_read_only(name)
-    except Exception as exc:
-        raise EffectUncertain("The effect classifier is unavailable; dispatch was withheld.") from exc
+    read_only = is_read_only(name)
     if read_only:
         return await executor.execute(name, arguments)
-    identity = effect_identity(state, call)
+    identity = _effect_identity(state, call)
     if not identity:
         return await executor.execute(name, arguments)
     try:
-        journal = EffectJournal((await asyncio.to_thread(data_dir)) / "tool_effects.db")
+        journal = _EffectJournal((await asyncio.to_thread(data_dir)) / "tool_effects.db")
         from kazma_core.workspace.binding import resolve_active_root
 
         root = await asyncio.to_thread(resolve_active_root)
@@ -171,7 +170,7 @@ async def execute_effect(
                                          str(state.get("thread_id") or ""), name)
     except EffectUncertain:
         raise
-    except Exception as exc:
+    except (sqlite3.Error, OSError, TypeError, ValueError, OverflowError) as exc:
         raise EffectUncertain("The effect receipt is unavailable; dispatch was withheld.") from exc
     if cached is not None:
         logger.info("[effects] using recorded result tool=%s effect=%s", name, identity[:12])
@@ -185,13 +184,15 @@ async def execute_effect(
     try:
         result = await executor.execute(name, arguments)
     except Exception as exc:
+        # Tool implementations may raise arbitrary application exceptions.
+        # Keep the admission receipt and terminate this turn rather than retry.
         raise EffectUncertain(
             "The dispatch failed without a durable result. Its effects are unknown; "
             "verify the target before starting new work."
         ) from exc
     try:
         await asyncio.to_thread(journal.finish, identity, result)
-    except Exception as exc:
+    except (sqlite3.Error, OSError, TypeError, ValueError, OverflowError) as exc:
         raise EffectUncertain(
             "The tool returned but its result receipt was not committed. "
             "Its effects need reconciliation; this call must not be repeated."
@@ -217,7 +218,7 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=200)
     args = parser.parse_args()
     load_env_files()
-    print(json.dumps(EffectJournal(data_dir() / "tool_effects.db").inspect(
+    print(json.dumps(_EffectJournal(data_dir() / "tool_effects.db").inspect(
         args.thread, limit=args.limit,
     ), ensure_ascii=False, indent=2))
     return 0
