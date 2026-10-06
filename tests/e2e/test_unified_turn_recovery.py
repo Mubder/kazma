@@ -32,8 +32,8 @@ pytest.importorskip("httpx")
 pytest.importorskip("uvicorn")
 
 from tests.e2e._unified_turn_harness import (  # noqa: E402
-    Harness,
     HITL_EVENTS,
+    Harness,
     Script,
     api_client,
     attach_stream,
@@ -76,11 +76,10 @@ def _streaming_script(tmp_dir: str) -> Script:
 @pytest.fixture
 def harness() -> Iterator[Harness]:
     """One app per test — see ``test_unified_turn_concurrency.py``."""
-    import tempfile
-
-    with tempfile.TemporaryDirectory(prefix="utb-recov-") as tmp:
-        with unified_turn_server(_streaming_script(tmp)) as h:
-            yield h
+    # Relative paths target the app's own isolated workspace, so approval
+    # really executes before the next pause rather than refusing a write.
+    with unified_turn_server(_streaming_script("."), approved_fixture=True) as h:
+        yield h
 
 
 # ══════════════════════════════════════════════════════════════════════

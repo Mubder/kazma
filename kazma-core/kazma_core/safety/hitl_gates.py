@@ -67,6 +67,7 @@ __all__ = [
     "set_db_path_for_tests",
     "gate_for",
     "live_gates",
+    "display_gates",
     "pending_gates",
     "recorded_decision_count",
     "gate_outcomes_since",
@@ -79,6 +80,7 @@ __all__ = [
     "settle_gate_async",
     "gate_for_async",
     "live_gates_async",
+    "display_gates_async",
     "pending_gates_async",
     "expire_due_gates_async",
 ]
@@ -732,6 +734,25 @@ def live_gates(thread_id: str) -> list[GateRow]:
         conn.close()
 
 
+def display_gates(thread_id: str) -> list[GateRow]:
+    """Live questions plus failed resumes overriding stale transcript stamps.
+
+    ``live_gates`` remains the lifecycle reader. Error rows are terminal,
+    but readers must not label their old part Approved after a crash.
+    """
+    ensure_gate_schema()
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM hitl_gates WHERE thread_id = ? "
+            "AND state IN ('pending','claimed','resuming','error') ORDER BY created_at ASC",
+            (thread_id,),
+        ).fetchall()
+        return [_row_to_gate(row) for row in rows]
+    finally:
+        conn.close()
+
+
 def recorded_decision_count() -> int:
     """How many approval questions the registry holds a decision for.
 
@@ -854,6 +875,10 @@ async def live_gates_async(thread_id: str) -> list[GateRow]:
     return await asyncio.to_thread(live_gates, thread_id)
 
 
+async def display_gates_async(thread_id: str) -> list[GateRow]:
+    return await asyncio.to_thread(display_gates, thread_id)
+
+
 async def pending_gates_async(tenant_id: str | None = None) -> list[GateRow]:
     return await asyncio.to_thread(pending_gates, tenant_id)
 
@@ -868,16 +893,18 @@ async def expire_due_gates_async(now: float | None = None) -> list[GateRow]:
 def boot_sweep(grace_seconds: float = 300.0) -> dict[str, int]:
     """Converge rows a dead process left behind. Run once at startup.
 
-    * ``claimed``/``resuming`` rows older than *grace_seconds*: the drive
-      that owned them died with the process — settle as ``orphaned``. The
-      user was already told (or will retry); a stuck in-flight stamp is the
-      lie we refuse to keep.
+    * ``claimed``/``resuming`` rows older than *grace_seconds*: preserve the
+      human's decision and actor, but mark execution ``error`` with an
+      uncertainty notice. A recorded approval does not prove execution.
+      The exclusive server owner calls with zero grace at startup: even a
+      freshly claimed row belongs to the previous process.
     * ``pending`` rows are LEFT ALONE — the checkpoint pause survives a
       restart and the card must keep showing (fail toward a live card).
     * TTL expiry runs as part of the sweep.
     """
     ensure_gate_schema()
     out = {"orphaned": 0, "expired": 0}
+    recovered: list[GateRow] = []
     cutoff = time.time() - max(0.0, grace_seconds)
     conn = _connect()
     try:
@@ -889,11 +916,22 @@ def boot_sweep(grace_seconds: float = 300.0) -> dict[str, int]:
         targets = [(r["gate_id"], r["state"]) for r in cur.fetchall()]
         now = time.time()
         for gid, st in targets:
-            if _cas(conn, gid, st, "settled",
-                    {"settled_at": now, "decision": "orphaned"}):
+            if _cas(conn, gid, st, "error", {
+                "settled_at": now,
+                "message": (
+                    "The process stopped during approval resume. The recorded decision "
+                    "is preserved, but execution is unconfirmed. Verify the tool target "
+                    "before starting new work; this approval will not be replayed."
+                ),
+            }):
                 out["orphaned"] += 1
+                row = _get(conn, gid)
+                if row is not None:
+                    recovered.append(row)
     finally:
         conn.close()
+    for row in recovered:
+        gate_events.publish("gate_settled", row)
     try:
         out["expired"] = len(expire_due_gates())
     except Exception:

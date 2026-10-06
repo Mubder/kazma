@@ -252,7 +252,7 @@ async def hitl_thread_status(
         if registry_on():
             import asyncio as _aio
 
-            from kazma_core.safety.hitl_gates import live_gates
+            from kazma_core.safety.hitl_gates import gate_for, live_gates
 
             rows = await _aio.to_thread(live_gates, thread_id)
             if any(r.state == "pending" for r in rows):
@@ -265,6 +265,15 @@ async def hitl_thread_status(
                 snap = await _load_snapshot(thread_id, graph=graph, snapshot=snapshot)
             if _snapshot_abandoned(snap):
                 return "idle"
+            # A settled/failed decision for this exact pause is authoritative.
+            # A leftover checkpoint cannot resurrect its buttons. A DIFFERENT
+            # interrupt still uses the thin fallback and remains pending.
+            interrupt_id = snapshot_interrupt_id(snap)
+            if interrupt_id:
+                decided = await _aio.to_thread(gate_for, interrupt_id)
+                if (decided is not None and decided.thread_id == thread_id
+                        and not decided.is_live):
+                    return "idle"
             return await _thin_execution_status(
                 thread_id, graph=graph, snapshot=snap
             )

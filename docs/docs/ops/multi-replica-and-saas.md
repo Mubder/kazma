@@ -74,10 +74,11 @@ Env: `KAZMA_MULTI_USER=1`, `KAZMA_PRODUCTION=1`, `KAZMA_DATABASE_URL`,
 | Swarm bus adapters | Process singleton | Fan-out multi-platform; still one process |
 | Browser affinity | None | Cookie ``kazma-replica`` (`KAZMA_REPLICA_ID`, LB sticky) |
 
-**Minimum multi-replica stack:** shared Postgres (`KAZMA_DATABASE_URL`),
-shared/networked `kazma-data` or object store for workspaces, sticky LB on
-cookie `kazma-replica` (or source-IP hash), same `KAZMA_SECRET` / vault key
-on all nodes. Set unique `KAZMA_REPLICA_ID` per process.
+These shared subsystems do not make the whole runtime safe for concurrent
+active replicas. The supported HA preparation profile has one active owner,
+a dedicated Postgres ownership session and a complete fenced state volume.
+Sticky routing or networked SQLite storage cannot replace ownership and fencing.
+See [Multi-Region & HA](./multi-region) for setup and qualification drills.
 
 ### Host code_exec sandbox
 

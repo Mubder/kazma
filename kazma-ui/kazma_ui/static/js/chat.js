@@ -6171,9 +6171,14 @@
   // ── Session management ────────────────────────────────
   /** Debounced server re-fetch so rapid turns don't spam /api/chat/sessions. */
   var _sessionsRefreshTimer = null;
+  // Only the newest request for the current view may replace its list.
+  // A late active-list reply used to overwrite an already loaded archive.
+  var _sessionsRequestVersion = 0;
 
   function loadSessions() {
-    fetch('/api/chat/sessions')
+    if (showArchived) return loadArchivedSessions();
+    var requestVersion = ++_sessionsRequestVersion;
+    return fetch('/api/chat/sessions')
       .then(function(r) {
         if (!r.ok) {
           throw new Error('HTTP ' + r.status);
@@ -6181,6 +6186,7 @@
         return r.json();
       })
       .then(function(data) {
+        if (requestVersion !== _sessionsRequestVersion || showArchived) return;
         sessions = data || [];
         _sessionsLoaded = true;
         // Preserve optimistic active session if the server hasn't flushed it yet
@@ -6195,6 +6201,7 @@
         renderSessionList();
       })
       .catch(function(err) {
+        if (requestVersion !== _sessionsRequestVersion || showArchived) return;
         console.error('Failed to load sessions:', err);
         if (sessionListEl && !_sessionsLoaded) {
           sessionListEl.innerHTML = '<div class="session-empty">' +
@@ -6599,17 +6606,21 @@
   }
 
   function loadArchivedSessions() {
-    fetch('/api/chat/sessions/archived')
+    if (!showArchived) return loadSessions();
+    var requestVersion = ++_sessionsRequestVersion;
+    return fetch('/api/chat/sessions/archived')
       .then(function(r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
       .then(function(data) {
+        if (requestVersion !== _sessionsRequestVersion || !showArchived) return;
         sessions = data || [];
         _sessionsLoaded = true;
         renderSessionList();
       })
       .catch(function(err) {
+        if (requestVersion !== _sessionsRequestVersion || !showArchived) return;
         console.error('Failed to load archived sessions:', err);
         if (sessionListEl) {
           sessionListEl.innerHTML = '<div class="session-empty">' +
@@ -6632,11 +6643,11 @@
     if (showArchived) {
       if (headerTitle) headerTitle.textContent = ti('archived', 'Archived');
       if (newBtn) newBtn.style.display = 'none';
-      loadArchivedSessions();
+      return loadArchivedSessions();
     } else {
       if (headerTitle) headerTitle.textContent = ti('sessions', 'Sessions');
       if (newBtn) newBtn.style.display = '';
-      loadSessions();
+      return loadSessions();
     }
   }
 
@@ -8201,7 +8212,7 @@
       card.className = 'hitl-approval-card hitl-' + kind + (wasCollapsed ? ' hitl-collapsed' : '');
       var errLabel = show === 'timeout'
         ? ti('approval_expired', 'Approval timed out — continuing without this tool.')
-        : (show === 'error' ? ti('hitl_no_longer_pending', 'No longer pending') : ti('hitl_status_denied', 'Denied'));
+        : (show === 'error' ? ti('hitl_no_longer_pending', 'Execution unconfirmed — inspect the tool target before starting new work.') : ti('hitl_status_denied', 'Denied'));
       if (actions) {
         actions.innerHTML = '<span class="hitl-status hitl-' + kind + '">' +
           escapeHtml(errLabel) + '</span>';
@@ -8213,7 +8224,7 @@
     if (show === 'approved' || show === 'inflight' || show === 'settled') {
       var wasCol = card.classList.contains('hitl-collapsed');
       card.className = 'hitl-approval-card hitl-approved' + (wasCol ? ' hitl-collapsed' : '');
-      var okLabel = show === 'inflight' ? ti('hitl_status_running', 'Approved — running…') : ti('hitl_status_approved', 'Approved');
+      var okLabel = show === 'inflight' ? ti('hitl_status_running', 'Applying decision…') : ti('hitl_status_approved', 'Approved');
       if (actions) {
         actions.innerHTML = '<span class="hitl-status hitl-approved">' + escapeHtml(okLabel) + '</span>';
       }

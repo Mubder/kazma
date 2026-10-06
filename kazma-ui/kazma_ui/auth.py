@@ -1286,7 +1286,7 @@ def create_auth_middleware(
         expected = static_secret if static_secret is not None else get_kazma_secret()
 
         # 0. Public demo mode: KAZMA_DEMO_MODE bypasses the secret gate so a
-        #    public demo (e.g. kazma-demo.fly.dev) is open to all visitors
+        #    public demo instance is open to all visitors
         #    without login. Only enable this on a throwaway demo instance —
         #    never on a production deployment with real secrets/data.
         if os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):

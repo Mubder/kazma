@@ -619,6 +619,15 @@ class LocalToolRegistry:
             min_wait = 2
             max_wait = 10
 
+        # An exception can arrive AFTER an external write. Retrying inside
+        # one receipt would repeat that effect invisibly. Reads keep backoff;
+        # mutating/unknown tools have one attempt on every execution path.
+        from kazma_core.safety.side_effects import is_read_only
+
+        _read_only = is_read_only(tool_name)
+        if not _read_only:
+            max_attempts = 1
+
         # ── YAML permission allowlist (audit M4, opt-in) ─────────────
         # kazma-permissions.yaml users.<user>.{allowed,denied} was parsed but
         # never enforced outside MCP. Enforced HERE, the single tool-exec
@@ -707,15 +716,21 @@ class LocalToolRegistry:
 
         start = time.monotonic()
         last_exc: Exception | None = None
+        _invoked = False
 
         async def _with_post(payload: dict[str, Any]) -> dict[str, Any]:
+            was_error = bool(payload.get("is_error"))
             try:
                 from kazma_core.agent.tool_hooks import apply_post_tool_hooks
 
-                return await apply_post_tool_hooks(tool_name, arguments, payload)
+                payload = await apply_post_tool_hooks(tool_name, arguments, payload)
             except Exception:
                 logger.debug("[ToolRegistry] post-tool hook failed", exc_info=True)
-                return payload
+            if _invoked and not _read_only and (was_error or payload.get("is_error")):
+                # Preserve the uncertainty through output hooks. A returned
+                # failure does not prove that a mutator made no changes.
+                payload["effect_uncertain"] = True
+            return payload
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -795,6 +810,7 @@ class LocalToolRegistry:
                             "is_error": True,
                         }
 
+                _invoked = True
                 if tool.is_async:
                     result = await tool.func(**valid_params)
                 else:

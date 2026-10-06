@@ -1,6 +1,6 @@
 """Shipped defaults that changed, and whether installs already running follow.
 
-``ConfigStore.reconcile_from_yaml`` copies every ``kazma.yaml`` value into
+``ConfigStore.reconcile_from_yaml`` copies merged shipped/local YAML into
 the settings database the first time Kazma boots, and a stored value wins
 from then on. So a default changed in a later release never reached an
 install that already had the old one -- whether its owner had chosen that
@@ -16,6 +16,10 @@ A changed default is declared here, once:
   again afterwards keeps it.
 - ``NEW_INSTALLS_ONLY``: the new value is for new installs; a stored copy
   of the old one stays. Say why.
+
+Retirements inspect pre-existing rows against raw shipped defaults before
+missing keys are seeded. A deliberate fresh local override equal to an old
+default is therefore kept; local overrides do not define product retirements.
 
 ``tests/test_shipped_config_defaults.py`` holds a snapshot of the values
 ``kazma.yaml`` ships and fails on a change declared in neither;

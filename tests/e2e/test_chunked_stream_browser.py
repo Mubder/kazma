@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -83,13 +84,16 @@ class _EveryTurnScript(Script):
 
 
 @pytest.fixture
-def harness(tmp_path) -> Iterator[Harness]:
+def harness() -> Iterator[Harness]:
     script = _EveryTurnScript(
         steps=[
             Step(tool="current_datetime", args={}, narration="Checking the time first."),
             Step(
                 tool="file_write",
-                args={"path": str(tmp_path / "notes" / "scaffold.md"), "content": "# notes"},
+                # Relative tool paths resolve inside the harness's active
+                # workspace. A separate pytest tmp_path is outside it and
+                # the real file tool correctly refuses that write.
+                args={"path": "notes/scaffold.md", "content": "# notes"},
                 narration="Writing the scaffold note now.",
             ),
         ]
@@ -223,6 +227,7 @@ def test_turns_read_through_a_cut_stream_paint_whole(page, harness: Harness) -> 
             arg=n,
             timeout=90000,
         )
+        assert (Path(harness.data_dir) / "notes" / "scaffold.md").read_text() == "# notes"
 
     bubbles = page.evaluate(_BUBBLES_JS)
     assert len(bubbles) == 2, f"two turns, {len(bubbles)} blocks: {bubbles}"

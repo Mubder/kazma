@@ -48,7 +48,7 @@ pytestmark = [pytest.mark.e2e, pytest.mark.slow]
 @pytest.fixture
 def harness() -> Iterator[Harness]:
     """One app per test, not per module — see ``tests/e2e/conftest.py``."""
-    with unified_turn_server() as h:
+    with unified_turn_server(approved_fixture=True) as h:
         yield h
 
 
@@ -172,6 +172,19 @@ def test_approved_tools_actually_execute(harness: Harness) -> None:
         f"{target} was created empty; the write was announced but the "
         "content never landed"
     )
+    assert os.path.isfile(os.path.join(harness.data_dir, "src", "index.js"))
+    assert not os.path.exists(os.path.join(harness.data_dir, "src", "old.js"))
+
+
+def test_failed_mutator_stops_before_followup_fixture_actions(harness: Harness) -> None:
+    """An approved tool failure cannot be hidden by the scripted final answer."""
+    harness.script.steps[1].args = {"command": "npm init -y"}
+    run = drive_turn(harness, "Set up the project scaffold.", [True] * 4, leg_timeout=120.0)
+    assert _tools(run) == ["file_write", "shell_exec"]
+    assert run.finished
+    assert "effects are unknown" in run.final_answer()
+    assert "Scaffold ready" not in run.final_answer()
+    assert not os.path.exists(os.path.join(harness.data_dir, "src", "index.js"))
 
 
 def test_persisted_row_carries_the_protocol_contract(harness: Harness) -> None:

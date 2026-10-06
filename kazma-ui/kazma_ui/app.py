@@ -1593,6 +1593,15 @@ class KazmaAppBuilder:
 
     async def _on_startup(self) -> None:
         """Application startup: checkpointer, HITL graph, gateway, cron."""
+        # Reconcile under the exclusive writer fence BEFORE any transport,
+        # worker or timeout can claim a gate in this process. Even a fresh
+        # claim belongs to the previous owner. A failed read must stop boot.
+        from kazma_core.safety.hitl_gates import boot_sweep_async, gate_registry_enabled
+
+        if gate_registry_enabled():
+            _swept = await boot_sweep_async(grace_seconds=0)
+            if any(_swept.values()):
+                logger.info("[HITL] gate boot sweep: %s", _swept)
         # One TLS context for every httpx client, built here in a thread so no
         # event-loop caller pays the CA load (kazma_core.http_tls). prewarm()
         # does not raise: a failure degrades to httpx's per-client default.
@@ -2051,24 +2060,6 @@ class KazmaAppBuilder:
             logger.info("[Memory] V2 durable worker started")
         except Exception as e:
             logger.warning("[Memory] V2 worker start failed: %s", e)
-
-        # ── HITL gate registry boot sweep ─────────────────────────────
-        # Rows a dead process left claimed/resuming are settled `orphaned`
-        # (the drive died with the process); pending rows are kept — the
-        # checkpoint pause survives a restart and the card must keep
-        # showing. Best-effort: never blocks boot.
-        try:
-            from kazma_core.safety.hitl_gates import (
-                boot_sweep_async,
-                gate_registry_enabled,
-            )
-
-            if gate_registry_enabled():
-                _swept = await boot_sweep_async()
-                if any(_swept.values()):
-                    logger.info("[HITL] gate boot sweep: %s", _swept)
-        except Exception as e:
-            logger.warning("[HITL] gate boot sweep failed: %s", e)
 
         # ── Vault: same secret, two scopes, two values ────────────────
         # A name under both the tenant and global scope with DIFFERENT values

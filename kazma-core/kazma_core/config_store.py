@@ -2392,26 +2392,34 @@ class ConfigStore(_ChangeNotices):
 
     @_ANY_KEY_IF_WRITTEN
     def reconcile_from_yaml(self) -> int:
-        """Seed DB with kazma.yaml values for keys not already in the DB.
+        """Seed missing DB keys from shipped YAML plus local overrides.
 
         This is the startup reconciliation step that makes ConfigStore the
         authoritative source: on first run (or when new YAML keys appear),
-        YAML values are copied into the active store (SQLite or Postgres) so
-        all components read from one place. Existing DB keys are **never
-        overwritten** — user-made settings changes always win.
+        Merged YAML values are copied into SQLite or Postgres so workspace
+        alignment cannot discard a local provider/model choice. Existing
+        settings win, except declared, one-time shipped-default retirements.
 
         Returns the number of new keys seeded.
         """
-        if not self._yaml_path.exists():
-            return 0
+        from kazma_core.config_loader import load_merged_yaml
 
-        yaml_text = self._yaml_path.read_text(encoding="utf-8")
-        data = yaml.safe_load(yaml_text)
-        if not isinstance(data, dict):
-            return 0
+        # Keep shipped-file parse failures visible, as before. Retirements
+        # describe product defaults, not the owner's local YAML choices.
+        shipped = None
+        if self._yaml_path.exists():
+            shipped = yaml.safe_load(self._yaml_path.read_text(encoding="utf-8"))
 
         # All YAML leaf values as (key, value, category).
-        yaml_items = shipped_settings(data)
+        yaml_items = shipped_settings(load_merged_yaml(self._yaml_path))
+
+        # Check only pre-existing rows before seeding. A fresh local choice
+        # equal to a retired default is intentional, not a fossil to replace.
+        # Read missing keys afterwards: retirement can delete an old row.
+        if isinstance(shipped, dict):
+            self.apply_retired_defaults({
+                key: value for key, value, _cat in shipped_settings(shipped)
+            })
 
         # Find which keys are NOT already in the active backend.
         with self._lock:
@@ -2437,13 +2445,12 @@ class ConfigStore(_ChangeNotices):
         seeded = 0
         if new_items:
             logger.info(
-                "[ConfigStore] Reconciling %d new keys from kazma.yaml into %s",
+                "[ConfigStore] Reconciling %d new keys from merged YAML into %s",
                 len(new_items),
                 backend_label,
             )
             seeded = self.batch_set(new_items)
         self.scrub_nested_hitl_fossils()
-        self.apply_retired_defaults({key: value for key, value, _cat in yaml_items})
         return seeded
 
     def apply_retired_defaults(self, shipped: dict[str, Any]) -> list[str]:

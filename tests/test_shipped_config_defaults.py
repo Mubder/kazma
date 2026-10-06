@@ -102,7 +102,11 @@ def test_every_declaration_is_consistent():
 def test_the_snapshot_is_what_the_database_is_seeded_with(tmp_path):
     """The snapshot reads kazma.yaml through ``shipped_settings``, as the
     boot does: a fresh database seeded from kazma.yaml holds exactly it."""
-    store = ConfigStore(db_path=str(tmp_path / "settings.db"), yaml_path=str(REPO / "kazma.yaml"))
+    # This checks shipped defaults only. A developer's machine-local YAML
+    # beside the checkout must not become part of the shipped snapshot.
+    shipped = tmp_path / "kazma.yaml"
+    shipped.write_bytes((REPO / "kazma.yaml").read_bytes())
+    store = ConfigStore(db_path=str(tmp_path / "settings.db"), yaml_path=str(shipped))
     try:
         store.reconcile_from_yaml()
         snapshot = shipped_defaults.load_snapshot()
