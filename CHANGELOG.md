@@ -2,6 +2,12 @@
 
 ## Tool receipts and interrupted approvals (2026-10-06)
 
+Cloud restart testing exposed an ephemeral default workspace: a fresh HA
+container selected its nonempty application directory instead of the paired
+state volume. HA workspace initialization now keeps the persistent default
+sandbox across boots. Explicit operator workspace registrations remain intact;
+operators must include their storage in the paired backup.
+
 Graph tool effects now reserve a durable invocation receipt before dispatch
 and save the result before checkpointing. A checkpoint replay reuses a saved
 result; an interrupted dispatch or uncommitted result stops with an explicit

@@ -190,6 +190,12 @@ session pooling; transaction pooling is incompatible with the ownership lock.
 Set ingress proxy addresses narrowly and require TLS. Supply provider and
 platform credentials through the normal protected configuration workflow.
 
+Fresh HA installs register the default workspace inside the persistent data
+directory, rather than the container's application directory. Existing active
+workspace registrations are preserved: verify that every writable workspace
+is on storage included in the paired backup. A workspace under `/app` loses
+its files when a pod is replaced, even when database and PVC recovery succeed.
+
 ```bash
 kubectl kustomize deploy/kubernetes
 # Review the rendered resources after replacing both placeholders.
