@@ -615,9 +615,12 @@ class IdeService:
         if parts[0] in ("diff", "log", "show", "blame") or parts[:2] == ["stash", "show"]:
             index = 2 if parts[:2] == ["stash", "show"] else 1
             parts[index:index] = ["--no-ext-diff", "--no-textconv"] if parts[0] != "blame" else ["--no-textconv"]
-        argv = [binary, "--no-pager", "-c", "core.fsmonitor=false", *parts]
+        base_argv = [binary, "--no-pager", "-c", "core.fsmonitor=false", f"--work-tree={cwd}"]
 
         def _run() -> subprocess.CompletedProcess[str]:
+            import time
+
+            deadline = time.monotonic() + max(1, int(timeout))
             # Keep operator newline configuration while dropping process-level
             # repo/config injections and trace paths from the scrubbed builder.
             env = tool_child_env()
@@ -629,13 +632,29 @@ class IdeService:
                 "GIT_OPTIONAL_LOCKS": "0",
                 "GIT_CEILING_DIRECTORIES": str(root.parent),
             })
+            # Clean/process filters also execute programs during work-tree
+            # comparisons. Query names only, then disable each configured
+            # driver while preserving unrelated operator Git configuration.
+            filters = subprocess.run(
+                [*base_argv, "config", "--null", "--name-only", "--get-regexp",
+                 r"^filter\..*\.(clean|smudge|process|required)$"],
+                cwd=cwd, env=env, capture_output=True, text=True,
+                timeout=max(0.001, deadline - time.monotonic()),
+            )
+            if filters.returncode not in (0, 1):
+                return filters
+            overrides: list[str] = []
+            for key in filters.stdout.split("\0"):
+                if key:
+                    value = "false" if key.endswith(".required") else ""
+                    overrides.extend(["-c", f"{key}={value}"])
             return subprocess.run(
-                argv,
+                [*base_argv, *overrides, *parts],
                 cwd=cwd,
                 env=env,
                 capture_output=True,
                 text=True,
-                timeout=max(1, int(timeout)),
+                timeout=max(0.001, deadline - time.monotonic()),
                 check=False,
             )
 

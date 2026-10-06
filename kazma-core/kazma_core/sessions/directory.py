@@ -165,11 +165,11 @@ def thread_owner(thread_id: str, *, strict: bool = False) -> str:
         logger.debug("[sessions] owner read failed", exc_info=True)
         if strict:
             raise ThreadOwnerUnavailable("Thread ownership storage is unavailable") from exc
-    # Deterministic DM form: gw-<platform>-<tail> with no trailing uuid
-    # segment (named/fork ids end in '-<8 hex>'). Sender ids on every
-    # supported platform are alphanumeric/underscore.
+    # Deterministic DM form: gw-<platform>-<tail>. The full match excludes
+    # named/fork ids' extra '-<8 hex>' segment; an eight-digit sender is
+    # itself valid and must not be confused with that suffix.
     m = re.match(r"^gw-([a-z0-9_]+)-([A-Za-z0-9_]+)$", thread_id)
-    if m and not re.search(r"-[0-9a-f]{8}$", thread_id):
+    if m:
         return f"{m.group(1)}:{m.group(2)}"
     return ""
 

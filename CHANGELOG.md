@@ -11,8 +11,10 @@ handler, including unrestricted and long-YOLO commands; status and disabling
 remain available.
 
 IDE Git reads now allow explicit options, refuse output-file writes and
-outside-workspace paths, disable fsmonitor/external diff/textconv execution,
-and prevent inherited Git environment variables from redirecting reads.
+outside-workspace paths, disable fsmonitor/external diff/textconv and
+clean/smudge/process-filter execution,
+and pin the working tree so local configuration or inherited Git environment
+variables cannot redirect reads.
 Branch mutations retain the existing tool-registry approval path. Ordinary
 status and diff reads remain available without approval and preserve operator
 newline configuration.

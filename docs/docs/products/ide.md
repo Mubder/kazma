@@ -39,11 +39,17 @@ industrial editor loop, use `kazma acp` in Zed.
 
 Git status, history and diff reads use an explicit option policy and do not
 require an approval card. Output-file options and outside-workspace operands
-are refused before spawning Git. Reads disable fsmonitor, external diff and
-textconv helpers and preserve operator newline configuration. Unsupported read
-options produce an error rather than falling through to shell execution.
+are refused before spawning Git. Reads disable fsmonitor, external diff,
+textconv and checkout-filter helpers and preserve operator newline configuration.
+Unsupported read options produce an error rather than falling through to shell execution.
 Branch creation and other mutations use the existing tool-registry approval
 path.
+The working tree is pinned to the active workspace, including when local Git
+configuration names a different folder.
+
+Repositories using custom checkout filters are compared without those
+conversions, so raw-file differences may appear. Use an approved terminal
+command when the repository's custom transformations are required.
 
 | Piece | Module |
 |-------|--------|

@@ -63,10 +63,12 @@ async def test_approval_denies_when_durable_owner_store_is_unavailable(monkeypat
     assert "authorized" in manager.send.call_args.args[0].text.lower()
 
 
-async def test_legacy_dm_owner_reaches_checkpoint_with_readable_store(monkeypatch):
+@pytest.mark.parametrize("sender_id", ["42", "12345678"])
+async def test_legacy_dm_owner_reaches_checkpoint_with_readable_store(monkeypatch, sender_id):
     from kazma_gateway.agent_handler import hitl
 
-    monkeypatch.setenv("KAZMA_GATEWAY_ADMINS", "telegram:42")
+    sender = f"telegram:{sender_id}"
+    monkeypatch.setenv("KAZMA_GATEWAY_ADMINS", sender)
 
     async def stop(*_args):
         raise CheckpointReached()
@@ -75,8 +77,8 @@ async def test_legacy_dm_owner_reaches_checkpoint_with_readable_store(monkeypatc
     delivery = SimpleNamespace(get=AsyncMock(return_value={}))
     manager = SimpleNamespace(send=AsyncMock())
     with pytest.raises(CheckpointReached):
-        await hitl._handle_hitl_resume(_message("telegram:42"), object(), {},
-                                       "gw-telegram-42", delivery, manager)
+        await hitl._handle_hitl_resume(_message(sender), object(), {},
+                                       f"gw-telegram-{sender_id}", delivery, manager)
     manager.send.assert_not_awaited()
 
 

@@ -42,6 +42,8 @@ async def test_git_status_does_not_call_shell_exec(
     monkeypatch.setattr(IdeService, "run", _no_shell)
 
     def _fake_run(*a, **k):  # noqa: ARG001
+        if "--name-only" in a[0]:
+            return subprocess.CompletedProcess(args=a[0], returncode=1, stdout="", stderr="")
         return subprocess.CompletedProcess(
             args=["git", "status", "-sb"], returncode=0, stdout="## main\n", stderr=""
         )
@@ -116,7 +118,7 @@ async def test_real_git_reads_do_not_run_repository_helpers(monkeypatch, tmp_pat
     setup("config", "user.name", "Test")
     setup("config", "user.email", "test@example.invalid")
     (tmp_path / "file.txt").write_bytes(b"before\n")
-    (tmp_path / ".gitattributes").write_bytes(b"file.txt diff=audit\n")
+    (tmp_path / ".gitattributes").write_bytes(b"file.txt diff=audit filter=audit\n")
     setup("add", "file.txt", ".gitattributes")
     setup("commit", "-m", "baseline")
     marker = tmp_path / "helper-ran.txt"
@@ -126,11 +128,15 @@ async def test_real_git_reads_do_not_run_repository_helpers(monkeypatch, tmp_pat
     setup("config", "core.fsmonitor", helper_command)
     setup("config", "diff.audit.textconv", helper_command)
     setup("config", "diff.external", helper_command)
+    setup("config", "filter.audit.clean", helper_command)
+    setup("config", "filter.audit.smudge", helper_command)
+    setup("config", "filter.audit.process", helper_command)
     (tmp_path / "file.txt").write_bytes(b"after\n")
     monkeypatch.setattr(svc, "_resolve_workspace_root", lambda: tmp_path)
     ide = IdeService()
     for command in ("status -sb", "diff -- file.txt", "show HEAD:file.txt", "log -1 --oneline", "branch --list", "blame file.txt"):
         result = await ide.git(command)
+        assert not marker.exists(), command
         assert result["ok"], (command, result)
     assert not marker.exists()
 
@@ -168,5 +174,35 @@ async def test_git_reads_keep_operator_newline_configuration(monkeypatch, tmp_pa
     setup("commit", "-m", "baseline")
     monkeypatch.setattr(svc, "_resolve_workspace_root", lambda: workspace)
     result = await IdeService().git("status --porcelain")
+    assert result["ok"]
+    assert result["output"] == ""
+
+
+async def test_git_config_cannot_redirect_reads_to_another_work_tree(monkeypatch, tmp_path):
+    import shutil
+
+    from kazma_core.ide import service as svc
+
+    git = shutil.which("git")
+    assert git
+    workspace = tmp_path / "repo"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+
+    def setup(*args):
+        return subprocess.run([git, "-c", "core.fsmonitor=false", *args], cwd=workspace,
+                              capture_output=True, text=True, check=True)
+
+    setup("init")
+    setup("config", "user.name", "Test")
+    setup("config", "user.email", "test@example.invalid")
+    (workspace / "file.txt").write_bytes(b"authorized bytes\n")
+    setup("add", "file.txt")
+    setup("commit", "-m", "baseline")
+    (outside / "file.txt").write_bytes(b"OUTSIDE_WORKSPACE_CONTENT\n")
+    setup("config", "core.worktree", str(outside))
+    monkeypatch.setattr(svc, "_resolve_workspace_root", lambda: workspace)
+    result = await IdeService().git("diff -- file.txt")
     assert result["ok"]
     assert result["output"] == ""
