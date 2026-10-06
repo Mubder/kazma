@@ -615,7 +615,9 @@ class IdeService:
         if parts[0] in ("diff", "log", "show", "blame") or parts[:2] == ["stash", "show"]:
             index = 2 if parts[:2] == ["stash", "show"] else 1
             parts[index:index] = ["--no-ext-diff", "--no-textconv"] if parts[0] != "blame" else ["--no-textconv"]
-        base_argv = [binary, "--no-pager", "-c", "core.fsmonitor=false", f"--work-tree={cwd}"]
+        # The flag is also a capability requirement: older Git must refuse
+        # before a read, rather than silently ignoring a new environment key.
+        base_argv = [binary, "--no-pager", "--no-lazy-fetch", "-c", "core.fsmonitor=false", f"--work-tree={cwd}"]
 
         def _run() -> subprocess.CompletedProcess[str]:
             import time
@@ -631,6 +633,7 @@ class IdeService:
             env.update({
                 "GIT_OPTIONAL_LOCKS": "0",
                 "GIT_CEILING_DIRECTORIES": str(root.parent),
+                "GIT_NO_LAZY_FETCH": "1",
             })
             # Clean/process filters also execute programs during work-tree
             # comparisons. Query names only, then disable each configured
@@ -665,6 +668,12 @@ class IdeService:
         except OSError as exc:
             return {"ok": False, "error": str(exc), "output": ""}
         out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        if proc.returncode and "unknown option" in out.lower() and "no-lazy-fetch" in out:
+            return {
+                "ok": False,
+                "error": "Read-only Git requires --no-lazy-fetch support; upgrade Git or use approved terminal execution",
+                "output": out,
+            }
         return {
             "ok": proc.returncode == 0,
             "error": None if proc.returncode == 0 else (out or f"exit {proc.returncode}"),

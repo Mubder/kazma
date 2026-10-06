@@ -206,3 +206,73 @@ async def test_git_config_cannot_redirect_reads_to_another_work_tree(monkeypatch
     result = await IdeService().git("diff -- file.txt")
     assert result["ok"]
     assert result["output"] == ""
+
+
+async def test_missing_promisor_object_cannot_execute_remote_helper(monkeypatch, tmp_path):
+    import shutil
+    import sys
+
+    from kazma_core.ide import service as svc
+
+    git = shutil.which("git")
+    assert git
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+
+    def setup(*args):
+        return subprocess.run([git, *args], cwd=workspace, capture_output=True,
+                              text=True, check=True)
+
+    setup("init")
+    setup("config", "extensions.partialClone", "origin")
+    setup("config", "remote.origin.promisor", "true")
+    setup("config", "remote.origin.partialclonefilter", "blob:none")
+    setup("config", "protocol.ext.allow", "always")
+    marker = tmp_path / "remote-helper-ran.txt"
+    helper = tmp_path / "remote-helper.py"
+    helper.write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('ran')\n",
+        encoding="utf-8",
+    )
+    # remote-ext uses percent escaping for literal spaces and percent signs.
+    def ext_argument(value):
+        return str(value).replace("%", "%%").replace(" ", "% ")
+
+    setup("config", "remote.origin.url",
+          f"ext::{ext_argument(sys.executable)} {ext_argument(helper)}")
+    setup("symbolic-ref", "HEAD", "refs/heads/audit")
+    (workspace / ".git" / "refs" / "heads" / "audit").write_text("a" * 40 + "\n")
+    monkeypatch.setattr(svc, "_resolve_workspace_root", lambda: workspace)
+    # An inherited opt-out cannot override the read path's own policy.
+    monkeypatch.setenv("GIT_NO_LAZY_FETCH", "0")
+    ide = IdeService()
+    gate = AsyncMock()
+    monkeypatch.setattr(ide, "run", gate)
+    result = await ide.git("show HEAD")
+    assert not marker.exists(), "read-only Git executed a lazy-fetch remote helper"
+    assert result["ok"] is False
+    gate.assert_not_awaited()
+
+
+async def test_git_without_no_lazy_fetch_support_refuses_before_read(monkeypatch, tmp_path):
+    from kazma_core.ide import service as svc
+
+    monkeypatch.setattr(svc, "_resolve_workspace_root", lambda: tmp_path)
+    calls = []
+
+    def old_git(args, **kwargs):
+        calls.append(args)
+        assert "--no-lazy-fetch" in args
+        assert kwargs["env"]["GIT_NO_LAZY_FETCH"] == "1"
+        return subprocess.CompletedProcess(args, 129, "", "unknown option: --no-lazy-fetch\n")
+
+    monkeypatch.setattr(subprocess, "run", old_git)
+    ide = IdeService()
+    gate = AsyncMock()
+    monkeypatch.setattr(ide, "run", gate)
+    result = await ide.git("status -s")
+    assert result["ok"] is False
+    assert "upgrade Git" in result["error"]
+    assert len(calls) == 1
+    assert "status" not in calls[0]
+    gate.assert_not_awaited()

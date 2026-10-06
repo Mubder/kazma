@@ -19,6 +19,16 @@ Branch mutations retain the existing tool-registry approval path. Ordinary
 status and diff reads remain available without approval and preserve operator
 newline configuration.
 
+Partial-clone reads cannot automatically fetch missing objects and execute
+configured remote helpers. Git must support `--no-lazy-fetch`; an older version
+refuses the read with an upgrade hint. Missing objects require an approved
+fetch before retrying.
+
+Discord admin checks recognize the user in the adapter's `user:channel` actor
+while approvals still require full channel-specific ownership. Postgres
+first-owner acquisition now has exactly one winner when concurrent connections
+observe a missing key; expired lease replacement retains its row lock.
+
 ## Tool receipts and interrupted approvals (2026-10-06)
 
 Fresh settings reconciliation now persists shipped YAML merged with local

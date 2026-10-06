@@ -47,6 +47,12 @@ path.
 The working tree is pinned to the active workspace, including when local Git
 configuration names a different folder.
 
+Reads also disable automatic fetching of missing objects from partial-clone
+remotes, which could otherwise run configured remote helpers. A missing object
+returns an error; fetch it through approved terminal execution before retrying.
+The installed Git must support `--no-lazy-fetch`; older Git refuses reads with
+an upgrade hint. This requirement is checked by Git itself on every read.
+
 Repositories using custom checkout filters are compared without those
 conversions, so raw-file differences may appear. Use an approved terminal
 command when the repository's custom transformations are required.

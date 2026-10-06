@@ -16,6 +16,51 @@ def _message(sender: str, text: str = "/hitl approve", platform: str = "telegram
     return IncomingMessage(platform, sender, text, context_metadata={"chat_id": 42})
 
 
+@pytest.mark.parametrize("admin_source", ["qualified", "bare", "allowlist"])
+@pytest.mark.parametrize("owner", ["discord:42:900", "discord:42:901", "discord:900:900"])
+async def test_real_discord_admin_identity_preserves_channel_owner(monkeypatch, admin_source, owner):
+    from kazma_core.config_store import get_config_store
+    from kazma_core.sessions.directory import record_thread_owner
+    from kazma_gateway.adapters.discord_parse import parse_message_create
+    from kazma_gateway.agent_handler import hitl
+    from kazma_gateway.agent_handler.graph import _sender_is_gateway_admin
+
+    monkeypatch.delenv("KAZMA_GATEWAY_ADMINS", raising=False)
+    if admin_source == "allowlist":
+        get_config_store().set("connectors.discord.allowed_users", "42")
+    else:
+        monkeypatch.setenv("KAZMA_GATEWAY_ADMINS", "discord:42" if admin_source == "qualified" else "42")
+    msg = parse_message_create({"author": {"id": "42"}, "channel_id": "900", "content": "/hitl approve"})
+    assert msg is not None and msg.sender_id == "discord:42:900"
+    assert _sender_is_gateway_admin(msg)
+    record_thread_owner("discord-admin-review", owner)
+
+    async def stop(*_args):
+        raise CheckpointReached()
+
+    monkeypatch.setattr(hitl, "_check_graph_interrupt", stop)
+    delivery = SimpleNamespace(get=AsyncMock(return_value={}))
+    manager = SimpleNamespace(send=AsyncMock())
+    graph = SimpleNamespace(aget_state=AsyncMock(), ainvoke=AsyncMock())
+    if owner == msg.sender_id:
+        with pytest.raises(CheckpointReached):
+            await hitl._handle_hitl_resume(msg, graph, {}, "discord-admin-review", delivery, manager)
+        manager.send.assert_not_awaited()
+    else:
+        assert await hitl._handle_hitl_resume(msg, graph, {}, "discord-admin-review", delivery, manager)
+        graph.aget_state.assert_not_awaited()
+        graph.ainvoke.assert_not_awaited()
+        assert "authorized" in manager.send.call_args.args[0].text.lower()
+
+
+@pytest.mark.parametrize("admin", ["discord:900", "900", "telegram:42"])
+def test_discord_channel_identity_cannot_grant_user_admin(monkeypatch, admin):
+    from kazma_gateway.allowlists import is_gateway_admin
+
+    monkeypatch.setenv("KAZMA_GATEWAY_ADMINS", admin)
+    assert not is_gateway_admin("discord:42:900", "discord")
+
+
 @pytest.mark.parametrize("sender,admins,owner", [
     ("telegram:42", "telegram:admin", "telegram:42"),
     ("", "telegram:42", "telegram:42"),
