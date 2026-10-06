@@ -43,12 +43,17 @@ def split_ids(raw: Any) -> list[str]:
 
 
 def _candidate_tokens(sender_id: str) -> set[str]:
-    """Both the full sender id and its platform-local tail."""
+    """Full actor plus platform user tokens, without treating channels as users."""
     tokens = {sender_id}
     if ":" in sender_id:
         tail = sender_id.split(":", 1)[1]
         if tail:
             tokens.add(tail)
+    # Discord's verified inbound actor is discord:user:channel. Admin lists
+    # contain users; thread ownership keeps the complete actor elsewhere.
+    parts = sender_id.split(":")
+    if len(parts) == 3 and parts[0] == "discord" and all(p.isdigit() for p in parts[1:]):
+        tokens.add(parts[1])
     return tokens
 
 

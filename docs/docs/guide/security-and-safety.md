@@ -46,6 +46,21 @@ flowchart TB
 | **B** | `swarm/safety.py` + `tool_registry.py` | Bus adapter buttons (Telegram / Discord / Slack) |
 | **C** | `swarm/checkpoint_manager.py` | `POST /api/swarm/tasks/{id}/approve` |
 
+Gateway `/hitl` decisions require a gateway administrator who owns the target
+thread. Ownership is stored durably in the session directory, independently
+of the five-minute delivery cache, so authorized approvals survive cache
+expiry and restarts. Missing or mismatched identity is refused before reading
+the graph. An approval command cannot create its own thread ownership.
+`KAZMA_GATEWAY_ADMINS`, when set, is authoritative; otherwise the platform's
+configured user allowlist grants admin status. An empty allowlist allows
+chatting and grants no administrator privileges.
+
+Enabling `/yolo`, `/unrestricted` or `/long yolo` also requires a gateway
+administrator. These handlers check authorization before activation; adding
+their names to a later command gate would leave them unprotected. Checking
+status or disabling YOLO remains available without granting new privileges.
+Production YOLO restrictions still apply to administrators.
+
 **Not extra HITL gates:**
 
 - **Tool hooks** (`agent/tool_hooks.py`) — cannot auto-approve danger, skip commitment, or replace the YAML list. Broken hook fail-opens. `KAZMA_TOOL_HOOKS=0`.

@@ -110,6 +110,10 @@ _OWNER_KEY_PREFIX = "session.owner."
 _OPEN_TAKEOVER_ENV = "KAZMA_SESSION_OPEN_TAKEOVER"
 
 
+class ThreadOwnerUnavailable(RuntimeError):
+    """A strict ownership lookup could not read its durable registry."""
+
+
 def _open_takeover_enabled() -> bool:
     """Shared-team opt-in: any allowlisted sender may take over any season."""
     import os
@@ -133,18 +137,19 @@ def record_thread_owner(thread_id: str, sender_id: str) -> None:
 
         key = f"{_OWNER_KEY_PREFIX}{thread_id}"
         store = get_config_store()
-        if not store.get(key, ""):
-            store.set(key, sender_id)
+        store.set_if_absent(key, sender_id, category="session")
     except Exception:
         logger.debug("[sessions] owner record failed", exc_info=True)
 
 
-def thread_owner(thread_id: str) -> str:
+def thread_owner(thread_id: str, *, strict: bool = False) -> str:
     """The sender that owns *thread_id* ("" when unowned/derivable-none).
 
     Explicit registry first; deterministic per-DM ids (``gw-<plat>-<id>``
     with no minted uuid suffix) derive their owner from the id itself, so
     pre-ownership-registry threads keep working with no migration.
+    Authorization callers use ``strict=True``: a failed registry read must
+    raise rather than mask a stored owner with that legacy fallback.
     """
     if not thread_id:
         return ""
@@ -156,13 +161,15 @@ def thread_owner(thread_id: str) -> str:
         ).strip()
         if owner:
             return owner
-    except Exception:
+    except Exception as exc:
         logger.debug("[sessions] owner read failed", exc_info=True)
-    # Deterministic DM form: gw-<platform>-<tail> with no trailing uuid
-    # segment (named/fork ids end in '-<8 hex>'). Sender ids on every
-    # supported platform are alphanumeric/underscore.
+        if strict:
+            raise ThreadOwnerUnavailable("Thread ownership storage is unavailable") from exc
+    # Deterministic DM form: gw-<platform>-<tail>. The full match excludes
+    # named/fork ids' extra '-<8 hex>' segment; an eight-digit sender is
+    # itself valid and must not be confused with that suffix.
     m = re.match(r"^gw-([a-z0-9_]+)-([A-Za-z0-9_]+)$", thread_id)
-    if m and not re.search(r"-[0-9a-f]{8}$", thread_id):
+    if m:
         return f"{m.group(1)}:{m.group(2)}"
     return ""
 
