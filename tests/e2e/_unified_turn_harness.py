@@ -460,6 +460,7 @@ def unified_turn_server(
     script: Script | None = None,
     *,
     asgi_wrapper: Any = None,
+    approved_fixture: bool = False,
 ) -> Iterator[Harness]:
     """Boot the real app with an isolated data directory and a scripted model.
 
@@ -469,6 +470,11 @@ def unified_turn_server(
 
     ``asgi_wrapper`` wraps the app before uvicorn serves it (for example
     :class:`RechunkedStreams`); the wrapped app is on ``Harness.app``.
+
+    ``approved_fixture`` keeps the four-gate topology but substitutes a
+    harmless allowed Git probe for npm, and seeds the file to delete. The
+    canonical layout fixture denies npm; approving that blocked command
+    cannot be a successful four-approval execution test.
     """
     import uvicorn
     from kazma_core.config_store import ConfigStore, set_config_store
@@ -510,6 +516,12 @@ def unified_turn_server(
         seed_provider_config(cs)
         stack.enter_context(_isolate_workspace_store(tmp_dir))
         script = script or four_gate_script(tmp_dir)
+        if approved_fixture:
+            script.steps[1].args = {"command": "git --version"}
+            script.final = "Scaffold ready."
+            obsolete = Path(tmp_dir) / "src" / "old.js"
+            obsolete.parent.mkdir(parents=True, exist_ok=True)
+            obsolete.write_text("// obsolete fixture\n", encoding="utf-8")
         with scripted_provider(script):
             port = free_port()
             app = create_app(isolated_config(tmp_dir))

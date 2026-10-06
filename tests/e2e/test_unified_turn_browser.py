@@ -85,7 +85,7 @@ _SHAPE_JS = """() => {
 @pytest.fixture
 def harness() -> Iterator[Harness]:
     """One app per test, not per module — see ``tests/e2e/conftest.py``."""
-    with unified_turn_server() as h:
+    with unified_turn_server(approved_fixture=True) as h:
         yield h
 
 
