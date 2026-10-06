@@ -110,6 +110,10 @@ _OWNER_KEY_PREFIX = "session.owner."
 _OPEN_TAKEOVER_ENV = "KAZMA_SESSION_OPEN_TAKEOVER"
 
 
+class ThreadOwnerUnavailable(RuntimeError):
+    """A strict ownership lookup could not read its durable registry."""
+
+
 def _open_takeover_enabled() -> bool:
     """Shared-team opt-in: any allowlisted sender may take over any season."""
     import os
@@ -157,10 +161,10 @@ def thread_owner(thread_id: str, *, strict: bool = False) -> str:
         ).strip()
         if owner:
             return owner
-    except Exception:
+    except Exception as exc:
         logger.debug("[sessions] owner read failed", exc_info=True)
         if strict:
-            raise
+            raise ThreadOwnerUnavailable("Thread ownership storage is unavailable") from exc
     # Deterministic DM form: gw-<platform>-<tail> with no trailing uuid
     # segment (named/fork ids end in '-<8 hex>'). Sender ids on every
     # supported platform are alphanumeric/underscore.

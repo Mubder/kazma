@@ -605,20 +605,10 @@ class IdeService:
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "output": ""}
 
-        def _environment() -> tuple[str | None, dict[str, str]]:
-            binary = resolve_shell_binary("git", restricted_path=os.pathsep.join(system_path_dirs()))
-            # Keep operator configuration (including newline handling), while
-            # dropping process-level repo/config injections and trace paths.
-            config_paths = {"GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL"}
-            env = {k: v for k, v in tool_child_env().items()
-                   if not k.upper().startswith("GIT_") or k.upper() in config_paths}
-            env.update({
-                "GIT_OPTIONAL_LOCKS": "0",
-                "GIT_CEILING_DIRECTORIES": str(root.parent),
-            })
-            return binary, env
-
-        binary, env = await asyncio.to_thread(_environment)
+        binary = await asyncio.to_thread(
+            resolve_shell_binary, "git",
+            restricted_path=os.pathsep.join(system_path_dirs()),
+        )
         if not binary:
             return {"ok": False, "error": "Git could not be resolved on the trusted tool PATH", "output": ""}
         parts = list(parts)
@@ -628,6 +618,17 @@ class IdeService:
         argv = [binary, "--no-pager", "-c", "core.fsmonitor=false", *parts]
 
         def _run() -> subprocess.CompletedProcess[str]:
+            # Keep operator newline configuration while dropping process-level
+            # repo/config injections and trace paths from the scrubbed builder.
+            env = tool_child_env()
+            config_paths = {"GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL"}
+            for key in list(env):
+                if key.upper().startswith("GIT_") and key.upper() not in config_paths:
+                    env.pop(key)
+            env.update({
+                "GIT_OPTIONAL_LOCKS": "0",
+                "GIT_CEILING_DIRECTORIES": str(root.parent),
+            })
             return subprocess.run(
                 argv,
                 cwd=cwd,

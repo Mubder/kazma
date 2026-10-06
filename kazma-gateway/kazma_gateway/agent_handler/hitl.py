@@ -772,11 +772,11 @@ async def _handle_hitl_resume(
     # Buttons and text decisions require the same admin policy. Ownership
     # comes from the durable directory, not a delivery cache that expires or
     # changes on /session take-over. Never infer identity from the command.
+    from kazma_core.sessions.directory import ThreadOwnerUnavailable, thread_owner
+    from kazma_gateway.allowlists import is_gateway_admin
+
     authorized = False
     try:
-        from kazma_core.sessions.directory import thread_owner
-        from kazma_gateway.allowlists import is_gateway_admin
-
         current_sender = (msg.sender_id or "").strip()
         platform = (msg.platform or "").strip().lower()
         if current_sender and platform:
@@ -787,7 +787,7 @@ async def _handle_hitl_resume(
                     owner = await asyncio.to_thread(thread_owner, target_thread, strict=True)
                     owner = owner if ":" in owner or not owner else f"{platform}:{owner}"
                     authorized = bool(owner and owner == actor)
-    except Exception:
+    except (ThreadOwnerUnavailable, OSError, ValueError, TypeError):
         logger.warning("[HITL] authorization unavailable; refusing decision", exc_info=True)
     if not authorized:
         logger.warning("[HITL] unauthorized decision refused for thread=%s", target_thread)
