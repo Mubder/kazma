@@ -4,8 +4,9 @@
 
 Gateway text approvals now require an administrator who owns the thread,
 using durable ownership rather than the short-lived delivery cache. Approval
-commands cannot create ownership, and authorized owners can resume after
-cache expiry or restart. YOLO activation is authorized before its early
+commands cannot create ownership, unreadable ownership storage refuses the
+decision, and authorized owners can resume after cache expiry or restart.
+YOLO activation is authorized before its early
 handler, including unrestricted and long-YOLO commands; status and disabling
 remain available.
 

@@ -138,12 +138,14 @@ def record_thread_owner(thread_id: str, sender_id: str) -> None:
         logger.debug("[sessions] owner record failed", exc_info=True)
 
 
-def thread_owner(thread_id: str) -> str:
+def thread_owner(thread_id: str, *, strict: bool = False) -> str:
     """The sender that owns *thread_id* ("" when unowned/derivable-none).
 
     Explicit registry first; deterministic per-DM ids (``gw-<plat>-<id>``
     with no minted uuid suffix) derive their owner from the id itself, so
     pre-ownership-registry threads keep working with no migration.
+    Authorization callers use ``strict=True``: a failed registry read must
+    raise rather than mask a stored owner with that legacy fallback.
     """
     if not thread_id:
         return ""
@@ -157,6 +159,8 @@ def thread_owner(thread_id: str) -> str:
             return owner
     except Exception:
         logger.debug("[sessions] owner read failed", exc_info=True)
+        if strict:
+            raise
     # Deterministic DM form: gw-<platform>-<tail> with no trailing uuid
     # segment (named/fork ids end in '-<8 hex>'). Sender ids on every
     # supported platform are alphanumeric/underscore.

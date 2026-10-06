@@ -39,6 +39,47 @@ async def test_unauthorized_approval_does_not_read_graph(monkeypatch, sender, ad
     assert "authorized" in manager.send.call_args.args[0].text.lower()
 
 
+async def test_approval_denies_when_durable_owner_store_is_unavailable(monkeypatch):
+    from kazma_core.config_store import get_config_store
+    from kazma_gateway.agent_handler.hitl import _handle_hitl_resume
+
+    monkeypatch.setenv("KAZMA_GATEWAY_ADMINS", "telegram:42")
+    store = get_config_store()
+    original_get = store.get
+
+    def unavailable_owner(key, *args, **kwargs):
+        if key.startswith("session.owner."):
+            raise RuntimeError("synthetic owner-store outage")
+        return original_get(key, *args, **kwargs)
+
+    monkeypatch.setattr(store, "get", unavailable_owner)
+    graph = SimpleNamespace(aget_state=AsyncMock(), ainvoke=AsyncMock())
+    manager = SimpleNamespace(send=AsyncMock())
+    delivery = SimpleNamespace(get=AsyncMock(return_value={}))
+    assert await _handle_hitl_resume(_message("telegram:42"), graph, {},
+                                   "gw-telegram-42", delivery, manager)
+    graph.aget_state.assert_not_awaited()
+    graph.ainvoke.assert_not_awaited()
+    assert "authorized" in manager.send.call_args.args[0].text.lower()
+
+
+async def test_legacy_dm_owner_reaches_checkpoint_with_readable_store(monkeypatch):
+    from kazma_gateway.agent_handler import hitl
+
+    monkeypatch.setenv("KAZMA_GATEWAY_ADMINS", "telegram:42")
+
+    async def stop(*_args):
+        raise CheckpointReached()
+
+    monkeypatch.setattr(hitl, "_check_graph_interrupt", stop)
+    delivery = SimpleNamespace(get=AsyncMock(return_value={}))
+    manager = SimpleNamespace(send=AsyncMock())
+    with pytest.raises(CheckpointReached):
+        await hitl._handle_hitl_resume(_message("telegram:42"), object(), {},
+                                       "gw-telegram-42", delivery, manager)
+    manager.send.assert_not_awaited()
+
+
 @pytest.mark.parametrize("platform", ["telegram", "discord", "slack"])
 @pytest.mark.parametrize("cross_thread", [False, True])
 async def test_owner_admin_reaches_checkpoint_after_session_expiry_and_store_reopen(

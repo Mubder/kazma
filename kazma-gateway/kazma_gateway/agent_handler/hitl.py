@@ -784,7 +784,7 @@ async def _handle_hitl_resume(
             if actor.split(":", 1)[0] == platform:
                 is_admin = await asyncio.to_thread(is_gateway_admin, actor, platform)
                 if is_admin:
-                    owner = await asyncio.to_thread(thread_owner, target_thread)
+                    owner = await asyncio.to_thread(thread_owner, target_thread, strict=True)
                     owner = owner if ":" in owner or not owner else f"{platform}:{owner}"
                     authorized = bool(owner and owner == actor)
     except Exception:

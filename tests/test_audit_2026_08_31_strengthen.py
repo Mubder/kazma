@@ -41,16 +41,33 @@ def test_graph_commitment_gate_passes_enforce_unknown_mutators():
     assert "get_commitment_config()" in src
 
 
-def test_hitl_gateway_refuses_sessionstore_for_cross_thread():
-    src = (
-        _ROOT
-        / "kazma-gateway"
-        / "kazma_gateway"
-        / "agent_handler"
-        / "hitl.py"
-    ).read_text(encoding="utf-8")
-    assert "refuse_session_lookup_for_durable_job" in src
-    assert "msg.context_metadata" in src
+@pytest.mark.parametrize("owner", ["", "telegram:other"])
+async def test_hitl_gateway_cache_cannot_authorize_cross_thread(monkeypatch, owner):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from kazma_core.sessions.directory import record_thread_owner
+    from kazma_gateway.agent_handler.hitl import _handle_hitl_resume
+    from kazma_gateway.gateway import IncomingMessage
+
+    monkeypatch.setenv("KAZMA_GATEWAY_ADMINS", "telegram:42")
+    if owner:
+        record_thread_owner("durable-cross-thread", owner)
+    # A cache row claiming this sender must not override missing or different
+    # durable ownership, even when it has enough routing data to resume.
+    store = SimpleNamespace(get=AsyncMock(return_value={
+        "sender_id": "telegram:42", "platform": "telegram", "chat_id": 42,
+    }))
+    graph = SimpleNamespace(aget_state=AsyncMock(), ainvoke=AsyncMock())
+    manager = SimpleNamespace(send=AsyncMock())
+    msg = IncomingMessage("telegram", "telegram:42",
+                          "/hitl approve durable-cross-thread",
+                          context_metadata={"chat_id": 42})
+
+    assert await _handle_hitl_resume(msg, graph, {}, "current-thread", store, manager)
+    graph.aget_state.assert_not_awaited()
+    graph.ainvoke.assert_not_awaited()
+    assert "authorized" in manager.send.call_args.args[0].text.lower()
 
 
 def test_troubleshooting_does_not_claim_no_429():
