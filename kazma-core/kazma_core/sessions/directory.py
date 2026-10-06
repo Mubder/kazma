@@ -133,8 +133,7 @@ def record_thread_owner(thread_id: str, sender_id: str) -> None:
 
         key = f"{_OWNER_KEY_PREFIX}{thread_id}"
         store = get_config_store()
-        if not store.get(key, ""):
-            store.set(key, sender_id)
+        store.set_if_absent(key, sender_id, category="session")
     except Exception:
         logger.debug("[sessions] owner record failed", exc_info=True)
 

@@ -87,31 +87,12 @@ def _lang_for_path(path: Path) -> str:
 
 def _is_readonly_git(subcommand: str) -> bool:
     """True for git verbs that do not mutate the repo or remotes."""
-    import shlex
-
+    from kazma_core.ide.git_policy import read_operands, split_git_command
     try:
-        parts = shlex.split(subcommand.strip())
+        read_operands(split_git_command(subcommand))
+        return True
     except ValueError:
         return False
-    if not parts:
-        return False
-    cmd, rest = parts[0], parts[1:]
-    if cmd in {
-        "status", "log", "diff", "show", "rev-parse", "blame",
-        "ls-files", "describe", "rev-list", "shortlog", "version",
-    }:
-        return True
-    if cmd == "branch" and not any(
-        a in ("-d", "-D", "-m", "-M", "--delete", "--move") for a in rest
-    ):
-        return True
-    if cmd == "stash" and rest and rest[0] in ("list", "show"):
-        return True
-    if cmd == "remote" and (
-        not rest or rest[0] in ("-v", "--verbose", "show", "get-url")
-    ):
-        return True
-    return False
 
 
 class IdeService:
@@ -598,31 +579,59 @@ class IdeService:
         if not subcommand or not subcommand.strip():
             return {"ok": False, "error": "Empty git subcommand", "output": ""}
         sub = subcommand.strip()
-        if _is_readonly_git(sub):
+        from kazma_core.ide.git_policy import is_read_request, split_git_command
+        try:
+            parts = split_git_command(sub)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc), "output": ""}
+        if is_read_request(parts):
             return await self._git_read(sub, timeout=timeout)
         return await self.run(f"git {sub}", timeout=timeout)
 
     async def _git_read(self, subcommand: str, timeout: int = 60) -> dict[str, Any]:
         import asyncio
         import os
-        import shlex
         import subprocess
 
+        from kazma_core.ide.git_policy import split_git_command, validate_read_paths
+        from kazma_core.safety.post_hitl import resolve_shell_binary, system_path_dirs
         from kazma_core.security.child_env import tool_child_env
 
-        cwd = str(await asyncio.to_thread(lambda: self.root))
+        root = await asyncio.to_thread(lambda: self.root)
+        cwd = str(root)
         try:
-            argv = ["git", *shlex.split(subcommand, posix=os.name != "nt")]
+            parts = split_git_command(subcommand)
+            await asyncio.to_thread(validate_read_paths, parts, root)
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "output": ""}
+
+        def _environment() -> tuple[str | None, dict[str, str]]:
+            binary = resolve_shell_binary("git", restricted_path=os.pathsep.join(system_path_dirs()))
+            # Keep operator configuration (including newline handling), while
+            # dropping process-level repo/config injections and trace paths.
+            config_paths = {"GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL"}
+            env = {k: v for k, v in tool_child_env().items()
+                   if not k.upper().startswith("GIT_") or k.upper() in config_paths}
+            env.update({
+                "GIT_OPTIONAL_LOCKS": "0",
+                "GIT_CEILING_DIRECTORIES": str(root.parent),
+            })
+            return binary, env
+
+        binary, env = await asyncio.to_thread(_environment)
+        if not binary:
+            return {"ok": False, "error": "Git could not be resolved on the trusted tool PATH", "output": ""}
+        parts = list(parts)
+        if parts[0] in ("diff", "log", "show", "blame") or parts[:2] == ["stash", "show"]:
+            index = 2 if parts[:2] == ["stash", "show"] else 1
+            parts[index:index] = ["--no-ext-diff", "--no-textconv"] if parts[0] != "blame" else ["--no-textconv"]
+        argv = [binary, "--no-pager", "-c", "core.fsmonitor=false", *parts]
 
         def _run() -> subprocess.CompletedProcess[str]:
             return subprocess.run(
                 argv,
                 cwd=cwd,
-                # Read-only git still runs the repo's configured programs
-                # (core.fsmonitor, textconv): no server secrets for them.
-                env=tool_child_env(),
+                env=env,
                 capture_output=True,
                 text=True,
                 timeout=max(1, int(timeout)),

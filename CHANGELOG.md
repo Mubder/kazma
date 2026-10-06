@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Gateway approval and IDE Git safety (2026-10-06)
+
+Gateway text approvals now require an administrator who owns the thread,
+using durable ownership rather than the short-lived delivery cache. Approval
+commands cannot create ownership, and authorized owners can resume after
+cache expiry or restart. YOLO activation is authorized before its early
+handler, including unrestricted and long-YOLO commands; status and disabling
+remain available.
+
+IDE Git reads now allow explicit options, refuse output-file writes and
+outside-workspace paths, disable fsmonitor/external diff/textconv execution,
+and prevent inherited Git environment variables from redirecting reads.
+Branch mutations retain the existing tool-registry approval path. Ordinary
+status and diff reads remain available without approval and preserve operator
+newline configuration.
+
 ## Tool receipts and interrupted approvals (2026-10-06)
 
 Fresh settings reconciliation now persists shipped YAML merged with local

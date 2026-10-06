@@ -37,6 +37,14 @@ industrial editor loop, use `kazma acp` in Zed.
 
 ## Components
 
+Git status, history and diff reads use an explicit option policy and do not
+require an approval card. Output-file options and outside-workspace operands
+are refused before spawning Git. Reads disable fsmonitor, external diff and
+textconv helpers and preserve operator newline configuration. Unsupported read
+options produce an error rather than falling through to shell execution.
+Branch creation and other mutations use the existing tool-registry approval
+path.
+
 | Piece | Module |
 |-------|--------|
 | Service | `kazma_core/ide/service.py` |

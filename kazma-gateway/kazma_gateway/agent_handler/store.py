@@ -204,6 +204,14 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
     # Resolve thread_id using standardized resolver
     thread_id = _resolve_thread(msg)
 
+    # Persist authorization independently of the five-minute delivery cache.
+    # Approval commands are intercepted before this builder: they must never
+    # acquire ownership of an unknown thread just by asking to approve it.
+    import asyncio
+    from kazma_core.sessions.directory import record_thread_owner
+
+    await asyncio.to_thread(record_thread_owner, thread_id, msg.sender_id)
+
     # Store full platform context in SessionStore (NEVER enters the graph).
     # Adapters only set sender_id as the top-level IncomingMessage field,
     # never inside context_metadata — but hitl.py's cross-thread approval

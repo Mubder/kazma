@@ -769,78 +769,34 @@ async def _handle_hitl_resume(
         for _k, _v in stored.items():
             ctx.setdefault(_k, _v)
 
-    # Authorization: verify that the requester is the same user who
-    # initiated the paused task. Look up the target thread's context
-    # and compare sender_id. This prevents any user from approving
-    # another user's paused danger-tool execution.
-    # Fail-closed: if the target session is missing, deny cross-thread
-    # approvals rather than skipping the check.
-    if target_thread != thread_id:
-        from kazma_core.sessions.ttl import (
-            SESSION_TTL_SECONDS,
-            refuse_session_lookup_for_durable_job,
-        )
+    # Buttons and text decisions require the same admin policy. Ownership
+    # comes from the durable directory, not a delivery cache that expires or
+    # changes on /session take-over. Never infer identity from the command.
+    authorized = False
+    try:
+        from kazma_core.sessions.directory import thread_owner
+        from kazma_gateway.allowlists import is_gateway_admin
 
-        target_ctx = await store.get(target_thread)
-        if not target_ctx:
-            refuse_session_lookup_for_durable_job(
-                job_kind="hitl_cross_thread",
-                thread_id=str(target_thread),
-            )
-            logger.warning(
-                "[HITL] Authz denied: cross-thread approve for missing session %s by %s",
-                target_thread, msg.sender_id,
-            )
-            await manager.send(
-                OutboundMessage(
-                    target_id=_build_target_id(msg.platform, ctx),
-                    text=(
-                        "⚠️ Cannot approve: target session expired "
-                        f"(SessionStore TTL is {count_noun(SESSION_TTL_SECONDS // 60, 'minute')}). Approve from the "
-                        "original chat, or send a new request."
-                    ),
-                    context_metadata=ctx,
-                )
-            )
-            return True
-        original_sender = (target_ctx.get("sender_id") or "").strip()
         current_sender = (msg.sender_id or "").strip()
-        # Fail-closed (audit M6): empty owner or mismatch → deny
-        if not original_sender or not current_sender or original_sender != current_sender:
-            logger.warning(
-                "[HITL] Authz denied: %s tried to approve thread %s owned by %s",
-                current_sender or "(empty)",
-                target_thread,
-                original_sender or "(empty)",
-            )
-            await manager.send(
-                OutboundMessage(
-                    target_id=_build_target_id(msg.platform, ctx),
-                    text="⚠️ You are not authorized to approve this task.",
-                    context_metadata=ctx,
-                )
-            )
-            return True
-    else:
-        # In-thread approve (default path, incl. platform callback buttons):
-        # verify the requester is the sender bound to this thread. The
-        # cross-thread branch above never runs here, and in shared threads
-        # any member used to be able to approve any gate (audit H-3).
-        stored_sender = (stored.get("sender_id") or "").strip()
-        current_sender = (msg.sender_id or "").strip()
-        if stored_sender and current_sender and stored_sender != current_sender:
-            logger.warning(
-                "[HITL] Authz denied: in-thread approve by %s on thread bound to %s",
-                current_sender, stored_sender,
-            )
-            await manager.send(
-                OutboundMessage(
-                    target_id=_build_target_id(msg.platform, ctx),
-                    text="⚠️ You are not authorized to approve this task.",
-                    context_metadata=ctx,
-                )
-            )
-            return True
+        platform = (msg.platform or "").strip().lower()
+        if current_sender and platform:
+            actor = current_sender if ":" in current_sender else f"{platform}:{current_sender}"
+            if actor.split(":", 1)[0] == platform:
+                is_admin = await asyncio.to_thread(is_gateway_admin, actor, platform)
+                if is_admin:
+                    owner = await asyncio.to_thread(thread_owner, target_thread)
+                    owner = owner if ":" in owner or not owner else f"{platform}:{owner}"
+                    authorized = bool(owner and owner == actor)
+    except Exception:
+        logger.warning("[HITL] authorization unavailable; refusing decision", exc_info=True)
+    if not authorized:
+        logger.warning("[HITL] unauthorized decision refused for thread=%s", target_thread)
+        await manager.send(OutboundMessage(
+            target_id=_build_target_id(msg.platform, ctx),
+            text="⚠️ Not authorized: a gateway admin who owns this thread must decide this task. Thread ownership must be verifiable.",
+            context_metadata=ctx,
+        ))
+        return True
 
     try:
         import contextlib
@@ -901,7 +857,7 @@ async def _handle_hitl_resume(
                 await record_gate_decision(
                     target_thread,
                     decision="approved" if approved else "denied",
-                    actor=f"{msg.platform}:{msg.sender_id or 'unknown'}",
+                    actor=actor,
                     tool=str(_pending.get("tool") or ""),
                     payload=_pending,
                     interrupt_id=str(_pending.get("interrupt_id") or ""),
