@@ -210,6 +210,10 @@ or blank volume cannot take over that database. Pair the **authoritative**
 volume on the first HA boot, after backing up the database and complete state.
 The monitor never reconnects: session loss exits the entire process (75),
 including workers that are still running while the event loop is stalled.
+An independent watchdog also exits 75 if ownership cannot be verified for
+eight seconds. This covers a proxy that keeps the local TCP connection alive
+while its upstream query hangs; database statement timeouts and TCP keepalives
+alone cannot bound that case. A late response never revives an expired owner.
 The Kubernetes controller may restart it after database connectivity returns.
 
 The lock supplements storage fencing. PostgreSQL releasing a lost session

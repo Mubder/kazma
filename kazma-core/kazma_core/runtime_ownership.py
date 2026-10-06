@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -18,6 +19,7 @@ from kazma_core.runtime_writer import RuntimeWriterBusy, RuntimeWriterLease
 logger = logging.getLogger(__name__)
 _LOCK_NAMESPACE = 1262570829
 _LOCK_SLOT = 1
+_OWNERSHIP_HEALTH_TIMEOUT_SECONDS = 8.0
 
 
 def _stop_on_ownership_loss() -> None:
@@ -54,7 +56,10 @@ class _PostgresRuntimeLease:
         self._conn: Any = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._watchdog: threading.Thread | None = None
         self._lost = threading.Event()
+        self._health_lock = threading.Lock()
+        self._health_deadline = 0.0
 
     def acquire(self) -> None:
         """Acquire before constructing any runtime services or opening their stores."""
@@ -98,13 +103,45 @@ class _PostgresRuntimeLease:
                 conn.close()
         self._conn = conn
         self._stop.clear()
+        self._lost.clear()
+        with self._health_lock:
+            self._health_deadline = time.monotonic() + _OWNERSHIP_HEALTH_TIMEOUT_SECONDS
         self._thread = threading.Thread(target=self._monitor, name="kazma-runtime-owner", daemon=True)
+        self._watchdog = threading.Thread(target=self._watch_health, name="kazma-runtime-owner-deadline", daemon=True)
         try:
+            # Start the independent deadline first. A local proxy can ACK TCP
+            # while libpq's query blocks forever on its upstream connection.
+            self._watchdog.start()
             self._thread.start()
         except RuntimeError:
+            self._stop.set()
+            if self._watchdog.is_alive():
+                self._watchdog.join(timeout=10)
+            self._watchdog = None
+            self._thread = None
             conn.close()
             self._conn = None
             raise
+
+    def _notify_loss(self, *, expired_only: bool = False) -> None:
+        """Only one monitor may fail-stop; shutdown does not authorize reacquisition."""
+        with self._health_lock:
+            if self._stop.is_set() or self._lost.is_set():
+                return
+            if expired_only and time.monotonic() < self._health_deadline:
+                return
+            self._lost.set()
+        self._on_loss()
+
+    def _watch_health(self) -> None:
+        """Bound a stalled ownership query without touching its native connection."""
+        while not self._stop.wait(min(1.0, _OWNERSHIP_HEALTH_TIMEOUT_SECONDS / 4)):
+            with self._health_lock:
+                expired = time.monotonic() >= self._health_deadline
+            if expired:
+                self._notify_loss(expired_only=True)
+                if self._lost.is_set():
+                    return
 
     def _monitor(self) -> None:
         """Never reconnect: a new connection cannot prove uninterrupted ownership."""
@@ -114,13 +151,29 @@ class _PostgresRuntimeLease:
             try:
                 self._conn.execute("SELECT 1").fetchone()
             except psycopg.Error:
-                self._lost.set()
-                self._on_loss()
+                self._notify_loss()
+                return
+            with self._health_lock:
+                # Once proof expired, a late answer must never revive ownership.
+                if self._lost.is_set() or self._stop.is_set():
+                    return
+                if time.monotonic() >= self._health_deadline:
+                    expired = True
+                else:
+                    self._health_deadline = time.monotonic() + _OWNERSHIP_HEALTH_TIMEOUT_SECONDS
+                    expired = False
+            if expired:
+                self._notify_loss(expired_only=True)
                 return
 
     def release(self) -> None:
         """Called only after all runtime services and stores have stopped."""
         self._stop.set()
+        if self._watchdog is not None:
+            self._watchdog.join(timeout=10)
+            if self._watchdog.is_alive():
+                raise RuntimeWriterBusy("Ownership deadline did not stop; retain the volume fence until process exit")
+            self._watchdog = None
         if self._thread is not None:
             self._thread.join(timeout=10)
             if self._thread.is_alive():

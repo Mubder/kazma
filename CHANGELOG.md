@@ -2,6 +2,12 @@
 
 ## Tool receipts and interrupted approvals (2026-10-06)
 
+An isolated PostgreSQL proxy-partition drill exposed an ownership query that
+could hang while the local proxy kept TCP alive. An independent watchdog now
+exits the runtime with code 75 after eight seconds without verified ownership.
+Late replies cannot revive ownership; shutdown retains the volume fence if
+the native query has not stopped. Storage fencing remains required for takeover.
+
 Cloud restart testing exposed an ephemeral default workspace: a fresh HA
 container selected its nonempty application directory instead of the paired
 state volume. HA workspace initialization now keeps the persistent default
