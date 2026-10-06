@@ -245,7 +245,7 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   registry read and stalled SSE (2026-09-08 `_No response received._`).
 - **A changed shipped default declares whether installs follow**
   (`kazma_core/config_defaults.py`, 2026-09-29). The first boot copies every
-  `kazma.yaml` value into the database (`reconcile_from_yaml`, through
+  merged shipped/local YAML value into the database (`reconcile_from_yaml`, through
   `shipped_settings`) and a stored value wins, so a default changed later
   never reached an install that had booted before it -- the live install
   still held four lifecycle events after the fix, and ten older shipped
@@ -260,6 +260,15 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   `tests/fixtures/shipped_config_defaults.json`; `python
   scripts/shipped_defaults.py --write` refreshes it and refuses an
   undeclared changed value).
+- **First boot seeds merged YAML, retirement reads shipped defaults**
+  (`reconcile_from_yaml`, 2026-10-06): local provider/model choices must
+  survive the active workspace's fallback reload. Seed missing keys through
+  `load_merged_yaml` and `shipped_settings`, including local-only files;
+  existing rows retain precedence. Check declared retirements against raw
+  shipped defaults BEFORE seeding, so a fresh local choice equal to a retired
+  value is not mistaken for an old stored default. No valid shipped mapping
+  means no retirement. `tests/test_config_reconcile_local.py` covers both
+  SQLite and real PostgreSQL, plus the workspace reload that exposed it.
 
 ### 9. SwarmEngine Module Structure (P2-1 refactor — 3 extractions)
 

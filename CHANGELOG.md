@@ -2,6 +2,11 @@
 
 ## Tool receipts and interrupted approvals (2026-10-06)
 
+Fresh settings reconciliation now persists shipped YAML merged with local
+overrides. Local provider/model choices survive workspace alignment, while
+saved settings keep precedence. Declared default migrations run before new
+keys are seeded, preserving deliberate local choices of retired values.
+
 An isolated PostgreSQL proxy-partition drill exposed an ownership query that
 could hang while the local proxy kept TCP alive. An independent watchdog now
 exits the runtime with code 75 after eight seconds without verified ownership.
