@@ -253,9 +253,9 @@ def register_system_tools(registry: Any) -> None:
 
         if not host_shell_allowed():
             return (
-                "Error: host shell_exec is disabled while KAZMA_CODE_EXEC_DOCKER=force "
-                "(attention jail). Use python_exec (Docker, no network) or set "
-                "KAZMA_HOST_SHELL=1 as an explicit escape hatch."
+                "Error: host shell_exec is disabled by the execution policy. "
+                "Use python_exec or the native file/git tools. "
+                "An administrator must change the policy to enable host shell."
             )
         # Log all shell_exec invocations — this is a dangerous tool
         logger.warning(

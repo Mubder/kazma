@@ -94,8 +94,8 @@ async def test_a_grouped_approval_is_disclosed_to_the_model(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_a_single_tool_approval_adds_no_scope_note(monkeypatch):
-    """One tool, one card — saying "grouped" there would be its own lie."""
+async def test_a_single_tool_approval_is_disclosed(monkeypatch):
+    """One tool still needs an authoritative record for the final answer."""
     monkeypatch.setattr(
         "langgraph.types.interrupt", _approve_all, raising=False
     )
@@ -109,12 +109,15 @@ async def test_a_single_tool_approval_adds_no_scope_note(monkeypatch):
         tracer=_Tracer(),
         hitl_config={"enabled": True, "require_approval_for": []},
     )
-    assert "APPROVAL SCOPE" not in " ".join(_system_notes(result))
+    notes = " ".join(_system_notes(result))
+    assert "One approval card covered 1 danger tools" in notes
+    assert "SINGLE human approval received" in notes
+    assert "file_write: authorized; tool reported success" in notes
 
 
 @pytest.mark.anyio
-async def test_a_denied_group_gets_no_scope_note(monkeypatch):
-    """Nothing ran, so there is no executed scope to describe."""
+async def test_a_denied_group_states_that_nothing_ran(monkeypatch):
+    """The decision and execution outcome stay distinct."""
     monkeypatch.setattr(
         "langgraph.types.interrupt",
         lambda _p: {"approved": False},
@@ -131,4 +134,7 @@ async def test_a_denied_group_gets_no_scope_note(monkeypatch):
         tracer=_Tracer(),
         hitl_config={"enabled": True, "require_approval_for": []},
     )
-    assert "APPROVAL SCOPE" not in " ".join(_system_notes(result))
+    notes = " ".join(_system_notes(result))
+    assert "Human approval denied" in notes
+    assert "Authorized 0 of 2" in notes
+    assert "denied; not executed" in notes

@@ -230,13 +230,21 @@ def local_exec_forbidden() -> bool:
     Lab opt-in: ``KAZMA_CODE_EXEC_ALLOW_LOCAL=1`` re-enables local even in
     production (not recommended).
     """
+    from kazma_core.safety.deployment_policy import container_required, policy_read_failures
+
+    try:
+        if container_required():
+            return True
+    except policy_read_failures():
+        logger.warning("[code_exec] execution profile unavailable; refusing host fallback", exc_info=True)
+        return True
+    raw = (os.environ.get("KAZMA_CODE_EXEC_DOCKER") or "").strip().lower()
+    if raw in ("force", "required", "1", "true", "on", "yes", "docker"):
+        return True
     if (os.environ.get("KAZMA_CODE_EXEC_ALLOW_LOCAL") or "").strip().lower() in (
         "1", "true", "on", "yes",
     ):
         return False
-    raw = (os.environ.get("KAZMA_CODE_EXEC_DOCKER") or "").strip().lower()
-    if raw in ("force", "required", "1", "true", "on", "yes", "docker"):
-        return True
     return _production_or_multi_user()
 
 
@@ -249,8 +257,8 @@ def jail_note_for_tool(tool: str) -> str:
 
             if not host_shell_allowed():
                 return (
-                    "BLOCKED: host shell is off under Docker force. "
-                    "Use python_exec or set KAZMA_HOST_SHELL=1."
+                    "BLOCKED: host shell is disabled by the execution policy. "
+                    "Use python_exec or the native file/git tools."
                 )
         except Exception:
             pass
@@ -258,7 +266,13 @@ def jail_note_for_tool(tool: str) -> str:
     if name not in ("python_exec", "code_exec"):
         return ""
     try:
+        from kazma_core.sandbox.e2b import e2b_enabled
+
+        if e2b_enabled():
+            return "This attempts E2B after Approve; fallback depends on the execution policy."
         if use_docker_jail():
+            if not local_exec_forbidden():
+                return "This attempts Docker after Approve (no network); HOST fallback is permitted if Docker fails."
             return "This runs in Docker after Approve (no network)."
     except Exception:
         logger.debug("[code_exec] jail note probe failed", exc_info=True)
@@ -672,10 +686,17 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
             + store_refusal(mentioned, door="python_exec")
         )
 
+    from kazma_core.safety.deployment_policy import container_required, policy_read_failures
+
+    try:
+        strict_container = await asyncio.to_thread(container_required)
+    except policy_read_failures():
+        logger.warning("[code_exec] execution profile unavailable; refusing execution", exc_info=True)
+        return "Error: Execution policy is unavailable; execution refused."
     try:
         from kazma_core.sandbox.e2b import e2b_enabled, run_python as _e2b_run
 
-        if e2b_enabled():
+        if not strict_container and e2b_enabled():
             try:
                 return await _e2b_run(code, timeout)
             except Exception as exc:

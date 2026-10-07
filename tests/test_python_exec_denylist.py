@@ -169,3 +169,25 @@ def test_e2b_runs_the_code_raw_so_nothing_is_refused_for_the_sandbox(ops_db, mon
     monkeypatch.delenv("KAZMA_E2B", raising=False)
     d = authorize_effect("python_exec", {"code": "import os\nprint(os.getcwd())"})
     assert d.decision == "allow", d.reason
+
+
+@pytest.mark.parametrize("strict,decision", [(True, "deny"), (False, "allow")])
+def test_approval_preflight_follows_the_effective_backend(ops_db, monkeypatch, strict, decision):
+    """A stored Docker profile also applies its runner's deny-before-card floor.
+
+    Negative control: with the profile off, E2B still runs ordinary os imports
+    raw and they may reach its approval card.
+    """
+    from kazma_core.config_store import get_config_store
+    from kazma_core.safety.deployment_policy import CONTAINER_REQUIRED_KEY
+
+    get_config_store().set(CONTAINER_REQUIRED_KEY, strict)
+    monkeypatch.setenv("KAZMA_E2B_API_KEY", "e2b-test-key")
+    monkeypatch.delenv("KAZMA_E2B", raising=False)
+    result = authorize_effect("python_exec", {"code": "import os\nprint(os.getcwd())"})
+    assert result.decision == decision, result.reason
+    from kazma_core.tools.code_exec import jail_note_for_tool
+
+    assert ("Docker" if strict else "E2B") in jail_note_for_tool("python_exec")
+    if strict:
+        assert "sandbox refuses" in result.reason

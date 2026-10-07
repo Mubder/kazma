@@ -237,7 +237,8 @@ class TestDockerJailConfig:
         assert "Docker" in note
         assert "no network" in note
         host = jail_note_for_tool("shell_exec")
-        assert "HOST" in host
+        assert "BLOCKED" in host
+        assert "execution policy" in host
 
     def test_host_shell_blocked_under_docker_force(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from kazma_core.safety.post_hitl import host_shell_allowed

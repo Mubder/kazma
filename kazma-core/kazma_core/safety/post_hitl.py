@@ -37,6 +37,14 @@ def host_shell_allowed() -> bool:
     ``KAZMA_CODE_EXEC_DOCKER=force|required`` means python_exec is containerized.
     Host ``shell_exec`` is then an escape hatch: opt in with ``KAZMA_HOST_SHELL=1``.
     """
+    from kazma_core.safety.deployment_policy import container_required, policy_read_failures
+
+    try:
+        if container_required():
+            return False
+    except policy_read_failures():
+        logger.warning("[post_hitl] execution profile unavailable; refusing host shell", exc_info=True)
+        return False
     raw = (os.environ.get("KAZMA_HOST_SHELL") or "").strip().lower()
     if raw in ("1", "true", "on", "yes"):
         return True

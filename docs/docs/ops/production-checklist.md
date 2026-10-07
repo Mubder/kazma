@@ -54,6 +54,42 @@ Use this before exposing Kazma beyond loopback. Aligns with
 - [ ] New tools have a **`TOOL_TIERS`** entry (`read` / `write` / `danger`); unclassified = gated
 - [ ] Scraping: pin-IP on the direct path; do not pin through `proxy=`
 
+### Persisted workspace and execution policies
+
+An administrator can use the authenticated `PUT /api/settings` atomic batch
+instead of editing an installation's environment file:
+
+```json
+[
+  {"key": "security.workspace_roots", "value": ["/srv/kazma-projects"]},
+  {"key": "security.execution.container_required", "value": true}
+]
+```
+
+Choose existing absolute directories on the server. Multiple explicit roots
+can retain an existing workspace and confine new repositories separately.
+Resolved symlinks must stay inside a configured root. If
+`KAZMA_WORKSPACE_ROOT` is present, a path must also stay inside that environment
+root; a Settings save cannot expand it. Production without either policy
+refuses workspace creation and switching. Missing or invalid policy storage
+fails closed.
+
+The strict container profile requires Docker for `python_exec`, skips E2B,
+disables `shell_exec`, and forbids local fallback even when legacy environment
+flags allow it. Native file and Git tools retain their approval gates. Check
+the actual Docker daemon and run an approved disposable snippet before
+qualifying execution; daemon readiness alone does not verify the image or
+mount permissions. The strict profile makes `code_execution` a required
+readiness capability automatically; an unavailable Docker daemon refuses traffic.
+These install policies are protected from agent config tools and excluded
+from portable settings backups with the other `security.*` values.
+
+Runtime approval notes distinguish an authorization from a successful tool
+result. Workspace-bound MCP servers use separate scoped instances when a task
+targets a different root; the global binding does not describe that instance.
+This supplies verified facts to the model, without guaranteeing every freeform
+answer it generates.
+
 ## Multi-user / multi-replica (if applicable)
 
 - [ ] `KAZMA_DATABASE_URL` set; migrate script run

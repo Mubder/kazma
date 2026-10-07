@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Production workspace and execution policies (2026-10-07)
+
+Administrators can save explicit allowed workspace directories and a strict
+Docker execution profile through the existing Settings API. An environment
+workspace root remains an additional confinement boundary. The strict profile
+overrides legacy local-execution and host-shell grants; Docker failure refuses
+execution. Policy lookup failures also fail closed. Settings reject invalid
+paths and non-boolean profile values before writing an atomic batch.
+
+Scoped instructions such as “do not write outside this repo” no longer turn a
+coding request into a global audit-only request. Descriptions of Docker mounts
+also retain coding tools; separate global read-only instructions still win.
+The agent receives current execution policy, correct scoped MCP routing facts,
+and runtime approval decisions for single, grouped, selective and denied tool
+batches. Authorization is reported separately from tool success.
+
 ## Workspace binding across approval resumes (2026-10-07)
 
 New graph turns save their execution workspace in the checkpoint. Approval,

@@ -96,7 +96,7 @@ BASELINE = {
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
 STRUCTURAL_BASELINE = {
     # Turn workspace entry consumes the binding resolver through its module.
-    "module_local_public_symbols": 555,
+    "module_local_public_symbols": 554,
     "patched_value_imports": 72,
     "sleep_then_assert": 52,
     "bare_module_attr_assignments": 0,
