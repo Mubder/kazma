@@ -566,13 +566,19 @@ async def _run_local_subprocess(code_file: Path, tmp_dir: str, timeout: int) -> 
 
 
 async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
-    """Run snippet inside a disposable Docker container (network none)."""
+    """Pipe the sandbox runner into a disposable Docker container (network none).
+
+    ``tmp_dir`` remains in the call contract shared with the local runner, but
+    Docker never mounts it. Windows service-created private temporary folders
+    can be unreadable to Docker Desktop even when workspace mounts work.
+    """
     docker = _docker_cli()
     if not docker:
         raise RuntimeError("docker CLI not found")
 
     image = (os.environ.get("KAZMA_CODE_EXEC_IMAGE") or DEFAULT_DOCKER_IMAGE).strip()
-    # Mount work dir read-only; use tmpfs for /tmp. No network. Memory capped.
+    script = await asyncio.to_thread(code_file.read_bytes)
+    # Mount only the workspace read-only; send source through stdin. No network.
     # --rm cleans up; --user avoids root when possible (numeric nobody).
     # `--mount`, not `-v`. The colon-delimited `-v src:dst:mode` form cannot
     # express a Windows path: `G:\work` contains a colon, so docker reads
@@ -582,7 +588,7 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
     # looked like a docker problem rather than a Kazma one. Found 2026-09-12 by
     # running it rather than reading it. `--mount` takes comma-separated
     # key=value pairs and handles drive letters.
-    mount_args = ["--mount", f"type=bind,src={tmp_dir},dst=/work,ro"]
+    mount_args: list[str] = []
     ws_mount_target = ""
     try:
         ws = await asyncio.to_thread(_fw._get_workspace)
@@ -600,7 +606,7 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
         pass
 
     cmd = [
-        docker, "run", "--rm",
+        docker, "run", "--rm", "-i",
         "--network", "none",
         "--memory", f"{MEMORY_LIMIT_MB}m",
         "--memory-swap", f"{MEMORY_LIMIT_MB}m",
@@ -621,18 +627,19 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
         "-w", "/work",
         "--user", "65534:65534",  # nobody
         image,
-        "python", "-I", "/work/snippet.py",
+        "python", "-I", "-",
     ]
 
     logger.info("[code_exec] Docker jail: image=%s timeout=%s", image, timeout)
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout + 15)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(input=script), timeout=timeout + 15)
         except TimeoutError:
             proc.kill()
             await proc.wait()
@@ -645,9 +652,11 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
         import subprocess
 
         def _run_docker_sync() -> str:
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            p = subprocess.Popen(
+                cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
             try:
-                out, err = p.communicate(timeout=timeout + 15)
+                out, err = p.communicate(input=script, timeout=timeout + 15)
                 body_str = _format_output(p.returncode or 0, out, err)
                 return f"[sandbox: docker network=none image={image}]\n{body_str}"
             except subprocess.TimeoutExpired:
@@ -716,13 +725,6 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
         # The runner with the snippet embedded (its blocklist applies inside
         # Docker too, where it is belt-and-braces).
         code_file.write_text(_build_sandbox_script(code), encoding="utf-8")
-        # Container runs as nobody — ensure world-readable
-        try:
-            os.chmod(tmp_dir, 0o755)
-            os.chmod(code_file, 0o644)
-        except OSError:
-            pass
-
         no_local = local_exec_forbidden()
 
         if use_docker_jail():
