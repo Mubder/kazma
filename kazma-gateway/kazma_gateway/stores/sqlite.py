@@ -84,6 +84,7 @@ class SQLiteSessionStore(SessionStore):
             # raises cannot leave the write lock held
             # (tests/test_sqlite_kept_connections.py).
             db = await aiosqlite.connect(self._db_path, isolation_level=None)
+            initialized = False
             try:
                 await apply_sqlite_pragmas_async(db)
                 await db.execute(_CREATE_TABLE)
@@ -91,11 +92,12 @@ class SQLiteSessionStore(SessionStore):
                 from kazma_core.db.sqlite_columns import add_missing_columns_async
 
                 await add_missing_columns_async(db, "sessions", (("tenant_id", "TEXT"),))
-            except BaseException:
+                initialized = True
+            finally:
                 # A failed/cancelled initialization must not leak a connection
                 # or make the next caller skip schema setup.
-                await db.close()
-                raise
+                if not initialized:
+                    await db.close()
             # Publish only a fully initialized connection. The unlocked fast
             # path must never hand another request a database without tables.
             self._db = db
