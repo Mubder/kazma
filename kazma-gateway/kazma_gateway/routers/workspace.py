@@ -170,7 +170,7 @@ def create_workspace_select_router() -> APIRouter:
 
         Raises:
             422: If the path is not absolute or does not exist.
-            403: If the path is outside KAZMA_WORKSPACE_ROOT (when set).
+            403: Outside KAZMA_WORKSPACE_ROOT, or production without a root.
         """
         raw = body.path.strip()
         if not raw:
@@ -186,18 +186,12 @@ def create_workspace_select_router() -> APIRouter:
         if not resolved.is_dir():
             raise HTTPException(status_code=422, detail="Path is not a directory.")
 
-        # Optional confinement: if KAZMA_WORKSPACE_ROOT is set, the selected
-        # path must live beneath it. Opt-in hardening for multi-project setups.
-        allow_root = os.environ.get("KAZMA_WORKSPACE_ROOT", "").strip()
-        if allow_root:
-            allow_resolved = Path(allow_root).resolve()
-            try:
-                resolved.relative_to(allow_resolved)
-            except ValueError:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Path is outside the allowed workspace root.",
-                ) from None
+        from kazma_core.workspace import root_policy
+
+        try:
+            root_policy.validate_root(resolved)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from None
 
         from kazma_core.config_store import get_config_store
         from kazma_core.stores import get_workspace_store
@@ -244,7 +238,7 @@ def create_workspace_select_router() -> APIRouter:
 
         Used by the "Select Folder" input for click-to-navigate autocomplete
         (browsers can't open a native OS folder dialog from a web page).
-        Respects the optional ``KAZMA_WORKSPACE_ROOT`` confinement.
+        Respects ``KAZMA_WORKSPACE_ROOT`` (required in production).
 
         Filtering: the last path segment the user is typing becomes a
         prefix filter — e.g. typing ``G:/Git`` resolves the parent ``G:/``
@@ -272,13 +266,12 @@ def create_workspace_select_router() -> APIRouter:
             base = resolved.parent
             prefix = typed_segment
 
-        # Confinement check.
-        allow_root = os.environ.get("KAZMA_WORKSPACE_ROOT", "").strip()
-        if allow_root:
-            try:
-                base.relative_to(Path(allow_root).resolve())
-            except ValueError:
-                return JSONResponse({"suggestions": []})
+        from kazma_core.workspace import root_policy
+
+        try:
+            root_policy.validate_root(base)
+        except PermissionError:
+            return JSONResponse({"suggestions": []})
 
         suggestions: list[dict[str, str]] = []
         try:
@@ -286,6 +279,10 @@ def create_workspace_select_router() -> APIRouter:
                 if len(suggestions) >= 15:
                     break
                 if not child.is_dir() or child.name.startswith("."):
+                    continue
+                try:
+                    root_policy.validate_root(child)
+                except PermissionError:
                     continue
                 # Prefix-filter on the typed segment (case-insensitive).
                 if prefix and not child.name.lower().startswith(prefix):

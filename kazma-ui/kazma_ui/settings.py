@@ -702,6 +702,12 @@ class SettingsRouterBuilder:
                 remote = str(req.get("rclone_remote") or "").strip()
                 if not remote:
                     return {"ok": False, "error": "No provider or remote specified"}
+                from kazma_core.backup import rclone_policy
+
+                try:
+                    remote = rclone_policy.validate_remote(remote)
+                except ValueError as exc:
+                    return {"ok": False, "error": str(exc)}
                 import shutil as _shutil
                 import asyncio as _aio
                 rclone = _shutil.which("rclone")
@@ -710,7 +716,7 @@ class SettingsRouterBuilder:
                 import subprocess as _sp
                 try:
                     proc = await _aio.to_thread(
-                        _sp.run, [rclone, "lsd", remote, "--max-depth", "1"],
+                        _sp.run, [rclone, "lsd", "--max-depth", "1", "--", remote],
                         capture_output=True, text=True, timeout=15,
                     )
                     if proc.returncode == 0:

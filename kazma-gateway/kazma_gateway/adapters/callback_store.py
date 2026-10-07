@@ -96,8 +96,8 @@ def encode_callback_data(data: str, max_bytes: int = 64) -> str:
                 )
                 # Opportunistic cleanup: delete expired records occasionally
                 conn.execute("DELETE FROM callbacks WHERE expires_at < ?", (now,))
-        except Exception:
-            logger.debug("[callback_store] Failed to persist callback token %s", token, exc_info=True)
+        except Exception as exc:
+            logger.debug("[callback_store] Failed to persist callback token (%s)", type(exc).__name__)
 
     return short_code
 
@@ -126,7 +126,7 @@ def decode_callback_data(data: str) -> str:
                     if len(_lru_cache) > _MAX_LRU_ENTRIES:
                         _lru_cache.popitem(last=False)
                     return val
-        except Exception:
-            logger.debug("[callback_store] Failed to retrieve callback token %s", token, exc_info=True)
+        except Exception as exc:
+            logger.debug("[callback_store] Failed to retrieve callback token (%s)", type(exc).__name__)
 
     return data

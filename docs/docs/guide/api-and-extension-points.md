@@ -79,6 +79,9 @@ The check resolves its key through `ModelRegistry.resolve_provider_credentials`
 and its model through `ModelRegistry.probe_model_for` — the same paths a real
 message uses. It resolves nothing by hand, and it does not write.
 
+Probe failures report the HTTP status and an actionable hint. Remote response
+bodies and credential-bearing request URLs are excluded from diagnostics.
+
 ### 2.3 HITL approval
 
 | Method | Path | Purpose |

@@ -70,6 +70,12 @@ repositories**:
 | Offsite (recommended) | `s3:https://<account>.r2.cloudflarestorage.com/<bucket>` (or B2) | append-only host key (`PutObject`/`GetObject`/`ListBucket` + `DeleteObject` on `locks/*` only) |
 | Offsite (legacy) | `rclone:<remote>/restic` | rclone OAuth — **do not use Google Drive / a service account**. Service accounts have no Drive quota; `rclone:` write probes can look healthy while every upload 403s. |
 
+An rclone destination must name an existing configured remote, such as
+`backup:restic`. For a restic repository use `rclone:backup:restic`.
+Inline backend specifications (`:s3:…`), option-like names and control
+characters are refused before executing rclone. Paths may contain spaces and
+Arabic text. The command places destinations after `--`.
+
 Prefer **S3-native restic** (Cloudflare R2 or Backblaze B2). The host key
 must not be able to `restic forget --prune`. Keep a full-access prune key
 **off this machine**. `remote_writable()` probes `s3:` with a real SigV4

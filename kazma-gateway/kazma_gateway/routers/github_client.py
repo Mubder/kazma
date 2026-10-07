@@ -140,16 +140,9 @@ def clone_auth_env(token: str | None) -> dict[str, str]:
     whole environment as ``tool_child_env(clone_auth_env(token))``: no server
     secrets for git or anything it starts.
     """
-    if not token:
-        return {}
-    import base64
+    from kazma_core.security import git_auth
 
-    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-    return {
-        "GIT_CONFIG_COUNT": "1",
-        "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
-        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: Basic {basic}",
-    }
+    return git_auth.clone_auth_env(token)
 
 
 def resolve_repo(cwd: str | None = None) -> tuple[str, str] | None:

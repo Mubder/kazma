@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Deployment secrets and bounded attachment reads (2026-10-07)
+
+The Postgres and Neo4j Compose templates require explicit passwords and publish
+database ports on loopback. Telegram voice and media downloads enforce byte
+limits while streaming, including responses with missing or misleading lengths.
+
+Production workspace selection, creation and switching share root confinement;
+stored workspaces outside the configured root cannot be activated. GitHub
+credentials travel through scoped Git configuration in the child environment,
+including token refresh, and are redacted from command results. Provider probes,
+OAuth errors, callback failures and first-run messages avoid echoing credentials
+or remote error bodies. Offsite rclone targets require a configured remote name
+and are passed after the option terminator.
+
 ## Tenant telemetry and remote database capabilities (2026-10-07)
 
 Chat sockets now validate the caller's identity and tenant before any history,

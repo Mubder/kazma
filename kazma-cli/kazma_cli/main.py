@@ -234,9 +234,9 @@ def _run_serve(port: int) -> None:
 
         generated = _secrets.token_urlsafe(32)
         _os_cli.environ["KAZMA_SECRET"] = generated
-        print("\n  [SECURITY] Generated KAZMA_SECRET for this process (not persisted):")
-        print(f"    {generated}")
-        print("  Pin it with:  export KAZMA_SECRET='…'  (or put it in .env)\n")
+        print("\n  [SECURITY] Generated a temporary secret for this loopback process.")
+        print("  Open the UI on this machine. For a stable login, set your own")
+        print("  strong KAZMA_SECRET in .env before starting Kazma.\n")
     elif not is_loopback:
         print(
             f"\n  [SECURITY] Binding {host} — ensure KAZMA_SECRET is strong "

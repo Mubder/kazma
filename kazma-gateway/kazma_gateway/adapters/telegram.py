@@ -882,45 +882,21 @@ class TelegramAdapter(BaseAdapter):
             resp.raise_for_status()
             data = resp.json()
             if not data.get("ok"):
-                logger.error("[telegram] getFile returned ok=false: %s", data)
+                logger.error("[telegram] getFile returned ok=false")
                 return None
             file_path = data["result"].get("file_path")
             if not file_path:
                 logger.error("[telegram] No file_path in getFile response")
                 return None
             file_url = f"https://api.telegram.org/file/bot{self._token}/{file_path}"
-            dl_resp = await self._http.get(file_url)
-            dl_resp.raise_for_status()
+            from kazma_gateway.adapters.downloads import bounded_download
 
-            # Check Content-Length header first (gw-064)
-            content_length = int(dl_resp.headers.get("content-length", 0))
-            if content_length > MAX_VOICE_BYTES:
-                logger.warning(
-                    "[telegram] Voice file too large (Content-Length): %d bytes exceeds limit %d",
-                    content_length,
-                    MAX_VOICE_BYTES,
-                )
-                return None
-
-            # Stream-based fallback: check actual downloaded bytes
-            # (protects against servers that omit Content-Length)
-            if len(dl_resp.content) > MAX_VOICE_BYTES:
-                logger.warning(
-                    "[telegram] Voice file too large (downloaded): %d bytes exceeds limit %d",
-                    len(dl_resp.content),
-                    MAX_VOICE_BYTES,
-                )
-                return None
-
-            logger.info("[telegram] Downloaded voice file: %s (%d bytes)", file_path, len(dl_resp.content))
-            return dl_resp.content
+            body = await bounded_download(self._http, file_url, MAX_VOICE_BYTES)
+            logger.info("[telegram] Downloaded voice file (%d bytes)", len(body))
+            return body
         except httpx.HTTPStatusError as exc:
-            # Log status + body only — exc string contains the URL with bot token
-            try:
-                err_body = exc.response.text[:300]
-            except Exception:
-                err_body = "<unreadable>"
-            logger.error("[telegram] HTTP %d downloading voice file: %s", exc.response.status_code, err_body)
+            # Neither URL nor remote body: either can echo the bot credential.
+            logger.error("[telegram] HTTP %d downloading voice file", exc.response.status_code)
             return None
         except Exception as exc:
             logger.error("[telegram] Failed to download voice file: %s", type(exc).__name__)
@@ -955,35 +931,17 @@ class TelegramAdapter(BaseAdapter):
             resp.raise_for_status()
             data = resp.json()
             if not data.get("ok"):
-                logger.error("[telegram] getFile ok=false for media: %s", data)
+                logger.error("[telegram] getFile ok=false for media")
                 return None
             file_path = data["result"].get("file_path")
             if not file_path:
                 return None
             file_url = f"https://api.telegram.org/file/bot{self._token}/{file_path}"
-            # Size pre-check from Content-Length (the voice path already did
-            # this): the old post-hoc check downloaded the whole file into
-            # memory first — bounded by Telegram's 20MB cap, but the header
-            # check avoids the spike entirely (audit L-12).
-            head_resp = await self._http.head(file_url)
-            declared = head_resp.headers.get("content-length", "")
-            if declared.isdigit() and int(declared) > MAX_MEDIA_BYTES:
-                logger.warning(
-                    "[telegram] media file too large (declared): %s bytes", declared
-                )
-                return None
-            dl_resp = await self._http.get(file_url)
-            dl_resp.raise_for_status()
-            if len(dl_resp.content) > MAX_MEDIA_BYTES:
-                logger.warning(
-                    "[telegram] media file too large: %d bytes", len(dl_resp.content)
-                )
-                return None
-            logger.info(
-                "[telegram] Downloaded media file: %s (%d bytes)",
-                file_path, len(dl_resp.content),
-            )
-            return dl_resp.content
+            from kazma_gateway.adapters.downloads import bounded_download
+
+            body = await bounded_download(self._http, file_url, MAX_MEDIA_BYTES)
+            logger.info("[telegram] Downloaded media file (%d bytes)", len(body))
+            return body
         except Exception as exc:
             logger.error("[telegram] media download failed: %s", type(exc).__name__)
             return None

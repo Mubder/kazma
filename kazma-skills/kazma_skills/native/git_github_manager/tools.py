@@ -174,10 +174,9 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
     # Authorization header, gets 401, and git never recovers (confirmed via
     # GIT_CURL_VERBOSE). http.extraheader attaches the header from the first
     # request, so it works cross-platform.
-    import base64
-    auth_b64 = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-    auth_header = f"Authorization: Basic {auth_b64}"
-    cmd.extend(["-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"])
+    from kazma_core.security import git_auth
+
+    cmd.extend(["-c", "credential.helper="])
 
     cmd.append(action)
 
@@ -195,7 +194,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
 
     # The server's environment without its secrets: a push or pull runs the
     # repository's hooks, which have no business with the vault key.
-    env = tool_child_env()
+    env = tool_child_env(git_auth.clone_auth_env(token))
     env["GIT_TERMINAL_PROMPT"] = "0"
     # The App token is sent via http.extraheader. A globally-configured
     # credential helper (Git Credential Manager, osxkeychain, wincred) would
@@ -226,17 +225,24 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             )
         )
 
+    def _safe_output(text: str) -> str:
+        from kazma_core.errors import redact_secrets
+
+        encoded = env.get("GIT_CONFIG_VALUE_0", "").rsplit(" ", 1)[-1]
+        for value in (token, encoded):
+            if value:
+                text = text.replace(value, "[REDACTED_TOKEN]")
+        return redact_secrets(text)
+
     async def _run() -> tuple[int, str]:
         r = await run_off_loop(
             cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=30
         )
         # Capture BOTH streams — git often puts the real auth error on stderr
         # while stdout holds the benign "Already up to date" / refspec summary.
-        stdout = r.stdout.strip()
-        stderr = r.stderr.strip()
+        stdout = _safe_output(r.stdout.strip())
+        stderr = _safe_output(r.stderr.strip())
         out = (stdout + ("\n" + stderr if stderr else "")) if stderr else (stdout or stderr)
-        if token:
-            out = out.replace(token, "[REDACTED_TOKEN]")
         # Verbose diagnostic: log exit code + token prefix + tail so the NEXT
         # failure shows exactly what git/GitHub returned (HTTP 401/403, etc.).
         token_prefix = (token[:4] + "***") if token else "none"
@@ -258,13 +264,13 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         silently NOT contacting GitHub — so we query the live remote ref.
         """
         try:
-            ls_cmd = ["git", "-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"]
+            ls_cmd = ["git", "-c", "credential.helper="]
             ls_target = remote_url if remote_url else remote
             ls_cmd.extend(["ls-remote", ls_target, ref])
             r = await run_off_loop(
                 ls_cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=20
             )
-            out = r.stdout.strip()
+            out = _safe_output(r.stdout.strip())
             logger.info(
                 "[git_push_pull] verify ls-remote %s returncode=%d out_tail=%r",
                 ref,
@@ -274,7 +280,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             # ls-remote output: "<sha>\t<ref>"
             return r.returncode == 0 and sha in out and bool(out)
         except Exception as exc:
-            logger.warning("[git_push_pull] verify ls-remote failed: %s", exc)
+            logger.warning("[git_push_pull] verify ls-remote failed: %s", _safe_output(str(exc)))
             return False
 
     try:
@@ -287,7 +293,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             Handles the rebuild + single retry shared by the exit-nonzero path
             and the verify-mismatch path.
             """
-            nonlocal token, auth_header
+            nonlocal token
             logger.info(
                 "[git_push_pull] Push auth failure — clearing token cache and re-minting for a single retry"
             )
@@ -307,12 +313,10 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             if not (fresh and fresh != token):
                 return None  # No fresh token available; caller reports prev_output.
 
-            # Rebuild the http.extraheader auth with the fresh token.
+            # Refresh the URL-scoped header in the same child environment.
             token = fresh
-            import base64 as _b64
-            fresh_b64 = _b64.b64encode(f"x-access-token:{token}".encode()).decode()
-            auth_header = f"Authorization: Basic {fresh_b64}"
-            new_cmd = ["git", "-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"]
+            env.update(git_auth.clone_auth_env(token))
+            new_cmd = ["git", "-c", "credential.helper="]
             new_cmd.append(action)
             if action == "push":
                 push_target = remote_url if remote_url else remote
@@ -321,7 +325,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
                 elif target_branch:
                     new_cmd.extend([push_target, target_branch])
             # Rebuild cmd in place so _run() uses the fresh-token command, and
-            # _remote_has_commit() uses the fresh auth_header too.
+            # _remote_has_commit() uses the refreshed environment too.
             cmd[:] = new_cmd
 
             return (await _run())[1]
@@ -411,7 +415,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         if action == "push" and ("fetch first" in output or "non-fast-forward" in output or "remote contains work" in output):
             logger.info("[git_push_pull] Push rejected (remote ahead) — auto-rebasing and retrying push")
 
-            pull_cmd = ["git", "-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"]
+            pull_cmd = ["git", "-c", "credential.helper="]
             pull_cmd.extend(["pull", "--rebase", remote, target_branch or "main"])
 
             await run_off_loop(pull_cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
