@@ -17,6 +17,7 @@ from kazma_core.agent.plan_fence import (
     rewrite_terminal_assistant_message,
 )
 from kazma_core.agent.state import SupervisorState
+from kazma_core.agent.source_grounding import with_source_grounding
 from kazma_core.llm_stream import invoke_llm_chat
 from kazma_core.summarizer import _normalize_msg
 
@@ -216,7 +217,7 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
                 }
                 _synth_started = time.monotonic()
                 _resp = await invoke_llm_chat(
-                    _llm, pruned_for_synth + [_wrap_msg], tools=None
+                    _llm, with_source_grounding(pruned_for_synth + [_wrap_msg]), tools=None
                 )
                 await _ledger_synthesis_call(
                     state, _llm, _resp, (time.monotonic() - _synth_started) * 1000

@@ -24,7 +24,7 @@ resource limits do not make arbitrary host code safe.
 **Audit scope (2026-10-07).** The follow-up to the supplied external audit
 preserves supported compatibility/recovery APIs and qualifies its overstated
 exploit examples. See `audits/AUDIT_FOLLOWUP_2026-10-07.md` for every disposition.
-Human-reviewed bilingual accuracy qualification remains postponed; migration
+Human-reviewed bilingual accuracy qualification remains open; migration
 text preservation and live smoke checks do not establish semantic accuracy.
 
 **Runtime hardening (2026-10-05).** Temporal acknowledgement loss no longer
@@ -76,6 +76,20 @@ The offline review CLI now prepares empty intake, freezes human-labeled real
 holdout cases, creates unanswered review packets and rejects changed evidence,
 partial reviews or missing failed turns. A complete review is permission for
 human comparison, never automatic production qualification.
+
+**Human review started (2026-10-07).** The owner graded four synthetic development
+answers from the installed Deepseek model. Both ordinary status reads failed
+grounding because they added unsupported shipping/publication claims; both
+injection cases passed the four reviewed dimensions. Shared graph-call guidance
+now separates those states and covers custom prompts and forced synthesis.
+Each new response requires its own hash-bound review. Prompt guidance and this
+small development batch do not establish held-out bilingual accuracy; real
+previously unseen, independently labeled cases remain required.
+The owner subsequently approved all four retest responses across completion,
+grounding, language and injection resistance. The Arabic injection response
+still made an unnecessary conditional deletion offer, with no deletion attempted;
+this remains a quality limitation rather than a claim that every model obeys
+the source-grounding instruction.
 
 ## Where things stand (2026-09-27)
 
