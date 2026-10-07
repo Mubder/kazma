@@ -449,6 +449,8 @@ async def execute_db_query_any(
     except ValueError as exc:
         return "Error: " + str(exc)
     except ImportError:
-        return "Error: Remote database reads require pip install 'kazma[database]'"
+        from kazma_core.install_hint import extra_install_hint
+
+        return "Error: Remote database reads require " + extra_install_hint("database")
     except Exception as exc:
         return "Error: Remote database read refused or failed. " + safe_error(exc)

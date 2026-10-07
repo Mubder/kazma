@@ -9,7 +9,7 @@ import pytest
 from kazma_core.config_store import get_config_store
 from kazma_core.tenant_context import tenant_scope
 from kazma_skills.native.database_client.connections import CONNECTIONS_KEY
-from kazma_skills.native.database_client import tools
+from kazma_skills.native.database_client import remote_reads, tools
 
 pytestmark = pytest.mark.postgres
 
@@ -19,9 +19,9 @@ def postgres_reader():
     dsn = os.environ.get("KAZMA_AUDIT_POSTGRES_DSN")
     if not dsn:
         pytest.skip("needs a disposable KAZMA_AUDIT_POSTGRES_DSN (never an install database)")
-    import psycopg
-    from psycopg import sql
-    from psycopg.conninfo import conninfo_to_dict
+    psycopg = pytest.importorskip("psycopg")
+    sql = pytest.importorskip("psycopg.sql")
+    conninfo_to_dict = pytest.importorskip("psycopg.conninfo").conninfo_to_dict
     from urllib.parse import quote
 
     suffix = uuid.uuid4().hex[:12]
@@ -57,8 +57,16 @@ def postgres_reader():
 
 
 @pytest.mark.asyncio
-async def test_real_constrained_role_reads_and_rejects_privileged_functions(postgres_reader):
+async def test_real_constrained_role_reads_and_rejects_privileged_functions(postgres_reader, monkeypatch):
     setup, role, entry = postgres_reader
+    calls = []
+    original_read = remote_reads.read_postgres
+
+    def read(*args):
+        calls.append(args)
+        return original_read(*args)
+
+    monkeypatch.setattr(remote_reads, "read_postgres", read)
     with tenant_scope("audit"):
         answer = await tools.execute_db_query("connection:proof",
                                              "SELECT id FROM audit_data.items WHERE id = %s", [1])
@@ -73,11 +81,12 @@ async def test_real_constrained_role_reads_and_rejects_privileged_functions(post
                       "SELECT audit_data.mutate()", "SELECT audit_data.mutate(1)"):
             assert (await tools.execute_db_query("connection:proof", query)).startswith("Error:")
     assert setup.execute("SELECT count(*) FROM audit_data.effects").fetchone() == (0,)
+    assert len(calls) == 3  # each valid query reached the real constrained connection
 
 
 @pytest.mark.asyncio
 async def test_real_views_rls_and_custom_types_are_refused(postgres_reader):
-    from psycopg import sql
+    sql = pytest.importorskip("psycopg.sql")
 
     setup, role, entry = postgres_reader
     setup.execute("CREATE VIEW audit_data.summary AS SELECT id FROM audit_data.items")
@@ -111,7 +120,7 @@ async def test_real_reader_times_out_and_closes_connection(postgres_reader):
 
 @pytest.mark.asyncio
 async def test_real_role_drift_to_write_or_custom_function_fails_closed(postgres_reader):
-    from psycopg import sql
+    sql = pytest.importorskip("psycopg.sql")
 
     setup, role, entry = postgres_reader
     for grant, revoke in (
