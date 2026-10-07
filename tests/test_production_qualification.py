@@ -1,6 +1,7 @@
 """Live qualification regressions: policies, scoped wording and runtime facts."""
 from __future__ import annotations
 
+import sqlite3
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -107,17 +108,31 @@ async def test_strict_profile_never_falls_back_or_uses_cloud(monkeypatch):
     host.assert_not_called()
 
 
-def test_policy_lookup_failure_does_not_grant_execution_or_workspace(monkeypatch, tmp_path):
+@pytest.mark.parametrize("failure", [
+    RuntimeError("policy offline"), OSError("storage offline"), ValueError("invalid policy"),
+    sqlite3.OperationalError("database locked"),
+])
+def test_policy_lookup_failure_does_not_grant_execution_or_workspace(monkeypatch, tmp_path, failure):
     from kazma_core.tools.code_exec import local_exec_forbidden
     from kazma_core.safety.post_hitl import host_shell_allowed
 
     monkeypatch.setenv("KAZMA_CODE_EXEC_ALLOW_LOCAL", "1")
     monkeypatch.setenv("KAZMA_HOST_SHELL", "1")
-    monkeypatch.setattr(get_config_store(), "get", MagicMock(side_effect=RuntimeError("policy offline")))
+    monkeypatch.setattr(get_config_store(), "get", MagicMock(side_effect=failure))
     assert local_exec_forbidden()
     assert not host_shell_allowed()
     with pytest.raises(PermissionError, match="unavailable"):
         validate_root(tmp_path)
+
+
+def test_unexpected_policy_bug_propagates_before_execution(monkeypatch, tmp_path):
+    from kazma_core.tools.code_exec import local_exec_forbidden
+    from kazma_core.safety.post_hitl import host_shell_allowed
+
+    monkeypatch.setattr(get_config_store(), "get", MagicMock(side_effect=TypeError("implementation bug")))
+    for check in (local_exec_forbidden, host_shell_allowed, lambda: validate_root(tmp_path)):
+        with pytest.raises(TypeError, match="implementation bug"):
+            check()
 
 
 @pytest.mark.parametrize("text", [

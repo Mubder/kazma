@@ -5,11 +5,34 @@ host execution or workspace access. Callers doing database work use a thread.
 """
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Any
 
 WORKSPACE_ROOTS_KEY = "security.workspace_roots"
 CONTAINER_REQUIRED_KEY = "security.execution.container_required"
+
+
+def policy_read_failures() -> tuple[type[Exception], ...]:
+    """Storage, configuration and dependency failures that refuse access.
+
+    Unexpected programming errors propagate to the caller's error boundary;
+    they must never become a permissive policy value.
+    """
+    failures: tuple[type[Exception], ...] = (sqlite3.Error, OSError, RuntimeError, ValueError, ImportError)
+    try:
+        from psycopg import Error as PostgresError
+    except ImportError:
+        pass
+    else:
+        failures += (PostgresError,)
+    try:
+        from psycopg_pool import PoolTimeout
+    except ImportError:
+        pass
+    else:
+        failures += (PoolTimeout,)
+    return failures
 
 
 def normalize_workspace_roots(value: Any) -> list[str]:

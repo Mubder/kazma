@@ -323,12 +323,14 @@ def _build_env_context_sync(workspace_id: str | None = None) -> str:
             lines.append(f"- **MCP global root (not this task's scoped instance):** `{_sanitize_env_field(str(mcp_root), max_len=240)}`")
     except Exception:
         pass
+    from kazma_core.safety.deployment_policy import policy_read_failures
+
     try:
         from kazma_core.tools.code_exec import jail_note_for_tool
 
         lines.append("- **Python execution policy:** " + jail_note_for_tool("python_exec"))
         lines.append("- **Host shell policy:** " + jail_note_for_tool("shell_exec"))
-    except Exception:
+    except policy_read_failures():
         lines.append("- **Execution policy:** unavailable; do not claim execution is permitted.")
     if ws_id:
         lines.append(f"- **Workspace id:** `{ws_id}`")

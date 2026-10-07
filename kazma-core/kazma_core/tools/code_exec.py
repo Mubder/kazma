@@ -230,12 +230,12 @@ def local_exec_forbidden() -> bool:
     Lab opt-in: ``KAZMA_CODE_EXEC_ALLOW_LOCAL=1`` re-enables local even in
     production (not recommended).
     """
-    try:
-        from kazma_core.safety.deployment_policy import container_required
+    from kazma_core.safety.deployment_policy import container_required, policy_read_failures
 
+    try:
         if container_required():
             return True
-    except Exception:
+    except policy_read_failures():
         logger.warning("[code_exec] execution profile unavailable; refusing host fallback", exc_info=True)
         return True
     raw = (os.environ.get("KAZMA_CODE_EXEC_DOCKER") or "").strip().lower()
@@ -686,11 +686,11 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
             + store_refusal(mentioned, door="python_exec")
         )
 
-    from kazma_core.safety.deployment_policy import container_required
+    from kazma_core.safety.deployment_policy import container_required, policy_read_failures
 
     try:
         strict_container = await asyncio.to_thread(container_required)
-    except Exception:
+    except policy_read_failures():
         logger.warning("[code_exec] execution profile unavailable; refusing execution", exc_info=True)
         return "Error: Execution policy is unavailable; execution refused."
     try:

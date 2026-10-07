@@ -504,12 +504,12 @@ async def _readiness(*, runtime: Any = None, required: Any = None):
     from kazma_core.swarm.durable import durable_required
 
     temporal_required = durable_required()
-    from kazma_core.safety.deployment_policy import container_required
+    from kazma_core.safety.deployment_policy import container_required, policy_read_failures
 
     policy_error = False
     try:
         strict_container = await asyncio.wait_for(asyncio.to_thread(container_required), timeout=2)
-    except Exception:
+    except policy_read_failures():
         strict_container = False
         policy_error = True
     if temporal_required or (isinstance(required, (list, tuple)) and "temporal" in required):

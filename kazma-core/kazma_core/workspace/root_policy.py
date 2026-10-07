@@ -9,11 +9,11 @@ def validate_root(path: Path) -> Path:
     """Validate a proposed root without changing the active workspace binding."""
     root = path.resolve()
     allowed = os.environ.get("KAZMA_WORKSPACE_ROOT", "").strip()
-    from kazma_core.safety.deployment_policy import configured_workspace_roots
+    from kazma_core.safety.deployment_policy import configured_workspace_roots, policy_read_failures
 
     try:
         configured = configured_workspace_roots()
-    except Exception as exc:
+    except policy_read_failures() as exc:
         raise PermissionError("Workspace root policy is unavailable; access refused.") from exc
     production = os.environ.get("KAZMA_PRODUCTION", "").strip().lower() in (
         "1", "true", "on", "yes",
