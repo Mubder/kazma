@@ -49,7 +49,9 @@ __all__ = ["create_ide_router"]
 def create_ide_router() -> APIRouter:
     """Create and return the IDE API router."""
 
-    router = APIRouter(prefix="/api/ide", tags=["ide"])
+    from kazma_ui.ide_effects import IdeEffectRoute
+
+    router = APIRouter(prefix="/api/ide", tags=["ide"], route_class=IdeEffectRoute)
 
     async def _service():
         """The IDE service on the active workspace. Resolving the root reads
@@ -195,7 +197,7 @@ def create_ide_router() -> APIRouter:
         try:
             restored = get_file_checkpoint_store().restore_hunk(checkpoint_id, path, idx)
         except (OSError, UnicodeDecodeError, ValueError) as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": str(exc), "effect_uncertain": not isinstance(exc, ValueError)}
         return {"ok": True, "path": restored, "hunk_index": idx}
 
     @router.post("/checkpoints/{checkpoint_id}/restore-path")
@@ -209,7 +211,7 @@ def create_ide_router() -> APIRouter:
             restored = get_file_checkpoint_store().restore_one(checkpoint_id, path)
             return {"ok": True, "path": restored, "checkpoint_id": checkpoint_id}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": str(exc), "effect_uncertain": not isinstance(exc, ValueError)}
 
     @router.post("/checkpoints/{checkpoint_id}/restore")
     async def restore_checkpoint_route(checkpoint_id: str) -> dict[str, Any]:

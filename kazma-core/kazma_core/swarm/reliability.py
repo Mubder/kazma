@@ -163,7 +163,7 @@ class RetryPolicy:
                 # If fn returns a dict, check status
                 if isinstance(result, dict):
                     status = result.get("status", "")
-                    if status in ("success",):
+                    if status in ("success",) or result.get("retry_safe") is False:
                         return result
                     last_error = result.get("error") or f"Worker '{worker_name}' returned status={status}"
                     last_result = result
@@ -980,7 +980,7 @@ class FallbackChain:
             accumulated on the returned result.
         """
         # Successful primary -- nothing to do.
-        if primary_result.status == "success":
+        if primary_result.status == "success" or not primary_result.retry_safe:
             return primary_result
 
         # Empty chain -- no fallback.
@@ -1041,6 +1041,9 @@ class FallbackChain:
                 handoffs.extend(fallback_result.handoffs)
             fallback_result.handoffs = list(handoffs)
 
+            if not fallback_result.retry_safe:
+                logger.warning("[FallbackChain] holding uncertain effects from '%s'", fallback_name)
+                return fallback_result
             if fallback_result.status == "success":
                 logger.info(
                     "[FallbackChain] fallback '%s' succeeded", fallback_name

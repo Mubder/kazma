@@ -208,7 +208,14 @@ class InProcessWorker(SwarmWorker):
         import json as _json
 
         MAX_ITERATIONS = worker_iteration_budget()
-        task_id = f"swarm-{self.name}-{uuid.uuid4().hex[:8]}"
+        task_id = f"swarm-{self.name}-{uuid.uuid4().hex}"
+        from kazma_core.agent.effect_journal import EffectUncertain, execute_effect
+        from kazma_core.tenant_context import get_current_tenant_id
+
+        effect_state = {
+            "thread_id": task_id, "tenant_id": get_current_tenant_id() or "default",
+            "created_at": task_id,
+        }
         logger.info("[InProcessWorker:%s] dispatching %s (model=%s)", self.name, task_id, self.model or "default")
 
         # Start each dispatch with a cold file-read dedup cache: the cache is
@@ -462,6 +469,7 @@ class InProcessWorker(SwarmWorker):
                 batch_meta: list[tuple[Any, dict[str, Any]]] = []
 
                 for tc in response.tool_calls:
+                    effect_state["iteration"] = iteration
                     if _circuit_breaker_tripped:
                         logger.warning(
                             "[InProcessWorker:%s] Circuit breaker is active! Bypassing tool execution for '%s'.",
@@ -508,20 +516,30 @@ class InProcessWorker(SwarmWorker):
                                     # workers previously awaited tools with
                                     # no bound — a hung tool stalled the whole
                                     # swarm task until the engine reaper).
-                                    from kazma_core.agent.graph_helpers import _resolve_tool_timeout
-
                                     import asyncio as _aio
+
+                                    from kazma_core.agent.graph_helpers import _resolve_tool_timeout
 
                                     _t = _resolve_tool_timeout()
                                     if _t and _t > 0:
                                         result = await _aio.wait_for(
-                                            tool_registry.execute(tc.name, tc.arguments),
+                                            execute_effect(tool_registry, effect_state,
+                                                           {"id": tc.id, "name": tc.name}, tc.arguments),
                                             timeout=_t,
                                         )
                                     else:
-                                        result = await tool_registry.execute(tc.name, tc.arguments)
+                                        result = await execute_effect(tool_registry, effect_state,
+                                                                      {"id": tc.id, "name": tc.name}, tc.arguments)
                                     executed_tools[tc_key] = result.get("content", "")
-                                except _aio.TimeoutError:
+                                except EffectUncertain:
+                                    raise
+                                except TimeoutError:
+                                    from kazma_core.safety.side_effects import is_read_only
+
+                                    if not is_read_only(tc.name):
+                                        raise EffectUncertain(
+                                            "A mutating tool timed out. Its effects are unknown; inspect the target."
+                                        ) from None
                                     logger.error(
                                         "[InProcessWorker:%s] tool %s timed out",
                                         self.name, tc.name,
@@ -602,6 +620,13 @@ class InProcessWorker(SwarmWorker):
                 "error": None,
                 "tokens_used": total_tokens,
                 "cost": total_cost,
+                "duration_seconds": time.monotonic() - dispatch_started,
+            }
+        except EffectUncertain as exc:
+            return {
+                "worker": self.name, "task_id": task_id, "status": "error",
+                "output": "", "error": str(exc), "retry_safe": False,
+                "tokens_used": total_tokens, "cost": total_cost,
                 "duration_seconds": time.monotonic() - dispatch_started,
             }
         except Exception as exc:

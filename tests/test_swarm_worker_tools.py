@@ -229,8 +229,8 @@ class TestWorkerToolExecution:
         assert mock_provider.chat.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_tool_execution_failure_fed_back_as_content(self):
-        """When a tool execution crashes, the error is fed back, not raised."""
+    async def test_unknown_tool_failure_stops_without_synthesis(self):
+        """An unclassified tool can mutate; a failed dispatch has unknown effects."""
         from kazma_core.swarm.worker import InProcessWorker
         from kazma_core.swarm.task import WorkerCapabilities
 
@@ -280,8 +280,10 @@ class TestWorkerToolExecution:
 
                 result = await worker.dispatch("use broken tool")
 
-        assert result["status"] == "success"
-        assert "Tool failed" in result["output"]
+        assert result["status"] == "error"
+        assert result["output"] == ""
+        assert result["retry_safe"] is False
+        assert mock_provider.chat.await_count == 1
 
 
 class TestWorkerToolFiltering:

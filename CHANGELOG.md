@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## IDE and swarm effect recovery (2026-10-08)
+
+- IDE tool calls and in-process swarm tool loops now use durable invocation
+  receipts. Uncertain swarm effects stop with an empty output, without another
+  model synthesis. Failed worker dispatches after local/MCP mutator invocation
+  withhold both retry and fallback; the flag survives worker-result storage.
+- IDE mutation HTTP requests accept `Idempotency-Key`, bound to the authenticated
+  principal, tenant, request and captured workspace. Completed retries return
+  the saved response; concurrent, changed and uncertain requests stay held.
+  The web IDE retains unresolved IDs across response loss and tab reload,
+  storing only a request digest and operation ID. Existing HITL paths remain
+  the execution authority.
+- New SQLite/PostgreSQL contracts cover rollback after an earlier batch
+  statement, concurrent conditional saves and restored approval resumes with
+  one effect in the original workspace. Historical GKE results are recorded
+  separately from the next candidate's still-unrun cloud qualification.
+
 ## Source grounding across graph answer paths (2026-10-07)
 
 - Human review of four synthetic bilingual development answers rejected two

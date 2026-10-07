@@ -39,24 +39,41 @@ leave them paused. Readiness requires the actual graph/saver binding. Evidence:
 the recovery, binding, durable-decision, writer-fence and readiness regression
 tests, plus the real Temporal drill.
 
-**Cross-host HA remains open.** The local writer fence prevents concurrent
+**Cross-host HA qualification remains bounded.** Two temporary GKE trials on
+2026-10-06 exercised actual regional storage and separate-zone nodes. The
+follow-up on `bcccd059` passed paired restore with approval Deny and
+database-connectivity partition followed by provider-confirmed physical fencing
+before cross-zone replacement. Earlier-image database failover results remain
+separate. Those observations do not qualify the current revision, complete
+control-plane partition, region loss, long soak or an availability SLO. See
+[the current qualification plan](audits/HA_QUALIFICATION_2026-10-08.md).
+The local writer fence prevents concurrent
 servers on one local data directory, including Postgres deployments. The
 Compose recipe permits one owner and corrects the data-volume mount. The
 optional HA profile adds dedicated-session Postgres ownership, fail-stop on
 session loss and database/state-volume pairing. A single-owner Kubernetes
 template requires a ReadWriteOncePod volume. Disposable Postgres drills prove
 admission, wrong-volume refusal, process-death recovery and session-loss exit.
-These do not qualify a replicated CSI driver's fencing or cross-host delivery
-recovery. Node-loss, partition and paired-restore drills remain required on
-the actual cluster; do not infer HA from the database lock. Whole-agent activity
+Each observation is specific to the tested driver, fault and image. Node-loss,
+partition and paired-restore drills must qualify the candidate on the intended
+cluster; do not infer HA from the database lock. Whole-agent activity
 replay also needs step-level effect identities before retries can be enabled.
 
-**CI coverage expanded, qualification pending.** Recovery regressions are now
+**CI coverage expanded.** Recovery regressions are now
 configured on Windows/Linux with Python 3.11–3.14, and a separate real Temporal
-drill exercises protocol behavior. Those remote matrix runs must pass before
-claiming compatibility. The Postgres suite still covers its explicitly marked
-tests rather than complete backend parity. These new checks need to be included
-in release acceptance and branch protection before relying on them as merge gates.
+drill exercises protocol behavior. These checks passed on the grounding release
+`6b535a3e` and remain required for each new candidate. The Postgres suite still
+covers its explicitly marked tests rather than complete backend parity.
+
+**Recovery scope expanded (2026-10-08).** IDE calls and in-process swarm tool
+loops use durable action receipts. Keyed IDE HTTP retries return the recorded
+response and never re-open approval; changed requests/workspaces and uncertain
+results stay held. A failed worker after local/MCP mutation cannot retry or use
+a fallback worker. Custom workers' effects outside those executors, unkeyed
+clients' lost responses and whole-agent Temporal retries remain outside that
+contract. New backend tests compare transaction rollback, concurrent revision
+claims and restored approval workspace/effect behavior on SQLite and PostgreSQL;
+this does not establish complete store parity.
 
 **Settings outage recovery (closed 2026-10-04).** A failed PostgreSQL boot
 could latch a volatile settings store and ordinary saves returned 200 while

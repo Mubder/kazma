@@ -80,7 +80,7 @@ async def _index_worker_l4_memory(
 
 
 async def dispatch_worker(
-    engine: "SwarmEngine",
+    engine: SwarmEngine,
     worker: SwarmWorker,
     prompt: str,
     context: str | SwarmDispatchContext,
@@ -166,6 +166,9 @@ async def dispatch_worker(
 
     # Mutable container for handoff state captured inside _attempt.
     captured_handoff: dict[str, Any] = {}
+    from kazma_core.agent.dispatch_effects import DispatchEffects, track_dispatch_effects
+
+    effects = DispatchEffects()
 
     # Whether _attempt ran worker.mark_dispatched (which sets busy=True).
     # busy is ONLY reset by mark_completed(); on the normal result path
@@ -221,7 +224,8 @@ async def dispatch_worker(
                 with tenant_scope(tid or "default"):
                     # Both managers no-op when their token is None, so always wrap.
                     async with workspace_scope(_ws_id), swarm_scope(_scope_token):
-                        return await worker.dispatch(prompt, context=context)
+                        with track_dispatch_effects(effects):
+                            return await worker.dispatch(prompt, context=context)
 
             try:
                 raw_result = await timeout_guard.execute(
@@ -263,6 +267,12 @@ async def dispatch_worker(
                         f"Output validation failed: {validation_error}"
                     )
 
+            if effects.invoked and raw_result.get("status") != "success":
+                raw_result["retry_safe"] = False
+                raw_result["error"] = (
+                    str(raw_result.get("error") or "Worker did not complete")
+                    + " Whole-worker retry withheld because a mutating tool was invoked; inspect its effects."
+                )
             return raw_result
 
         raw_result = await retry_policy.execute_with_retry(
