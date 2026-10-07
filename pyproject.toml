@@ -80,6 +80,7 @@ dev = [
     "virtualenv>=21.7.13",  # security floor (see the base list): pre-commit brings it
 ]
 test = [
+    "sqlglot==30.21.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=5.0.0",
@@ -179,6 +180,7 @@ durable = [
 ]
 # Database drivers beyond SQLite (database_client skill)
 database = [
+    "sqlglot==30.21.0",
     "psycopg[binary]>=3.1.0",
     "pymysql>=1.1.0",
     "pymongo>=4.7.0",
@@ -333,4 +335,3 @@ bump_pattern = "^(break|BREAKING CHANGE|feat|fix|perf|refactor)(\\([\\w\\-\\.]+\
 # Everything → PATCH. Middle digit only via light_version_bump --level minor --confirm CONFIRM
 bump_map = {"break" = "PATCH", "BREAKING CHANGE" = "PATCH", "feat" = "PATCH", "fix" = "PATCH", "perf" = "PATCH", "refactor" = "PATCH"}
 change_type_order = ["BREAKING CHANGE", "feat", "fix", "perf", "refactor", "docs", "chore"]
-

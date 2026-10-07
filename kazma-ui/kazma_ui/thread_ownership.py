@@ -71,7 +71,8 @@ def owned_threads(thread_ids: Iterable[str], *, store: Any = None) -> list[str] 
     """
     try:
         sessions = _store(store)
-        return [t for t in thread_ids if t and sessions.get_by_thread_id(t) is not None]
+        return [t for t in thread_ids if t and sessions.get_by_thread_id(t) is not None
+                and sessions.thread_is_exclusive(t)]
     except Exception:
         logger.warning("[ownership] thread ownership check failed — denying", exc_info=True)
         return None
@@ -121,8 +122,10 @@ async def resolve_caller_thread(session_id: str, thread_id: str, *, store: Any =
         return ""
 
     def _from_session() -> str:
-        session = _store(store).get(session_id)
-        return (session.thread_id or session_id) if session is not None else ""
+        sessions = _store(store)
+        session = sessions.get(session_id)
+        thread = (session.thread_id or session_id) if session is not None else ""
+        return thread if thread and sessions.thread_is_exclusive(thread) else ""
 
     try:
         resolved = await asyncio.to_thread(_from_session)

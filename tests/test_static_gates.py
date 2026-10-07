@@ -1926,7 +1926,7 @@ SECURITY_ENV_NAMES = (
     "KAZMA_WS_ORIGIN_CHECK", "KAZMA_WS_EXTRA_ORIGINS", "KAZMA_OPAQUE_SESSIONS",
     "KAZMA_RATE_LIMIT_ENABLED", "KAZMA_TENANT_FILTER", "KAZMA_SESSION_OPEN_TAKEOVER",
     "KAZMA_MCP_INHERIT_ENV", "KAZMA_ALLOW_PRIVATE_LLM",
-    "KAZMA_DB_CLIENT_ALLOWED_HOSTS", "KAZMA_CLONE_HOSTS", "KAZMA_UPDATE_REMOTE_ALLOWLIST",
+    "KAZMA_CLONE_HOSTS", "KAZMA_UPDATE_REMOTE_ALLOWLIST",
     "KAZMA_HITL_GRANT_TTL_SECONDS", "KAZMA_UNRESTRICTED_TTL_SECONDS", "KAZMA_SHELL_STRICT",
     "KAZMA_SHELL_ALLOW_ARCHIVE", "KAZMA_GATE_REGISTRY", "KAZMA_COMMITMENT_ENABLED",
     "KAZMA_COMMITMENT_MODE", "KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE",
@@ -2018,7 +2018,7 @@ def test_the_security_switch_net_catches_listed_and_marked_names():
 
 
 def test_every_websocket_endpoint_authenticates():
-    """Every ``@app.websocket`` handler must call ``websocket_is_authenticated``.
+    """Every socket handler must validate auth or obtain a verified principal.
 
     WebSocket handshakes do not pass through the HTTP auth middleware, so a WS
     endpoint's authentication lives *inside its handler* and nothing structural
@@ -2046,14 +2046,14 @@ def test_every_websocket_endpoint_authenticates():
             if not decorated_ws:
                 continue
             body = ast.dump(node)
-            if "websocket_is_authenticated" not in body:
+            if not any(name in body for name in ("websocket_is_authenticated", "get_websocket_principal")):
                 offenders.append(f"{_rel(path)}:{node.lineno} {node.name}")
 
     assert not offenders, (
         "WebSocket endpoint with no authentication check. WS handshakes bypass "
         "the HTTP auth middleware entirely, so the check must be in the handler "
         "(audit 2026-09-16 F-8).\n"
-        "Fix: `from kazma_ui.auth import websocket_is_authenticated`, then "
+        "Fix: use websocket_is_authenticated or get_websocket_principal, then "
         "`await websocket.accept()` and close 4003 when it returns False.\n  "
         + "\n  ".join(offenders)
     )

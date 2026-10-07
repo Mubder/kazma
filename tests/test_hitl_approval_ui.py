@@ -325,6 +325,9 @@ def _live_client(monkeypatch, graph, checkpointer, *, owned=("t-1",), registry=N
         def get_by_thread_id(self, thread_id: str):
             return object() if thread_id in owned else None
 
+        def thread_is_exclusive(self, thread_id: str):
+            return thread_id in owned
+
     async def _registry():
         return registry
 

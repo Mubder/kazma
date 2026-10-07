@@ -1063,6 +1063,27 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
     return False
 
 
+def get_websocket_principal(websocket: Any) -> dict[str, Any] | None:
+    """Validate a socket identity before considering credential-less peer trust.
+
+    Cookies need the same Origin guard as Boolean socket auth. A supplied
+    expired/invalid credential never falls back to the local operator, and a
+    valid tenant session on loopback keeps its tenant.
+    """
+    provided = extract_provided_credential(websocket)
+    if provided:
+        header_credential = any(
+            websocket.headers.get(name)
+            for name in (SECRET_HEADER, "X-Api-Token", "X-Kazma-Token", "authorization")
+        )
+        if not header_credential and not _ws_origin_allowed(websocket):
+            return None
+        return get_request_principal(websocket)
+    if websocket_is_authenticated(websocket):
+        return {"username": "operator", "role": "admin", "source": "local"}
+    return None
+
+
 def get_request_principal(request: Request) -> dict[str, Any] | None:
     """Return authenticated principal {username, role, user_id, source} or None."""
     provided = extract_provided_credential(request)
