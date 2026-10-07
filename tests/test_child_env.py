@@ -224,11 +224,13 @@ _SPAWN_DIRS = (
     # with ``{**os.environ, **cfg.env}`` until 2026-09-30. Neither was covered.
     "kazma-core/kazma_core/mcp",
     "kazma-core/kazma_core/mcp_client.py",
+    "kazma-core/kazma_core/security/process_budget.py",
 )
 _SPAWNERS = {
     "subprocess.run", "subprocess.Popen", "subprocess.check_output",
     "subprocess.check_call", "subprocess.call",
     "asyncio.create_subprocess_exec", "asyncio.create_subprocess_shell",
+    "run_bounded", "run_bounded_async", "_start_process", "start_process_async",
 }
 _DEFAULTS_SAFE = {"run_off_loop"}  # fills env= with tool_child_env() itself
 _BUILDERS = {
@@ -246,12 +248,18 @@ _ENV_BY_OTHER_ROUTE = {
         "the docker CLI itself; the container gets no environment",
     ("kazma-core/kazma_core/tools/code_exec.py", "_run_docker_sync"):
         "the docker CLI itself; the container gets no environment",
-    ("kazma-core/kazma_core/agent/tool_builtins/system.py", "_run_shell_capped"):
-        "env is its parameter; shell_exec passes restricted_child_env",
     ("kazma-ui/kazma_ui/settings.py", "api_restart_server"):
         "starts the Kazma server itself (no guard): it needs the server's environment",
     ("kazma-skills/kazma_skills/native/_subprocess.py", "run_off_loop"):
         "the runner every skill uses: fills env= with tool_child_env() when the caller did not",
+    ("kazma-core/kazma_core/security/process_budget.py", "_start_process"):
+        "env is a REQUIRED keyword parameter, forwarded to Popen; audited tool/MCP callers build it",
+    ("kazma-core/kazma_core/security/process_budget.py", "run_bounded"):
+        "env is a REQUIRED keyword parameter, forwarded to start_process; audited tool callers build it",
+    ("kazma-core/kazma_core/security/process_budget.py", "start_process_async"):
+        "forwards to start_process which requires env; omission raises before Popen",
+    ("kazma-core/kazma_core/security/process_budget.py", "run_bounded_async"):
+        "forwards to run_bounded which requires env; omission raises before Popen",
 }
 
 

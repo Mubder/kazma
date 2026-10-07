@@ -33,14 +33,13 @@ Usage::
     res = await run_off_loop(cmd, cwd=cwd, capture_output=True,
                              text=True, timeout=30)
 
-``run_off_loop`` is a drop-in for ``subprocess.run``: same arguments, same
-``CompletedProcess``, same ``subprocess.TimeoutExpired`` on timeout. The only
-difference is that it does not stop the world.
+``run_off_loop`` accepts the argument-list calls used by native skills,
+returns ``CompletedProcess`` and raises ``subprocess.TimeoutExpired`` on timeout.
+It also enforces process-tree cleanup and combined output and memory budgets.
 """
 
 from __future__ import annotations
 
-import asyncio
 import subprocess
 from typing import Any
 
@@ -48,15 +47,11 @@ __all__ = ["run_off_loop"]
 
 
 async def run_off_loop(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[Any]:
-    """``subprocess.run`` on a worker thread, never on the event loop.
+    """Run native skills off-loop under the shared process budgets.
 
-    Accepts and returns exactly what :func:`subprocess.run` does, and lets
-    :class:`subprocess.TimeoutExpired` propagate so existing ``except
-    subprocess.TimeoutExpired`` handlers keep working unchanged.
-
-    Note on cancellation: ``asyncio.to_thread`` cannot interrupt the worker,
-    so a cancelled caller returns immediately while the child keeps running
-    until its own ``timeout`` fires. Always pass a ``timeout``.
+    Timeout defaults to 90 seconds and is capped at 300. Excess output raises
+    OutputLimitExceeded rather than returning success with missing bytes.
+    Cancellation signals the worker to terminate its process tree.
 
     The child's environment defaults to the server's WITHOUT its secrets
     (:func:`kazma_core.security.child_env.tool_child_env`): pytest, pip and
@@ -69,4 +64,7 @@ async def run_off_loop(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess
         from kazma_core.security.child_env import tool_child_env
 
         kwargs["env"] = tool_child_env()
-    return await asyncio.to_thread(subprocess.run, *args, **kwargs)
+    from kazma_core.security.process_budget import run_bounded_async
+
+    kwargs["timeout"] = kwargs.get("timeout") or 90
+    return await run_bounded_async(*args, **kwargs)

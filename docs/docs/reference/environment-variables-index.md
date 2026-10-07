@@ -53,7 +53,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_CUA_PLANNER` | `"1"` | `kazma_core.tools.computer_use_planners` | yes |
 | `KAZMA_DAILY_DIGEST` | `""` | `kazma_core.observability.daily_digest` | yes |
 | `KAZMA_DATABASE_URL` | (none) | `kazma_core.db.backend`, `kazma_core.memory.backends` | yes |
-| `KAZMA_DATA_DIR` | (none) | `kazma_core.config_store`, `kazma_core.paths` | yes |
+| `KAZMA_DATA_DIR` | (none) | `kazma_core.config_store`, `kazma_core.memory.backfill_v2`, `kazma_core.paths` | yes |
 | `KAZMA_DB_BACKEND` | (none) | `kazma_core.db.backend` | yes |
 | `KAZMA_DB_BACKEND_SOURCE` | (none) | `kazma_core.migration.exporter` | yes |
 | `KAZMA_DB_CONTAINER` | `""` | `kazma_core.migration.pg_bridge` | yes |
@@ -88,7 +88,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_FILE_CHECKPOINTS_DB` | (none) | `kazma_core.ide.file_checkpoints` | yes |
 | `KAZMA_FIRECRAWL_API_KEY` | (none) | `kazma_core.stores.knowledge_ingest`, `kazma_core.tools.read_url`, `kazma_core.tools.research_readiness` | yes |
 | `KAZMA_FIRECRAWL_URL` | (none) | `kazma_core.stores.knowledge_ingest`, `kazma_core.tools.read_url` | yes |
-| `KAZMA_FTS5_PATH` | (none) | `kazma_core.paths` | yes |
+| `KAZMA_FTS5_PATH` | (none) | `kazma_core.memory.backfill_v2`, `kazma_core.paths` | yes |
 | `KAZMA_GATEWAY_ADMINS` | (none) | `kazma_gateway.allowlists` | yes |
 | `KAZMA_GATEWAY_STRICT_ALLOWLIST` | (none) | `kazma_gateway.chat_adapters` | yes |
 | `KAZMA_GATE_REGISTRY` | (none) | `kazma_core.safety.hitl_gates` | yes |
@@ -125,7 +125,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_KB_MAX_PAGES` | `200` | `kazma_core.stores.knowledge_ingest` | yes |
 | `KAZMA_KB_SCOPE_MODE` | (none) | `kazma_core.stores.knowledge_ingest` | yes |
 | `KAZMA_KB_SMART_SEARCH` | (none) | `kazma_core.stores.knowledge_index` | yes |
-| `KAZMA_KNOWLEDGE_GRAPH_DB` | (none) | `kazma_core.paths` | yes |
+| `KAZMA_KNOWLEDGE_GRAPH_DB` | (none) | `kazma_core.memory.backfill_v2`, `kazma_core.paths` | yes |
 | `KAZMA_LANGFUSE` | `""` | `kazma_core.tracing.langfuse_enable` | yes |
 | `KAZMA_LITELLM` | (none) | `kazma_core.llm_gateway` | yes |
 | `KAZMA_LITELLM_FALLBACK_DIRECT` | (none) | `kazma_core.llm_gateway` | yes |
@@ -156,8 +156,8 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_MCP_TRUSTED_IN_PROD` | (none) | `kazma_core.mcp.manager` | yes |
 | `KAZMA_MEMORY_CONFLICT_POLICY` | (none) | `kazma_core.memory.backends` | yes |
 | `KAZMA_MEMORY_ENFORCE_TENANT` | `""` | `kazma_ui.memory_api` | yes |
-| `KAZMA_MEMORY_OPS_DB` | (none) | `kazma_core.paths` | yes |
-| `KAZMA_MEMORY_STATE_DB` | (none) | `kazma_core.paths` | yes |
+| `KAZMA_MEMORY_OPS_DB` | (none) | `kazma_core.memory.backfill_v2`, `kazma_core.paths` | yes |
+| `KAZMA_MEMORY_STATE_DB` | (none) | `kazma_core.memory.backfill_v2`, `kazma_core.paths` | yes |
 | `KAZMA_MEMORY_STATE_REGION` | (none) | `kazma_core.memory.backends` | yes |
 | `KAZMA_MEMORY_STATE_ROLE` | (none) | `kazma_core.memory.backends` | yes |
 | `KAZMA_MIGRATE_CHECK_PORT` | (none) | `kazma_core.migration.importer` | yes |
@@ -273,7 +273,7 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_VOICE_DUPLEX` | (none) | `kazma_core.voice.livekit` | yes |
 | `KAZMA_WATCHER_STALE_SECONDS` | (none) | `kazma_core.safety.bus_bridge` | yes |
 | `KAZMA_WORKSPACE` | `""` | `kazma_core.tools.research_pipeline`, `kazma_core.workspace.binding`, `kazma_ui.app` | yes |
-| `KAZMA_WORKSPACE_ROOT` | `""` | `kazma_gateway.routers.workspace`, `kazma_gateway.routers.workspaces` | yes |
+| `KAZMA_WORKSPACE_ROOT` | `""` | `kazma_core.workspace.root_policy`, `kazma_gateway.routers.workspaces` | yes |
 | `KAZMA_WS_EXTRA_ORIGINS` | (none) | `kazma_ui.auth` | yes |
 | `KAZMA_WS_ORIGIN_CHECK` | `""` | `kazma_ui.auth` | yes |
 | `KAZMA_X_POST` | (none) | `kazma_core.x_api.config`, `kazma_core.x_api.schedule`, `kazma_core.x_api.stance` | yes |

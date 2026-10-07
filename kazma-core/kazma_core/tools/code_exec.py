@@ -357,10 +357,20 @@ def _assign_to_job_object(proc: Any) -> Any:
             ]
 
         JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
-        JOB_OBJECT_LIMIT_JOB_MEMORY = 0x400
+        JOB_OBJECT_LIMIT_JOB_MEMORY = 0x200
         JobObjectExtendedLimitInformation = 9
 
         kernel32 = ctypes.windll.kernel32
+        kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
         job_handle = kernel32.CreateJobObjectW(None, None)
         if not job_handle:
             return None

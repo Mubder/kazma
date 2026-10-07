@@ -599,6 +599,8 @@ jobs:
           tests/test_effect_journal.py tests/test_hitl_gate_reconciler.py
           tests/test_execution_policy_failures.py tests/test_config_store_close_race.py
           tests/test_text_newlines.py tests/test_shutdown_builds_nothing.py
+          tests/test_process_budgets.py tests/test_shell_glued_options.py
+          tests/test_outbound_attachment_policy.py tests/test_legacy_backfill_cli.py
           -q --timeout=120 --junitxml=runtime-results.xml
         env:
           KAZMA_DB_BACKEND: sqlite

@@ -800,18 +800,18 @@
 
     evtSource.addEventListener('worker_started', function(e) {
       var data = parseSseData(e); if (!data) return;
-      addEventLine(taskId, '', t('swarm.worker_started', {worker: esc(data.worker), step: (Number(data.step) || 0)}));
+      addEventLine(taskId, '', t('swarm.worker_started', {worker: data.worker, step: (Number(data.step) || 0)}));
     });
 
     evtSource.addEventListener('worker_progress', function(e) {
       var data = parseSseData(e); if (!data) return;
-      addEventLine(taskId, '', esc(data.worker) + ': ' + window.kazmaCount('swarm.tokens_inline', Number(data.tokens) || 0));
+      addEventLine(taskId, '', data.worker + ': ' + window.kazmaCount('swarm.tokens_inline', Number(data.tokens) || 0));
     });
 
     evtSource.addEventListener('worker_completed', function(e) {
       var data = parseSseData(e); if (!data) return;
       var icon = data.status === 'success' ? '' : '';
-      addEventLine(taskId, icon, '<span translate="no">' + esc(workerLabel(data.worker)) + '</span>: ' + esc(stateLabel(data.status)));
+      addEventLine(taskId, icon, ': ' + stateLabel(data.status), workerLabel(data.worker));
     });
 
     evtSource.addEventListener('checkpoint', function(e) {
@@ -892,12 +892,23 @@
     };
   }
 
-  function addEventLine(taskId, icon, text) {
+  function addEventLine(taskId, icon, text, worker) {
     var eventsEl = $('events-' + taskId);
     if (!eventsEl) return;
     var line = document.createElement('div');
     line.style.cssText = 'font-size:0.8rem;color:var(--text-secondary);display:flex;align-items:center;gap:6px;';
-    line.innerHTML = '<span>' + icon + '</span><span>' + text + '</span>';
+    var iconEl = document.createElement('span');
+    iconEl.textContent = icon;
+    var textEl = document.createElement('span');
+    if (worker !== undefined) {
+      var workerEl = document.createElement('span');
+      workerEl.setAttribute('translate', 'no');
+      workerEl.textContent = worker;
+      textEl.appendChild(workerEl);
+    }
+    textEl.appendChild(document.createTextNode(text));
+    line.appendChild(iconEl);
+    line.appendChild(textEl);
     eventsEl.appendChild(line);
     eventsEl.scrollTop = eventsEl.scrollHeight;
   }

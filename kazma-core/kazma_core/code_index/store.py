@@ -8,6 +8,7 @@ from pathlib import Path
 
 from kazma_core.code_index.symbols import Symbol
 from kazma_core.code_index.walk import lang_for_path
+from kazma_core.db.sql_patterns import like_literal
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS files (
@@ -89,13 +90,13 @@ def search_symbols(
     q = (query or "").strip()
     if not q:
         return []
-    like = f"%{q}%"
+    like = f"%{like_literal(q)}%"
     return list(
         conn.execute(
             """
             SELECT path, name, kind, line, signature
             FROM symbols
-            WHERE name = ? COLLATE NOCASE OR name LIKE ? COLLATE NOCASE
+            WHERE name = ? COLLATE NOCASE OR name LIKE ? ESCAPE '!' COLLATE NOCASE
             ORDER BY CASE WHEN name = ? COLLATE NOCASE THEN 0 ELSE 1 END,
                      length(name), path, line
             LIMIT ?

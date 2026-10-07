@@ -42,6 +42,7 @@ Plus direct routes in `routes_direct/` and a conditional Telegram webhook at `/a
 |---|---|---|
 | `POST` | `/api/chat/stream` | Primary chat transport. Body `\{message, session_id, model\}`. Returns `text/event-stream`. (`sse_chat/__init__.py`) |
 | `GET` | `/api/chat/sessions` | List sessions. (line 547) |
+| `POST` | `/api/chat/sessions` | Bind an empty session shell to the authenticated caller before opening its telemetry socket. Requires CSRF protection. |
 | `DELETE` | `/api/chat/sessions/\{session_id\}` | Delete session. (line 555) |
 | `GET` | `/api/chat/sessions/\{session_id\}/messages` | Session history. (line 561) |
 
@@ -79,6 +80,9 @@ The check resolves its key through `ModelRegistry.resolve_provider_credentials`
 and its model through `ModelRegistry.probe_model_for` — the same paths a real
 message uses. It resolves nothing by hand, and it does not write.
 
+Probe failures report the HTTP status and an actionable hint. Remote response
+bodies and credential-bearing request URLs are excluded from diagnostics.
+
 ### 2.3 HITL approval
 
 | Method | Path | Purpose |
@@ -115,6 +119,22 @@ message uses. It resolves nothing by hand, and it does not write.
 | `GET` | `/health/ready` | Readiness. (line 104) |
 | `GET` | `/health/details` | Detailed health. (line 148) |
 | `GET` | `/api/gateway/status` | Gateway/adapter status. |
+
+### 2.7 Memory compatibility and operator interfaces
+
+| Method | Path | Current contract |
+|---|---|---|
+| `GET` | `/api/memory/graph` | HTTP 410; use `/api/memory/v2/graph`. |
+| `GET` | `/api/memory/graph/stats` | HTTP 410; use `/api/memory/v2/health`. |
+| `GET` | `/api/memory/graph/export` | HTTP 410; use the V2 graph surface. |
+| `GET` | `/api/memory/graph/search` | Compatibility search backed by V2 beliefs. |
+| `POST` | `/api/memory/graph/clear` | Requires confirmation and tenant authorization; invalidates current beliefs while preserving history and episodes. |
+
+Operator diagnostics and public integration endpoints can intentionally have no
+browser caller. Their maintained inventory and caller reasons are in
+`tests/test_api_route_callers.py`; absence from the frontend is not a deletion
+criterion. Restore remains available through
+`python -m kazma_core.backup.restore`; see [Disaster recovery](../ops/disaster-recovery).
 
 ---
 
