@@ -24,6 +24,13 @@ def ended(pid):
     assert not psutil.pid_exists(pid)
 
 
+def _pid_publication(marker, pid="os.getpid()"):
+    """Publish readiness only after the complete PID has reached the file."""
+    pending = str(marker) + ".pending"
+    return (f"marker_file=open({pending!r},'w'); marker_file.write(str({pid})); "
+            f"marker_file.close(); os.replace({pending!r},{str(marker)!r})")
+
+
 def test_input_and_both_output_streams_keep_their_contract():
     result = run("import sys; print(sys.stdin.read()); print('error',file=sys.stderr)", input="العربية", timeout=3)
     assert result.returncode == 0
@@ -40,7 +47,7 @@ def test_excess_output_is_a_bounded_failure_without_pipe_deadlock():
 
 def test_timeout_kills_the_descendant_not_only_the_launcher(tmp_path):
     marker = tmp_path / "child.pid"
-    child = f"import os,time; open({str(marker)!r},'w').write(str(os.getpid())); time.sleep(30)"
+    child = f"import os,time; {_pid_publication(marker)}; time.sleep(30)"
     parent = f"import subprocess,sys,time; subprocess.Popen([sys.executable,'-I','-c',{child!r}]); time.sleep(30)"
     with pytest.raises(subprocess.TimeoutExpired):
         run(parent, timeout=1)
@@ -64,7 +71,7 @@ def test_memory_limit_is_enforced_by_the_operating_system():
 @pytest.mark.asyncio
 async def test_cancellation_tells_the_worker_to_end_its_tree(tmp_path):
     marker = tmp_path / "parent.pid"
-    code = f"import os,time; open({str(marker)!r},'w').write(str(os.getpid())); time.sleep(30)"
+    code = f"import os,time; {_pid_publication(marker)}; time.sleep(30)"
     task = asyncio.create_task(run_bounded_async([sys.executable, "-I", "-c", code], env=tool_child_env(), timeout=20))
     try:
         async with asyncio.timeout(3):
@@ -149,9 +156,9 @@ async def test_real_stdio_handshake_and_disconnect_reap_a_server_child(tmp_path,
     child = "import time; time.sleep(30)"
     script = tmp_path / "server.py"
     script.write_text(
-        "import json,subprocess,sys\n"
+        "import json,os,subprocess,sys\n"
         f"child=subprocess.Popen([sys.executable,'-I','-c',{child!r}])\n"
-        f"open({str(marker)!r},'w').write(str(child.pid))\n"
+        f"{_pid_publication(marker, 'child.pid')}\n"
         "for line in sys.stdin:\n"
         "    msg=json.loads(line)\n"
         "    if 'id' not in msg: continue\n"
@@ -199,7 +206,7 @@ async def test_cancelled_mcp_setup_closes_its_unregistered_child(tmp_path, monke
         "    msg=json.loads(line)\n"
         "    if 'id' not in msg: continue\n"
         f"    if msg['method']=={stage!r}:\n"
-        f"        open({str(marker)!r},'w').write(str(os.getpid()))\n"
+        f"        {_pid_publication(marker)}\n"
         "        time.sleep(30)\n"
         "    else:\n"
         "        result={'protocolVersion':'2024-11-05','capabilities':{},'serverInfo':{'name':'proof','version':'1'}}\n"
@@ -242,7 +249,7 @@ async def test_cancelled_diagnostic_handshake_closes_its_child(tmp_path):
 
     marker = tmp_path / "diagnostic.pid"
     script = tmp_path / "diagnostic.py"
-    script.write_text(f"import os,time;open({str(marker)!r},'w').write(str(os.getpid()));time.sleep(30)", encoding="utf-8")
+    script.write_text(f"import os,time;{_pid_publication(marker)};time.sleep(30)", encoding="utf-8")
     client = MCPClient()
     task = asyncio.create_task(client.connect({
         "name": "diagnostic-cancel", "transport": "stdio",
