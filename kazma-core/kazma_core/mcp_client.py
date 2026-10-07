@@ -28,7 +28,10 @@ import sys
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+_STDIO_BYTES = 16 * 1024 * 1024
+
 import httpx
+
 from kazma_core.http_tls import shared_ssl_context
 from kazma_core.mcp.child_env import mcp_child_env
 from kazma_core.mcp.secrets import MCPSecretUnavailable, redacted_argv, resolve, secret_values
@@ -142,6 +145,7 @@ class MCPClient:
         self._connected: bool = False
         self._tools: list[dict[str, Any]] = []
         self._process: subprocess.Popen[bytes] | None = None
+        self._process_tree: Any = None
         self._http: httpx.AsyncClient | None = None
         self._read_lock: asyncio.Lock = asyncio.Lock()
 
@@ -201,6 +205,9 @@ class MCPClient:
             self._connected = True
             logger.info("Connected to MCP server '%s' via %s", cfg.name, cfg.transport)
             return True
+        except asyncio.CancelledError:
+            await self.disconnect()
+            raise
         except Exception:
             # A test/start failure must never leave a child process or HTTP
             # connection alive for the caller to discover and clean up.
@@ -248,6 +255,8 @@ class MCPClient:
     async def disconnect(self) -> None:
         """Cleanly disconnect from the server."""
         if self._process is not None:
+            if self._process_tree is not None:
+                self._process_tree.close()
             try:
                 self._process.stdin.close()  # type: ignore[union-attr]
             except Exception as exc:
@@ -263,6 +272,7 @@ class MCPClient:
                 except Exception as kill_exc:
                     logger.warning("Failed to kill MCP process: %s", kill_exc)
             self._process = None
+            self._process_tree = None
 
         if self._http is not None:
             await self._http.aclose()
@@ -299,14 +309,10 @@ class MCPClient:
 
         try:
             # Off the event loop: starting a process blocks (AGENTS.md §23).
-            self._process = await asyncio.to_thread(
-                subprocess.Popen,
-                command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=cfg.working_dir,
-                env=env,
+            from kazma_core.security.process_budget import start_process_async
+
+            self._process, self._process_tree = await start_process_async(
+                command, cwd=cfg.working_dir, env=env,
             )
         except FileNotFoundError as exc:
             raise MCPConnectionError(f"Command not found: {cfg.command[0]}") from exc
@@ -364,6 +370,8 @@ class MCPClient:
             proc = self._process
             if proc is None or proc.stdin is None:
                 return
+            if len(raw.encode()) > _STDIO_BYTES:
+                raise MCPConnectionError("MCP notification exceeds its byte budget")
             try:
                 await asyncio.wait_for(
                     asyncio.to_thread(proc.stdin.write, raw.encode()),
@@ -373,7 +381,7 @@ class MCPClient:
                     asyncio.to_thread(proc.stdin.flush),
                     timeout=self._config.timeout,
                 )
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 self._connected = False
                 raise MCPConnectionError(
                     f"stdio notification to '{self.server_name}' timed out after "
@@ -386,6 +394,8 @@ class MCPClient:
         proc = self._process
         if proc is None or proc.stdin is None or proc.stdout is None:
             raise MCPConnectionError("stdio process not running")
+        if len(raw.encode()) > _STDIO_BYTES:
+            raise MCPConnectionError("MCP request exceeds its byte budget")
 
         # stdio responses have no background JSON-RPC dispatcher here, so
         # serialize a complete write/read transaction to preserve response
@@ -401,16 +411,18 @@ class MCPClient:
                     timeout=self._config.timeout if self._config else 90.0,
                 )
                 line = await asyncio.wait_for(
-                    asyncio.to_thread(proc.stdout.readline),
+                    asyncio.to_thread(proc.stdout.readline, _STDIO_BYTES + 1),
                     timeout=self._config.timeout if self._config else 90.0,
                 )
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 self._connected = False
                 timeout = self._config.timeout if self._config else 90.0
                 raise MCPConnectionError(
                     f"stdio request to '{self.server_name}' timed out after {timeout:g}s"
                 ) from exc
 
+        if len(line) > _STDIO_BYTES:
+            raise MCPConnectionError("MCP response exceeds its byte budget")
         if not line:
             # The subprocess exited before answering. Read whatever it wrote
             # to stderr so operators get the *real* cause (bad arg, missing
@@ -419,8 +431,9 @@ class MCPClient:
             proc = self._process
             if proc is not None and proc.stderr is not None:
                 try:
-                    stderr_hint = proc.stderr.read(4096).decode(errors="replace").strip()
-                except Exception:
+                    read = getattr(proc.stderr, "read1", proc.stderr.read)
+                    stderr_hint = (await asyncio.wait_for(asyncio.to_thread(read, 4096), timeout=0.5)).decode(errors="replace").strip()
+                except (TimeoutError, OSError):
                     stderr_hint = ""
             detail = f": {stderr_hint}" if stderr_hint else " (no stderr output)"
             raise MCPConnectionError(f"Server closed stdout (EOF){detail}")

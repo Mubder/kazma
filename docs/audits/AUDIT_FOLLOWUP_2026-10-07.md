@@ -62,6 +62,10 @@ POSIX applies per-process address-space/CPU limits and group cleanup; deliberate
 session detachment requires stronger container/cgroup isolation. Shell capture
 is 30 KB; shared native/hook/patch capture is 256 KiB. MCP protocol buffers have
 their configured finite limits and remain long-lived, with request deadlines.
+The separate Settings diagnostic client retains its one-off protocol and
+stderr diagnostics while using the same contained launcher and a finite
+16 MiB protocol cap. Launch, initialization and tool-discovery cancellation
+tests prove that unregistered children are cleaned up as well.
 
 Tests use temporary synthetic data and disposable local services. No cloud
 resources or live database migrations are needed for this audit. Human-reviewed

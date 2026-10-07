@@ -140,8 +140,10 @@ async def test_mcp_write_is_deferred_off_the_loop_and_bounded():
 
 
 @pytest.mark.asyncio
-async def test_real_stdio_handshake_and_disconnect_reap_a_server_child(tmp_path):
+@pytest.mark.parametrize("implementation", ["manager", "diagnostic"])
+async def test_real_stdio_handshake_and_disconnect_reap_a_server_child(tmp_path, implementation):
     from kazma_core.mcp.manager import AsyncMCPManager
+    from kazma_core.mcp_client import MCPClient
 
     marker = tmp_path / "mcp-child.pid"
     child = "import time; time.sleep(30)"
@@ -158,21 +160,29 @@ async def test_real_stdio_handshake_and_disconnect_reap_a_server_child(tmp_path)
         "    print(json.dumps({'jsonrpc':'2.0','id':msg['id'],'result':result}),flush=True)\n",
         encoding="utf-8",
     )
-    manager = AsyncMCPManager()
+    manager = AsyncMCPManager() if implementation == "manager" else MCPClient()
     try:
-        assert await manager.connect_from_config([{
+        cfg = {
             "name": "budget-proof", "transport": "stdio",
             "command": [sys.executable, "-I", str(script)], "timeout": 5,
-        }], raise_on_error=True) == 0
-        assert "budget-proof" in manager._servers, manager.list_servers()
-        assert manager._servers["budget-proof"].connected
+        }
+        if implementation == "manager":
+            assert await manager.connect_from_config([cfg], raise_on_error=True) == 0
+            assert "budget-proof" in manager._servers, manager.list_servers()
+            assert manager._servers["budget-proof"].connected
+        else:
+            assert await manager.connect(cfg)
+            assert await manager.list_tools() == []
         async with asyncio.timeout(3):
             while not marker.exists():
                 await asyncio.sleep(0.01)
         pid = int(marker.read_text())
         assert psutil.pid_exists(pid)
     finally:
-        await manager.shutdown()
+        if implementation == "manager":
+            await manager.shutdown()
+        else:
+            await manager.disconnect()
     await asyncio.to_thread(ended, pid)
 
 
@@ -224,3 +234,47 @@ async def test_cancelled_mcp_setup_closes_its_unregistered_child(tmp_path, monke
         if handles:
             await manager._close_handle(handles[0])
         await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_diagnostic_handshake_closes_its_child(tmp_path):
+    from kazma_core.mcp_client import MCPClient
+
+    marker = tmp_path / "diagnostic.pid"
+    script = tmp_path / "diagnostic.py"
+    script.write_text(f"import os,time;open({str(marker)!r},'w').write(str(os.getpid()));time.sleep(30)", encoding="utf-8")
+    client = MCPClient()
+    task = asyncio.create_task(client.connect({
+        "name": "diagnostic-cancel", "transport": "stdio",
+        "command": [sys.executable, "-I", str(script)], "timeout": 20,
+    }))
+    try:
+        async with asyncio.timeout(5):
+            while not marker.exists():
+                await asyncio.sleep(0.01)
+        pid = int(marker.read_text())
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.to_thread(ended, pid)
+        assert not client.connected
+    finally:
+        task.cancel()
+        await client.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_diagnostic_protocol_read_stops_at_its_byte_cap(monkeypatch):
+    import io
+    from types import SimpleNamespace
+
+    from kazma_core import mcp_client
+
+    monkeypatch.setattr(mcp_client, "_STDIO_BYTES", 8)
+    client = mcp_client.MCPClient()
+    stream = io.BytesIO(b"x" * 1000 + b"\n")
+    client._process = SimpleNamespace(stdin=io.BytesIO(), stdout=stream, stderr=io.BytesIO())
+    client._config = mcp_client.MCPServerConfig(name="bounded", timeout=1)
+    with pytest.raises(mcp_client.MCPConnectionError, match="byte budget"):
+        await client._send_stdio("{}\n")
+    assert stream.tell() == 9
