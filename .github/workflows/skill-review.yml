@@ -92,6 +92,7 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade "setuptools>=83.0.0"
           pip install -e ".[test]"
       - name: Check Dependency Vulnerabilities
         run: |
