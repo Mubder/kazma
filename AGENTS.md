@@ -47,6 +47,12 @@ V2 memory lives in `kazma_core.memory`).
 - The LangGraph state NEVER contains `chat_id`, `user_id`, or `message_id`
 - These live in `SessionStore` and are restored via `_build_target_id()` on reply
 - Breaking this leaks platform IDs into the graph and corrupts sessions
+- `SQLiteSessionStore._ensure_db` publishes its connection only after pragmas,
+  table creation and migrations finish. Publishing before those awaits lets
+  another request's fast path query a missing table. Failed/cancelled setup
+  closes the unpublished connection; `close` shares the initialization lock.
+  Gate: `TestConcurrentSerialization.test_concurrent_first_use_waits_for_schema`
+  (old initializer fails deterministically), plus setup failure/close cases.
 
 ### 3. LLM Tool Fallback (`kazma-core/kazma_core/llm_provider.py`)
 - Some providers (NVIDIA NIM) reject tool definitions with 404 "Function not found"
@@ -4035,6 +4041,12 @@ and the sibling suites):**
   OAuth state mismatch logs a short SHA-256 fingerprint, never the raw
   anti-CSRF secret (`github.py`, AUD-024). Migration PK identifiers are
   quote-doubled (`path_rewrite._quote_ident`, AUD-028).
+  The base catalog lives in `#kazma-i18n-data`, an inert JSON script;
+  initial load and `nav.js` parse its text. Never parse the bootstrap's
+  JavaScript as JSON or evaluate it to refresh translations. The bootstrap
+  also defines helpers/listeners; parsing its assignment remainder logged a
+  warning on every live sidebar navigation. Gates: `test_soft_nav_i18n.js`
+  and `tests/e2e/test_soft_nav_into_chat.py`.
 - **Blocking I/O stays off the loop:** the system-log tool tails from the file
   END in a thread (AUD-004), the skill installer validates + extracts in a
   thread (AUD-005), Drive uploads over 5 MB use a chunked **resumable** session
