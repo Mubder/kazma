@@ -106,6 +106,9 @@ class _Graph:
         self.snap = _Snap(NARRATION, paused=True)
 
     def astream_events(self, *a, **k):
+        # Model the graph's durable state merge, including the execution
+        # workspace captured by the turn entry wrapper.
+        self.snap.values["workspace_root"] = a[0]["workspace_root"]
         async def _gen():
             return
             yield  # pragma: no cover - empty async generator
@@ -113,7 +116,9 @@ class _Graph:
         return _gen()
 
     async def ainvoke(self, *a, **k):
+        workspace_root = self.snap.values["workspace_root"]
         self.snap = _Snap(FINAL, paused=False)
+        self.snap.values["workspace_root"] = workspace_root
         return {}
 
     async def aget_state(self, config):

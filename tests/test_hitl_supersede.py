@@ -11,13 +11,14 @@ import pytest
 from kazma_core.agent.hitl_supersede import cancel_pending_hitl, has_pending_hitl
 
 
-def _interrupt_snapshot(with_hitl: bool = True) -> Any:
+def _interrupt_snapshot(with_hitl: bool = True, workspace_root: str | None = None) -> Any:
     if not with_hitl:
         return SimpleNamespace(next=(), tasks=[])
     payload = {"type": "hitl_approval", "tool": "shell_exec", "args": {}}
     intr = SimpleNamespace(value=payload)
     task = SimpleNamespace(interrupts=[intr])
-    return SimpleNamespace(next=("tools",), tasks=[task])
+    values = {"workspace_root": workspace_root} if workspace_root else {}
+    return SimpleNamespace(next=("tools",), tasks=[task], values=values)
 
 
 @pytest.mark.asyncio
@@ -47,12 +48,12 @@ async def test_cancel_pending_hitl_preserves_state_by_default() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancel_pending_hitl_resumes_deny_when_auto_deny_true() -> None:
+async def test_cancel_pending_hitl_resumes_deny_when_auto_deny_true(tmp_path) -> None:
     graph = MagicMock()
 
     async def _aget(_config):
         if graph.ainvoke.await_count == 0:
-            return _interrupt_snapshot(True)
+            return _interrupt_snapshot(True, workspace_root=str(tmp_path))
         return _interrupt_snapshot(False)
 
     graph.aget_state = AsyncMock(side_effect=_aget)

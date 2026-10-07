@@ -91,7 +91,10 @@ async def peek_interrupt(graph: Any, config: dict[str, Any]) -> dict[str, Any] |
 
 async def _ainvoke(graph: Any, state: Any, cfg: dict[str, Any]) -> Any:
     """The only ``graph.ainvoke`` in kazma_core production code."""
-    return await graph.ainvoke(state, cfg)
+    from kazma_core.agent.turn_workspace import turn_workspace
+
+    async with turn_workspace(graph, state, cfg) as prepared:
+        return await graph.ainvoke(prepared, cfg)
 
 
 def _report_turn_timeout(timeout_s: float, thread_id: str) -> None:

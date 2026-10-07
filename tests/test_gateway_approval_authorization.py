@@ -228,7 +228,9 @@ async def test_admin_can_enable_yolo_and_chat_member_can_disable_it(monkeypatch,
 @pytest.mark.parametrize("action", ["approve", "deny"])
 async def test_real_checkpoint_resume_after_restart_records_owner_decision(monkeypatch, tmp_path, action):
     import aiosqlite
+    from kazma_core.agent.turn import _ainvoke
     from kazma_core.config_store import get_config_store
+    from kazma_core.ide.workspace_scope import workspace_path_scope
     from kazma_core.safety.hitl_gates import gate_for
     from kazma_core.sessions.directory import record_thread_owner
     from kazma_gateway.agent_handler import hitl
@@ -260,7 +262,8 @@ async def test_real_checkpoint_resume_after_restart_records_owner_decision(monke
         saver = AsyncSqliteSaver(connection)
         await saver.setup()
         graph = builder.compile(checkpointer=saver)
-        await graph.ainvoke({"messages": []}, config)
+        async with workspace_path_scope(tmp_path):
+            await _ainvoke(graph, {"messages": []}, config)
         pending = await hitl._check_graph_interrupt(graph, config)
         await gate_pending_from_payload(pending)
         gate_id = pending["interrupt_id"]
