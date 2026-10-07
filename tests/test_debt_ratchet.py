@@ -95,8 +95,8 @@ BASELINE = {
 
 #: Structural debt, 2026-09-25 (see the module docstring). Same rules.
 STRUCTURAL_BASELINE = {
-    # Gateway authorization now consumes the directory's ownership helpers.
-    "module_local_public_symbols": 556,
+    # Turn workspace entry consumes the binding resolver through its module.
+    "module_local_public_symbols": 555,
     "patched_value_imports": 72,
     "sleep_then_assert": 52,
     "bare_module_attr_assignments": 0,

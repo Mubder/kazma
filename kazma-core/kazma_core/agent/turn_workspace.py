@@ -11,7 +11,7 @@ from langgraph.types import Command
 
 from kazma_core.exceptions import ConfigError
 from kazma_core.ide.workspace_scope import workspace_path_scope
-from kazma_core.workspace.binding import resolve_active_root
+from kazma_core.workspace import binding
 
 
 @asynccontextmanager
@@ -29,7 +29,7 @@ async def turn_workspace(
     if isinstance(input_state, dict):
         # Ignore a supplied state value: the actual execution scope is the
         # authority at the start of a new turn, including task-specific pins.
-        root = str(await asyncio.to_thread(resolve_active_root))
+        root = str(await asyncio.to_thread(binding.resolve_active_root))
         prepared = {**input_state, "workspace_root": root}
     elif isinstance(input_state, Command):
         snapshot = await graph.aget_state(config)
