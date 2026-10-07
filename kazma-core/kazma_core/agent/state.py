@@ -201,6 +201,13 @@ class SupervisorState(TypedDict, total=False):
     thread_id: str
     """Stable conversation thread ID (persists across checkpoints)."""
 
+    workspace_root: str
+    """Trusted execution root captured at turn entry and restored on resume.
+
+    A pending approval keeps its workspace even if the process restarts or
+    another turn changes the active workspace. Not a client-supplied path.
+    """
+
     tenant_id: str
     """Tenant/sender identity for multi-tenant memory isolation.
 
