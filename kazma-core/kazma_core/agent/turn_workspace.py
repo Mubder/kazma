@@ -26,12 +26,13 @@ async def turn_workspace(
     Legacy checkpoints without this field cannot recover a scope that was
     never saved. Refuse to resume them; a fresh turn captures a safe binding.
     """
-    if isinstance(input_state, dict):
+    maintenance = isinstance(input_state, dict) and input_state.get("needs_compaction") is True
+    if isinstance(input_state, dict) and not maintenance:
         # Ignore a supplied state value: the actual execution scope is the
         # authority at the start of a new turn, including task-specific pins.
         root = str(await asyncio.to_thread(binding.resolve_active_root))
         prepared = {**input_state, "workspace_root": root}
-    elif isinstance(input_state, Command):
+    elif isinstance(input_state, Command) or maintenance:
         snapshot = await graph.aget_state(config)
         values = getattr(snapshot, "values", {})
         if not isinstance(values, dict) or "workspace_root" not in values:
@@ -47,7 +48,7 @@ async def turn_workspace(
         if not await asyncio.to_thread(Path(root).is_dir):
             message = "⚠️ Cannot resume: checkpointed workspace directory is unavailable. Restore it or start a fresh turn."
             raise ConfigError(message, user_message=message)
-        prepared = input_state
+        prepared = {**input_state, "workspace_root": root} if maintenance else input_state
     else:
         yield input_state
         return

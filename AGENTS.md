@@ -428,7 +428,8 @@ workspace. Three new modules; understanding their interaction is essential.
   points (`turn_runtime.invoke_turn` / `astream_events`) and core `_ainvoke`
   use it. A `Command` reads that checkpointed root and restores a path scope
   for execution; the approval request's context and global active row cannot
-  redirect a paused turn. A new turn captures the current scope afresh.
+  redirect a paused turn. A new turn captures the current scope afresh;
+  `/compact` maintenance keeps the checkpoint's root instead.
   Legacy checkpoints without the root, invalid roots and missing directories
   fail closed with a public instruction to start a fresh turn. Never infer a
   legacy root from a pending tool's arguments. Gate:

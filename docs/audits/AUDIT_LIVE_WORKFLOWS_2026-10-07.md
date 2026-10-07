@@ -32,7 +32,8 @@ core invoke use it. A Command resume restores the saved root for the execution
 scope and resets the caller's context afterwards. New turns capture a fresh
 root. Invalid/missing roots and legacy checkpoints without a saved binding
 refuse to resume with an actionable public error; no root is guessed from tool
-arguments.
+arguments. Manual compaction preserves the checkpoint binding rather than
+capturing the caller's current root; it is maintenance, not a fresh user turn.
 
 The regression suite uses the declared SupervisorState and a real SQLite
 checkpointer reopened between pause and resume. It exercises streaming and

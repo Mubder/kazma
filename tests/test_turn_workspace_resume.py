@@ -97,6 +97,28 @@ async def test_negative_control_unscoped_resume_edits_the_wrong_workspace(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_compaction_cannot_retarget_a_paused_turn(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    for root in (a, b):
+        root.mkdir()
+        (root / "effect.txt").write_text("", encoding="utf-8")
+    config = {"configurable": {"thread_id": "compact"}}
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "compact.db")) as saver:
+        graph = _graph(saver)
+        async with workspace_path_scope(a):
+            await invoke_turn(graph, {}, config, persist=False, register=False, session_id="owned")
+        # /compact re-enters with checkpoint state, not a new user turn.
+        async with workspace_path_scope(b):
+            compact = {"needs_compaction": True, "workspace_root": str(b)}
+            await invoke_turn(graph, compact, config, persist=False, register=False, session_id="owned")
+            assert (await graph.aget_state(config)).values["workspace_root"] == str(a.resolve())
+            await invoke_turn(graph, Command(resume=True), config, persist=False, register=False, session_id="owned")
+            assert resolve_active_root() == b.resolve()
+    assert (a / "effect.txt").read_text() == "approved\n"
+    assert (b / "effect.txt").read_text() == ""
+
+
+@pytest.mark.asyncio
 async def test_concurrent_resumes_and_exception_cleanup_keep_their_own_scope(tmp_path):
     async def run(root):
         root.mkdir()
