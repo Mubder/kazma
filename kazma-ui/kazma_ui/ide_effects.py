@@ -10,6 +10,8 @@ import uuid
 from typing import Any
 
 from fastapi import Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
@@ -28,6 +30,14 @@ class IdeEffectRoute(APIRoute):
             path = request.url.path
             if request.method != "POST" or path in _READ_ONLY_PATHS:
                 return await original(request)
+            # Run declared rate admission before claiming an effect. A 429
+            # admits no work and must remain retryable after its window ends.
+            # The dependency remembers this request's check, so the original
+            # handler applies the same limit without consuming it twice.
+            for dependency in self.dependencies:
+                check = dependency.dependency
+                if getattr(check, "_kazma_rate_limit", False):
+                    await check(request)
             raw = await request.body()
             try:
                 payload = await request.json() if raw else {}
@@ -60,7 +70,13 @@ class IdeEffectRoute(APIRoute):
             from kazma_core.workspace.binding import resolve_active_root
 
             async def dispatch() -> dict[str, Any]:
-                response = await original(request)
+                try:
+                    response = await original(request)
+                except RequestValidationError as exc:
+                    # FastAPI rejected the request before calling the endpoint.
+                    # Keep its public 422 response, rather than reporting an
+                    # unknown tool effect for work that never ran.
+                    response = await request_validation_exception_handler(request, exc)
                 body = json.loads(response.body)
                 return {"body": body, "status_code": response.status_code,
                         "effect_uncertain": bool(body.get("effect_uncertain")) if isinstance(body, dict) else False}

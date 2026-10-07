@@ -302,6 +302,17 @@ async def dispatch_worker(
                 _depth=_depth + 1,
             )
             recorded = True  # _handle_handoff always record_* or release_probe
+            # The caller chooses the last handoff result for task-level
+            # fallback. Keep earlier effects on every failed result, including
+            # a missing target and failures deeper in a multi-hop chain.
+            if effects.invoked or any(not result.retry_safe for result in results):
+                for result in results:
+                    if result.status != "success":
+                        result.retry_safe = False
+                        result.error = (
+                            str(result.error or "Handoff did not complete")
+                            + " Handoff-chain fallback withheld because a mutating tool was invoked; inspect its effects."
+                        )
             return results
 
         worker_result = WorkerResult.from_dict(raw_result)

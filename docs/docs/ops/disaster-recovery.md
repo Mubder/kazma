@@ -434,7 +434,11 @@ deliberate operation and retain it if the response is lost. A repeated request
 with the same principal, tenant, payload and workspace returns the saved response;
 changed requests and unresolved effects return 409 without another dispatch or
 approval. Authentication and operator role are checked before a saved response
-is returned. The web IDE retains unresolved operation IDs across reload within
+is returned.
+Rate admission precedes receipt admission and is applied once per request,
+including saved-response reads. HTTP 429 does not admit an effect; the same
+operation key can be submitted again after the limiter window expires.
+The web IDE retains unresolved operation IDs across reload within
 the same browser tab; session storage holds only a payload digest and ID.
 Clients that omit the header get a generated response key, which cannot rescue
 a lost response they never received. Do not start a new keyed operation merely

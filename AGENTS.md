@@ -2702,7 +2702,12 @@ post-invocation error into a retryable ordinary result.
 `dispatch_effects` tracks actual local/MCP mutator invocation across the worker
 retry boundary, after validation and HITL. An unsuccessful dispatch after such
 an invocation carries `retry_safe=False`; keep it on `WorkerResult` through
-serialization and stop both retry and fallback chains. In-process workers stop
+serialization and stop both retry and fallback chains.
+Handoff failures retain earlier invocation evidence on every failed result,
+including missing targets, so selecting the chain's final result cannot reopen
+task-level fallback. IDE rate admission runs before receipt admission and once
+per HTTP request; throttled requests retain HTTP 429 and can retry after expiry.
+In-process workers stop
 uncertain tool loops with an empty output and no synthesis. This does not qualify
 whole-agent Temporal retries or custom workers' external effects outside the tool
 registry. Completed effects and unknown effects both make whole-worker replay

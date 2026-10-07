@@ -14,6 +14,7 @@ from kazma_core.agent.tool_registry import LocalToolRegistry
 from kazma_core.ide.service import IdeService
 from kazma_core.llm_provider import LLMResponse, ToolCall
 from kazma_core.swarm.engine import SwarmEngine
+from kazma_core.swarm.handoff import HandoffRequest
 from kazma_core.swarm.reliability import FallbackChain, RetryPolicy
 from kazma_core.swarm.task import WorkerResult
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker
@@ -47,6 +48,37 @@ def _client():
     app = FastAPI()
     app.include_router(create_ide_router())
     return TestClient(app)
+
+
+def test_throttled_key_can_be_admitted_after_the_rate_window(fixture_tools, monkeypatch):
+    from kazma_ui import rate_limit as limiter
+
+    monkeypatch.setattr(limiter, "_enabled", lambda: True)
+    monkeypatch.setattr(limiter, "_per_minute", lambda bucket, default: 1)
+    limiter._windows.clear()
+    try:
+        with _client() as client:
+            first = client.post("/api/ide/run", json={}, headers={"Idempotency-Key": "admitted"})
+            assert first.status_code == 200  # One dependency admission, not two.
+            limited = client.post("/api/ide/run", json={}, headers={"Idempotency-Key": "waiting"})
+            assert limited.status_code == 429 and "Retry-After" in limited.headers
+            limiter._windows.clear()  # The limiter window expires; no work was admitted.
+            resumed = client.post("/api/ide/run", json={}, headers={"Idempotency-Key": "waiting"})
+            assert resumed.status_code == 200 and not resumed.json().get("effect_uncertain")
+    finally:
+        limiter._windows.clear()
+
+
+def test_invalid_body_keeps_validation_response_without_tool_effect(fixture_tools):
+    _, _, safety = fixture_tools
+    with _client() as client:
+        headers = {"Idempotency-Key": "invalid-body"}
+        first = client.post("/api/ide/write", json="not a dictionary", headers=headers)
+        repeated = client.post("/api/ide/write", json="not a dictionary", headers=headers)
+        assert first.status_code == repeated.status_code == 422
+        assert first.json() == repeated.json() and isinstance(first.json()["detail"], list)
+        assert not first.json().get("effect_uncertain")
+    safety.check.assert_not_awaited()
 
 
 def test_http_retry_after_lost_response_reuses_result_and_gate(fixture_tools):
@@ -290,3 +322,54 @@ async def test_fallback_stops_after_an_uncertain_alternative():
     result = await FallbackChain(["first", "second"]).execute(primary, dispatch_worker=fallback)
     assert result is held
     fallback.assert_awaited_once_with("first")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effect_at", ["source", "target", "none", "missing"])
+async def test_handoff_failure_keeps_chain_effects(fixture_tools, monkeypatch, effect_at):
+    root, registry, _ = fixture_tools
+    monkeypatch.setattr("kazma_core.swarm.worker_dispatch._index_worker_l4_memory", AsyncMock())
+    fallback_calls = []
+    marker = root / "effects.txt"
+
+    @registry.register(name="file_append")
+    async def append():
+        with marker.open("a", encoding="utf-8") as stream:
+            stream.write("once\n")
+        return "written"
+
+    class Worker(SwarmWorker):
+        async def start(self):
+            pass
+
+        async def stop(self):
+            pass
+
+        async def dispatch(self, task, context=""):
+            if self.name == "source":
+                if effect_at in ("source", "missing"):
+                    await registry.execute("file_append", {})
+                raise HandoffRequest("absent" if effect_at == "missing" else "target", "finish work")
+            if self.name == "target":
+                if effect_at == "target":
+                    await registry.execute("file_append", {})
+                return {"worker": self.name, "status": "error", "output": "", "error": "read failed"}
+            fallback_calls.append(self.name)
+            await registry.execute("file_append", {})
+            return {"worker": self.name, "status": "success", "output": "done"}
+
+    engine = SwarmEngine()
+    monkeypatch.setattr(engine, "get_retry_policy", lambda name: RetryPolicy(max_retries=0))
+    for name in ("source", "target", "fallback"):
+        engine._workers[name] = Worker(name)
+    results = await engine._dispatch_worker(engine.get_worker("source"), "original work", "")
+    final, _ = await engine._execute_fallback_chain(
+        results[-1], ["fallback"], prompt="original work", context="",
+    )
+    assert marker.read_text().splitlines() == ["once"]
+    assert len(fallback_calls) == (1 if effect_at == "none" else 0)
+    if effect_at != "none":
+        assert final.status == "error" and final.retry_safe is False
+        assert all(r.retry_safe is False for r in results if r.status != "success")
+    else:
+        assert final.status == "success"

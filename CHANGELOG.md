@@ -6,12 +6,16 @@
   receipts. Uncertain swarm effects stop with an empty output, without another
   model synthesis. Failed worker dispatches after local/MCP mutator invocation
   withhold both retry and fallback; the flag survives worker-result storage.
+  Failed handoffs preserve invocation evidence from earlier workers, including
+  missing targets, so task-level fallback cannot repeat their actions.
 - IDE mutation HTTP requests accept `Idempotency-Key`, bound to the authenticated
   principal, tenant, request and captured workspace. Completed retries return
   the saved response; concurrent, changed and uncertain requests stay held.
   The web IDE retains unresolved IDs across response loss and tab reload,
   storing only a request digest and operation ID. Existing HITL paths remain
   the execution authority.
+  Rate admission precedes receipt admission; throttled requests keep HTTP 429
+  and may retry after the limiter window expires.
 - New SQLite/PostgreSQL contracts cover rollback after an earlier batch
   statement, concurrent conditional saves and restored approval resumes with
   one effect in the original workspace. Historical GKE results are recorded
