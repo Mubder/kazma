@@ -186,6 +186,7 @@ class TestWSChatConnectHitlScan:
         mock_graph.aget_state = AsyncMock(return_value=mock_snapshot)
 
         mock_ws = AsyncMock()
+        mock_ws.query_params = {}
         mock_ws.receive_text = AsyncMock(side_effect=Exception("Done"))
 
         router = create_ws_chat_router(graph_getter=lambda: mock_graph)
@@ -200,9 +201,10 @@ class TestWSChatConnectHitlScan:
         mock_store = MagicMock()
         mock_sess = MagicMock()
         mock_sess.thread_id = "test-thread-123"
-        mock_store.get_or_create.return_value = mock_sess
+        mock_store.get.return_value = mock_sess
+        mock_store.thread_is_exclusive.return_value = True
 
-        with patch("kazma_ui.auth.websocket_is_authenticated", return_value=True), \
+        with patch("kazma_ui.auth.get_websocket_principal", return_value={"tenant_id": "default"}), \
              patch("kazma_ui.routes.ws_chat.get_session_manager", return_value=mock_store):
             try:
                 await endpoint(mock_ws, "test-session-123")
@@ -231,5 +233,4 @@ class TestCostBreakerUserInteraction:
         assert breaker.is_halted is False
         assert breaker.should_halt() is False
         assert breaker.current_cost == 0.0
-
 

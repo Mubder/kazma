@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## Tenant telemetry and remote database capabilities (2026-10-07)
+
+Chat sockets now validate the caller's identity and tenant before any history,
+checkpoint, journal or broker access. Unknown sessions cannot be claimed by a
+socket. The browser registers empty shells over HTTP without sidebar rows;
+new nondefault tenants receive independent graph IDs. Gateway sessions must
+already exist, and historical graph bindings shared by different tenants fail
+closed on ownership checks. Expired credentials cannot become the localhost
+operator through peer trust.
+
+Every exported IDE MCP alias now maps to its canonical risk tier, including
+`run_command` and `run_tests`, so secret authentication and the existing HITL
+execution gates apply consistently.
+
+Remote database reads require operator-defined tenant/table capabilities and
+dedicated constrained login roles. Raw DSNs are refused. SQL is parsed into a
+restricted read grammar, role privileges and table semantics are checked, and
+queries/results have execution and size limits. SQLite retains workspace/store
+confinement and now opens files read-only. See the native skills guide for
+connection setup and compatibility limits.
+
+The skill review workflow now runs the maintained tests and the shared secret
+scanner over native skills. Its dependency scan fails on unreviewed advisories
+instead of ignoring scan errors. A fresh OSV check raised security minimums
+for langgraph-sdk, multidict and Werkzeug, with the dependency lock updated.
+
 ## Gateway approval and IDE Git safety (2026-10-06)
 
 Gateway text approvals now require an administrator who owns the thread,

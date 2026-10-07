@@ -52,7 +52,7 @@ from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from kazma_core.exceptions import sanitize_error
 
 from kazma_ui.rate_limit import rate_limit
@@ -281,7 +281,7 @@ def create_sse_chat_router(
 
     r = APIRouter(tags=["chat-sse"])
 
-    def _resolve_session(session_id: str) -> tuple[Any, str]:
+    def _resolve_session(session_id: str, *, durable: bool = True) -> tuple[Any, str]:
         """Return (ChatSession, thread_id) for ``session_id``.
 
         Creates the ChatSession in the shared store on first use so the
@@ -291,18 +291,46 @@ def create_sse_chat_router(
         ``gw-telegram-…``. Those ids **are** the LangGraph thread_id, so
         Web and Telegram share one checkpointer season.
         """
-        session = _get_store().get_or_create(session_id)
+        from kazma_core.tenant_isolation import require_tenant_id
+
+        store = _get_store()
+        session = store.get(session_id)
+        if session is None:
+            # Only the gateway mirror may introduce a gateway checkpoint.
+            # Other tenants may use the same browser session id, but must
+            # receive a fresh global graph/journal id, never another tenant's.
+            if session_id.startswith("gw-"):
+                raise PermissionError("Session unavailable")
         # One id everywhere: Web session_id == LangGraph thread_id, same as
         # gw-* platform seasons. Existing rows keep a previously stored
         # thread_id so we never orphan a checkpointer chain.
-        if session_id.startswith("gw-"):
-            if session.thread_id != session_id:
-                session.thread_id = session_id
-                _get_store().put(session)
-        elif not session.thread_id:
-            session.thread_id = session_id
-            _get_store().put(session)
+        if session is None or not session.thread_id:
+            if session_id.startswith("gw-"):
+                raise PermissionError("Session unavailable")
+            new_thread = (
+                session_id if require_tenant_id() == "default" else str(uuid.uuid4())
+            )
+            session = store.get_or_create(session_id, durable=durable, thread_id=new_thread)
+        if not store.thread_is_exclusive(session.thread_id):
+            raise PermissionError("Session unavailable")
         return session, session.thread_id
+
+    @r.post("/api/chat/sessions", dependencies=[Depends(rate_limit("chat-bind", 60))])
+    async def bind_chat_session(request: Request) -> JSONResponse:
+        """Register an empty browser shell before its telemetry subscription."""
+        try:
+            body = await request.json()
+            sid = body.get("session_id") if isinstance(body, dict) else None
+            if not isinstance(sid, str) or not sid.strip() or len(sid) > 200:
+                return JSONResponse({"error": "Invalid session id"}, status_code=400)
+            session, thread_id = await asyncio.to_thread(_resolve_session, sid, durable=False)
+            return JSONResponse({"session_id": session.session_id, "thread_id": thread_id})
+        except PermissionError:
+            return JSONResponse({"error": "Session unavailable"}, status_code=404)
+        except Exception as exc:
+            from kazma_core.errors import safe_error
+
+            return JSONResponse({"error": safe_error(exc)}, status_code=503)
 
     # ── Provider profile management ───────────────────────────────
 
@@ -374,6 +402,10 @@ def create_sse_chat_router(
             )
 
         session_id = body.get("session_id") or str(uuid.uuid4())
+        try:
+            session, thread_id = await asyncio.to_thread(_resolve_session, session_id)
+        except PermissionError:
+            return JSONResponse({"error": "Session unavailable"}, status_code=404)
         workspace_id = str(body.get("workspace_id") or "").strip()
         _ws_token = None
         _model_token = None
@@ -397,7 +429,6 @@ def create_sse_chat_router(
         ide_context = str(body.get("context") or "").strip()[:_IDE_CONTEXT_MAX_CHARS]
 
         # ── Resolve session and thread_id (shared store) ───────────
-        session, thread_id = _resolve_session(session_id)
 
         # ── Turn Delivery V2: cursor attach (replay + live reattach) ──
         # Serves the missed window of a RUNNING turn (pump survives client

@@ -11,7 +11,7 @@ description: Every KAZMA_* variable the code reads, where, and its default. Gene
 > `python scripts/generate_env_reference.py` after adding or removing a variable;
 > `tests/test_env_reference.py` fails while this page is stale.
 
-**266** variables are read by the product code; **266** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
+**265** variables are read by the product code; **265** are described on the curated page and **0** are not yet (marked —). New variables must be described there:
 the undocumented count is on a ratchet that may only go down.
 
 | Variable | Default in code | Read in | Described |
@@ -56,7 +56,6 @@ the undocumented count is on a ratchet that may only go down.
 | `KAZMA_DATA_DIR` | (none) | `kazma_core.config_store`, `kazma_core.paths` | yes |
 | `KAZMA_DB_BACKEND` | (none) | `kazma_core.db.backend` | yes |
 | `KAZMA_DB_BACKEND_SOURCE` | (none) | `kazma_core.migration.exporter` | yes |
-| `KAZMA_DB_CLIENT_ALLOWED_HOSTS` | (none) | `kazma_skills.native.database_client.tools` | yes |
 | `KAZMA_DB_CONTAINER` | `""` | `kazma_core.migration.pg_bridge` | yes |
 | `KAZMA_DB_INTERNAL_PORT` | `"5432"` | `kazma_core.migration.pg_bridge` | yes |
 | `KAZMA_DEMO_MODE` | `""` | `kazma_core.memory.belief_extractor`, `kazma_core.memory.health`, `kazma_core.security.boot_guard` +5 | yes |
