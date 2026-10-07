@@ -494,7 +494,10 @@ async def invoke_turn(
             task = None
 
     try:
-        return await graph.ainvoke(input_state, config)
+        from kazma_core.agent.turn_workspace import turn_workspace
+
+        async with turn_workspace(graph, input_state, config) as prepared:
+            return await graph.ainvoke(prepared, config)
     finally:
         try:
             if persist:
@@ -535,5 +538,8 @@ async def astream_events(
     untracked entry in UI code.
     """
     kwargs.setdefault("version", "v2")
-    async for ev in graph.astream_events(input_state, config=config, **kwargs):
-        yield ev
+    from kazma_core.agent.turn_workspace import turn_workspace
+
+    async with turn_workspace(graph, input_state, config) as prepared:
+        async for ev in graph.astream_events(prepared, config=config, **kwargs):
+            yield ev

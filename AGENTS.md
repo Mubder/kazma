@@ -422,6 +422,19 @@ workspace. Three new modules; understanding their interaction is essential.
 - `ContextVar` propagates across `await` points within one asyncio task;
   `asyncio.create_task` copies the context (var travels with it).
 
+- **Approval resumes keep the turn's workspace** (2026-10-07):
+  `agent.turn_workspace.turn_workspace` captures the resolved root at turn
+  entry into the declared `SupervisorState.workspace_root`. Both UI entry
+  points (`turn_runtime.invoke_turn` / `astream_events`) and core `_ainvoke`
+  use it. A `Command` reads that checkpointed root and restores a path scope
+  for execution; the approval request's context and global active row cannot
+  redirect a paused turn. A new turn captures the current scope afresh.
+  Legacy checkpoints without the root, invalid roots and missing directories
+  fail closed with a public instruction to start a fresh turn. Never infer a
+  legacy root from a pending tool's arguments. Gate:
+  `tests/test_turn_workspace_resume.py` (reopened SQLite saver, both entries,
+  concurrent scopes, exactly one effect, old unscoped resume as negative control).
+
 **E. Repo identity — `WorkspaceStore` persistence**
 - `stores/workspaces.py` has repo-identity columns (`repo_url`, `owner`,
   `repo`, `default_branch`, `is_github`) added via idempotent `ALTER TABLE`.

@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Workspace binding across approval resumes (2026-10-07)
+
+New graph turns save their execution workspace in the checkpoint. Approval,
+watchdog and gateway resumes restore that root instead of following the current
+global workspace, including after a process restart. The streaming, UI invoke
+and core invoke entry points share the same binding helper. Older checkpoints
+without a saved root refuse to resume and ask for a fresh turn; a missing or
+invalid saved directory also fails closed.
+
 ## Gateway session store cold-start concurrency (2026-10-07)
 
 Concurrent first requests wait until SQLite pragmas, table creation and column
