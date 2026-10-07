@@ -441,8 +441,9 @@ def _check_code_execution() -> dict[str, Any]:
     from kazma_core.sandbox.e2b import e2b_available
     from kazma_core.security.child_env import tool_child_env
     from kazma_core.tools import code_exec
+    from kazma_core.safety.deployment_policy import container_required
 
-    if e2b_available():
+    if not container_required() and e2b_available():
         return {"status": "ok", "component": "code_execution", "backend": "e2b",
                 "check_mode": "sdk_and_credentials_present", "remote_service_verified": False}
     if not code_exec.local_exec_forbidden():
@@ -503,9 +504,17 @@ async def _readiness(*, runtime: Any = None, required: Any = None):
     from kazma_core.swarm.durable import durable_required
 
     temporal_required = durable_required()
+    from kazma_core.safety.deployment_policy import container_required, policy_read_failures
+
+    policy_error = False
+    try:
+        strict_container = await asyncio.wait_for(asyncio.to_thread(container_required), timeout=2)
+    except policy_read_failures():
+        strict_container = False
+        policy_error = True
     if temporal_required or (isinstance(required, (list, tuple)) and "temporal" in required):
         plan += (("temporal", _check_temporal_runtime, 3.0),)
-    if isinstance(required, (list, tuple)) and "code_execution" in required:
+    if strict_container or (isinstance(required, (list, tuple)) and "code_execution" in required):
         plan += (("code_execution", _check_code_execution, 3.0),)
     results = await asyncio.gather(
         *(_offloaded_check(check, name, cap) for name, check, cap in plan),
@@ -525,6 +534,11 @@ async def _readiness(*, runtime: Any = None, required: Any = None):
         critical.add("chat_runtime")
     if temporal_required:
         critical.add("temporal")
+    if strict_container:
+        critical.add("code_execution")
+    if policy_error:
+        critical.add("execution_policy")
+        checks["execution_policy"] = {"status": "failed", "error": "Execution policy unavailable"}
     if isinstance(required, (list, tuple)):
         critical.update(str(name) for name in required)
     elif required is not None:

@@ -742,6 +742,28 @@ _NO_SEND_RE = re.compile(
     r"(?is)\b(don'?t\s+send|do\s+not\s+send|no\s+telegram|no\s+email\s+send)\b"
 )
 
+
+def _has_global_audit_instruction(text: str) -> bool:
+    """Keep global refusals, without widening a workspace boundary into one.
+
+    Mount descriptions are execution facts, not a request to audit only.
+    Exemptions are deliberately narrow; a separate global prohibition wins.
+    """
+    for match in _AUDIT_ONLY_RE.finditer(text):
+        phrase = match.group(0).lower()
+        suffix = text[match.end():]
+        if re.search(r"(?:write|edit|modify|regenerate|change|changing)", phrase):
+            if re.match(r"\s+(?:(?:files?|code|anything)\s+)?(?:outside|beyond)\b", suffix, re.I):
+                continue
+        if re.fullmatch(r"read[\s-]?only", phrase):
+            prefix = text[max(0, match.start() - 40):match.start()]
+            if re.search(r"\bmounted\s+(?:as\s+)?$", prefix, re.I):
+                continue
+            if re.match(r"\s+(?:mount|volume|filesystem)\b", suffix, re.I):
+                continue
+        return True
+    return False
+
 # MCP tools that write/exec — blocked under audit_only.
 _MCP_WRITE_RE = re.compile(
     r"(?i)(write|delete|move|rename|create|remove|unlink|exec|shell|run|put|patch|post)"
@@ -777,7 +799,7 @@ def parse_hard_constraints(text: str) -> list[str]:
     if not t:
         return []
     found: list[str] = []
-    if _AUDIT_ONLY_RE.search(t):
+    if _has_global_audit_instruction(t):
         found.extend(["audit_only", "read_only", "no_code_change", "no_writes"])
     if _NO_SEND_RE.search(t):
         found.append("no_send")

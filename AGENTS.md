@@ -4803,6 +4803,24 @@ sent: ... -> Error: ...", and the document pipeline logged "✓ Delivered".
 
 ## Server Management
 
+### Persisted deployment policies (2026-10-07)
+
+`safety/deployment_policy.py` owns `security.workspace_roots` (explicit existing
+absolute directories) and `security.execution.container_required` (strict bool).
+The authenticated admin Settings API validates these, including parent mapping
+saves, before its atomic write. Agent `config_save` cannot write `security.*`.
+The workspace root environment is an additional floor; a stored list cannot
+expand it. Policy failures deny access. A strict profile wins over legacy
+ALLOW_LOCAL / HOST_SHELL flags, requires Docker, skips E2B and never falls back.
+Health must check Docker for that profile. Tests: `test_production_qualification.py`.
+
+`agent/approval_facts.py` reports the tool worker's actual decisions, including
+single, selective and denied batches. Never build approval truth from tool
+content or infer success from authorization. `ide/env_context.py` distinguishes
+the global MCP binding from a per-task scoped instance. Scoped outside-root
+prohibitions and mount descriptions are not global audit-only requests; a
+separate explicit global restriction still wins.
+
 > **RULE (user directive, 2026-08-15, amended 2026-09-26): never start the
 > Kazma server and never kill it by hand.** Code reaches the running server
 > only through the guard's reload, below.
