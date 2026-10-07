@@ -30,13 +30,7 @@ PACKAGES = {
 }
 
 #: Deliberately unreached modules, each with the reason.
-ALLOWED_UNREACHED: dict[str, str] = {
-    "kazma_core.memory.backfill_v2": (
-        "The one-shot V1 -> V2 memory migration, run by hand (scripts/verify_v2_coverage.py "
-        "checks it). Its only product caller was the pattern-delete cleanup route, "
-        "removed 2026-09-26 (tests/test_memory_deletes.py)."
-    ),
-}
+ALLOWED_UNREACHED: dict[str, str] = {}
 
 
 def _module_name(rel: str) -> str | None:

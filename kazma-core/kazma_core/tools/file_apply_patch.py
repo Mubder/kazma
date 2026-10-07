@@ -277,10 +277,11 @@ def _run_pytest(test_files: list[str], cwd: Path) -> str:
     import sys
 
     from kazma_core.security.child_env import tool_child_env
+    from kazma_core.security.process_budget import OutputLimitExceeded, run_bounded
 
     cmd = [sys.executable, "-m", "pytest", "-q", "--tb=line", *test_files]
     try:
-        proc = subprocess.run(
+        proc = run_bounded(
             cmd,
             cwd=str(cwd),
             # The workspace's tests are code nobody reviewed; they get the
@@ -293,6 +294,8 @@ def _run_pytest(test_files: list[str], cwd: Path) -> str:
         )
     except subprocess.TimeoutExpired:
         return "TESTS TIMEOUT (90s)"
+    except OutputLimitExceeded:
+        return "TESTS ERROR: output budget exceeded"
     except OSError as exc:
         return f"TESTS ERROR: {exc}"
     out = ((proc.stdout or "") + (proc.stderr or "")).strip()

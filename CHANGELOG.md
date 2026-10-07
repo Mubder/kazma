@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Audit execution and recovery contracts (2026-10-07)
+
+Shell argument checks cover attached short-option values and ambiguous tar
+clusters. Executables must resolve within explicit PATH directories; the Windows
+current directory and unresolved bare names cannot supply the binary.
+
+Shell tools, native skills, operator hooks, patch tests and MCP children share
+process budgets and tree cleanup. Windows starts children suspended under a Job
+Object; POSIX inherits address-space/CPU limits in a new process group. Output
+overflow fails explicitly. These limits do not replace production Docker
+isolation. Attachment URL fetches validate public addresses and redirects, pin
+DNS and keep Slack credentials confined to the initial Slack host. Swarm event
+text is rendered through DOM text nodes.
+
+The documented V2 compatibility APIs and recovery operations remain supported.
+An explicit offline legacy-backfill CLI preserves tenant data and refuses
+inherited live paths; reruns report only actual inserts. User-search LIKE
+fallbacks escape wildcard characters instead of widening a percent query.
+
 ## Deployment secrets and bounded attachment reads (2026-10-07)
 
 The Postgres and Neo4j Compose templates require explicit passwords and publish

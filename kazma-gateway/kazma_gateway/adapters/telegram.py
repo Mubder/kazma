@@ -1702,11 +1702,11 @@ class TelegramAdapter(BaseAdapter):
         data = att.data
         if data is None and att.url:
             try:
-                resp = await self._http.get(att.url, timeout=30.0)
-                resp.raise_for_status()
-                data = resp.content
+                from kazma_gateway.adapters.downloads import public_attachment_download
+
+                data = await public_attachment_download(att.url)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("[telegram] attachment fetch failed: %s", exc)
+                logger.warning("[telegram] attachment fetch failed: %s", type(exc).__name__)
                 return False
         if not data:
             return False

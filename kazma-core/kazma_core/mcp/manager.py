@@ -449,21 +449,33 @@ class MCPServerHandle:
 class _SyncWriterAdapter:
     """Expose the ``write``/``drain`` pair the bridge uses on a blocking pipe."""
 
-    def __init__(self, stream: Any) -> None:
+    def __init__(self, stream: Any, limit: int = 16 * 1024 * 1024) -> None:
         self._stream = stream
+        self._limit = limit
+        self._pending: list[bytes] = []
 
     def write(self, data: bytes) -> None:
-        self._stream.write(data)
+        if len(data) + sum(map(len, self._pending)) > self._limit:
+            raise ValueError("MCP stdio write exceeds its byte budget")
+        self._pending.append(data)
 
     async def drain(self) -> None:
-        await asyncio.to_thread(self._stream.flush)
+        pending, self._pending = self._pending, []
+
+        def flush():
+            for data in pending:
+                self._stream.write(data)
+            self._stream.flush()
+
+        await asyncio.to_thread(flush)
 
 
 class _SyncReaderAdapter:
     """Async ``readline``/``read`` over a blocking pipe via executor threads."""
 
-    def __init__(self, stream: Any) -> None:
+    def __init__(self, stream: Any, limit: int = 16 * 1024 * 1024) -> None:
         self._stream = stream
+        self._limit = limit
 
     # _drain_stderr probes for read1 (BufferedReader) — delegate synchronously.
     def read1(self, n: int) -> bytes:
@@ -472,9 +484,14 @@ class _SyncReaderAdapter:
         return self._stream.read(n)
 
     async def readline(self) -> bytes:
-        return await asyncio.to_thread(self._stream.readline)
+        line = await asyncio.to_thread(self._stream.readline, self._limit + 1)
+        if len(line) > self._limit:
+            raise ValueError("MCP stdio line exceeds its byte budget")
+        return line
 
     async def read(self, n: int = -1) -> bytes:
+        if n < 0 or n > self._limit:
+            raise ValueError("MCP stdio read exceeds its byte budget")
         return await asyncio.to_thread(self._stream.read, n)
 
 
@@ -489,11 +506,12 @@ class _SyncProcessAdapter:
     stdio path works on every event-loop policy.
     """
 
-    def __init__(self, proc: subprocess.Popen[bytes]) -> None:
+    def __init__(self, proc: subprocess.Popen[bytes], tree: Any = None, limit: int = 16 * 1024 * 1024) -> None:
         self._proc = proc
-        self.stdin = _SyncWriterAdapter(proc.stdin)
-        self.stdout = _SyncReaderAdapter(proc.stdout)
-        self.stderr = _SyncReaderAdapter(proc.stderr)
+        self._tree = tree
+        self.stdin = _SyncWriterAdapter(proc.stdin, limit)
+        self.stdout = _SyncReaderAdapter(proc.stdout, limit)
+        self.stderr = _SyncReaderAdapter(proc.stderr, limit)
 
     @property
     def pid(self) -> int:
@@ -501,16 +519,24 @@ class _SyncProcessAdapter:
 
     @property
     def returncode(self) -> int | None:
-        return self._proc.poll()
+        return self._tree.returncode() if self._tree is not None else self._proc.poll()
 
     def terminate(self) -> None:
-        self._proc.terminate()
+        if self._tree is not None:
+            self._tree.close()
+        else:
+            self._proc.terminate()
 
     def kill(self) -> None:
-        self._proc.kill()
+        if self._tree is not None:
+            self._tree.close()
+        else:
+            self._proc.kill()
 
     async def wait(self) -> int:
-        return await asyncio.to_thread(self._proc.wait)
+        if self._tree is not None:
+            self._tree.close()
+        return await asyncio.to_thread(self._proc.wait, timeout=5)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -757,7 +783,10 @@ class AsyncMCPManager:
                         )
                     except TimeoutError:
                         process.kill()
-                        await process.wait()
+                        await asyncio.wait_for(process.wait(), timeout=_TERMINATE_GRACE_SECONDS)
+                elif isinstance(process, _SyncProcessAdapter):
+                    # An exited leader may have left live descendants.
+                    await process.wait()
                 logger.info("[MCP] Terminated stdio process '%s'", handle.name)
             except ProcessLookupError:
                 pass
@@ -1559,31 +1588,13 @@ class AsyncMCPManager:
                             + str(env.get("PATH") or _os.environ.get("PATH", ""))
                         )
 
-            try:
-                process = await asyncio.create_subprocess_exec(
-                    *command,
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    env=env,
-                    cwd=working_dir,
-                    limit=stdio_limit,
-                )
-            except NotImplementedError:
-                # Windows SelectorEventLoop (forced for psycopg compat) cannot
-                # host asyncio subprocesses. Fall back to blocking Popen +
-                # executor-thread adapter — same JSON-RPC protocol, works on
-                # every event-loop policy.
-                popen: subprocess.Popen[bytes] = await asyncio.to_thread(lambda: subprocess.Popen(
-                        command,
-                        stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        env=env,
-                        cwd=working_dir,
-                    ),
-                )
-                process = _SyncProcessAdapter(popen)  # type: ignore[assignment]
+            from kazma_core.security.process_budget import start_process_async
+
+            # One contained launch on every loop policy. MCP servers are
+            # long-lived: per-request deadlines remain on the bridge, while
+            # memory and pipe limits hold for their complete lifetime.
+            popen, tree = await start_process_async(command, env=env, cwd=working_dir)
+            process = _SyncProcessAdapter(popen, tree, stdio_limit)  # type: ignore[assignment]
         except FileNotFoundError as exc:
             hint = ""
             if command[0].lower().startswith(("npx", "node")):
@@ -1631,6 +1642,9 @@ class AsyncMCPManager:
                 timeout=handle.timeout,
             )
             await self._notify(handle, "notifications/initialized", {})
+        except asyncio.CancelledError:
+            await self._close_handle(handle)
+            raise
         except TimeoutError:
             # npx cold-start or server never replied.  Capture stderr so the
             # user can see WHY (npm fetch failure / missing dependency /
@@ -1663,6 +1677,9 @@ class AsyncMCPManager:
             self._servers[name] = handle
             logger.info("[MCP] Connected to '%s' (stdio, pid=%d, tools=%d)", name, process.pid, len(tools))
             return len(tools)
+        except asyncio.CancelledError:
+            await self._close_handle(handle)
+            raise
         except Exception:
             await self._close_handle(handle)
             raise

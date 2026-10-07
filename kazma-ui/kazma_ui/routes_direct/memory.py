@@ -14,6 +14,7 @@ from typing import Any
 
 from fastapi import Depends, Request
 from kazma_core.errors import safe_error
+from kazma_core.db.sql_patterns import like_literal
 
 from kazma_ui.rate_limit import rate_limit
 from kazma_ui.routes_direct._shared import (
@@ -521,8 +522,8 @@ def register_memory_routes(self: Any) -> None:
                 params.extend(fts_ids)
             elif query:
                 # LIKE fallback (FTS unavailable or no usable tokens).
-                ql = f"%{query.lower()}%"
-                where += " AND (LOWER(subject) LIKE ? OR LOWER(predicate) LIKE ? OR LOWER(object) LIKE ?)"
+                ql = f"%{like_literal(query.lower())}%"
+                where += " AND (LOWER(subject) LIKE ? ESCAPE '!' OR LOWER(predicate) LIKE ? ESCAPE '!' OR LOWER(object) LIKE ? ESCAPE '!')"
                 params.extend([ql, ql, ql])
 
             # Total count for the pager (same WHERE).
