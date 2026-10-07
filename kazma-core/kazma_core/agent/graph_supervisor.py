@@ -27,6 +27,7 @@ from kazma_core.agent.plan_fence import (
     tools_ran_this_turn,
 )
 from kazma_core.agent.state import NodeName, PendingToolCall, SupervisorState
+from kazma_core.agent.source_grounding import with_source_grounding
 from kazma_core.agent.task_ledger import (
     extract_next_action as _extract_next_action,
     format_ledger_block as _format_ledger_block,
@@ -1506,7 +1507,7 @@ async def supervisor_node(
                 try:
                     return await invoke_llm_chat(
                         turn_llm,
-                        messages=_llm_messages,
+                        messages=with_source_grounding(_llm_messages),
                         tools=effective_tool_definitions if effective_tool_definitions else None,
                         model=routed_model,
                         max_tokens=_call_max_tokens,
@@ -1637,7 +1638,7 @@ async def supervisor_node(
                     )
                     response = await invoke_llm_chat(
                         client,
-                        messages=_llm_messages,
+                        messages=with_source_grounding(_llm_messages),
                         tools=effective_tool_definitions if effective_tool_definitions else None,
                         model=fb_model,
                         # S3-2: the primary attempt already streamed its
@@ -1862,7 +1863,7 @@ async def supervisor_node(
             try:
                 nudge_response = await invoke_llm_chat(
                     turn_llm,
-                    messages=pruned_nudge_msgs,
+                    messages=with_source_grounding(pruned_nudge_msgs),
                     tools=[],
                     model=routed_model,
                 )
