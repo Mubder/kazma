@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Translation refresh during navigation (2026-10-07)
+
+Sidebar navigation reads the translation catalog from an inert JSON element,
+shared with initial page loading. It previously parsed the bootstrap script's
+language helpers and event listeners along with the JSON, logging a refresh
+failure on every page change. Arabic/English strings and script-break escaping
+remain intact; no bootstrap code is evaluated to refresh translations.
+
 ## Audit execution and recovery contracts (2026-10-07)
 
 Shell argument checks cover attached short-option values and ambiguous tar

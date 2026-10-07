@@ -8,6 +8,18 @@ Source fixes, regression qualification and deployment are distinct milestones.
 This document records implementation disposition; full-suite, CI and live
 release evidence must be completed before marking the release qualified.
 
+PR #103 completed the remaining source batches at
+`2da1ab79c3326bc9538111fcc27fc4d6f2526b63`: the default local full runner
+passed 13,428 tests (59 skipped, 2 deselected), and all 23 CI checks passed,
+including 13,358 Linux tests. Main merged as
+`10b7fd3ff792e781aa429f9539bab874e57f8c0e`. The guarded live update is healthy
+at `6ed6cd52`; English and Arabic chat smoke tests returned 42 and ٥٦ on
+the existing deepseek-flash profile. This is transport verification, not
+human-reviewed semantic qualification. The live navigation checks also
+reproduced a pre-existing catalog-refresh warning: JSON parsing included
+bootstrap JavaScript. A follow-up separates inert catalog data from executable
+helpers and adds a browser regression for the warning.
+
 Batch 1 merged as PR #101. Batch 2 merged as PR #102,
 `ce98863319d3f7a811e2f0f347dbb18db1244934`: local default full runner
 **13,341 passed, 59 skipped, 2 deselected**, exit 0; all **23** CI checks
