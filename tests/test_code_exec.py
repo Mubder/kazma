@@ -265,7 +265,8 @@ class TestDockerJailConfig:
         class _FakeProc:
             returncode = 0
 
-            async def communicate(self) -> tuple[bytes, bytes]:
+            async def communicate(self, input: bytes) -> tuple[bytes, bytes]:
+                assert b"print('hi')" in input
                 return (b"hi\n", b"")
 
             def kill(self) -> None:
@@ -293,6 +294,94 @@ class TestDockerJailConfig:
         assert "--network" in args
         assert "none" in args
         assert "--memory" in args
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selector_fallback", [False, True])
+@pytest.mark.parametrize("times_out", [False, True])
+async def test_docker_stdin_avoids_private_temp_mount(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, selector_fallback: bool, times_out: bool
+) -> None:
+    """Both subprocess paths transport exact source and retain jail restrictions."""
+    import asyncio
+    import subprocess
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    private_temp = tmp_path / "private-temp"
+    private_temp.mkdir()
+    source = private_temp / "snippet.py"
+    payload = code_exec._build_sandbox_script("print('مرحبا')").encode("utf-8")
+    source.write_bytes(payload)
+    captured: dict = {}
+
+    class SyncProcess:
+        returncode = 0
+
+        def communicate(self, *, input: bytes, timeout: int):
+            captured.update(input=input, timeout=timeout)
+            if times_out:
+                raise subprocess.TimeoutExpired("docker", timeout)
+            return "مرحبا\n".encode(), b""
+
+        def kill(self):
+            captured["killed"] = True
+
+        def wait(self):
+            captured["waited"] = True
+            return 0
+
+    class AsyncProcess:
+        returncode = 0
+
+        async def communicate(self, *, input: bytes):
+            captured["input"] = input
+            if times_out:
+                raise TimeoutError
+            return "مرحبا\n".encode(), b""
+
+        def kill(self):
+            captured["killed"] = True
+
+        async def wait(self):
+            captured["waited"] = True
+            return 0
+
+    async def spawn_async(*args, **kwargs):
+        if selector_fallback:
+            raise NotImplementedError
+        captured.update(args=args, kwargs=kwargs)
+        return AsyncProcess()
+
+    def spawn_sync(args, **kwargs):
+        captured.update(args=args, kwargs=kwargs)
+        return SyncProcess()
+
+    monkeypatch.setattr(code_exec, "_docker_cli", lambda: "docker")
+    monkeypatch.setattr(code_exec._fw, "_get_workspace", lambda: workspace)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn_async)
+    monkeypatch.setattr(subprocess, "Popen", spawn_sync)
+    result = await code_exec._run_docker_jail(source, str(private_temp), 5)
+
+    args = captured["args"]
+    assert captured["input"] == payload
+    assert captured["kwargs"]["stdin"] == subprocess.PIPE
+    assert tuple(args[-3:]) == ("python", "-I", "-")
+    assert "-i" in args
+    mounts = [args[i + 1] for i, value in enumerate(args) if value == "--mount"]
+    assert len(mounts) == 1 and str(workspace.resolve()) in mounts[0]
+    assert mounts[0].endswith(",ro") and str(private_temp) not in str(args)
+    assert args[args.index("--network") + 1] == "none"
+    assert args[args.index("--user") + 1] == "65534:65534"
+    for flag in ("--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges"):
+        assert flag in args
+    assert args[args.index("--memory") + 1] == "512m"
+    assert args[args.index("--pids-limit") + 1] == "64"
+    if times_out:
+        assert "Exit code: 124" in result
+        assert captured["killed"] and captured["waited"]
+    else:
+        assert "sandbox: docker" in result and "Exit code: 0" in result and "مرحبا" in result
 
 
 class TestCodeExecWindowsPortability:
