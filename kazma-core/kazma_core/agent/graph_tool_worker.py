@@ -1079,6 +1079,8 @@ async def tool_worker_node(
         # *before* resume so later turns skip the gate entirely.
         approved = False
         approved_ids = None
+        approval_tools = list(danger_tools)
+        approval_mode = "policy"
         # Bound here (not at the safe-tool section below) because the
         # auto_deny block appends deny ToolResults before that section runs.
         results: list[ToolResult] = []
@@ -1308,10 +1310,12 @@ async def tool_worker_node(
                 )
                 approved = True
                 approval = {"approved": True, "yolo": True}
+                approval_mode = "yolo"
             else:
                 # interrupt() pauses the graph — resumes when /api/approve
                 # calls graph.ainvoke(Command(resume=...), config)
                 approval = interrupt(approval_input)
+                approval_mode = "human"
                 approved = isinstance(approval, dict) and approval.get("approved", False)
             # Optional selective ids; None/missing → all tools in the batch.
             if isinstance(approval, dict):
@@ -1502,49 +1506,15 @@ async def tool_worker_node(
                 }
             )
 
-        # Tell the model, in words, when ONE approval covered several tools.
-        #
-        # Without this it sees N separate tool results and nothing else, so it
-        # infers N separate approvals. On 2026-09-21 an operator asked for four
-        # HITL cards to check their gate, got two (because the danger tools
-        # landed in two supervisor steps and each step groups), and the model
-        # reported: "each of the four ran as its own discrete operation with
-        # its own approval prompt — nothing was batched." The gate registry
-        # said otherwise: one gate covering file_write, file_apply_patch,
-        # shell_exec and file_delete, and a second covering three more.
-        #
-        # The human surfaces were already honest — the Telegram card lists
-        # "N actions in this turn" and the web card renders every tool with
-        # its args. Only the model was guessing, and it guessed confidently at
-        # the one fact the operator was trying to verify.
-        #
-        # Approval scope is a security property. A model that cannot see how
-        # many tools one click authorized must not be left to describe it.
-        if len(danger_tools) > 1 and approved:
-            _granted = ", ".join(tc["name"] for tc in danger_tools)
-            _selective = (
-                ""
-                if approved_ids is None
-                else (
-                    f" The approver selected {len(approved_ids)} of them; the "
-                    "rest were denied."
-                )
-            )
-            tool_messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        f"APPROVAL SCOPE: the {len(danger_tools)} danger tools "
-                        f"just executed ({_granted}) were authorized by a "
-                        "SINGLE human approval, not one prompt each — they were "
-                        "pending in the same step and the gate groups those "
-                        f"into one card.{_selective} If you describe this to "
-                        "the user, say one approval covered "
-                        f"{len(danger_tools)} tools. Do not claim they were "
-                        "approved individually."
-                    ),
-                }
-            )
+        # Tell the model what the runtime decided, even for a single card or
+        # a denial. Tool prose is never a source of approval truth.
+        if approval_tools:
+            from kazma_core.agent.approval_facts import approval_scope_note
+
+            tool_messages.append(approval_scope_note(
+                approval_tools, results, approved=bool(approved),
+                approved_ids=approved_ids, mode=approval_mode,
+            ))
 
         # Soft research-depth gate + R4 pipeline prefer (nudge once each)
         try:

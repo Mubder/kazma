@@ -296,9 +296,10 @@ def _build_env_context_sync(workspace_id: str | None = None) -> str:
             f"- **Workspace root:** `{_sanitize_env_field(str(root), max_len=240)}`",
             "- Native `file_*` / shell / git tools use this root (and per-task "
             "`workspace_scope` when a swarm task targets another workspace).",
-            "- MCP `filesystem` tools rebind to the **global active** workspace on "
-            "Switch Repo; they do **not** follow concurrent per-task scope — prefer "
-            "`file_list` / `file_read` for multi-repo swarm work.",
+            "- Workspace-bound MCP servers use a separate scoped instance when "
+            "this task targets another root; the global instance stays bound to "
+            "the global workspace. A missing scoped instance fails closed. "
+            "A tool result, not the global binding, proves which root served a call.",
             "- Prefer `file_*` / `git_*` / `python_exec` over `shell_exec`. "
             "Shell cwd is already this workspace — do not use `cd`.",
         ]
@@ -319,9 +320,16 @@ def _build_env_context_sync(workspace_id: str | None = None) -> str:
 
         mcp_root = get_bound_mcp_root()
         if mcp_root is not None:
-            lines.append(f"- **MCP filesystem root (last bound):** `{mcp_root}`")
+            lines.append(f"- **MCP global root (not this task's scoped instance):** `{_sanitize_env_field(str(mcp_root), max_len=240)}`")
     except Exception:
         pass
+    try:
+        from kazma_core.tools.code_exec import jail_note_for_tool
+
+        lines.append("- **Python execution policy:** " + jail_note_for_tool("python_exec"))
+        lines.append("- **Host shell policy:** " + jail_note_for_tool("shell_exec"))
+    except Exception:
+        lines.append("- **Execution policy:** unavailable; do not claim execution is permitted.")
     if ws_id:
         lines.append(f"- **Workspace id:** `{ws_id}`")
     if slug:
