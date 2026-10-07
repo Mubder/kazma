@@ -7,6 +7,7 @@ on:
       - 'kazma-core/kazma_core/hub/**'
       - 'kazma-core/kazma_core/agent_skills/**'
       - 'skills/**'
+      - '.github/workflows/skill-review.yml'
 
 jobs:
   validate-manifest:
@@ -73,10 +74,12 @@ jobs:
           pip install -e ".[test]"
           pip install pytest pytest-cov
       - name: Run Skill Tests
-        run: pytest skills/*/tests/ -v --tb=short
-      - name: Check Test Coverage
-        run: |
-          pytest skills/*/tests/ --cov --cov-report=xml --cov-fail-under=80 || echo "Coverage check skipped (no coverage config)"
+        run: >-
+          python -m pytest tests/test_agent_skills.py tests/test_agent_skill_integrity.py
+          tests/test_skill_validation.py tests/test_skill_checksum.py
+          tests/test_hub_validator.py tests/test_mcp_ide_alias_auth.py
+          tests/test_database_read_capabilities.py -q --tb=short
+          --cov=kazma_skills --cov-report=xml
 
   security-scan:
     runs-on: ubuntu-latest
@@ -89,36 +92,47 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade "setuptools>=83.0.0"
           pip install -e ".[test]"
-          pip install pip-audit
       - name: Check Dependency Vulnerabilities
-        run: pip-audit --strict || echo "pip-audit completed with warnings"
+        run: |
+          python - <<'PY'
+          import asyncio, sys
+          from kazma_core.security.dependency_scanner import audit_installed
+          report = asyncio.run(audit_installed())
+          for item in report.open_vulnerabilities:
+              print(f'{item.package} {item.version}: {item.vuln_id}')
+          print(f'Queried {report.total} installed distributions; '
+                f'{len(report.open_vulnerabilities)} unreviewed advisories')
+          sys.exit(bool(report.open_vulnerabilities))
+          PY
       - name: Verify No Hardcoded Secrets
         run: |
-          python -c "
-          import re, sys
+          python - <<'PY'
+          import sys
           from pathlib import Path
-
-          patterns = [
-              r'(?i)(api[_-]?key|secret|password|token)\s*[=:]\s*['\''\"](.*?){8,}['\''\"]',
-              r'(?i)BEGIN\s+(RSA|DSA|EC)?\s*PRIVATE\s+KEY',
-          ]
+          from kazma_core.security.secret_scan import find_credentials
           found = []
-          skill_dir = Path('skills')
-          if not skill_dir.exists():
-              print('No skills/ directory — skipping secrets check')
-              sys.exit(0)
-
-          for f in skill_dir.rglob('*'):
-              if f.is_file() and f.suffix in ('.py', '.yaml', '.yml', '.json', '.env'):
-                  for line in f.read_text().splitlines():
-                      for pat in patterns:
-                          if re.search(pat, line):
-                              found.append(f'{f}:{line.strip()[:80]}')
+          scanned = 0
+          roots = [Path('kazma-skills/kazma_skills/native'), Path('skills')]
+          for root in roots:
+              if not root.is_dir():
+                  continue
+              for f in root.rglob('*'):
+                  if f.is_file() and f.suffix in ('.py', '.yaml', '.yml', '.json', '.env'):
+                      scanned += 1
+                      for finding in find_credentials(
+                          f.read_text(encoding='utf-8'), bare_values=f.suffix != '.py'
+                      ):
+                          found.append(f'{f}:{finding.line}: {finding.kind}')
+          if scanned == 0:
+              print('No skill source/config files found — refusing an empty scan')
+              sys.exit(1)
           if found:
               print('POTENTIAL SECRETS FOUND:')
               for s in found:
                   print(f'  {s}')
               sys.exit(1)
           print('No hardcoded secrets detected')
-          "
+          sys.exit(0)
+          PY

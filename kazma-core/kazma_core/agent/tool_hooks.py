@@ -255,8 +255,10 @@ def _run_command_sync(
     from kazma_core.security.child_env import tool_child_env
 
     env = tool_child_env()
+    from kazma_core.security.process_budget import run_bounded
+
     if isinstance(command, str):
-        return subprocess.run(  # nosec B602 - operator-authored hook, see docstring
+        return run_bounded(  # operator-authored hook, see docstring
             command,
             input=stdin,
             capture_output=True,
@@ -268,7 +270,7 @@ def _run_command_sync(
             encoding="utf-8",
             errors="replace",
         )
-    return subprocess.run(
+    return run_bounded(
         command,
         input=stdin,
         capture_output=True,

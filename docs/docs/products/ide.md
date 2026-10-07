@@ -79,8 +79,9 @@ ask one function, `kazma_core.workspace.binding.resolve_active_root()`
 5. Default sandbox: `<data dir>/workspace`
 
 A relative path given to an agent tool means this folder, never the server
-process's working directory (`binding.resolve_tool_path`). Production may
-require an explicit workspace root. Path traversal is blocked with `normpath` +
+process's working directory (`binding.resolve_tool_path`). Production requires
+`KAZMA_WORKSPACE_ROOT`: selecting, creating or switching a workspace refuses
+paths outside that resolved root, including symlinks. Path traversal is blocked with `normpath` +
 containment checks.
 
 ### Path grants (outside-workspace access)

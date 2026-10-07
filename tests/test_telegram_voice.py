@@ -15,6 +15,20 @@ import pytest
 from kazma_gateway.adapters.telegram import MAX_VOICE_BYTES, TelegramAdapter
 from kazma_gateway.gateway import IncomingMessage
 
+
+def _stream_download(client, metadata, download):
+    """Metadata is a buffered API response; file bytes arrive as a stream."""
+    client.get = AsyncMock(return_value=metadata)
+
+    async def chunks(**_kwargs):
+        yield download.content
+
+    download.aiter_bytes = chunks
+    manager = MagicMock()
+    manager.__aenter__ = AsyncMock(return_value=download)
+    manager.__aexit__ = AsyncMock(return_value=False)
+    client.stream = MagicMock(return_value=manager)
+
 # ══════════════════════════════════════════════════════════════════════════
 # Helpers
 # ══════════════════════════════════════════════════════════════════════════
@@ -146,11 +160,12 @@ class TestDownloadVoiceFile:
         download_resp.content = b"\x4f\x67\x67\x53"  # fake OGG bytes
         download_resp.headers = {"content-length": str(len(b"\x4f\x67\x67\x53"))}
 
-        adapter._http.get = AsyncMock(side_effect=[get_file_resp, download_resp])
+        _stream_download(adapter._http, get_file_resp, download_resp)
 
         result = await adapter.download_voice_file("AgACAgIAAxkBAAI")
         assert result == b"\x4f\x67\x67\x53"
-        assert adapter._http.get.call_count == 2
+        assert adapter._http.get.call_count == 1
+        adapter._http.stream.assert_called_once()
         assert adapter._http.get.await_args_list[0].args[0] == "/getFile"
 
     @pytest.mark.asyncio
@@ -317,7 +332,7 @@ class TestVoicePipeline:
         download_resp.content = b"fake ogg bytes"
         download_resp.headers = {"content-length": str(len(b"fake ogg bytes"))}
 
-        adapter._http.get = AsyncMock(side_effect=[get_file_resp, download_resp])
+        _stream_download(adapter._http, get_file_resp, download_resp)
 
         # Mock STT
         mock_stt_resp = MagicMock()
@@ -367,7 +382,7 @@ class TestVoicePipeline:
         send_resp = MagicMock()
         send_resp.status_code = 200
 
-        adapter._http.get = AsyncMock(side_effect=[get_file_resp, download_resp])
+        _stream_download(adapter._http, get_file_resp, download_resp)
         adapter._http.post = AsyncMock(return_value=send_resp)
 
         # Mock STT to return None (failure)
@@ -409,7 +424,7 @@ class TestVoicePipeline:
         download_resp.content = b"fake ogg bytes"
         download_resp.headers = {"content-length": str(len(b"fake ogg bytes"))}
 
-        adapter._http.get = AsyncMock(side_effect=[get_file_resp, download_resp])
+        _stream_download(adapter._http, get_file_resp, download_resp)
 
         # Mock STT
         mock_stt_resp = MagicMock()
@@ -490,7 +505,7 @@ class TestVoiceSizeCap:
         download_resp.content = b"x" * 100  # small actual content
         download_resp.headers = {"content-length": str(MAX_VOICE_BYTES + 1)}
 
-        adapter._http.get = AsyncMock(side_effect=[get_file_resp, download_resp])
+        _stream_download(adapter._http, get_file_resp, download_resp)
 
         result = await adapter.download_voice_file("huge_file_id")
         assert result is None
@@ -515,7 +530,7 @@ class TestVoiceSizeCap:
         download_resp.content = b"x" * 100
         download_resp.headers = {}  # no Content-Length header
 
-        adapter._http.get = AsyncMock(side_effect=[get_file_resp, download_resp])
+        _stream_download(adapter._http, get_file_resp, download_resp)
 
         # Patch MAX_VOICE_BYTES to be tiny so 100 bytes triggers the cap
         with patch("kazma_gateway.adapters.telegram.MAX_VOICE_BYTES", 50):
@@ -544,7 +559,7 @@ class TestVoiceSizeCap:
         download_resp.content = content
         download_resp.headers = {"content-length": str(len(content))}
 
-        adapter._http.get = AsyncMock(side_effect=[get_file_resp, download_resp])
+        _stream_download(adapter._http, get_file_resp, download_resp)
 
         with patch("kazma_gateway.adapters.telegram.MAX_VOICE_BYTES", 16):
             result = await adapter.download_voice_file("exact_file_id")

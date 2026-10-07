@@ -114,7 +114,7 @@ async def test_git_push_pull_upstream():
     """Verify git_push_pull action='push' attaches --set-upstream when branch has no tracking."""
     from kazma_skills.native.git_github_manager.tools import git_push_pull
 
-    with patch("subprocess.run") as mock_run, \
+    with patch("kazma_skills.native.git_github_manager.tools.run_off_loop", new_callable=AsyncMock) as mock_run, \
          patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
          patch("kazma_core.git_identity.get_app_installation_token", return_value=""), \
          patch("kazma_gateway.routers.github_client.get_github_token", return_value="ghp_test_token"):
@@ -148,7 +148,7 @@ async def test_git_push_delegates_to_push_path():
     """
     from kazma_skills.native.git_github_manager.tools import git_push
 
-    with patch("subprocess.run") as mock_run, \
+    with patch("kazma_skills.native.git_github_manager.tools.run_off_loop", new_callable=AsyncMock) as mock_run, \
          patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
          patch("kazma_core.git_identity.get_app_installation_token", return_value=""), \
          patch("kazma_gateway.routers.github_client.get_github_token", return_value="ghp_test_token"):
@@ -174,7 +174,7 @@ async def test_git_pull_delegates_to_pull_path():
     """git_pull() runs the PULL path (never push)."""
     from kazma_skills.native.git_github_manager.tools import git_pull
 
-    with patch("subprocess.run") as mock_run, \
+    with patch("kazma_skills.native.git_github_manager.tools.run_off_loop", new_callable=AsyncMock) as mock_run, \
          patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
          patch("kazma_core.git_identity.get_app_installation_token", return_value=""), \
          patch("kazma_gateway.routers.github_client.get_github_token", return_value="ghp_test_token"):
@@ -212,7 +212,7 @@ async def test_git_push_pull_retries_on_auth_failure_after_re_mint():
         token_seq["calls"] += 1
         return "ghs_stale_dead_token" if token_seq["calls"] == 1 else "ghs_fresh_token"
 
-    with patch("subprocess.run") as mock_run, \
+    with patch("kazma_skills.native.git_github_manager.tools.run_off_loop", new_callable=AsyncMock) as mock_run, \
          patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
          patch("kazma_core.git_identity.get_app_installation_token", side_effect=fake_app_token), \
          patch("kazma_core.git_identity.invalidate_app_token_cache") as mock_invalidate, \
@@ -256,7 +256,7 @@ async def test_git_push_pull_detects_false_up_to_date():
 
     HEAD_SHA = "abc123def456"
 
-    with patch("subprocess.run") as mock_run, \
+    with patch("kazma_skills.native.git_github_manager.tools.run_off_loop", new_callable=AsyncMock) as mock_run, \
          patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
          patch("kazma_gateway.routers.github_client.get_github_token", side_effect=fake_get_token), \
          patch("kazma_core.git_identity.invalidate_app_token_cache"), \
@@ -301,7 +301,7 @@ async def test_git_push_pull_up_to_date_when_truly_in_sync():
 
     HEAD_SHA = "abc123def456"
 
-    with patch("subprocess.run") as mock_run, \
+    with patch("kazma_skills.native.git_github_manager.tools.run_off_loop", new_callable=AsyncMock) as mock_run, \
          patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
          patch("kazma_core.git_identity.get_app_installation_token", return_value=""), \
          patch("kazma_gateway.routers.github_client.get_github_token", return_value="ghs_good_token"):

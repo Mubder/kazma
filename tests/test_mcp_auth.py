@@ -37,14 +37,12 @@ class TestMCPStdioAuth:
             proc.stderr = MagicMock()
             proc.pid = 12345
             captured_env.update(kwargs.get("env", {}))
-            return proc
+            proc.poll.return_value = None
+            return proc, None
 
-        with patch("asyncio.create_subprocess_exec", side_effect=mock_create_subprocess):
+        with patch("kazma_core.security.process_budget.start_process_async", side_effect=mock_create_subprocess):
             with patch.object(manager, "_send", return_value={"tools": []}):
-                try:
-                    await manager._connect_stdio("test-server", cfg)
-                except Exception:
-                    pass  # May fail on handshake, we just need env check
+                assert await manager._connect_stdio("test-server", cfg) == 0
 
         # Check that API_TOKEN was injected
         assert captured_env.get("API_TOKEN") == "secret-token-123"
@@ -73,20 +71,18 @@ class TestMCPStdioAuth:
         captured_cmd = []
 
         async def mock_create_subprocess(*args, **kwargs):
-            captured_cmd.extend(args)
+            captured_cmd.extend(args[0])
             proc = MagicMock()
             proc.stdin = MagicMock()
             proc.stdout = MagicMock()
             proc.stderr = MagicMock()
             proc.pid = 12345
-            return proc
+            proc.poll.return_value = None
+            return proc, None
 
-        with patch("asyncio.create_subprocess_exec", side_effect=mock_create_subprocess):
+        with patch("kazma_core.security.process_budget.start_process_async", side_effect=mock_create_subprocess):
             with patch.object(manager, "_send", return_value={"tools": []}):
-                try:
-                    await manager._connect_stdio("test-server", cfg)
-                except Exception:
-                    pass
+                assert await manager._connect_stdio("test-server", cfg) == 0
 
         # Check that --api-key was injected into command
         assert "--api-key" in captured_cmd

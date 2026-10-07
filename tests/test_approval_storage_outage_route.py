@@ -24,7 +24,8 @@ def test_storage_failure_neither_grants_nor_resumes(monkeypatch, scope):
                               _graph_holder={"graph": graph}, session_store=None)
     owner = SimpleNamespace(session_id="owner", messages=[])
     monkeypatch.setattr(auth, "get_kazma_secret", lambda: "")
-    monkeypatch.setattr(session_manager, "get_session_manager", lambda: SimpleNamespace(get_by_thread_id=lambda _: owner))
+    monkeypatch.setattr(session_manager, "get_session_manager", lambda: SimpleNamespace(
+        get_by_thread_id=lambda _: owner, thread_is_exclusive=lambda _: True))
     monkeypatch.setattr(active_turns, "is_turn_running", lambda _: False)
     monkeypatch.setattr(misc, "_gate_not_pending", AsyncMock(return_value=""))
     monkeypatch.setattr(hitl_status, "persisted_hitl_for_thread", lambda _: None)

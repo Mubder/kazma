@@ -547,8 +547,8 @@ async def oauth_callback(request: Request) -> RedirectResponse | JSONResponse:
 
     # GitHub surfaces user-denial / errors as query params on the callback.
     if error:
-        logger.warning("[github/oauth] authorization error from GitHub: %s", error)
-        return _oauth_result_page(False, f"Authorization denied: {error}")
+        logger.warning("[github/oauth] authorization denied by GitHub")
+        return _oauth_result_page(False, "Authorization denied by GitHub. Please try connecting again.")
 
     # Validate the state to prevent CSRF.
     try:
@@ -590,11 +590,14 @@ async def oauth_callback(request: Request) -> RedirectResponse | JSONResponse:
     try:
         token_data = await exchange_code_for_token(code=code, redirect_uri=redirect_uri)
     except GitHubError as exc:
-        logger.error("[github/oauth] token exchange failed: %s", exc)
-        return _oauth_result_page(False, f"Token exchange failed: {exc.message}")
+        from kazma_core.errors import redact_secrets
+
+        detail = redact_secrets(exc.message)[:200]
+        logger.error("[github/oauth] token exchange failed: %s", detail)
+        return _oauth_result_page(False, f"Token exchange failed: {detail}")
     except Exception as exc:
-        logger.exception("[github/oauth] unexpected error during token exchange")
-        return _oauth_result_page(False, f"Unexpected error: {exc}")
+        logger.error("[github/oauth] unexpected error during token exchange (%s)", type(exc).__name__)
+        return _oauth_result_page(False, "Token exchange failed unexpectedly. Please try connecting again.")
 
     await asyncio.to_thread(store_oauth_token, token_data)
     # Clear the one-time state so it can't be replayed.

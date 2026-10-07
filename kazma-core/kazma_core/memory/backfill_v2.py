@@ -21,7 +21,8 @@ Idempotency: every insert uses a STABLE derived primary key
 so re-running the script never duplicates rows — it only backfills rows
 that were added since the last run.
 
-Safe to run while the server is live (WAL mode, separate DB files).
+Run the operator CLI against a restored generation while its runtime is stopped.
+The CLI performs offline conversion without LLM belief extraction.
 """
 
 from __future__ import annotations
@@ -29,13 +30,15 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import sqlite3
 import time
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["run_backfill", "backfill_status"]
+__all__ = ["run_backfill", "backfill_status", "main"]
 
 # Structural L2 edge types that are graph plumbing, NOT real beliefs.
 # These must be skipped during backfill — they produce noise like
@@ -54,7 +57,7 @@ def _stable_id(source_table: str, source_id: str) -> str:
     Re-running the backfill produces the SAME id for the same source
     row, so ``INSERT OR IGNORE`` skips already-migrated rows.
     """
-    h = hashlib.sha256(f"{source_table}|{source_id}".encode("utf-8")).hexdigest()
+    h = hashlib.sha256(f"{source_table}|{source_id}".encode()).hexdigest()
     return h[:24]
 
 
@@ -210,8 +213,8 @@ def _llm_extract_beliefs_from_memories(
 
     # Open the ops connection for audit logging
     try:
-        from kazma_core.paths import memory_ops_db
         from kazma_core.memory.schema_v2 import ensure_ops_schema
+        from kazma_core.paths import memory_ops_db
 
         ops = sqlite3.connect(memory_ops_db(), check_same_thread=False, isolation_level=None)
         ensure_ops_schema(ops)
@@ -263,10 +266,9 @@ def _llm_extract_beliefs_from_memories(
             f"Memory entries:\n{batch_text}"
         )
         try:
-            import re as _re
-
             import asyncio
             import inspect
+            import re as _re
 
             res = client.chat([
                 {"role": "system", "content": "You are a memory extraction engine. Return only JSON."},
@@ -383,7 +385,7 @@ def _open_primary() -> sqlite3.Connection:
 # ── Backfill steps ────────────────────────────────────────────────────────
 
 
-def _backfill_memories_to_episodes(primary: sqlite3.Connection) -> dict[str, int]:
+def _backfill_memories_to_episodes(primary: sqlite3.Connection, *, extract_beliefs: bool = True) -> dict[str, int]:
     """Migrate legacy `memories` rows → V2 `episodes` + LLM-extract beliefs."""
     stats = {"memories_seen": 0, "episodes_inserted": 0, "skipped": 0, "beliefs_extracted": 0}
     legacy = _open_legacy_memory()
@@ -421,7 +423,7 @@ def _backfill_memories_to_episodes(primary: sqlite3.Connection) -> dict[str, int
             emb = r["embedding"] if "embedding" in cols else None
             meta = {"source": "backfill_memories", "legacy_source": source}
             try:
-                primary.execute(
+                inserted = primary.execute(
                     """INSERT OR IGNORE INTO episodes
                        (id, tenant_id, session_id, turn_number, user_text, tier,
                         structural_importance, created_at, embedding, metadata_json)
@@ -433,7 +435,7 @@ def _backfill_memories_to_episodes(primary: sqlite3.Connection) -> dict[str, int
                         json.dumps(meta, ensure_ascii=False),
                     ),
                 )
-                stats["episodes_inserted"] += 1
+                stats["episodes_inserted"] += inserted.rowcount
                 # Belief extraction is done in a batch LLM pass AFTER all
                 # episodes are stored (see _llm_extract_beliefs_from_memories).
                 # This is more efficient + accurate than per-row regex.
@@ -447,7 +449,8 @@ def _backfill_memories_to_episodes(primary: sqlite3.Connection) -> dict[str, int
         # approach — the LLM understands context and can distinguish
         # "My name is Mubder" (a real fact) from "name is just exploring"
         # (a sentence fragment).
-        stats["beliefs_extracted"] = _llm_extract_beliefs_from_memories(primary, legacy, cols)
+        if extract_beliefs:
+            stats["beliefs_extracted"] = _llm_extract_beliefs_from_memories(primary, legacy, cols)
     finally:
         legacy.close()
     return stats
@@ -485,7 +488,7 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
                 tenant = n["tenant_id"] if "tenant_id" in n.keys() and n["tenant_id"] else "default"
                 high = 1 if etype in ("person", "project") else 0
                 try:
-                    primary.execute(
+                    inserted = primary.execute(
                         """INSERT OR IGNORE INTO entities
                            (id, tenant_id, type, name, aliases_json, is_high_stakes, metadata_json)
                            VALUES (?, ?, ?, ?, ?, ?, ?)""",
@@ -495,7 +498,7 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
                             json.dumps({"source": "backfill_kg_nodes", "legacy_id": src_id}),
                         ),
                     )
-                    stats["entities_inserted"] += 1
+                    stats["entities_inserted"] += inserted.rowcount
                 except Exception:
                     stats["skipped"] += 1
 
@@ -578,7 +581,7 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
                     "memory_class": "general",
                 }
                 try:
-                    primary.execute(
+                    inserted = primary.execute(
                         """INSERT OR IGNORE INTO beliefs
                            (id, tenant_id, subject, predicate, predicate_type, object,
                             confidence, structural_importance, source_trust_weight,
@@ -591,7 +594,7 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
                             json.dumps(meta, ensure_ascii=False),
                         ),
                     )
-                    stats["beliefs_inserted"] += 1
+                    stats["beliefs_inserted"] += inserted.rowcount
                 except Exception:
                     stats["skipped"] += 1
 
@@ -635,7 +638,7 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
                     "fact_text": str(fact)[:200], "memory_class": "general",
                 }
                 try:
-                    primary.execute(
+                    inserted = primary.execute(
                         """INSERT OR IGNORE INTO beliefs
                            (id, tenant_id, subject, predicate, predicate_type, object,
                             confidence, structural_importance, source_trust_weight,
@@ -648,7 +651,7 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
                             json.dumps(meta, ensure_ascii=False),
                         ),
                     )
-                    stats["beliefs_inserted"] += 1
+                    stats["beliefs_inserted"] += inserted.rowcount
                 except Exception:
                     stats["skipped"] += 1
                     logger.debug("[backfill] edge %s skipped", src_id, exc_info=True)
@@ -660,12 +663,14 @@ def _backfill_graph_to_beliefs(primary: sqlite3.Connection) -> dict[str, int]:
 # ── Public entry points ──────────────────────────────────────────────────
 
 
-def run_backfill(*, dry_run: bool = False) -> dict[str, Any]:
+def run_backfill(*, dry_run: bool = False, extract_beliefs: bool = True) -> dict[str, Any]:
     """Run the full backfill. Returns a combined stats dict.
 
     Args:
         dry_run: If True, count source rows but do NOT write to V2.
             Useful for sizing the migration before committing.
+        extract_beliefs: Preserve the legacy Python API's optional provider
+            extraction. Use False for deterministic offline recovery.
     """
     logger.info("[backfill] starting (dry_run=%s)", dry_run)
     if dry_run:
@@ -676,7 +681,7 @@ def run_backfill(*, dry_run: bool = False) -> dict[str, Any]:
 
     primary = _open_primary()
     try:
-        mem_stats = _backfill_memories_to_episodes(primary)
+        mem_stats = _backfill_memories_to_episodes(primary, extract_beliefs=extract_beliefs)
         graph_stats = _backfill_graph_to_beliefs(primary)
         combined = {"memories": mem_stats, "graph": graph_stats}
         logger.info("[backfill] complete: %s", combined)
@@ -736,3 +741,47 @@ def backfill_status() -> dict[str, Any]:
         }
     finally:
         primary.close()
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Convert a stopped, restored legacy generation, with explicit paths."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data-dir", required=True, type=Path,
+                        help="Existing restored data directory; stop its runtime first")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--dry-run", action="store_true", help="Count legacy rows without writing V2")
+    mode.add_argument("--apply", action="store_true", help="Write V2 rows without provider calls")
+    args = parser.parse_args(argv)
+    root = args.data_dir.expanduser().resolve()
+    if not root.is_dir():
+        parser.error("--data-dir must name an existing restored directory")
+    # A inherited path override must never send a recovery command to the
+    # operator's live database. All four stores stay inside the explicit root.
+    overrides = {
+        "KAZMA_DATA_DIR": str(root),
+        "KAZMA_FTS5_PATH": str(root / "memory.db"),
+        "KAZMA_KNOWLEDGE_GRAPH_DB": str(root / "knowledge_graph.db"),
+        "KAZMA_MEMORY_STATE_DB": str(root / "memory_state.db"),
+        "KAZMA_MEMORY_OPS_DB": str(root / "memory_ops.db"),
+    }
+    if any(not Path(path).resolve().is_relative_to(root) for key, path in overrides.items()
+           if key != "KAZMA_DATA_DIR"):
+        parser.error("Restored store paths must stay inside --data-dir; external symlinks are refused")
+    previous = {key: os.environ.get(key) for key in overrides}
+    os.environ.update(overrides)
+    try:
+        result = run_backfill(dry_run=args.dry_run, extract_beliefs=False)
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return 0
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

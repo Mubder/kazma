@@ -220,13 +220,16 @@ async def test_sqlite_query_requires_path_and_denies_internal(tmp_path):
     assert "vault_list" in denied
 
 
-def test_remote_db_host_denied_without_allowlist(monkeypatch):
-    from kazma_skills.native.database_client.tools import _remote_host_error
+@pytest.mark.asyncio
+async def test_remote_db_host_requires_operator_connection_even_with_allowlist(monkeypatch):
+    from kazma_skills.native.database_client.tools import execute_db_query
 
     monkeypatch.delenv("KAZMA_DB_CLIENT_ALLOWED_HOSTS", raising=False)
-    err = _remote_host_error("postgresql://db.example.com/x", "postgres")
-    assert err is not None
-    assert "KAZMA_DB_CLIENT_ALLOWED_HOSTS" in err
+    err = await execute_db_query("postgresql://db.example.com/x", "SELECT 1")
+    assert "connection:<name>" in err
 
-    loopback = _remote_host_error("postgresql://localhost/x", "postgres")
-    assert loopback is None
+    # Host-only policy no longer authorizes a credential/privilege choice,
+    # and loopback is subject to the same operator capability boundary.
+    monkeypatch.setenv("KAZMA_DB_CLIENT_ALLOWED_HOSTS", "db.example.com,localhost")
+    for host in ("db.example.com", "localhost"):
+        assert "connection:<name>" in await execute_db_query(f"postgresql://{host}/x", "SELECT 1")

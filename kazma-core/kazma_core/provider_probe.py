@@ -84,10 +84,9 @@ async def probe_chat_completion(
         ms = int((time.monotonic() - start) * 1000)
 
         if resp.status_code != 200:
-            detail = " ".join(resp.text[:200].split())
             return {
                 "ok": False, "ms": ms, "model": model,
-                "error": f"HTTP {resp.status_code} — {detail}",
+                "error": f"HTTP {resp.status_code}. Check the provider URL, key and selected model.",
             }
 
         data = resp.json()
@@ -105,10 +104,10 @@ async def probe_chat_completion(
             }
         return {"ok": True, "ms": ms, "model": str(data.get("model") or model), "error": ""}
 
-    except httpx.ConnectError as exc:
-        return {"ok": False, "ms": None, "model": model, "error": f"cannot connect — {exc}"}
+    except httpx.ConnectError:
+        return {"ok": False, "ms": None, "model": model, "error": "cannot connect — check the provider URL"}
     except Exception as exc:  # pragma: no cover - a probe must not raise
         return {
             "ok": False, "ms": None, "model": model,
-            "error": f"{type(exc).__name__}: {str(exc)[:160]}",
+            "error": f"{type(exc).__name__}: provider completion probe failed",
         }

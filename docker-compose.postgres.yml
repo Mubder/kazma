@@ -2,7 +2,7 @@
 #
 #   docker compose -f docker-compose.postgres.yml up -d --build
 #
-# Requires: KAZMA_SECRET, KAZMA_VAULT_KEY in .env
+# Requires: KAZMA_SECRET, KAZMA_VAULT_KEY, POSTGRES_PASSWORD in .env
 # Optional: pip/install image with [postgres] extra for psycopg pool.
 services:
   db:
@@ -10,12 +10,12 @@ services:
     container_name: kazma-db
     environment:
       POSTGRES_USER: kazma
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kazma_change_me}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to a strong password}
       POSTGRES_DB: kazma
     volumes:
       - kazma_pgdata:/var/lib/postgresql/data
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kazma -d kazma"]
       interval: 10s
@@ -42,7 +42,7 @@ services:
       KAZMA_PRODUCTION: "${KAZMA_PRODUCTION:-1}"
       KAZMA_CODE_EXEC_DOCKER: "${KAZMA_CODE_EXEC_DOCKER:-force}"
       KAZMA_VECTOR_PATH: "/home/kazma/.kazma/vector_memory"
-      KAZMA_DATABASE_URL: "postgresql://kazma:${POSTGRES_PASSWORD:-kazma_change_me}@db:5432/kazma"
+      KAZMA_DATABASE_URL: "postgresql://kazma:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to a strong password}@db:5432/kazma"
       KAZMA_DB_BACKEND: "postgres"
     restart: unless-stopped
     healthcheck:

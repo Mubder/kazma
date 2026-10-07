@@ -771,15 +771,18 @@ class SessionManager:
         session_id: str | None = None,
         *,
         durable: bool = True,
+        thread_id: str = "",
     ) -> ChatSession:
         """Get an existing session or create a new one.
 
         If ``session_id`` is ``None`` a fresh UUID is generated.  If a
         session with the given ID already exists (memory **or DB**) it is
-        returned as-is — never invent an empty row over existing history.
+        returned — never invent an empty row over existing history. A supplied
+        *thread_id* fills an unset binding under the same lock; an existing
+        binding is never replaced.
 
         *durable* (default True): write the new empty shell to the DB.
-        Pass ``durable=False`` for WS connect / UI bind so we do not pollute
+        Pass ``durable=False`` for HTTP UI bind so we do not pollute
         the sidebar with "Web Session · 0 msgs" until the first real message
         (which calls :meth:`put` and persists).
         """
@@ -788,11 +791,15 @@ class SessionManager:
             if session_id:
                 existing = self.get(session_id)
                 if existing is not None:
+                    if thread_id and not existing.thread_id:
+                        existing.thread_id = thread_id
+                        if durable or existing.messages:
+                            self._write_durably(existing)
                     return existing
 
             sid = session_id or str(uuid.uuid4())
             key = f"{tenant_id}:{sid}"
-            session = ChatSession(session_id=sid, tenant_id=tenant_id)
+            session = ChatSession(session_id=sid, tenant_id=tenant_id, thread_id=thread_id)
             self._sessions[key] = session
             if durable:
                 self._write_durably(session)
@@ -812,6 +819,40 @@ class SessionManager:
                 self._sessions[f"{t}:{sid}"] = loaded
                 return loaded
         return None
+
+    def thread_is_exclusive(self, thread_id: str) -> bool:
+        """Refuse legacy global graph bindings shared with another tenant.
+
+        Check memory, durable rows and the spool. Store errors raise so the
+        ownership boundary fails closed even when a session is cached.
+        """
+        tenant_id = get_current_tenant_id() or "default"
+        with self._lock:
+            if any(s.thread_id == thread_id and s.tenant_id != tenant_id
+                   for s in self._sessions.values()):
+                return False
+            if self._pg:
+                from kazma_core.db.pg_helpers import get_pool
+
+                row = get_pool().execute_one(
+                    "SELECT 1 FROM kazma_chat_sessions WHERE thread_id=%s AND tenant_id<>%s LIMIT 1",
+                    (thread_id, tenant_id),
+                )
+            else:
+                assert self._conn is not None
+                row = self._conn.execute(
+                    "SELECT 1 FROM sessions WHERE thread_id=? AND tenant_id<>? LIMIT 1",
+                    (thread_id, tenant_id),
+                ).fetchone()
+            if row:
+                return False
+            if self._spool is not None:
+                for owner, sid in self._spool.keys():
+                    if owner != tenant_id:
+                        payload = self._spool.get(owner, sid)
+                        if payload and payload.get("thread_id") == thread_id:
+                            return False
+            return True
 
     def get_by_thread_id(self, thread_id: str) -> ChatSession | None:
         """Return the current tenant's session associated with ``thread_id``."""

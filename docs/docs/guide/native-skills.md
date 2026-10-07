@@ -164,13 +164,76 @@ pip install -e ".[database]"   # psycopg, pymysql, pymongo
 | Tool | What it does |
 |---|---|
 | `inspect_db_schema` | Tables, columns, types, PKs, indexes |
-| `execute_db_query` | Read-only SELECT (dialect auto-detected from URI scheme) |
+| `execute_db_query` | Local SQLite SELECT, or a named remote read capability |
 | `sqlite_query` | Convenience alias for local SQLite |
 
-Dialect is detected from the `db_uri` scheme: `postgresql://` → Postgres
-(psycopg3), `mysql://` → MySQL (pymysql), `mongodb://` → Mongo (JSON filter),
-else SQLite. All SQL dialects enforce read-only (SELECT/WITH only; write
-keywords blocked).
+SQLite paths remain workspace-scoped; Kazma's own stores are refused. Remote
+reads use `db_uri="connection:warehouse"`. Raw remote URIs, including localhost
+URIs, are refused. The operator defines the connection in
+`security.database_client.connections`, a protected setting the agent cannot
+write. Each entry needs `enabled: true`, a vault-backed `dsn`, the expected
+login `role`, an explicit `tenants` list, and `tables` containing qualified
+`schema.table` names (MongoDB: collection names). Wildcards are refused.
+
+For example, an operator can register a PostgreSQL reader from the install's
+Python environment. Run this with the usual install configuration loaded and
+an encrypted vault configured; never put the password in a prompt or Git:
+
+```python
+import os
+from kazma_core.config_store import get_config_store
+from kazma_core.security.vault import get_vault
+
+vault = get_vault()
+assert vault is not None, "Configure the encrypted vault first"
+vault.store_install_scoped("warehouse_read_dsn", os.environ["WAREHOUSE_READ_DSN"], category="database")
+get_config_store().set("security.database_client.connections", {
+    "warehouse": {
+        "enabled": True,
+        "dsn": "vault://warehouse_read_dsn",
+        "role": "kazma_reader",
+        "tenants": ["default"],
+        "tables": ["reporting.items"],
+    }
+})
+```
+
+Remote SQL uses a parsed SELECT grammar with ordinary projections, comparisons,
+joins, nonrecursive CTEs and a small set of built-in aggregates/string functions.
+Unknown functions, casts, custom operators, locks, INTO, multiple statements and
+tables outside the capability are refused before connecting. PostgreSQL reads
+pin `search_path` to `pg_catalog`; tables must be qualified. Positional `%s`
+parameters work with both SQL drivers. Views, foreign tables, inherited tables,
+RLS, custom PostgreSQL types and generated columns are refused because a read
+of them can invoke code outside the declared capability.
+
+Use a dedicated database login, never the application's owner or administrator:
+
+- PostgreSQL: no elevated role flags or memberships, no database CREATE/TEMP,
+  no schema CREATE, no table or column write grants, and no EXECUTE on
+  application/extension routines. Grant CONNECT, schema USAGE and SELECT on the
+  declared ordinary tables. Revoke the default PUBLIC TEMP privilege on the
+  **dedicated reporting database**, and revoke PUBLIC EXECUTE on its noncatalog
+  routines; an administrator must assess those changes before applying them
+  to a shared application database. The tool verifies these conditions on
+  every connection and refuses privilege drift.
+- MySQL 8: only SELECT/USAGE grants, without grant option or role memberships;
+  declared tables must be InnoDB base tables. MariaDB is not qualified: a server
+  that lacks MySQL's statement timeout setting refuses the read.
+- MongoDB: a custom role with collection-specific `find` privileges only,
+  matching the declared database and collections. Standard broader `read`
+  roles are refused. Filters support data comparisons and Boolean predicates;
+  `$where`, `$expr`, `$function`, regular expressions and other operators are
+  refused. `params[0]` selects an allowed collection.
+
+Queries have a two-second server/SQLite execution limit, at most 1,000 rows,
+16,384 query characters and a one-million-character returned result limit.
+Remote connect/socket waits are bounded; connections close after each call.
+Output limits are checked after fetching, so operators should expose tables
+with bounded column sizes and database resource quotas. Nonloopback connections
+require verified TLS (PostgreSQL uses its configured root certificate; MySQL
+and MongoDB use their driver trust configuration). DSN query options are
+refused. Install the `[database]` extra for SQLGlot and the remote drivers.
 
 ---
 

@@ -419,23 +419,19 @@ def register_system_tools(registry: Any) -> None:
             #    an absolute path first — which is precisely the fix, so it now
             #    applies to both.
             #
-            # Strict mode still REFUSES an unresolvable binary. Non-strict
-            # keeps today's lenient behaviour and falls back to the bare name
-            # rather than turning a lab convenience into a hard failure.
+            # Every mode refuses unresolved names: falling back lets the OS
+            # search a different PATH (or the current directory on Windows).
             child_env = restricted_child_env(cwd=cwd_s)
             resolved = resolve_shell_binary(
                 args[0], restricted_path=child_env.get("PATH", "")
             )
-            if shell_strict_mode():
-                if not resolved:
-                    return (
-                        f"Error: could not resolve '{args[0]}' under restricted PATH. "
-                        "Post-HITL shell only runs system/build tools on the "
-                        "allowlist (set KAZMA_SHELL_STRICT=0 to relax in lab)."
-                    )
-                args = [resolved, *args[1:]]
-            elif resolved:
-                args = [resolved, *args[1:]]
+            if not resolved:
+                path_label = "restricted PATH" if shell_strict_mode() else "tool PATH"
+                return (
+                    f"Error: could not resolve '{args[0]}' under the {path_label}. "
+                    "Install the allowlisted executable or use a native tool."
+                )
+            args = [resolved, *args[1:]]
 
             # Reject absolute paths outside workspace (audit H4).
             # Flag-prefixed args carry paths too (``--file=../../x``,
@@ -445,6 +441,17 @@ def register_system_tools(registry: Any) -> None:
                 if not a:
                     continue
                 candidates_a = [a]
+                from kazma_core.safety.shell_arguments import short_option_values
+
+                try:
+                    attached = short_option_values(binary, a)
+                except ValueError as exc:
+                    return f"Error: {exc}"
+                for flag, value in attached:
+                    blocked = {"tar": {"-I", "-T"}, "git": {"-c"}, "grep": {"-f"}, "jq": {"-f"}}
+                    if flag in blocked.get(binary, set()):
+                        return f"Error: '{flag}' is not allowed for {binary}; use a native tool."
+                    candidates_a.append(value)
                 if a.startswith("-") and "=" in a:
                     candidates_a.append(a.split("=", 1)[1])
                 for check in candidates_a:
@@ -511,6 +518,7 @@ def register_system_tools(registry: Any) -> None:
                 "tar": (
                     "--use-compress-program", "--to-command", "-I",
                     "--checkpoint-action", "--rmt-command", "--rsh-command",
+                    "-T", "--files-from", "--extract", "--get", "--absolute-names", "--dereference",
                 ),
                 "zip": ("-TT", "--unzip-command"),
                 "unzip": ("-TT",),
@@ -527,6 +535,8 @@ def register_system_tools(registry: Any) -> None:
                         f"Use python_exec for multi-step work, or a native "
                         f"file_*/git_* tool."
                     )
+            if binary == "tar" and args[1:] and not args[1].startswith("-"):
+                return "Error: tar requires explicit dash options; old-style option clusters are refused."
 
             # git subcommand denylist (destructive / credential / rewrite)
             if binary == "git" and len(args) > 1:
@@ -577,66 +587,26 @@ def register_system_tools(registry: Any) -> None:
             # failed.". Run a blocking Popen in a worker thread instead
             # (to_thread), keeping the bounded-output + timeout semantics.
             import subprocess
-            import threading
-
-            def _run_shell_capped(
-                args: list[str],
-                *,
-                cwd: str | None,
-                env: dict[str, str] | None,
-                timeout: float,
-            ) -> tuple[bytes, bytes, int]:
-                proc = subprocess.Popen(
-                    args,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    cwd=cwd,
-                    env=env,
-                )
-                chunks: dict[str, bytes] = {"out": b"", "err": b""}
-
-                def _drain(stream, key: str, limit: int) -> None:
-                    while len(chunks[key]) < limit:
-                        chunk = stream.read(min(4096, limit - len(chunks[key])))
-                        if not chunk:
-                            break
-                        chunks[key] += chunk
-
-                t_out = threading.Thread(
-                    target=_drain, args=(proc.stdout, "out", 20_000), daemon=True
-                )
-                t_err = threading.Thread(
-                    target=_drain, args=(proc.stderr, "err", 10_000), daemon=True
-                )
-                t_out.start()
-                t_err.start()
-                try:
-                    proc.wait(timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait()
-                    raise
-                t_out.join(timeout=2)
-                t_err.join(timeout=2)
-                return chunks["out"], chunks["err"], proc.returncode
+            from kazma_core.security.process_budget import OutputLimitExceeded, run_bounded_async
 
             try:
-                stdout, stderr, returncode = await asyncio.to_thread(
-                    _run_shell_capped,
+                result = await run_bounded_async(
                     args,
                     cwd=cwd,
                     env=child_env,
-                    timeout=timeout,
+                    timeout=timeout, output_bytes=30_000,
                 )
             except subprocess.TimeoutExpired:
                 return f"Error: Command timed out after {timeout}s"
+            except OutputLimitExceeded:
+                return "Error: Command exceeded its output budget."
 
-            output = stdout.decode("utf-8", errors="replace")
-            err_output = stderr.decode("utf-8", errors="replace")
+            output = result.stdout.decode("utf-8", errors="replace")
+            err_output = result.stderr.decode("utf-8", errors="replace")
             if err_output:
                 output += f"\n[stderr]\n{err_output}"
-            if returncode != 0:
-                output += f"\n[exit code: {returncode}]"
+            if result.returncode != 0:
+                output += f"\n[exit code: {result.returncode}]"
             return output[:10_000]  # cap output
         except FileNotFoundError:
             # Say WHY, not just "not found". The operator has already approved

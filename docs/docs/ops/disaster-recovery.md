@@ -70,6 +70,12 @@ repositories**:
 | Offsite (recommended) | `s3:https://<account>.r2.cloudflarestorage.com/<bucket>` (or B2) | append-only host key (`PutObject`/`GetObject`/`ListBucket` + `DeleteObject` on `locks/*` only) |
 | Offsite (legacy) | `rclone:<remote>/restic` | rclone OAuth — **do not use Google Drive / a service account**. Service accounts have no Drive quota; `rclone:` write probes can look healthy while every upload 403s. |
 
+An rclone destination must name an existing configured remote, such as
+`backup:restic`. For a restic repository use `rclone:backup:restic`.
+Inline backend specifications (`:s3:…`), option-like names and control
+characters are refused before executing rclone. Paths may contain spaces and
+Arabic text. The command places destinations after `--`.
+
 Prefer **S3-native restic** (Cloudflare R2 or Backblaze B2). The host key
 must not be able to `restic forget --prune`. Keep a full-access prune key
 **off this machine**. `remote_writable()` probes `s3:` with a real SigV4
@@ -258,6 +264,23 @@ eo4j_graph.jsonl'))"
 
 ### Step 4 — point Kazma at it and start
 
+For a restored **pre-V2** generation, keep its runtime stopped and take a copy
+before conversion. Use an explicit existing data directory:
+
+```powershell
+python -m kazma_core.memory.backfill_v2 --data-dir D:\fresh-kazma\kazma-data --dry-run
+python -m kazma_core.memory.backfill_v2 --data-dir D:\fresh-kazma\kazma-data --apply
+```
+
+The CLI converts legacy `memory.db` and `knowledge_graph.db` into
+`memory_state.db`, without provider calls. It preserves episode text, tenant
+IDs, timestamps and available embeddings, converts graph entities/fact edges,
+and skips structural edges. Stable IDs make reruns idempotent; reported insert
+counts include only new rows. Inspect the returned seen/inserted/skipped counts
+before starting the restored runtime. All store paths use this directory even
+when the shell inherited live-install path overrides. This does not convert a
+Postgres generation or qualify semantic belief extraction.
+
 Copy `.env`, `kazma.yaml` and `kazma-data/` into the install root, or point
 `KAZMA_DATA_DIR` at the restored tree. Then:
 
@@ -274,6 +297,17 @@ Copy `.env`, `kazma.yaml` and `kazma-data/` into the install root, or point
 |---------|--------------|-----|
 | Settings empty / keys missing | Wrong or missing `KAZMA_VAULT_KEY` | Restore vault key from password manager |
 | 401 everywhere | Wrong `KAZMA_SECRET` | Restore secret; clear old cookies |
+
+### Repository password rotation
+
+`kazma_core.backup.restic_repo.rotate_password(repos, old, new, persist=...)`
+is the maintained operator Python API. Pass the active repositories and a
+durable persistence callback for the configured passphrase. It adds and verifies
+the new key on every repository, persists it, then removes old keys; a failed
+add, verification or persistence refuses revocation. Read passphrases through
+a password manager or `getpass`, never command arguments or printed output.
+Back up the stored passphrase, schedule rotation while backups are idle, and
+verify repository access and a restore drill afterwards.
 | SQLite “database is locked” | Process still running | Kill uvicorn/python; retry |
 | Vector search empty | Vector volume not in backup path | Restore `vector_memory` / Chroma path; re-index if needed |
 

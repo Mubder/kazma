@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -55,7 +54,7 @@ async def _ws_resume_handshake(socket: Any, thread_id: str, last_seq: int) -> No
     a dead socket aborts the replay silently.
     """
     broker = get_turn_broker()
-    frames, gap, head = broker.resume(thread_id, int(last_seq or 0))
+    frames, gap, head = await asyncio.to_thread(broker.resume, thread_id, int(last_seq or 0))
     try:
         await socket.send_json(
             TelemetryEvent(
@@ -184,7 +183,7 @@ def create_ws_chat_router(
 ) -> APIRouter:
     """Factory to build the WebSocket chat gateway router.
 
-    The graph is read (the HITL card on connect, steer, abort), never run for
+    The graph is read (the HITL card on connect), never run for
     a new turn: turns are the SSE route's.
     """
     router = APIRouter(tags=["ws-chat"])
@@ -200,30 +199,6 @@ def create_ws_chat_router(
         if graph_holder and graph_holder.get("graph"):
             return graph_holder.get("graph")
         return graph
-
-    def _thread_for(session_id: str) -> str:
-        """The LangGraph thread this socket watches.
-
-        A new chat gets an in-memory shell only -- never an empty "Web Session
-        · 0 msgs" row in the database; the first message sent over SSE makes it
-        durable. Gateway threads (``gw-*``) still force thread_id alignment and
-        persist when needed.
-        """
-        store = get_session_manager()
-        session = store.get(session_id)
-        if session is None:
-            session = store.get_or_create(session_id, durable=False)
-        if session_id.startswith("gw-"):
-            if session.thread_id != session_id:
-                session.thread_id = session_id
-                store.put(session)
-        elif not session.thread_id:
-            session.thread_id = str(uuid.uuid4())
-            # Only durable-write when the session already has content. Empty
-            # shells stay memory-only.
-            if session.messages:
-                store.put(session)
-        return session.thread_id
 
     async def _scan_and_emit_hitl_interrupt(
         graph_inst: Any,
@@ -303,18 +278,46 @@ def create_ws_chat_router(
     @router.websocket("/ws/chat/{session_id}")
     async def chat_websocket(websocket: WebSocket, session_id: str) -> None:
         """WebSocket connection handler for session-bound agent telemetry."""
-        from kazma_ui.auth import websocket_is_authenticated
+        from kazma_core.tenant_context import tenant_scope
+        from kazma_core.tenant_isolation import principal_tenant_id
+        from kazma_ui.auth import get_websocket_principal
 
-        if not websocket_is_authenticated(websocket):
+        try:
+            principal = await asyncio.to_thread(get_websocket_principal, websocket)
+        except Exception:
+            logger.warning("[WS-Chat] Authentication failed closed", exc_info=True)
+            principal = None
+        if principal is None:
             logger.warning("[WS-Chat] Unauthenticated connection attempt for session=%s", session_id)
             await websocket.accept()
             await websocket.close(code=4003, reason="Unauthorized")
             return
 
+        with tenant_scope(principal_tenant_id(principal) or "default"):
+            await _observe_session(websocket, session_id)
+
+    async def _observe_session(websocket: WebSocket, session_id: str) -> None:
+        """Observe only a pre-existing session inside the verified tenant."""
+        from kazma_ui.thread_ownership import resolve_caller_thread
+
+        # A blank shell has no checkpoint or journal to observe. The HTTP
+        # creation/first-turn path assigns its thread; a socket never claims it.
+        try:
+            store = await asyncio.to_thread(get_session_manager)
+            thread_id = await resolve_caller_thread(session_id, "", store=store)
+            session = await asyncio.to_thread(store.get, session_id)
+        except Exception:
+            logger.warning("[WS-Chat] Session lookup failed closed", exc_info=True)
+            session = None
+            thread_id = ""
+        if not thread_id or session is None or session.thread_id != thread_id:
+            await websocket.accept()
+            await websocket.close(code=4004, reason="Session unavailable")
+            return
+
         await websocket.accept()
         logger.info("[WS-Chat] Client connected: session_id=%s", session_id)
 
-        thread_id = _thread_for(session_id)
         # A watching client is present: a turn whose SSE stream dropped must
         # not be reaped as abandoned while this tab follows it here.
         clear_orphan_stamp(thread_id)
@@ -325,7 +328,7 @@ def create_ws_chat_router(
                 "thread_id": thread_id,
                 "checkpoint_ns": "",
             },
-            "recursion_limit": _ws_recursion_limit(thread_id),
+            "recursion_limit": await asyncio.to_thread(_ws_recursion_limit, thread_id),
         }
 
         # Scan graph state on connection/reconnection for any pending HITL interrupts
@@ -374,7 +377,7 @@ def create_ws_chat_router(
                     )
                 else:
                     try:
-                        sess = get_session_manager().get(session_id)
+                        sess = await asyncio.to_thread(store.get, session_id)
                         if sess and sess.messages:
                             last = sess.messages[-1]
                             if (

@@ -63,6 +63,7 @@ def _chat_kept_out(thread: str, tenant_id: str) -> bool:
 
 def register_memory_tools(registry: Any) -> None:
     """Register the memory tools onto *registry*."""
+    from kazma_core.db.sql_patterns import like_literal
     # Helper closures used by the memory tools below. They carry no
     # @registry.register decorator, so they moved with their callers when
     # this module was split out of tool_builtins.py (audit O5).
@@ -92,11 +93,11 @@ def register_memory_tools(registry: Any) -> None:
             if (q or "").strip():
                 # Word-boundary friendly: normalize _/- to spaces on BOTH
                 # sides so 'memory system' matches user_memory_system.
-                ql = f"%{_qnorm(q)}%"
+                ql = f"%{like_literal(_qnorm(q))}%"
                 sql += (
-                    " AND (LOWER(REPLACE(REPLACE(subject,'_',' '),'-',' ')) LIKE ? "
-                    "OR LOWER(REPLACE(REPLACE(predicate,'_',' '),'-',' ')) LIKE ? "
-                    "OR LOWER(REPLACE(REPLACE(object,'_',' '),'-',' ')) LIKE ?)"
+                    " AND (LOWER(REPLACE(REPLACE(subject,'_',' '),'-',' ')) LIKE ? ESCAPE '!' "
+                    "OR LOWER(REPLACE(REPLACE(predicate,'_',' '),'-',' ')) LIKE ? ESCAPE '!' "
+                    "OR LOWER(REPLACE(REPLACE(object,'_',' '),'-',' ')) LIKE ? ESCAPE '!')"
                 )
                 params.extend([ql, ql, ql])
             sql += (
@@ -142,11 +143,11 @@ def register_memory_tools(registry: Any) -> None:
             """
             params: list[Any] = [tenant]
             if (q or "").strip():
-                ql = f"%{_qnorm(q)}%"
+                ql = f"%{like_literal(_qnorm(q))}%"
                 sql += (
-                    " AND (LOWER(REPLACE(REPLACE(e.id,'_',' '),'-',' ')) LIKE ? "
-                    "OR LOWER(REPLACE(REPLACE(e.name,'_',' '),'-',' ')) LIKE ? "
-                    "OR LOWER(REPLACE(REPLACE(e.type,'_',' '),'-',' ')) LIKE ?)"
+                    " AND (LOWER(REPLACE(REPLACE(e.id,'_',' '),'-',' ')) LIKE ? ESCAPE '!' "
+                    "OR LOWER(REPLACE(REPLACE(e.name,'_',' '),'-',' ')) LIKE ? ESCAPE '!' "
+                    "OR LOWER(REPLACE(REPLACE(e.type,'_',' '),'-',' ')) LIKE ? ESCAPE '!')"
                 )
                 params.extend([ql, ql, ql])
             sql += " ORDER BY belief_count DESC, e.name ASC LIMIT ?"

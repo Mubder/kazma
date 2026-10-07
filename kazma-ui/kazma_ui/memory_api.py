@@ -195,7 +195,9 @@ def _merged_into(metadata_json: Any) -> str:
 def _like_literal(text: str) -> str:
     """*text* as a LIKE pattern that matches itself (``ESCAPE '!'``): a ``_``
     in an entity id is a character, not "any one character"."""
-    return text.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+    from kazma_core.db.sql_patterns import like_literal
+
+    return like_literal(text)
 
 
 def _conn() -> sqlite3.Connection:

@@ -215,6 +215,9 @@ class _Sessions:
     def get_by_thread_id(self, thread_id: str):
         return object() if thread_id in self.owned else None
 
+    def thread_is_exclusive(self, thread_id: str):
+        return thread_id in self.owned
+
 
 @pytest.fixture
 def client(monkeypatch) -> TestClient:

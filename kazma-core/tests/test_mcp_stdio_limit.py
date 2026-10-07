@@ -1,4 +1,4 @@
-"""MCP stdio spawn must raise StreamReader limit above 64 KiB default."""
+"""MCP stdio must carry its configured finite framing limit to the pipes."""
 
 from __future__ import annotations
 
@@ -25,8 +25,10 @@ async def test_connect_stdio_passes_raised_limit(monkeypatch) -> None:
         proc.stdout = MagicMock()
         proc.stderr = MagicMock()
         proc.returncode = None
+        proc.poll.return_value = None
+        captured["proc"] = proc
         # Handshake + tools/list need _send to succeed
-        return proc
+        return proc, None
 
     mgr = AsyncMCPManager()
 
@@ -37,7 +39,7 @@ async def test_connect_stdio_passes_raised_limit(monkeypatch) -> None:
             return {"tools": [{"name": "list_directory", "description": "list", "inputSchema": {}}]}
         return {}
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr("kazma_core.security.process_budget.start_process_async", fake_exec)
     monkeypatch.setattr(mgr, "_send", fake_send)
     monkeypatch.setattr(mgr, "_notify", AsyncMock())
 
@@ -52,8 +54,10 @@ async def test_connect_stdio_passes_raised_limit(monkeypatch) -> None:
         },
     )
     assert n >= 1
-    assert "limit" in captured["kwargs"]
-    assert captured["kwargs"]["limit"] == 4 * 1024 * 1024
+    captured["proc"].stdout.readline.return_value = b"x" * (4 * 1024 * 1024 + 1)
+    with pytest.raises(ValueError, match="byte budget"):
+        await mgr._servers["filesystem"].process.stdout.readline()
+    captured["proc"].stdout.readline.assert_called_once_with(4 * 1024 * 1024 + 1)
 
 
 @pytest.mark.skipif(
@@ -84,7 +88,7 @@ async def test_win32_which_hit_prepends_shim_dir_without_unbound_os(
     captured: dict[str, Any] = {}
 
     async def fake_exec(*args, **kwargs):
-        captured["args"] = args
+        captured["args"] = args[0]
         captured["kwargs"] = kwargs
         proc = MagicMock()
         proc.stdin = MagicMock()
@@ -93,7 +97,8 @@ async def test_win32_which_hit_prepends_shim_dir_without_unbound_os(
         proc.stdout = MagicMock()
         proc.stderr = MagicMock()
         proc.returncode = None
-        return proc
+        proc.poll.return_value = None
+        return proc, None
 
     mgr = AsyncMCPManager()
 
@@ -113,7 +118,7 @@ async def test_win32_which_hit_prepends_shim_dir_without_unbound_os(
     shim = r"C:\nvm4w\nodejs\npx.cmd"
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr("shutil.which", lambda cmd: shim)
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr("kazma_core.security.process_budget.start_process_async", fake_exec)
     monkeypatch.setattr(mgr, "_send", fake_send)
     monkeypatch.setattr(mgr, "_notify", AsyncMock())
 

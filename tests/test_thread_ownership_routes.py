@@ -56,6 +56,9 @@ class _TenantStore:
     def put(self, session: Any) -> None:  # fork creates a web session
         self._by_session[session.session_id] = session.thread_id
 
+    def thread_is_exclusive(self, thread_id: str) -> bool:
+        return not self.broken and thread_id in self._by_session.values()
+
 
 @pytest.fixture
 def store(monkeypatch: pytest.MonkeyPatch) -> _TenantStore:

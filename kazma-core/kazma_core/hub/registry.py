@@ -12,6 +12,7 @@ from typing import Any
 import aiosqlite
 
 from kazma_core.hub.manifest_schema import SkillManifest
+from kazma_core.db.sql_patterns import like_literal
 
 __all__ = ["AgentInfo", "KazmaHub"]
 
@@ -243,17 +244,17 @@ class KazmaHub:
         params: list = []
 
         if query:
-            like = f"%{query}%"
-            clauses.append("(name LIKE ? OR description LIKE ? OR manifest_json LIKE ?)")
+            like = f"%{like_literal(query)}%"
+            clauses.append("(name LIKE ? ESCAPE '!' OR description LIKE ? ESCAPE '!' OR manifest_json LIKE ? ESCAPE '!')")
             params.extend([like, like, like])
         if capabilities:
             for cap in capabilities:
-                clauses.append("capabilities LIKE ?")
-                params.append(f"%{json.dumps(cap)}%")
+                clauses.append("capabilities LIKE ? ESCAPE '!'")
+                params.append(f"%{like_literal(json.dumps(cap))}%")
         if tags:
             for tag in tags:
-                clauses.append("tags LIKE ?")
-                params.append(f"%{json.dumps(tag)}%")
+                clauses.append("tags LIKE ? ESCAPE '!'")
+                params.append(f"%{like_literal(json.dumps(tag))}%")
         if author:
             clauses.append("author = ?")
             params.append(author)

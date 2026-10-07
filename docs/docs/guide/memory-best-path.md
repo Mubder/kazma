@@ -86,12 +86,15 @@ Includes isolation, KB toggles, backends, Neo4j Test/Sync, **and embedder** (no 
 ## Optional Neo4j
 
 ```bash
+export KAZMA_NEO4J_PASSWORD=YOUR_PASSWORD_HERE
 docker compose -f deploy/docker-compose.neo4j.yml up -d
 
 # Env install default (fail-open if server down):
 export KAZMA_NEO4J_DEFAULT=1
-export KAZMA_NEO4J_PASSWORD=YOUR_PASSWORD_HERE
 ```
+
+Choose a strong password before starting Compose; an unset password refuses
+startup. The published HTTP and Bolt ports bind to loopback.
 
 Or UI: Graph store **Neo4j** → Save → **Test Neo4j** → **Sync beliefs → Neo4j**.
 

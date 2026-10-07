@@ -323,10 +323,16 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
             }
         import subprocess
 
-        remote = f"{cfg['rclone_remote'].rstrip('/')}/{dest.name}"
+        from kazma_core.backup import rclone_policy
+
+        try:
+            base_remote = rclone_policy.validate_remote(cfg["rclone_remote"])
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc), "via": "rclone"}
+        remote = f"{base_remote.rstrip('/')}/{dest.name}"
         proc = await asyncio.to_thread(
             subprocess.run,
-            ["rclone", "copy", str(dest), remote, "--transfers", "4"],
+            ["rclone", "copy", "--transfers", "4", "--", str(dest), remote],
             capture_output=True,
             text=True, encoding="utf-8", errors="replace",
             timeout=1800,

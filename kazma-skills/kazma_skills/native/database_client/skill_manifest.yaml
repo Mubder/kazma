@@ -14,7 +14,10 @@ tools:
   execute_db_query:
     arabic_name: "تنفيذ استعلام قاعدة البيانات"
     description: >
-      READ-ONLY SQL SELECT/WITH against a local SQLite file. Cannot INSERT/UPDATE/DELETE.
+      READ-ONLY SQL SELECT/WITH against a local SQLite file, or connection:<name>
+      for an operator-defined remote read capability. Raw remote URIs are refused.
+      Remote SQL accepts only supported read syntax and approved tables/functions.
+      Cannot INSERT/UPDATE/DELETE.
       NOT for memory cleanup — use memory_list_beliefs / memory_invalidate / memory_search instead.
       Writes return authorization denied.
     category: "database"

@@ -511,7 +511,6 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             await asyncio.to_thread(validate_url, base, allow_private=True)
             async with httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context()) as client:
                 last_status = None
-                last_body = ""
                 last_exc: Exception | None = None
                 for url in candidates:
                     try:
@@ -521,7 +520,6 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                         # Try the next candidate endpoint.
                         continue
                     last_status = resp.status_code
-                    last_body = resp.text[:200]
                     if resp.status_code == 200:
                         latency = int((time.monotonic() - start) * 1000)
                         # The model list answered. That is NOT the same as the
@@ -615,11 +613,11 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                 latency = int((time.monotonic() - start) * 1000)
                 await asyncio.to_thread(registry.set_provider_health, name, "degraded")
                 if last_status is None:
-                    logger.debug("Provider test %r: all endpoints unreachable: %s", name, last_exc)
+                    logger.debug("Provider test %r: all endpoints unreachable (%s)", name, type(last_exc).__name__)
                     return {
                         "success": False,
                         "latency_ms": latency,
-                        "error": f"Cannot connect to {base_url} (connection failed)",
+                        "error": "Cannot connect to the configured provider (connection failed)",
                     }
                 hint = ""
                 if last_status == 401:
@@ -631,14 +629,14 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                 return {
                     "success": False,
                     "latency_ms": latency,
-                    "error": f"{hint}HTTP {last_status}: {last_body}",
+                    "error": f"{hint}HTTP {last_status}. Check the provider URL and key.",
                 }
         except httpx.ConnectError:
             await asyncio.to_thread(registry.set_provider_health, name, "down")
-            return {"success": False, "error": f"Cannot connect to {base_url}"}
+            return {"success": False, "error": "Cannot connect to the configured provider"}
         except Exception as exc:  # pragma: no cover - defensive
             await asyncio.to_thread(registry.set_provider_health, name, "down")
-            logger.error("Provider test failed for %r: %s", name, exc)
+            logger.error("Provider test failed for %r (%s)", name, type(exc).__name__)
             return {"success": False, "error": "Provider test failed unexpectedly"}
 
     @router.post("/api/providers/{name}/discover")

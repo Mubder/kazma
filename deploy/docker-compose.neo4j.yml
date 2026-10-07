@@ -1,5 +1,6 @@
 # Optional Neo4j for Kazma belief dual-write (not required for single-node).
 #
+#   Set KAZMA_NEO4J_PASSWORD to a strong password, then:
 #   docker compose -f deploy/docker-compose.neo4j.yml up -d
 #
 # Then either:
@@ -16,10 +17,10 @@ services:
     image: neo4j:5
     container_name: kazma-neo4j
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
     environment:
-      NEO4J_AUTH: neo4j/${KAZMA_NEO4J_PASSWORD:-YOUR_PASSWORD_HERE}
+      NEO4J_AUTH: neo4j/${KAZMA_NEO4J_PASSWORD:?Set KAZMA_NEO4J_PASSWORD to a strong password}
     volumes:
       - kazma-neo4j-data:/data
     restart: unless-stopped

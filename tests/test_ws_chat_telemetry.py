@@ -47,6 +47,11 @@ async def test_event_bridge_process_stream():
 
 
 def test_ws_chat_endpoint_ping_pong():
+    from kazma_ui.session_manager import get_session_manager
+
+    store = get_session_manager()
+    session = store.get_or_create("session-test-456", durable=False)
+    session.thread_id = "ping-test-thread"
     app = FastAPI()
     router = create_ws_chat_router()
     app.include_router(router)
@@ -69,9 +74,12 @@ def test_ws_connect_does_not_create_empty_listed_session():
 
     client = TestClient(app)
     sid = "ws-empty-shell-test"
+    from starlette.websockets import WebSocketDisconnect
+
     with client.websocket_connect(f"/ws/chat/{sid}") as websocket:
-        websocket.send_json({"action": "ping"})
-        assert websocket.receive_json() == {"type": "pong"}
+        with pytest.raises(WebSocketDisconnect) as denied:
+            websocket.receive_json()
+        assert denied.value.code == 4004
 
     mgr = get_session_manager()
     # Hidden from the default sidebar list even if a memory shell exists.

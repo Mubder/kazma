@@ -11,6 +11,22 @@ found it forgets.
 **Reviewed 2026-10-05 for runtime recovery and evaluation review.** Other
 entries retain their original dates.
 
+**Host process budgets (2026-10-07).** Shared shell/native/hook/patch/MCP
+launches bound captured output and terminate their process trees. Windows Job
+Objects enforce an aggregate 2 GiB memory and 32-process budget; POSIX inherits
+per-process address-space and CPU limits and kills the process group on cleanup.
+POSIX group cleanup does not contain a deliberately detached session and is
+not an aggregate cgroup memory/process limit. Production and multi-user code
+execution must retain Docker isolation. The documented single-operator host
+profile and explicit local escape hatch remain a trust decision; approval and
+resource limits do not make arbitrary host code safe.
+
+**Audit scope (2026-10-07).** The follow-up to the supplied external audit
+preserves supported compatibility/recovery APIs and qualifies its overstated
+exploit examples. See `audits/AUDIT_FOLLOWUP_2026-10-07.md` for every disposition.
+Human-reviewed bilingual accuracy qualification remains postponed; migration
+text preservation and live smoke checks do not establish semantic accuracy.
+
 **Runtime hardening (2026-10-05).** Temporal acknowledgement loss no longer
 falls back to a second local execution; activity retries are disabled until
 effects have individual idempotency. A real local-server drill found and fixed

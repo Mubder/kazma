@@ -190,28 +190,12 @@ def create_workspaces_router() -> APIRouter:
         ):
             raise HTTPException(status_code=403, detail="Suspicious path traversal attempt blocked.")
 
-        # Confinement: KAZMA_WORKSPACE_ROOT required in production (audit H12).
-        allow_root = os.environ.get("KAZMA_WORKSPACE_ROOT", "").strip()
-        prod = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
-            "1", "true", "on", "yes",
-        )
-        if prod and not allow_root:
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    "KAZMA_WORKSPACE_ROOT is required when KAZMA_PRODUCTION=1. "
-                    "Set it to the parent directory of allowed workspaces."
-                ),
-            )
-        if allow_root:
-            allow_resolved = Path(allow_root).resolve()
-            try:
-                resolved_path.relative_to(allow_resolved)
-            except ValueError:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Workspace path is outside the allowed workspace root.",
-                ) from None
+        from kazma_core.workspace import root_policy
+
+        try:
+            root_policy.validate_root(resolved_path)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from None
 
         try:
             # Safely generate the directory structure
@@ -252,6 +236,17 @@ def create_workspaces_router() -> APIRouter:
         config_store = get_config_store()
 
         try:
+            # Check the stored target before mutating the active binding: old
+            # registrations must not bypass today's production confinement.
+            proposed = ws_store.get_workspace(ws_id)
+            if not proposed:
+                raise HTTPException(status_code=404, detail="Workspace not found.")
+            from kazma_core.workspace import root_policy
+
+            try:
+                root_policy.validate_root(Path(proposed["root_path"]))
+            except PermissionError as exc:
+                raise HTTPException(status_code=403, detail=str(exc)) from None
             # Activate the workspace in the database
             success = ws_store.set_active_workspace(ws_id)
             if not success:

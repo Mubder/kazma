@@ -268,7 +268,7 @@ function registerAgentStore() {
       this._scheduleReconnect();
     },
 
-    connect(sessionId) {
+    async connect(sessionId) {
       if (!sessionId) return;
       this._startLivenessTicker();
       if (this.sessionId === sessionId && this._socket && this._socket.readyState === WebSocket.OPEN) {
@@ -295,6 +295,28 @@ function registerAgentStore() {
       // starts the SessionStore poller (that caused chat blink every 2s).
       this._intentionalClose = true;
       this._closeSocket();
+      const attempt = this._connectionAttempt = (this._connectionAttempt || 0) + 1;
+      // A socket observes only an existing tenant-owned shell. Creation is
+      // HTTP, inside the authentication/tenant/CSRF middleware, and stays out
+      // of the sidebar until a first message makes the shell durable.
+      let bindStatus = 0;
+      try {
+        const bound = await fetch('/api/chat/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId }),
+        });
+        bindStatus = bound.status;
+        if (!bound.ok) throw new Error(`Session unavailable (${bound.status})`);
+      } catch (err) {
+        if (attempt !== this._connectionAttempt) return;
+        this.connectionStatus = 'disconnected';
+        this._intentionalClose = false;
+        console.warn('[AgentStore] Could not bind telemetry session:', err);
+        if (![400, 401, 403, 404].includes(bindStatus)) this._scheduleReconnect();
+        return;
+      }
+      if (attempt !== this._connectionAttempt || this.sessionId !== sessionId) return;
       // Turn Delivery V2: fresh seq tracker per connection + resume cursor.
       // The persisted cursor tells the server where we stopped reading; its
       // journal replays everything after it on accept.
@@ -392,6 +414,7 @@ function registerAgentStore() {
     },
 
     disconnect() {
+      this._connectionAttempt = (this._connectionAttempt || 0) + 1;
       this._intentionalClose = true;
       this._closeSocket();
       this._resetTurnState();

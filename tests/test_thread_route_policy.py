@@ -45,6 +45,11 @@ MISC = "kazma-ui/kazma_ui/routes_direct/misc.py"
 DASH = "kazma-ui/kazma_ui/dashboard.py"
 
 POLICY: dict[tuple[str, str, str], tuple[str, str]] = {
+    ("POST", "/api/chat/sessions", SSE): (
+        "session",
+        "HTTP registers a caller-tenant shell; new nondefault tenants get a "
+        "fresh graph id, and a missing gateway session cannot be claimed",
+    ),
     # Replay: reads and rewrites conversation state.
     ("GET", "/api/replay/snapshots/{thread_id}", REPLAY): ("owner", ""),
     ("GET", "/api/replay/snapshots/{thread_id}/{iteration}", REPLAY): ("owner", ""),
@@ -115,6 +120,7 @@ def _takes_a_thread(fn: ast.AST, paths: list[tuple[str, str]]) -> bool:
         or "thread_id" in names
         or "thread_id" in strings
         or any("{thread_id}" in p for _, p in paths)
+        or ("session_id" in params and any(method == "WEBSOCKET" for method, _ in paths))
     )
 
 

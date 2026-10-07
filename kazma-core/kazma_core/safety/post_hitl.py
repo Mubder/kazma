@@ -237,29 +237,21 @@ def resolve_shell_binary(argv0: str, *, restricted_path: str) -> str | None:
     if os.name == "nt" and name.lower().endswith(".exe"):
         name = name[:-4]
 
-    # Prefer which() with restricted PATH only
-    found = shutil.which(name, path=restricted_path)
-    if found:
-        return found
-
-    # Absolute path: only if it lands inside a restricted PATH dir
-    p = Path(argv0)
-    if p.is_absolute() or (len(argv0) > 2 and argv0[1] == ":"):
+    # Enumerate explicit absolute directories. shutil.which may implicitly
+    # search the current directory on Windows, even with a supplied PATH.
+    # Resolve symlinks before accepting a candidate from a trusted directory.
+    suffixes = (".exe", ".com") if os.name == "nt" else ("",)
+    for directory in restricted_path.split(os.pathsep):
+        if not directory or not Path(directory).is_absolute():
+            continue
         try:
-            resolved = p.resolve()
-        except OSError:
-            return None
-        if not resolved.is_file():
-            return None
-        allowed_roots = [Path(d).resolve() for d in restricted_path.split(os.pathsep) if d]
-        for root in allowed_roots:
-            try:
-                resolved.relative_to(root)
-                return str(resolved)
-            except ValueError:
-                continue
-        return None
-
+            root = Path(directory).resolve()
+            for suffix in suffixes:
+                candidate = (root / (name + suffix)).resolve()
+                if candidate.is_relative_to(root) and candidate.is_file() and os.access(candidate, os.X_OK):
+                    return str(candidate)
+        except (OSError, RuntimeError):
+            continue
     return None
 
 

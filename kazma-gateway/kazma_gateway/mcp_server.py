@@ -189,8 +189,13 @@ TOOL_MAP = {t["name"]: t for t in TOOLS}
 
 # Map MCP tool names to safety danger tool names for HITL gating
 MCP_TOOL_TO_SAFETY = {
+    "search_code": "file_search",
+    "read_file": "file_read",
     "write_file": "file_write",
-    "run_tests": "run_tests",  # Added to safety danger list in safety.py
+    "run_tests": "run_unit_tests",
+    "list_files": "file_list",
+    "run_command": "shell_exec",
+    "git_status": "file_read",
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -490,6 +495,9 @@ class MCPServer:
         """Execute a tool and return the result."""
         tool_name = params.get("name")
         arguments = params.get("arguments", {})
+        if not isinstance(arguments, dict):
+            return make_error(req_id, -32602, "Tool arguments must be an object")
+        arguments = dict(arguments)
 
         if tool_name not in DISPATCH:
             return make_error(req_id, -32602, f"Unknown tool: {tool_name}")
@@ -502,8 +510,12 @@ class MCPServer:
             return make_error(req_id, -32603, "MCP IDE server is disabled via configuration")
 
         # Map MCP tool names to safety danger tool names
+        from kazma_core.safety.hitl import get_tool_tier
+
         safety_tool_name = MCP_TOOL_TO_SAFETY.get(tool_name, tool_name)
-        is_danger_tool = safety_tool_name in {"file_write", "run_tests", "file_delete", "shell_exec", "python_exec", "code_exec", "spawn_agent", "spawn_agents", "schedule_task", "cancel_scheduled"}
+        # Secret authentication is independent of standing HITL grants.
+        # Unknown names default to danger in the canonical tier registry.
+        is_danger_tool = get_tool_tier(safety_tool_name) != "read"
 
         # Strict KAZMA_SECRET enforcement: require secret for ALL danger tools
         kazma_secret = os.environ.get("KAZMA_SECRET", "").strip()
@@ -516,7 +528,7 @@ class MCPServer:
                 provided = arguments.pop("_secret", "") or ""
             if not isinstance(provided, str):
                 provided = str(provided)
-            if not hmac.compare_digest(provided, kazma_secret):
+            if not hmac.compare_digest(provided.encode("utf-8"), kazma_secret.encode("utf-8")):
                 return make_error(req_id, -32603, "Invalid KAZMA_SECRET for danger tool")
 
         # Safety middleware gate (fail-closed bus gate)

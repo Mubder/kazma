@@ -9,7 +9,7 @@ the fix in ``mcp/manager.py``).
 from __future__ import annotations
 
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from kazma_core.mcp_client import MCPClient, MCPServerConfig
@@ -26,13 +26,13 @@ async def test_stdio_resolves_cmd_shim_on_win32() -> None:
     with (
         patch.object(sys, "platform", "win32"),
         patch("kazma_core.mcp_client.shutil.which", return_value=r"C:\nodejs\npx.cmd") as mock_which,
-        patch("kazma_core.mcp_client.subprocess.Popen") as mock_popen,
+        patch("kazma_core.security.process_budget.start_process_async", new_callable=AsyncMock) as mock_start,
     ):
-        mock_popen.return_value = MagicMock()
+        mock_start.return_value = (MagicMock(), None)
         await client._connect_stdio(cfg)
 
     mock_which.assert_called_once()
-    spawned = mock_popen.call_args[0][0]
+    spawned = mock_start.call_args[0][0]
     assert spawned[0] == r"C:\nodejs\npx.cmd"
     assert spawned[1:] == ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
 
@@ -44,7 +44,7 @@ async def test_stdio_leaves_command_untouched_when_unresolved() -> None:
     with (
         patch.object(sys, "platform", "win32"),
         patch("kazma_core.mcp_client.shutil.which", return_value=None),
-        patch("kazma_core.mcp_client.subprocess.Popen", side_effect=FileNotFoundError),
+        patch("kazma_core.security.process_budget.start_process_async", new=AsyncMock(side_effect=FileNotFoundError)),
     ):
         with pytest.raises(Exception, match="Command not found: missing-bin"):
             await client._connect_stdio(cfg)

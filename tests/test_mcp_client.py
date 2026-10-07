@@ -115,7 +115,7 @@ class TestMCPClient:
         mock_proc.stdout = MagicMock()
         mock_proc.stderr = MagicMock()
 
-        with patch("kazma_core.mcp_client.subprocess.Popen", return_value=mock_proc):
+        with patch("kazma_core.security.process_budget.start_process_async", new=AsyncMock(return_value=(mock_proc, None))):
             # We need to mock the _send_stdio to return a valid initialize response
             init_response = json.dumps(
                 {
@@ -188,7 +188,7 @@ class TestMCPClient:
         mock_proc.stdout = MagicMock()
         mock_proc.stderr = MagicMock()
 
-        with patch("kazma_core.mcp_client.subprocess.Popen", return_value=mock_proc):
+        with patch("kazma_core.security.process_budget.start_process_async", new=AsyncMock(return_value=(mock_proc, None))):
             init_response = json.dumps(
                 {
                     "jsonrpc": "2.0",

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import sqlite3
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -127,18 +127,20 @@ def _fence_result(text: str, source: str) -> str:
 
 def _connect_sqlite(resolved: str) -> sqlite3.Connection:
     """Connect to SQLite and attempt to load sqlite_vec extension if available."""
-    conn = sqlite3.connect(resolved)
+    uri = resolved if resolved == ":memory:" else Path(resolved).as_uri() + "?mode=ro"
+    conn = sqlite3.connect(uri, uri=resolved != ":memory:", timeout=2)
     try:
         import sqlite_vec
 
         conn.enable_load_extension(True)
         sqlite_vec.load(conn)
-    except Exception:
-        pass
+    except (ImportError, OSError, sqlite3.Error):
+        logger.debug("SQLite vector extension unavailable", exc_info=True)
     try:
         conn.enable_load_extension(False)
-    except Exception:
-        pass
+    except (AttributeError, sqlite3.Error):
+        conn.close()
+        raise
     return conn
 
 
@@ -236,7 +238,7 @@ async def execute_db_query(
     use ``memory_list_beliefs`` / ``memory_invalidate`` / ``memory_search``.
 
     Args:
-        db_uri: Path to the local sqlite database file, or ':memory:'.
+        db_uri: Local SQLite file, ':memory:', or operator-defined connection:<name>.
         query: SQL statement (SELECT only).
         params: Optional list of query parameters.
         limit: Max row limit.
@@ -245,8 +247,17 @@ async def execute_db_query(
         JSON string representing rows, or safety/execution error messages.
     """
     # ── Multi-dialect dispatch: non-SQLite URIs route to the right driver ──
-    if _detect_dialect(db_uri) != "sqlite":
+    if _detect_dialect(db_uri) != "sqlite" or db_uri.startswith("connection:"):
         return await execute_db_query_any(db_uri, query, params, limit)
+
+    from .sql_policy import MAX_OUTPUT_CHARS, MAX_QUERY_CHARS, bounded_rows
+
+    try:
+        bounded_rows(limit)
+    except ValueError as exc:
+        return "Error: " + str(exc)
+    if not isinstance(query, str) or len(query) > MAX_QUERY_CHARS:
+        return "Error: SQL query exceeds the query size limit"
 
     # ── Safety: only allow SELECT or WITH ──
     def strip_leading_comments(sql: str) -> str:
@@ -292,15 +303,20 @@ async def execute_db_query(
         try:
             conn.row_factory = sqlite3.Row
             _install_readonly_authorizer(conn)
+            deadline = time.monotonic() + 2
+            conn.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
             cursor = conn.execute(query, params or [])
             rows = cursor.fetchmany(limit)
             if not rows:
                 return "[]"
-            return json.dumps(
+            result = json.dumps(
                 [dict(row) for row in rows],
                 ensure_ascii=False,
                 indent=2,
             )
+            if len(result) > MAX_OUTPUT_CHARS:
+                return "Error: Query result exceeds the output size limit"
+            return result
         finally:
             conn.close()
 
@@ -390,181 +406,51 @@ def _validate_readonly_sql(query: str) -> str | None:
     return None
 
 
-async def _query_postgres(db_uri: str, query: str, params: list | None, limit: int) -> str:
-    try:
-        import psycopg  # psycopg3
-    except ImportError:
-        return "Error: psycopg not installed. Run: pip install 'psycopg[binary]'"
-    try:
-        # psycopg3 is sync; run in a worker thread to stay non-blocking.
-        import asyncio
-
-        def _run() -> str:
-            with psycopg.connect(db_uri) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(query, params or [])
-                    cols = [d.name for d in (cur.description or [])]
-                    rows = cur.fetchmany(limit)
-                    if not rows:
-                        return "[]"
-                    return json.dumps(
-                        [dict(zip(cols, r)) for r in rows], ensure_ascii=False, indent=2, default=str
-                    )
-        return await asyncio.to_thread(_run)
-    except Exception as exc:  # noqa: BLE001
-        return f"SQL Error: Postgres query failed. Detail: {exc}"
-
-
-async def _query_mysql(db_uri: str, query: str, params: list | None, limit: int) -> str:
-    try:
-        import pymysql
-    except ImportError:
-        return "Error: pymysql not installed. Run: pip install pymysql"
-    try:
-        import asyncio
-
-        def _run() -> str:
-            from urllib.parse import urlparse
-
-            p = urlparse(db_uri)
-            conn = pymysql.connect(
-                host=p.hostname or "localhost",
-                port=p.port or 3306,
-                user=p.username or "root",
-                password=p.password or "",
-                database=(p.path or "/").lstrip("/"),
-            )
-            try:
-                with conn.cursor(pymysql.cursors.DictCursor) as cur:
-                    cur.execute(query, params or ())
-                    rows = cur.fetchmany(limit)
-                    if not rows:
-                        return "[]"
-                    return json.dumps(rows, ensure_ascii=False, indent=2, default=str)
-            finally:
-                conn.close()
-        return await asyncio.to_thread(_run)
-    except Exception as exc:  # noqa: BLE001
-        return f"SQL Error: MySQL query failed. Detail: {exc}"
-
-
-async def _query_mongodb(db_uri: str, query: str, params: list | None, limit: int) -> str:
-    """Run a MongoDB find() from a JSON *query* document.
-
-    For Mongo, ``query`` is a JSON filter document (not SQL). ``params`` is
-    ignored. The default database is taken from the URI path.
-    """
-    try:
-        from pymongo import MongoClient
-        from urllib.parse import urlparse
-    except ImportError:
-        return "Error: pymongo not installed. Run: pip install pymongo"
-    try:
-        import asyncio
-
-        def _run() -> str:
-            try:
-                filt = json.loads(query) if query.strip() else {}
-            except json.JSONDecodeError as exc:
-                return f"Error: MongoDB filter must be valid JSON — {exc}"
-            p = urlparse(db_uri)
-            db_name = (p.path or "/test").lstrip("/")
-            client = MongoClient(db_uri, serverSelectionTimeoutMS=5000)
-            try:
-                # Infer collection: prefer params[0], else 'documents'.
-                coll_name = (params[0] if params else "documents")
-                docs = list(client[db_name][coll_name].find(filt).limit(limit))
-                if not docs:
-                    return "[]"
-                return json.dumps(docs, ensure_ascii=False, indent=2, default=str)
-            finally:
-                client.close()
-        return await asyncio.to_thread(_run)
-    except Exception as exc:  # noqa: BLE001
-        return f"Mongo Error: query failed. Detail: {exc}"
-
-
-def _remote_host_error(db_uri: str, dialect: str) -> str | None:
-    """Gate + log outbound database connections (audit 2026-09-16 F-6).
-
-    The SQLite path is workspace-scoped and path-validated. The remote
-    dialects are not scoped to anything: the model supplies a whole URI, so a
-    prompt-injected agent can open a connection to any host on the internet
-    or the local network, at tool tier ``read`` with no HITL prompt.
-
-    The reads themselves are already constrained (SELECT/WITH only), so this
-    is not sized as a block-by-default — an operator legitimately points this
-    at localhost, a LAN warehouse, or a managed cloud instance, and defaulting
-    to deny would break all three. Instead:
-
-      * every remote connection is logged with its host, so it is *visible*;
-      * ``KAZMA_DB_CLIENT_ALLOWED_HOSTS`` (comma-separated hostnames) turns it
-        into a real allowlist for anyone who wants one.
-    """
-    from urllib.parse import urlparse
-
-    host = (urlparse(db_uri).hostname or "").strip().lower()
-    if not host:
-        return "Error: could not parse a host from the database URI."
-
-    if host in ("localhost", "127.0.0.1", "::1"):
-        logger.info("[database_client] %s query -> loopback %r", dialect, host)
-        return None
-
-    allowed_raw = (os.environ.get("KAZMA_DB_CLIENT_ALLOWED_HOSTS") or "").strip()
-    allowed = {h.strip().lower() for h in allowed_raw.split(",") if h.strip()}
-    if host not in allowed:
-        logger.warning(
-            "[database_client] refused %s connection to %r "
-            "(not in KAZMA_DB_CLIENT_ALLOWED_HOSTS)", dialect, host,
-        )
-        return (
-            f"Error: host {host!r} is not in KAZMA_DB_CLIENT_ALLOWED_HOSTS. "
-            "Loopback is allowed without an allowlist; add this host there "
-            "to allow this connection."
-        )
-
-    logger.info("[database_client] %s query -> host %r", dialect, host)
-    return None
-
-
 async def execute_db_query_any(
     db_uri: str,
     query: str,
     params: list[Any] | None = None,
     limit: int = 100,
 ) -> str:
-    """Dialect-aware read-only query (Postgres/MySQL/Mongo/SQLite).
+    """Read an operator-defined Postgres/MySQL/Mongo capability or local SQLite.
 
-    For SQL dialects, *query* must be a SELECT/WITH. For Mongo, *query* is a
-    JSON filter document and ``params[0]`` (optional) names the collection.
+    Raw remote URIs are refused. Remote SQL is compiled to supported SELECT
+    syntax and its role/table privileges verified. Mongo uses a restricted
+    JSON filter and ``params[0]`` names an explicitly allowed collection.
     """
-    dialect = _detect_dialect(db_uri)
-    if dialect != "sqlite":
-        host_err = _remote_host_error(db_uri, dialect)
-        if host_err:
-            return host_err
-    if dialect == "mongodb":
-        return _fence_result(
-            await _query_mongodb(db_uri, query, params, limit),
-            source=f"db:mongo:{db_uri}",
-        )
+    if _detect_dialect(db_uri) == "sqlite" and not db_uri.startswith("connection:"):
+        return await execute_db_query(db_uri=db_uri, query=query, params=params, limit=limit)
 
-    # SQL dialects — enforce read-only.
-    err = _validate_readonly_sql(query)
-    if err:
-        return err
+    from kazma_core.errors import safe_error
+    from .connections import resolve_connection
+    from .remote_reads import read_mongo, read_mysql, read_postgres
+    from .sql_policy import bounded_rows, compile_read, validate_mongo_filter
 
-    if dialect == "postgres":
-        return _fence_result(
-            await _query_postgres(db_uri, query, params, limit),
-            source=f"db:postgres:{db_uri}",
-        )
-    if dialect == "mysql":
-        return _fence_result(
-            await _query_mysql(db_uri, query, params, limit),
-            source=f"db:mysql:{db_uri}",
-        )
-    # SQLite — delegate to the existing path-validated implementation.
-    return await execute_db_query(db_uri=db_uri, query=query, params=params, limit=limit)
+    try:
+        bounded_rows(limit)
+        capability = await asyncio.to_thread(resolve_connection, db_uri)
+        if not isinstance(params, (list, type(None))) or len(params or []) > 256:
+            return "Error: params must be a list of at most 256 scalar values"
+        if capability.dialect == "mongodb":
+            collection = params[0] if params else "documents"
+            if collection not in capability.tables:
+                return "Error: Collection is outside this connection's capability"
+            filt = validate_mongo_filter(query)
+            text = await asyncio.to_thread(read_mongo, capability, filt, collection, limit)
+        else:
+            if any(type(value) not in (str, int, float, bool, type(None))
+                   or (isinstance(value, str) and len(value) > 16384) for value in params or []):
+                return "Error: SQL params must contain bounded scalar values"
+            sql, used = compile_read(query, dialect=capability.dialect,
+                                     tables=capability.tables, limit=limit)
+            read = read_postgres if capability.dialect == "postgres" else read_mysql
+            text = await asyncio.to_thread(read, capability, sql, params or [], limit, used)
+        return _fence_result(text, source=f"db_connection:{capability.name}")
+    except ValueError as exc:
+        return "Error: " + str(exc)
+    except ImportError:
+        from kazma_core.install_hint import extra_install_hint
 
+        return "Error: Remote database reads require " + extra_install_hint("database")
+    except Exception as exc:
+        return "Error: Remote database read refused or failed. " + safe_error(exc)

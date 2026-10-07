@@ -233,9 +233,13 @@ def test_endpoint_multi_tab_both_receive_live_frames():
     client = _mk_client()
     with client.websocket_connect("/ws/chat/v2-multitab-session") as ws1:
         with client.websocket_connect("/ws/chat/v2-multitab-session") as ws2:
-            # Both connections registered themselves with the broker on
-            # accept — simulate a turn event emission exactly as the
-            # broker-backed sender would.
+            # Accept precedes asynchronous initialization and subscription.
+            # A pong proves the receive loop (and broker registration) is
+            # ready; broadcasting immediately after accept races the second
+            # socket and leaves receive_json waiting for an event it missed.
+            for ws in (ws1, ws2):
+                ws.send_json({"action": "ping"})
+                assert ws.receive_json() == {"type": "pong"}
             asyncio.run(broker.emit("v2-multitab-thread", {"type": "status_update",
                                                            "data": {"status": "thinking"}}))
             got1 = ws1.receive_json()

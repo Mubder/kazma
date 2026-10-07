@@ -59,6 +59,9 @@ class _Store:
             return object()
         return None
 
+    def thread_is_exclusive(self, thread_id: str) -> bool:
+        return thread_id in (MINE_NEW, MINE_OLD, ORPHAN)
+
     def list_all(self, include_archived: bool = False, *, include_empty: bool = False, prune_empty: bool = True):
         if not self.listing:
             raise AssertionError("list_all must not be called")

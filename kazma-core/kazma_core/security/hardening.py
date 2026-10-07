@@ -87,7 +87,7 @@ _CONFIG_SUFFIXES = frozenset({".yaml", ".yml", ".toml", ".json", ".ini", ".cfg",
 #: Calls in product code that run a shell or evaluate code, reviewed: why
 #: each is needed and what keeps it safe. Keyed by (file, function, call).
 _REVIEWED_SITES: dict[tuple[str, str, str], str] = {
-    ("kazma-core/kazma_core/agent/tool_hooks.py", "_run_command_sync", "subprocess.run(shell=True)"): (
+    ("kazma-core/kazma_core/agent/tool_hooks.py", "_run_command_sync", "kazma_core.security.process_budget.run_bounded(shell=True)"): (
         "an operator's tool hook (agent.hooks.*), a command line the operator wrote and "
         "the agent cannot write (safety.protected_config); it runs without the server's "
         "secrets (tool_child_env)"
@@ -103,6 +103,8 @@ _ALWAYS_RISKY = frozenset({
 _SUBPROCESS_SHELL_ARG = frozenset({
     "subprocess.run", "subprocess.call", "subprocess.Popen",
     "subprocess.check_output", "subprocess.check_call",
+    "kazma_core.security.process_budget.run_bounded",
+    "kazma_core.security.process_budget.run_bounded_async",
 })
 
 

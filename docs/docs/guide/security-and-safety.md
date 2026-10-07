@@ -103,6 +103,10 @@ Web paints from `_serverGates` / TurnDocument (`chat.js`). `close_turn` keeps th
 
 ### Auth: `KAZMA_SECRET` vs opaque sessions
 
+First-run output does not print the generated secret. A local operator can open
+the loopback UI; configure a strong `KAZMA_SECRET` in the installation's `.env`
+for a stable machine credential.
+
 **Never rely on cookie-based `KAZMA_SECRET` for multi-user safety.** A `kazma-secret=<KAZMA_SECRET>` cookie is the raw shared secret: theft = admin until rotation; no revocation table; no per-user identity.
 
 **Use** opaque server-side sessions (`kazma-session` random ID → hashed row + expiry). Keep `KAZMA_SECRET` for machine-to-machine header auth. If unset, `get_kazma_secret()` may return `""` and approval endpoints become **unauthenticated** — always set it off localhost.

@@ -555,7 +555,7 @@ def register_system_routes(self: Any) -> None:
         # ── Core dependencies (always installed via monorepo packages) ──
         CORE_PACKAGES = [
             "fastapi", "uvicorn", "langgraph", "langgraph-checkpoint-sqlite",
-            "pydantic", "langchain-core",
+            "pydantic", "langchain-core", "langgraph-sdk", "multidict", "werkzeug",
             "aiosqlite", "langfuse", "pyyaml", "httpx", "cryptography",
             "PyJWT", "jinja2", "python-multipart", "textual", "psutil",
             "websockets", "duckduckgo-search", "trafilatura",

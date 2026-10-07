@@ -432,6 +432,12 @@ def remote_writable(repo: str, *, force: bool = False) -> tuple[bool, str]:
     if not repo.startswith("rclone:"):
         return True, ""
     remote = repo[len("rclone:"):]
+    from kazma_core.backup import rclone_policy
+
+    try:
+        remote = rclone_policy.validate_remote(remote)
+    except ValueError as exc:
+        return False, str(exc)
     now = time.time()
     hit = _write_probe_cache.get(remote)
     if hit and not force and now - hit[0] < _WRITE_PROBE_TTL_S:
@@ -444,7 +450,7 @@ def remote_writable(repo: str, *, force: bool = False) -> tuple[bool, str]:
         env.setdefault("RCLONE_RETRIES", "1")
         env.setdefault("RCLONE_LOW_LEVEL_RETRIES", "1")
         proc = subprocess.run(
-            ["rclone", "rcat", f"{remote.rstrip('/')}/{name}"],
+            ["rclone", "rcat", "--", f"{remote.rstrip('/')}/{name}"],
             input="probe", env=env, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=90, check=False,
         )
@@ -453,7 +459,7 @@ def remote_writable(repo: str, *, force: bool = False) -> tuple[bool, str]:
             detail = _meaningful_error(proc.stderr, proc.stdout)
         else:
             subprocess.run(
-                ["rclone", "deletefile", f"{remote.rstrip('/')}/{name}"],
+                ["rclone", "deletefile", "--", f"{remote.rstrip('/')}/{name}"],
                 env=env, capture_output=True, text=True, encoding="utf-8",
                 errors="replace", timeout=90, check=False,
             )

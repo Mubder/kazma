@@ -70,10 +70,11 @@ async def test_tools_discovery_failure_closes_stdio_process(monkeypatch: pytest.
     process.stdout = MagicMock()
     process.stderr = None
     process.returncode = None
-    process.wait = AsyncMock()
+    process.poll.return_value = None
+    process.wait.return_value = 0
 
     async def fake_exec(*_args: object, **_kwargs: object) -> MagicMock:
-        return process
+        return process, None
 
     async def fake_send(
         _handle: MCPServerHandle,
@@ -87,7 +88,7 @@ async def test_tools_discovery_failure_closes_stdio_process(monkeypatch: pytest.
             raise MCPBridgeError("tools/list rejected")
         return {}
 
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr("kazma_core.security.process_budget.start_process_async", fake_exec)
     monkeypatch.setattr(manager, "_send", fake_send)
     monkeypatch.setattr(manager, "_notify", AsyncMock())
 
@@ -98,7 +99,7 @@ async def test_tools_discovery_failure_closes_stdio_process(monkeypatch: pytest.
         )
 
     process.terminate.assert_called_once()
-    process.wait.assert_awaited_once()
+    process.wait.assert_called_once_with(timeout=5)
     assert "broken" not in manager._servers
 
 
@@ -179,7 +180,8 @@ async def test_legacy_client_stdio_read_uses_configured_timeout() -> None:
     read_started = threading.Event()
     release_read = threading.Event()
 
-    def readline() -> bytes:
+    def readline(size: int = -1) -> bytes:
+        assert size > 0
         read_started.set()
         release_read.wait()
         return b""
