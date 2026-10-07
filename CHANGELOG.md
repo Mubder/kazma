@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Source grounding across graph answer paths (2026-10-07)
+
+- Human review of four synthetic bilingual development answers rejected two
+  unsupported claims that a release awaiting review had not shipped or been
+  published. The original failures and their hash-bound human grading are
+  retained; they do not qualify held-out accuracy.
+- Supervisor calls, retries, failover, empty-answer recovery and final synthesis
+  now share a source-grounding instruction, including custom prompts and restored
+  history. Review, approval, shipping and publication require their own evidence;
+  absent facts remain unknown. File-injected actions must not become unsolicited
+  offers. Guidance is added only to the model payload, preserving checkpoint history.
+- Graph regression tests cover English/Arabic fixture reads, synthesis from old
+  custom prompts, unchanged tool results and the failed-turn synthesis guard.
+
 ## Docker execution under the Windows service (2026-10-07)
 
 The Docker Python runner sends its sandbox script through standard input instead
