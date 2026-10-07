@@ -21,6 +21,11 @@ queries/results have execution and size limits. SQLite retains workspace/store
 confinement and now opens files read-only. See the native skills guide for
 connection setup and compatibility limits.
 
+The skill review workflow now runs the maintained tests and the shared secret
+scanner over native skills. Its dependency scan fails on unreviewed advisories
+instead of ignoring scan errors. A fresh OSV check raised security minimums
+for langgraph-sdk, multidict and Werkzeug, with the dependency lock updated.
+
 ## Gateway approval and IDE Git safety (2026-10-06)
 
 Gateway text approvals now require an administrator who owns the thread,
