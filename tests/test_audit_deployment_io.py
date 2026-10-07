@@ -170,7 +170,7 @@ def test_callback_failures_do_not_log_token_or_exception_payload(monkeypatch, ca
         raise RuntimeError(token)
 
     monkeypatch.setattr(callback_store, "_get_connection", fail)
-    caplog.set_level("DEBUG")
+    caplog.set_level("DEBUG", logger=callback_store.logger.name)
     assert callback_store.encode_callback_data("x" * 70) == f"cb:{token}"
     callback_store._lru_cache.clear()
     assert callback_store.decode_callback_data(f"cb:{token}") == f"cb:{token}"

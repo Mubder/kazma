@@ -25,9 +25,10 @@ def test_database_templates_require_secret_and_bind_loopback(tmp_path, template,
     version = subprocess.run([docker, "compose", "version"], capture_output=True, timeout=10)
     if version.returncode:
         pytest.skip("Docker Compose CLI unavailable")
-    env_file = tmp_path / "empty.env"
+    env_file = tmp_path / ".env"
     env_file.write_text("", encoding="utf-8")
-    command = [docker, "compose", "--env-file", str(env_file), "-f", str(ROOT / template),
+    command = [docker, "compose", "--project-directory", str(tmp_path),
+               "--env-file", str(env_file), "-f", str(ROOT / template),
                "config", "--format", "json", "--no-env-resolution"]
     environment = tool_child_env()
     environment.pop(variable, None)

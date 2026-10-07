@@ -38,6 +38,11 @@ def test_input_and_both_output_streams_keep_their_contract():
     assert result.stderr.strip() == "error"
 
 
+def test_missing_executable_keeps_the_launch_error_contract(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        run_bounded([str(tmp_path / "no-such-executable")], env=tool_child_env())
+
+
 def test_excess_output_is_a_bounded_failure_without_pipe_deadlock():
     started = time.monotonic()
     with pytest.raises(OutputLimitExceeded):

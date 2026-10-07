@@ -142,6 +142,26 @@ def _start_process(
         raise ValueError("memory_bytes must be positive")
     if os.name != "nt" and not (hasattr(os, "waitid") and hasattr(os, "WNOWAIT")):
         raise OSError("Host process budgets require waitid/WNOWAIT on this platform")
+    if os.name != "nt":
+        import errno
+        import shutil
+
+        # The limit launcher is itself a valid executable. Resolve the real
+        # program first so a missing command retains Popen's FileNotFoundError
+        # contract instead of becoming a later protocol EOF. Relative names
+        # and PATH components use the child's working directory.
+        task_cwd = os.path.abspath(cwd or os.getcwd())
+        executable = command[0]
+        if os.sep in executable and not os.path.isabs(executable):
+            executable = os.path.join(task_cwd, executable)
+        search_path = os.pathsep.join(
+            entry if os.path.isabs(entry) else os.path.join(task_cwd, entry)
+            for entry in env.get("PATH", os.defpath).split(os.pathsep)
+        )
+        resolved = shutil.which(executable, path=search_path)
+        if resolved is None:
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), command[0])
+        command = [resolved, *command[1:]]
     argv = limited_command(command, memory_bytes=memory_bytes, cpu_seconds=cpu_seconds)
     extra = {"creationflags": 0x4} if os.name == "nt" else {"start_new_session": True}
     proc = subprocess.Popen(

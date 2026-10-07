@@ -144,6 +144,10 @@ def test_override_false_keeps_the_shell_and_still_prefers_the_specific_file(
 
 #: Entry points that must NOT load `.env`, and why.
 ENV_FREE_ENTRY_POINTS: dict[str, str] = {
+    "kazma-core/kazma_core/memory/backfill_v2.py": (
+        "offline restored-generation migration: explicit --data-dir pins every "
+        "store; loading an install's .env could redirect recovery to live data"
+    ),
     "kazma-core/kazma_core/documents/parser_worker.py": "sandboxed: parses untrusted documents with a scrubbed environment",
     "kazma-core/kazma_core/documents/renderer_worker.py": "sandboxed: renders documents with a scrubbed environment",
     "kazma-core/kazma_core/documents/mutation_worker.py": "sandboxed: mutates documents with a scrubbed environment",
