@@ -237,11 +237,11 @@ def test_test_client_starts_a_server_without_kazmas_secrets(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "demo-openai-key-must-not-leak")
     seen: dict = {}
 
-    def fake_popen(command, **kwargs):
+    async def fake_start(command, **kwargs):
         seen.update(kwargs)
         raise FileNotFoundError(command[0])
 
-    monkeypatch.setattr(mcp_client.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr("kazma_core.security.process_budget.start_process_async", fake_start)
     client = mcp_client.MCPClient()
     cfg = mcp_client.MCPServerConfig(name="probe", command=["probe"], env={"BRAVE_API_KEY": BRAVE})
     with pytest.raises(mcp_client.MCPConnectionError):
