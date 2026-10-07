@@ -110,6 +110,93 @@ class TestConcurrentSerialization:
     """Two concurrent messages with the same thread_id must not run ainvoke() in parallel."""
 
     @pytest.mark.asyncio
+    async def test_concurrent_first_use_waits_for_schema(
+        self, store: SQLiteSessionStore, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Two cold-start requests see a usable store, even during setup I/O."""
+        from kazma_gateway.stores import sqlite as sqlite_store
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        original = sqlite_store.apply_sqlite_pragmas_async
+
+        async def pause_setup(db: Any) -> None:
+            entered.set()
+            await release.wait()
+            await original(db)
+
+        monkeypatch.setattr(sqlite_store, "apply_sqlite_pragmas_async", pause_setup)
+        first = asyncio.create_task(store.put("first", {"chat_id": 1}))
+        await entered.wait()
+        second = asyncio.create_task(store.put("second", {"chat_id": 2}))
+        try:
+            # Run the second request while the first is still before CREATE.
+            # The old fast path enqueues INSERT against the unready connection.
+            await asyncio.sleep(0)
+            release.set()
+            await asyncio.gather(first, second)
+            assert await store.get("first") == {"chat_id": 1}
+            assert await store.get("second") == {"chat_id": 2}
+        finally:
+            release.set()
+            await asyncio.gather(first, second, return_exceptions=True)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", [RuntimeError("setup failed"), asyncio.CancelledError()])
+    async def test_failed_initialization_can_retry(
+        self, store: SQLiteSessionStore, monkeypatch: pytest.MonkeyPatch,
+        failure: BaseException,
+    ) -> None:
+        from kazma_gateway.stores import sqlite as sqlite_store
+
+        original = sqlite_store.apply_sqlite_pragmas_async
+        connections = []
+
+        async def fail_first_setup(db: Any) -> None:
+            connections.append(db)
+            if len(connections) == 1:
+                raise failure
+            await original(db)
+
+        monkeypatch.setattr(sqlite_store, "apply_sqlite_pragmas_async", fail_first_setup)
+        with pytest.raises(type(failure)):
+            await store.put("failed", {"chat_id": 1})
+        with pytest.raises(ValueError, match="closed database|no active connection"):
+            await connections[0].execute("SELECT 1")
+        await store.put("recovered", {"chat_id": 2})
+        assert await store.get("recovered") == {"chat_id": 2}
+
+    @pytest.mark.asyncio
+    async def test_close_waits_for_initialization(
+        self, store: SQLiteSessionStore, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from kazma_gateway.stores import sqlite as sqlite_store
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        original = sqlite_store.apply_sqlite_pragmas_async
+
+        async def pause_setup(db: Any) -> None:
+            entered.set()
+            await release.wait()
+            await original(db)
+
+        monkeypatch.setattr(sqlite_store, "apply_sqlite_pragmas_async", pause_setup)
+        writing = asyncio.create_task(store.put("first", {"chat_id": 1}))
+        await entered.wait()
+        closing = asyncio.create_task(store.close())
+        try:
+            await asyncio.sleep(0)
+            release.set()
+            await asyncio.gather(writing, closing)
+            # Reopening an in-memory database starts a fresh generation:
+            # close did not return before setup and leave its connection live.
+            assert await store.get("first") == {}
+        finally:
+            release.set()
+            await asyncio.gather(writing, closing, return_exceptions=True)
+
+    @pytest.mark.asyncio
     async def test_same_thread_id_serialized(self, store: SQLiteSessionStore) -> None:
         graph = _SerialGraph()
         manager = MagicMock(spec=GatewayManager)

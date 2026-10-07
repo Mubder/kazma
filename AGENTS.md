@@ -47,6 +47,12 @@ V2 memory lives in `kazma_core.memory`).
 - The LangGraph state NEVER contains `chat_id`, `user_id`, or `message_id`
 - These live in `SessionStore` and are restored via `_build_target_id()` on reply
 - Breaking this leaks platform IDs into the graph and corrupts sessions
+- `SQLiteSessionStore._ensure_db` publishes its connection only after pragmas,
+  table creation and migrations finish. Publishing before those awaits lets
+  another request's fast path query a missing table. Failed/cancelled setup
+  closes the unpublished connection; `close` shares the initialization lock.
+  Gate: `TestConcurrentSerialization.test_concurrent_first_use_waits_for_schema`
+  (old initializer fails deterministically), plus setup failure/close cases.
 
 ### 3. LLM Tool Fallback (`kazma-core/kazma_core/llm_provider.py`)
 - Some providers (NVIDIA NIM) reject tool definitions with 404 "Function not found"

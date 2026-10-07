@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Gateway session store cold-start concurrency (2026-10-07)
+
+Concurrent first requests wait until SQLite pragmas, table creation and column
+migration finish before sharing the gateway session connection. Failed or
+cancelled setup closes its connection and can retry; close waits for setup.
+The former fast path could expose a connection before its sessions table
+existed, intermittently failing an otherwise valid concurrent request.
+
 ## Translation refresh during navigation (2026-10-07)
 
 Sidebar navigation reads the translation catalog from an inert JSON element,
