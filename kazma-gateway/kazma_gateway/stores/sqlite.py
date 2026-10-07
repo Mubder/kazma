@@ -83,13 +83,24 @@ class SQLiteSessionStore(SessionStore):
             # Autocommit: every write here is one statement, and one that
             # raises cannot leave the write lock held
             # (tests/test_sqlite_kept_connections.py).
-            self._db = await aiosqlite.connect(self._db_path, isolation_level=None)
-            await apply_sqlite_pragmas_async(self._db)
-            await self._db.execute(_CREATE_TABLE)
-            # Schema auto-migration: add tenant_id if not present
-            from kazma_core.db.sqlite_columns import add_missing_columns_async
+            db = await aiosqlite.connect(self._db_path, isolation_level=None)
+            initialized = False
+            try:
+                await apply_sqlite_pragmas_async(db)
+                await db.execute(_CREATE_TABLE)
+                # Schema auto-migration: add tenant_id if not present
+                from kazma_core.db.sqlite_columns import add_missing_columns_async
 
-            await add_missing_columns_async(self._db, "sessions", (("tenant_id", "TEXT"),))
+                await add_missing_columns_async(db, "sessions", (("tenant_id", "TEXT"),))
+                initialized = True
+            finally:
+                # A failed/cancelled initialization must not leak a connection
+                # or make the next caller skip schema setup.
+                if not initialized:
+                    await db.close()
+            # Publish only a fully initialized connection. The unlocked fast
+            # path must never hand another request a database without tables.
+            self._db = db
             logger.info("[SQLiteSessionStore] Opened %s and auto-migrated schema if needed", self._db_path)
             return self._db
 
@@ -217,7 +228,8 @@ class SQLiteSessionStore(SessionStore):
 
     async def close(self) -> None:
         """Close the database connection."""
-        if self._db is not None:
-            await self._db.close()
-            self._db = None
-            logger.info("[SQLiteSessionStore] Closed")
+        async with self._init_lock:
+            if self._db is not None:
+                await self._db.close()
+                self._db = None
+                logger.info("[SQLiteSessionStore] Closed")

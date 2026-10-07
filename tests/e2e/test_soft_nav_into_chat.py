@@ -55,6 +55,8 @@ def test_a_turn_sent_after_reaching_chat_from_another_page_paints_live(tmp_path)
             pg = browser.new_page()
             errors: list[str] = []
             pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.on("console", lambda message: errors.append(message.text)
+                  if "[soft-nav] i18n refresh failed" in message.text else None)
             pg.goto(f"{h.base}/memory", wait_until="domcontentloaded")
             pg.wait_for_function("() => !!window.Alpine", timeout=30000)
             pg.wait_for_timeout(1500)

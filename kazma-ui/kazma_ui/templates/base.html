@@ -170,8 +170,9 @@
     {% include "components/modal.html" %}
 
     {# i18n: inject translations + language for client-side (Alpine) use #}
+    <script id="kazma-i18n-data" type="application/json">{{ translations_json|safe }}</script>
     <script>
-        window.KAZMA_I18N = {{ translations_json|safe }};
+        window.KAZMA_I18N = JSON.parse(document.getElementById('kazma-i18n-data').textContent);
         window.KAZMA_LANG = {{ lang()|default("en") | tojson }};
         // Client-side t() — mirrors the Python t() for Alpine x-text expressions.
         window.t = function(key) {

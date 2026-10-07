@@ -261,22 +261,12 @@ export function initSoftNav() {
         document.querySelectorAll('script[data-kazma-page-script]').forEach((el) => el.remove());
 
         // Refresh i18n from the new page
-        const i18nScript = Array.from(doc.querySelectorAll('script')).find(
-            (s) => !s.getAttribute('src') && s.textContent && s.textContent.includes('window.KAZMA_I18N'),
-        );
+        const i18nScript = doc.getElementById('kazma-i18n-data');
         if (i18nScript && i18nScript.textContent) {
             try {
-                // The script tag holds `window.KAZMA_I18N = <json>;` from the
-                // server. Parse the payload instead of executing the tag as
-                // code (new Function) — same-origin but an eval-equivalent
-                // that turns any reflected-content bug into code execution
-                // (audit finding).
-                const text = i18nScript.textContent.trim();
-                const m = /^\s*window\.KAZMA_I18N\s*=\s*/.exec(text);
-                if (m) {
-                    const payload = text.slice(m[0].length).replace(/;\s*$/, '');
-                    window.KAZMA_I18N = JSON.parse(payload);
-                }
+                // Read only inert JSON. The bootstrap also defines language
+                // helpers/listeners, so its JavaScript is never JSON or eval.
+                window.KAZMA_I18N = JSON.parse(i18nScript.textContent);
             } catch (e) {
                 console.warn('[soft-nav] i18n refresh failed:', e);
             }
