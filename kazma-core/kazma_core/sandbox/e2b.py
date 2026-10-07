@@ -29,7 +29,15 @@ def e2b_api_key() -> str:
 
 
 def e2b_enabled() -> bool:
-    """True when the operator asked for E2B and a key is present."""
+    """Effective backend choice shared by execution and approval preflight."""
+    try:
+        from kazma_core.safety.deployment_policy import container_required
+
+        if container_required():
+            return False
+    except Exception:
+        logger.warning("[e2b] execution profile unavailable; refusing cloud execution", exc_info=True)
+        return False
     raw = (os.environ.get("KAZMA_E2B") or "").strip().lower()
     if raw in ("0", "false", "off", "no"):
         return False

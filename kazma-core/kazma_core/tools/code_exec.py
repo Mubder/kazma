@@ -266,7 +266,13 @@ def jail_note_for_tool(tool: str) -> str:
     if name not in ("python_exec", "code_exec"):
         return ""
     try:
+        from kazma_core.sandbox.e2b import e2b_enabled
+
+        if e2b_enabled():
+            return "This attempts E2B after Approve; fallback depends on the execution policy."
         if use_docker_jail():
+            if not local_exec_forbidden():
+                return "This attempts Docker after Approve (no network); HOST fallback is permitted if Docker fails."
             return "This runs in Docker after Approve (no network)."
     except Exception:
         logger.debug("[code_exec] jail note probe failed", exc_info=True)
