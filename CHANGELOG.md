@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Docker execution under the Windows service (2026-10-07)
+
+The Docker Python runner sends its sandbox script through standard input instead
+of mounting its private temporary directory. The scheduled Windows service could
+start containers and mount a workspace, but Docker Desktop refused that temporary
+directory with “Access is denied.” Both subprocess paths now use the same input
+transport. Temporary directories remain private; the workspace stays read-only
+and the container retains its network, user, capability and resource restrictions.
+
 ## Production workspace and execution policies (2026-10-07)
 
 Administrators can save explicit allowed workspace directories and a strict
