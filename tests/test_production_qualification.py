@@ -135,6 +135,41 @@ def test_unexpected_policy_bug_propagates_before_execution(monkeypatch, tmp_path
             check()
 
 
+@pytest.mark.postgres
+def test_policy_settings_persist_and_backend_errors_refuse_access(tmp_path, monkeypatch):
+    """Runs with both SQLite and the marked suite's real throwaway PostgreSQL."""
+    from kazma_core import config_store
+    from kazma_core.tools.code_exec import local_exec_forbidden
+    from kazma_core.safety.post_hitl import host_shell_allowed
+
+    store = get_config_store()
+    keys = (policy.WORKSPACE_ROOTS_KEY, policy.CONTAINER_REQUIRED_KEY)
+    before = {key: store._db_get_raw(key) for key in keys}
+    try:
+        store.batch_set([(keys[0], [str(tmp_path)], "security"), (keys[1], True, "security")])
+        store.close()
+        assert policy.configured_workspace_roots() == [tmp_path.resolve()]
+        assert policy.container_required() is True
+        assert local_exec_forbidden()
+        assert not host_shell_allowed()
+        assert validate_root(tmp_path) == tmp_path.resolve()
+        with pytest.raises(PermissionError, match="outside"):
+            validate_root(tmp_path.parent)
+        # Use the real driver's error class when PostgreSQL is installed.
+        psycopg = pytest.importorskip("psycopg")
+        with monkeypatch.context() as patch:
+            patch.setattr(store, "get", MagicMock(side_effect=psycopg.OperationalError("scratch storage offline")))
+            assert local_exec_forbidden()
+            assert not host_shell_allowed()
+            with pytest.raises(PermissionError, match="unavailable"):
+                validate_root(tmp_path)
+    finally:
+        for key in keys:
+            store.delete(key)
+        store.batch_set([(key, value, "security") for key, value in before.items()
+                         if value is not config_store._MISSING])
+
+
 @pytest.mark.parametrize("text", [
     "Fix the bug. Do not write outside this repo.",
     "Implement it; don't modify outside the workspace.",
