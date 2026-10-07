@@ -66,6 +66,10 @@ The separate Settings diagnostic client retains its one-off protocol and
 stderr diagnostics while using the same contained launcher and a finite
 16 MiB protocol cap. Launch, initialization and tool-discovery cancellation
 tests prove that unregistered children are cleaned up as well.
+Stdio deadlines use `asyncio.timeout` so Python 3.11's `wait_for` completion
+race cannot swallow caller cancellation. A deterministic regression fails
+against the old deadline path and passes with the correction; the MCP/budget
+subset passes on both local Python 3.11 and 3.12.
 
 Tests use temporary synthetic data and disposable local services. No cloud
 resources or live database migrations are needed for this audit. Human-reviewed

@@ -373,14 +373,10 @@ class MCPClient:
             if len(raw.encode()) > _STDIO_BYTES:
                 raise MCPConnectionError("MCP notification exceeds its byte budget")
             try:
-                await asyncio.wait_for(
-                    asyncio.to_thread(proc.stdin.write, raw.encode()),
-                    timeout=self._config.timeout,
-                )
-                await asyncio.wait_for(
-                    asyncio.to_thread(proc.stdin.flush),
-                    timeout=self._config.timeout,
-                )
+                async with asyncio.timeout(self._config.timeout):
+                    await asyncio.to_thread(proc.stdin.write, raw.encode())
+                async with asyncio.timeout(self._config.timeout):
+                    await asyncio.to_thread(proc.stdin.flush)
             except TimeoutError as exc:
                 self._connected = False
                 raise MCPConnectionError(
@@ -402,18 +398,15 @@ class MCPClient:
         # ownership when callers execute tools concurrently.
         async with self._read_lock:
             try:
-                await asyncio.wait_for(
-                    asyncio.to_thread(proc.stdin.write, raw.encode()),
-                    timeout=self._config.timeout if self._config else 90.0,
-                )
-                await asyncio.wait_for(
-                    asyncio.to_thread(proc.stdin.flush),
-                    timeout=self._config.timeout if self._config else 90.0,
-                )
-                line = await asyncio.wait_for(
-                    asyncio.to_thread(proc.stdout.readline, _STDIO_BYTES + 1),
-                    timeout=self._config.timeout if self._config else 90.0,
-                )
+                # Match the manager: Python 3.11 wait_for can consume caller
+                # cancellation when a worker completes in the same tick.
+                timeout = self._config.timeout if self._config else 90.0
+                async with asyncio.timeout(timeout):
+                    await asyncio.to_thread(proc.stdin.write, raw.encode())
+                async with asyncio.timeout(timeout):
+                    await asyncio.to_thread(proc.stdin.flush)
+                async with asyncio.timeout(timeout):
+                    line = await asyncio.to_thread(proc.stdout.readline, _STDIO_BYTES + 1)
             except TimeoutError as exc:
                 self._connected = False
                 timeout = self._config.timeout if self._config else 90.0

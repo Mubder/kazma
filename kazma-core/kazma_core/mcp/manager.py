@@ -1873,9 +1873,8 @@ class AsyncMCPManager:
             # the call forever once the pipe buffer filled (the read side
             # was time-bounded; the write side was not) — audit L-30.
             try:
-                await asyncio.wait_for(
-                    self._write_stdin(proc, raw), timeout=handle.timeout
-                )
+                async with asyncio.timeout(handle.timeout):
+                    await self._write_stdin(proc, raw)
             except TimeoutError:
                 raise MCPBridgeError(
                     f"Server '{handle.name}' is not reading stdin (write timeout)"
@@ -1915,14 +1914,14 @@ class AsyncMCPManager:
             try:
                 # Bounded write (audit L-30): a hung server that stops
                 # reading stdin must not park the call forever.
-                await asyncio.wait_for(
-                    self._write_stdin(proc, raw), timeout=read_timeout
-                )
+                # wait_for on Python 3.11 can swallow caller cancellation
+                # racing with completed I/O. Keep deadlines in this task so
+                # connection setup's cancellation cleanup always runs.
+                async with asyncio.timeout(read_timeout):
+                    await self._write_stdin(proc, raw)
                 while True:
-                    line = await asyncio.wait_for(
-                        proc.stdout.readline(),
-                        timeout=read_timeout,
-                    )
+                    async with asyncio.timeout(read_timeout):
+                        line = await proc.stdout.readline()
                     if not line:
                         handle.connected = False
                         retcode = proc.returncode

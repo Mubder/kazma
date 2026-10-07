@@ -278,3 +278,33 @@ async def test_diagnostic_protocol_read_stops_at_its_byte_cap(monkeypatch):
     with pytest.raises(mcp_client.MCPConnectionError, match="byte budget"):
         await client._send_stdio("{}\n")
     assert stream.tell() == 9
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["write", "read"])
+async def test_mcp_cancellation_at_completed_io_is_not_swallowed(monkeypatch, stage):
+    """Python 3.11 wait_for loses cancellation racing with completed I/O."""
+    from types import SimpleNamespace
+
+    from kazma_core.mcp.manager import AsyncMCPManager, MCPServerHandle
+
+    manager = AsyncMCPManager()
+    target = None
+
+    async def write(*args):
+        if stage == "write":
+            target.cancel()
+
+    async def read():
+        if stage == "read":
+            target.cancel()
+        await asyncio.sleep(0)
+        return b'{"jsonrpc":"2.0","id":1,"result":{}}\n'
+
+    monkeypatch.setattr(manager, "_write_stdin", write)
+    handle = MCPServerHandle(name="cancel-race", transport="stdio", process=SimpleNamespace(
+        stdin=object(), stdout=SimpleNamespace(readline=read), stderr=None,
+    ), timeout=1)
+    target = asyncio.create_task(manager._send_stdio(handle, "{}\n"))
+    with pytest.raises(asyncio.CancelledError):
+        await target
