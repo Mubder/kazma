@@ -7,6 +7,7 @@ import json
 import logging
 from typing import Any
 
+import httpx
 from kazma_core.agent.command_catalog import BY_NAME, command_name, native_command_text
 
 from kazma_gateway.adapters.discord_send import chunk_message, sanitize_outbound
@@ -48,7 +49,7 @@ async def register(adapter: Any, application: str) -> None:
                 )
             )
             status[key] = "verified" if matches else "mismatch"
-        except Exception as exc:
+        except (httpx.HTTPError, ValueError) as exc:
             status[key] = f"failed ({type(exc).__name__})"
         if status[key] != "verified":
             logger.warning("[discord] /kazma registration %s: %s", key, status[key])
@@ -70,7 +71,7 @@ async def handle(adapter: Any, data: dict[str, Any]) -> None:
             response = await adapter._http.post(f"/interactions/{iid}/{token}/callback", json=payload, timeout=2.5)
             response.raise_for_status()
             return True
-        except Exception as exc:
+        except (httpx.HTTPError, ValueError) as exc:
             logger.warning("[discord] native command ACK failed (%s)", type(exc).__name__)
             adapter._receive.drop_event("processing_failed", raw)
             return False
@@ -168,7 +169,7 @@ async def send(adapter: Any, outbound: OutboundMessage) -> bool:
                     else adapter._http.patch(base + "/messages/@original", json=payload)
                 )
                 response.raise_for_status()
-            except Exception as exc:
+            except (httpx.HTTPError, ValueError) as exc:
                 logger.warning("[discord] native reply failed (%s)", type(exc).__name__)
                 return False
             entry.sent += 1
@@ -180,7 +181,7 @@ async def send(adapter: Any, outbound: OutboundMessage) -> bool:
 
                 try:
                     body = await public_attachment_download(attachment.url)
-                except Exception:
+                except (httpx.HTTPError, ValueError, OSError):
                     return False
             if not body or len(body) > 8 * 1024 * 1024:
                 logger.warning("[discord] native attachment unavailable or larger than 8 MiB")
@@ -198,7 +199,7 @@ async def send(adapter: Any, outbound: OutboundMessage) -> bool:
                     },
                 )
                 response.raise_for_status()
-            except Exception as exc:
+            except (httpx.HTTPError, ValueError) as exc:
                 logger.warning("[discord] private attachment failed (%s)", type(exc).__name__)
                 return False
     return True

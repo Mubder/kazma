@@ -130,6 +130,29 @@ async def test_discord_defer_deduplicate_and_complete_private_reply():
 
 
 @pytest.mark.asyncio
+async def test_discord_failed_ack_never_dispatches_or_logs_continuation(caplog):
+    adapter = DiscordAdapter("test", allowed_users=["U"])
+    adapter._queue, adapter._http = asyncio.Queue(), AsyncMock()
+    adapter._http.post.side_effect = httpx.ReadTimeout("private-continuation")
+    await adapter._handle_interaction(discord_data())
+    assert adapter._queue.empty()
+    assert adapter._receive.dropped["processing_failed"] == 1
+    assert "private-continuation" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_slack_failed_ack_never_dispatches(caplog):
+    adapter = SlackAdapter("test", "app", allowed_users=["U"])
+    adapter._queue = asyncio.Queue()
+    ws = AsyncMock()
+    ws.send.side_effect = TimeoutError("private-continuation")
+    await slack_handle(adapter, ws, slack_data())
+    assert adapter._queue.empty()
+    assert adapter._receive.dropped["processing_failed"] == 1
+    assert "private-continuation" not in caplog.text
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "change,reason",
     [

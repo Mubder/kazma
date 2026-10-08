@@ -8,7 +8,9 @@ import logging
 from typing import Any
 from urllib.parse import urlsplit
 
+import httpx
 from kazma_core.agent.command_catalog import BY_NAME, command_name, native_command_text
+from websockets.exceptions import ConnectionClosed
 
 from kazma_gateway.adapters.slack_send import chunk_message, sanitize_outbound
 from kazma_gateway.gateway import IncomingMessage, OutboundMessage
@@ -49,7 +51,7 @@ async def handle(adapter: Any, ws: Any, envelope: dict[str, Any]) -> None:
         try:
             await asyncio.wait_for(ws.send(json.dumps(response)), timeout=2.5)
             return True
-        except Exception as exc:
+        except (TimeoutError, ConnectionClosed, OSError, ValueError) as exc:
             logger.warning("[slack] native command ACK failed (%s)", type(exc).__name__)
             adapter._receive.drop("processing_failed", message_id=iid, author_id=uid, channel_id=cid)
             return False
@@ -143,7 +145,7 @@ async def send(adapter: Any, outbound: OutboundMessage) -> bool:
                     data = response.json()
                     if data.get("ok") is False:
                         return False
-            except Exception as exc:
+            except (httpx.HTTPError, ValueError) as exc:
                 logger.warning("[slack] native reply failed (%s)", type(exc).__name__)
                 return False
             entry.sent += 1

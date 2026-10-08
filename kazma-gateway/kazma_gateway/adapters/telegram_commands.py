@@ -6,6 +6,7 @@ import json
 import logging
 from typing import Any
 
+import httpx
 from kazma_core.agent.command_catalog import menu_commands
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ async def reconcile_commands(http: Any) -> dict[str, str]:
                 actual.raise_for_status()
                 data = actual.json()
                 results[key] = "verified" if data.get("ok") and data.get("result") == expected else "mismatch"
-            except Exception as exc:
+            except (httpx.HTTPError, ValueError) as exc:
                 # HTTP exception text includes the URL, which includes the bot token.
                 results[key] = f"failed ({type(exc).__name__})"
             if results[key] != "verified":
