@@ -14,7 +14,7 @@
   Slack requires an external app-manifest entry; native continuation limits and
   private file delivery limits are documented in the native-command guide.
 - Make IDE file rows and document upload keyboard accessible, name skill
-  switches and chat actions, and associate form labels. Complete shipped native
+  switches, the shared model picker and chat actions, and associate form labels. Complete shipped native
   capability descriptions in Arabic, translate missing connector credentials,
   show unknown/stale agent status, and correct X scheduling terminology.
 
