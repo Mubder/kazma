@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
+import httpx
+import pytest
+from kazma_gateway.adapters.slack import SlackAdapter
+from kazma_gateway.adapters.slack_commands import prepare_callback, settle_callback
 from kazma_gateway.agent_handler.hitl import _build_approval_prompt
 from kazma_gateway.adapters.platform_keyboards import slack_approval_blocks
 
@@ -61,3 +67,33 @@ def test_legacy_keyboard_call_keeps_default_heading_and_callbacks():
     assert [b["value"] for b in blocks[-1]["elements"]] == [
         "hitl:approve:gate", "hitl:deny:gate", "hitl:approve_task:gate",
     ]
+
+
+@pytest.mark.asyncio
+async def test_private_clicked_card_clears_buttons_and_counts_response_limit():
+    adapter = SlackAdapter("test", "app", allowed_users=["U"])
+    adapter._http = AsyncMock()
+    adapter._http.post.return_value = httpx.Response(200, text="ok", request=httpx.Request("POST", "https://hooks.slack.com"))
+    payload = {"response_url": "https://hooks.slack.com/actions/T/test", "user": {"id": "U"}, "channel": {"id": "C"}}
+    key = prepare_callback(adapter, payload, "callback", "U", "C")
+    assert await settle_callback(adapter, payload, key)
+    body = adapter._http.post.call_args.kwargs["json"]
+    assert body["replace_original"] and body["blocks"] == []
+    assert body["response_type"] == "ephemeral" and "approved" not in body["text"].lower()
+    entry = adapter._native_replies.get(key)
+    assert entry.sent == 1
+    entry.sent = 5
+    adapter._http.post.reset_mock()
+    assert not await settle_callback(adapter, payload, key)
+    adapter._http.post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_card_update_refuses_foreign_url_or_recipient():
+    adapter = SlackAdapter("test", "app", allowed_users=["U"])
+    adapter._http = AsyncMock()
+    payload = {"response_url": "https://hooks.slack.com/actions/T/test", "user": {"id": "U"}, "channel": {"id": "C"}}
+    key = prepare_callback(adapter, payload, "callback", "U", "C")
+    assert not await settle_callback(adapter, payload | {"response_url": "https://evil.test/actions/T/test"}, key)
+    assert not await settle_callback(adapter, payload | {"user": {"id": "OTHER"}}, key)
+    adapter._http.post.assert_not_awaited()

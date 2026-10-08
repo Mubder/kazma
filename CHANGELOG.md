@@ -5,6 +5,9 @@
 - Show the redacted tool, path and content preview inside Slack approval blocks,
   including grouped requests. Preserve callback identities and private delivery;
   split long previews within Slack limits and render arguments as literal text.
+- Clear clicked Slack buttons through validated response URLs, count private
+  card updates against the reply limit, and acknowledge receipt without claiming
+  the action was approved. Card updates no longer stall the Socket Mode reader.
 
 ## UI audit and native command routing (2026-10-08)
 
