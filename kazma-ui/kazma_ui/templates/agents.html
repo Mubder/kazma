@@ -16,9 +16,9 @@
         <div>
           <div style="font-size:1rem;font-weight:500;color:var(--text-primary);" translate="no" x-text="agent.name || 'kazma'"></div>
           <div style="font-size:0.8rem;color:var(--text-muted);">
-            <span x-text="agent.running ? (agent.agent_state === 'idle' ? t('agents.ready') : (agent.agent_state === 'thinking' ? t('agents.thinking') : t('agents.acting'))) : t('agents.stopped')"></span>
+            <span x-text="statusLabel()"></span>
             <span style="margin:0 6px;color:var(--text-tertiary);">·</span>
-            <span x-text="t('agents.state_label') + ': ' + tOr('agents.state_' + agent.agent_state, agent.agent_state)"></span>
+            <span x-text="t('agents.state_label') + ': ' + (statusLoaded ? tOr('agents.state_' + agent.agent_state, agent.agent_state) : t('agents.unknown_status'))"></span>
             <template x-if="agent.last_activity">
               <span style="margin-left:6px;color:var(--text-tertiary);">— <span x-text="agent.last_activity"></span></span>
             </template>
@@ -31,14 +31,19 @@
            agent serves while the server runs; a turn is stopped from the
            chat, the server through its supervisor. #}
         <span style="font-size:0.75rem;color:var(--text-muted);max-width:360px;">{{ t('agents.serves_while_running') }}</span>
-        <button class="btn btn-secondary" @click="refresh()" :disabled="loadingAction" :title="t('agents.refresh')">
-          <span x-show="!loadingAction" x-cloak>↻</span>
-          <span x-show="loadingAction" x-cloak>…</span>
+        <button class="btn btn-secondary" @click="refresh()" :disabled="statusLoading" :aria-label="t('agents.refresh')" :title="t('agents.refresh')">
+          <span x-show="!statusLoading" x-cloak>↻</span>
+          <span x-show="statusLoading" x-cloak>…</span>
         </button>
       </div>
     </div>
   </div>
 
+  <div role="status" aria-live="polite" style="margin-bottom:1rem;" x-cloak>
+    <p x-show="!statusLoaded" x-text="statusLabel()"></p>
+    <p x-show="statusError" style="color:var(--warning);" x-text="t('agents.status_failed')"></p>
+    <p x-show="statusLoaded" style="color:var(--text-muted);font-size:.8rem;"><span x-text="t('agents.last_updated')"></span>: <span x-text="statusUpdatedAt"></span></p>
+  </div>
   <!-- ── Personality Templates ── -->
   <div class="chart-card" style="margin-bottom:1.5rem;padding:18px 20px;border-radius:12px;" x-cloak>
     <h3 style="margin:0 0 14px 0;font-size:0.95rem;display:flex;align-items:center;gap:8px;">
@@ -69,16 +74,16 @@
       <div class="metric-icon"><span x-html="KazmaIcons.settings()"></span></div>
       <div class="metric-label">{{ t('agents.status') }}</div>
       <div class="metric-value" id="metric-running" style="color:var(--text-primary);">
-        <span x-text="agent.running ? (agent.agent_state === 'idle' ? t('agents.ready') : (agent.agent_state === 'thinking' ? t('agents.thinking') : t('agents.acting'))) : t('agents.stopped')"
+        <span x-text="statusLabel()"
               :style="agent.running ? 'color:var(--success);' : 'color:var(--text-muted);'"></span>
       </div>
-      <div class="metric-sub" x-text="agent.running ? (agent.agent_state === 'idle' ? t('agents.waiting') : tOr('agents.state_' + agent.agent_state, agent.agent_state)) : (agent.last_activity || t('agents.idle'))"></div>
+      <div class="metric-sub" x-text="agent.running ? (agent.agent_state === 'idle' ? t('agents.waiting') : (statusLoaded ? tOr('agents.state_' + agent.agent_state, agent.agent_state) : t('agents.unknown_status'))) : (agent.last_activity || t('agents.idle'))"></div>
     </div>
     <div class="metric-card">
       <div class="metric-icon"><span class="ki" data-icon="brain" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('agents.state_label') }}</div>
       <div class="metric-value" id="metric-state">
-        <span x-text="tOr('agents.state_' + agent.agent_state, agent.agent_state)"
+        <span x-text="(statusLoaded ? tOr('agents.state_' + agent.agent_state, agent.agent_state) : t('agents.unknown_status'))"
               :class="'state-badge state-' + agent.agent_state"></span>
       </div>
       <div class="metric-sub">{{ t('agents.state_hint') }}</div>
@@ -87,7 +92,7 @@
       <div class="metric-icon"><span class="ki" data-icon="wrench" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('agents.tool_calls') }}</div>
       <div class="metric-value" id="metric-tool-calls"
-            x-text="(agent.metrics && agent.metrics.total_tool_calls) || 0"
+            x-text="statusLoaded ? ((agent.metrics && agent.metrics.total_tool_calls) || 0) : '—'"
             style="color:var(--text-primary);"></div>
       <div class="metric-sub">{{ t('agents.since_start') }}</div>
     </div>
@@ -95,7 +100,7 @@
       <div class="metric-icon"><span class="ki" data-icon="hash" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('agents.llm_calls') }}</div>
       <div class="metric-value" id="metric-llm-calls"
-            x-text="(agent.metrics && agent.metrics.total_llm_calls) || 0"
+            x-text="statusLoaded ? ((agent.metrics && agent.metrics.total_llm_calls) || 0) : '—'"
             style="color:var(--text-primary);"></div>
       <div class="metric-sub">{{ t('agents.since_start') }}</div>
     </div>
@@ -105,7 +110,7 @@
          labelled "Sessions" over that number (live, 2026-09-28). #}
       <div class="metric-label">{{ t('agents.trace_count') }}</div>
       <div class="metric-value" id="metric-sessions"
-            x-text="agent.session_count || 0"
+            x-text="statusLoaded ? (agent.session_count || 0) : '—'"
             style="color:var(--text-primary);"></div>
       <div class="metric-sub">{{ t('agents.since_start') }}</div>
     </div>
@@ -214,13 +219,13 @@
         <span style="font-family:var(--font-mono);font-size:0.8rem;" translate="no"
               x-text="(agent.llm && agent.llm.model) || '—'"></span>
         <span style="color:var(--text-tertiary);">{{ t('agents.tools_registered') }}</span>
-        <span x-text="((agent.tools && agent.tools.count) || 0) + ' ' + t('agents.available')"></span>
+        <span x-text="statusLoaded ? (((agent.tools && agent.tools.count) || 0) + ' ' + t('agents.available')) : '—'"></span>
         <span style="color:var(--text-tertiary);">{{ t('agents.mcp_servers') }}</span>
         <span x-text="(agent.tools && agent.tools.servers) || 0"></span>
         <span style="color:var(--text-tertiary);">{{ t('agents.total_tokens') }}</span>
-        <span x-text="(agent.metrics && agent.metrics.total_tokens) || '0'"></span>
+        <span x-text="statusLoaded ? ((agent.metrics && agent.metrics.total_tokens) || '0') : '—'"></span>
         <span style="color:var(--text-tertiary);">{{ t('agents.total_cost') }}</span>
-        <span x-text="(agent.metrics && agent.metrics.total_cost) || '$0.0000'"></span>
+        <span x-text="statusLoaded ? ((agent.metrics && agent.metrics.total_cost) || '$0.0000') : '—'"></span>
         <span style="color:var(--text-tertiary);">{{ t('agents.last_activity_label') }}</span>
         <span style="color:var(--text-muted);" x-text="agent.last_activity || '—'"></span>
       </div>
@@ -237,7 +242,7 @@
       <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:16px;">
         <span class="ki" data-icon="wrench" aria-hidden="true"></span> {{ t('agents.registered_tools') }}
         <span style="font-size:0.75rem;color:var(--text-muted);font-weight:400;margin-left:8px;"
-              x-text="((agent.tools && agent.tools.count) || 0) + ' ' + t('agents.available')"></span>
+              x-text="statusLoaded ? (((agent.tools && agent.tools.count) || 0) + ' ' + t('agents.available')) : '—'"></span>
       </h3>
       <div style="max-height:260px;overflow-y:auto;">
         <template x-if="!agent.tools || !agent.tools.list || agent.tools.list.length === 0">

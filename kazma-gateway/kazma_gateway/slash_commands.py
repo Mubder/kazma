@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from kazma_core.agent.command_catalog import menu_commands
 from kazma_core.english_count import count_noun
 
 if TYPE_CHECKING:
@@ -47,47 +48,7 @@ __all__ = [
 # next to the chat input. The menu and _cmd_help list the same commands
 # (tests/test_slash_help_and_menu.py).
 # Constraints: command 1–32 [a-z0-9_]; description 3–256 chars; max 100.
-BOT_MENU_COMMANDS: list[dict[str, str]] = [
-    {"command": "help", "description": "Show available commands"},
-    {"command": "sessions", "description": "List every season (Web + Telegram + Discord + Slack)"},
-    {"command": "seasons", "description": "List every season (alias of /sessions)"},
-    {"command": "session", "description": "Switch onto a season (#, id, or name)"},
-    {"command": "season", "description": "Switch onto a season (alias of /session)"},
-    {"command": "switch", "description": "Take over a season (same as /session)"},
-    {"command": "new", "description": "Create a brand new session/season"},
-    {"command": "reset", "description": "Clear conversation history"},
-    {"command": "compact", "description": "Manually trigger context compaction"},
-    {"command": "research", "description": "Deep research via the same agent"},
-    {"command": "swarm", "description": "Swarm orchestration"},
-    {"command": "ide", "description": "IDE: files, git, coding skills"},
-    {
-        "command": "skill",
-        "description": "Agent Skills: list / install / activate (agentskills.io)",
-    },
-    {"command": "documents", "description": "Document Intelligence: list / read / search"},
-    {"command": "docs", "description": "Documents (alias of /documents)"},
-    {"command": "kb", "description": "Knowledge library: list / crawl / search"},
-    {"command": "long", "description": "Long-task mode on/off (deep audits)"},
-    {"command": "mission", "description": "Mission-length budget for this chat"},
-    {"command": "yolo", "description": "Toggle session YOLO safety bypass"},
-    {"command": "unrestricted", "description": "Mission budget + YOLO for this chat"},
-    {"command": "plan", "description": "Plan mode: inspect and propose before acting"},
-    {"command": "steer", "description": "Add context to the running task"},
-    {"command": "abort", "description": "Stop and abandon the running task"},
-    {"command": "replay", "description": "Time travel snapshots"},
-    {"command": "fork", "description": "Fork from a snapshot into a new thread"},
-    {"command": "undo", "description": "Undo last response"},
-    {"command": "edit", "description": "Edit last response"},
-    {"command": "config", "description": "Configuration wizard"},
-    {"command": "personality", "description": "Agent personality"},
-    {"command": "model", "description": "Show / switch active model"},
-    {"command": "models", "description": "Show / switch active model (alias of /model)"},
-    {"command": "context", "description": "Context window usage"},
-    {"command": "status", "description": "Gateway health overview"},
-    {"command": "memory", "description": "Report memory usage"},
-    {"command": "cost", "description": "Tokens and cost of this chat"},
-    {"command": "hitl", "description": "Approve or deny a pending HITL tool"},
-]
+BOT_MENU_COMMANDS: list[dict[str, str]] = menu_commands()
 
 # ── Config path / store ──────────────────────────────────────────────
 #
@@ -336,6 +297,7 @@ def _cmd_help() -> str:
         "• `/personality list` — List all available personalities\n"
         "• `/personality <name>` — Switch personality\n"
         "• `/context` — Show context window usage\n"
+        "• `/x` — X Studio: drafts, accounts, scheduled posts (`/x help`)\n"
         "• `/ide` — Workspace files, git and coding skills (`/ide help`)\n"
         "• `/kb` — Knowledge libraries: list, crawl, search (`/kb help`)\n"
         "• `/skill list` — List installed Agent Skills\n"

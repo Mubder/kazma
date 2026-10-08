@@ -8,6 +8,11 @@ One slice of the translation catalog, extracted from the former
 from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
+    "agents.loading_status": {"en": "Loading status…", "ar": "جارٍ تحميل الحالة…"},
+    "agents.unknown_status": {"en": "Unknown", "ar": "غير معروفة"},
+    "agents.stale_status": {"en": "Stale — refresh failed", "ar": "غير محدثة — فشل التحديث"},
+    "agents.status_failed": {"en": "Could not refresh status. Retry with Refresh.", "ar": "تعذر تحديث الحالة. أعد المحاولة باستخدام زر التحديث."},
+    "agents.last_updated": {"en": "Last successful update", "ar": "آخر تحديث ناجح"},
     "agents.acting": {
         "ar": "ينفذ...",
         "en": "Acting...",

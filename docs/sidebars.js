@@ -79,6 +79,7 @@ const sidebars = {
         'ops/chaos-testing',
         'ops/smoke-matrix',
         'ops/diagnosis-map',
+        'ops/native-slash-commands',
         'ops/opentelemetry',
         'ops/postgres-and-saas',
         'ops/multi-replica-and-saas',

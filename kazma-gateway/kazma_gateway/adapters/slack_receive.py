@@ -17,6 +17,8 @@ __all__ = ["SLACK_REASONS", "drop_reason", "event_key", "where_of"]
 
 SLACK_REASONS: dict[str, str] = {
     **COMMON_REASONS,
+    "duplicate": "was a repeated native command envelope already dispatched",
+    "unsupported_command": "named an unsupported command; use /kazma help",
     "from_a_bot": "sent by a bot or an app (Kazma's own posts included)",
     "not_a_new_message": "was an edit, a deletion or a channel notice, not a new message",
     "no_text": "had no text or file",

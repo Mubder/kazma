@@ -240,7 +240,7 @@ def test_telegram_all_is_well() -> None:
     result = _run_tg(_tg_routes(), live=_tg_live(), group={"enabled": True, "chat_id": -100})
     assert result["success"] is True and result["bot_name"] == "kazma_bot", result["checks"]
     assert [c["key"] for c in result["checks"]] == [
-        "token", "receiving", "groups", "chat", "group", "latest", "allowed", "listening"]
+        "token", "receiving", "groups", "chat", "group", "latest", "allowed", "listening", "commands"]
     assert "@kazma_bot" in _check(result, "token")["detail"]
     assert "private chat with @bader" in _check(result, "chat")["detail"]
     assert "an administrator" in _check(result, "group")["detail"]
@@ -347,7 +347,7 @@ def test_slack_all_is_well() -> None:
     result = _run_slack(_slack_routes(), live=_slack_live())
     assert result["success"] is True and result["bot_name"] == "kazma", result["checks"]
     assert [c["key"] for c in result["checks"]] == [
-        "token", "app_token", "scopes", "channel", "latest", "direct_message", "allowed", "listening"]
+        "token", "app_token", "scopes", "channel", "latest", "direct_message", "allowed", "listening", "commands"]
     dm = _check(result, "direct_message")
     assert "reached Kazma" in dm["detail"] and dm["link"] == "https://slack.com/app_redirect?channel=D1&team=T1"
 

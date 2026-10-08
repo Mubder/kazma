@@ -132,7 +132,7 @@ class TestTelegramRelativePaths:
 
     @pytest.mark.asyncio
     async def test_listen_startup_uses_relative_delete_webhook_and_get_me(self, adapter):
-        """listen() should call /deleteWebhook, /getMe, and /setMyCommands (3 scopes)."""
+        """Startup uses relative paths and reconciles nine localized menu scopes."""
         mock_http = AsyncMock()
         ok_resp = MagicMock()
         ok_resp.status_code = 200
@@ -152,8 +152,8 @@ class TestTelegramRelativePaths:
             shutdown_event.set()  # run startup section then exit loop
             await adapter.listen(queue, shutdown_event)
 
-        # Verify 4 POST calls: 1 deleteWebhook + 3 setMyCommands (default, private, group)
-        assert mock_http.post.await_count == 4
+        # One deleteWebhook plus default/en/ar menus for each of three scopes.
+        assert mock_http.post.await_count == 10
         # Check deleteWebhook was called
         mock_http.post.assert_any_await(
             "/deleteWebhook",
@@ -165,7 +165,11 @@ class TestTelegramRelativePaths:
             call for call in mock_http.post.await_args_list
             if call.args[0] == "/setMyCommands"
         ]
-        assert len(set_my_commands_calls) == 3
+        assert len(set_my_commands_calls) == 9
+        assert {
+            (call.kwargs["json"]["scope"]["type"], call.kwargs["json"]["language_code"])
+            for call in set_my_commands_calls
+        } == {(scope, language) for scope in scopes for language in ("", "en", "ar")}
         called_scopes = [
             call.kwargs["json"]["scope"]["type"]
             for call in set_my_commands_calls
@@ -186,9 +190,11 @@ class TestTelegramRelativePaths:
             "research",
             "documents",
             "help",
+            "x",
         ):
             assert required in registered, f"Missing Telegram menu command: /{required}"
-        mock_http.get.assert_awaited_once_with("/getMe")
+        mock_http.get.assert_any_await("/getMe")
+        assert [call.args[0] for call in mock_http.get.await_args_list].count("/getMyCommands") == 9
 
     @pytest.mark.asyncio
     async def test_poll_uses_relative_get_updates(self, adapter):

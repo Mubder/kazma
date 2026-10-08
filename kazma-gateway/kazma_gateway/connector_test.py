@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-__all__ = ["Checks", "judge_message", "listening", "show", "when"]
+__all__ = ["Checks", "command_registration", "judge_message", "listening", "show", "when"]
 
 
 class Checks:
@@ -102,6 +102,26 @@ def judge_message(
         f"{lead} never reached Kazma's connection, though the connection was up "
         f"(its last event: {show(when(live.get('last_event_at')))}). {never_hint}"
     )
+
+
+def command_registration(live: dict[str, Any] | None, platform: str) -> tuple[bool | None, str]:
+    """Expose registration readback without credentials or private scope IDs."""
+    if platform == "Slack":
+        return None, (
+            "Native /kazma commands require a slash_commands entry in the Slack app manifest. "
+            "Kazma's bot token cannot verify or edit that manifest. See the native slash commands guide."
+        )
+    key = "command_menus" if platform == "Telegram" else "native_commands"
+    states = (live or {}).get(key)
+    if not isinstance(states, dict) or not states:
+        return None, "Command registration has not completed in this connection. Test again after startup."
+    failed = [str(state) for state in states.values() if state != "verified"]
+    if failed:
+        return False, (
+            f"{len(failed)} of {len(states)} command scope(s) failed registration readback "
+            f"({', '.join(sorted(set(failed)))}). Check bot permissions and reconnect, then Test again."
+        )
+    return True, f"All {len(states)} command scope(s) match Kazma's current command catalog."
 
 
 def listening(live: dict[str, Any] | None, platform: str, *, not_running: str) -> tuple[bool, str]:

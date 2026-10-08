@@ -8,6 +8,7 @@ One slice of the translation catalog, extracted from the former
 from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
+    "settings.connector_status_missing_token": {"en": "Token missing — add a token to connect", "ar": "رمز الوصول مفقود — أضف رمزًا للاتصال"},
     "settings.xt.model_sample_pass": {"en": "Sample content checks passed; production qualification is still required", "ar": "نجحت فحوص محتوى العينة؛ وما زال تأهيل الإنتاج مطلوبًا"},
     "settings.xt.model_sample_hold": {"en": "Model compatibility unconfirmed — inspect the check reasons", "ar": "توافق النموذج غير مؤكّد — راجع أسباب الفحوص"},
     "settings.xt.example_target": {"en": "this proposal", "ar": "هذا المقترح"},
@@ -5565,6 +5566,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.hub.check_listening": {
         "ar": "Kazma يستمع",
         "en": "Kazma is listening",
+    },
+    "settings.hub.check_commands": {
+        "ar": "تسجيل الأوامر",
+        "en": "Command registration",
     },
     "settings.hub.discord_test_title": {
         "ar": "يفحص رمز البوت وصلاحياته وخوادمه وقناة التسليم، وهل وصلت آخر رسالة كتبتها هناك إلى Kazma",

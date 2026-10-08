@@ -50,6 +50,7 @@ _EPHEMERAL_CTX_KEYS = frozenset(
         "parse_mode",
         "reply_markup",
         "components",
+        "native_reply_id",
     }
 )
 
