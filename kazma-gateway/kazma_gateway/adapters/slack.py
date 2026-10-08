@@ -1034,18 +1034,12 @@ class SlackAdapter(BaseAdapter):
                                                 },
                                             )
                                             self._queue.put_nowait(incoming)
-                                            if response_url:
-                                                try:
-                                                    async with httpx.AsyncClient(verify=shared_ssl_context()) as client:
-                                                        await client.post(
-                                                            response_url,
-                                                            json={
-                                                                "text": f"Selection received ({action.kind})",
-                                                                "replace_original": True,
-                                                            },
-                                                        )
-                                                except Exception:
-                                                    pass
+                                            from kazma_gateway.adapters.slack_commands import settle_callback
+
+                                            spawn_background(
+                                                settle_callback(self, payload, private_reply_id),
+                                                name="slack-card-received",
+                                            )
                                         except Exception as exc:
                                             logger.warning(
                                                 "[Slack] Failed to enqueue interaction: %s",
@@ -1275,11 +1269,11 @@ class SlackAdapter(BaseAdapter):
     # ── Interactive builders (Telegram-parity static API) ───────────
 
     @staticmethod
-    def build_approval_keyboard(request_id: str) -> list[dict[str, Any]]:
+    def build_approval_keyboard(request_id: str, *, details: str | None = None) -> list[dict[str, Any]]:
         """Slack Block Kit for graph HITL (shared callback IDs with Telegram)."""
         from kazma_gateway.adapters.slack_blocks import build_approval_blocks
 
-        return build_approval_blocks(request_id)
+        return build_approval_blocks(request_id, details=details)
 
     @staticmethod
     def build_personality_keyboard(personalities: list[str]) -> list[dict[str, Any]]:

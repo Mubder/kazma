@@ -127,8 +127,11 @@ def discord_model_components(provider_name: str, models: list[str]) -> list[dict
 # ── Slack Block Kit ───────────────────────────────────────────────────────
 
 
-def slack_approval_blocks(request_id: str, text: str = "Approval required") -> list[dict[str, Any]]:
-    return [
+def slack_approval_blocks(
+    request_id: str, text: str = "Approval required", *, details: str | None = None,
+) -> list[dict[str, Any]]:
+    """Keep the redacted decision visible when Slack renders blocks over text."""
+    blocks = [
         {
             "type": "section",
             "text": {"type": "mrkdwn", "text": f"⚠️ *{text}*"},
@@ -160,6 +163,21 @@ def slack_approval_blocks(request_id: str, text: str = "Approval required") -> l
             ],
         },
     ]
+    if details:
+        # Section text is capped at 3,000 characters; a message allows 50 blocks.
+        # Plain text keeps argument markup, mentions and links literal.
+        sections = [
+            {"type": "section", "text": {"type": "plain_text", "text": details[i:i + 3000], "emoji": False}}
+            for i in range(0, min(len(details), 144000), 3000)
+        ]
+        if len(details) > 144000:
+            sections.append({"type": "section", "text": {
+                "type": "plain_text",
+                "text": "More approval details are not shown. Do NOT approve this from chat; review the full request in Kazma web.",
+                "emoji": False,
+            }})
+        blocks = sections + blocks[1:]
+    return blocks
 
 
 def slack_personality_blocks(personalities: list[str]) -> list[dict[str, Any]]:

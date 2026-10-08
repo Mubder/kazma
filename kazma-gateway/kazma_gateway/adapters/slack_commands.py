@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from typing import Any
@@ -122,6 +123,41 @@ def prepare_callback(adapter: Any, payload: dict[str, Any], key: str, user: str,
     team = str((payload.get("team") or {}).get("id") or "")
     adapter._native_replies.put(key, url, team, user, channel, original=False)
     return key
+
+
+async def settle_callback(adapter: Any, payload: dict[str, Any], reply_id: str | None = None) -> bool:
+    """Clear clicked buttons without claiming that a gate has been approved."""
+    url = str(payload.get("response_url") or "")
+    if not safe_response_url(url, interaction=True):
+        return False
+    entry = adapter._native_replies.get(reply_id) if reply_id else None
+    if reply_id and (
+        not entry or entry.credential != url
+        or entry.user != str((payload.get("user") or {}).get("id") or "")
+        or entry.channel != str((payload.get("channel") or {}).get("id") or "")
+    ):
+        return False
+    async with (entry.lock if entry else contextlib.AsyncExitStack()):
+        if entry and entry.sent >= 5:
+            return False
+        body: dict[str, Any] = {
+            "text": "Selection received; checking the current request.",
+            "blocks": [],
+            "replace_original": True,
+        }
+        if entry:
+            body["response_type"] = "ephemeral"
+        try:
+            response = await adapter._http.post(url, json=body, timeout=2.5)
+            response.raise_for_status()
+            if response.text and response.text != "ok" and response.json().get("ok") is False:
+                return False
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("[slack] callback card update failed (%s)", type(exc).__name__)
+            return False
+        if entry:
+            entry.sent += 1
+    return True
 
 
 async def send(adapter: Any, outbound: OutboundMessage) -> bool:

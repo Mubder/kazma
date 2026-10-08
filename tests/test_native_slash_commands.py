@@ -182,7 +182,10 @@ async def test_discord_private_component_keeps_followup_private_or_drops(valid):
 @pytest.mark.parametrize("valid", [True, False])
 async def test_slack_private_component_keeps_followup_private_or_drops(monkeypatch, valid):
     import websockets
+    from kazma_gateway.adapters import slack_commands
 
+    settle = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_commands, "settle_callback", settle)
     adapter = SlackAdapter("test", "app", allowed_users=["U"], allowed_channels=["C"], allowed_teams=["T"])
     adapter._queue, adapter._shutdown, adapter._http = asyncio.Queue(), asyncio.Event(), AsyncMock()
     adapter._http.post.return_value = httpx.Response(200, json={"ok": True, "url": "wss://socket.test"})
@@ -209,10 +212,13 @@ async def test_slack_private_component_keeps_followup_private_or_drops(monkeypat
     monkeypatch.setattr(websockets, "connect", lambda *args, **kwargs: connection)
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: adapter._http)
     await adapter._listen_socket_mode()
+    await asyncio.sleep(0)  # Let the tracked card-update task run after the reader returns.
     assert json.loads(ws.send.call_args.args[0])["envelope_id"] == "private-button"
     if not valid:
         assert adapter._queue.empty()
+        settle.assert_not_awaited()
         return
+    settle.assert_awaited_once_with(adapter, payload, "private-button")
     incoming = adapter._queue.get_nowait()
     assert incoming.context_metadata["native_reply_id"] == "private-button"
     assert "private-continuation" not in json.dumps(incoming.context_metadata)

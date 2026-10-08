@@ -19,8 +19,10 @@ __all__ = [
 ]
 
 
-def build_approval_blocks(request_id: str, text: str = "Approval required") -> list[dict[str, Any]]:
-    return slack_approval_blocks(request_id, text=text)
+def build_approval_blocks(
+    request_id: str, text: str = "Approval required", *, details: str | None = None,
+) -> list[dict[str, Any]]:
+    return slack_approval_blocks(request_id, text=text, details=details)
 
 
 def build_personality_blocks(personalities: list[str]) -> list[dict[str, Any]]:
