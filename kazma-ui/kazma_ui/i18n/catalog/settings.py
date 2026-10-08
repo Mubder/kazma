@@ -5567,6 +5567,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "Kazma يستمع",
         "en": "Kazma is listening",
     },
+    "settings.hub.check_commands": {
+        "ar": "تسجيل الأوامر",
+        "en": "Command registration",
+    },
     "settings.hub.discord_test_title": {
         "ar": "يفحص رمز البوت وصلاحياته وخوادمه وقناة التسليم، وهل وصلت آخر رسالة كتبتها هناك إلى Kazma",
         "en": "Checks the bot token, its permissions and servers, the delivery channel, and whether your latest message there reached Kazma",

@@ -20,6 +20,25 @@ from kazma_gateway.gateway import OutboundMessage
 from kazma_ui.sse_chat._command_discovery import discovery_reply
 
 
+@pytest.mark.parametrize("platform,key", [("Telegram", "command_menus"), ("Discord", "native_commands")])
+def test_registration_diagnostics_show_readback_failures_without_scope_ids(platform, key):
+    from kazma_gateway.connector_test import command_registration
+
+    assert command_registration({key: {"private-id": "verified"}}, platform)[0] is True
+    ok, detail = command_registration({key: {"private-id": "mismatch"}}, platform)
+    assert ok is False
+    assert "mismatch" in detail and "private-id" not in detail
+    assert command_registration({}, platform)[0] is None
+
+
+def test_slack_registration_diagnostics_do_not_claim_manifest_verified():
+    from kazma_gateway.connector_test import command_registration
+
+    ok, detail = command_registration({"native_commands": "Receiver enabled"}, "Slack")
+    assert ok is None
+    assert "cannot verify or edit" in detail
+
+
 @pytest.mark.parametrize("command", [c.name for c in COMMANDS])
 def test_telegram_addressing_preserves_arguments_and_rejects_another_bot(command):
     text = f"/{command}@KazmaBot  AbC\nKeep This"

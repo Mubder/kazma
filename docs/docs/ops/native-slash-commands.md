@@ -11,7 +11,7 @@ through the existing gateway dispatcher and its approval and administrator gates
 
 At startup Kazma writes and reads back its default, private-chat and group-chat
 menus in the default language, English and Arabic. Connector Test diagnostics
-show `command_menus`: `verified`, `mismatch`, or a safe failure category. An
+show whether every menu matches, or name a mismatch or safe failure category. An
 owner-specific chat/member scope can override these menus; Kazma leaves those
 custom scopes alone. Commands addressed to another bot are ignored. Commands
 addressed to Kazma retain their arguments and use the same handlers as bare text.
@@ -20,7 +20,7 @@ addressed to Kazma retain their arguments and use the same handlers as bare text
 
 At Gateway READY, Kazma upserts **only `/kazma`** in each configured allowed guild,
 or globally when no guild list is configured. It reads the registration back;
-Connector Test shows `native_commands` per scope. The installed application must
+Connector Test summarizes verified scopes and registration failures. The installed application must
 have the `applications.commands` scope. Registration alone does not prove that
 an actual guild command reached Kazma: verify `/kazma command:help` in a test guild.
 
