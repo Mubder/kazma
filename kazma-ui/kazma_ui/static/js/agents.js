@@ -25,6 +25,10 @@ function agentsPage() {
     toolHistory: [],
     reasoningSteps: [],
     loadingAction: false,
+    statusLoading: false,
+    statusLoaded: false,
+    statusError: false,
+    statusUpdatedAt: '',
     _pollInterval: null,
 
     init() {
@@ -47,6 +51,7 @@ function agentsPage() {
 
       // Poll for updates every 5 seconds
       this._pollInterval = setInterval(() => this.refresh(), 5000);
+      window.kazmaOnSoftNavLeave = () => this.destroy();
 
       // Clean up on page unload
       window.addEventListener('beforeunload', () => this.destroy());
@@ -72,37 +77,54 @@ function agentsPage() {
     },
 
     async fetchStatus() {
+      if (this.statusLoading) return;
+      this.statusLoading = true;
       try {
-        const resp = await fetch('/api/agents/status');
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        const data = await resp.json();
+        const data = await this._getJson('/api/agents/status');
+        if (!data || typeof data.running !== 'boolean') throw new Error('Status unavailable');
         this.agent = data;
+        this.statusLoaded = true;
+        this.statusError = false;
+        this.statusUpdatedAt = new Date().toLocaleString(window.KAZMA_LANG === 'ar' ? 'ar' : 'en');
       } catch (err) {
-        console.error('[AgentsPage] status fetch failed:', err);
+        this.statusError = true;
+      } finally {
+        this.statusLoading = false;
       }
+    },
+
+    async _getJson(url) {
+      if (window.kazmaGetJson) return window.kazmaGetJson(url);
+      try {
+        const response = await fetch(url);
+        return response.ok ? await response.json() : null;
+      } catch (error) { return null; }
+    },
+
+    statusLabel() {
+      if (!this.statusLoaded) return t(this.statusLoading ? 'agents.loading_status' : 'agents.unknown_status');
+      if (this.statusError) return t('agents.stale_status');
+      if (!this.agent.running) return t('agents.stopped');
+      return t(this.agent.agent_state === 'idle' ? 'agents.ready' : this.agent.agent_state === 'thinking' ? 'agents.thinking' : 'agents.acting');
     },
 
     async fetchToolHistory() {
       try {
-        const resp = await fetch('/api/agents/tools?limit=50');
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        const data = await resp.json();
+        const data = await this._getJson('/api/agents/tools?limit=50');
+        if (!data) return;
         // Newest first
         this.toolHistory = (data.tools || []).reverse();
       } catch (err) {
-        console.error('[AgentsPage] tool history fetch failed:', err);
       }
     },
 
     async fetchReasoning() {
       try {
-        const resp = await fetch('/api/agents/reasoning?limit=50');
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        const data = await resp.json();
+        const data = await this._getJson('/api/agents/reasoning?limit=50');
+        if (!data) return;
         // Newest first
         this.reasoningSteps = (data.steps || []).reverse();
       } catch (err) {
-        console.error('[AgentsPage] reasoning fetch failed:', err);
       }
     },
 

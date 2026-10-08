@@ -116,6 +116,9 @@ class DiscordAdapter(BaseAdapter):
         # What the connection received and why each unanswered message was
         # left (discord_receive); the connector Test shows it.
         self._receive = DiscordReceiveLog()
+        from kazma_gateway.adapters.native_replies import NativeReplies
+
+        self._native_replies = NativeReplies(ttl=15 * 60)
 
     def set_allowed_users(self, user_ids: list[str] | set[str]) -> None:
         """Replace the user allowlist at runtime (mirrors Telegram).
@@ -354,6 +357,11 @@ class DiscordAdapter(BaseAdapter):
                             else None
                         )
                         self._receive.ready(d)
+                        from kazma_gateway.adapters.discord_commands import register
+
+                        application = str((d.get("application") or {}).get("id") or (d.get("user") or {}).get("id") or "")
+                        if application and application.isdecimal():
+                            spawn_background(register(self, application), name="discord-register-commands")
                         logger.info("[discord] Gateway READY, session_id=%s", self._session_id)
 
                     elif op == 0 and t == "RESUMED":
@@ -555,6 +563,11 @@ class DiscordAdapter(BaseAdapter):
         Handles swarm HITL, dependency install, and graph-HITL button IDs
         (``hitl:approve:{id}``) using :mod:`discord_callbacks`.
         """
+        if data.get("type") == 2:
+            from kazma_gateway.adapters.discord_commands import handle
+
+            await handle(self, data)
+            return
         from kazma_gateway.adapters.discord_callbacks import (
             is_install_action,
             package_from_install,
@@ -745,6 +758,10 @@ class DiscordAdapter(BaseAdapter):
         Returns:
             True if sent successfully.
         """
+        if outbound.context_metadata.get("native_reply_id"):
+            from kazma_gateway.adapters.discord_commands import send
+
+            return await send(self, outbound)
         from kazma_gateway.adapters.discord_send import chunk_message, resolve_channel_id, sanitize_outbound
 
         # Fire typing indicator before sending

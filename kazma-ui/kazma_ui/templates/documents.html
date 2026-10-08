@@ -48,7 +48,6 @@
       <div class="card" style="padding:1rem;margin-bottom:1rem;">
         <div class="drop-zone" :class="{ 'dragover': dragover }"
              role="region" aria-label="{{ t('documents.upload_region') }}"
-             @click="$refs.file.click()"
              @dragover.prevent="dragover = true"
              @dragleave.prevent="dragover = false"
              @drop.prevent="onDrop($event)">
@@ -56,7 +55,8 @@
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
           </svg>
           <div x-show="!uploading" x-cloak>{{ t('documents.drop_hint') }}</div>
-          <div x-show="uploading" x-cloak>{{ t('documents.uploading') }}</div>
+          <div x-show="uploading" x-cloak role="status" aria-live="polite">{{ t('documents.uploading') }}</div>
+          <button type="button" class="btn btn-secondary" @click="$refs.file.click()" :disabled="uploading">{{ t('documents.choose_file') }}</button>
           <input type="file" x-ref="file" style="display:none" @change="onPick($event)">
         </div>
         <label style="display:flex;align-items:center;gap:6px;margin-top:.6rem;font-size:.78rem;color:var(--text-muted);">

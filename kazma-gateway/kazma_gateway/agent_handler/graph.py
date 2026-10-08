@@ -674,6 +674,13 @@ def create_graph_handler(
 
     async def handler(msg: IncomingMessage) -> None:
         """Process a single IncomingMessage through the agent graph."""
+        from kazma_core.agent.command_catalog import normalize_telegram_command
+
+        if msg.platform == "telegram":
+            normalized = normalize_telegram_command(msg.text or "", (msg.context_metadata or {}).get("bot_username", ""))
+            if normalized is None:
+                return
+            msg.text = normalized
         sender = msg.sender_id
 
         # Resolve thread_id using standardized resolver (synchronized).
@@ -772,6 +779,16 @@ def create_graph_handler(
     async def _handler_body(msg: IncomingMessage, thread_id: str) -> None:
         """Inner handler body (typing keepalive wraps this)."""
         sender = msg.sender_id or "unknown"
+        from kazma_core.agent.command_catalog import BY_NAME, INTERNAL_COMMANDS, command_name
+
+        name = command_name(msg.text or "")
+        if name and name.rstrip("!") not in BY_NAME and name not in INTERNAL_COMMANDS:
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, msg.context_metadata),
+                text=f"Unknown command /{name}. Use /help to see the supported commands.",
+                context_metadata=msg.context_metadata,
+            ))
+            return
         # Work slashes become graph turns (research / swarm dispatch / …).
         # Control slashes (help/list/status) stay on the intercepts below.
         try:

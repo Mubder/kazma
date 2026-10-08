@@ -8,6 +8,17 @@ One slice of the translation catalog, extracted from the former
 from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
+    "common.send": {"en": "Send", "ar": "إرسال"},
+    "chat.slash.page_action": {"en": "Manage on its page", "ar": "الإدارة من صفحة الميزة"},
+    "chat.slash.admin_options": {"en": "Some options require an administrator", "ar": "بعض الخيارات تتطلب صلاحية مسؤول"},
+    "skill.desc.x-publisher": {"en": "Manage X accounts, reviewed drafts, publishing and scheduled posts.", "ar": "إدارة حسابات X والمسودات المعتمدة والنشر والمنشورات المجدولة."},
+    "ide.dlg.leave_title": {"en": "Unsaved files", "ar": "ملفات غير محفوظة"},
+    "ide.dlg.leave_message": {"en": "Leaving this page will discard your unsaved file edits.", "ar": "مغادرة هذه الصفحة ستتجاهل تعديلات الملفات غير المحفوظة."},
+    "ide.dlg.leave_confirm": {"en": "Discard edits and leave", "ar": "تجاهل التعديلات والمغادرة"},
+    "ide.parent_directory": {"en": "Open parent directory", "ar": "فتح المجلد الأعلى"},
+    "skills.toggle_named": {"en": "Enable skill {name}", "ar": "تفعيل المهارة {name}"},
+    "skill.desc.document-platform": {"en": "Manage durable document jobs, extraction, search and document generation.", "ar": "إدارة مهام المستندات الدائمة واستخراج المحتوى والبحث وإنشاء المستندات."},
+    "skill.desc.document-processor": {"en": "Read and extract content from PDFs, office documents and images.", "ar": "قراءة المحتوى واستخراجه من ملفات PDF والمستندات المكتبية والصور."},
     "auth.relogin_hint": {
         "ar": "انتهت جلستك — سيتم توجيهك إلى صفحة تسجيل الدخول.",
         "en": "Your session expired — you'll be redirected to the login page.",

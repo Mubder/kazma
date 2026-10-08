@@ -18,7 +18,7 @@
     
     <div style="display:flex;align-items:center;gap:12px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end;">
       <span style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);">{{ t('workspace.active_env') }}</span>
-      <select
+      <select aria-label="{{ t('workspace.active_env') }}"
         class="form-input"
         style="max-width:240px;min-width:160px;flex:1;padding:6px 12px;border-radius:var(--radius-sm);font-weight:500;"
         :value="activeWorkspaceId"

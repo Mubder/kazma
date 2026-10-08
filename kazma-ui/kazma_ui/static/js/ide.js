@@ -23,6 +23,9 @@ function ideApp() {
     currentLang: 'plaintext',
     originalContent: '',
     dirty: false,
+    _leaveGuard: null,
+    _beforeUnload: null,
+    _confirmedLeave: false,
     busy: false,
     command: '',
     grepPattern: '',
@@ -72,9 +75,39 @@ function ideApp() {
       this.initChat();
       var self = this;
       window.kazmaOnSoftNavLeave = function () { self.destroy(); };
+      this._leaveGuard = function () { return self.confirmLeave(); };
+      window.kazmaBeforeNavigate = this._leaveGuard;
+      this._beforeUnload = function (event) {
+        if (!self._confirmedLeave && self.hasUnsavedChanges()) {
+          event.preventDefault();
+          event.returnValue = '';
+        }
+      };
+      window.addEventListener('beforeunload', this._beforeUnload);
+    },
+
+    hasUnsavedChanges() {
+      return this.dirty || this.tabs.some(function (tab) { return tab.dirty; });
+    },
+
+    async confirmLeave() {
+      if (!this.hasUnsavedChanges()) return true;
+      var leave = await window.kazmaConfirm({
+        title: this._tx('ide.dlg.leave_title', 'Unsaved files'),
+        message: this._tx('ide.dlg.leave_message', 'Leaving this page will discard your unsaved file edits.'),
+        confirmText: this._tx('ide.dlg.leave_confirm', 'Discard edits and leave'),
+        danger: true,
+      });
+      this._confirmedLeave = !!leave;
+      // A failed navigation must not suppress future browser-close warnings.
+      if (leave) setTimeout(function () { this._confirmedLeave = false; }.bind(this), 1000);
+      return !!leave;
     },
 
     destroy() {
+      if (window.kazmaBeforeNavigate === this._leaveGuard) window.kazmaBeforeNavigate = null;
+      if (this._beforeUnload) window.removeEventListener('beforeunload', this._beforeUnload);
+      this._beforeUnload = null;
       try { if (this.chatStream && this.chatStream.abort) this.chatStream.abort(); } catch (e) {}
       this.chatStream = null;
       try { if (this._themeObs) this._themeObs.disconnect(); } catch (e) {}
@@ -191,6 +224,7 @@ function ideApp() {
       if (!ta || !window.CodeMirror) return;
       try {
         _ideCM = window.CodeMirror.fromTextArea(ta, {
+          screenReaderLabel: this._tx('ide.editor', 'File editor'),
           lineNumbers: true,
           lineWrapping: false,
           indentUnit: 4,

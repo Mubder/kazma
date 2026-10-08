@@ -572,6 +572,7 @@ Lists all available commands grouped by category.
 • `/personality list` — List all available personalities
 • `/personality <name>` — Switch personality
 • `/context` — Show context window usage
+• `/x` — X Studio: drafts, accounts, scheduled posts (`/x help`)
 • `/ide` — Workspace files, git and coding skills (`/ide help`)
 • `/kb` — Knowledge libraries: list, crawl, search (`/kb help`)
 • `/skill list` — List installed Agent Skills

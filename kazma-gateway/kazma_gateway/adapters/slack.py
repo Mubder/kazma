@@ -121,6 +121,10 @@ class SlackAdapter(BaseAdapter):
         # What the connection received and why each unanswered message was
         # left (receive_log); the connector Test shows it.
         self._receive = ReceiveLog(SLACK_REASONS)
+        from kazma_gateway.adapters.native_replies import NativeReplies
+
+        self._native_replies = NativeReplies(ttl=30 * 60)
+        self._receive.extra["native_commands"] = "Receiver enabled; configure /kazma in the Slack app manifest"
         #: When Kazma's last Socket Mode connection ended (monotonic).
         self._socket_ended_at: float | None = None
         #: Connections Slack has refused in a row because the app was full
@@ -381,6 +385,10 @@ class SlackAdapter(BaseAdapter):
         Returns:
             True if sent successfully.
         """
+        if outbound.context_metadata.get("native_reply_id"):
+            from kazma_gateway.adapters.slack_commands import send
+
+            return await send(self, outbound)
         # Fire typing indicator (fire-and-forget)
         spawn_background(self._trigger_typing(outbound.target_id), name="slack-typing")
 
@@ -801,6 +809,11 @@ class SlackAdapter(BaseAdapter):
                             continue
 
                         msg_type = msg.get("type", "")
+                        if msg_type == "slash_commands":
+                            from kazma_gateway.adapters.slack_commands import handle
+
+                            await handle(self, ws, msg)
+                            continue
 
                         # Team (workspace) allowlist — previously stored but
                         # never enforced (dead config, audit L-2). Socket Mode

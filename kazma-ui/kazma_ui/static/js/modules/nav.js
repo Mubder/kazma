@@ -92,6 +92,17 @@ export function scriptKey(src) {
     return kept.length ? text.slice(0, at) + '?' + kept.join('&') : text.slice(0, at);
 }
 
+/** A page may veto navigation before its editor, sockets or DOM are torn down. */
+export async function canLeavePage() {
+    if (typeof window.kazmaBeforeNavigate !== 'function') return true;
+    try {
+        return await window.kazmaBeforeNavigate() === true;
+    } catch (error) {
+        console.warn('[soft-nav] leave guard failed; keeping the current page', error);
+        return false;
+    }
+}
+
 export function initSoftNav() {
     // The header's New Chat button calls this. Set here, not at module top
     // level: tests import this module in Node, where there is no window.
@@ -114,6 +125,12 @@ export function initSoftNav() {
 
     let navInFlight = null;
     let softNavGeneration = 0;
+    const oldState = history.state || {};
+    const navHistoryId = oldState.kazmaNavHistory || String(Date.now()) + '-' + Math.random().toString(36).slice(2);
+    let navIndex = typeof oldState.kazmaNavIndex === 'number' ? oldState.kazmaNavIndex : 0;
+    let restoringHistory = false;
+    let committedUrl = location.href;
+    history.replaceState({ ...oldState, kazmaNavIndex: navIndex, kazmaNavHistory: navHistoryId }, '', committedUrl);
 
     function targetKey(href) {
         try {
@@ -556,10 +573,9 @@ export function initSoftNav() {
         }
     }
 
-    async function softNav(url) {
+    async function softNav(url, { pushHistory = true } = {}) {
         const gen = ++softNavGeneration;
         setNavigating(true);
-        teardownLiveSockets();
         let alpinePaused = false;
         try {
             const res = await fetch(url, {
@@ -595,6 +611,8 @@ export function initSoftNav() {
             const newMain = doc.querySelector('#main-content');
             const oldMain = document.querySelector('#main-content');
             if (!newMain || !oldMain) throw new Error('missing #main-content');
+
+            teardownLiveSockets();
 
             // Pause Alpine BEFORE the innerHTML swap. <html> is x-data, so
             // the document MutationObserver would otherwise init the new
@@ -634,7 +652,11 @@ export function initSoftNav() {
             }
 
             if (gen !== softNavGeneration) return;
-            history.pushState({ kazmaSoft: true }, '', url);
+            if (pushHistory) {
+                navIndex += 1;
+                history.pushState({ kazmaSoft: true, kazmaNavIndex: navIndex, kazmaNavHistory: navHistoryId }, '', url);
+            }
+            committedUrl = location.href;
             updateActiveNav();
         } finally {
             if (alpinePaused) resumeAlpineMutations();
@@ -643,19 +665,18 @@ export function initSoftNav() {
     }
 
     function navigateTo(url, { forceFull } = {}) {
-        const toPath = pathOnly(url);
-        if (forceFull || needsHardReload(location.pathname, toPath)) {
-            window.location.href = url;
-            return;
-        }
-        if (!SOFT_NAV_ENABLED) {
-            window.location.href = url;
-            return;
-        }
-        const run = () => softNav(url).catch((err) => {
-            console.warn('[soft-nav] falling back to full load:', err);
-            window.location.href = url;
-        });
+        const run = async () => {
+            if (!await canLeavePage()) return;
+            const toPath = pathOnly(url);
+            if (forceFull || !SOFT_NAV_ENABLED || needsHardReload(location.pathname, toPath)) {
+                window.location.href = url;
+                return;
+            }
+            await softNav(url).catch((err) => {
+                console.warn('[soft-nav] falling back to full load:', err);
+                window.location.href = url;
+            });
+        };
         navInFlight = (navInFlight || Promise.resolve()).then(run, run);
         return navInFlight;
     }
@@ -687,12 +708,24 @@ export function initSoftNav() {
         navigateTo(a.href);
     });
 
-    window.addEventListener('popstate', () => {
+    window.addEventListener('popstate', async (event) => {
+        if (restoringHistory) { restoringHistory = false; return; }
+        const nextIndex = event.state && event.state.kazmaNavHistory === navHistoryId ? event.state.kazmaNavIndex : null;
+        if (!await canLeavePage()) {
+            if (typeof nextIndex === 'number' && nextIndex !== navIndex) {
+                restoringHistory = true;
+                history.go(navIndex - nextIndex);
+            } else {
+                history.pushState({ kazmaNavIndex: navIndex, kazmaNavHistory: navHistoryId }, '', committedUrl);
+            }
+            return;
+        }
+        if (typeof nextIndex === 'number') navIndex = nextIndex;
         if (!SOFT_NAV_ENABLED || needsHardReload(location.pathname, location.pathname)) {
             window.location.reload();
             return;
         }
-        softNav(location.pathname + location.search)
+        softNav(location.pathname + location.search, { pushHistory: false })
             .then(updateActiveNav)
             .catch(() => window.location.reload());
     });
