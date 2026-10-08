@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Slack approval details (2026-10-09)
+
+- Show the redacted tool, path and content preview inside Slack approval blocks,
+  including grouped requests. Preserve callback identities and private delivery;
+  split long previews within Slack limits and render arguments as literal text.
+
 ## UI audit and native command routing (2026-10-08)
 
 - Protect unsaved IDE tabs before page navigation, Back, reload and close. A

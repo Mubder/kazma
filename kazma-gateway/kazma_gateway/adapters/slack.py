@@ -1275,11 +1275,11 @@ class SlackAdapter(BaseAdapter):
     # ── Interactive builders (Telegram-parity static API) ───────────
 
     @staticmethod
-    def build_approval_keyboard(request_id: str) -> list[dict[str, Any]]:
+    def build_approval_keyboard(request_id: str, *, details: str | None = None) -> list[dict[str, Any]]:
         """Slack Block Kit for graph HITL (shared callback IDs with Telegram)."""
         from kazma_gateway.adapters.slack_blocks import build_approval_blocks
 
-        return build_approval_blocks(request_id)
+        return build_approval_blocks(request_id, details=details)
 
     @staticmethod
     def build_personality_keyboard(personalities: list[str]) -> list[dict[str, Any]]:
