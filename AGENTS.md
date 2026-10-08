@@ -2683,8 +2683,15 @@ binds arguments and workspace. A completed replay returns the recorded result;
 a started receipt, timeout or result-commit failure stops the turn with an
 honest assistant warning and no synthesis. Never reset an unknown receipt
 or enable whole-agent retries on this basis. Reads are not cached. Legacy
-states without thread/turn scope have no receipt, and direct IDE/swarm bus
-execution remains outside this graph fence. `tests/test_effect_journal.py`
+states without thread/turn scope have no graph receipt. Direct IDE tool calls
+and in-process swarm tool loops now use the same receipt engine. The IDE HTTP
+boundary binds an `Idempotency-Key` to principal, tenant, payload and captured
+workspace; its saved response never dispatches or opens another gate. The browser
+retains unresolved IDs in session storage across reload, without storing payloads.
+Unkeyed clients receive a generated ID but cannot recover a lost response without
+having retained their own key. `tests/test_execution_recovery_scope.py` covers
+concurrent requests, changed payload/workspace, denied gates and failed writes.
+`tests/test_effect_journal.py`
 includes real child-process death, concurrent admission and visible warnings.
 
 `LocalToolRegistry.execute` retries only classified reads. Mutating and unknown
@@ -2692,6 +2699,19 @@ tools have one invocation attempt; a failure after invocation carries
 `effect_uncertain=True`, which the journal persists and holds on replay.
 Argument validation before invocation is still correctable. Do not turn a
 post-invocation error into a retryable ordinary result.
+`dispatch_effects` tracks actual local/MCP mutator invocation across the worker
+retry boundary, after validation and HITL. An unsuccessful dispatch after such
+an invocation carries `retry_safe=False`; keep it on `WorkerResult` through
+serialization and stop both retry and fallback chains.
+Handoff failures retain earlier invocation evidence on every failed result,
+including missing targets, so selecting the chain's final result cannot reopen
+task-level fallback. IDE rate admission runs before receipt admission and once
+per HTTP request; throttled requests retain HTTP 429 and can retry after expiry.
+In-process workers stop
+uncertain tool loops with an empty output and no synthesis. This does not qualify
+whole-agent Temporal retries or custom workers' external effects outside the tool
+registry. Completed effects and unknown effects both make whole-worker replay
+unsafe; a successful tool receipt alone does not prove the next worker safe.
 `UnifiedToolExecutor` carries the same uncertainty for a failed MCP mutator
 dispatch, preserving the original failure through output hooks. Read errors
 remain correctable. This does not make the external server transactional.

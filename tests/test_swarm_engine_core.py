@@ -331,6 +331,7 @@ async def test_swarm_manager_dispatch_wrapper_delegates_to_engine(in_process_con
         "cost": 0.0,
         "duration_seconds": 0.0,
         "handoffs": [],
+        "retry_safe": True,
     }
 
 

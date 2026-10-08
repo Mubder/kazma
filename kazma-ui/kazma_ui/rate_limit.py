@@ -136,6 +136,10 @@ def rate_limit(bucket: str, default_per_minute: int) -> Any:
     async def _check(request: Request) -> None:
         if not _enabled():
             return
+        marker = (bucket, default_per_minute)
+        checked = getattr(request.state, "_kazma_rate_limit_checks", None)
+        if checked is not None and marker in checked:
+            return
         limit = _per_minute(bucket, default_per_minute)
         allowed, retry_after = _allow((bucket, _principal(request)), limit)
         if not allowed:
@@ -147,5 +151,9 @@ def rate_limit(bucket: str, default_per_minute: int) -> Any:
                 ),
                 headers={"Retry-After": str(max(1, int(retry_after) + 1))},
             )
+        if checked is None:
+            checked = request.state._kazma_rate_limit_checks = set()
+        checked.add(marker)
 
+    setattr(_check, "_kazma_rate_limit", True)
     return _check

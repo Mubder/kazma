@@ -423,8 +423,27 @@ registry invokes mutating and unknown tools once; only classified reads receive
 automatic retries. A post-invocation error is uncertain because an action may
 have completed partially. Reads are not cached.
 Failed MCP mutator dispatches also carry uncertainty, including when an output
-hook rewrites the error. This fence does not cover legacy checkpoints
-without turn identity, direct IDE calls or the separate swarm bus path.
+hook rewrites the error. Direct IDE tool calls and in-process swarm tool loops
+also write receipts. An uncertain swarm tool stops without a synthesis call.
+An unsuccessful worker that invoked a local/MCP mutator cannot retry or fall
+back to a replacement worker. Custom workers' effects outside these shared
+executors and legacy graph checkpoints without turn identity remain uncovered.
+
+IDE mutation requests support `Idempotency-Key`. Use one new key for each
+deliberate operation and retain it if the response is lost. A repeated request
+with the same principal, tenant, payload and workspace returns the saved response;
+changed requests and unresolved effects return 409 without another dispatch or
+approval. Authentication and operator role are checked before a saved response
+is returned.
+Rate admission precedes receipt admission and is applied once per request,
+including saved-response reads. HTTP 429 does not admit an effect; the same
+operation key can be submitted again after the limiter window expires.
+The web IDE retains unresolved operation IDs across reload within
+the same browser tab; session storage holds only a payload digest and ID.
+Clients that omit the header get a generated response key, which cannot rescue
+a lost response they never received. Do not start a new keyed operation merely
+to bypass an uncertain result. Direct non-HTTP IDE calls have per-call receipts,
+not an automatic retry protocol.
 
 Inspect metadata from the install's environment with its thread ID:
 

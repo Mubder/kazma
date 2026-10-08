@@ -189,6 +189,7 @@ class WorkerResult(_JsonSerializable):
     cost: float = 0.0
     duration_seconds: float = 0.0
     handoffs: list[HandoffRecord] = field(default_factory=list)
+    retry_safe: bool = True
 
     def __post_init__(self) -> None:
         self.handoffs = [HandoffRecord.from_dict(record) for record in self.handoffs]
@@ -208,6 +209,7 @@ class WorkerResult(_JsonSerializable):
             cost=float(data.get("cost", 0.0)),
             duration_seconds=float(data.get("duration_seconds", 0.0)),
             handoffs=[HandoffRecord.from_dict(record) for record in data.get("handoffs", [])],
+            retry_safe=data.get("retry_safe") is not False,
         )
 
     @classmethod
