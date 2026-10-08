@@ -586,7 +586,7 @@ def _build_approval_prompt(
             elif plat_multi == "slack":
                 from kazma_gateway.adapters.slack import SlackAdapter
 
-                markup_multi = SlackAdapter.build_approval_keyboard(request_id)
+                markup_multi = SlackAdapter.build_approval_keyboard(request_id, details=text_multi)
         except Exception as exc:
             logger.debug(
                 "Approval keyboard build failed for platform=%s: %s",
@@ -646,7 +646,7 @@ def _build_approval_prompt(
         elif plat == "slack":
             from kazma_gateway.adapters.slack import SlackAdapter
 
-            markup = SlackAdapter.build_approval_keyboard(request_id)
+            markup = SlackAdapter.build_approval_keyboard(request_id, details=text)
     except Exception as exc:
         logger.debug(
             "Approval keyboard build failed for platform=%s: %s",
