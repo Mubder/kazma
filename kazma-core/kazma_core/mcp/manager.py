@@ -2434,6 +2434,9 @@ class UnifiedToolExecutor:
                             }
 
                 logger.debug("[Unified] Routing '%s' → MCP server '%s'", tool_name, server_name)
+                from kazma_core.agent.dispatch_effects import note_effect_invocation
+
+                note_effect_invocation(tool_name)
                 _mcp_result = await self._mcp.execute_mcp_tool(server_name, tool_name, arguments)
                 _was_error = bool(_mcp_result.get("is_error"))
                 try:

@@ -215,15 +215,26 @@ class IdeService:
         the ONLY execution path used by the IDE. Never call the underlying
         tool functions directly from the IDE layer.
         """
+        import uuid
+
+        from kazma_core.agent.effect_journal import EffectUncertain, execute_operation
         from kazma_core.agent.tool_registry import get_tool_registry
 
-        result = await get_tool_registry().execute(tool_name, arguments)
+        try:
+            result = await execute_operation(
+                "ide-call", uuid.uuid4().hex, tool_name, arguments,
+                lambda: get_tool_registry().execute(tool_name, arguments),
+            )
+        except EffectUncertain as exc:
+            return {"ok": False, "tool": tool_name, "output": "", "error": str(exc),
+                    "effect_uncertain": True}
         ok = bool(result.get("is_error")) is False
         return {
             "ok": ok,
             "tool": tool_name,
             "output": result.get("content", ""),
             "error": None if ok else result.get("content", "Tool execution failed"),
+            "effect_uncertain": bool(result.get("effect_uncertain")),
         }
 
     # ── IDE operations ─────────────────────────────────────────────────
@@ -377,7 +388,7 @@ class IdeService:
             # File writes and a store read: in a thread.
             paths = await asyncio.to_thread(restore_checkpoint, checkpoint_id)
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": str(exc), "effect_uncertain": not isinstance(exc, ValueError)}
         return {"ok": True, "paths": paths, "checkpoint_id": checkpoint_id}
 
     async def delete_file(self, rel_path: str) -> dict[str, Any]:

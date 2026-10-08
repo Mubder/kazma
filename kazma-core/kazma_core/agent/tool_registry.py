@@ -810,6 +810,9 @@ class LocalToolRegistry:
                             "is_error": True,
                         }
 
+                from kazma_core.agent.dispatch_effects import note_effect_invocation
+
+                note_effect_invocation(tool_name)
                 _invoked = True
                 if tool.is_async:
                     result = await tool.func(**valid_params)

@@ -14,6 +14,7 @@ import json
 import logging
 import sqlite3
 import time
+from collections.abc import Awaitable, Callable
 from contextlib import closing
 from pathlib import Path
 from typing import Any
@@ -141,6 +142,29 @@ class _EffectJournal:
                 (thread_id, min(1000, max(1, limit))),
             ).fetchall()
             return [dict(row) for row in rows]
+
+
+async def execute_operation(
+    namespace: str, operation_id: str, tool: str, arguments: dict[str, Any],
+    dispatch: Callable[[], Awaitable[dict[str, Any]]], *, actor: str = "operator",
+) -> dict[str, Any]:
+    """Fence a non-graph operation; callers keep its ID for retries of that operation.
+
+    A new deliberate operation needs a new ID. Neither this receipt nor a
+    completed replay grants permission to execute a new action.
+    """
+    from kazma_core.tenant_context import get_current_tenant_id
+
+    class Executor:
+        async def execute(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+            return await dispatch()
+
+    state = {
+        "thread_id": namespace + ":" + actor,
+        "tenant_id": get_current_tenant_id() or "default",
+        "created_at": namespace, "iteration": 0,
+    }
+    return await execute_effect(Executor(), state, {"id": operation_id, "name": tool}, arguments)
 
 
 async def execute_effect(

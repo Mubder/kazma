@@ -11,6 +11,7 @@
 /* CodeMirror instance must stay OFF the Alpine object (same hang as Monaco).
    File bytes are written to #ide-fallback first; CM wraps that textarea. */
 var _ideCM = null;
+var _idePendingRequests = new Map();
 function _ed() { return _ideCM; }
 
 function ideApp() {
@@ -480,12 +481,34 @@ function ideApp() {
       return r.json();
     },
     async _post(url, body) {
+      var encoded = JSON.stringify(body || {});
+      var fingerprint = url + '\n' + encoded;
+      var slot = null;
+      if (window.crypto && crypto.subtle) {
+        var digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(fingerprint));
+        slot = 'kazma-ide-operation:' + Array.from(new Uint8Array(digest), function (b) {
+          return b.toString(16).padStart(2, '0');
+        }).join('');
+      }
+      var key = _idePendingRequests.get(fingerprint);
+      try { if (!key && slot) key = sessionStorage.getItem(slot); } catch (e) {}
+      if (!key) key = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID() : ('ide-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+      _idePendingRequests.set(fingerprint, key);
+      try { if (slot) sessionStorage.setItem(slot, key); } catch (e) {}
       var r = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body || {}),
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+        body: encoded,
       });
-      return r.json();
+      var result = await r.json();
+      // Transport loss keeps the ID for a user retry, including a page reload.
+      // An uncertain result stays held; a confirmed result ends this operation.
+      if (r.ok && !result.effect_uncertain) {
+        _idePendingRequests.delete(fingerprint);
+        try { if (slot) sessionStorage.removeItem(slot); } catch (e) {}
+      }
+      return result;
     },
 
     // ── File tree (reuses the read-only workspace API) ──
