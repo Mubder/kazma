@@ -34,6 +34,7 @@ def _built_notes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, s
     """Each kind's note, built by the code that writes it."""
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     from kazma_core.agent.intent.policy import _plan_note_for
+    from kazma_core.agent.approval_facts import approval_scope_note
     from kazma_core.agent.intent.types import ActKind, EntitySet
     from kazma_core.agent.long_task import consume_continue_context, store_continue_context
     from kazma_core.agent.research_policy import deep_research_route_hint
@@ -52,6 +53,10 @@ def _built_notes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, s
 
     store_continue_context("turn-notes-t1", summary="Verified 6 of 8 domains.")
     notes = {
+        "approval_scope": approval_scope_note(
+            [{"id": "call_previous", "name": "file_write"}], [],
+            approved=False, approved_ids=None, mode="human",
+        )["content"],
         "working_memory": format_working_memory_anchor(active_goal="Ship v0.4"),
         "latest_message_priority": latest_turn_priority_note(),
         "task_ledger": format_ledger_block(TaskLedger(thread_id="t", goal="Ship v0.4")),
@@ -280,6 +285,65 @@ def test_strip_keeps_everything_that_is_not_a_turn_note() -> None:
     kept = strip_turn_notes(history)
     assert not any(note_kind(m) for m in kept)
     assert [m for m in history if note_kind(m) is None] == kept
+
+
+@pytest.mark.parametrize("gateway", [False, True])
+@pytest.mark.parametrize("approved", [False, True])
+def test_new_request_drops_previous_approval_instruction_but_keeps_tool_evidence(
+    gateway: bool, approved: bool,
+) -> None:
+    from kazma_core.agent.approval_facts import approval_scope_note
+    from kazma_core.agent.turn_input import build_turn_messages
+    from kazma_gateway.agent_handler.graph import _rebuild_turn_messages
+
+    call = {"id": "call_previous", "name": "file_write"}
+    evidence = {
+        "role": "tool", "tool_call_id": call["id"],
+        "content": "File written" if approved else "Denied by user; not executed",
+    }
+    assistant_call = {
+        "role": "assistant", "content": "",
+        "tool_calls": [{"id": call["id"], "type": "function", "function": {
+            "name": call["name"], "arguments": '{"path":"old.txt","content":"old"}',
+        }}],
+    }
+    note = approval_scope_note(
+        [call], [{"tool_call_id": call["id"], "is_error": False}],
+        approved=approved, approved_ids=None, mode="human",
+    )
+    history = [_sys(BASE), {"role": "user", "content": "Write old.txt"},
+               assistant_call, evidence, note, {"role": "assistant", "content": "Previous turn finished"}]
+    graph = _Graph(history)
+    config = {"configurable": {"thread_id": "approval-turn-scope"}}
+    new_text = "New independent request: write new.txt and ask for its own approval"
+    if gateway:
+        out = asyncio.run(_rebuild_turn_messages(
+            graph, config, [{"role": "user", "content": new_text}], new_text,
+        ))
+    else:
+        out = asyncio.run(build_turn_messages(graph, config, user_text=new_text))
+    assert note not in out
+    assert not any(note_kind(message) == "approval_scope" for message in out)
+    assert assistant_call in out and evidence in out
+    assert out[-1] == {"role": "user", "content": new_text}
+    # Loading a new turn must not rewrite the paused/completed checkpoint.
+    assert note in graph._messages
+
+
+def test_unregistered_approval_scope_replays_the_previous_decision(monkeypatch) -> None:
+    from kazma_core.agent.approval_facts import approval_scope_note
+    from kazma_core.agent.turn_input import build_turn_messages
+
+    note = approval_scope_note(
+        [{"id": "previous", "name": "file_write"}], [],
+        approved=False, approved_ids=None, mode="human",
+    )
+    monkeypatch.delitem(TURN_NOTE_KINDS, "approval_scope")
+    out = asyncio.run(build_turn_messages(
+        _Graph([_sys(BASE), note]), {"configurable": {"thread_id": "old"}},
+        user_text="New independent request",
+    ))
+    assert note in out  # The live defect before this kind was registered.
 
 
 # ── The prompt cache keeps a turn's notes out of its stable prefix ──────
