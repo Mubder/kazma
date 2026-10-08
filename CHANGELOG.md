@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Fresh gateway approval cards (2026-10-09)
+
+- Lift the approval notification throttle when the operator starts a new
+  request. An identical file write within three minutes of a previous turn
+  could pause at a real gate without displaying a new Telegram card.
+  Autonomous duplicate/burst suppression and approval-resume gates remain.
+
 ## Approval decision turn scope (2026-10-09)
 
 - Remove the preceding tool batch's approval instruction when a fresh user

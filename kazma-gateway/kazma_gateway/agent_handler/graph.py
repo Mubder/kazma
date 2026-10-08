@@ -23,6 +23,7 @@ from .hitl import (
     _check_graph_interrupt,
     _build_approval_prompt,
     approval_card_suppressed,
+    clear_approval_throttle,
     _handle_hitl_resume,
     apply_hitl_approval_markup,
 )
@@ -848,6 +849,10 @@ def create_graph_handler(
             return
 
         # ── Build platform-agnostic state ──────────────────────────
+        # A new operator request is a new decision, even when its args match
+        # a recent failed/expired action. Keep throttling autonomous retries
+        # within that turn; approval resumes above do not lift the throttle.
+        clear_approval_throttle(thread_id)
         state = await _build_initial_state(msg, _store)
 
         # §17: pin working memory (attachments, constraints) so the intent
