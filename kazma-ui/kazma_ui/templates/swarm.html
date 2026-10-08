@@ -82,7 +82,7 @@
 
           <!-- Orchestration Pattern Selector (VAL-UI-001, VAL-ORCH-042) -->
           <div class="form-group">
-            <label class="form-label">{{ t('swarm.orchestration_pattern') }} *</label>
+            <label for="pattern-select" class="form-label">{{ t('swarm.orchestration_pattern') }} *</label>
             <select id="pattern-select" class="form-select" onchange="KazmaSwarm.onPatternChange(this.value)">
               <option value="dispatch">{{ t('swarm.pattern.dispatch') }}</option>
               <option value="broadcast">{{ t('swarm.pattern.broadcast') }}</option>
@@ -127,19 +127,19 @@
 
           <!-- Prompt Textarea (VAL-UI-003) -->
           <div class="form-group">
-            <label class="form-label">{{ t('swarm.prompt') }} *</label>
+            <label for="dispatch-task" class="form-label">{{ t('swarm.prompt') }} *</label>
             <textarea id="dispatch-task" class="form-textarea" rows="4" placeholder="{{ t('swarm.prompt_placeholder') }}" required></textarea>
           </div>
 
           <!-- Context Textarea (VAL-UI-003) -->
           <div class="form-group">
-            <label class="form-label">{{ t('swarm.context') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.context_hint') }}</span></label>
+            <label for="dispatch-context" class="form-label">{{ t('swarm.context') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.context_hint') }}</span></label>
             <textarea id="dispatch-context" class="form-textarea" rows="2" placeholder="{{ t('swarm.context_placeholder') }}"></textarea>
           </div>
 
           <!-- Conditional Routes (shown only for conditional pattern) -->
           <div id="conditional-routes-group" class="form-group" style="display:none;">
-            <label class="form-label">{{ t('swarm.routing_rules') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.routing_rules_hint') }}</span></label>
+            <label for="conditional-routes" class="form-label">{{ t('swarm.routing_rules') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.routing_rules_hint') }}</span></label>
             <textarea id="conditional-routes" class="form-textarea" rows="3" translate="no" placeholder='{"approve": "worker-a", "reject": "worker-b", "default": "worker-c"}'></textarea>
           </div>
 
@@ -150,15 +150,15 @@
             </summary>
             <div class="two-col-grid" style="padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:12px;">
               <div class="form-group" style="margin:0;">
-                <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.timeout_seconds') }}</label>
+                <label for="adv-timeout" class="form-label" style="font-size:0.8rem;">{{ t('swarm.timeout_seconds') }}</label>
                 <input type="number" id="adv-timeout" class="form-input" value="300" min="1" max="3600" step="1">
               </div>
               <div class="form-group" style="margin:0;">
-                <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.max_retry_count') }}</label>
+                <label for="adv-retries" class="form-label" style="font-size:0.8rem;">{{ t('swarm.max_retry_count') }}</label>
                 <input type="number" id="adv-retries" class="form-input" value="0" min="0" max="10" step="1">
               </div>
               <div class="form-group" style="margin:0;">
-                <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.aggregation_strategy') }}</label>
+                <label for="adv-aggregation" class="form-label" style="font-size:0.8rem;">{{ t('swarm.aggregation_strategy') }}</label>
                 <select id="adv-aggregation" class="form-select">
                   <option value="collect">{{ t('swarm.agg.collect') }}</option>
                   <option value="first_valid">{{ t('swarm.agg.first_valid') }}</option>
@@ -168,7 +168,7 @@
                 </select>
               </div>
               <div class="form-group" style="margin:0;">
-                <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.validation_schema') }}</label>
+                <label for="adv-validation" class="form-label" style="font-size:0.8rem;">{{ t('swarm.validation_schema') }}</label>
                 <input type="text" id="adv-validation" class="form-input" placeholder='{"type":"object"}'>
               </div>
             </div>
@@ -217,18 +217,18 @@
         
         <!-- Pipeline Prompt -->
         <div class="form-group" style="margin-bottom:8px;">
-          <label class="form-label" style="font-size:0.8rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);"><span class="ki" data-icon="file-text" aria-hidden="true"></span> {{ t('swarm.master_task_prompt') }} *</label>
+          <label for="pipeline-prompt" class="form-label" style="font-size:0.8rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);"><span class="ki" data-icon="file-text" aria-hidden="true"></span> {{ t('swarm.master_task_prompt') }} *</label>
           <textarea id="pipeline-prompt" class="form-textarea" style="font-size:0.8rem;padding:8px 12px;background:rgba(0,0,0,0.15);border:1px solid var(--border);border-radius:var(--radius);resize:vertical;min-height:70px;" placeholder="{{ t('swarm.master_task_ph') }}"></textarea>
         </div>
 
         <!-- Global Timeout & Fallback Worker side-by-side -->
         <div style="display:flex;gap:12px;margin-bottom:8px;align-items:flex-end;">
           <div class="form-group" style="flex:1;margin-bottom:0;">
-            <label class="form-label" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;"><span x-html="KazmaIcons.clock()"></span> {{ t('swarm.step_timeout') }}</label>
+            <label for="pipeline-timeout" class="form-label" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;"><span x-html="KazmaIcons.clock()"></span> {{ t('swarm.step_timeout') }}</label>
             <input type="number" id="pipeline-timeout" class="form-input" style="height:32px;font-size:0.8rem;padding:4px 8px;background:rgba(0,0,0,0.15);border:1px solid var(--border);border-radius:var(--radius);" value="300">
           </div>
           <div class="form-group" style="flex:1.5;margin-bottom:0;">
-            <label class="form-label" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;"><span class="ki" data-icon="shield" aria-hidden="true"></span> {{ t('swarm.fallback_worker') }}</label>
+            <label for="pipeline-fallback-select" class="form-label" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;"><span class="ki" data-icon="shield" aria-hidden="true"></span> {{ t('swarm.fallback_worker') }}</label>
             <select id="pipeline-fallback-select" class="form-select" style="height:32px;font-size:0.8rem;padding:4px 8px;background:rgba(0,0,0,0.15);border:1px solid var(--border);border-radius:var(--radius);">
               <option value="">{{ t('swarm.none_fail_closed') }}</option>
               {% for w in workers %}
@@ -301,7 +301,7 @@
           
           <!-- Orchestration Pattern Selector -->
           <div class="form-group">
-            <label class="form-label">{{ t('swarm.orchestration_pattern') }} *</label>
+            <label for="play-pattern-select" class="form-label">{{ t('swarm.orchestration_pattern') }} *</label>
             <select id="play-pattern-select" class="form-select" onchange="KazmaSwarm.onPlayPatternChange(this.value)">
               <option value="dispatch">{{ t('swarm.pattern.dispatch') }}</option>
               <option value="broadcast">{{ t('swarm.pattern.broadcast') }}</option>
@@ -345,7 +345,7 @@
 
           <!-- Prompt text area -->
           <div class="form-group">
-            <label class="form-label">{{ t('swarm.prompt') }} *</label>
+            <label for="play-dispatch-task" class="form-label">{{ t('swarm.prompt') }} *</label>
             <textarea id="play-dispatch-task" class="form-textarea" rows="3" placeholder="{{ t('swarm.prompt_placeholder') }}" required></textarea>
           </div>
 
@@ -357,16 +357,16 @@
             <div style="padding:12px;display:flex;flex-direction:column;gap:12px;">
               <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                 <div class="form-group" style="margin:0;">
-                  <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.timeout_seconds') }}</label>
+                  <label for="play-adv-timeout" class="form-label" style="font-size:0.8rem;">{{ t('swarm.timeout_seconds') }}</label>
                   <input type="number" id="play-adv-timeout" class="form-input" value="300" min="1" max="3600">
                 </div>
                 <div class="form-group" style="margin:0;">
-                  <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.max_retry_count') }}</label>
+                  <label for="play-adv-retries" class="form-label" style="font-size:0.8rem;">{{ t('swarm.max_retry_count') }}</label>
                   <input type="number" id="play-adv-retries" class="form-input" value="0" min="0" max="10">
                 </div>
               </div>
               <div class="form-group" style="margin:0;">
-                  <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.metadata_json') }}</label>
+                  <label for="play-adv-metadata" class="form-label" style="font-size:0.8rem;">{{ t('swarm.metadata_json') }}</label>
                 <textarea id="play-adv-metadata" class="form-textarea" rows="2" translate="no" placeholder='{"key": "value"}' style="font-family:var(--font-mono);font-size:0.75rem;"></textarea>
               </div>
             </div>
@@ -557,12 +557,12 @@
           <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;"><span x-html="KazmaIcons.plus()"></span> {{ t('swarm.add_worker') }}</h3>
           <form id="add-worker-form" onsubmit="return false;">
             <div class="form-group">
-              <label class="form-label">{{ t('swarm.worker_name') }} *</label>
+              <label for="add-name" class="form-label">{{ t('swarm.worker_name') }} *</label>
               <input type="text" id="add-name" class="form-input" placeholder="{{ t('swarm.worker_name_hint') }}" required>
             </div>
             <div class="form-row">
               <div class="form-group">
-                <label class="form-label">{{ t('swarm.role') }}</label>
+                <label for="add-role" class="form-label">{{ t('swarm.role') }}</label>
                 <select id="add-role" class="form-select" onchange="KazmaSwarm.applyRole(this.value)">
                   <option value="">{{ t('swarm.custom') }}</option>
                   <option value="orchestrator">{{ t('swarm.orchestrator') }}</option>
@@ -574,7 +574,7 @@
                 </select>
               </div>
               <div class="form-group">
-                <label class="form-label">{{ t('swarm.model_specialty') }}</label>
+                <label for="add-specialty" class="form-label">{{ t('swarm.model_specialty') }}</label>
                 <select id="add-specialty" class="form-select">
                   <option value="">{{ t('swarm.none') }}</option>
                   <option value="reasoning">{{ t('swarm.reasoning') }}</option>
@@ -586,20 +586,20 @@
             </div>
             <div class="form-row">
               <div class="form-group">
-                <label class="form-label">{{ t('swarm.model') }}</label>
+                <label for="add-model-select" class="form-label">{{ t('swarm.model') }}</label>
                 <select id="add-model-select" class="form-select"></select>
               </div>
             </div>
             <div class="form-group">
-              <label class="form-label">{{ t('swarm.expertise_tags') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.expertise_hint') }}</span></label>
+              <label for="add-expertise" class="form-label">{{ t('swarm.expertise_tags') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.expertise_hint') }}</span></label>
               <input type="text" id="add-expertise" class="form-input" translate="no" placeholder="{{ t('swarm.expertise_placeholder') }}">
             </div>
             <div class="form-group">
-              <label class="form-label">{{ t('swarm.tools_label') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.tools_hint') }}</span></label>
+              <label for="add-tools" class="form-label">{{ t('swarm.tools_label') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.tools_hint') }}</span></label>
               <input type="text" id="add-tools" class="form-input" translate="no" placeholder="{{ t('swarm.tools_placeholder') }}">
             </div>
             <div class="form-group">
-              <label class="form-label">{{ t('settings.system_prompt') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.system_prompt_desc') }}</span></label>
+              <label for="add-system-prompt" class="form-label">{{ t('settings.system_prompt') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.system_prompt_desc') }}</span></label>
               <textarea id="add-system-prompt" class="form-input" rows="3" placeholder="{{ t('swarm.system_prompt_ph') }}"></textarea>
             </div>
             <div class="form-actions">
@@ -646,31 +646,31 @@
         <div class="card" style="padding:16px;">
           <input type="hidden" id="tmpl-edit-name" value="">
           <div class="form-group" style="margin-bottom:12px;">
-            <label style="font-size:0.8rem;font-weight:600;">{{ t('swarm.tmpl_name') }}</label>
+            <label for="tmpl-name" style="font-size:0.8rem;font-weight:600;">{{ t('swarm.tmpl_name') }}</label>
             <input id="tmpl-name" type="text" class="form-input" translate="no" placeholder="coder">
           </div>
           <div class="form-group" style="margin-bottom:12px;">
-            <label style="font-size:0.8rem;font-weight:600;">{{ t('swarm.tmpl_role') }}</label>
+            <label for="tmpl-role" style="font-size:0.8rem;font-weight:600;">{{ t('swarm.tmpl_role') }}</label>
             <input id="tmpl-role" type="text" class="form-input" translate="no" placeholder="coding">
           </div>
           <div class="form-group" style="margin-bottom:12px;">
-            <label style="font-size:0.8rem;font-weight:600;">{{ t('swarm.tmpl_expertise') }}</label>
+            <label for="tmpl-expertise" style="font-size:0.8rem;font-weight:600;">{{ t('swarm.tmpl_expertise') }}</label>
             <input id="tmpl-expertise" type="text" class="form-input" translate="no" placeholder="coding, python, refactor">
             <div style="font-size:0.72rem;color:var(--text-tertiary);margin-top:4px;">{{ t('swarm.tmpl_expertise_hint') }}</div>
           </div>
           <div class="form-group" style="margin-bottom:12px;display:flex;gap:12px;">
             <div style="flex:1;">
-              <label style="font-size:0.8rem;font-weight:600;">{{ t('swarm.tmpl_model') }}</label>
+              <label for="tmpl-model" style="font-size:0.8rem;font-weight:600;">{{ t('swarm.tmpl_model') }}</label>
               <input id="tmpl-model" type="text" class="form-input" translate="no" placeholder="auto">
               <div style="font-size:0.72rem;color:var(--text-tertiary);margin-top:4px;">{{ t('swarm.tmpl_model_hint') }}</div>
             </div>
             <div style="flex:0 0 100px;">
-              <label style="font-size:0.8rem;font-weight:600;">{{ t('swarm.tmpl_max_instances') }}</label>
+              <label for="tmpl-max" style="font-size:0.8rem;font-weight:600;">{{ t('swarm.tmpl_max_instances') }}</label>
               <input id="tmpl-max" type="number" class="form-input" value="3" min="1" max="20">
             </div>
           </div>
           <div class="form-group" style="margin-bottom:12px;">
-            <label style="font-size:0.8rem;font-weight:600;">{{ t('swarm.tmpl_system_prompt') }}</label>
+            <label for="tmpl-prompt" style="font-size:0.8rem;font-weight:600;">{{ t('swarm.tmpl_system_prompt') }}</label>
             <textarea id="tmpl-prompt" class="form-input" rows="3" placeholder="{{ t('swarm.tmpl_prompt_ph') }}"></textarea>
           </div>
           <div class="form-group" style="margin-bottom:12px;">
@@ -697,11 +697,11 @@
     <div class="card" style="margin-bottom:16px;">
       <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
         <div class="form-group" style="flex:1;min-width:200px;margin:0;">
-          <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.search') }}</label>
+          <label for="history-search" class="form-label" style="font-size:0.8rem;">{{ t('swarm.search') }}</label>
           <input type="text" id="history-search" class="form-input" placeholder="{{ t('swarm.search_placeholder') }}" oninput="KazmaSwarm.filterHistory()">
         </div>
         <div class="form-group" style="margin:0;">
-          <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.filter_type') }}</label>
+          <label for="history-filter-type" class="form-label" style="font-size:0.8rem;">{{ t('swarm.filter_type') }}</label>
           <select id="history-filter-type" class="form-select" onchange="KazmaSwarm.filterHistory()">
             <option value="">{{ t('swarm.all_types') }}</option>
             <option value="dispatch">{{ t('swarm.pattern.dispatch') }}</option>
@@ -713,7 +713,7 @@
           </select>
         </div>
         <div class="form-group" style="margin:0;">
-          <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.filter_status') }}</label>
+          <label for="history-filter-status" class="form-label" style="font-size:0.8rem;">{{ t('swarm.filter_status') }}</label>
           <select id="history-filter-status" class="form-select" onchange="KazmaSwarm.filterHistory()">
             <option value="">{{ t('swarm.all_statuses') }}</option>
             <option value="completed">{{ t('swarm.status_completed') }}</option>
@@ -799,7 +799,7 @@
     <h2 style="display:flex;align-items:center;gap:8px;"><span class="ki" data-icon="edit" aria-hidden="true"></span> {{ t('swarm.edit_worker_modal') }}</h2>
     <input type="hidden" id="edit-worker-name">
     <div class="form-group">
-      <label class="form-label">{{ t('swarm.role') }}</label>
+      <label for="edit-worker-role" class="form-label">{{ t('swarm.role') }}</label>
       <select id="edit-worker-role" class="form-select">
         <option value="">{{ t('swarm.custom') }}</option>
         <option value="orchestrator">{{ t('swarm.orchestrator') }}</option>
@@ -811,7 +811,7 @@
       </select>
     </div>
     <div class="form-group">
-      <label class="form-label">{{ t('swarm.model') }}</label>
+      <label for="edit-worker-model" class="form-label">{{ t('swarm.model') }}</label>
       <select id="edit-worker-model" class="form-select"></select>
     </div>
     <div class="modal-actions" style="flex-wrap:wrap;gap:8px">

@@ -29,7 +29,7 @@ import httpx
 
 from kazma_core.http_tls import shared_ssl_context
 from kazma_gateway.adapters.discord_receive import DROP_REASONS
-from kazma_gateway.connector_test import Checks, judge_message, listening, when
+from kazma_gateway.connector_test import Checks, command_registration, judge_message, listening, when
 
 logger = logging.getLogger(__name__)
 
@@ -279,4 +279,5 @@ async def diagnose(
         "Kazma's Discord connection is not running: turn Discord on above and Save, "
         "or check the bot token."
     )))
+    add("commands", *command_registration(live, "Discord"))
     return checks.result(bot_name)

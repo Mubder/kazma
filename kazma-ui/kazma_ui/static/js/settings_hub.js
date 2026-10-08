@@ -635,6 +635,7 @@
                 scopes: _k('settings.hub.check_scopes', 'Permissions'),
                 allowed: _k('settings.hub.check_allowed', 'Allowed users'),
                 listening: _k('settings.hub.check_listening', 'Kazma is listening'),
+                commands: _k('settings.hub.check_commands', 'Command registration'),
             };
             return titles[key] || key;
         },

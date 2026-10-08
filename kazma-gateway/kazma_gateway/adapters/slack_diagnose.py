@@ -29,7 +29,7 @@ import httpx
 from kazma_core.english_count import count_noun
 from kazma_core.http_tls import shared_ssl_context
 from kazma_gateway.adapters.slack_receive import SLACK_REASONS
-from kazma_gateway.connector_test import Checks, judge_message, listening, show, when
+from kazma_gateway.connector_test import Checks, command_registration, judge_message, listening, show, when
 
 logger = logging.getLogger(__name__)
 
@@ -310,4 +310,5 @@ async def diagnose(
         "Kazma's Slack connection is not running: turn Slack on above and Save, or check the tokens."
     ))
     add("listening", *_with_connection_count(ok, said, live, reached))
+    add("commands", *command_registration(live, "Slack"))
     return checks.result(bot_name)

@@ -11,6 +11,15 @@ found it forgets.
 **Reviewed 2026-10-05 for runtime recovery and evaluation review.** Other
 entries retain their original dates.
 
+**Native slash commands (2026-10-08).** Discord registration is read back and
+Slack Socket Mode slash envelopes are implemented, with private delayed replies
+and adapter protocol regression tests. Actual commands in an installed Discord
+guild and Slack workspace require separate inbound verification. Slack's existing
+bot/app tokens cannot add the `/kazma` manifest entry. Native continuation tokens
+expire and are lost on restart; long tasks and durable approval conversations
+should use ordinary messages or web chat. Slack response URLs cannot upload
+private file bytes. See [Native chat commands](docs/ops/native-slash-commands.md).
+
 **Host process budgets (2026-10-07).** Shared shell/native/hook/patch/MCP
 launches bound captured output and terminate their process trees. Windows Job
 Objects enforce an aggregate 2 GiB memory and 32-process budget; POSIX inherits

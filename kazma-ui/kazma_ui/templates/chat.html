@@ -12,6 +12,7 @@
 {% endblock %}
 
 {% block content %}
+<script id="kazma-command-catalog" type="application/json">{{ command_catalog|tojson }}</script>
 <div class="chat-container">
 <div class="setup-wall" id="setup-wall"
      x-data="setupWall()"

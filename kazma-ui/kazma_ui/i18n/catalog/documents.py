@@ -7,6 +7,7 @@ into ``TRANSLATIONS``.
 from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
+    "documents.choose_file": {"en": "Choose file", "ar": "اختيار ملف"},
     "documents.library_pick": {
         "ar": "اختر مكتبة…",
         "en": "Choose a library…",

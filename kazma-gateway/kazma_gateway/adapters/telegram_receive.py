@@ -17,6 +17,7 @@ __all__ = ["TELEGRAM_REASONS", "message_of", "update_kind", "where_of"]
 
 TELEGRAM_REASONS: dict[str, str] = {
     **COMMON_REASONS,
+    "other_bot": "was addressed to another bot (or Kazma's bot identity is unavailable)",
     "unsupported": "was a kind of message Kazma does not read (a sticker, poll, location or contact)",
     "voice_failed": "was a voice note that could not be transcribed",
     "media_failed": "had a photo or file that could not be downloaded",

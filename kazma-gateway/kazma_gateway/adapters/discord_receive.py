@@ -19,6 +19,8 @@ __all__ = ["DROP_REASONS", "DiscordReceiveLog"]
 #: Why a message was not answered, in words the Test and the log show.
 DROP_REASONS: dict[str, str] = {
     **COMMON_REASONS,
+    "duplicate": "was a repeated native command already dispatched",
+    "unsupported_command": "named an unsupported command; use /kazma help",
     "from_a_bot": "sent by a bot (Kazma's own posts included)",
     "no_text": (
         "arrived without text or attachment -- in a server channel Discord "

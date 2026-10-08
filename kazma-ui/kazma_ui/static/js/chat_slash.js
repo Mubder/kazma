@@ -35,4 +35,21 @@
     { cmd: '/abort', desc: d('chat.slash.abort', 'Stop and abandon the running task') },
     { cmd: '/help', desc: d('chat.slash.help', 'List available slash commands') },
   ];
+  var catalogNode = root.document && root.document.getElementById('kazma-command-catalog');
+  if (catalogNode) {
+    var catalog = JSON.parse(catalogNode.textContent);
+    catalog.forEach(function (entry) {
+      var cmd = '/' + entry.name;
+      var existing = root.KAZMA_SLASH_COMMANDS.find(function (row) { return row.cmd === cmd; });
+      var row = existing || {
+        cmd: cmd,
+        insert: cmd + (entry.arguments ? ' ' : ''),
+        desc: root.KAZMA_LANG === 'ar' ? entry.description_ar : entry.description,
+      };
+      if (entry.arguments) row.desc += ' · ' + entry.arguments;
+      if (entry.page) row.desc += ' · ' + d('chat.slash.page_action', 'Manage on its page');
+      if (entry.admin_options) row.desc += ' · ' + d('chat.slash.admin_options', 'Some options require an administrator');
+      if (!existing) root.KAZMA_SLASH_COMMANDS.push(row);
+    });
+  }
 })(typeof window !== "undefined" ? window : globalThis);

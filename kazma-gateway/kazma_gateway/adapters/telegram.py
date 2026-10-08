@@ -48,7 +48,6 @@ from kazma_gateway.gateway import (
 )
 from kazma_gateway.adapters.telegram_receive import TELEGRAM_REASONS, message_of, update_kind, where_of
 from kazma_gateway.receive_log import ReceiveLog
-from kazma_gateway.slash_commands import BOT_MENU_COMMANDS
 from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
@@ -656,6 +655,14 @@ class TelegramAdapter(BaseAdapter):
                     return
 
             # User whitelist (fail-closed: empty list + allow_all=false = reject all)
+            from kazma_core.agent.command_catalog import normalize_telegram_command
+
+            normalized = normalize_telegram_command(msg.text or "", getattr(self, "_bot_username", ""))
+            if normalized is None:
+                self._note_drop("other_bot", message)
+                return
+            msg.text = normalized
+            msg.context_metadata["bot_username"] = getattr(self, "_bot_username", "")
             if not self._allowed_users and not self._allow_all:
                 self._note_drop("no_allowlist", message)
                 return
@@ -1758,47 +1765,12 @@ class TelegramAdapter(BaseAdapter):
         Uses the shared ``self._http`` client (already initialized
         in ``listen()`` before this method is called).
         """
-        # Telegram shows only what we register here (menu next to the input).
-        # Single SoT: kazma_gateway.slash_commands.BOT_MENU_COMMANDS.
-        commands = list(BOT_MENU_COMMANDS)
-
-        scopes: list[tuple[str, str]] = [
-            ("default", "default"),
-            ("all_private_chats", "all_private_chats"),
-            ("all_group_chats", "all_group_chats"),
-        ]
+        from kazma_gateway.adapters.telegram_commands import reconcile_commands
 
         if self._http is None:
             raise RuntimeError("HTTP client not initialized")
+        self._receive.extra["command_menus"] = await reconcile_commands(self._http)
 
-        for scope_label, scope_type in scopes:
-            try:
-                payload: dict[str, Any] = {
-                    "commands": commands,
-                    "scope": {"type": scope_type},
-                }
-                resp = await self._http.post(
-                    "/setMyCommands",
-                    json=payload,
-                )
-                if resp.status_code == 200 and resp.json().get("ok"):
-                    logger.info(
-                        "[telegram] setMyCommands OK for scope %s (%d cmds)",
-                        scope_label,
-                        len(commands),
-                    )
-                else:
-                    logger.warning(
-                        "[telegram] setMyCommands failed for scope %s: %s",
-                        scope_label,
-                        resp.text[:200],
-                    )
-            except Exception as exc:
-                logger.warning(
-                    "[telegram] setMyCommands error for scope %s (non-fatal): %s",
-                    scope_label,
-                    exc,
-                )
 
 
 def telegram_webhook_router(resolve: Callable[[], TelegramAdapter | None]) -> Any:

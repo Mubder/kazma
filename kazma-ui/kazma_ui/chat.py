@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from kazma_core.agent.command_catalog import web_commands
 
 from kazma_ui.session_manager import ChatSession, SessionManager, get_session_manager
 
@@ -73,6 +74,7 @@ def create_chat_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRout
             "chat.html",
             {
                 "config": agent.config,
+                "command_catalog": web_commands(),
             },
         )
 
@@ -85,4 +87,3 @@ def create_chat_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRout
 
 
     return r
-

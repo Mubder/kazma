@@ -458,6 +458,18 @@ def create_sse_chat_router(
 
         # ── Intercept YOLO command ─────────────────────────────────
         raw_msg = (body.get("message") or "").strip()
+        from kazma_ui.i18n import current_language
+        from kazma_ui.sse_chat._command_discovery import discovery_reply
+
+        _discovery = discovery_reply(raw_msg, current_language())
+        if _discovery is not None:
+            _persist_instant_turn(session, thread_id, raw_msg, _discovery)
+
+            async def _discovery_gen() -> AsyncGenerator[str, None]:
+                yield await _journal_fast_path(thread_id, "token", {"content": _discovery, "capacity": True})
+                yield await _journal_fast_path(thread_id, "done", {"content": _discovery, "tokens": 0, "cost": 0.0, "duration_ms": 0, "capacity": True})
+
+            return StreamingResponse(_discovery_gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
         try:
             from kazma_core.agent.slash_turns import rewrite_work_slash
 

@@ -152,7 +152,7 @@
     .ide-panel-title h3 { margin: 0; font-size: 0.85rem; font-weight: 600; color: var(--text-primary); }
     .ide-breadcrumb { padding: 5px 10px; background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle); font-size: 0.72rem; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
     .ide-breadcrumb code { font-family: var(--font-mono); color: var(--accent); }
-    .ide-tree-row { display: flex; align-items: center; gap: 6px; padding: 5px 12px; cursor: pointer; font-size: 0.8rem; transition: background var(--transition-fast); box-sizing: border-box; overflow: hidden; }
+    .ide-tree-row { width:100%; border:0; background:transparent; color:inherit; font-family:inherit; text-align:start; display: flex; align-items: center; gap: 6px; padding: 5px 12px; cursor: pointer; font-size: 0.8rem; transition: background var(--transition-fast); box-sizing: border-box; overflow: hidden; }
     .ide-tree-row:hover { background: var(--bg-hover); }
     .ide-tree-active { background: var(--accent-subtle); box-shadow: inset 2px 0 0 var(--accent); padding-left: 10px; }
     .ide-tree-up { color: var(--text-secondary); }
@@ -321,15 +321,15 @@
         <code x-text="treePath || t('ide.root')"></code>
       </div>
       <div>
-        <div x-show="treePath" x-cloak @click="goUp()" class="ide-tree-row ide-tree-up">
+        <button type="button" x-show="treePath" x-cloak @click="goUp()" class="ide-tree-row ide-tree-up" aria-label="{{ t('ide.parent_directory') }}">
           <span class="ide-file-glyph" data-ext="up">..</span>
           <span>..</span>
-        </div>
+        </button>
         <template x-for="item in tree" :key="item.path">
-          <div class="ide-tree-row" :class="{ 'ide-tree-active': item.path === activeTabPath }" @click="navigate(item)">
+          <button type="button" class="ide-tree-row" :class="{ 'ide-tree-active': item.path === activeTabPath }" @click="navigate(item)" :aria-current="item.path === activeTabPath ? 'true' : null">
             <span class="ide-file-glyph" :data-ext="item.ext"></span>
             <span class="ide-tree-name" translate="no" x-text="item.name"></span>
-          </div>
+          </button>
         </template>
         <div x-show="tree.length === 0 && !busy" x-cloak class="ide-tree-empty">{{ t('ide.empty') }}</div>
       </div>
@@ -361,7 +361,7 @@
            if the scripts loaded; otherwise you still see the file. x-ignore
            so Alpine cannot replace this node when tabs change. #}
         <div id="ide-editor-wrap" class="ide-editor-wrap" x-ignore>
-          <textarea id="ide-fallback" class="ide-fallback" spellcheck="false"
+          <textarea id="ide-fallback" aria-label="{{ t('ide.editor') }}" class="ide-fallback" spellcheck="false"
                     placeholder="{{ t('ide.open_file_ph') }}"></textarea>
         </div>
       </div>
@@ -454,14 +454,14 @@
         </template>
       </div>
       <div class="chat-input-row" style="padding:10px 12px;">
-        <textarea id="ide-chat-input" class="form-input" rows="2"
+        <textarea id="ide-chat-input" aria-label="{{ t('ide.chat_ph') }}" class="form-input" rows="2"
                   placeholder="{{ t('ide.chat_ph') }}"
                   x-model="chatInput" @keydown="chatKeydown($event)"
                   :disabled="chatBusy"
                   style="flex:1;resize:none;font-size:0.82rem;font-family:inherit;"></textarea>
         <div style="display:flex;flex-direction:column;gap:4px;">
-          <button class="btn btn-sm btn-primary" @click="sendChat()" :disabled="chatBusy || !chatInput.trim()"><span class="ki" data-icon="chevron-right" aria-hidden="true"></span></button>
-          <button class="btn btn-sm btn-secondary" @click="abortChat()" x-show="chatBusy" x-cloak>⏹</button>
+          <button class="btn btn-sm btn-primary" aria-label="{{ t('common.send') }}" @click="sendChat()" :disabled="chatBusy || !chatInput.trim()"><span class="ki" data-icon="chevron-right" aria-hidden="true"></span></button>
+          <button class="btn btn-sm btn-secondary" aria-label="{{ t('common.cancel') }}" @click="abortChat()" x-show="chatBusy" x-cloak>⏹</button>
         </div>
       </div>
     </div>

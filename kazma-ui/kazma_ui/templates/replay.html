@@ -8,7 +8,7 @@
 
   <!-- ── Thread Picker ── -->
   <div class="card" style="margin-bottom:1rem;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-    <label style="font-size:0.85rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">{{ t('replay.thread') }}</label>
+    <label for="replay-thread-select" style="font-size:0.85rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">{{ t('replay.thread') }}</label>
     <select id="replay-thread-select" class="form-select" style="min-width:280px;" onchange="KazmaReplay.loadTimeline(this.value)">
       <option value="">{{ t('replay.select_thread') }}</option>
     </select>

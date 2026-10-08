@@ -126,9 +126,9 @@ class TestAgentStatusReady:
 
     def test_agents_html_shows_ready_when_idle(self) -> None:
         html = (_TEMPLATES_DIR / "agents.html").read_text(encoding="utf-8")
-        assert "t('agents.ready')" in html, (
-            "agents.html must use t('agents.ready') status when agent is running but idle"
-        )
+        script = (_TEMPLATES_DIR.parent / "static/js/agents.js").read_text(encoding="utf-8")
+        assert 'x-text="statusLabel()"' in html
+        assert "'agents.ready'" in script and "this.agent.agent_state === 'idle'" in script
         assert "t('agents.waiting')" in html, (
             "agents.html must use t('agents.waiting') context"
         )

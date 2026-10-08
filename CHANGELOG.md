@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## UI audit and native command routing (2026-10-08)
+
+- Protect unsaved IDE tabs before page navigation, Back, reload and close. A
+  cancelled navigation keeps the editor; failed fetches no longer tear it down.
+- Share command capabilities across Telegram registration and web discovery;
+  include `/x`, validate addressed Telegram commands, and read back localized
+  menus. Unknown controls return help without starting model work.
+- Add Discord native `/kazma` registration, fast private deferral and interaction
+  replies. Add Slack native Socket Mode command acknowledgement and private
+  delayed replies. Both retain user and tenant restrictions and deduplicate
+  delivery. Continuation credentials stay in bounded adapter memory.
+  Slack requires an external app-manifest entry; native continuation limits and
+  private file delivery limits are documented in the native-command guide.
+- Make IDE file rows and document upload keyboard accessible, name skill
+  switches and chat actions, and associate form labels. Complete shipped native
+  capability descriptions in Arabic, translate missing connector credentials,
+  show unknown/stale agent status, and correct X scheduling terminology.
+
 ## IDE and swarm effect recovery (2026-10-08)
 
 - IDE tool calls and in-process swarm tool loops now use durable invocation

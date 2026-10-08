@@ -49,7 +49,7 @@
                 {% endif %}
                 <div class="skill-actions">
                     <label class="toggle">
-                        <input type="checkbox" {% if skill.enabled %}checked{% endif %}
+                        <input type="checkbox" aria-label="{{ t('skills.toggle_named', name=skill.name) }}" {% if skill.enabled %}checked{% endif %}
                                @change='toggleSkill({{ skill.id|tojson }}, $event.target.checked)'>
                         <span class="toggle-slider"></span>
                     </label>
