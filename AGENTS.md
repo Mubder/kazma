@@ -3955,6 +3955,14 @@ clarify-only lock, a notice to repeat verbatim).
   literal in the producing module), fails on a registered opening nothing
   writes, and fails on a kind with no producer -- each with a negative
   control. A note that must persist must not begin with a registered opening.
+- **Approval scope facts belong to their tool batch** (2026-10-09).
+  `APPROVAL SCOPE (runtime decision facts):` is registered as `approval_scope`.
+  Fresh user turns strip that instruction while retaining assistant/tool
+  history; approval resumes keep the checkpoint unchanged. An unregistered
+  denial note made the live Slack model claim a later request was denied
+  without creating a new gate. Gate: `tests/test_turn_notes.py` covers both
+  turn rebuild paths, approval/denial history, and the old unregistered note
+  as a negative control.
 - **The IDE chat's open file is a fenced turn note** (`source="ide_context"`,
   cut at 2,000 characters). It was glued to the question, so memory, the
   chat store, the chat's title, the language lock and the Knowledge lookup
