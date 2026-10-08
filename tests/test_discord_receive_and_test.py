@@ -272,8 +272,9 @@ def test_all_is_well() -> None:
     result = _run(_good_routes(), live=_live())
     assert result["success"] is True and result["bot_name"] == "Kazma", result
     assert [c["key"] for c in result["checks"]] == [
-        "token", "message_text", "servers", "channel", "latest", "direct_message", "allowed", "listening"]
-    assert all(c["ok"] is True for c in result["checks"]), result["checks"]
+        "token", "message_text", "servers", "channel", "latest", "direct_message", "allowed", "listening", "commands"]
+    assert all(c["ok"] is True for c in result["checks"] if c["key"] != "commands"), result["checks"]
+    assert _check(result, "commands")["ok"] is None
     assert "direct message with bader (user u1)" in _check(result, "channel")["detail"]
     assert "reached Kazma" in _check(result, "latest")["detail"]
     assert "direct message user u1 wrote to the bot" in _check(result, "direct_message")["detail"]
@@ -284,7 +285,7 @@ def test_all_is_well() -> None:
 def test_a_refused_token_stops_there() -> None:
     result = _run(_good_routes(**{"/users/@me": (401, {"message": "401: Unauthorized"})}), live=_live())
     assert result["success"] is False and "401" in result["error"]
-    assert [c["key"] for c in result["checks"]] == ["token", "allowed", "listening"]
+    assert [c["key"] for c in result["checks"]] == ["token", "allowed", "listening", "commands"]
 
 
 @pytest.mark.parametrize(
