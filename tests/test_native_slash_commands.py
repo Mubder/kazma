@@ -153,6 +153,78 @@ async def test_slack_failed_ack_never_dispatches(caplog):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("valid", [True, False])
+async def test_discord_private_component_keeps_followup_private_or_drops(valid):
+    adapter = DiscordAdapter("test", allowed_users=["U"])
+    adapter._queue, adapter._http = asyncio.Queue(), AsyncMock()
+    adapter._http.post.return_value = response()
+    data = discord_data()
+    data.update(type=3, message={"flags": 64, "content": "Choose a model"})
+    data["data"] = {"custom_id": "model_select:deepseek-chat"}
+    if not valid:
+        data.pop("token")
+    await adapter._handle_interaction(data)
+    if not valid:
+        assert adapter._queue.empty()
+        adapter._http.post.assert_not_awaited()
+        return
+    incoming = adapter._queue.get_nowait()
+    assert incoming.context_metadata["native_reply_id"] == data["id"]
+    assert "private-continuation" not in json.dumps(incoming.context_metadata)
+    assert await adapter.send(
+        OutboundMessage(target_id="discord:C", text="private result", context_metadata=incoming.context_metadata)
+    )
+    assert adapter._http.post.call_args.args[0].startswith("/webhooks/")
+    assert adapter._http.post.call_args.kwargs["json"]["flags"] == 64
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("valid", [True, False])
+async def test_slack_private_component_keeps_followup_private_or_drops(monkeypatch, valid):
+    import websockets
+
+    adapter = SlackAdapter("test", "app", allowed_users=["U"], allowed_channels=["C"], allowed_teams=["T"])
+    adapter._queue, adapter._shutdown, adapter._http = asyncio.Queue(), asyncio.Event(), AsyncMock()
+    adapter._http.post.return_value = httpx.Response(200, json={"ok": True, "url": "wss://socket.test"})
+    adapter._http.__aenter__.return_value = adapter._http
+    url = "https://hooks.slack.com/actions/T/private-continuation" if valid else "https://evil.test/actions/T/secret"
+    payload = {
+        "type": "block_actions",
+        "team": {"id": "T"},
+        "user": {"id": "U"},
+        "channel": {"id": "C"},
+        "container": {"is_ephemeral": True},
+        "response_url": url,
+        "actions": [{"value": "model_select:deepseek-chat"}],
+    }
+    ws = AsyncMock()
+
+    async def recv():
+        adapter._shutdown.set()
+        return json.dumps({"type": "interactive", "envelope_id": "private-button", "payload": payload})
+
+    ws.recv.side_effect = recv
+    connection = AsyncMock()
+    connection.__aenter__.return_value = ws
+    monkeypatch.setattr(websockets, "connect", lambda *args, **kwargs: connection)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: adapter._http)
+    await adapter._listen_socket_mode()
+    assert json.loads(ws.send.call_args.args[0])["envelope_id"] == "private-button"
+    if not valid:
+        assert adapter._queue.empty()
+        return
+    incoming = adapter._queue.get_nowait()
+    assert incoming.context_metadata["native_reply_id"] == "private-button"
+    assert "private-continuation" not in json.dumps(incoming.context_metadata)
+    adapter._http.post.return_value = response()
+    assert await adapter.send(
+        OutboundMessage(target_id="slack:C", text="private result", context_metadata=incoming.context_metadata)
+    )
+    assert adapter._http.post.call_args.args[0] == url
+    assert adapter._http.post.call_args.kwargs["json"]["response_type"] == "ephemeral"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "change,reason",
     [

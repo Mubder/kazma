@@ -65,6 +65,11 @@ to a public channel. Use ordinary message commands or web chat for long-running
 work and durable approval conversations. Native commands should primarily serve
 short control/status operations.
 
+Buttons in private replies keep their follow-up output private. A button callback
+supplies a fresh interaction credential; Kazma validates and retains it only in
+adapter memory. Missing or invalid private continuation data stops dispatch,
+rather than rerouting the result to a public channel.
+
 Discord native replies can upload private files up to 8 MiB. Slack response URLs
 cannot upload private file bytes: Kazma reports that limitation in the private
 reply and records delivery failure. Use web chat or an ordinary message command

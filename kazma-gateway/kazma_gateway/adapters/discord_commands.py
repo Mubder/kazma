@@ -141,6 +141,30 @@ async def handle(adapter: Any, data: dict[str, Any]) -> None:
         )
 
 
+async def prepare_callback(adapter: Any, data: dict[str, Any], user: str, channel: str) -> str | None:
+    """ACK a private component and bind its fresh, private follow-up route."""
+    iid, token = str(data.get("id") or ""), str(data.get("token") or "")
+    app = str(data.get("application_id") or "")
+    if not iid.isdecimal() or not app.isdecimal() or not token or "/" in token or not user or not channel:
+        return None
+    if adapter._native_replies.get(iid):
+        return None
+    try:
+        response = await adapter._http.post(
+            f"/interactions/{iid}/{token}/callback",
+            json={"type": 7, "data": {"content": (data.get("message") or {}).get("content", ""), "components": []}},
+            timeout=2.5,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        logger.warning("[discord] private component ACK failed (%s)", type(exc).__name__)
+        return None
+    entry = adapter._native_replies.put(iid, token, app, user, channel)
+    # The callback updated the existing message; new output is an ephemeral follow-up.
+    entry.sent = 1
+    return iid
+
+
 async def send(adapter: Any, outbound: OutboundMessage) -> bool:
     """Complete the deferred reply; credentials never leave this adapter."""
     entry = adapter._native_replies.get(str(outbound.context_metadata.get("native_reply_id") or ""))

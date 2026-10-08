@@ -1013,6 +1013,15 @@ class SlackAdapter(BaseAdapter):
                                                     user_id,
                                                 )
                                                 continue
+                                            private_reply_id = None
+                                            if (payload.get("container") or {}).get("is_ephemeral"):
+                                                from kazma_gateway.adapters.slack_commands import prepare_callback
+
+                                                private_reply_id = prepare_callback(
+                                                    self, payload, envelope_id, user_id, channel
+                                                )
+                                                if private_reply_id is None:
+                                                    continue  # Never route a private continuation publicly.
                                             incoming = IncomingMessage(
                                                 platform="slack",
                                                 sender_id=f"slack:{user.get('id', '')}",
@@ -1021,6 +1030,7 @@ class SlackAdapter(BaseAdapter):
                                                     "channel_id": channel,
                                                     "user_id": user.get("id", ""),
                                                     "interaction": True,
+                                                    **({"native_reply_id": private_reply_id} if private_reply_id else {}),
                                                 },
                                             )
                                             self._queue.put_nowait(incoming)

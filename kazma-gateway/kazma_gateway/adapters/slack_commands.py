@@ -18,7 +18,7 @@ from kazma_gateway.gateway import IncomingMessage, OutboundMessage
 logger = logging.getLogger(__name__)
 
 
-def safe_response_url(url: str) -> bool:
+def safe_response_url(url: str, *, interaction: bool = False) -> bool:
     """Continuation endpoints are Slack-owned HTTPS URLs, never arbitrary hosts."""
     try:
         parts = urlsplit(url)
@@ -28,7 +28,7 @@ def safe_response_url(url: str) -> bool:
             and not parts.username
             and not parts.password
             and parts.port in (None, 443)
-            and parts.path.startswith("/commands/")
+            and parts.path.startswith("/actions/" if interaction else "/commands/")
             and not parts.fragment
         )
     except ValueError:
@@ -110,6 +110,18 @@ async def handle(adapter: Any, ws: Any, envelope: dict[str, Any]) -> None:
                 target_id=f"slack:{cid}", text="Kazma is busy. Please retry shortly.", context_metadata=metadata
             ),
         )
+
+
+def prepare_callback(adapter: Any, payload: dict[str, Any], key: str, user: str, channel: str) -> str | None:
+    """Keep private button responses private using the fresh interaction URL."""
+    url = str(payload.get("response_url") or "")
+    if not key or not user or not channel or not safe_response_url(url, interaction=True):
+        return None
+    if adapter._native_replies.get(key):
+        return None
+    team = str((payload.get("team") or {}).get("id") or "")
+    adapter._native_replies.put(key, url, team, user, channel, original=False)
+    return key
 
 
 async def send(adapter: Any, outbound: OutboundMessage) -> bool:
