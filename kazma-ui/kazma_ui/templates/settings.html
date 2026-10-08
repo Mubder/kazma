@@ -2002,7 +2002,7 @@
         <div class="settings-group">
             <h3>{{ t('settings.tool_registry') }}</h3>
             <div class="search-bar">
-                <input type="text" class="form-input" x-model="toolSearch" placeholder="{{ t('settings.search_tools') }}">
+                <input type="text" class="form-input" x-model="toolSearch" aria-label="{{ t('settings.search_tools') }}" placeholder="{{ t('settings.search_tools') }}">
             </div>
 
             <div style="display:flex;flex-direction:column;gap:6px">
@@ -2010,7 +2010,7 @@
                     <div style="padding:10px 14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:border-color 0.15s" :style="selectedTool === tool.name ? 'border-color:var(--accent)' : ''" @click="selectedTool = selectedTool === tool.name ? null : tool.name">
                         <div style="display:flex;align-items:center;gap:8px">
                             <label class="toggle" @click.stop>
-                                <input type="checkbox" :checked="tool.enabled !== false" @change="toggleTool(tool.name, $event.target.checked)">
+                                <input type="checkbox" :aria-label="'{{ t('common.enable') }}: ' + tool.name" :checked="tool.enabled !== false" @change="toggleTool(tool.name, $event.target.checked)">
                                 <span class="toggle-slider"></span>
                             </label>
                             <span class="tool-name" translate="no" x-text="tool.name"></span>
@@ -2028,7 +2028,7 @@
                             <div style="display:flex;gap:8px;align-items:end">
                                 <div class="form-group" style="flex:1;margin-bottom:0">
                                     <label>{{ t('settings.test_arguments_json') }}</label>
-                                    <input type="text" class="form-input" x-model="toolTestArgs" placeholder='{}' style="font-family:var(--font-mono)">
+                                    <input type="text" class="form-input" x-model="toolTestArgs" aria-label="{{ t('settings.test_arguments_json') }}" placeholder='{}' style="font-family:var(--font-mono)">
                                 </div>
                                 <button class="btn btn-secondary btn-sm" @click.stop="testTool(tool.name)" style="height:36px">{{ t('settings.test') }}</button>
                             </div>
