@@ -13,8 +13,9 @@
   delivery. Continuation credentials stay in bounded adapter memory.
   Slack requires an external app-manifest entry; native continuation limits and
   private file delivery limits are documented in the native-command guide.
-- Make IDE file rows and document upload keyboard accessible, name skill
-  switches, the shared model picker and chat actions, and associate form labels. Complete shipped native
+- Make IDE file rows and document upload keyboard accessible, name skill/tool
+  switches, the shared model picker and chat actions, and associate form labels.
+  Name Settings tool search and test arguments. Complete shipped native
   capability descriptions in Arabic, translate missing connector credentials,
   show unknown/stale agent status, and correct X scheduling terminology.
 
