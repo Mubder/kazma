@@ -90,6 +90,9 @@ TURN_NOTE_KINDS: dict[str, tuple[str, ...]] = {
     "outbound_drafts": ("OUTBOUND DRAFTS:",),
     # research_policy.deep_research_route_hint.
     "deep_research_route": ("DEEP RESEARCH ROUTE",),
+    # graph_tool_worker.approval_scope_note: current batch's decision only.
+    # Retain on approval resume; remove at the next fresh user turn.
+    "approval_scope": ("APPROVAL SCOPE (runtime decision facts):",),
 }
 
 

@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Approval decision turn scope (2026-10-09)
+
+- Remove the preceding tool batch's approval instruction when a fresh user
+  turn starts. Keep assistant/tool evidence and approval-resume checkpoints.
+  A live Slack follow-up had reused an earlier denial to claim a new request
+  was denied even though no new gate or tool call existed.
+
 ## Slack approval details (2026-10-09)
 
 - Show the redacted tool, path and content preview inside Slack approval blocks,
