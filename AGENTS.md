@@ -159,6 +159,13 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   (SSE — the Web SoT), or gateway `/hitl approve|deny {thread_id}`. The
   WebSocket takes no approvals: it refuses `approve_tool` (§31 D).
 - State persists in the checkpointer — paused turns survive restarts
+- Gateway approval notification throttles reset at a fresh operator request
+  (`graph._handler_body`, before building its new state), never at an approval
+  resume. Identical args can represent a new deliberate operation after a
+  refusal/expiry; keeping the old three-minute mute created an invisible real
+  Telegram gate (2026-10-09). Within-turn duplicate/burst suppression remains.
+  Gate: `tests/test_gateway_approval_card_retry.py` (all three transports,
+  unchanged throttle as negative control, resume and other-thread isolation).
 - Double-gating prevention: graph sets ContextVars (`_graph_hitl_gate_ctx` /
   `_hitl_approved_ctx`) so `LocalToolRegistry.execute` does **not** re-prompt the bus
 
