@@ -137,6 +137,8 @@ fenced code whitespace and escape content before styling. The shared converter
 serves normal chat and swarm output; Slack/Discord keep their original Markdown.
 Gate: `tests/test_telegram_format.py` (old matcher as negative control, EN/AR,
 mixed delimiters, real gateway preparation and HTML send path).
+Web's separate `streaming.js` renderer uses the same inline-run rule and stashes
+code before styles, links and images. Gate: `tests/js/test_markdown_render.js`.
 
 **Vision capability routing (`kazma-core/kazma_core/vision_capability.py`):**
 - `is_text_only(model)` / `is_vision_capable(model)` classify by allow/deny
