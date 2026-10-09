@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Explicit one-paragraph answers in English and Arabic (2026-10-09)
+
+- Check explicit current-user paragraph requests at the shared final-answer
+  boundary. Join plain prose by replacing paragraph separators only, keeping
+  words, numbers, paths, inline code and quotations intact. Final delivery and
+  saved history use the same corrected answer across chat platforms.
+- Keep code, lists, tables, blockquotes and JSON untouched. Heading-based
+  answers may get one quiet formatting-only call, with no tools and a
+  15-second deadline. Accept it only when wording and order are unchanged;
+  failed, unsupported or meaning-changing repairs retain the original answer.
+- Cover both languages through the real graph, old behavior as a negative
+  control, protected layouts, provider failures, cancellation, accounting and
+  suppression of unvalidated retry tokens. Existing reviewed answers stay
+  unchanged; this is a layout safeguard, not an accuracy certification.
+
 ## HTTP subscriber disconnect after a final reply (2026-10-09)
 
 - Persist the terminal reply before the HTTP subscriber yields `done`, and

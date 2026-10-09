@@ -16,8 +16,8 @@ from kazma_core.agent.plan_fence import (
     normalize_plan_fence,
     rewrite_terminal_assistant_message,
 )
-from kazma_core.agent.state import SupervisorState
 from kazma_core.agent.source_grounding import with_source_grounding
+from kazma_core.agent.state import SupervisorState
 from kazma_core.llm_stream import invoke_llm_chat
 from kazma_core.summarizer import _normalize_msg
 
@@ -344,6 +344,17 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     # SSE / WS / session reload never hide the answer inside an unclosed
     # CommonMark code block (````Saved.`` incident, 2026-08-26).
     messages = rewrite_terminal_assistant_message(messages)
+
+    # One shared terminal answer for SSE, saved history and every adapter.
+    # The formatting pass cannot execute tools or synthesize over failure.
+    from kazma_core.agent.answer_format import format_terminal_answer
+
+    async def _record_format_call(client: Any, response: Any, duration: float) -> None:
+        await _ledger_synthesis_call(state, client, response, duration)
+
+    messages = await format_terminal_answer(
+        messages, llm=llm, state=state, on_call=_record_format_call,
+    )
 
     # Post-turn memory: mark this turn as finished so the turn's closer
     # (kazma_ui.turn_runtime.close_turn, which every transport runs) hands

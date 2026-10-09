@@ -23,7 +23,7 @@ ANSWER_QUALITY_PROMPT = (
     "Keep internal planning/checklists out of the final answer. Do not repeat "
     "a workbench plan fence in the final report. Requested plans, code examples "
     "and explanations are allowed. Respect exact output constraints (JSON only, "
-    "exactly two bullets, or brevity); do not add unrequested sections. "
+    "exactly two bullets, one paragraph, or brevity); do not add unrequested sections. "
     "Check arithmetic and unit labels in explanations as well as deliverables: "
     "GiB and MiB use powers of 1024; GB and MB use powers of 1000. Omit "
     "unnecessary hypothetical conversions. Use natural, precise wording in "
