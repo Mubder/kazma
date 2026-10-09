@@ -113,6 +113,22 @@ paths (`turn_input.py`): a basename is a display name, not a second path to
 read. Same-named files in different folders remain separate. Gate:
 `tests/test_attachment_path_identity.py` (old basename matcher as control).
 
+**One-paragraph output requests** (`agent/answer_format.py`, 2026-10-09):
+`respond_node` applies the check after plan-fence normalization and before
+terminal delivery/post-turn memory. Only explicit latest-user EN/AR requests
+count; quoted, fenced, negated, conflicting and historical instructions do
+not. Plain prose changes paragraph separators only. Code, lists, tables,
+blockquotes, JSON and multiline quoted literals remain intact. Headings may
+get ONE quiet, tool-free formatting call (15 s, 4096 output tokens, 16000 input
+characters), on the turn's resolved provider. Accept only unchanged wording
+and order, with exact quoted/inline-code spans; never execute returned tool
+calls. Account the call through the existing LLM ledger. Preserve the original
+on failed/unsupported repair, and skip ALL formatting on `turn_failed`.
+This is a conservative layout safeguard, not arbitrary format compliance.
+Gate: `tests/test_answer_format.py` (real graph, old boundary as negative
+control, bilingual prose, protected blocks, no extra prose model call,
+tool-free retry, streaming silence, deadline, cancellation and ledger).
+
 **Vision capability routing (`kazma-core/kazma_core/vision_capability.py`):**
 - `is_text_only(model)` / `is_vision_capable(model)` classify by allow/deny
   lists (deny wins; unknown models are NOT downgraded — fail-open).
