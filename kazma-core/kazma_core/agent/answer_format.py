@@ -1,4 +1,4 @@
-"""Conservative one-paragraph formatting at the shared terminal boundary."""
+"""Conservative paragraph and literal JSON-copy terminal formatting."""
 
 from __future__ import annotations
 
@@ -118,20 +118,31 @@ async def format_terminal_answer(
 
     Plain prose needs no model call. Headings get at most one quiet, 15-second
     tool-free formatting call. Failure or changed wording keeps the original.
-    Lists, code, tables, blockquotes, JSON and failed turns stay untouched.
+    Explicit verbatim JSON-copy requests can unwrap an exactly matching JSON
+    fence without a model call. Other code/JSON layouts and failed turns stay
+    untouched; this never generates data or changes it into a tool call.
     """
     if (state or {}).get("turn_failed"):
         return messages
     from kazma_core.agent.turn_input import extract_latest_user_text
 
-    if not _requests_one_paragraph(extract_latest_user_text(messages)):
-        return messages
+    prompt = extract_latest_user_text(messages)
     index = len(messages) - 1
     if index < 0 or messages[index].get("role") not in ("assistant", "ai"):
         return messages
     message = messages[index]
     text = message.get("content")
     if message.get("tool_calls") or not isinstance(text, str) or not text.strip():
+        return messages
+    from kazma_core.agent.json_echo_format import repair_json_echo
+
+    echo = repair_json_echo(prompt, text)
+    if echo is not None:
+        result = list(messages)
+        result[index] = {**message, "content": echo}
+        logger.info("[AnswerFormat] Removed JSON echo wrapper without changing supplied data")
+        return result
+    if not _requests_one_paragraph(prompt):
         return messages
     if _one_paragraph(text):
         return messages
