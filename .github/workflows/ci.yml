@@ -296,7 +296,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       # The projector is one contract in two languages; this job runs both
       # halves against the same fixtures, so it needs node as well.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
       - name: Install app
@@ -617,7 +617,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
       - name: node --check all static JS
