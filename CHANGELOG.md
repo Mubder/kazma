@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Tool-fragment recheck provider compatibility (2026-10-09)
+
+- Retry the original conversation when rechecking an argument-shaped answer.
+  Replaying the discarded dictionary as an assistant turn omitted thinking
+  metadata and caused DeepSeek to reject the next request with HTTP 400,
+  including when the dictionary was the requested JSON deliverable.
+- Cover requested JSON and real file-read recovery through the provider's
+  HTTP path with a strict thinking-provider regression. The one-recheck
+  limit and normal approval gates remain in force.
+
 ## Bilingual answer quality and tool-fragment recovery (2026-10-09)
 
 - Recheck a bare dictionary matching an available tool's argument schema

@@ -89,7 +89,9 @@ V2 memory lives in `kazma_core.memory`).
 tool's schema for ONE model recheck within the turn budget. The declared
 `SupervisorState.tool_argument_rechecks` resets on a fresh turn, not an approval
 resume. The reminder is call-local system guidance; it must not replace the
-user's active goal/language or accumulate in checkpoints. Never guess a tool
+user's active goal/language or accumulate in checkpoints. Retry the original
+conversation, discarding the rejected candidate: replaying it as a synthetic
+assistant turn loses thinking metadata and strict providers reject it. Never guess a tool
 name or execute the parsed text: it may be requested JSON or a dictionary
 example. Actual calls still go through the normal tool worker and HITL.
 Answer guidance joins source grounding at the LLM boundary (synthesis too).

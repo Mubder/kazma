@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import copy
 import json
+from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from kazma_core.agent.answer_quality import TOOL_ARGUMENT_RECHECK, looks_like_tool_arguments
 from kazma_core.agent_evaluation import evaluate_case
-from kazma_core.llm_provider import LLMResponse, ToolCall
+from kazma_core.llm_provider import LLMConfig, LLMProvider, LLMResponse, ToolCall
 
 READ_TOOL = {
     "type": "function",
@@ -140,6 +142,60 @@ async def test_requested_data_examples_and_plans_survive_without_execution(answe
     assert len(calls) == expected_calls
     # Repeated argument-shaped data is allowed after the single recheck.
     assert all(result["checks"].values()), result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("needs_read", [False, True])
+async def test_recheck_retries_original_request_without_incomplete_thinking_turn(monkeypatch, needs_read):
+    """A discarded completion must not become a provider-invalid continuation.
+
+    Strict thinking providers require their reasoning metadata when an
+    assistant completion is replayed. Retry the original request instead;
+    both requested JSON and a genuine tool read still work on the real wire.
+    """
+    fragment = '{"path":"reports/release.txt"}'
+    requests = []
+
+    def respond(request):
+        payload = json.loads(request.content)
+        requests.append(payload)
+        if any(m.get("role") == "assistant" and m.get("content") == fragment
+               and not m.get("reasoning_content") for m in payload["messages"]):
+            return httpx.Response(400, json={"error": {
+                "message": "The reasoning_content in thinking mode must be passed back to the API.",
+            }})
+        message = {"role": "assistant", "content": fragment, "reasoning_content": "fixture metadata"}
+        if needs_read and len(requests) == 2:
+            message.update(content="", tool_calls=[{
+                "id": "read", "type": "function", "function": {
+                    "name": "file_read", "arguments": fragment,
+                },
+            }])
+        elif needs_read and len(requests) == 3:
+            message["content"] = "Review approved. Deployment not authorized."
+        return httpx.Response(200, json={"model": "strict-thinking", "choices": [{
+            "message": message, "finish_reason": "tool_calls" if message.get("tool_calls") else "stop",
+        }], "usage": {"total_tokens": 10}})
+
+    provider = LLMProvider(LLMConfig(model="strict-thinking", api_key="fixture-key"))
+    monkeypatch.setattr(provider, "_sync_gateway", lambda: None)
+    async with httpx.AsyncClient(base_url="https://strict.invalid/v1",
+                                transport=httpx.MockTransport(respond)) as wire:
+        monkeypatch.setattr(provider, "_get_client", AsyncMock(return_value=wire))
+        prompt = ("Read reports/release.txt with file_read and report the status." if needs_read else
+                  "Return exactly this JSON as data; no tools or prose: " + fragment)
+        result = await evaluate_case(case(prompt, required=["file_read"] if needs_read else []),
+                                     provider, model="strict-thinking", system_prompt="Custom identity.")
+
+    assert all(result["checks"].values()), result
+    assert len(requests) == (3 if needs_read else 2)
+    assert not any(m.get("role") == "assistant" for m in requests[1]["messages"])
+    assert any(TOOL_ARGUMENT_RECHECK in str(m.get("content", "")) for m in requests[1]["messages"])
+    assert [m["content"] for m in requests[1]["messages"] if m["role"] == "user"] == [prompt]
+    assert len(result["fixture_calls"]) == int(needs_read)
+    if not needs_read:
+        assert result["answer"] == fragment
+        assert not result["attempted_tools"]
 
 
 @pytest.mark.asyncio
