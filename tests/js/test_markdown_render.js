@@ -83,4 +83,33 @@ assert(
 const prose = mdRender("Use A | B as alternatives.");
 assert("prose-pipe", !prose.includes("<table"), prose);
 
+// Original live blemish: unmatched triple ticks shifted all later inline spans.
+for (const prefix of ["Fence markers: ", "علامات السياج: "]) {
+  const text = prefix + "``` or ~~~; `_protected` then `_join_prose_paragraphs`.";
+  const rendered = mdRender(text);
+  assert(prefix + "literal fence", rendered.includes("``` or ~~~;"), rendered);
+  for (const name of ["_protected", "_join_prose_paragraphs"]) {
+    assert(prefix + name, rendered.includes('<code class="inline-code" dir="ltr">' + name + '</code>'), rendered);
+  }
+  const old = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+  assert(prefix + "negative control", !old.includes('<code>_protected</code>'), old);
+}
+const codeCases = [
+  ["``a`b``", "a`b"],
+  ["```a``b```", "a``b"],
+  ["`**bold** _x_ ~~strike~~`", "**bold** _x_ ~~strike~~"],
+  ["`[link](https://example.com) ![image](/image.png)`", "[link](https://example.com) ![image](/image.png)"],
+  ["`<script>&`", "&lt;script&gt;&amp;"],
+];
+for (const [input, body] of codeCases) {
+  const rendered = mdRender(input);
+  assert("protected " + input, rendered.includes('<code class="inline-code" dir="ltr">' + body + '</code>'), rendered);
+  assert("no embedded styles or navigation " + input, !/<strong>|<del>|<a |<img /.test(rendered), rendered);
+}
+const multiline = mdRender("Before `a\nb` after.");
+assert("inline never crosses newline", !multiline.includes('class="inline-code"'), multiline);
+const codeBody = '  print("one")  \n\nprint("two")';
+const fenced = mdRender("```python\n" + codeBody + "\n```");
+assert("fenced whitespace preserved", fenced.includes('<code>  print(&quot;one&quot;)  \n\nprint(&quot;two&quot;)</code>'), fenced);
+
 process.exit(fail ? 1 : 0);

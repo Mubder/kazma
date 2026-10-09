@@ -701,6 +701,16 @@ var KazmaStream = (function() {
 
       function inline(s) {
         var html = esc(s);
+        // Protect exact-length backtick spans before styles/links/images.
+        // A literal unmatched ``` must not steal the next `snake_case` opener.
+        var codeSpans = [];
+        var codeToken = '\x00KZCODE';
+        while (html.indexOf(codeToken) !== -1) codeToken += 'X';
+        html = html.replace(/(?<!`)(`+)(?!`)([^\n]*?)(?<!`)\1(?!`)/g, function(_, ticks, body) {
+          var token = codeToken + codeSpans.length + '\x00';
+          codeSpans.push('<code class="inline-code" dir="ltr">' + body + '</code>');
+          return token;
+        });
         // Images first (so ![a](u) isn't partially eaten by links).
         // Only this server's own images load. A reply is steerable by any
         // untrusted text the agent read (a web page, an email, a document),
@@ -729,7 +739,6 @@ var KazmaStream = (function() {
         // Single * italic only (underscore italic breaks snake_case / model ids)
         html = html.replace(/(^|[^\*])\*([^\*\n]+?)\*(?!\*)/g, '$1<em>$2</em>');
         html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
-        html = html.replace(/`([^`]+)`/g, '<code class="inline-code" dir="ltr">$1</code>');
         html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) {
           var decodedUrl = url.replace(/&amp;/g, '&');
           if (/^(https?:|mailto:)/i.test(decodedUrl)) {
@@ -750,6 +759,9 @@ var KazmaStream = (function() {
             return pre + '<a href="' + esc(rawHref) + '" target="_blank" rel="noopener noreferrer" dir="ltr">' + url + '</a>';
           }
         );
+        for (var ci = 0; ci < codeSpans.length; ci++) {
+          html = html.split(codeToken + ci + '\x00').join(codeSpans[ci]);
+        }
         return html;
       }
 
