@@ -8,6 +8,10 @@ import logging
 import time
 from typing import Any
 
+from kazma_core.agent.answer_quality import (
+    TOOL_ARGUMENT_RECHECK,
+    looks_like_tool_arguments,
+)
 from kazma_core.agent.graph_helpers import (
     _ensure_about_user,
     _ensure_personality,
@@ -23,15 +27,23 @@ from kazma_core.agent.plan_fence import (
     PLAN_EXECUTE_FINAL,
     normalize_plan_fence,
     should_execute_plan_only_hop,
-    split_plan_and_prose as _split_plan_fence,
     tools_ran_this_turn,
 )
-from kazma_core.agent.state import NodeName, PendingToolCall, SupervisorState
+from kazma_core.agent.plan_fence import (
+    split_plan_and_prose as _split_plan_fence,
+)
 from kazma_core.agent.source_grounding import with_source_grounding
+from kazma_core.agent.state import NodeName, PendingToolCall, SupervisorState
 from kazma_core.agent.task_ledger import (
     extract_next_action as _extract_next_action,
+)
+from kazma_core.agent.task_ledger import (
     format_ledger_block as _format_ledger_block,
+)
+from kazma_core.agent.task_ledger import (
     get_ledger_store as _get_ledger_store,
+)
+from kazma_core.agent.task_ledger import (
     resolve_continuation as _resolve_ledger_continuation,
 )
 from kazma_core.llm_provider import LLMProvider
@@ -256,7 +268,11 @@ async def supervisor_node(
     if iteration == 0:
         if state.get("circuit_breaker_tripped", False) or state.get("consecutive_tool_failures", 0) > 0:
             logger.info("[Supervisor] Resetting tool circuit breaker for new turn")
-        breaker_reset = {"circuit_breaker_tripped": False, "consecutive_tool_failures": 0}
+        breaker_reset = {
+            "circuit_breaker_tripped": False,
+            "consecutive_tool_failures": 0,
+            "tool_argument_rechecks": 0,
+        }
         if cost_breaker and hasattr(cost_breaker, "record_user_interaction"):
             cost_breaker.record_user_interaction()
 
@@ -732,22 +748,19 @@ async def supervisor_node(
     # ── Explicit Working Memory (immutable turn anchors) ───────────
     # Parse once at iteration 0; re-inject the system anchor every iteration.
     from kazma_core.agent.turn_input import (
+        WORKING_MEMORY_MARKER,
+        bind_scratchpad_thread,
+        drain_scratchpad_writes,
         extract_active_attachments,
         extract_latest_user_text,
         filter_tools_for_constraints,
         format_working_memory_anchor,
         parse_hard_constraints,
         resolve_trim_token_budget,
-        trim_messages_deterministic,
-        WORKING_MEMORY_MARKER,
-    )
-
-    from kazma_core.agent.turn_input import (
-        should_suppress_memory_recall,
-        should_quarantine_documents_search,
         set_active_turn_context,
-        bind_scratchpad_thread,
-        drain_scratchpad_writes,
+        should_quarantine_documents_search,
+        should_suppress_memory_recall,
+        trim_messages_deterministic,
     )
 
     # Merge any tool-side scratchpad writes from the previous tool_worker hop.
@@ -1358,9 +1371,11 @@ async def supervisor_node(
     # can pin a checklist (providers rarely expose true chain-of-thought).
     if iteration == 0 and effective_tool_definitions:
         _plan_nudge = (
-            "UI WORKBENCH: If you will call any tools this turn, put a short "
-            "```plan fence (3–7 bullets) in your content field before or "
-            "alongside tool_calls so the user sees your plan. Then use tools. "
+            "UI WORKBENCH: For a multi-step tool task, you may put a short "
+            "user-facing checklist in a ```plan fence alongside actual "
+            "tool_calls. A simple read or answer does not need a checklist. "
+            "Keep internal reasoning out of it. Do not repeat the checklist "
+            "or a plan fence in the final answer. Requested plans are allowed. "
             "Close the fence with ``` alone on its own line, then a blank line, "
             "then any user-facing text — never glue the answer onto the ticks "
             "(wrong: ```Saved.). A plan with no tool_calls is not a finished turn."
@@ -1469,8 +1484,8 @@ async def supervisor_node(
 
     start = time.monotonic()
     try:
-        from kazma_core.retry import friendly_llm_error, load_retry_config
         from kazma_core.llm_provider import LLMError
+        from kazma_core.retry import friendly_llm_error, load_retry_config
 
         cfg = load_retry_config()
         # Guard: max_attempts <= 0 would make range(1, 1) empty and raise
@@ -1492,6 +1507,10 @@ async def supervisor_node(
         _llm_attempts = 0
         _served_by: list[str] = []  # failover bookkeeping: [model] when a chain model answered
         _llm_messages = list(messages) + ([_budget_nudge] if _budget_nudge else [])
+        if iteration > 0 and state.get("tool_argument_rechecks") and not tools_ran_this_turn(messages):
+            # Call-local guidance: do not make a synthetic user turn the new
+            # active goal/language, or retain this reminder in future turns.
+            _llm_messages.append({"role": "system", "content": TOOL_ARGUMENT_RECHECK})
         _did_overflow_compact = False
 
         async def _call_llm_with_retry() -> Any:
@@ -1828,6 +1847,31 @@ async def supervisor_node(
     # ── Route decision ─────────────────────────────────────────────
     if not response.tool_calls:
         content = response.content.strip() if response.content else ""
+
+        # B27-ar: a path dictionary was accepted as a finished file-read task.
+        # Ask the model to resolve the ambiguity ONCE with the same tools and
+        # safety constraints. Never turn text into a guessed tool invocation;
+        # the dictionary could be exactly the deliverable the user requested.
+        rechecks = 0 if iteration == 0 else int(state.get("tool_argument_rechecks") or 0)
+        if (
+            rechecks < 1
+            and iteration + 1 < int(state.get("max_iterations") or 15)
+            and not tools_ran_this_turn(messages)
+            and looks_like_tool_arguments(content, effective_tool_definitions)
+        ):
+            logger.warning("[Supervisor] Rechecking bare tool-argument text (iteration=%d)", iteration)
+            return {
+                **breaker_reset,
+                **intent_patch,
+                **_mission_carry,
+                "messages": messages + [{"role": "assistant", "content": content}],
+                "next_node": NodeName.SUPERVISOR,
+                "iteration": iteration + 1,
+                "tool_argument_rechecks": rechecks + 1,
+                "last_model": response.model,
+                "last_tokens": response.usage.get("total_tokens", 0),
+                "last_cost_usd": response.cost_usd,
+            }
 
         # ── Empty-response recovery ────────────────────────────────
         # Some providers (Groq compound-mini, certain Ollama models, and

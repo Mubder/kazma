@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 import pytest
-
+from kazma_core.agent.answer_quality import ANSWER_QUALITY_PROMPT
 from kazma_core.agent.source_grounding import SOURCE_GROUNDING_PROMPT, with_source_grounding
 from kazma_core.agent_evaluation import evaluate_case, validate_dataset
 from kazma_core.llm_provider import LLMResponse, ToolCall
@@ -29,6 +29,10 @@ def assert_grounding_before_user(messages):
     rules = [i for i, m in enumerate(messages)
              if m.get("role") == "system" and m.get("content") == SOURCE_GROUNDING_PROMPT]
     assert len(rules) == 1
+    quality = [i for i, m in enumerate(messages)
+               if m.get("role") == "system" and m.get("content") == ANSWER_QUALITY_PROMPT]
+    assert len(quality) == 1
+    assert quality[0] < next(i for i, m in enumerate(messages) if m.get("role") == "user")
     assert rules[0] < next(i for i, m in enumerate(messages) if m.get("role") == "user")
     assert "does not establish that a release has not shipped" in messages[rules[0]]["content"]
     assert "has not been published" in messages[rules[0]]["content"]
@@ -100,7 +104,7 @@ def test_policy_does_not_rewrite_or_duplicate_checkpointed_tool_history():
     assert_grounding_before_user(once)
     assert with_source_grounding(once) == once
     assert messages == original
-    assert once[2:] == messages[1:]
+    assert once[3:] == messages[1:]
 
 
 @pytest.mark.asyncio

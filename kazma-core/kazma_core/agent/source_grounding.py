@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from kazma_core.agent.answer_quality import ANSWER_QUALITY_PROMPT
 
 SOURCE_GROUNDING_PROMPT = (
     "SOURCE GROUNDING: Report only the facts a file or tool result establishes. "
@@ -28,11 +29,12 @@ def with_source_grounding(messages: list[dict[str, Any]]) -> list[dict[str, Any]
     compaction, retries and forced finalization receive the same rules.
     This is a model instruction, not a semantic accuracy guarantee.
     """
+    policies = (SOURCE_GROUNDING_PROMPT, ANSWER_QUALITY_PROMPT)
     result = [m for m in messages if not (
-        m.get("role") == "system" and m.get("content") == SOURCE_GROUNDING_PROMPT
+        m.get("role") == "system" and m.get("content") in policies
     )]
     index = 0
     while index < len(result) and result[index].get("role") in ("system", "developer"):
         index += 1
-    result.insert(index, {"role": "system", "content": SOURCE_GROUNDING_PROMPT})
+    result[index:index] = [{"role": "system", "content": policy} for policy in policies]
     return result

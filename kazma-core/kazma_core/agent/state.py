@@ -313,6 +313,13 @@ class SupervisorState(TypedDict, total=False):
     instead of looping.
     """
 
+    tool_argument_rechecks: int
+    """One ambiguity recheck per turn for bare tool-argument-shaped text.
+
+    It is a model reminder, never a parsed text-to-operation execution path.
+    Fresh turns reset it; graph iterations and approval resumes retain it.
+    """
+
     _research_depth_nudged: bool
     """One-shot guard so the research-depth "more sources" nudge fires once per
     turn, not every tool-worker iteration. Must be declared (undeclared keys
@@ -442,6 +449,7 @@ def initial_supervisor_state(
         scratchpad={},
         force_synthesis=False,
         plan_only_continues=0,
+        tool_argument_rechecks=0,
         _research_depth_nudged=False,
         _research_pipeline_nudged=False,
         turn_failed=False,

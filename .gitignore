@@ -162,3 +162,4 @@ pytest-of-*/
 # release evidence (docs/plans/UNIFIED_TURN_BLOCK.md §13). Uploaded by
 # CI, never committed.
 test-artifacts/
+/.unsnooze

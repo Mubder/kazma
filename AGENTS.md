@@ -84,6 +84,22 @@ V2 memory lives in `kazma_core.memory`).
 - Keep the `turn_failed` guard in `respond_node` and the `transient` flag
   on `LLMError`; removing either reintroduces silent forced-finalization.
 
+**Bare tool-argument text is ambiguous, never executable** (2026-10-09):
+`agent/answer_quality.py` detects a small literal object matching an available
+tool's schema for ONE model recheck within the turn budget. The declared
+`SupervisorState.tool_argument_rechecks` resets on a fresh turn, not an approval
+resume. The reminder is call-local system guidance; it must not replace the
+user's active goal/language or accumulate in checkpoints. Never guess a tool
+name or execute the parsed text: it may be requested JSON or a dictionary
+example. Actual calls still go through the normal tool worker and HITL.
+Answer guidance joins source grounding at the LLM boundary (synthesis too).
+Gate: `tests/test_answer_quality.py`, including the original fragment without
+recovery as a negative control, bilingual reads, requested data and auto-denial.
+Active attachment extraction and its working-memory anchor preserve full
+paths (`turn_input.py`): a basename is a display name, not a second path to
+read. Same-named files in different folders remain separate. Gate:
+`tests/test_attachment_path_identity.py` (old basename matcher as control).
+
 **Vision capability routing (`kazma-core/kazma_core/vision_capability.py`):**
 - `is_text_only(model)` / `is_vision_capable(model)` classify by allow/deny
   lists (deny wins; unknown models are NOT downgraded — fail-open).
