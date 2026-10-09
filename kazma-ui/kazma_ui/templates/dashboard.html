@@ -98,6 +98,14 @@
     </div>
   </div>
 
+  <section class="chart-card" style="margin-bottom:1.5rem;" aria-labelledby="answer-quality-title">
+    <h2 id="answer-quality-title" class="chart-title">{{ t('dashboard.quality_title') }}</h2>
+    <p style="color:var(--text-secondary);font-size:0.82rem;">{{ t('dashboard.quality_scope') }}</p>
+    <div id="answer-quality-status" role="status" aria-live="polite">{{ t('dashboard.quality_loading') }}</div>
+    <div id="answer-quality-counts" style="display:flex;gap:16px;flex-wrap:wrap;margin:12px 0;"></div>
+    <ul id="answer-quality-recent" style="padding-inline-start:20px;"></ul>
+  </section>
+
   <!-- ── Charts Row ── -->
   <div class="charts-row">
     <div class="chart-card">

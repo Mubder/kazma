@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Answer-quality review signals (2026-10-09)
+
+- Add an administrator dashboard panel for empty terminal drafts/answers,
+  ambiguous tool-argument rechecks, plan blocks, unresolved/repaired paragraph
+  layouts and failed turns. These structural signals are not accuracy grades.
+- Record graph terminal turns across transports, with idempotent writes off
+  the event loop. Retain at most 10,000 turns for 30 days; store no prompt,
+  answer or tool-argument text. Monitoring failures do not block replies and
+  appear as unavailable, never as a healthy zero.
+- Keep the paragraph detector's narrow English/Arabic scope and protected
+  layouts. Usage commands, paused approvals and cancelled turns are excluded.
+
 ## Web and Telegram code delimiters in prose (2026-10-09)
 
 - Keep an unmatched triple backtick in prose from consuming later inline-code

@@ -31,7 +31,10 @@
     // Set up auto-refresh fallback (skipped while the tab is hidden —
     // memory_console.js already gates its polls this way)
     setInterval(function() {
-      if (!document.hidden) fetchStatusFallback();
+      if (!document.hidden) {
+        fetchStatusFallback();
+        fetchAnswerQuality();
+      }
     }, 10000);
 
     // Time range selector
@@ -126,6 +129,7 @@
 
   // ── Data Fetching ─────────────────────────────────────
   function fetchInitialData() {
+    fetchAnswerQuality();
     fetch('/api/dashboard/status')
       .then(function(r) { return r.json(); })
       .then(function(data) {
@@ -133,6 +137,49 @@
         if (data.traces) updateTraceTable(data.traces);
       })
       .catch(function() {});
+  }
+
+  function fetchAnswerQuality() {
+    var status = $('answer-quality-status');
+    var counts = $('answer-quality-counts');
+    var recent = $('answer-quality-recent');
+    if (!status || !counts || !recent) return;
+    fetch('/api/dashboard/answer-quality')
+      .then(function(r) { if (!r.ok) throw new Error('unavailable'); return r.json(); })
+      .then(function(data) {
+        counts.replaceChildren();
+        recent.replaceChildren();
+        if (!data.available) throw new Error('unavailable');
+        var totals = data.totals || {};
+        status.textContent = window.tOr('dashboard.quality_window', 'Retained graph turns: {count} (30 days, at most 10,000 turns).').replace('{count}', String(totals.turns || 0));
+        ['empty_draft', 'empty_answer', 'argument_recheck', 'plan_block', 'paragraph_miss', 'paragraph_repaired', 'turn_failed'].forEach(function(signal) {
+          var item = document.createElement('span');
+          item.textContent = window.tOr('dashboard.quality_' + signal, signal) + ': ' + String(totals[signal] || 0);
+          if (totals[signal] && ['empty_answer', 'paragraph_miss', 'turn_failed'].indexOf(signal) >= 0) item.style.color = 'var(--warning)';
+          counts.appendChild(item);
+        });
+        (data.recent || []).forEach(function(row) {
+          var item = document.createElement('li');
+          var labels = (row.signals || []).map(function(s) { return window.tOr('dashboard.quality_' + s, s); }).join(' · ');
+          item.appendChild(document.createTextNode(new Date(row.ts).toLocaleString() + ' — ' + labels + ' '));
+          var identity = document.createElement('bdi');
+          identity.textContent = row.turn_id || '';
+          item.appendChild(identity);
+          item.appendChild(document.createTextNode(' '));
+          if (row.session_id) {
+            var link = document.createElement('a');
+            link.href = '/chat?s=' + encodeURIComponent(row.session_id);
+            link.textContent = window.tOr('dashboard.quality_open', 'Open chat');
+            item.appendChild(link);
+          }
+          recent.appendChild(item);
+        });
+      })
+      .catch(function() {
+        counts.replaceChildren();
+        recent.replaceChildren();
+        status.textContent = window.tOr('dashboard.quality_unavailable', 'Answer-quality monitoring is unavailable or requires administrator access.');
+      });
   }
 
   function fetchStatusFallback() {

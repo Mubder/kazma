@@ -19,6 +19,22 @@ description: X-relates-to-Y map of dual paths, shared elements, and first places
 
 ## 0. Mental model (one brain, many mouths)
 
+### Answer-quality review signals
+
+The Dashboard's answer-quality panel reads the administrator-only
+`GET /api/dashboard/answer-quality`. Its metadata ledger is written off the
+event loop at the shared graph terminal node (`agent/graph_respond.py` →
+`observability/answer_quality.py`) for Web and gateway turns. It stores flags
+and turn/chat identity, with no prompt, answer or tool-argument content, for
+30 days and at most 10,000 turns. Recent signals link to existing chats.
+
+Empty drafts, tool-argument rechecks and plan blocks can have valid or repaired
+outcomes: inspect the linked turn rather than treating a counter as an accuracy
+grade. Paragraph checks cover explicit English/Arabic one-paragraph prose only;
+code, lists, JSON and quoted layouts opt out. Pauses, cancellations and usage
+commands are outside this graph-terminal ledger. Storage errors show unavailable
+and do not block reply delivery. This panel sends no external notifications.
+
 ```
 User surfaces          Identity                 Brain                    Execution              Safety
 ─────────────          ────────                 ─────                    ─────────              ──────

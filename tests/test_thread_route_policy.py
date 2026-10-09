@@ -69,6 +69,7 @@ POLICY: dict[tuple[str, str, str], tuple[str, str]] = {
     ("POST", "/api/pending-approvals/clear", MISC): ("admin+owner", ""),
     # Dashboard: the instance's whole checkpoint store.
     ("GET", "/api/sessions", DASH): ("admin", ""),
+    ("GET", "/api/dashboard/answer-quality", DASH): ("admin", ""),
     ("DELETE", "/api/sessions/{thread_id}", DASH): ("admin", ""),
     # Thread resolved from the caller's own session.
     ("POST", "/api/chat/stream", SSE): (
