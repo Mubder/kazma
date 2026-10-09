@@ -12,6 +12,7 @@ from typing import Any
 from kazma_gateway.gateway import Attachment, IncomingMessage, OutboundMessage, SessionStore
 from kazma_gateway.telegram_format import md_to_tg_html
 from kazma_gateway.slash_commands import changes_global_config, is_slash_command, resolve_slash_command
+from . import hitl as _hitl
 from .store import (
     _InMemoryStore,
     _resolve_thread,
@@ -848,6 +849,10 @@ def create_graph_handler(
             return
 
         # ── Build platform-agnostic state ──────────────────────────
+        # A new operator request is a new decision, even when its args match
+        # a recent failed/expired action. Keep throttling autonomous retries
+        # within that turn; approval resumes above do not lift the throttle.
+        _hitl.clear_approval_throttle(thread_id)
         state = await _build_initial_state(msg, _store)
 
         # §17: pin working memory (attachments, constraints) so the intent
