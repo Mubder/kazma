@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -26,7 +27,6 @@ async def test_new_request_lifts_card_mute_before_turn_entry(
     other = "unrelated-card-thread"
     args = {"path": "fixture.txt", "content": "approved"}
     monkeypatch.setattr(hitl, "_recent_cards", {})
-    monkeypatch.setattr("kazma_core.sessions.directory.find_mouth_thread", lambda *a, **k: None)
     assert hitl.approval_card_suppressed(tid, "file_write", args) is None
     assert hitl.approval_card_suppressed(other, "file_write", args) is None
     assert hitl.approval_card_suppressed(tid, "file_write", args)
@@ -37,10 +37,10 @@ async def test_new_request_lifts_card_mute_before_turn_entry(
 
     monkeypatch.setattr(graph, "_build_initial_state", stop_at_turn)
     if negative_control:
-        monkeypatch.setattr(graph, "clear_approval_throttle", lambda thread: None)
+        monkeypatch.setattr(hitl, "clear_approval_throttle", lambda thread: None)
     manager = SimpleNamespace(send=AsyncMock(), adapters=[])
     handler = graph.create_graph_handler(graph=object(), manager=manager, store=_InMemoryStore())
-    msg = IncomingMessage(platform, f"{platform}:42", text,
+    msg = IncomingMessage(platform, f"{platform}:{uuid4().hex}", text,
                           context_metadata={"thread_id": tid, "chat_id": 42})
     with pytest.raises(TurnEntryReached):
         await handler(msg)
@@ -60,7 +60,6 @@ async def test_approval_resume_does_not_lift_card_mute(monkeypatch, platform):
     tid = f"resume-card-{platform}"
     args = {"path": "fixture.txt", "content": "approved"}
     monkeypatch.setattr(hitl, "_recent_cards", {})
-    monkeypatch.setattr("kazma_core.sessions.directory.find_mouth_thread", lambda *a, **k: None)
     assert hitl.approval_card_suppressed(tid, "file_write", args) is None
     resume = AsyncMock(return_value=True)
     monkeypatch.setattr(graph, "_handle_hitl_resume", resume)
@@ -69,7 +68,7 @@ async def test_approval_resume_does_not_lift_card_mute(monkeypatch, platform):
     handler = graph.create_graph_handler(
         graph=object(), manager=SimpleNamespace(send=AsyncMock(), adapters=[]), store=_InMemoryStore(),
     )
-    await handler(IncomingMessage(platform, f"{platform}:42", "/hitl approve",
+    await handler(IncomingMessage(platform, f"{platform}:{uuid4().hex}", "/hitl approve",
                                   context_metadata={"thread_id": tid, "chat_id": 42}))
     resume.assert_awaited_once()
     build.assert_not_awaited()
