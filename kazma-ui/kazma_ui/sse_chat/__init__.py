@@ -65,6 +65,8 @@ logger = logging.getLogger(__name__)
 _IDE_CONTEXT_MAX_CHARS = 2000
 
 # Layers extracted from this module when it was split (audit O5).
+from kazma_core.runtime.live_llm import key_is_usable as _key_is_usable
+
 from kazma_ui.sse_chat._helpers import (  # noqa: F401
     _convert_messages_to_dicts,
     _extract_hitl_payload,
@@ -78,7 +80,6 @@ from kazma_ui.sse_chat._helpers import (  # noqa: F401
     _record_frame_activity,
     _user_facing_reply,
 )
-from kazma_core.runtime.live_llm import key_is_usable as _key_is_usable
 from kazma_ui.sse_chat._persistence import (  # noqa: F401
     _checkpoint_backfill_unanswered,
     _persist_detached_reply,
@@ -1094,13 +1095,13 @@ def create_sse_chat_router(
             # ``ts`` from creation so every append path (incremental, final,
             # detached) produces the same row shape — mixed shapes surfaced
             # as ts-less duplicate rows after restarts (2026-08-26).
-            from datetime import UTC as _UTCc
+            from datetime import UTC as _UTC_C
             from datetime import datetime as _dtc
 
             temp_assistant_msg: dict[str, Any] = {
                 "role": "assistant",
                 "content": "",
-                "ts": _dtc.now(_UTCc).isoformat(),
+                "ts": _dtc.now(_UTC_C).isoformat(),
             }
             if _turn_model:
                 temp_assistant_msg["model"] = _turn_model
@@ -1149,6 +1150,7 @@ def create_sse_chat_router(
             # Chars already flushed to the store by _persist_now.
             _flushed_at = [0]
             _hitl_frame_payload: dict[str, Any] | None = None
+            _terminal_received = False
 
             try:
                 # CQRS: the graph runs in a shielded background task that
@@ -1259,6 +1261,14 @@ def create_sse_chat_router(
                         done_text = str(data.get("content") or "")
                         if done_text.strip():
                             temp_assistant_msg["content"] = done_text.strip()
+                        if not data.get("interrupted"):
+                            _terminal_received = True
+                            # A subscriber's final token flush can race the
+                            # pump's terminal write. Reassert terminal text
+                            # before yielding done; clients may close here.
+                            await asyncio.to_thread(
+                                _persist_now, final=done_text, open_turn=False,
+                            )
 
                     yield frame
 
@@ -1268,8 +1278,8 @@ def create_sse_chat_router(
                 # in ``text``.
                 done_body = str(temp_assistant_msg.get("content") or "") or content_acc
                 if done_body or activity_log or _hitl_frame_payload:
-                    from kazma_ui.turn_document import activity_of, parts_from_stream, text_of
                     from kazma_ui.sse_chat._streaming import _hitl_persist_parts
+                    from kazma_ui.turn_document import activity_of, parts_from_stream, text_of
 
                     parts = (
                         _hitl_persist_parts(
@@ -1316,7 +1326,11 @@ def create_sse_chat_router(
                 # that had not yet written a row of its own, that target was
                 # the PREVIOUS turn's answer, silently replacing good history
                 # with a fragment.
-                _persist_now(open_turn=True)
+                # Once done was observed, the stream buffer is superseded.
+                # A late disconnect flush must not replace the final reply
+                # with narration or two copies emitted by a model recheck.
+                if not _terminal_received:
+                    _persist_now(open_turn=True)
                 raise
 
             except Exception as exc:
@@ -2161,6 +2175,7 @@ def create_sse_chat_router(
         # consumed the steer body; cancelling it raced the shielded invoke).
         logger.info("[SSE] hard steer resuming thread=%s", thread_id[:12])
         from kazma_core.safety.commitment.resume import build_resume_command
+
         from kazma_ui.active_turns import register_turn
         from kazma_ui.reply_sink import resolve_reply_turn as _resolve_steer_turn
         from kazma_ui.sse_chat._streaming import (

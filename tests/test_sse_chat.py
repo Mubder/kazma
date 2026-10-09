@@ -10,6 +10,8 @@ Covers:
 
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,6 +19,66 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from kazma_ui.sse_chat import _sse_frame, create_sse_chat_router
+from starlette.requests import Request
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("after_done", [False, True])
+async def test_disconnect_flush_cannot_overwrite_observed_terminal_reply(monkeypatch, after_done):
+    """Exercise the HTTP subscriber's cancellation, not just the graph pump."""
+    from kazma_ui import sse_chat
+    from kazma_ui.session_manager import get_session_manager
+    from kazma_ui.turn_document import parts_from_stream
+    from kazma_ui.turn_runtime import persist_reply
+
+    final = '{"path":"reports/release.txt"}'
+    streamed = final + final
+    sid = "disconnect-terminal-regression"
+    waiting = asyncio.Event()
+    never = asyncio.Event()
+
+    async def drive(*args, **kwargs):
+        pass
+
+    async def attach(thread_id, session_id, *args, **kwargs):
+        yield _sse_frame("token", {"content": streamed})
+        if not after_done:
+            waiting.set()
+            await never.wait()
+        row = get_session_manager().get(session_id).messages[-1]
+        assert persist_reply(session_id, row["turn_id"], final, thread_id=thread_id,
+                             parts=parts_from_stream(final=final))
+        yield _sse_frame("done", {"content": final, "interrupted": False})
+        waiting.set()
+        await never.wait()
+
+    monkeypatch.setattr(sse_chat, "_drive_graph_to_journal", drive)
+    monkeypatch.setattr(sse_chat, "_sse_attach_stream", attach)
+    graph = MagicMock()
+    graph.aget_state = AsyncMock(return_value=None)
+    router = create_sse_chat_router(graph=graph, system_prompt="Test identity.")
+    endpoint = next(r.endpoint for r in router.routes if r.path == "/api/chat/stream")
+
+    async def receive():
+        return {"type": "http.request", "body": json.dumps({
+            "message": "Return requested JSON as data without tools.", "session_id": sid,
+        }).encode(), "more_body": False}
+
+    response = await endpoint(Request({"type": "http", "method": "POST", "headers": []}, receive))
+    iterator = response.body_iterator
+    async for frame in iterator:
+        if ("event: done" if after_done else "event: token") in frame:
+            break
+    else:
+        pytest.fail("Subscriber never reached the intended disconnect boundary")
+    reader = asyncio.create_task(anext(iterator))
+    await asyncio.wait_for(waiting.wait(), timeout=5)
+    reader.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await reader
+    rows = get_session_manager().get(sid).messages
+    answer = [r for r in rows if r["role"] == "assistant"][-1]
+    assert answer["content"] == (final if after_done else streamed)
 
 
 @pytest.fixture(autouse=True)
