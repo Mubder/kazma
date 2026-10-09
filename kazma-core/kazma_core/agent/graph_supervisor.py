@@ -1864,7 +1864,11 @@ async def supervisor_node(
                 **breaker_reset,
                 **intent_patch,
                 **_mission_carry,
-                "messages": messages + [{"role": "assistant", "content": content}],
+                # Retry the original conversation with call-local guidance.
+                # Replaying this discarded candidate as an assistant turn
+                # loses provider-specific thinking metadata and can make
+                # strict providers reject the continuation with HTTP 400.
+                "messages": messages,
                 "next_node": NodeName.SUPERVISOR,
                 "iteration": iteration + 1,
                 "tool_argument_rechecks": rechecks + 1,
