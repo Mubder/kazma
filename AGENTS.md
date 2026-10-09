@@ -103,6 +103,11 @@ can stream a JSON object twice; choosing the longer text corrupts the saved
 answer even though `done.content` is correct. Gate: terminal reply authority,
 durable presentation and browser TurnDocument tests. No final text means a
 partial turn keeps its stream; paused narration stays in its own part.
+Gateway completion delivers this finalized text without cultural prefix/suffix
+rewriting: it can corrupt requested JSON, one-sentence replies and language.
+The shared turn runner owns terminal persistence and post-turn memory; do not
+re-close or re-merge the completed checkpoint in the gateway. Cultural prompt
+guidance and pure-greeting fast paths remain. Gate: `tests/test_gateway_terminal_answer.py`.
 The HTTP subscriber persists terminal text before yielding `done` and must
 not flush its accumulated tokens on a later cancellation. The pump's final
 write alone is insufficient: subscriber flushes can race it. Gate:
