@@ -826,7 +826,7 @@ def extract_active_attachments(
         key = (
             str(item.get("id") or "")
             + "|"
-            + str(item.get("filename") or item.get("path") or item.get("name") or "")
+            + str(item.get("path") or item.get("filename") or item.get("name") or "")
         )
         if key in seen or key == "|":
             return
@@ -863,6 +863,7 @@ def extract_active_attachments(
 
     # From textual stubs: [Attached: name — …] or [Attached file: name]
     blob = user_text or extract_latest_user_text(messages)
+    stub_spans: list[tuple[int, int]] = []
     for m in re.finditer(
         r"\[Attached(?:\s+file)?[:\s]+([^\]]+?)\]",
         blob or "",
@@ -873,14 +874,24 @@ def extract_active_attachments(
         name = re.split(r"\s+[—\-]\s+", raw, maxsplit=1)[0].strip()
         if name:
             _add({"kind": "file", "filename": name, "path": name})
+            stub_spans.append(m.span())
 
-    # Bare .docx/.pdf mentions often are the active attachment name
+    # Keep the complete path the user named. Matching only the basename
+    # invented a competing root-level release.txt for reports/release.txt.
+    # URLs are not local attachments; do not extract a suffix of their host
+    # or path as a relative file (including domains containing dots/hyphens).
+    excluded_spans = stub_spans + [
+        m.span() for m in re.finditer(r"\b(?:https?|ftp|file)://\S+", blob or "", re.IGNORECASE)
+    ]
     for m in re.finditer(
-        r"([\w.\-]+\.(?:docx|pdf|pptx|xlsx|doc|txt|md|html))",
+        r"(?<![\w.:/\\-])((?:[A-Za-z]:)?[~\w./\\-]+\.(?:docx|pdf|pptx|xlsx|doc|txt|md|html))(?!\w|\.\w)",
         blob or "",
         flags=re.IGNORECASE,
     ):
-        _add({"kind": "file", "filename": m.group(1), "path": m.group(1)})
+        if any(start <= m.start() < end for start, end in excluded_spans):
+            continue
+        path = m.group(1)
+        _add({"kind": "file", "filename": path.replace("\\", "/").rsplit("/", 1)[-1], "path": path})
 
     return atts
 
@@ -899,7 +910,7 @@ def format_working_memory_anchor(
     atts = active_attachments or []
     att_lines: list[str] = []
     for a in atts[:12]:
-        name = a.get("filename") or a.get("path") or a.get("id") or a.get("name") or "?"
+        name = a.get("path") or a.get("filename") or a.get("id") or a.get("name") or "?"
         kind = a.get("kind") or "file"
         att_lines.append(f"- ({kind}) {name}")
     att_block = "\n".join(att_lines) if att_lines else "- (none)"

@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Bilingual answer quality and tool-fragment recovery (2026-10-09)
+
+- Recheck a bare dictionary matching an available tool's argument schema
+  once, within the existing turn budget. Ask the model to invoke the real
+  tool when needed; never convert text into an operation or bypass HITL.
+  Requested dictionaries, JSON and fenced examples remain valid answers.
+- Make the workbench checklist optional for multi-step tool tasks instead
+  of requesting a plan fence for every read. Apply final-answer guidance
+  to supervisor, retry and synthesis calls, including exact output formats,
+  Arabic wording, ambiguous dates and explanatory unit accuracy. These
+  instructions reduce model errors; they do not certify semantic accuracy.
+- Preserve complete file paths in active-attachment context and show the
+  actual path ahead of its display filename. Mentioning reports/release.txt
+  previously invented a competing release.txt at the workspace root.
+  Keep same-named files in distinct directories separate; skip URL suffixes
+  and duplicate filename guesses inside attachment stubs.
+
 ## Fresh gateway approval cards (2026-10-09)
 
 - Lift the approval notification throttle when the operator starts a new
