@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Telegram code delimiters in prose (2026-10-09)
+
+- Keep an unmatched triple backtick in prose from consuming later inline-code
+  markers and turning underscores in function names into italics. Recognize
+  matching backtick runs for inline code and line-based backtick/tilde fences.
+- Preserve whitespace inside fenced code. Cover Arabic and English prose,
+  nested delimiters, gateway HTML delivery and unchanged Slack/Discord text.
+
 ## Explicit one-paragraph answers in English and Arabic (2026-10-09)
 
 - Check explicit current-user paragraph requests at the shared final-answer

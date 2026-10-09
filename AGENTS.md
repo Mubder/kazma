@@ -129,6 +129,15 @@ Gate: `tests/test_answer_format.py` (real graph, old boundary as negative
 control, bilingual prose, protected blocks, no extra prose model call,
 tool-free retry, streaming silence, deadline, cancellation and ledger).
 
+**Telegram code delimiters** (`kazma_gateway/telegram_format.py`, 2026-10-09):
+Markdown-to-HTML conversion recognizes line-based fences and matching maximal
+backtick runs for inline code. A bare ``` in explanatory prose must not steal
+the next inline opener and expose underscored names to italic parsing. Preserve
+fenced code whitespace and escape content before styling. The shared converter
+serves normal chat and swarm output; Slack/Discord keep their original Markdown.
+Gate: `tests/test_telegram_format.py` (old matcher as negative control, EN/AR,
+mixed delimiters, real gateway preparation and HTML send path).
+
 **Vision capability routing (`kazma-core/kazma_core/vision_capability.py`):**
 - `is_text_only(model)` / `is_vision_capable(model)` classify by allow/deny
   lists (deny wins; unknown models are NOT downgraded — fail-open).

@@ -12,8 +12,17 @@ import re
 from typing import Any
 
 # Placeholder tokens so fenced/inline code is not re-parsed as markdown
-_CODE_FENCE_RE = re.compile(r"```(?:[^\n`]*)\n?(.*?)```", re.DOTALL)
-_INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
+_CODE_FENCE_RE = re.compile(
+    r"^ {0,3}(?:"
+    r"(?P<ticks>`{3,})[^\n`]*\n(?P<tick_body>.*?)"
+    r"^ {0,3}(?P=ticks)`*[ \t]*\r?(?=\n|$)"
+    r"|(?P<tildes>~{3,})(?!~)[^\n]*\n(?P<tilde_body>.*?)"
+    r"^ {0,3}(?P=tildes)~*[ \t]*\r?(?=\n|$))",
+    re.MULTILINE | re.DOTALL,
+)
+# Delimiters are maximal runs of the SAME length. An unmatched ``` mentioned
+# in prose must not consume the next `name_with_underscores` opener.
+_INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)([^\n]*?)(?<!`)\1(?!`)")
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*|__(.+?)__")
 _ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)([^*\n]+?)(?<!\*)\*(?!\*)|(?<!_)_(?!_)([^_\n]+?)(?<!_)_(?!_)")
 _HEADING_MD_RE = re.compile(r"(?m)^(#{1,6})\s+(.+)$")
@@ -55,12 +64,13 @@ def md_to_tg_html(text: str) -> str:
 
     # Fenced code → <pre> (stash so inner * etc. are not styled)
     def _fence(m: re.Match[str]) -> str:
-        return _stash(f"<pre>{m.group(1).strip()}</pre>")
+        body = m.group("tick_body") if m.group("tick_body") is not None else m.group("tilde_body")
+        return _stash(f"<pre>{body}</pre>")
 
     s = _CODE_FENCE_RE.sub(_fence, s)
 
     def _inline(m: re.Match[str]) -> str:
-        return _stash(f"<code>{m.group(1)}</code>")
+        return _stash(f"<code>{m.group(2)}</code>")
 
     s = _INLINE_CODE_RE.sub(_inline, s)
 
