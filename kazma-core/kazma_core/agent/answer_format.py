@@ -11,6 +11,9 @@ import unicodedata
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+import httpx
+
+from kazma_core.llm_provider import LLMError
 from kazma_core.llm_stream import invoke_llm_chat
 
 logger = logging.getLogger(__name__)
@@ -47,7 +50,7 @@ FORMAT_ONLY_PROMPT = (
 )
 
 
-def requests_one_paragraph(text: str) -> bool:
+def _requests_one_paragraph(text: str) -> bool:
     """Recognize narrow EN/AR instructions, excluding quoted/negated examples.
 
     This does not infer arbitrary formatting intent or inherit earlier turns.
@@ -87,14 +90,14 @@ def _one_paragraph(text: str) -> bool:
     return bool(text.strip()) and not (_BREAK.search(text.strip()) or _HEADING.search(text) or _protected(text))
 
 
-def join_prose_paragraphs(text: str) -> str | None:
+def _join_prose_paragraphs(text: str) -> str | None:
     """Change paragraph separators only; protected blocks and headings opt out."""
     if not text.strip() or _protected(text) or _HEADING.search(text):
         return None
     return _BREAK.sub(" ", text.strip())
 
 
-def valid_format_only_retry(original: str, candidate: str) -> bool:
+def _valid_format_only_retry(original: str, candidate: str) -> bool:
     """Accept layout changes, never new facts, reordered words or altered quotes."""
     if _protected(original) or not _one_paragraph(candidate):
         return False
@@ -121,7 +124,7 @@ async def format_terminal_answer(
         return messages
     from kazma_core.agent.turn_input import extract_latest_user_text
 
-    if not requests_one_paragraph(extract_latest_user_text(messages)):
+    if not _requests_one_paragraph(extract_latest_user_text(messages)):
         return messages
     index = len(messages) - 1
     if index < 0 or messages[index].get("role") not in ("assistant", "ai"):
@@ -132,7 +135,7 @@ async def format_terminal_answer(
         return messages
     if _one_paragraph(text):
         return messages
-    repaired = join_prose_paragraphs(text)
+    repaired = _join_prose_paragraphs(text)
     if repaired is None:
         if _protected(text) or not _HEADING.search(text) or llm is None or len(text) > 16000:
             logger.info("[AnswerFormat] One-paragraph request left unchanged: protected/unsupported layout")
@@ -152,11 +155,12 @@ async def format_terminal_answer(
             if on_call is not None:
                 await on_call(client, response, (time.monotonic() - started) * 1000)
             candidate = getattr(response, "content", "") or ""
-            if getattr(response, "tool_calls", None) or not valid_format_only_retry(text, candidate):
+            if getattr(response, "tool_calls", None) or not _valid_format_only_retry(text, candidate):
                 logger.warning("[AnswerFormat] Rejected formatting retry: wording/layout changed or tool calls emitted")
                 return messages
             repaired = candidate.strip()
-        except Exception:
+        except (LLMError, httpx.HTTPError, TimeoutError, NotImplementedError,
+                AttributeError, TypeError, ValueError, OSError):
             logger.warning("[AnswerFormat] Formatting retry unavailable; original reply retained", exc_info=True)
             return messages
     if repaired == text:

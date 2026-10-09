@@ -7,16 +7,17 @@ import copy
 import json
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from kazma_core.agent.answer_format import (
     FORMAT_ONLY_PROMPT,
+    _join_prose_paragraphs,
+    _requests_one_paragraph,
     format_terminal_answer,
-    join_prose_paragraphs,
-    requests_one_paragraph,
 )
 from kazma_core.agent.graph_respond import respond_node
 from kazma_core.agent_evaluation import evaluate_case
-from kazma_core.llm_provider import LLMResponse, ToolCall
+from kazma_core.llm_provider import LLMError, LLMResponse, ToolCall
 
 
 @pytest.fixture(autouse=True)
@@ -57,7 +58,7 @@ def isolated_graph(monkeypatch):
     ("Could you explain the result in one paragraph?", True),
 ])
 def test_only_explicit_unquoted_current_instructions(prompt, expected):
-    assert requests_one_paragraph(prompt) is expected
+    assert _requests_one_paragraph(prompt) is expected
 
 
 @pytest.mark.parametrize("draft,expected", [
@@ -71,7 +72,7 @@ def test_only_explicit_unquoted_current_instructions(prompt, expected):
     ("A soft\nline break.\n\nNext paragraph.", "A soft\nline break. Next paragraph."),
 ])
 def test_prose_changes_only_paragraph_separators(draft, expected):
-    assert join_prose_paragraphs(draft) == expected
+    assert _join_prose_paragraphs(draft) == expected
 
 
 @pytest.mark.asyncio
@@ -168,9 +169,13 @@ async def test_one_quiet_retry_cannot_change_facts_or_execute_tools(candidate, t
 
 
 @pytest.mark.asyncio
-async def test_format_retry_failure_retains_original(monkeypatch):
+@pytest.mark.parametrize("error", [TimeoutError("Provider timed out"),
+    LLMError("Provider rejected formatting"), httpx.ConnectError("Network unavailable"),
+    NotImplementedError("No formatting support"), TypeError("Unsupported signature"),
+    AttributeError("Unsupported client"), ValueError("Malformed response")])
+async def test_format_retry_failure_retains_original(monkeypatch, error):
     client = AsyncMock()
-    client.chat.side_effect = TimeoutError("Provider timed out")
+    client.chat.side_effect = error
     monkeypatch.setattr("kazma_core.runtime.live_llm.resolve_live_client", lambda llm, **kw: (llm, None))
     messages = [{"role": "user", "content": "Explain in one paragraph."},
                 {"role": "assistant", "content": "## Status\n\nPending review."}]
@@ -272,9 +277,9 @@ async def test_respond_retry_is_accounted_and_uses_turn_model(monkeypatch):
     ("## حالة\n\nالنشر غير مأذون به.", "حالة النشر مأذون به."),
 ])
 def test_retry_cannot_alter_numbers_paths_quotes_code_or_negation(original, candidate):
-    from kazma_core.agent.answer_format import valid_format_only_retry
+    from kazma_core.agent.answer_format import _valid_format_only_retry
 
-    assert not valid_format_only_retry(original, candidate)
+    assert not _valid_format_only_retry(original, candidate)
 
 
 @pytest.mark.asyncio
