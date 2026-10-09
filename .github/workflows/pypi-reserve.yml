@@ -59,7 +59,7 @@ jobs:
         run: python scripts/pypi_reserve.py --out dist ${WANTED:+--names "$WANTED"}
       - name: Check the metadata
         run: uvx twine check --strict dist/*/*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: pypi-reserve
           path: dist/
