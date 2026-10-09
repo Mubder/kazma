@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Verbatim JSON-copy wrappers (2026-10-09)
+
+- Remove an enclosing JSON fence and trailing commentary when a direct
+  English/Arabic request asks for only a supplied object verbatim and the
+  enclosed text matches it exactly. Final delivery and saved answers share
+  this check, with no model call, data serialization or tool execution.
+- Keep unsupported/ambiguous requests, changed values, multiple blocks,
+  assistant tool calls and failed turns untouched. This narrowly addresses
+  a reviewed Arabic output-shape miss; it is not general JSON conformance.
+
 ## Answer-quality review signals (2026-10-09)
 
 - Add an administrator dashboard panel for empty terminal drafts/answers,

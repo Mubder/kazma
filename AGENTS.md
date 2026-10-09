@@ -129,6 +129,18 @@ Gate: `tests/test_answer_format.py` (real graph, old boundary as negative
 control, bilingual prose, protected blocks, no extra prose model call,
 tool-free retry, streaming silence, deadline, cancellation and ledger).
 
+**Verbatim JSON copies** (`agent/json_echo_format.py`, 2026-10-09):
+At the same terminal boundary, direct latest-user EN/AR requests to return
+only a supplied JSON object verbatim may lose an enclosing JSON fence and
+trailing prose. Require an exact textual match to the user's literal: no
+serialization, guessed values, tools or extra LLM call. Unsupported requests,
+conflicting suffixes, quoted/historical instructions, duplicate keys,
+non-JSON constants, multiple blocks and changed object text stay untouched.
+The failed-turn and assistant-tool-call guards apply before repair. This
+targets literal copies, not arbitrary JSON generation or general compliance.
+Gate: `tests/test_json_echo_format.py` (original H04-ar fence/prose failure,
+EN/AR, real respond boundary, data fidelity and no execution).
+
 **Telegram code delimiters** (`kazma_gateway/telegram_format.py`, 2026-10-09):
 Markdown-to-HTML conversion recognizes line-based fences and matching maximal
 backtick runs for inline code. A bare ``` in explanatory prose must not steal
