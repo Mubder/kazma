@@ -103,6 +103,11 @@ can stream a JSON object twice; choosing the longer text corrupts the saved
 answer even though `done.content` is correct. Gate: terminal reply authority,
 durable presentation and browser TurnDocument tests. No final text means a
 partial turn keeps its stream; paused narration stays in its own part.
+The HTTP subscriber persists terminal text before yielding `done` and must
+not flush its accumulated tokens on a later cancellation. The pump's final
+write alone is insufficient: subscriber flushes can race it. Gate:
+`test_sse_chat.test_disconnect_flush_cannot_overwrite_observed_terminal_reply`
+(cancellation while awaiting another frame, before and after done).
 Active attachment extraction and its working-memory anchor preserve full
 paths (`turn_input.py`): a basename is a display name, not a second path to
 read. Same-named files in different folders remain separate. Gate:

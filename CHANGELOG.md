@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## HTTP subscriber disconnect after a final reply (2026-10-09)
+
+- Persist the terminal reply before the HTTP subscriber yields `done`, and
+  skip partial-buffer flushes after that point. Closing a stream immediately
+  after `done` could overwrite the saved answer with earlier narration or
+  two copies of a rechecked JSON object. Partial disconnects still flush.
+- Reproduce cancellation while the real HTTP subscriber waits for its next
+  frame, covering disconnects both before and after the terminal boundary.
+
 ## Terminal transcript text after a model recheck (2026-10-09)
 
 - Keep the terminal reply when the accumulated stream begins with the same
