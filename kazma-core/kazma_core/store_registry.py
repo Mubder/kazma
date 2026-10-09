@@ -152,6 +152,8 @@ STORES: dict[str, Store] = {
     "certifications.db": Store("skill certifications", "bundle"),
     "llm_calls.db": Store(
         "the model-call ledger: tokens, cost and latency", "bundle"),
+    "answer_quality.db": Store(
+        "bounded answer-quality flags and turn identity (administrator dashboard; no answer text)", "bundle"),
     # ── documents and mail ─────────────────────────────────────────────
     "documents.db": Store(
         "the document catalog", "documents",
