@@ -70,7 +70,7 @@ jobs:
         run: python scripts/generate_metrics.py --out-dir "$RUNNER_TEMP/site-metrics" --require-collected
 
       - name: Keep the generated files
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: site-metrics
           path: ${{ runner.temp }}/site-metrics
