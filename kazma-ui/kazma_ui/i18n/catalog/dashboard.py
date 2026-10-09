@@ -8,6 +8,22 @@ One slice of the translation catalog, extracted from the former
 from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
+    "dashboard.quality_title": {"en": "Answer-quality signals", "ar": "مؤشرات جودة الإجابات"},
+    "dashboard.quality_scope": {
+        "en": "Structural review signals, including repaired drafts; not accuracy grades. Graph turns only: usage commands, paused approvals and cancellations are excluded. Prompt, answer and tool-argument text is not stored here. Paragraph checks cover explicit EN/AR one-paragraph prose requests only; protected code, lists and JSON are excluded.",
+        "ar": "مؤشرات بنيوية للمراجعة تشمل المسودات المصححة؛ وليست درجات للدقة. تشمل أدوار الوكيل فقط، وتستثني أوامر الاستخدام والموافقات المعلقة والإلغاء. لا يُخزّن هنا نص السؤال أو الإجابة أو معاملات الأدوات. يقتصر فحص الفقرة على طلب صريح بالعربية أو الإنجليزية لفقرة نثرية واحدة، ويستثني الشيفرة والقوائم وJSON.",
+    },
+    "dashboard.quality_loading": {"en": "Loading quality signals…", "ar": "جارٍ تحميل مؤشرات الجودة…"},
+    "dashboard.quality_window": {"en": "Retained graph turns: {count} (30 days, at most 10,000 turns).", "ar": "أدوار الوكيل المحفوظة: {count} (30 يومًا، بحد أقصى 10,000 دور)."},
+    "dashboard.quality_empty_draft": {"en": "Empty drafts", "ar": "مسودات فارغة"},
+    "dashboard.quality_empty_answer": {"en": "Empty terminal answers", "ar": "إجابات نهائية فارغة"},
+    "dashboard.quality_argument_recheck": {"en": "Tool-argument rechecks (ambiguous)", "ar": "إعادة فحص معاملات أدوات محتملة"},
+    "dashboard.quality_plan_block": {"en": "Plan blocks detected (review context)", "ar": "كتل خطة مرصودة (راجع السياق)"},
+    "dashboard.quality_paragraph_miss": {"en": "Unresolved paragraph layout", "ar": "تنسيق فقرة غير مصحح"},
+    "dashboard.quality_paragraph_repaired": {"en": "Paragraph layouts repaired", "ar": "تنسيق فقرة مصحح"},
+    "dashboard.quality_turn_failed": {"en": "Failed turns", "ar": "أدوار فاشلة"},
+    "dashboard.quality_open": {"en": "Open chat", "ar": "افتح المحادثة"},
+    "dashboard.quality_unavailable": {"en": "Answer-quality monitoring is unavailable or requires administrator access.", "ar": "مراقبة جودة الإجابات غير متاحة أو تتطلب صلاحية المسؤول."},
     "dashboard.active_capabilities": {
         "ar": "القدرات النشطة",
         "en": "Active Capabilities",

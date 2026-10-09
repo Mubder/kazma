@@ -89,6 +89,7 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     # Sanitize tool chains to remove any unhandled/dangling tool_calls
     # (e.g. when max_iterations forced routing to respond before ToolWorker ran)
     messages = sanitize_tool_chains(messages)
+    quality_draft = list(messages)
 
     logger.info(
         "[Respond] Finalizing turn (iteration=%d, messages=%d)",
@@ -355,6 +356,12 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     messages = await format_terminal_answer(
         messages, llm=llm, state=state, on_call=_record_format_call,
     )
+
+    # Metadata only, once at the shared graph terminal boundary. A ledger
+    # failure must not prevent a reply, and disk work stays off the loop.
+    from kazma_core.observability.answer_quality import record as record_quality
+
+    await asyncio.to_thread(record_quality, quality_draft, messages, state)
 
     # Post-turn memory: mark this turn as finished so the turn's closer
     # (kazma_ui.turn_runtime.close_turn, which every transport runs) hands

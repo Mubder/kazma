@@ -4959,6 +4959,18 @@ new *guard* (its own code, or other OS-level variables) still needs the
 
 ## Testing & Validation
 
+**Answer-quality observations (2026-10-09):**
+`observability/answer_quality.py` records at `graph_respond.respond_node`, after
+terminal formatting, on a worker thread. A bounded 30-day/10,000-turn SQLite
+ledger holds flags and turn/chat identity only; never add prompts, answers,
+tool arguments, model reasoning or credentials. Rechecks and plan blocks are
+review signals, not accuracy failures (requested JSON/plans may be valid).
+Paragraph signals share `answer_format`'s narrow EN/AR predicate and exclude
+protected layouts and failed turns. Pauses, cancellations and usage commands
+do not pass this terminal node. The quality API is administrator-only; a
+storage failure is unavailable, not zero healthy. No external messages are
+sent. Gate: `tests/test_answer_quality_monitor.py`.
+
 - **Runtime ownership:** `KazmaAppBuilder` acquires `RuntimeOwnership` before
   services construct and releases only after complete shutdown. Its local
   OS fence is always on. `KAZMA_RUNTIME_HA=1` additionally holds a dedicated

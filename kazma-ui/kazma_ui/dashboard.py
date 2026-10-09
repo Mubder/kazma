@@ -325,6 +325,22 @@ def dashboard_status() -> JSONResponse:
 
 
 # ══════════════════════════════════════════════════════════════════════════
+@router.get("/api/dashboard/answer-quality")
+def answer_quality_status(request: Request) -> JSONResponse:
+    """Admin-only structural signals, never answer text or human grades."""
+    if (denied := require_admin(request)) is not None:
+        return denied
+    from kazma_core.observability.answer_quality import snapshot
+
+    from kazma_ui.turn_runtime import resolve_session_id
+
+    result = snapshot()
+    for row in result["recent"]:
+        row["session_id"] = resolve_session_id(row["thread_id"])
+    return JSONResponse(result)
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # Session Management API
 # ══════════════════════════════════════════════════════════════════════════
 
