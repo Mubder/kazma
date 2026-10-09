@@ -507,7 +507,10 @@ def split_stream_and_final(streamed: str, final: str) -> tuple[str, str]:
     if final_s.startswith(probe) or streamed_s.startswith(
         final_s[:80] if len(final_s) > 80 else final_s
     ):
-        return "", final_s if len(final_s) >= len(streamed_s) else streamed_s
+        # A recheck may stream the same answer twice. The terminal answer
+        # remains authoritative even when the accumulated stream starts
+        # with it and is longer; otherwise valid JSON becomes two objects.
+        return "", final_s
     return streamed_s, final_s
 
 

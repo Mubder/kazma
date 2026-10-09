@@ -236,7 +236,9 @@
     var probe = streamedS.length > 80 ? streamedS.slice(0, 80) : streamedS;
     var fProbe = finalS.length > 80 ? finalS.slice(0, 80) : finalS;
     if (finalS.indexOf(probe) === 0 || streamedS.indexOf(fProbe) === 0) {
-      return { reasoning: '', text: finalS.length >= streamedS.length ? finalS : streamedS };
+      // A recheck can stream the same answer twice. Terminal text wins
+      // even when the accumulated stream starts with it and is longer.
+      return { reasoning: '', text: finalS };
     }
     return { reasoning: streamedS, text: finalS };
   }

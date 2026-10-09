@@ -97,6 +97,12 @@ example. Actual calls still go through the normal tool worker and HITL.
 Answer guidance joins source grounding at the LLM boundary (synthesis too).
 Gate: `tests/test_answer_quality.py`, including the original fragment without
 recovery as a negative control, bilingual reads, requested data and auto-denial.
+The terminal reply also wins over a longer prefix-matching stream in
+`turn_document.split_stream_and_final` and its JavaScript mirror. A recheck
+can stream a JSON object twice; choosing the longer text corrupts the saved
+answer even though `done.content` is correct. Gate: terminal reply authority,
+durable presentation and browser TurnDocument tests. No final text means a
+partial turn keeps its stream; paused narration stays in its own part.
 Active attachment extraction and its working-memory anchor preserve full
 paths (`turn_input.py`): a basename is a display name, not a second path to
 read. Same-named files in different folders remain separate. Gate:

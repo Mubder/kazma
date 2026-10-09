@@ -57,6 +57,24 @@ def _row(sid: str, turn: str) -> dict[str, Any]:
     return next((m for m in rows if m.get("turn_id") == turn), {})
 
 
+def test_terminal_json_replaces_repeated_stream_in_durable_transcript(session) -> None:
+    """Refresh must return the exact terminal JSON, not both model hops."""
+    from kazma_ui.sse_chat._streaming import DurablePresentation, _hitl_persist_parts
+    from kazma_ui.turn_document import text_of
+    from kazma_ui.turn_runtime import persist_reply
+
+    sid, turn = session
+    final = '{"path":"reports/release.txt"}'
+    streamed = final + final
+    dp = DurablePresentation(sid, turn, sid)
+    assert asyncio.run(dp.commit(streamed, force=True))
+    assert persist_reply(sid, turn, final, thread_id=sid,
+                         parts=_hitl_persist_parts(final, False, None, streamed=streamed))
+    row = _row(sid, turn)
+    assert row["content"] == final
+    assert text_of(row["parts"]) == final
+
+
 def test_activity_is_durable_immediately(session) -> None:
     """A noted tool part commits on the next call, with no throttle.
 

@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Terminal transcript text after a model recheck (2026-10-09)
+
+- Keep the terminal reply when the accumulated stream begins with the same
+  text but is longer. A tool-fragment recheck could stream the requested
+  JSON twice; the final SSE reply was correct but the saved transcript
+  preferred both copies. Match this rule in Python and the browser reducer.
+- Verify the durable transcript, terminal parts and browser reducer. Partial
+  turns with no terminal reply retain their streamed text.
+
 ## Tool-fragment recheck provider compatibility (2026-10-09)
 
 - Retry the original conversation when rechecking an argument-shaped answer.
