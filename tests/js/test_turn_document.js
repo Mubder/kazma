@@ -75,6 +75,9 @@ var d3 = TD.applyEvent(d2, {
 });
 assert("done keeps reasoning", d3.parts.some(function (p) { return p.type === "reasoning"; }));
 assert("done text wins", TD.textOf(d3.parts) === "Everything checks out.");
+const requestedJson = '{"path":"reports/release.txt"}';
+const repeatedJson = TD.partsFromStream(requestedJson + requestedJson, requestedJson);
+assert("terminal JSON beats duplicate streamed completion", TD.textOf(repeatedJson) === requestedJson);
 var d3b = TD.applyEvent(d3, { type: "done", content: "Everything checks out.", seq: 3 });
 assert("done seq dedupe", d3b === d3);
 

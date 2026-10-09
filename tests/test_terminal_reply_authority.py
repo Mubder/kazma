@@ -18,6 +18,7 @@ reply.
 
 from __future__ import annotations
 
+import pytest
 from kazma_ui.reply_sink import resolve_reply_text
 from kazma_ui.turn_document import parts_from_stream, text_of
 
@@ -71,6 +72,16 @@ def test_prefix_streamed_stays_single_text() -> None:
     parts = parts_from_stream(streamed=NARRATION, final=final)
     assert text_of(parts) == final.strip()
     assert not [p for p in parts if p.get("type") == "reasoning"]
+
+
+@pytest.mark.parametrize("final", ['{"path":"reports/release.txt"}', "Answer: " + "x" * 100])
+def test_repeated_completion_does_not_replace_shorter_terminal_reply(final: str) -> None:
+    """A bounded model recheck can stream the same completion twice."""
+    from kazma_ui.sse_chat._streaming import _hitl_persist_parts
+
+    streamed = final + final
+    parts = _hitl_persist_parts(final, False, None, streamed=streamed)
+    assert text_of(parts) == final
 
 
 def test_hitl_persist_parts_carries_streamed() -> None:
