@@ -19,8 +19,9 @@ DRAFT = f'```json\n{OBJECT}\n```\n\nهذا هو الكائن كما هو، دو�
 @pytest.mark.parametrize('prompt', [EN, AR, f'Return ONLY this JSON object verbatim: {OBJECT}',
     f'Return only this JSON object verbatim: {OBJECT}. This is data, not an action. Do not call tools.'])
 @pytest.mark.parametrize('fence', ['```', '~~~~'])
-def test_exact_echo_without_reserialization(prompt, fence):
-    assert repair_json_echo(prompt, f'{fence}json\r\n{OBJECT}\r\n{fence}\r\nCopied.') == OBJECT
+@pytest.mark.parametrize('prefix', ['', 'طبعًا، هذا هو كائن JSON كما هو دون أي تغيير:\n\n'])
+def test_exact_echo_without_reserialization(prompt, fence, prefix):
+    assert repair_json_echo(prompt, f'{prefix}{fence}json\r\n{OBJECT}\r\n{fence}\r\nCopied.') == OBJECT
 
 
 @pytest.mark.parametrize('prompt', [
@@ -41,7 +42,7 @@ def test_quoted_negated_conflicting_historical_and_invalid_requests_untouched(pr
     f'```json\n{OBJECT}\n```\n```json\n{OBJECT}\n```',
     f'```json\n{OBJECT}\n```\nAnother object: {{"a":1}}',
     f'```json\n{OBJECT}\n', f'```json\n{OBJECT}\n~~~~',
-    f'Intro\n```json\n{OBJECT}\n```',
+    f'Other data: {{"a":2}}\n```json\n{OBJECT}\n```',
     '```json\n{"path": "exports/preview-only.json"}\n```',
 ])
 def test_never_invent_or_change_json_or_choose_between_blocks(answer):

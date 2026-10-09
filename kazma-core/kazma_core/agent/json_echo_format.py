@@ -9,7 +9,7 @@ _REQUEST = re.compile(
     r'^(?:return\s+only\s+this\s+JSON\s+object\s+verbatim|'
     r'أعد\s+كائن\s+JSON\s+التالي\s+فقط\s+كما\s+هو)\s*:\s*', re.I,
 )
-_FENCE = re.compile(r'\A\s*(`{3,}|~{3,})json[ \t]*\r?\n(.*?)\r?\n\1[ \t]*(?:\r?\n|$)([^`~]*)\Z', re.S | re.I)
+_FENCE = re.compile(r'\A([^`~]*?)(`{3,}|~{3,})json[ \t]*\r?\n(.*?)\r?\n\2[ \t]*(?:\r?\n|$)([^`~]*)\Z', re.S | re.I)
 _CLARIFICATION = re.compile(
     r'(?:This is (?:requested )?data, not (?:a request to read or write anything|a file operation|an action)|'
     r'(?:Use no|Do not (?:use|invoke|call) any|Do not (?:use|invoke|call)) tools|'
@@ -53,8 +53,8 @@ def repair_json_echo(prompt: str, answer: str) -> str | None:
            for clause in suffix.split('.') if clause.strip()):
         return None
     fenced = _FENCE.fullmatch(answer)
-    if fenced is None or fenced.group(2).strip() != literal:
+    if fenced is None or fenced.group(3).strip() != literal:
         return None
-    if any(c in fenced.group(3) for c in '{}[]'):
+    if any(c in fenced.group(1) + fenced.group(4) for c in '{}[]'):
         return None
     return literal

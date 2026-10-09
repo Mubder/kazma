@@ -2,7 +2,7 @@
 
 ## Verbatim JSON-copy wrappers (2026-10-09)
 
-- Remove an enclosing JSON fence and trailing commentary when a direct
+- Remove an enclosing JSON fence and surrounding commentary when a direct
   English/Arabic request asks for only a supplied object verbatim and the
   enclosed text matches it exactly. Final delivery and saved answers share
   this check, with no model call, data serialization or tool execution.
