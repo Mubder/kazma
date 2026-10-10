@@ -2,7 +2,7 @@
 
 Written from the code on **2026-09-29** for the website: every line was
 checked against the source, and each names where to look. It says what exists,
-not what is planned.
+not what is planned. The changes below were checked again on **2026-10-10**. Disclosures about bounded bilingual review and deployment qualification are in [Known gaps](KNOWN_GAPS.md).
 
 **Status words.** **Shipped**: works out of the box or one setting away.
 **Opt-in**: works once you install or configure the named extra.
@@ -22,8 +22,11 @@ Every line below describes that setup.
 |---|---|---|
 | Web chat with streaming answers, a step-by-step activity view per answer, and approvals inline | Shipped | `/chat` |
 | Telegram, Discord and Slack: text, photos and documents, voice notes transcribed, approve/deny buttons, per-platform allowed-user lists | Shipped | `kazma-gateway/` |
+| Native Telegram command menus and Discord/Slack `/kazma` commands | Opt-in — external application registration is required; private continuation credentials expire on restart | [Documentation](docs/ops/native-slash-commands.md) |
 | Each chat app's Test diagnoses the connection: the token, the chat or channel Kazma delivers to, direct messages, allowed users, and what became of the last message a person sent | Shipped | Settings → Providers & Connectors → Platform Connectors |
+| Finalized chat replies delivered without gateway tone rewriting, with one terminal persistence owner | Shipped | [Documentation](docs/guide/recent-features.md) |
 | Tables in an answer are rewritten as lines for Telegram, Discord and Slack, so they read on a phone | Shipped | `kazma_gateway/chat_tables.py` |
+| Explicit English/Arabic one-paragraph prose and verbatim supplied-JSON output safeguards | Partial — conservative prose layout and literal JSON copies only; no general format guarantee | [Documentation](docs/guide/recent-features.md) |
 | Terminal UI, including a file editor | Shipped | `kazma-tui` |
 | Command line: one-shot questions (`kazma ask`), and the Agent Client Protocol for editors (`kazma acp`) | Shipped | `kazma-cli/` |
 | An MCP server: other agents can use Kazma's tools, with the same approval gate (`kazma mcp`) | Shipped | `kazma_core/mcp/server.py` |
@@ -47,6 +50,7 @@ Every line below describes that setup.
 | Feature | Status | Where |
 |---|---|---|
 | Dangerous actions wait for your approval — on chat, multi-agent and pipeline paths alike; unclassified tools are gated by default | Shipped | [Threat model](THREAT_MODEL.md) |
+| Durable mutation receipts and keyed IDE retries that hold uncertain outcomes for inspection | Partial — shared graph, IDE and swarm executors; external or custom effects are not atomic | [Documentation](docs/products/ide.md) |
 | Plans checked against memory before they act: a reminder date is anchored to what you said, not what the model guessed; catastrophic shell commands are refused before the approval card | Shipped | [Commitment layer](docs/guide/commitment-layer.md) |
 | Web pages, search results, documents and recalled memory are fenced as untrusted data; the effect is measured on a public benchmark | Shipped | [Prompt injection: the numbers](INJECTION.md) |
 | Secrets in an encrypted vault (AES-256-GCM); never passed to programs a tool starts; masked on every screen and API | Shipped | `security/vault.py`, `security/child_env.py` |
@@ -127,8 +131,10 @@ Every line below describes that setup.
 | Health checks that make a real round trip; alerts to Telegram, Discord or Slack; a daily digest and a weekly resilience report | Shipped | `/health/deep` |
 | Old chat step history pruned on a schedule you set | Shipped | Settings → System |
 | Postgres for settings, chats, tasks and checkpoints; SQLite with no setup | Shipped | [Postgres](docs/ops/postgres-and-saas.md) |
+| Admin answer-quality signals without storing answer text in the signal record | Shipped | [Documentation](docs/guide/api-and-extension-points.md) |
 | Prometheus metrics; OpenTelemetry and Langfuse traces | Shipped / Opt-in | `/metrics`, [OpenTelemetry](docs/ops/opentelemetry.md) |
 | Updates in one command: on a supervised install it waits for the chats to go quiet, stops Kazma, installs and starts it again | Shipped | [`kazma update`](docs/ops/kazma-update.md) |
+| Active-passive recovery preparation with one active runtime owner, fencing and paired backups | Partial — target-cluster drills are required; shared Postgres alone does not qualify concurrent runtimes | [Documentation](docs/ops/multi-region.md) |
 | Fault injection to test retries and failover: slow or failing model calls, tool calls and reply saves (other targets have no injection point yet); off unless enabled | Opt-in | `KAZMA_CHAOS_ENABLED`, [Chaos testing](docs/ops/chaos-testing.md) |
 
 ## Not built

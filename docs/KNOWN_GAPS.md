@@ -8,13 +8,17 @@ say against it. Every entry names the evidence, so a reader can check it rather
 than take our word — and so the gap stops being invisible when the person who
 found it forgets.
 
-**Reviewed 2026-10-05 for runtime recovery and evaluation review.** Other
+**Reviewed 2026-10-10 for native delivery and completed bilingual review.** Other
 entries retain their original dates.
 
 **Native slash commands (2026-10-08).** Discord registration is read back and
 Slack Socket Mode slash envelopes are implemented, with private delayed replies
 and adapter protocol regression tests. Actual commands in an installed Discord
-guild and Slack workspace require separate inbound verification. Slack's existing
+guild and Slack workspace require separate inbound verification; the owner's
+installed Telegram, Discord and Slack paths were exercised with native commands,
+approval decisions and saved replies on 2026-10-08 through 2026-10-10. This
+install-specific evidence does not verify a new workspace's registration.
+Slack's existing
 bot/app tokens cannot add the `/kazma` manifest entry. Native continuation tokens
 expire and are lost on restart; long tasks and durable approval conversations
 should use ordinary messages or web chat. Slack response URLs cannot upload
@@ -33,8 +37,8 @@ resource limits do not make arbitrary host code safe.
 **Audit scope (2026-10-07).** The follow-up to the supplied external audit
 preserves supported compatibility/recovery APIs and qualifies its overstated
 exploit examples. See `audits/AUDIT_FOLLOWUP_2026-10-07.md` for every disposition.
-Human-reviewed bilingual accuracy qualification remains open; migration
-text preservation and live smoke checks do not establish semantic accuracy.
+The owner's bounded bilingual answer review is now complete (below); migration
+text preservation and live smoke checks alone do not establish semantic accuracy.
 
 **Runtime hardening (2026-10-05).** Temporal acknowledgement loss no longer
 falls back to a second local execution; activity retries are disabled until
@@ -91,17 +95,33 @@ fallback, failed pool attempts are closed, PostgreSQL retries are not
 multiplied by the settings retry loop, and operational write failures return
 503. Gate: `tests/test_durable_config_outage.py`.
 
-**Live-model accuracy (measurement remains open).** The scripted eval pack
+**Live-model accuracy (bounded owner review complete; generalization unproven).** The scripted eval pack
 does not measure actual model behavior. `scripts/live_eval.py` now runs real
 models through the supervisor graph with isolated stores and fixture tools,
 records decisions, and separates mechanical checks from human-reviewed
-bilingual holdout accuracy. The owner has no labeled holdout yet. Synthetic
-development examples are not accuracy evidence. Workflow:
+bilingual holdout accuracy. The owner reviewed all 60 development responses and
+24 fresh English/Arabic responses. Original results remain 59/60 and 23/24 Pass;
+after remediation, the owner approved the current 60/60 and 24/24 answer sets,
+with grades bound to their displayed-answer hashes. The development rerun used
+the same cases; the fresh set contained 12 paired source groups. Neither set
+establishes representative real-world accuracy, and a replacement answer does
+not erase its original failure. Minor language slips remain documented.
+There are no outstanding owner verdicts for these sets. Workflow:
 [durable settings and live evaluation](DURABLE_SETTINGS_AND_LIVE_EVAL.md).
 The offline review CLI now prepares empty intake, freezes human-labeled real
 holdout cases, creates unanswered review packets and rejects changed evidence,
 partial reviews or missing failed turns. A complete review is permission for
 human comparison, never automatic production qualification.
+
+**Terminal delivery (closed 2026-10-10).** The gateway no longer adds cultural
+greetings or sign-offs after the shared graph finalizes an answer, or persists
+the same completed turn a second time. Nine handler regressions cover Arabic
+prose, bare JSON and English bullets across Telegram, Discord and Slack.
+Native live continuations preserved those formats and saved one reply per turn.
+The English/Arabic literal-JSON and one-paragraph safeguards remain deliberately
+narrow; they do not guarantee arbitrary output-format compliance. The local
+seven-day operational pilot is still in progress, with close-out scheduled for
+2026-10-17; it is not a completed soak or an availability SLO.
 
 **Human review started (2026-10-07).** The owner graded four synthetic development
 answers from the installed Deepseek model. Both ordinary status reads failed

@@ -4,6 +4,24 @@ sidebar_label: Release notes
 description: Dated changes and links to the Kazma upgrade guides.
 ---
 
+## What's new (2026-10-10)
+
+Telegram, Discord and Slack preserve finalized answer text and save one reply
+per turn. English/Arabic literal-JSON copies and one-paragraph prose requests
+have conservative formatting safeguards; ambiguous tool-argument fragments
+receive one bounded recheck without executing text. Web/Telegram code delimiters
+and saved terminal history preserve their contents. Structural answer-quality
+signals are available to administrators, separately from accuracy grades.
+
+Native command registration and private reply delivery, IDE draft protection,
+durable retry receipts and Windows-service Docker execution were also updated.
+The owner's 60 development and 24 fresh bilingual responses are fully reviewed;
+approved replacements remain separate from the original failed responses.
+The operational pilot is in progress through 2026-10-17. Neither these small
+review sets nor live smoke checks establish a production accuracy or uptime SLO.
+See [Recent features](recent-features), [Native chat commands](../ops/native-slash-commands)
+and [Known gaps](../../KNOWN_GAPS.md).
+
 ## What's new (2026-10-04)
 
 Settings now require durable storage: boot stops if settings cannot initialize,

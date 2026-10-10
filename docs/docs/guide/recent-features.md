@@ -7,6 +7,34 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 # Recent features guide
 
+**New in 2026-10-10 — final answers stay final across chat apps.** Telegram,
+Discord and Slack deliver the shared graph's answer without adding a greeting
+or sign-off afterward, and save the completed reply once. Native live checks
+covered one Arabic sentence, a bare JSON object and two English bullets.
+
+**New in 2026-10-09 — answer-quality safeguards and review.** Ambiguous bare
+tool-argument text receives at most one model recheck; text is never executed
+as a guessed tool call. Full attachment paths remain distinct. Explicit
+English/Arabic one-paragraph prose requests and verbatim supplied JSON copies
+receive conservative terminal formatting checks. Code delimiters render
+correctly in Web and Telegram, and saved history keeps the authoritative final
+reply after a recheck or disconnect. The administrator dashboard reports bounded
+structural quality signals without storing prompt or answer text; these are
+not accuracy grades. The owner completed review of 60 development answers and
+24 fresh answers: current approved sets are 60/60 and 24/24 Pass, with original
+59/60 and 23/24 results retained. This is bounded reviewed evidence, not a
+production-wide accuracy estimate or automatic-publishing qualification.
+
+**New in 2026-10-06 through 2026-10-08 — commands and recovery.** Native
+Discord/Slack `/kazma` commands and Telegram menu diagnostics use existing
+authorization and approval gates. Private command replies keep their follow-ups
+private. IDE retries use durable action receipts; uncertain effects remain
+held, and a swarm worker cannot automatically replay after a recorded mutation.
+The IDE protects unsent drafts, workspace changes and Git operations. Docker
+execution under the Windows service uses the configured workspace correctly.
+See [Native chat commands](../ops/native-slash-commands),
+[IDE](../products/ide) and [Known gaps](../../KNOWN_GAPS.md) for setup and limits.
+
 **New in 2026-10-05 — X subject and reply-language controls.** Start with a
 target and Support/Against; Advanced preserves scope, matching and permissions.
 Choose a tone independently of stance, and set language, dialect, slang and

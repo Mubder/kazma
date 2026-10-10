@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Finalized gateway replies and documentation sync (2026-10-10)
+
+- Deliver the shared graph's final answer without adding cultural greetings or
+  sign-offs. Keep terminal persistence and post-turn memory in the shared turn
+  runner, preventing duplicate saved replies. Nine handler regressions cover
+  Telegram, Discord and Slack with Arabic prose, bare JSON and English bullets;
+  native live continuations verified the delivered and saved replies.
+- Record the completed owner review of 60 development answers and 24 fresh
+  bilingual answers, keeping original failures separate from approved
+  replacements. These bounded sets do not establish production-wide accuracy.
+- Refresh operator documentation and the English/Arabic website mirror for
+  native commands, execution recovery, answer formatting and quality signals.
+
 ## Verbatim JSON-copy wrappers (2026-10-09)
 
 - Remove an enclosing JSON fence and surrounding commentary when a direct
