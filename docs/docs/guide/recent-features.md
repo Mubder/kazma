@@ -33,7 +33,7 @@ held, and a swarm worker cannot automatically replay after a recorded mutation.
 The IDE protects unsent drafts, workspace changes and Git operations. Docker
 execution under the Windows service uses the configured workspace correctly.
 See [Native chat commands](../ops/native-slash-commands),
-[IDE](../products/ide) and [Known gaps](../../KNOWN_GAPS.md) for setup and limits.
+[IDE](../products/ide) and [Known gaps](https://github.com/Mubder/kazma/blob/main/docs/KNOWN_GAPS.md) for setup and limits.
 
 **New in 2026-10-05 — X subject and reply-language controls.** Start with a
 target and Support/Against; Advanced preserves scope, matching and permissions.

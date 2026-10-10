@@ -20,7 +20,7 @@ approved replacements remain separate from the original failed responses.
 The operational pilot is in progress through 2026-10-17. Neither these small
 review sets nor live smoke checks establish a production accuracy or uptime SLO.
 See [Recent features](recent-features), [Native chat commands](../ops/native-slash-commands)
-and [Known gaps](../../KNOWN_GAPS.md).
+and [Known gaps](https://github.com/Mubder/kazma/blob/main/docs/KNOWN_GAPS.md).
 
 ## What's new (2026-10-04)
 
