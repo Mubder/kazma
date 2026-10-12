@@ -12,22 +12,24 @@ This helper routes Playwright coroutines onto a dedicated
 ``ProactorEventLoop`` living in a daemon thread:
 
 - subprocess spawns work there (Proactor supports them);
-- the server's selector loop never blocks — the result is awaited through
-  ``asyncio.to_thread``;
+- the server's selector loop never blocks — thread-safe completion futures
+  carry results and cleanup acknowledgements;
 - the loop is created lazily and shared process-wide, so Playwright objects
   (and module-level shared browser state) stay bound to one loop, exactly as
   the async API requires.
 
-On non-Windows platforms this is a thin pass-through (the running loop
-already supports subprocesses).
+On non-Windows platforms owned work runs on the caller's loop, with the same
+deadline and cancellation join (that loop already supports subprocesses).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import sys
 import threading
+from concurrent.futures import Future
 from typing import Any, Coroutine
 
 logger = logging.getLogger(__name__)
@@ -65,21 +67,92 @@ def _get_loop() -> asyncio.AbstractEventLoop | None:
 
 
 async def run_in_browser_loop(
-    coro: Coroutine[Any, Any, Any], timeout: float = 180.0
+    coro: Coroutine[Any, Any, Any], timeout: float = 180.0, *, loop: asyncio.AbstractEventLoop | None = None
 ) -> Any:
-    """Run *coro* on the browser loop (Windows) or inline on this loop.
+    """Run owned work and join its finalizers before reporting cancellation.
 
-    Raises whatever *coro* raises (after cancelling the cross-loop future).
+    Cancelling run_coroutine_threadsafe's future acknowledges a cancellation
+    REQUEST, not completion of the coroutine's asynchronous cleanup. Track the
+    actual task, cancel it once, and wait for its done callback. Repeated caller
+    cancellation cannot interrupt that join. Timeout covers execution; cleanup
+    still has to finish (hard process-tree termination is a separate boundary).
     """
-    if not _IS_WINDOWS:
-        return await coro
-    loop = _get_loop()
-    future = asyncio.run_coroutine_threadsafe(coro, loop)  # type: ignore[union-attr]
+    if not math.isfinite(timeout) or timeout <= 0:
+        coro.close()
+        raise ValueError("Browser deadline must be finite and positive")
+    loop = loop or (_get_loop() if _IS_WINDOWS else asyncio.get_running_loop())
+    call = _BrowserCall(loop, coro)
+    result = asyncio.wrap_future(call.result)
+    result.add_done_callback(_consume_result)
     try:
-        return await asyncio.to_thread(future.result, timeout)
-    except Exception:
-        future.cancel()
+        async with asyncio.timeout(timeout):
+            return await asyncio.shield(result)
+    except BaseException:
+        call.cancel()
+        await finish_owned(asyncio.wrap_future(call.finished))
         raise
+
+
+def _consume_result(future):
+    if not future.cancelled():
+        future.exception()  # also observe a late exception after caller timeout
+
+
+async def finish_owned(awaitable):
+    """Defer repeated caller cancellation until owned cleanup completes."""
+    task = asyncio.ensure_future(awaitable)
+    interrupted = False
+    while True:
+        try:
+            result = await asyncio.shield(task)
+            break
+        except asyncio.CancelledError:
+            if task.cancelled():
+                raise
+            interrupted = True
+    if interrupted:
+        raise asyncio.CancelledError
+    return result
+
+
+class _BrowserCall:
+    """Actual browser task ownership; completion futures are thread-safe."""
+
+    def __init__(self, loop, coro):
+        self.loop, self.coro = loop, coro
+        self.result, self.finished = Future(), Future()
+        self.task = None
+        self.cancel_requested = threading.Event()
+        self.cancel_delivered = False
+        try:
+            loop.call_soon_threadsafe(self._launch)
+        except RuntimeError:
+            coro.close()
+            raise
+
+    def _launch(self):
+        self.task = self.loop.create_task(self.coro)
+        self.task.add_done_callback(self._done)
+        if self.cancel_requested.is_set():
+            self._cancel_task()
+
+    def _done(self, task):
+        if task.cancelled():
+            self.result.cancel()
+        elif (error := task.exception()) is not None:
+            self.result.set_exception(error)
+        else:
+            self.result.set_result(task.result())
+        self.finished.set_result(None)
+
+    def _cancel_task(self):
+        if self.task is not None and not self.cancel_delivered:
+            self.cancel_delivered = True
+            self.task.cancel()
+
+    def cancel(self):
+        self.cancel_requested.set()
+        self.loop.call_soon_threadsafe(self._cancel_task)
 
 
 def close_browser_loop() -> None:

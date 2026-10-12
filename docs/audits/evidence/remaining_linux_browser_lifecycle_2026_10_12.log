@@ -1,0 +1,14 @@
+exit=0
+{"family": 2, "host_loopback_refused": true, "errno": 101}
+{"family": 10, "host_loopback_refused": true, "errno": 99}
+
+{"cycle": 10, "elapsed_s": 35.0, "max_sampled_owned_rss_bytes": 533893120, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 20, "elapsed_s": 83.2, "max_sampled_owned_rss_bytes": 535207936, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 30, "elapsed_s": 123.0, "max_sampled_owned_rss_bytes": 638521344, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 40, "elapsed_s": 167.9, "max_sampled_owned_rss_bytes": 638521344, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 50, "elapsed_s": 206.9, "max_sampled_owned_rss_bytes": 638521344, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"cycle": 60, "elapsed_s": 241.3, "max_sampled_owned_rss_bytes": 638521344, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+{"profile": "bounded_browser_lifecycle", "ok": true, "cycles": 60, "pages": 120, "elapsed_s": 241.3, "max_sampled_owned_rss_bytes": 638521344, "initial_threads": 1, "final_threads": 2, "network_mode": "required", "external_requests": 0, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+qualification_exit=0
+qualification_cgroup_removed=true
+

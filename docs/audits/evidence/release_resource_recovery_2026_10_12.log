@@ -1,0 +1,79 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 824 items
+
+tests\test_package_update_on_a_guarded_install.py ...................... [  2%]
+..............                                                           [  4%]
+tests\test_path_grants.py ......                                         [  5%]
+tests\test_path_refresh.py ...........s.....                             [  7%]
+tests\test_path_rewrite.py ..                                            [  7%]
+tests\test_pdf_verification.py .....                                     [  8%]
+tests\test_perf_fixes.py ...........................                     [ 11%]
+tests\test_permissions.py ........................                       [ 14%]
+tests\test_personalities.py ..........................                   [ 17%]
+tests\test_pg_backup.py .................                                [ 19%]
+tests\test_pg_bridge_docker_env.py ...                                   [ 19%]
+tests\test_pg_dump_reported_not_assumed.py ........                      [ 20%]
+tests\test_pg_nul_safe.py ......                                         [ 21%]
+tests\test_pg_pool_recovery.py ...ssss                                   [ 22%]
+tests\test_pg_store_dual_backend.py ....s                                [ 22%]
+tests\test_phase2_remaining.py ....                                      [ 23%]
+tests\test_pipeline_sandbox.py .........                                 [ 24%]
+tests\test_plan_fence.py ................................                [ 28%]
+tests\test_plan_mode.py .............                                    [ 29%]
+tests\test_platform_gate_identity.py ...                                 [ 30%]
+tests\test_platform_rbac.py ......                                       [ 31%]
+tests\test_platform_ux_modules.py ........                               [ 32%]
+tests\test_portability.py ................                               [ 33%]
+tests\test_portability_setup.py ..............                           [ 35%]
+tests\test_post_hitl_shell.py .....                                      [ 36%]
+tests\test_postgres_coverage.py ..                                       [ 36%]
+tests\test_postgres_suite.py ........                                    [ 37%]
+tests\test_procedural_recorder_worker.py .....                           [ 38%]
+tests\test_process_budgets.py ....................                       [ 40%]
+tests\test_process_priority.py ..........                                [ 41%]
+tests\test_product_knowledge.py ............                             [ 43%]
+tests\test_product_version.py .....                                      [ 43%]
+tests\test_production.py ........                                        [ 44%]
+tests\test_production_qualification.py ................................. [ 48%]
+.                                                                        [ 48%]
+tests\test_project_files.py ...........                                  [ 50%]
+tests\test_project_init.py .................                             [ 52%]
+tests\test_prompt_cache.py .......                                       [ 53%]
+tests\test_prompt_fence.py .................                             [ 55%]
+tests\test_protected_config.py ...................................       [ 59%]
+tests\test_provider_conformance.py ..................................... [ 63%]
+........................................................................ [ 72%]
+..................................................                       [ 78%]
+tests\test_provider_key_install_scope.py .............                   [ 80%]
+tests\test_provider_key_is_not_destroyed.py .............                [ 81%]
+tests\test_provider_probe_model.py .......                               [ 82%]
+tests\test_provider_test_key_resolution.py ............                  [ 84%]
+tests\test_provider_tool_conversion.py ........                          [ 85%]
+tests\test_providers.py .....                                            [ 85%]
+tests\test_providers_js_behaviour.py ...........                         [ 87%]
+tests\test_proxy_routing_safety.py ..................................... [ 91%]
+...                                                                      [ 91%]
+tests\test_proxy_scraping_coverage.py .........                          [ 93%]
+tests\test_push_honours_the_switch.py ......                             [ 93%]
+tests\test_python_exec_denylist.py ..................................... [ 98%]
+..............                                                           [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+tests/test_pipeline_sandbox.py::test_post_pipeline_validate_schema_error
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\anyio\_backends\_asyncio.py:1100: StarletteDeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    result = context.run(func, *args)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========== 818 passed, 6 skipped, 2 warnings in 168.10s (0:02:48) ============

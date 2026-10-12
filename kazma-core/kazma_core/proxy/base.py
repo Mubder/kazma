@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from kazma_core.http_tls import shared_ssl_context
 
 __all__ = ["ProxyProvider", "NullProvider"]
 
@@ -29,8 +28,9 @@ class ProxyProvider:
 
     Implementations read their config from ConfigStore on each call (live config
     — a Settings change takes effect without restart, mirroring HITL's
-    ``get_hitl_config``). They must degrade gracefully: if misconfigured, return
-    ``None`` from :meth:`get_proxy_url` so the caller falls back to direct.
+    ``get_hitl_config``). ``None`` means credentials are not configured; active
+    route resolution refuses a selected unusable provider instead of switching
+    to direct access. Configuration failures raise a typed acquisition error.
     """
 
     name: str = "none"
@@ -53,19 +53,59 @@ class ProxyProvider:
         proxy and return the exit IP. Subclasses may override for provider-
         specific health endpoints.
         """
-        import httpx
+        import asyncio
 
-        proxy_url = self.get_proxy_url()
-        if not proxy_url:
-            return {"success": False, "error": "Proxy not configured."}
+        from kazma_core.web_acquire.policy import acquisition_policy
+        from kazma_core.web_acquire.result import AcquisitionError
+
+        if not acquisition_policy().permits('proxy'):
+            return {'success': False, 'error': 'Proxy testing is disabled by acquisition policy.'}
         try:
-            async with httpx.AsyncClient(proxy=proxy_url, timeout=15.0, verify=shared_ssl_context()) as client:
-                resp = await client.get("https://api.ipify.org")
-                if resp.status_code == 200:
-                    return {"success": True, "exit_ip": resp.text.strip()}
-                return {"success": False, "error": f"Exit check HTTP {resp.status_code}"}
-        except Exception as exc:  # noqa: BLE001 — best-effort health check
-            return {"success": False, "error": f"Proxy connection failed: {exc}"}
+            proxy_url = await asyncio.to_thread(self.get_proxy_url)
+        except AcquisitionError as exc:
+            return {'success': False, 'error': str(exc)}
+        if not proxy_url:
+            return {'success': False, 'error': 'Proxy not configured.'}
+        return await probe_proxy(proxy_url)
+
+
+async def probe_proxy(proxy_url: str | None) -> dict[str, Any]:
+    """Probe a resolved route without re-reading provider/account settings."""
+    import asyncio
+    import ipaddress
+
+    from kazma_core.errors import redact_secrets
+    from kazma_core.proxy.client import get_scraping_client
+    from kazma_core.web_acquire.http import read_response_capped
+    from kazma_core.web_acquire.policy import acquisition_policy
+    from kazma_core.web_acquire.resources import acquisition_capacity
+    from kazma_core.web_acquire.result import AcquisitionError
+
+    if not acquisition_policy().permits('proxy'):
+        return {'success': False, 'error': 'Proxy testing is disabled by acquisition policy.'}
+    if proxy_url is None:
+        return {'success': True, 'message': 'Direct mode (no proxy).'}
+    try:
+        async with asyncio.timeout(15.0), await acquisition_capacity().acquire(), get_scraping_client(
+            proxy=proxy_url, timeout=15.0, follow_redirects=False,
+        ) as client:
+            async with client.stream('GET', 'https://api.ipify.org') as response:
+                resp, text, truncated = await read_response_capped(response, 128)
+            if resp.status_code != 200:
+                return {'success': False, 'error': f'Exit check HTTP {resp.status_code}'}
+            if truncated:
+                return {'success': False, 'error': 'Proxy exit check exceeded the response limit.'}
+            try:
+                exit_ip = str(ipaddress.ip_address(text.strip()))
+            except ValueError:
+                return {'success': False, 'error': 'Proxy exit check did not return a valid IP address.'}
+            return {'success': True, 'exit_ip': exit_ip}
+    except AcquisitionError as exc:
+        return {'success': False, 'error': str(exc), 'error_code': exc.code}
+    except TimeoutError:
+        return {'success': False, 'error': 'Proxy exit check deadline exceeded (15s).', 'error_code': 'acquisition_deadline'}
+    except Exception as exc:
+        return {'success': False, 'error': redact_secrets(f'Proxy connection failed: {exc}')[:300]}
 
 
 class NullProvider(ProxyProvider):

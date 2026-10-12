@@ -7,6 +7,34 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 # Recent features guide
 
+**New in 2026-10-10 — final answers stay final across chat apps.** Telegram,
+Discord and Slack deliver the shared graph's answer without adding a greeting
+or sign-off afterward, and save the completed reply once. Native live checks
+covered one Arabic sentence, a bare JSON object and two English bullets.
+
+**New in 2026-10-09 — answer-quality safeguards and review.** Ambiguous bare
+tool-argument text receives at most one model recheck; text is never executed
+as a guessed tool call. Full attachment paths remain distinct. Explicit
+English/Arabic one-paragraph prose requests and verbatim supplied JSON copies
+receive conservative terminal formatting checks. Code delimiters render
+correctly in Web and Telegram, and saved history keeps the authoritative final
+reply after a recheck or disconnect. The administrator dashboard reports bounded
+structural quality signals without storing prompt or answer text; these are
+not accuracy grades. The owner completed review of 60 development answers and
+24 fresh answers: current approved sets are 60/60 and 24/24 Pass, with original
+59/60 and 23/24 results retained. This is bounded reviewed evidence, not a
+production-wide accuracy estimate or automatic-publishing qualification.
+
+**New in 2026-10-06 through 2026-10-08 — commands and recovery.** Native
+Discord/Slack `/kazma` commands and Telegram menu diagnostics use existing
+authorization and approval gates. Private command replies keep their follow-ups
+private. IDE retries use durable action receipts; uncertain effects remain
+held, and a swarm worker cannot automatically replay after a recorded mutation.
+The IDE protects unsent drafts, workspace changes and Git operations. Docker
+execution under the Windows service uses the configured workspace correctly.
+See [Native chat commands](../ops/native-slash-commands),
+[IDE](../products/ide) and [Known gaps](https://github.com/Mubder/kazma/blob/main/docs/KNOWN_GAPS.md) for setup and limits.
+
 **New in 2026-10-05 — X subject and reply-language controls.** Start with a
 target and Support/Against; Advanced preserves scope, matching and permissions.
 Choose a tone independently of stance, and set language, dialect, slang and
@@ -188,7 +216,7 @@ resolution + git-write blast radius), transcript recall fallback
 | **Hands 0.11 (2026-09-10)** | Chat is home. `file_apply_patch_set` (one HITL card, `-/+` hunks, optional pytest verify). Supervisor re-hops on `TESTS FAILED` (cap 3). ACP diffs + `session/cancel`. Docker jail `force`. | [IDE](../products/ide); [CLI](./cli-reference); `examples/hands-demo/` |
 | **Web `/ide` CodeMirror (2026-09-10)** | File pane is CodeMirror 5 `fromTextArea` (nord, `--bg-deep`). Textarea-first so a blocked CDN still shows the file. Read-only git is a subprocess, not HITL. | `/ide`; [IDE](../products/ide) |
 | **Turn Delivery + HITL registry (2026-09)** | Chat journal is SoT; `close_turn` is the only closer; client projects. One HITL row in `hitl_gates.db` (`pending` = live buttons; second claim **409**). FanOut is tri-state. | [Security](./security-and-safety); [Diagnosis map](../ops/diagnosis-map); AGENTS.md §30–§31 |
-| **SSRF pin-IP (Wave 8)** | Direct scrape connects to the validated public IP; private peer abort. Skip pin when a proxy is set. | [Security](./security-and-safety); `KAZMA_JINA_READER=1` still opt-in |
+| **SSRF pin-IP (Wave 8)** | Direct scrape connects to the validated public IP; private peer abort. Skip pin when a proxy is set. | [Security](./security-and-safety); acquisition defaults to local-only; remote mode and provider allowlist required |
 | **Context integrity (2026-08-30)** | Scratchpad merges; drafts live in `agent_artifacts.db`; trim always summarizes dropped turns; only an **explicit** topic pivot disarms recall. | [Memory](./memory-and-rag); AGENTS.md §29 |
 | **X Studio (2026-08-31)** | First-class `/x` composer + X-only planner. Post now / Schedule / reschedule / thread hops / delete. Saved drafts stamp `proposal_id` (stored text wins). Chat `x_post` stays always-HITL. **All clocks** → `/scheduled` (mixed cron + X). | [X publisher](./x-publisher); sidebar → X Studio |
 | **Brand type + mark (2026-08-31)** | IBM Plex Sans / IBM Plex Sans Arabic across UI, docs, and generated documents (Amiri naskh fallback). Letterhead K is logo, favicon, avatar. PPTX/XLSX no longer hard-code Calibri. | [Arabic & cultural](./arabic-cultural-features); [Document rendering](./document-rendering) |
@@ -591,7 +619,7 @@ Industry-grade web scraping resilience and model output truncation recovery.
 | **Response Size Caps** | `read_url` streams body reads and enforces `KAZMA_FETCH_MAX_BYTES` (default 5 MB) to prevent memory exhaustion and gzip-bomb exploits. |
 | **Content-Type Gate** | Non-textual binary payloads (PDFs, images, archives) fail fast with actionable guidance instead of polluting the text extractor. |
 | **5xx Retry Loop** | HTTP scraper retry loop covers 500, 502, 503, and 504 status codes with backoff and jitter (3 attempts). |
-| **robots.txt Compliance** | Opt-in `crawl_site(respect_robots=True)` or `KAZMA_CRAWL_RESPECT_ROBOTS=1` parses host `robots.txt` and flags disallowed URLs as `blocked_robots`. |
+| **robots.txt policy** | Automated crawl/KB/research saves enforce bounded KazmaBot checks by default; failed checks refuse crawling and disallowed URLs report `blocked_robots`. Explicit opt-out is visible. See [web research](./web-research#robots-policy) for limits. |
 | **Auto-Retry Truncation** | When LLM completion stops with `finish_reason='length'`, `llm_provider.chat` transparently retries ONCE with doubled `max_tokens` (capped at 4x configured / 32k) instead of returning broken tool JSON. |
 | **`file_append` Tool** | Built-in tool in `LocalToolRegistry` allowing agents to write large files in chunks (`file_write` to initialize, `file_append` for subsequent sections). |
 

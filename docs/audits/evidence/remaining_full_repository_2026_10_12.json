@@ -1,0 +1,12 @@
+{
+  "status": "launch_failed",
+  "chunks": 1,
+  "math_threads": 2,
+  "lowered_priority": true,
+  "input_sha256": "1967e49815a78158b975b44a2fef03488eb737441ae627c6daab33baec91224a",
+  "started": 1791755379.881535,
+  "test_files": 1011,
+  "reason": "Windows command-line length limit; owned runner stopped for argument-file repair",
+  "finished": 1791755454.9524186,
+  "superseded_by": "remaining_full_repository_retry_2026_10_12.json"
+}

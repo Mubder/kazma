@@ -18,6 +18,8 @@
   var pollTimer = null;
   var liveSource = null;
   var liveSessionId = null;
+  var liveVersionId = null;
+  var liveUpdatedAt = 0;
 
   // Sessions live in research_sessions.db, tasks in the swarm TaskStore —
   // route mutations by id prefix so delete/archive work for BOTH.
@@ -136,6 +138,9 @@
       } else if (act === 'del-archived') {
         e.stopPropagation();
         if (tid) window.KazmaResearch.delArchived(tid);
+      } else if (act === 'resume') {
+        e.stopPropagation();
+        if (tid) window.KazmaResearch.resumeSession(tid);
       } else if (act === 'view-detail') {
         if (e.target.closest('a, button[data-act]:not([data-act="view-detail"])')) return;
         if (tid) window.KazmaResearch.viewDetail(tid);
@@ -209,14 +214,32 @@
             toast(data.error, 'error');
             return;
           }
-          toast(i18n('research_cancelled', 'Research cancelled'), 'info');
           if (data.session) applyLiveSession(data.session);
-          closeLiveStream();
-          var cancelBtn = $('research-cancel-btn');
-          if (cancelBtn) cancelBtn.style.display = 'none';
+          if (data.session && data.session.status === 'cancelling') {
+            toast(i18n('research.ui.cancelling', 'Cancelling; waiting for cleanup…'), 'info');
+          } else if (data.session && ['done', 'error', 'cancelled'].indexOf(data.session.status) !== -1) {
+            closeLiveStream();
+          }
           window.KazmaResearch.load();
         })
         .catch(function () { toast(i18n('research.ui.cancel_failed', 'Cancel failed'), 'error'); });
+    },
+
+    resumeSession: function (id) {
+      id = String(id || '').replace(/^session:/, '');
+      fetch('/api/research/sessions/' + encodeURIComponent(id) + '/resume', {
+        method: 'POST', credentials: 'same-origin',
+      }).then(function (r) { return r.json(); }).then(function (data) {
+        if (data.error || !data.session) {
+          toast(data.error || i18n('research.ui.resume_failed'), 'error');
+          return;
+        }
+        liveSessionId = data.session.id;
+        showLivePanel();
+        applyLiveSession(data.session);
+        openLiveStream(liveSessionId);
+        window.KazmaResearch.load();
+      }).catch(function () { toast(i18n('research.ui.resume_failed'), 'error'); });
     },
 
     startDeep: function () {
@@ -468,8 +491,13 @@
             // endpoints); show the right button for the archived state.
             if (archBtn) archBtn.style.display = s.archived ? 'none' : '';
             if (restBtn) restBtn.style.display = s.archived ? '' : 'none';
+            if (s.status === 'interrupted') {
+              liveSessionId = s.id;
+              closeLiveStream();
+              showLivePanel(s);
+            }
             // Re-attach live stream if still running
-            if (s.status === 'running' || s.status === 'pending') {
+            if (s.status === 'running' || s.status === 'pending' || s.status === 'cancelling') {
               liveSessionId = s.id;
               showLivePanel(s);
               openLiveStream(s.id);
@@ -789,6 +817,15 @@
 
   function applyLiveSession(s) {
     if (!s) return;
+    var versionId = s.id || liveSessionId;
+    if (versionId !== liveVersionId) {
+      liveVersionId = versionId;
+      liveUpdatedAt = 0;
+    }
+    if (typeof s.updated_at === 'number' && Number.isFinite(s.updated_at)) {
+      if (s.updated_at < liveUpdatedAt) return;
+      liveUpdatedAt = s.updated_at;
+    }
     var statusEl = $('research-live-status');
     var stageEl = $('research-live-stage');
     var msgEl = $('research-live-message');
@@ -821,11 +858,11 @@
       cancelBtn.style.display =
         (s.status === 'running' || s.status === 'pending') ? '' : 'none';
     }
-    if (s.status === 'done' || s.status === 'error' || s.status === 'cancelled') {
+    if (['done', 'partial', 'error', 'cancelled', 'interrupted'].indexOf(s.status) !== -1) {
       var actions = $('research-live-actions');
       if (actions) {
         actions.style.display = 'flex';
-        var html = '';
+        var html = s.status === 'interrupted' ? '<button class="btn btn-primary btn-sm" data-act="resume" data-task-id="' + esc(s.id) + '">' + esc(i18n('research.ui.resume')) + '</button>' : '';
         if (s.report_path) {
           html += '<a class="btn btn-primary btn-sm" href="/api/research/papers/file?path=' +
             encodeURIComponent(s.report_path) + '" target="_blank">' +
@@ -835,6 +872,7 @@
         }
         actions.innerHTML = html;
       }
+      if (s.status === 'partial' || s.status === 'interrupted') toast(stateLabel(s.status), 'info');
       if (s.status === 'done') toast(i18n('research_start_done'), 'success');
       if (s.status === 'error') {
         toast(
@@ -894,6 +932,7 @@
       applyLiveSession({
         id: data.session_id || sessionId,
         status: data.status || 'running',
+        updated_at: data.updated_at,
         stage: data.stage,
         message: data.message,
         sources: data.sources,
@@ -907,7 +946,7 @@
           return prev.slice(-40);
         })(),
       });
-      if (data.status === 'done' || data.status === 'error') {
+      if (data.status === 'done' || data.status === 'error' || data.status === 'cancelled') {
         closeLiveStream();
         window.KazmaResearch.load();
       }
@@ -1007,6 +1046,7 @@
         actions = '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" data-act="archive" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.archive', 'Archive')) + '">' + ARCHIVE_SVG + '</button>' +
           '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" data-act="del" data-task-id="' + esc(t.id) + '" title="' + esc(i18n('research.ui.delete', 'Delete')) + '">×</button>';
       }
+      if (isSession && t.status === 'interrupted') actions += '<button class="btn btn-primary btn-sm" data-act="resume" data-task-id="' + esc(t.id) + '">' + esc(i18n('research.ui.resume')) + '</button>';
       return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;" data-act="view-detail" data-task-id="' + esc(t.id) + '">' +
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
           '<div style="flex:1;min-width:0;overflow:hidden;">' +

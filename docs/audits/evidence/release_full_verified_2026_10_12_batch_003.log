@@ -1,0 +1,73 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 790 items
+
+tests\test_balance_exhausted.py ...........                              [  1%]
+tests\test_boot_exposure_guard.py ..................                     [  3%]
+tests\test_branch_protection_runbook.py ...                              [  4%]
+tests\test_browser_acquisition_broker.py ....................            [  6%]
+tests\test_browser_boot_policy.py ..                                     [  6%]
+tests\test_browser_driver_budget.py ..............                       [  8%]
+tests\test_browser_egress_every_context.py .                             [  8%]
+tests\test_browser_origin_policy.py ...................                  [ 11%]
+tests\test_bug_regression.py ................................            [ 15%]
+tests\test_bus_approval_can_be_answered.py ........                      [ 16%]
+tests\test_bus_bridge.py ......................                          [ 18%]
+tests\test_button_label_matches_action.py ..                             [ 19%]
+tests\test_calendar_card_providers.py ....                               [ 19%]
+tests\test_calendar_connector.py ...................                     [ 22%]
+tests\test_calendar_disconnect.py ................                       [ 24%]
+tests\test_callback_allowlist.py ....                                    [ 24%]
+tests\test_capacity_commands.py ...........                              [ 26%]
+tests\test_certification.py ...................                          [ 28%]
+tests\test_chaos_injection.py ...................                        [ 30%]
+tests\test_chaos_llm_retry.py ..........                                 [ 32%]
+tests\test_chaos_routes.py ........                                      [ 33%]
+tests\test_chat_adapters_follow_settings.py ...................          [ 35%]
+tests\test_chat_as_product.py ..................                         [ 37%]
+tests\test_chat_attachment_security.py ..........                        [ 39%]
+tests\test_chat_composer_chrome.py ....                                  [ 39%]
+tests\test_chat_connector_secrets_install_scope.py ..........            [ 40%]
+tests\test_chat_history.py .........                                     [ 42%]
+tests\test_chat_i18n_bridge.py ....                                      [ 42%]
+tests\test_chat_key_resolution.py ..........                             [ 43%]
+tests\test_chat_session_routes_off_loop.py ..                            [ 44%]
+tests\test_chat_sse_fix.py ...............                               [ 45%]
+tests\test_chat_steer_composer.py ...................................... [ 50%]
+......................                                                   [ 53%]
+tests\test_chat_tables.py .............                                  [ 55%]
+tests\test_checkpoint.py .......                                         [ 56%]
+tests\test_checkpoint_backend_recovery_contract.py .                     [ 56%]
+tests\test_checkpoint_retention.py ............................s         [ 59%]
+tests\test_checkpoint_serde.py .........                                 [ 61%]
+tests\test_checkpoint_timeout_deferral.py ...                            [ 61%]
+tests\test_checkpoints_pg.py ...s                                        [ 61%]
+tests\test_child_env.py ....................                             [ 64%]
+tests\test_circuit_breaker_hardening.py .............                    [ 66%]
+tests\test_cleanup_live_leftovers.py ....                                [ 66%]
+tests\test_cli_ask.py ...............................                    [ 70%]
+tests\test_cli_banner.py .............                                   [ 72%]
+tests\test_cli_commands.py ............................................. [ 77%]
+........................................................................ [ 86%]
+.......                                                                  [ 87%]
+tests\test_cli_docs.py ....                                              [ 88%]
+tests\test_cli_reference_commands.py .....                               [ 88%]
+tests\test_cloud_sync.py ..............................                  [ 92%]
+tests\test_code_exec.py ................................................ [ 98%]
+..                                                                       [ 99%]
+tests\test_code_index.py .......                                         [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============ 788 passed, 2 skipped, 1 warning in 177.74s (0:02:57) ============

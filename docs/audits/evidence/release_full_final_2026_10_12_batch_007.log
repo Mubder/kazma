@@ -1,0 +1,72 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 617 items
+
+tests\test_failover_cache_reset.py ..                                    [  0%]
+tests\test_fanout_bus.py ...                                             [  0%]
+tests\test_fast_test_runner.py ....................................      [  6%]
+tests\test_file_apply_patch.py ........                                  [  7%]
+tests\test_file_checkpoints.py ....                                      [  8%]
+tests\test_file_chip.py ...                                              [  9%]
+tests\test_file_read_cache_invalidation.py ........                      [ 10%]
+tests\test_file_search_event_loop.py ..                                  [ 10%]
+tests\test_file_tools.py .........                                       [ 12%]
+tests\test_firing_ledger_report.py ......                                [ 13%]
+tests\test_fleet_embed.py ....                                           [ 13%]
+tests\test_forwarded_headers_peer.py .......................             [ 17%]
+tests\test_frames_name_their_turn.py .....                               [ 18%]
+tests\test_fresh_imports.py ......                                       [ 19%]
+tests\test_gate_decision_recorder.py ...............                     [ 21%]
+tests\test_gate_view.py ...................                              [ 24%]
+tests\test_gateway.py .................................................. [ 32%]
+...                                                                      [ 33%]
+tests\test_gateway_approval_authorization.py ........................... [ 37%]
+............                                                             [ 39%]
+tests\test_gateway_approval_card_retry.py ...............                [ 42%]
+tests\test_gateway_prompt_shutdown.py .......                            [ 43%]
+tests\test_gateway_recursion_partial.py .....                            [ 44%]
+tests\test_gateway_send_backends.py ..                                   [ 44%]
+tests\test_gateway_slash_facts.py ..............                         [ 46%]
+tests\test_gateway_terminal_answer.py .........                          [ 48%]
+tests\test_genai_otel_spans.py ......................................... [ 54%]
+.                                                                        [ 54%]
+tests\test_generate_metrics.py ....................                      [ 58%]
+tests\test_get_routes_off_the_loop.py ...                                [ 58%]
+tests\test_github_app_clock_skew.py .................                    [ 61%]
+tests\test_github_client.py .......................                      [ 65%]
+tests\test_github_clone_guards.py ................................       [ 70%]
+tests\test_github_list_issues.py ............                            [ 72%]
+tests\test_github_oauth_redirect.py ...                                  [ 72%]
+tests\test_github_status_cache.py .......                                [ 73%]
+tests\test_gmail_oauth_client_shape.py ..........                        [ 75%]
+tests\test_google_llm.py ......                                          [ 76%]
+tests\test_guard_install_home.py ...                                     [ 76%]
+tests\test_guard_integration.py .......................                  [ 80%]
+tests\test_guard_owns_reload.py ...............................          [ 85%]
+tests\test_guard_port_exhaustion.py .....                                [ 86%]
+tests\test_guard_probe_answers.py ....                                   [ 87%]
+tests\test_gw061_bugfixes.py .............                               [ 89%]
+tests\test_gw062_bugfixes.py ....                                        [ 89%]
+tests\test_ha_workspace_boot.py ...                                      [ 90%]
+tests\test_handoff_breaker_accounting.py ..                              [ 90%]
+tests\test_handoff_guards.py ...                                         [ 91%]
+tests\test_hands_face.py ....                                            [ 91%]
+tests\test_hands_live.py s                                               [ 92%]
+tests\test_hands_outcome.py ..                                           [ 92%]
+tests\test_hard_page_recovery.py .....                                   [ 93%]
+tests\test_hardening.py ..........................................       [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============ 616 passed, 1 skipped, 1 warning in 468.08s (0:07:48) ============

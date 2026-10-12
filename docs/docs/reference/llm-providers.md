@@ -142,5 +142,5 @@ per project/location. Hardcoded model list: `gemini-2.5-flash`,
 The registry auto-corrects provider/model mismatches: calling a model owned
 by a different provider than the active one switches both. Use **Settings →
 Providers** in the UI, `/config model <name>` (chat), or the Model selector in
-the sidebar. See [AGENTS.md §1](../../../AGENTS.md) for the model-registry
+the sidebar. See [AGENTS.md §1](https://github.com/Mubder/kazma/blob/main/AGENTS.md) for the model-registry
 invariants.

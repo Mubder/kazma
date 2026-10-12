@@ -1,0 +1,32 @@
+"""Derive once-counted final coverage, preserving every failed raw attempt."""
+import json,time
+from pathlib import Path
+from scripts.generate_metrics import collection_fingerprint
+folder=Path('docs/audits/evidence'); expected=collection_fingerprint()
+raw=json.loads((folder/'release_full_completed_2026_10_12.json').read_text())
+assert raw['status']=='complete' and len(raw['results'])==21
+assert raw['input_sha256']==raw['final_input_sha256']==expected
+failed='tests/test_metrics_receipt_current.py::test_shipped_collection_receipt_matches_current_inputs'
+for row in raw['results']:
+ if row['batch']==11:
+  assert row['exit']==1 and row['measured'] and row['counts']['failed']==1 and row['failures']==[failed]
+ elif row['batch']==12:assert row['exit']==124 and not row['measured'] and not row['counts']
+ else:assert row['exit']==0 and row['measured']
+resource=json.loads((folder/'release_resource_recovery_2026_10_12.json').read_text())
+metrics=json.loads((folder/'release_metrics_receipt_recovery_2026_10_12.json').read_text())
+assert resource['exit']==metrics['exit']==0
+assert resource['input_sha256']==metrics['input_sha256']==expected
+assert resource['files']==raw['results'][12]['files']
+assert resource['counts'].get('passed',0)>0 and not resource['counts'].get('failed')
+assert metrics['counts']=={'passed':1}
+accepted=json.loads(json.dumps(raw));accepted.update(status='complete',exit=0,completed_at=time.time(),raw_complete_run='release_full_completed_2026_10_12.json',timing_scope='Continuation owner only; earlier batches and recoveries have separate receipts.',coverage_kind='Serial full-suite campaign with explicit recovery; not an uninterrupted green run')
+row=accepted['results'][11];row['observed_failures']=row['failures'];row['failures']=[];row['exit']=0;row['counts']['passed']+=1;del row['counts']['failed'];row['generated_receipt_recovery']='release_metrics_receipt_recovery_2026_10_12.log'
+row=accepted['results'][12];row.update(exit=0,measured=True,counts=resource['counts'],resource_guard_recovery='release_resource_recovery_2026_10_12.log',observed_exit=124)
+totals={}
+for row in accepted['results']:
+ for key,value in row['counts'].items():totals[key]=totals.get(key,0)+value
+accepted['totals']=totals
+files=[name for row in accepted['results'] for name in row['files']]
+assert len(files)==len(set(files))==1011
+(folder/'release_full_accepted_2026_10_12.json').write_text(json.dumps(accepted,indent=2)+'\n',encoding='utf-8')
+print(json.dumps({'coverage_kind':accepted['coverage_kind'],'totals':totals,'files':len(files),'input_sha256':expected}),flush=True)

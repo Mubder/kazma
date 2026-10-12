@@ -10,6 +10,7 @@ from __future__ import annotations
 from urllib.parse import quote
 
 from kazma_core.proxy.base import ProxyProvider
+from kazma_core.proxy.config import proxy_config_scope, proxy_value
 
 __all__ = ["BrightDataProvider"]
 
@@ -21,17 +22,14 @@ class BrightDataProvider(ProxyProvider):
 
     @staticmethod
     def _cfg(key: str, default: str = "") -> str:
-        try:
-            from kazma_core.config_store import get_config_store
+        return str(proxy_value(key, default)).strip()
 
-            val = get_config_store().get(f"proxy.{key}")
-            return str(val if val is not None else default).strip()
-        except Exception:  # noqa: BLE001 — config best-effort
-            return default
 
+    @proxy_config_scope()
     def is_configured(self) -> bool:
         return bool(self._cfg("username") and self._cfg("password"))
 
+    @proxy_config_scope()
     def get_proxy_url(self) -> str | None:
         if not self.is_configured():
             return None

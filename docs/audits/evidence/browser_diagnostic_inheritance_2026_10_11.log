@@ -1,0 +1,12 @@
+[
+  {
+    "boundary": "original_inheritance",
+    "code": 1,
+    "output": "nv\\Lib\\site-packages\\_pytest\\config\\__init__.py\", line 920, in import_plugin\r\n    raise ImportError(\r\n  File \"G:\\GitHubRepos\\kazma\\.venv\\Lib\\site-packages\\_pytest\\config\\__init__.py\", line 913, in import_plugin\r\n    mod = importlib.import_module(importspec)\r\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n  File \"C:\\Users\\balfa\\AppData\\Roaming\\uv\\python\\cpython-3.12.9-windows-x86_64-none\\Lib\\importlib\\__init__.py\", line 90, in import_module\r\n    return _bootstrap._gcd_import(name[level:], package, level)\r\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n  File \"<frozen importlib._bootstrap>\", line 1387, in _gcd_import\r\n  File \"<frozen importlib._bootstrap>\", line 1360, in _find_and_load\r\n  File \"<frozen importlib._bootstrap>\", line 1310, in _find_and_load_unlocked\r\n  File \"<frozen importlib._bootstrap>\", line 488, in _call_with_frames_removed\r\n  File \"<frozen importlib._bootstrap>\", line 1387, in _gcd_import\r\n  File \"<frozen importlib._bootstrap>\", line 1360, in _find_and_load\r\n  File \"<frozen importlib._bootstrap>\", line 1310, in _find_and_load_unlocked\r\n  File \"<frozen importlib._bootstrap>\", line 488, in _call_with_frames_removed\r\n  File \"<frozen importlib._bootstrap>\", line 1387, in _gcd_import\r\n  File \"<frozen importlib._bootstrap>\", line 1360, in _find_and_load\r\n  File \"<frozen importlib._bootstrap>\", line 1310, in _find_and_load_unlocked\r\n  File \"<frozen importlib._bootstrap>\", line 488, in _call_with_frames_removed\r\n  File \"<frozen importlib._bootstrap>\", line 1387, in _gcd_import\r\n  File \"<frozen importlib._bootstrap>\", line 1360, in _find_and_load\r\n  File \"<frozen importlib._bootstrap>\", line 1324, in _find_and_load_unlocked\r\nImportError: Error importing plugin \"docs.audits.evidence.browser_order_diagnostics_2026_10_11\": No module named 'docs'\r\n"
+  },
+  {
+    "boundary": "fixed_inheritance",
+    "code": 0,
+    "output": ".                                                                        [100%]\r\n1 passed in 0.00s\r\n"
+  }
+]

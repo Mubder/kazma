@@ -1,0 +1,44 @@
+"""Recover the resource-interrupted batch once, with private-memory diagnostics."""
+import json,os,threading,time
+from pathlib import Path
+import psutil
+from scripts import fast_test as runner,generate_metrics
+from release_memory_guard import install
+install(runner)
+root=Path.cwd();folder=root/'docs/audits/evidence'
+original=json.loads((folder/'release_full_completed_2026_10_12.json').read_text())
+row=original['results'][12]
+assert row['exit']==124 and not row['measured']
+assert original['input_sha256']==generate_metrics.collection_fingerprint()
+stopped=threading.Event()
+def sample():
+ with (folder/'release_resource_recovery_2026_10_12_resources.log').open('w',encoding='utf-8') as out:
+  tick=0
+  while not stopped.wait(1):
+   tick+=1
+   available=psutil.virtual_memory().available
+   if tick%5 and available>=8*1024**3:continue
+   owned=[]
+   for child in psutil.Process().children(recursive=True):
+    try:
+     info=child.memory_info();owned.append({'pid':child.pid,'name':child.name(),'rss':info.rss,'private':getattr(info,'private',None)})
+    except (psutil.NoSuchProcess,psutil.AccessDenied):pass
+   heavy=[]
+   if available<8*1024**3:
+    for proc in psutil.process_iter(['pid','name','memory_info']):
+     try:
+      info=proc.info['memory_info']
+      if info:heavy.append({'pid':proc.pid,'name':proc.info['name'],'rss':info.rss,'private':getattr(info,'private',0)})
+     except (psutil.NoSuchProcess,psutil.AccessDenied):pass
+    heavy=sorted(heavy,key=lambda r:r['private'],reverse=True)[:8]
+   out.write(json.dumps({'at':time.time(),'available_bytes':available,'owned':owned,'largest_private_processes':heavy})+'\n');out.flush()
+thread=threading.Thread(target=sample,daemon=True);thread.start()
+try:
+ code,output=runner.run_pytest(['-p','release_document_order_diagnostics',*row['files'],'--timeout=120','--tb=short'],1250)
+ (folder/'release_resource_recovery_2026_10_12.log').write_text(output,encoding='utf-8')
+ result={'exit':code,'counts':runner._parse_summary(output),'files':row['files'],'input_sha256':generate_metrics.collection_fingerprint()}
+ (folder/'release_resource_recovery_2026_10_12.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')
+ print(json.dumps({k:v for k,v in result.items() if k!='files'}),flush=True)
+finally:
+ stopped.set();thread.join(5)
+raise SystemExit(code)

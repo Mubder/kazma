@@ -253,13 +253,19 @@ See [Web research](../guide/web-research) for playbooks. Tools are used from **c
 | `KAZMA_RESEARCH_DIGEST_MAX` | `12000` | Max output size of `digest_research_file`. |
 | `KAZMA_CRAWL_MAX_PAGES` | `50` | Hard ceiling for `crawl_site` `max_pages`. |
 | `KAZMA_CRAWL_MAX_DEPTH` | `5` | Hard ceiling for `crawl_site` `max_depth`. |
-| `KAZMA_FETCH_BACKEND` | `auto` | `auto` \| `httpx` \| `jina` \| `firecrawl`. |
-| `KAZMA_FIRECRAWL_API_KEY` | unset | Optional Firecrawl scrape API (used in pre-fetch + hard-page recovery). |
+| `KAZMA_ACQUISITION_MODE` | `local_only` | Local HTTP/extraction/Chromium by default. `local_first_with_remote_fallback` permits only named providers below. |
+| `KAZMA_ACQUISITION_REMOTE_PROVIDERS` | empty | Comma-separated `jina`, `firecrawl`, `proxy`; requires the remote mode too. Keys and legacy flags cannot grant permission. |
+| `KAZMA_FETCH_DEADLINE_SECONDS` | `90` | Complete text acquisition deadline including DNS, HTTP retries and rendering; 1–300 seconds. |
+| `KAZMA_REMOTE_JOB_REQUESTS` | `256` | Durable remote request allowance per acquisition/research/crawl job, 0–1024. Failures and uncertain attempts consume allowance; nested requests share it. This is a request upper bound, not a financial spend cap. |
+| `KAZMA_REMOTE_DAY_REQUESTS` | `1024` | Installation-wide durable remote request allowance per UTC day, 0–4096. Shared across providers and processes. Zero refuses remote dispatch. Provider credit usage/balances remain separate. |
+| `KAZMA_BROWSER_CGROUP_ROOT` | Current Linux cgroup | Absolute writable delegated cgroup v2 root for the local Chromium driver tree. Requires memory, swap, pids, CPU and group-kill controls. Missing controls refuse rendering; Kazma does not configure host controllers. Windows uses Job Objects. |
+| `KAZMA_FETCH_BACKEND` | `auto` | Legacy remote selection: `auto` \| `httpx` \| `jina` \| `firecrawl`; always subject to acquisition policy. |
+| `KAZMA_FIRECRAWL_API_KEY` | unset | Optional Firecrawl credential; used only after local failure when policy permits Firecrawl. A key alone is not permission. |
 | `KAZMA_FIRECRAWL_URL` | `https://api.firecrawl.dev` | Firecrawl API base (self-host OK). |
-| `KAZMA_JINA_READER` | unset (recovery-on) | `1` = always try first; unset = last-resort recovery; `0`/`off` = never use Jina. |
+| `KAZMA_JINA_READER` | unset | `0`/`off` vetoes Jina. Other values cannot override the acquisition policy and provider allowlist. |
 | `JINA_API_KEY` / `KAZMA_JINA_API_KEY` | unset | Optional Jina Bearer token for higher rate limits. |
-| `KAZMA_FETCH_MAX_BYTES` | `5000000` | Most bytes read from one fetched page (at least 65536). The rest is never read, so a huge file or a compression bomb cannot fill memory. |
-| `KAZMA_CRAWL_RESPECT_ROBOTS` | `0` | `1` makes `crawl_site` obey each site's `robots.txt` (a call can still choose for itself). |
+| `KAZMA_FETCH_MAX_BYTES` | `5000000` | Decoded response-body cap for direct HTTP and hosted scrape responses; clamped to 65536–20000000 bytes. Wire consumption and gzip/deflate expansion are bounded. Clipping is explicit; incomplete hosted payloads and JSON are refused. This is a per-response bound, not a whole-job/browser memory budget. |
+| `KAZMA_CRAWL_RESPECT_ROBOTS` | `1` | Enforce KazmaBot robots policy for automated crawling, KB discovery/ingest and research saves. Failed checks refuse dispatch; 404/410 mean missing rules. Explicit `0` or `crawl_site(respect_robots=False)` is recorded as disabled by the operator. Only `0`/`1` are valid. |
 | `KAZMA_RESEARCH_ROUTE` | `soft` | For a request worded as deep research, the first turn tells the agent to use `run_research_pipeline` once rather than chain many searches by hand. `0` removes the hint. |
 | `KAZMA_RESEARCH_SOFT_NUDGE` | `deep` | When the agent has searched but read fewer than `KAZMA_RESEARCH_MIN_SOURCES` full sources, it is told once not to answer from snippets: `deep` for deep-worded requests, any other value for every research request, `0` never. |
 | `KAZMA_RESEARCH_MIN_SOURCES` | `2` | Full sources (`read_url`, `read_url_to_file`, crawls, digests) that count as enough for that nudge (1–8). |
@@ -268,7 +274,6 @@ See [Web research](../guide/web-research) for playbooks. Tools are used from **c
 | `KAZMA_RESEARCH_GAP_LOOP` | on | After a deep run's first synthesis, a critic may ask for one more round of sources. `0` skips it. |
 | `KAZMA_RESEARCH_LLM_PLANNER` | on | `0` plans search queries by heuristic instead of an LLM call. |
 | `KAZMA_RESEARCH_LLM_CRITIC` | on | `0` checks a draft for gaps by heuristic instead of an LLM call. |
-| `KAZMA_RESEARCH_PREFLIGHT_LIVE` | unset | `1` makes the research readiness check run a real micro-search, not only a configuration check. |
 | `KAZMA_RESEARCH_SYNTH_MAX_IN` | `48000` | Characters of research files one `research_synthesize` call reads (4000–200000). |
 
 Optional package: Playwright via `pip install -e ".[web]"` then `playwright install chromium` (bot walls / thin JS shells).
@@ -286,7 +291,7 @@ Optional package: Playwright via `pip install -e ".[web]"` then `playwright inst
 | `KAZMA_KB_MAX_DEPTH` | `10` | Link depth of an ingest crawl when the site has no sitemap (0–20). |
 | `KAZMA_KB_DELAY_MS` | `300` | Pause between page fetches of one ingest job (0–5000 ms). |
 | `KAZMA_KB_SCOPE_MODE` | `tree` | Which links an ingest crawl follows: `tree` (same host and a shared topic path segment), `prefix` (strict path prefix), `domain` (same host, any path) or `exact` (the one page). |
-| `KAZMA_KB_JINA_FALLBACK` | on | When a documentation page is bot-walled, ingest may fetch it through the free `r.jina.ai` reader, which sends the page URL to Jina. `0`, or `KAZMA_JINA_READER=0`, stops it. |
+| `KAZMA_KB_JINA_FALLBACK` | policy-gated | Jina discovery fallback requires remote mode plus `jina` allowlist permission. `0`, or `KAZMA_JINA_READER=0`, vetoes it; `1` cannot grant permission. |
 
 ---
 
@@ -401,6 +406,7 @@ build if the code reads one of these and it is missing from **both**
 
 | Variable | Default | What it turns OFF | Safe to set when |
 |----------|---------|-------------------|------------------|
+| `KAZMA_ACQUISITION_MODE` / `KAZMA_ACQUISITION_REMOTE_PROVIDERS` | `local_only` / empty | `local_first_with_remote_fallback` plus named providers admits hosted extraction or configured scraping proxies. URLs/content can leave the machine and paid services may charge. | The operator deliberately permits those providers. Durable request reservations bound job/day dispatch; they are not financial caps or observed charges. Firecrawl balances require an explicit metered refresh; unsupported balances remain unknown. Keys alone grant nothing. |
 | `KAZMA_AUTH_DISABLED` | unset | The entire HTTP auth gate. A configured `KAZMA_SECRET` becomes irrelevant — the switch disables the check that reads it. | Loopback only, with no proxy in front. **Refused at boot on a non-loopback bind or behind a declared proxy** (`KAZMA_TRUSTED_PROXIES`, `security/boot_guard.py`). While it is set, a request that came through a proxy is answered 503. Refused outright with `KAZMA_PRODUCTION=1`. |
 | `KAZMA_DEV_WS_BYPASS` | unset | Authentication on **every WebSocket handshake**, including the chat socket that carries the turn stream. HTTP auth is unaffected, which is what makes it easy to miss. | Loopback only, with no proxy in front. **Refused at boot on a non-loopback bind or behind a declared proxy**, same guard as `KAZMA_AUTH_DISABLED`. |
 | `KAZMA_DEMO_MODE` | unset | The auth gate, deliberately, for a public throwaway demo (`fly.toml`). Allowed on a public bind and announced loudly at boot. | A throwaway instance with no real data, credentials or vault. Never on an install you care about. |
@@ -664,3 +670,11 @@ does not enable multiple active replicas. See [Deployment](../guide/deployment#4
 - [Postgres & SaaS](../ops/postgres-and-saas)  
 - [Production checklist](../ops/production-checklist)  
 - [Security & Safety](../guide/security-and-safety)  
+
+### Acquisition enforcement added 2026-10-12
+
+| Variable | Default | Behavior |
+| --- | --- | --- |
+| `KAZMA_BROWSER_NETWORK_MODE` | `required` | Require Linux isolated network namespace and cgroup controls; strict launch unavailable on Windows. `compatibility` explicitly uses the weaker broker/deny-proxy boundary. |
+| `KAZMA_JINA_TOKEN_BUDGET` | `50000` | Reader token ceiling, integer 500–50000; provider rejection is visible. |
+| `KAZMA_ACQUISITION_MAX_COST_USD` | unset | Optional nonnegative monetary cap; remote dispatch refuses while its charging upper bound is unsupported. |

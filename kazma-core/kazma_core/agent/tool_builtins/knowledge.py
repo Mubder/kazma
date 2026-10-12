@@ -154,6 +154,7 @@ def register_knowledge_tools(registry: Any) -> None:
         seed_url: str,
         max_pages: int = 5,
         name: str = "",
+        resume_job_id: str = "",
     ) -> str:
         try:
             from kazma_core.stores.knowledge import get_knowledge_store
@@ -175,9 +176,11 @@ def register_knowledge_tools(registry: Any) -> None:
                 )
             final_msg = ""
             last = None
-            async for upd in ingest_site(lib_id, seed, max_pages=cap):
+            async for upd in ingest_site(lib_id, seed, max_pages=cap, job_id=resume_job_id or None, resume=bool(resume_job_id)):
                 last = upd
                 final_msg = getattr(upd, "message", "") or final_msg
+            if last is None or last.phase == 'error':
+                return f"Error: knowledge_ingest_site failed — {final_msg or 'No terminal crawl outcome received.'}"
             lib = store.get_library(lib_id) or {}
             discovered = getattr(last, "discovered", 0) if last else 0
             fetched = getattr(last, "fetched", 0) if last else 0
@@ -189,6 +192,7 @@ def register_knowledge_tools(registry: Any) -> None:
                 f"chunks_indexed≈{chunks_new}. "
                 f"Library total chunks={lib.get('chunk_count', '?')}. "
                 f"Last: {final_msg or 'done'}. "
+                f"Crawl job={getattr(last, 'job_id', '')}; inspect with research_readiness(job_id). "
                 f"Search with knowledge_search(query, library={lib_id!r})."
             )
         except Exception as exc:

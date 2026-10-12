@@ -127,7 +127,10 @@ def register_external_tools(registry: Any) -> None:
                 "Deep research paper mode: multi-query search → parallel acquire → "
                 "digest → LLM synthesis → research/reports/.../report.md (+ optional DOCX). "
                 "Args: topic, depth='deep'|'standard', max_sources=8, language=''. "
-                "Use for comprehensive/thorough research or a full report."
+                "Use for comprehensive/thorough research or a full report. Returns a durable job ID. "
+                "For an interrupted run, pass resume_job_id with the same topic/options/workspace. "
+                "Verified completed stages are reused; uncertain source effects are skipped and "
+                "uncertain required stages refuse replay."
             ),
             category="search",
         )
@@ -146,7 +149,9 @@ def register_external_tools(registry: Any) -> None:
                 "(default from profile; hard max 50; use 12–20 for deep "
                 "docs), max_depth, same_domain_only=True, delay_ms, "
                 "save=True. Saves pages under workspace; returns markdown "
-                "index. SSRF-safe."
+                "index and durable job ID. resume_job_id explicitly resumes an "
+                "interrupted crawl with identical options/workspace; uncertain "
+                "pages are skipped. SSRF-safe."
             ),
             category="search",
         )

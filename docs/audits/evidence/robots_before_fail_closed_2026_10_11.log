@@ -1,0 +1,10 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_________ test_original_checker_must_not_treat_http_503_as_permission _________
+docs\audits\evidence\robots_before_fail_closed_2026_10_11.py:32: in test_original_checker_must_not_treat_http_503_as_permission
+    assert not permitted, 'Original checker allowed crawling after a failed HTTP 503 robots fetch'
+E   AssertionError: Original checker allowed crawling after a failed HTTP 503 robots fetch
+E   assert not True
+=========================== short test summary info ===========================
+FAILED docs/audits/evidence/robots_before_fail_closed_2026_10_11.py::test_original_checker_must_not_treat_http_503_as_permission
+1 failed in 0.50s

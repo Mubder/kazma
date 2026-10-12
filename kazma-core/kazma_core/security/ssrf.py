@@ -42,10 +42,12 @@ import asyncio
 import ipaddress
 import logging
 import socket
+from contextvars import ContextVar
 from typing import Any
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+_dns_budget: ContextVar[Any] = ContextVar('acquisition_dns_budget', default=None)
 
 
 class SSRFError(ValueError):
@@ -90,6 +92,9 @@ def _resolve_host_ips(host: str) -> list[str]:
     Returns an empty list when resolution fails so callers can decide
     whether to treat an unresolvable host as blocked.
     """
+    budget = _dns_budget.get()
+    if budget is not None:
+        return budget.resolve(host)
     try:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror:
@@ -142,6 +147,9 @@ def validate_url(url: str, *, block_unresolved: bool = False, allow_private: boo
     # When private addresses are explicitly permitted, skip the checks.
     if allow_private:
         return ()
+
+    if parsed.username is not None or parsed.password is not None:
+        raise SSRFError("Blocked URL: embedded credentials are not allowed for public acquisition.")
 
     # Fast textual rejects for common internal hostnames.
     if host_lower in ("localhost", "0.0.0.0", "::1"):
@@ -197,20 +205,27 @@ def validate_url(url: str, *, block_unresolved: bool = False, allow_private: boo
 def peer_ip_from_response(response: Any) -> str | None:
     """Return the connected peer IP from an httpx response, if exposed.
 
-    Uses ``response.extensions["network_stream"].get_extra_info("peername")``
-    (httpcore). Returns None when the stream is missing (mocks, some proxies).
+    httpcore exposes ``server_addr``; ``peername`` is retained for older
+    adapters. A bounded reader snapshots the address before closing a stream.
     """
     ext = getattr(response, "extensions", None) or {}
+    captured = ext.get("kazma_peer_ip")
+    if isinstance(captured, str) and captured:
+        return captured
     stream = ext.get("network_stream") or ext.get("stream")
     if stream is None:
         return None
     getter = getattr(stream, "get_extra_info", None)
     if not callable(getter):
         return None
-    try:
-        peer = getter("peername")
-    except Exception:
-        return None
+    peer = None
+    for key in ("server_addr", "peername"):
+        try:
+            peer = getter(key)
+        except Exception:
+            continue
+        if isinstance(peer, (tuple, str)) and peer:
+            break
     if isinstance(peer, tuple) and peer:
         ip = str(peer[0])
         if ip.startswith("::ffff:"):
@@ -227,15 +242,21 @@ def assert_peer_public(
     url: str,
     validated_ips: tuple[str, ...] | set[str] | None = None,
     via_proxy: bool = False,
+    require_peer: bool = False,
 ) -> None:
     """Abort if the connected peer is private or not in *validated_ips* (H-7).
 
     When *via_proxy* is True the peer is the proxy, not the origin — only
-    the private-range check runs. Missing peer info is a no-op (cannot
-    inspect) rather than a fail-open skip of validate_url, which already ran.
+    the private-range check runs. Acquisition can require evidence: when
+    peer metadata is unavailable, a direct validated-IP transport attestation
+    suffices. Legacy non-acquisition callers may leave require_peer=False.
     """
     peer = peer_ip_from_response(response)
     if not peer:
+        ext = getattr(response, "extensions", None) or {}
+        pin = ext.get("kazma_pinned_ip")
+        if require_peer and not (not via_proxy and validated_ips and pin in validated_ips):
+            raise SSRFError(f"Blocked URL '{url}': connected peer could not be verified.")
         return
     try:
         ip = ipaddress.ip_address(peer)

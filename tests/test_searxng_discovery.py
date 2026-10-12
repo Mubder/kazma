@@ -32,35 +32,23 @@ def test_candidate_bases_include_env_and_defaults(monkeypatch):
 def test_searxng_prefers_cached_good_base(monkeypatch):
     calls: list[str] = []
 
-    class _Resp:
-        status_code = 200
+    def fake_search(backend, query, count, *, base, local):
+        calls.append(base)
+        assert local
+        return {'status': 'ok', 'reached': True, 'detail': '',
+            'results': [{'title': 'A', 'href': 'https://a.example', 'body': 'body'}]}
 
-        def json(self):
-            return {
-                "results": [
-                    {"title": "A", "url": "https://a.example", "content": "body"}
-                ]
-            }
-
-    def fake_get(url, params=None, timeout=None, headers=None):
-        calls.append(url)
-        return _Resp()
-
-    # Loopback bases so the code takes the httpx.get path (non-loopback
-    # bases route through the scraping client, bypassing the httpx.get mock).
     monkeypatch.setattr(ws, "_searxng_candidate_bases", lambda: [
         "http://localhost:1",
         "http://localhost:2",
     ])
     ws._searxng_cache["base"] = "http://localhost:2"
 
-    import httpx
-
-    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr("kazma_core.web_acquire.search_http.run_http_search", fake_search)
     results, note = ws._searxng_search("q", 3)
     assert results and results[0]["href"] == "https://a.example"
     assert "localhost:2" in note
-    assert calls[0].startswith("http://localhost:2/")
+    assert calls[0] == "http://localhost:2"
 
 
 def test_searxng_cooldown_skips_when_all_dead(monkeypatch):
@@ -74,13 +62,9 @@ def test_searxng_cooldown_skips_when_all_dead(monkeypatch):
 
 
 def test_searxng_all_fail_sets_cooldown(monkeypatch):
-    import httpx
-
-    def boom(*a, **k):
-        raise httpx.ConnectError("nope")
-
     monkeypatch.setattr(ws, "_searxng_candidate_bases", lambda: ["http://dead:1"])
-    monkeypatch.setattr(httpx, "get", boom)
+    monkeypatch.setattr("kazma_core.web_acquire.search_http.run_http_search", lambda *a, **k:
+        {'status': 'error', 'reached': False, 'results': [], 'detail': ''})
     results, note = ws._searxng_search("q", 2)
     assert results is None
     assert ws._searxng_cache["base"] is None
@@ -94,24 +78,9 @@ def test_searxng_empty_note_not_overwritten_by_dead_candidates(monkeypatch):
     with 'unavailable', making a WORKING SearXNG look dead. The reachable
     note must win, the suspended engines must be surfaced, and a reachable
     instance must NOT trigger the 60s dead-cooldown."""
-    import httpx
-
-    class _Resp:
-        status_code = 200
-
-        def json(self):
-            return {
-                "results": [],
-                "unresponsive_engines": [
-                    ["brave", "Suspended: too many requests"],
-                    ["duckduckgo", "CAPTCHA"],
-                ],
-            }
-
-    def fake_get(url, **k):
-        if "8088" in url:
-            return _Resp()
-        raise httpx.ConnectError("refused")
+    def fake_search(backend, query, count, *, base, local):
+        return {'status': 'ok' if '8088' in base else 'error', 'reached': '8088' in base,
+            'results': [], 'detail': ' (engines suspended: brave, duckduckgo)' if '8088' in base else ''}
 
     ws._searxng_cache.clear()
     ws._searxng_cache.update({"base": None, "dead_until": 0.0, "note": ""})
@@ -119,7 +88,7 @@ def test_searxng_empty_note_not_overwritten_by_dead_candidates(monkeypatch):
         ws, "_searxng_candidate_bases",
         lambda: ["http://127.0.0.1:8088", "http://127.0.0.1:8080"],
     )
-    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr("kazma_core.web_acquire.search_http.run_http_search", fake_search)
 
     results, note = ws._searxng_search("obscure brand", 3)
     assert results is None

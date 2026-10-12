@@ -12,7 +12,7 @@
 | Products (Web, IDE, TUI, SaaS) | [`docs/docs/products/`](docs/products/) |
 | Reference (tools, env, slash, API) | [`docs/docs/reference/`](docs/reference/) — includes `/api/documents/*`, `document_*` tools, `/documents` slash |
 | Ops | [`docs/docs/ops/`](docs/ops/) |
-| Consolidation plan | [`DOCS_CONSOLIDATION_PLAN.md`](DOCS_CONSOLIDATION_PLAN.md) |
+| Consolidation plan | [`plans/done/DOCS_CONSOLIDATION_PLAN.md`](plans/done/DOCS_CONSOLIDATION_PLAN.md) |
 | Document docs goals | [`plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md`](plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md) · [residuals](plans/DOCUMENT_RESIDUALS_GOAL.md) |
 | Engineering audits | [`audits/`](audits/) — includes [`AUDIT_DOCUMENT_CERTIFICATION.md`](audits/AUDIT_DOCUMENT_CERTIFICATION.md) |
 | Full system map | [`ARCHITECTURE_AND_SYSTEM_MAP.md`](ARCHITECTURE_AND_SYSTEM_MAP.md) |

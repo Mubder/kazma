@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from kazma_core.web_acquire import accounting
+from kazma_core.web_acquire.crawl_jobs import call
+from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
+from kazma_core.web_acquire.research_pipeline_job import gather_owned, pipeline_job, UncertainEffect
+from kazma_core.web_acquire.research_runtime import bounded_pipeline
+
 import asyncio
 import json
 import logging
@@ -131,10 +137,12 @@ def resolve_report_file(raw: str, *, stored: bool = False) -> Path | None:
 
 
 def _workspace_research_dir(topic: str) -> Path:
+    import uuid
+
     root = _get_ws_root()
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    d = root / "research" / "reports" / f"{_slug(topic)}-{stamp}"
-    d.mkdir(parents=True, exist_ok=True)
+    d = root / "research" / "reports" / f"{_slug(topic)}-{stamp}-{uuid.uuid4().hex[:12]}"
+    d.mkdir(parents=True, exist_ok=False)
     return d
 
 
@@ -202,37 +210,24 @@ def _register_paper(meta: dict[str, Any]) -> None:
         from kazma_core.config_store import get_config_store
 
         cs = get_config_store()
-        items = cs.get("research.papers_index") or []
-        if not isinstance(items, list):
-            items = []
         rp = str(meta.get("report_path") or "")
-        items = [
-            it
-            for it in items
-            if isinstance(it, dict) and it.get("report_path") != rp
-        ]
-        items.insert(0, meta)
-        cs.set("research.papers_index", items[:100], category="research")
+        def register(current):
+            items = current if isinstance(current, list) else []
+            items = [it for it in items if isinstance(it, dict) and it.get("report_path") != rp]
+            return [meta, *items][:100]
+        items = cs.atomic_update("research.papers_index", register, category="research")
     except Exception as exc:
         logger.debug("[research_pipeline] ConfigStore paper register failed: %s", exc)
+        raise
 
     try:
         path = _papers_index_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        items2: list[dict[str, Any]] = []
-        if path.is_file():
-            try:
-                raw = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(raw, list):
-                    items2 = raw
-            except Exception:
-                items2 = []
-        items2.insert(0, meta)
-        path.write_text(
-            json.dumps(items2[:100], indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        _write_source_metadata(path, items)
     except Exception as exc:
         logger.debug("[research_pipeline] file paper register failed: %s", exc)
+        raise
+
 
 
 def list_research_papers(*, limit: int = 50) -> list[dict[str, Any]]:
@@ -348,7 +343,7 @@ async def _export_docx(title: str, report_md: str, dest_dir: Path) -> str | None
                     dest = dest_dir / "report.docx"
                     try:
                         dest.write_bytes(src.read_bytes())
-                        return await asyncio.to_thread(_rel, dest)
+                        return await call(_rel, dest)
                     except Exception:
                         return str(src)
         # Fallback write via python-docx in place
@@ -358,40 +353,43 @@ async def _export_docx(title: str, report_md: str, dest_dir: Path) -> str | None
         return None
 
 
-async def run_research_pipeline(
-    topic: str,
-    depth: str = "deep",
-    max_sources: int = 8,
-    language: str = "",
-    *,
-    progress_cb: ProgressCb | None = None,
-    export_docx: bool = False,
-    parallel_acquire: bool = True,
-) -> str:
-    """Run multi-stage deep research and write a report under research/reports/.
+def _write_source_metadata(path, records):
+    """Replace this run's bounded source receipts without exposing torn JSON."""
+    import tempfile
 
-    Stages: plan → parallel search → parallel acquire → digest → synthesize → assemble.
+    payload = json.dumps(records, indent=2, ensure_ascii=False).encode('utf-8')
+    if len(payload) > 4 * 1024**2:
+        raise ValueError('Research source receipts exceeded 4MiB')
+    descriptor, temporary = tempfile.mkstemp(prefix='.kazma-sources-', dir=path.parent)
+    try:
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+async def _acquire_source_batches(urls, acquire, saved, maximum, concurrency, next_index, persist):
+    """Reserve remaining publication slots before dispatching a batch.
+
+    Failed acquisitions may be replaced by later candidates. A successful
+    publication always has a slot, and filenames never repeat across gap fills.
     """
-    topic = (topic or "").strip()
-    if not topic:
-        return "Error: topic is required. Usage: run_research_pipeline(topic=...)"
+    cursor = 0
+    while cursor < len(urls) and len(saved) < maximum:
+        count = min(concurrency, maximum - len(saved), len(urls) - cursor)
+        batch = urls[cursor:cursor + count]
+        await gather_owned(*[acquire(url, next_index + offset) for offset, url in enumerate(batch)])
+        await persist()
+        next_index += count
+        cursor += count
+    return next_index
 
-    depth_l = (depth or "deep").strip().lower()
-    is_deep = depth_l in ("deep", "comprehensive", "full", "paper")
-    max_sources = max(2, min(15, int(max_sources or (8 if is_deep else 4))))
-    max_queries = 10 if is_deep else 4
-    min_sources = min(max_sources, 4 if is_deep else 2)
 
-    from kazma_core.tools.read_url import digest_research_file, read_url_to_file
-    from kazma_core.tools.research_synthesize import synthesize_from_digests
-    from kazma_core.web_acquire import search as web_acquire_search
-
-    t0 = time.time()
-    log: list[str] = []
-    out_dir = await asyncio.to_thread(_workspace_research_dir, topic)
-    rel_dir = await asyncio.to_thread(_rel, out_dir)
-
-    # Industry preflight — fail fast when no search path exists
+async def _pipeline_preflight(progress_cb, log):
+    """Return a visible refusal before planning or output creation on failure."""
     await _emit(progress_cb, "preflight", "Checking research stack…")
     try:
         from kazma_core.tools.research_readiness import (
@@ -399,7 +397,9 @@ async def run_research_pipeline(
             research_readiness,
         )
 
-        ready = research_readiness(probe_search=False)
+        ready = await call(research_readiness, probe_search=False)
+        if not isinstance(ready, dict) or type(ready.get('ready')) is not bool:
+            raise ValueError('Invalid research readiness receipt')
         log.append(f"Preflight: {format_readiness_message(ready)}")
         for c in ready.get("checks") or []:
             log.append(f"- [{c.get('level')}] {c.get('id')}: {c.get('message')}")
@@ -413,8 +413,106 @@ async def run_research_pipeline(
             )
         await _emit(progress_cb, "preflight", format_readiness_message(ready))
     except Exception as exc:
-        log.append(f"Preflight skipped: {exc}")
-        logger.debug("[research_pipeline] preflight failed", exc_info=True)
+        logger.warning("[research_pipeline] preflight failed", exc_info=True)
+        msg = f"Research preflight failed ({type(exc).__name__}); check storage and research readiness before retrying."
+        await _emit(progress_cb, "error", msg)
+        return f"Error: {msg}"
+
+
+@accounting.remote_job
+@bounded_pipeline(lambda: _get_ws_root())
+async def run_research_pipeline(
+    topic: str, depth: str = "deep", max_sources: int = 8, language: str = "", *,
+    progress_cb: ProgressCb | None = None, export_docx: bool = False,
+    parallel_acquire: bool = True, resume_job_id: str | None = None,
+) -> str:
+    """Journal before effects; explicitly resume pending work in identical scope."""
+    topic = (topic or "").strip()
+    if not topic:
+        return "Error: topic is required. Usage: run_research_pipeline(topic=...)"
+    if len(topic) > 2000 or len(language) > 200:
+        return "Error: research topic/language exceeds its input budget."
+    if resume_job_id is not None and (not isinstance(resume_job_id, str)
+            or re.fullmatch(r'[0-9a-f]{32}', resume_job_id) is None):
+        return 'Error: resume_job_id must be a returned 32-character research job ID.'
+    log = []
+    refusal = await _pipeline_preflight(progress_cb, log)
+    if refusal:
+        return refusal
+    depth = (depth or 'deep').strip().lower()
+    is_deep = depth in ('deep', 'comprehensive', 'full', 'paper')
+    max_sources = max(2, min(15, int(max_sources or (8 if is_deep else 4))))
+    options = dict(depth=depth, max_sources=max_sources, language=language,
+                   export_docx=export_docx, parallel_acquire=parallel_acquire)
+    durable_id = resume_job_id
+    try:
+        root = await call(_get_ws_root)
+        async with pipeline_job(topic, root, options, resume_job_id=resume_job_id) as job:
+            durable_id = job.job.job_id
+            await _emit(progress_cb, 'journal', f'Durable research job: {durable_id}')
+            result = await _run_research_pipeline(topic, progress_cb=progress_cb, _job=job,
+                                                  _initial_log=log, **options)
+            result = await job.effect('terminal-summary', {}, lambda: asyncio.sleep(0, result=result))
+            status = 'failed' if result.startswith('Error:') else 'partial' if job.ambiguous_sources else 'completed'
+            await job.finish(status)
+            return result + f'\n**Durable job:** `{durable_id}`\n'
+    except AcquisitionError as exc:
+        return f'Error: {exc}\n**Durable job:** `{durable_id or "not admitted"}`\n'
+
+
+def _encode_extract(result):
+    return dict(acquisition=result.acquisition.evidence(), path=result.path,
+                absolute_path=result.absolute_path, saved_bytes=result.saved_bytes,
+                error=result.error, error_code=result.error_code)
+
+
+def _decode_extract(data):
+    from dataclasses import fields
+    from kazma_core.web_acquire.result import ExtractSaveResult, FetchResult, FetchAttempt
+
+    evidence = dict(data['acquisition'])
+    evidence['attempts'] = tuple(FetchAttempt(**attempt) for attempt in evidence.get('attempts', []))
+    evidence['meta'] = {key: evidence[key] for key in ('robots', 'browser_process') if key in evidence}
+    allowed = {field.name for field in fields(FetchResult)}
+    acquisition = FetchResult(**{key: value for key, value in evidence.items() if key in allowed})
+    return ExtractSaveResult(acquisition, **{key: data.get(key) for key in
+        ('path', 'absolute_path', 'saved_bytes', 'error', 'error_code')})
+
+
+async def _publish_stage(job, key, target, text):
+    async def publish():
+        from kazma_core.tools.research_files import create_extract
+
+        await call(create_extract, job.checked(target), text)
+        return text
+    return await job.effect(key, {}, publish, files=lambda _: [target], reserve_bytes=2 * 1024**2)
+
+
+async def _run_research_pipeline(
+    topic, depth, max_sources, language, *, progress_cb, export_docx,
+    parallel_acquire, _job, _initial_log,
+):
+    topic = (topic or "").strip()
+    if not topic:
+        return "Error: topic is required. Usage: run_research_pipeline(topic=...)"
+
+    depth_l = (depth or "deep").strip().lower()
+    is_deep = depth_l in ("deep", "comprehensive", "full", "paper")
+    max_sources = max(2, min(15, int(max_sources or (8 if is_deep else 4))))
+    max_queries = 10 if is_deep else 4
+    min_sources = min(max_sources, 4 if is_deep else 2)
+
+    from kazma_core.tools.read_url import digest_research_file, save_url_extract
+    from kazma_core.tools.research_synthesize import synthesize_from_digests
+    from kazma_core.web_acquire import search as web_acquire_search
+
+    t0 = time.time()
+    log: list[str] = list(_initial_log)
+    async def directory():
+        await call(_job.checked(_job.directory).mkdir, parents=True, exist_ok=False)
+        return str(_job.directory)
+    out_dir = Path(await _job.effect('directory', {}, directory))
+    rel_dir = await call(_rel, out_dir)
 
     await _emit(progress_cb, "plan", f"Planning research on: {topic}")
     log.append(f"## Pipeline start — depth={depth_l} max_sources={max_sources}")
@@ -425,23 +523,15 @@ async def run_research_pipeline(
     # ── Stage 1: adaptive planner (R2) ────────────────────────────────
     from kazma_core.tools.research_planner import (
         critique_synthesis_gaps,
-        plan_research_queries,
+        plan_research_queries, ResearchPlan, GapReport,
     )
 
-    plan = await plan_research_queries(
-        topic,
-        language=language,
-        max_queries=max_queries if is_deep else min(4, max_queries),
-        is_deep=is_deep,
-    )
-    queries = list(plan.search_queries)
-    try:
-        (out_dir / "plan.json").write_text(
-            json.dumps(plan.to_dict(), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-    except Exception:
-        logger.debug("[research] could not save plan.json", exc_info=True)
+    plan = await _job.effect('plan', {}, lambda: plan_research_queries(
+        topic, language=language, max_queries=max_queries if is_deep else min(4, max_queries), is_deep=is_deep),
+        encode=lambda value: value.to_dict(), decode=lambda value: ResearchPlan(**value))
+    queries = list(dict.fromkeys(plan.search_queries))
+    await _publish_stage(_job, 'plan-publication', out_dir / 'plan.json',
+                         json.dumps(plan.to_dict(), indent=2, ensure_ascii=False))
     log.append(f"### Plan — method={plan.method} · {len(queries)} search queries")
     for i, q in enumerate(queries, 1):
         log.append(f"{i}. {q}")
@@ -459,9 +549,14 @@ async def run_research_pipeline(
     async def _one_search(q: str) -> None:
         nonlocal candidates, domain_count
         try:
-            sr = await web_acquire_search(
-                q, max_results=8 if is_deep else 5, purpose="research"
-            )
+            from kazma_core.web_acquire.serp import SearchResult
+            import hashlib
+
+            sr = await _job.effect('search:' + hashlib.sha256(q.encode()).hexdigest(), {'query': q},
+                lambda: web_acquire_search(q, max_results=8 if is_deep else 5, purpose="research"),
+                encode=lambda value: dict(ok=value.ok, query=value.query, urls=value.urls,
+                                          error=value.error, latency_ms=value.latency_ms),
+                decode=lambda value: SearchResult(**value))
             async with lock:
                 log.append(
                     f"Search `{q}` → ok={sr.ok} urls={len(sr.urls)} "
@@ -474,6 +569,8 @@ async def run_research_pipeline(
                     if u not in candidates:
                         candidates.append(u)
                         domain_count[d] = domain_count.get(d, 0) + 1
+        except AcquisitionError:
+            raise
         except Exception as exc:
             async with lock:
                 log.append(f"Search failed `{q}`: {exc}")
@@ -483,7 +580,13 @@ async def run_research_pipeline(
     from kazma_core.tools.research_session import suppress_chat_recording
 
     with suppress_chat_recording():
-        await asyncio.gather(*[_one_search(q) for q in queries])
+        await gather_owned(*[_one_search(q) for q in queries])
+    async def discovered():
+        return candidates
+    candidates = await _job.effect('discovered:initial', {}, discovered)
+    domain_count = {}
+    for candidate in candidates:
+        domain_count[_domain(candidate)] = domain_count.get(_domain(candidate), 0) + 1
     log.append(f"### Discover — {len(candidates)} unique URLs (pre-rank)")
     await _emit(progress_cb, "discover", f"Found {len(candidates)} candidate URLs")
 
@@ -528,18 +631,24 @@ async def run_research_pipeline(
             t_acq = time.time()
             try:
                 name = f"src-{idx:02d}.md"
-                path = await asyncio.to_thread(_rel, out_dir / name)
-                (out_dir / name).parent.mkdir(parents=True, exist_ok=True)
-                res = await read_url_to_file(url, path=path)
+                path = await call(_rel, out_dir / name)
+                source_key = f'acquire:{idx:03d}'
+                res = await _job.effect(source_key, {'url': url, 'path': path},
+                    lambda: save_url_extract(url, path=path, receipt_cb=lambda result: _job.receipt(source_key, result)),
+                    encode=_encode_extract, decode=_decode_extract,
+                    files=lambda value: [value.absolute_path or value.path] if value.ok else [],
+                    reserve_bytes=25 * 1024**2)
                 latency = round(time.time() - t_acq, 2)
-                if isinstance(res, str) and res.startswith("Error:"):
+                evidence = res.acquisition.evidence()
+                if not res.ok:
                     async with save_lock:
-                        log.append(f"Acquire fail {url}: {res[:120]}")
+                        log.append(f"Acquire fail {url}: {(res.error or 'failed')[:120]}")
                         acquire_meta.append(
                             {
-                                "url": url,
+                                **evidence,
                                 "ok": False,
-                                "error": res[:200],
+                                "error": res.error,
+                                "error_code": res.error_code,
                                 "latency_s": latency,
                                 "rank_score": next(
                                     (x.score for x in ranked if x.url == url),
@@ -548,29 +657,16 @@ async def run_research_pipeline(
                             }
                         )
                     return
-                saved_path = path
-                if isinstance(res, str) and "saved" in res.lower():
-                    m = re.search(r"[`'\"]([^`'\"]+\.md)[`'\"]", res)
-                    if m:
-                        saved_path = m.group(1)
+                saved_path = res.path
                 async with save_lock:
                     if len(saved) < max_sources:
                         saved.append(saved_path)
-                        chars = 0
-                        try:
-                            p_abs = out_dir / Path(saved_path).name
-                            if not p_abs.is_file():
-                                p_abs = (await asyncio.to_thread(_get_ws_root)) / saved_path
-                            if p_abs.is_file():
-                                chars = p_abs.stat().st_size
-                        except Exception:
-                            pass
                         acquire_meta.append(
                             {
-                                "url": url,
+                                **evidence,
                                 "ok": True,
                                 "path": saved_path,
-                                "bytes": chars,
+                                "bytes": res.saved_bytes,
                                 "latency_s": latency,
                                 "rank_score": next(
                                     (x.score for x in ranked if x.url == url),
@@ -585,6 +681,14 @@ async def run_research_pipeline(
                             "acquire",
                             f"Acquired {len(saved)}/{max_sources}: {url[:80]}",
                         )
+            except UncertainEffect as exc:
+                _job.ambiguous_sources.add(source_key)
+                async with save_lock:
+                    acquire_meta.append(dict(url=url, ok=False, ambiguous=True, error_code='policy_error',
+                        error=str(exc), prior_acquisition=exc.effect.get('receipt')))
+                    log.append(f'Uncertain source {url}; preserved without replay.')
+            except AcquisitionError:
+                raise
             except Exception as exc:
                 async with save_lock:
                     log.append(f"Acquire error {url}: {exc}")
@@ -592,21 +696,20 @@ async def run_research_pipeline(
                         {"url": url, "ok": False, "error": str(exc)[:200]}
                     )
 
-    await asyncio.gather(
-        *[_acquire(u, i + 1) for i, u in enumerate(urls_to_fetch)]
-    )
+    async def _persist_sources():
+        await call(_write_source_metadata, out_dir / 'sources.json', acquire_meta)
 
-    # Persist acquire metadata for audit / industry provenance
     try:
-        meta_path = out_dir / "sources.json"
-        meta_path.write_text(
-            json.dumps(acquire_meta, indent=2, ensure_ascii=False),
-            encoding="utf-8",
+        # Refuse an unwritable receipt path before dispatching content fetches.
+        await _persist_sources()
+        next_source_index = await _acquire_source_batches(
+            urls_to_fetch, _acquire, saved, max_sources, 4 if parallel_acquire else 1, 1, _persist_sources,
         )
-        meta_rel = await asyncio.to_thread(_rel, meta_path)
+        saved.sort()
+        meta_rel = await call(_rel, out_dir / 'sources.json')
         log.append(f"Wrote `{meta_rel}`")
-    except Exception as exc:
-        log.append(f"sources.json write failed: {exc}")
+    except (OSError, ValueError) as exc:
+        return f"Error: research source receipts could not be persisted ({type(exc).__name__}); acquisition stopped. Check workspace storage."
 
     # Fail-closed for deep (industry R1) — standard may continue with warning
     fail_closed = is_deep and not os_env_truthy("KAZMA_RESEARCH_ALLOW_THIN")
@@ -630,20 +733,20 @@ async def run_research_pipeline(
     digests: list[str] = []
 
     async def _digest_one(p: str) -> str:
-        try:
+        async def digest():
             dig = await digest_research_file(p)
+            if dig.startswith('Error:'):
+                raise AcquisitionError(FetchErrorCode.STORAGE, 'Research digest failed; no synthesis dispatched.')
             dpath = out_dir / f"digest-{Path(p).stem}.md"
-            dpath.write_text(
-                dig if not dig.startswith("Error:") else dig, encoding="utf-8"
-            )
-            drel = await asyncio.to_thread(_rel, dpath)
-            log.append(f"Digest `{p}` → `{drel}`")
-            return drel
-        except Exception as exc:
-            log.append(f"Digest fallback raw `{p}`: {exc}")
-            return p
+            from kazma_core.tools.research_files import create_extract
+            await call(create_extract, _job.checked(dpath), dig)
+            return await call(_rel, dpath)
+        drel = await _job.effect('digest:' + Path(p).stem, {'path': p}, digest,
+                                files=lambda value: [value], reserve_bytes=2 * 1024**2)
+        log.append(f"Digest `{p}` → `{drel}`")
+        return drel
 
-    digests = list(await asyncio.gather(*[_digest_one(p) for p in saved]))
+    digests = list(await gather_owned(*[_digest_one(p) for p in saved]))
 
     # Heuristic claim map (no nested LLM by default)
     from kazma_core.tools.research_evidence import (
@@ -674,16 +777,13 @@ async def run_research_pipeline(
         all_claims.extend(
             extract_claims_from_file(p, source_url=src_url, max_claims=6)
         )
-    claims_path = out_dir / "claims.json"
-    try:
-        write_claims_json(claims_path, all_claims)
-        claims_md = claims_to_markdown(all_claims)
-        (out_dir / "claims.md").write_text(claims_md, encoding="utf-8")
-        claims_rel = await asyncio.to_thread(_rel, claims_path)
-        log.append(f"Evidence claims: {len(all_claims)} → `{claims_rel}`")
-    except Exception as exc:
-        claims_md = ""
-        log.append(f"claims extract failed: {exc}")
+    claims_path = out_dir / "claims-0.json"
+    claims_md = claims_to_markdown(all_claims)
+    await _publish_stage(_job, 'claims-json:0', claims_path,
+                         json.dumps([claim.to_dict() for claim in all_claims], ensure_ascii=False))
+    claims_md = await _publish_stage(_job, 'claims-markdown:0', out_dir / 'claims-0.md', claims_md)
+    claims_rel = await call(_rel, claims_path)
+    log.append(f"Evidence claims: {len(all_claims)} → `{claims_rel}`")
 
     # ── Stage 5: synthesize ───────────────────────────────────────────
     await _emit(progress_cb, "reduce", "Synthesizing multi-source analysis…")
@@ -693,14 +793,11 @@ async def run_research_pipeline(
         "## Conclusions\n## Sources\n"
     )
     synth_paths = digests
-    if (out_dir / "claims.md").is_file():
-        synth_paths = digests + [(await asyncio.to_thread(_rel, out_dir / "claims.md"))]
-    synthesis = await synthesize_from_digests(
-        synth_paths,
-        question=topic,
-        outline=outline,
-        max_chars=24_000 if is_deep else 12_000,
-    )
+    synth_paths = digests + [(await call(_rel, out_dir / "claims-0.md"))]
+    synthesis = await _job.effect('synthesis:0', {'paths': synth_paths}, lambda: synthesize_from_digests(
+        synth_paths, question=topic, outline=outline, max_chars=24_000 if is_deep else 12_000))
+    if synthesis.startswith('Error:'):
+        raise AcquisitionError(FetchErrorCode.PROVIDER_RESPONSE, 'Research synthesis failed; no complete report was published.')
     log.append(f"Synthesis length={len(synthesis)}")
 
     # ── Stage 5b: gap critic + optional second acquire (R2) ────────────
@@ -719,19 +816,11 @@ async def run_research_pipeline(
             for m in acquire_meta
             if m.get("ok")
         )
-        gap = await critique_synthesis_gaps(
-            topic,
-            synthesis,
-            sources_summary=src_summary,
-            max_followups=3,
-        )
-        try:
-            (out_dir / f"gap_loop_{gap_loops}.json").write_text(
-                json.dumps(gap.to_dict(), indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
-        except Exception:
-            logger.debug("[research] could not save the gap-loop record", exc_info=True)
+        gap = await _job.effect('gap-critic:0', {}, lambda: critique_synthesis_gaps(
+            topic, synthesis, sources_summary=src_summary, max_followups=3),
+            encode=lambda value: value.to_dict(), decode=lambda value: GapReport(**value))
+        await _publish_stage(_job, 'gap-publication:0', out_dir / 'gap_loop_0.json',
+                             json.dumps(gap.to_dict(), indent=2, ensure_ascii=False))
         log.append(
             f"Gap loop {gap_loops}: method={gap.method} needs_more={gap.needs_more} "
             f"followups={len(gap.followup_queries)}"
@@ -748,7 +837,8 @@ async def run_research_pipeline(
             f"Gap fill: {len(gap.followup_queries)} follow-up searches…",
         )
         with suppress_chat_recording():
-            await asyncio.gather(*[_one_search(q) for q in gap.followup_queries])
+            await gather_owned(*[_one_search(q) for q in dict.fromkeys(gap.followup_queries)])
+        candidates = await _job.effect('discovered:gap', {}, discovered)
         # Re-rank remaining unused URLs
         already = {m.get("url") for m in acquire_meta if m.get("url")}
         new_cands = [u for u in candidates if u not in already]
@@ -759,11 +849,14 @@ async def run_research_pipeline(
         if not more_urls:
             log.append("Gap loop: no new ranked URLs")
             break
-        start_idx = len(saved) + 1
         await _emit(progress_cb, "acquire", f"Gap fill acquire {len(more_urls)}…")
-        await asyncio.gather(
-            *[_acquire(u, start_idx + i) for i, u in enumerate(more_urls)]
-        )
+        try:
+            next_source_index = await _acquire_source_batches(
+                more_urls, _acquire, saved, max_sources, 4 if parallel_acquire else 1, next_source_index, _persist_sources,
+            )
+        except (OSError, ValueError) as exc:
+            return f"Error: research source receipts could not be persisted ({type(exc).__name__}); acquisition stopped. Check workspace storage."
+        saved.sort()
         # Digest any new raw sources not yet covered
         digested_stems = {Path(d).stem.replace("digest-", "") for d in digests}
         to_digest: list[str] = []
@@ -777,29 +870,23 @@ async def run_research_pipeline(
                 url_by_path[str(m["path"])] = str(m.get("url") or "")
                 url_by_path[f"digest-{stem}.md"] = str(m.get("url") or "")
         if to_digest:
-            extra = list(await asyncio.gather(*[_digest_one(p) for p in to_digest]))
+            extra = list(await gather_owned(*[_digest_one(p) for p in to_digest]))
             digests.extend(extra)
             for p in extra:
                 src_url = url_by_path.get(p) or url_by_path.get(Path(p).name) or ""
                 all_claims.extend(
                     extract_claims_from_file(p, source_url=src_url, max_claims=6)
                 )
-            try:
-                write_claims_json(claims_path, all_claims)
-                claims_md = claims_to_markdown(all_claims)
-                (out_dir / "claims.md").write_text(claims_md, encoding="utf-8")
-            except Exception:
-                logger.warning("[research] could not save the claims files in %s", out_dir, exc_info=True)
-            synth_paths = digests + (
-                [(await asyncio.to_thread(_rel, out_dir / "claims.md"))] if (out_dir / "claims.md").is_file() else []
-            )
+            claims_md = claims_to_markdown(all_claims)
+            await _publish_stage(_job, 'claims-json:1', out_dir / 'claims-1.json',
+                json.dumps([claim.to_dict() for claim in all_claims], ensure_ascii=False))
+            claims_md = await _publish_stage(_job, 'claims-markdown:1', out_dir / 'claims-1.md', claims_md)
+            synth_paths = digests + [(await call(_rel, out_dir / 'claims-1.md'))]
             await _emit(progress_cb, "reduce", "Re-synthesizing after gap fill…")
-            synthesis = await synthesize_from_digests(
-                synth_paths,
-                question=topic,
-                outline=outline,
-                max_chars=24_000 if is_deep else 12_000,
-            )
+            synthesis = await _job.effect('synthesis:1', {'paths': synth_paths}, lambda: synthesize_from_digests(
+                synth_paths, question=topic, outline=outline, max_chars=24_000 if is_deep else 12_000))
+            if synthesis.startswith('Error:'):
+                raise AcquisitionError(FetchErrorCode.PROVIDER_RESPONSE, 'Research gap synthesis failed; no complete report was published.')
             log.append(f"Re-synthesis length={len(synthesis)} after gap loop")
         break  # one gap loop max
 
@@ -821,32 +908,29 @@ async def run_research_pipeline(
         + "\n"
     )
     report_path = out_dir / "report.md"
-    report_path.write_text(report, encoding="utf-8")
-    report_rel = await asyncio.to_thread(_rel, report_path)
+    report = await _publish_stage(_job, 'report-publication', report_path, report)
+    report_rel = await call(_rel, report_path)
 
-    # Structural rubric (R0)
-    rubric_dict: dict[str, Any] = {}
-    try:
-        from kazma_core.tools.research_eval import score_report_markdown
-
-        rub = score_report_markdown(report, min_sources=min_sources)
-        rubric_dict = rub.to_dict()
-        (out_dir / "rubric.json").write_text(
-            json.dumps(rubric_dict, indent=2), encoding="utf-8"
-        )
-        log.append(f"Rubric score={rub.score} ok={rub.ok}")
-    except Exception as exc:
-        log.append(f"rubric failed: {exc}")
+    # Structural rubric (R0), a local stage with an immutable publication.
+    from kazma_core.tools.research_eval import score_report_markdown
+    rub = await call(score_report_markdown, report, min_sources=min_sources)
+    rubric_dict = rub.to_dict()
+    rubric_text = await _publish_stage(_job, 'rubric-publication', out_dir / 'rubric.json',
+                                      json.dumps(rubric_dict, indent=2))
+    rubric_dict = json.loads(rubric_text)
+    log.append(f"Rubric score={rubric_dict.get('score')} ok={rubric_dict.get('ok')}")
 
     docx_rel = None
     if export_docx or (os_env_truthy("KAZMA_RESEARCH_EXPORT_DOCX")):
         await _emit(progress_cb, "export", "Exporting DOCX…")
-        docx_rel = await _export_docx(f"Research: {topic}", report, out_dir)
+        docx_rel = await _job.effect('docx-export', {},
+            lambda: _export_docx(f'Research: {topic}', report, out_dir),
+            files=lambda value: [value] if value else [], reserve_bytes=25 * 1024**2)
         if docx_rel:
             log.append(f"DOCX: `{docx_rel}`")
 
     paper_id = out_dir.name
-    await asyncio.to_thread(
+    await _job.effect('paper-registration', {}, lambda: call(
         _register_paper,
         {
             "id": paper_id,
@@ -863,7 +947,7 @@ async def run_research_pipeline(
             "elapsed_seconds": round(elapsed, 1),
             "kind": "research_paper",
         },
-    )
+    ))
 
     await _emit(progress_cb, "done", f"Report ready: {report_rel}")
     rubric_line = ""
@@ -873,7 +957,7 @@ async def run_research_pipeline(
             f"({'pass' if rubric_dict.get('ok') else 'needs work'})\n"
         )
     summary = (
-        f"# Deep research complete\n\n"
+        (f"# Deep research partial — uncertain sources preserved\n\n" if _job.ambiguous_sources else f"# Deep research complete\n\n") +
         f"**Topic:** {topic}\n"
         f"**Sources acquired:** {len(saved)} (target {max_sources}, min {min_sources})\n"
         f"**Evidence claims:** {len(all_claims)}\n"

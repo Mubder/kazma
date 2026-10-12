@@ -438,6 +438,8 @@ class LLMProvider:
         (AGENTS.md §1). Live-read so ``KAZMA_LITELLM_URL`` / ConfigStore
         changes take effect on the next ``chat()``.
         """
+        if getattr(self, '_egress_frozen', False):
+            return
         if type(self) is not LLMProvider:
             self._via_gateway = False
             return

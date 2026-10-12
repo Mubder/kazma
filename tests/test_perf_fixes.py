@@ -1,7 +1,7 @@
 """Tests for P1 performance fixes (VAL-PERF-001 .. VAL-PERF-004).
 
 Covers:
-  VAL-PERF-001 — web_search runs in a thread executor (asyncio.to_thread)
+  VAL-PERF-001 — web_search owns its blocking executor work
   VAL-PERF-002 — Bounded LRU eviction on in-memory dicts
   VAL-PERF-003 — Error handlers do not leak exception details
   VAL-PERF-004 — file_read enforces workspace boundary
@@ -37,14 +37,14 @@ class TestWebSearchNonBlocking:
 
     @pytest.mark.asyncio
     async def test_search_runs_in_thread(self) -> None:
-        """``_run_search`` must be executed via ``asyncio.to_thread``."""
+        """Backend execution must happen away from the event loop."""
         ws_module = self._get_ws_module()
 
         captured: dict[str, object] = {}
 
         def fake_run_search(query: str, max_results: int):
             captured["thread_id"] = threading.get_ident()
-            return [{"title": "T", "href": "http://x", "body": "B"}]
+            return ([{"title": "T", "href": "http://x", "body": "B"}], ["fixture:ok"], "fixture")
 
         main_thread = threading.get_ident()
 
@@ -93,24 +93,28 @@ class TestWebSearchNonBlocking:
         assert result.startswith("Error")
 
     @pytest.mark.asyncio
-    async def test_search_uses_to_thread(self) -> None:
-        """Verify the source code uses asyncio.to_thread for the blocking call."""
-        ws_path = (
-            Path(__file__).resolve().parent.parent
-            / "kazma-core"
-            / "kazma_core"
-            / "tools"
-            / "web_search.py"
-        )
-        content = ws_path.read_text(encoding="utf-8")
-        assert "asyncio.to_thread" in content, (
-            "web_search.py must use asyncio.to_thread to avoid blocking"
-        )
+    async def test_blocked_backend_keeps_event_loop_responsive(self) -> None:
+        ws_module = self._get_ws_module()
+        entered, release = threading.Event(), threading.Event()
+        def blocked(query, max_results):
+            entered.set()
+            assert release.wait(5)
+            return ([{'title': 'Fixture', 'href': 'https://example.com', 'body': ''}], ['fixture:ok'], 'fixture')
+        with patch.object(ws_module, '_run_search', side_effect=blocked):
+            task = asyncio.create_task(ws_module.web_search('fixture'))
+            try:
+                async with asyncio.timeout(2):
+                    while not entered.is_set():
+                        await asyncio.sleep(.001)
+                    assert not task.done()
+            finally:
+                release.set()
+                result = await task
+        assert 'Fixture' in result
 
     @pytest.mark.asyncio
     async def test_run_search_is_module_level_function(self) -> None:
-        """``_run_search`` must be a standalone module-level function (picklable
-        for ``asyncio.to_thread``)."""
+        """Keep the backend chain accessible as an owned executor entry."""
         ws_module = self._get_ws_module()
 
         # It must be accessible at module level

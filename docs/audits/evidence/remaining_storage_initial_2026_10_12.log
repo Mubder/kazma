@@ -1,0 +1,14 @@
+....................................................F................... [ 79%]
+...................                                                      [100%]
+================================== FAILURES ===================================
+______ test_pipeline_deadline_joins_async_cleanup_and_releases_admission ______
+tests\test_research_runtime.py:207: in test_pipeline_deadline_joins_async_cleanup_and_releases_admission
+    assert report.startswith('Error:') and 'deadline expired' in report and cleanup.is_set()
+E   AssertionError: assert (True and 'deadline expired' in 'Error: research pipeline deadline expired (30 minutes); inspect partial output before retrying.' and False)
+E    +  where True = <built-in method startswith of str object at 0x00000250615889C0>('Error:')
+E    +    where <built-in method startswith of str object at 0x00000250615889C0> = 'Error: research pipeline deadline expired (30 minutes); inspect partial output before retrying.'.startswith
+E    +  and   False = is_set()
+E    +    where is_set = <asyncio.locks.Event object at 0x000002506430DC10 [unset]>.is_set
+=========================== short test summary info ===========================
+FAILED tests/test_research_runtime.py::test_pipeline_deadline_joins_async_cleanup_and_releases_admission
+1 failed, 90 passed in 21.16s

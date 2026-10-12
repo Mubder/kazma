@@ -1,0 +1,1244 @@
+[fast-test] 1003 test files in 8 chunks (8 requested, timeout 900s/chunk)
+[fast-test] chunk 06: OK 0p/0f (125 files)
+[fast-test] chunk 01: exit=124 0p/0f (126 files)
+[fast-test] chunk 04: exit=124 0p/0f (125 files)
+[fast-test] chunk 00: exit=124 0p/0f (126 files)
+[fast-test] chunk 07: exit=124 0p/0f (125 files)
+[fast-test] chunk 05: exit=124 0p/0f (125 files)
+[fast-test] chunk 02: exit=124 0p/0f (126 files)
+[fast-test] chunk 03: exit=124 0p/0f (125 files)
+[fast-test] chunk 06 produced no parseable test tally (exit=1) — recovering its 125 files
+[fast-test] --- chunk 06: last 400 lines ---
+  | ============================= test session starts =============================
+  | platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+  | rootdir: G:\GitHubRepos\kazma
+  | configfile: pyproject.toml
+  | plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+  | asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+  | timeout: 120.0s
+  | timeout method: thread
+  | timeout func_only: False
+  | collected 1835 items
+  | kazma-core\tests\test_config_read_structured.py .                        [  0%]
+  | kazma-core\tests\test_ide_service.py .........                           [  0%]
+  | kazma-core\tests\test_memory_kb_merge.py ....                            [  0%]
+  | kazma-core\tests\test_memory_v2_phase3.py ............................   [  2%]
+  | kazma-core\tests\test_prune_tool_outputs.py ...                          [  2%]
+  | kazma-gateway\kazma_gateway_tests\adapters\test_discord_bus.py ...       [  2%]
+  | kazma-gateway\kazma_gateway_tests\test_telegram_reactions.py ........... [  3%]
+  | ..                                                                       [  3%]
+  | kazma-tui\kazma_tui_tests\test_integration_flows.py .................... [  4%]
+  | ..............                                                           [  5%]
+  | tests\test_acquisition_accounting.py ...........                         [  5%]
+  | tests\test_adapter_burst_ordering.py ...                                 [  5%]
+  | tests\test_agents_active_model.py .                                      [  5%]
+  | tests\test_app_bootstrap_errors.py ..                                    [  6%]
+  | tests\test_arabic_text.py .............................................. [  8%]
+  | .....................                                                    [  9%]
+  | tests\test_audit_2026_09_04_wave2.py .......                             [ 10%]
+  | tests\test_audit_2026_09_17_regressions.py ...............               [ 10%]
+  | tests\test_audit_fixes.py .............                                  [ 11%]
+  | tests\test_audit_wave7.py .............                                  [ 12%]
+  | tests\test_backup_alerting.py ...........                                [ 12%]
+  | tests\test_browser_acquisition_broker.py ..........+++++++++++++++++++++++++++++++++++ Timeout +++++++++++++++++++++++++++++++++++
+  | ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Captured stdout ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  | 13:09:12 ERROR asyncio: Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)
+  | handle: <Handle _ProactorBasePipeTransport._call_connection_lost(None)>
+  | Traceback (most recent call last):
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\events.py", line 88, in _run
+  |     self._context.run(self._callback, *self._args)
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 165, in _call_connection_lost
+  |     self._sock.shutdown(socket.SHUT_RDWR)
+  | ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+  | 13:09:12 ERROR asyncio: Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)
+  | handle: <Handle _ProactorBasePipeTransport._call_connection_lost(None)>
+  | Traceback (most recent call last):
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\events.py", line 88, in _run
+  |     self._context.run(self._callback, *self._args)
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 165, in _call_connection_lost
+  |     self._sock.shutdown(socket.SHUT_RDWR)
+  | ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+  | ~~~~~~~~~~~~~~~~~~~~~~~~~ Stack of asyncio_0 (29104) ~~~~~~~~~~~~~~~~~~~~~~~~~~
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1032, in _bootstrap
+  |     self._bootstrap_inner()
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1075, in _bootstrap_inner
+  |     self.run()
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1012, in run
+  |     self._target(*self._args, **self._kwargs)
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\concurrent\futures\thread.py", line 90, in _worker
+  |     work_item = work_queue.get(block=True)
+  | ~~~~~~~~~~~~~~~~~~~ Stack of kazma-playwright-loop (54136) ~~~~~~~~~~~~~~~~~~~~
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1032, in _bootstrap
+  |     self._bootstrap_inner()
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1075, in _bootstrap_inner
+  |     self.run()
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1012, in run
+  |     self._target(*self._args, **self._kwargs)
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\windows_events.py", line 322, in run_forever
+  |     super().run_forever()
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 645, in run_forever
+  |     self._run_once()
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 1961, in _run_once
+  |     event_list = self._selector.select(timeout)
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\windows_events.py", line 445, in select
+  |     self._poll(timeout)
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\windows_events.py", line 774, in _poll
+  |     status = _overlapped.GetQueuedCompletionStatus(self._iocp, ms)
+  | ~~~~~~~~~~~~~~~~~~~~~~~~ Stack of tqdm_monitor (27860) ~~~~~~~~~~~~~~~~~~~~~~~~
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1032, in _bootstrap
+  |     self._bootstrap_inner()
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1075, in _bootstrap_inner
+  |     self.run()
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\tqdm\_monitor.py", line 69, in run
+  |     self.was_killed.wait(self.sleep_interval)
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 655, in wait
+  |     signaled = self._cond.wait(timeout)
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 359, in wait
+  |     gotit = waiter.acquire(True, timeout)
+  | ~~~~~~~~~~~~~~~~~~~~~~~~ Stack of tqdm_monitor (59436) ~~~~~~~~~~~~~~~~~~~~~~~~
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1032, in _bootstrap
+  |     self._bootstrap_inner()
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1075, in _bootstrap_inner
+  |     self.run()
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\tqdm\_monitor.py", line 69, in run
+  |     self.was_killed.wait(self.sleep_interval)
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 655, in wait
+  |     signaled = self._cond.wait(timeout)
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 359, in wait
+  |     gotit = waiter.acquire(True, timeout)
+  | ~~~~~~~~~~~~~~~~~~ Stack of kazma-procedural-record (67248) ~~~~~~~~~~~~~~~~~~~
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1032, in _bootstrap
+  |     self._bootstrap_inner()
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1075, in _bootstrap_inner
+  |     self.run()
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 1012, in run
+  |     self._target(*self._args, **self._kwargs)
+  |   File "G:\GitHubRepos\kazma\kazma-core\kazma_core\agent\tool_registry.py", line 214, in _procedural_worker
+  |     item = _PROCEDURAL_QUEUE.get()
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\queue.py", line 171, in get
+  |     self.not_empty.wait()
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\threading.py", line 355, in wait
+  |     waiter.acquire()
+  | ~~~~~~~~~~~~~~~~~~~~~~~~~ Stack of MainThread (66836) ~~~~~~~~~~~~~~~~~~~~~~~~~
+  |   File "<string>", line 22, in <module>
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\config\__init__.py", line 201, in main
+  |     return _main(args=args, plugins=plugins, prog="pytest.main()")
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\config\__init__.py", line 229, in _main
+  |     ret: ExitCode | int = config.hook.pytest_cmdline_main(config=config)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+  |     return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+  |     return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+  |     res = hook_impl.function(*args)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\main.py", line 377, in pytest_cmdline_main
+  |     return wrap_session(config, _main)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\main.py", line 330, in wrap_session
+  |     session.exitstatus = doit(config, session) or 0
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\main.py", line 384, in _main
+  |     config.hook.pytest_runtestloop(session=session)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+  |     return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+  |     return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+  |     res = hook_impl.function(*args)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\main.py", line 408, in pytest_runtestloop
+  |     item.config.hook.pytest_runtest_protocol(item=item, nextitem=nextitem)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+  |     return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+  |     return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+  |     res = hook_impl.function(*args)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\runner.py", line 118, in pytest_runtest_protocol
+  |     runtestprotocol(item, nextitem=nextitem)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\runner.py", line 139, in runtestprotocol
+  |     reports.append(call_and_report(item, "call", log))
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\runner.py", line 249, in call_and_report
+  |     call = CallInfo.from_call(
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\runner.py", line 361, in from_call
+  |     result: TResult | None = func()
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\runner.py", line 250, in <lambda>
+  |     lambda: runtest_hook(item=item, **kwds),
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+  |     return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+  |     return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+  |     res = hook_impl.function(*args)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\runner.py", line 184, in pytest_runtest_call
+  |     item.runtest()
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pytest_asyncio\plugin.py", line 569, in runtest
+  |     super().runtest()
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\python.py", line 1707, in runtest
+  |     self.ihook.pytest_pyfunc_call(pyfuncitem=self)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_hooks.py", line 512, in __call__
+  |     return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_manager.py", line 120, in _hookexec
+  |     return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pluggy\_callers.py", line 121, in _multicall
+  |     res = hook_impl.function(*args)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\python.py", line 167, in pytest_pyfunc_call
+  |     result = testfunction(**testargs)
+  |   File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pytest_asyncio\plugin.py", line 905, in inner
+  |     runner.run(coro, context=context)
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+  |     return self._loop.run_until_complete(task)
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 678, in run_until_complete
+  |     self.run_forever()
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\windows_events.py", line 322, in run_forever
+  |     super().run_forever()
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 645, in run_forever
+  |     self._run_once()
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 1961, in _run_once
+  |     event_list = self._selector.select(timeout)
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\windows_events.py", line 445, in select
+  |     self._poll(timeout)
+  |   File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\windows_events.py", line 774, in _poll
+  |     status = _overlapped.GetQueuedCompletionStatus(self._iocp, ms)
+  | +++++++++++++++++++++++++++++++++++ Timeout +++++++++++++++++++++++++++++++++++
+[fast-test] chunk 06 died in tests/test_browser_acquisition_broker.py — re-running the other 124 file(s) as one process
+[fast-test] chunk 01 timed out (exit=124) — recovering its 126 files
+[fast-test] --- chunk 01: last 400 lines ---
+  | ============================= test session starts =============================
+  | platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+  | rootdir: G:\GitHubRepos\kazma
+  | configfile: pyproject.toml
+  | plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+  | asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+  | timeout: 120.0s
+  | timeout method: thread
+  | timeout func_only: False
+  | collected 1712 items
+  | kazma-core\kazma_core_tests\test_hitl_gates_wired.py ..............      [  0%]
+  | kazma-core\tests\test_env_context.py ......                              [  1%]
+  | kazma-core\tests\test_mcp_lifecycle.py ......                            [  1%]
+  | kazma-core\tests\test_memory_scale_foundation.py .........               [  2%]
+  | kazma-core\tests\test_memory_v2_phase_b.py ......                        [  2%]
+  | kazma-core\tests\test_steer_routing.py .........                         [  2%]
+  | kazma-gateway\kazma_gateway_tests\adapters\test_ide_commands.py ...      [  3%]
+  | kazma-tui\kazma_tui_tests\test_comprehensive.py ........................ [  4%]
+  | ..............                                                           [  5%]
+  | kazma-ui\kazma_ui_tests\test_unit.py .....................               [  6%]
+  | tests\test_acquisition_parser.py ..........                              [  7%]
+  | tests\test_agent_self_improvement.py ..............                      [  7%]
+  | tests\test_alpine_templates.py ........                                  [  8%]
+  | tests\test_approval_reattaches_the_stream.py .......                     [  8%]
+  | tests\test_attachment_path_identity.py ...............                   [  9%]
+  | tests\test_audit_2026_09_04_wave5.py ............                        [ 10%]
+  | tests\test_audit_c_remaining.py ......                                   [ 10%]
+  | tests\test_audit_literal_search.py ...                                   [ 10%]
+  | tests\test_auth_middleware.py .......................................... [ 13%]
+  | ........................................................................ [ 17%]
+  | ..................................                                       [ 19%]
+  | tests\test_backup_silent_failures.py .................                   [ 20%]
+  | tests\test_browser_egress_every_context.py .......                       [ 20%]
+  | tests\test_calendar_disconnect.py ................                       [ 21%]
+  | tests\test_chat_as_product.py ..................                         [ 22%]
+  | tests\test_chat_sse_fix.py ...............                               [ 23%]
+  | tests\test_checkpoints_pg.py ...s                                        [ 24%]
+  | tests\test_cli_reference_commands.py .....                               [ 24%]
+  | tests\test_commitment_auto_store.py .......                              [ 24%]
+  | tests\test_commitment_outer_gate.py ....                                 [ 25%]
+  | tests\test_completions.py ....................                           [ 26%]
+  | tests\test_config_store_first_writer.py s                                [ 26%]
+  | tests\test_context_indicator.py ......                                   [ 26%]
+  | tests\test_cron_store_write_lock.py ...                                  [ 26%]
+  | tests\test_dashboard_metrics.py ...                                      [ 26%]
+  | tests\test_date_guard_word_match.py ..........                           [ 27%]
+  | tests\test_dependency_scanner.py ..............                          [ 28%]
+  | tests\test_dispatch_helpers.py .......                                   [ 28%]
+  | tests\test_document_actions_phase8.py ...........                        [ 29%]
+  | tests\test_document_jobs_pg_idempotency.py sss                           [ 29%]
+  | tests\test_document_platform_tools_phase8.py .....                       [ 29%]
+  | tests\test_documents_models.py ..........                                [ 30%]
+  | tests\test_durable_config_outage.py ................                     [ 31%]
+  | tests\test_email_api_security.py .........                               [ 31%]
+  | tests\test_email_oauth_refresh_lock.py ...                               [ 32%]
+  | tests\test_error_coverage.py ....................                        [ 33%]
+  | tests\test_extract_salvage.py ....                                       [ 33%]
+  | tests\test_file_read_cache_invalidation.py ........                      [ 33%]
+  | tests\test_gate_decision_recorder.py ...............                     [ 34%]
+  | tests\test_gateway_slash_facts.py ..............                         [ 35%]
+  | tests\test_github_list_issues.py ............                            [ 36%]
+  | tests\test_guard_port_exhaustion.py .....                                [ 36%]
+  | tests\test_hands_live.py s                                               [ 36%]
+  | tests\test_hitl_approval_ui.py ...........................               [ 38%]
+  | tests\test_hitl_grants.py ..........                                     [ 38%]
+  | tests\test_hitl_yolo_thread_bind.py .....                                [ 39%]
+  | tests\test_hunks.py ..                                                   [ 39%]
+  | tests\test_idle_reload.py ..........                                     [ 39%]
+  | tests\test_install_requirements.py .......                               [ 40%]
+  | tests\test_intent_engine_policy.py ..............                        [ 41%]
+  | tests\test_json_echo_format.py ......................................... [ 43%]
+  | ........                                                                 [ 43%]
+  | tests\test_knowledge_acquisition_profile.py ........                     [ 44%]
+  | tests\test_langfuse_enable.py .....                                      [ 44%]
+  | tests\test_live_agent_evaluation.py .........                            [ 45%]
+  | tests\test_llm_stream.py ...............                                 [ 46%]
+  | tests\test_loop_stall_watchdog.py ........                               [ 46%]
+  | tests\test_mcp_catalog.py ......                                         [ 46%]
+  | tests\test_mcp_reconnect.py ......................                       [ 48%]
+  | tests\test_memory_about_me.py ...........                                [ 48%]
+  | tests\test_memory_entity_protection.py ...............                   [ 49%]
+  | tests\test_memory_graph_mobile.py ...                                    [ 49%]
+  | tests\test_memory_pgvector.py ..........                                 [ 50%]
+  | tests\test_memory_tool_provenance.py ........                            [ 50%]
+  | tests\test_migration_bundle.py ........                                  [ 51%]
+  | tests\test_model_switch_service.py ...............                       [ 52%]
+  | tests\test_no_cwd_data_dir_fallback.py ......                            [ 52%]
+  | tests\test_oidc.py ....................                                  [ 53%]
+  | tests\test_p123_remaining.py ............                                [ 54%]
+  | tests\test_pdf_verification.py .....                                     [ 54%]
+  | tests\test_pg_pool_recovery.py ...ssss                                   [ 55%]
+  | tests\test_platform_ux_modules.py ........                               [ 55%]
+  | tests\test_process_priority.py ..........                                [ 56%]
+  | tests\test_prompt_fence.py .................                             [ 57%]
+  | tests\test_providers.py .....                                            [ 57%]
+  | tests\test_rbac.py ......................                                [ 58%]
+  | tests\test_regression_gw063.py ..                                        [ 58%]
+  | tests\test_reply_persistence_contract.py ..........                      [ 59%]
+  | tests\test_research_report_paths.py .........s....                       [ 60%]
+  | tests\test_restore.py ...........                                        [ 60%]
+  | tests\test_retry_backoff.py ......................                       [ 62%]
+  | tests\test_runtime_ownership.py .....sssss                               [ 62%]
+  | tests\test_scheduler_cadence.py ............                             [ 63%]
+  | tests\test_security_headers.py ......                                    [ 63%]
+  | tests\test_sensitive_key_classification.py ............................. [ 65%]
+  | .                                                                        [ 65%]
+  | tests\test_session_store.py ............                                 [ 66%]
+  | tests\test_settings_restore_classes.py F................                 [ 67%]
+  | tests\test_shutdown_builds_nothing.py ....                               [ 67%]
+  | tests\test_skill_review_workflow.py .....                                [ 67%]
+  | tests\test_snapshot_retention_actually_prunes.py ......                  [ 68%]
+  | tests\test_sse_chat.py ............................                      [ 69%]
+  | tests\test_static_gates.py ............................................. [ 72%]
+  | .............                                                            [ 73%]
+  | tests\test_supervisor.py .............................s..                [ 75%]
+  | tests\test_swarm_conditional_pattern.py ..............                   [ 75%]
+  | tests\test_swarm_handoff.py .................                            [ 76%]
+  | tests\test_swarm_recovery_no_replay.py .                                 [ 76%]
+  | tests\test_swarm_task_stream_ends.py .........                           [ 77%]
+  | tests\test_task_ledger.py ..................                             [ 78%]
+  | tests\test_telegram_offset_commit.py .........                           [ 79%]
+  | tests\test_template_plural_language.py ...                               [ 79%]
+  | tests\test_test_fail_continue.py ...                                     [ 79%]
+  | tests\test_time_travel_concurrency.py ..                                 [ 79%]
+  | tests\test_tool_paths.py ................................                [ 81%]
+  | tests\test_tracing_console.py 
+  | RUNNER: chunk timed out
+[fast-test] chunk 01 ran out of time — re-running its 126 files as 8 parallel pieces
+[fast-test] chunk 04 timed out (exit=124) — recovering its 125 files
+[fast-test] --- chunk 04: last 400 lines ---
+  | ============================= test session starts =============================
+  | platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+  | rootdir: G:\GitHubRepos\kazma
+  | configfile: pyproject.toml
+  | plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+  | asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+  | timeout: 120.0s
+  | timeout method: thread
+  | timeout func_only: False
+  | collected 1676 items / 2 deselected / 1674 selected
+  | kazma-core\kazma_core_tests\unit\test_reliability.py ................... [  1%]
+  | ...                                                                      [  1%]
+  | kazma-core\tests\test_github_app_integration.py ..............           [  2%]
+  | kazma-core\tests\test_memory_federated_search.py ....                    [  2%]
+  | kazma-core\tests\test_memory_v2_phase1.py ...................            [  3%]
+  | kazma-core\tests\test_paths_project_local.py .....                       [  3%]
+  | kazma-core\tests\test_vision_and_failure_handling.py ................    [  4%]
+  | kazma-gateway\kazma_gateway_tests\test_gateway_ux.py ..............      [  5%]
+  | kazma-tui\kazma_tui_tests\test_foundation.py .......s...                 [  6%]
+  | tests\integration\test_graph_roundtrip.py ..                             [  6%]
+  | tests\test_acquisition_surfaces.py ...                                   [  6%]
+  | tests\test_agent_turn.py .......                                         [  6%]
+  | tests\test_answer_quality_monitor.py .........................           [  8%]
+  | tests\test_arabic_i18n.py .................                              [  9%]
+  | tests\test_audit_2026_09_04_regressions.py ....                          [  9%]
+  | tests\test_audit_2026_09_16_approval_privilege.py ..........             [ 10%]
+  | tests\test_audit_deployment_io.py .............................          [ 12%]
+  | tests\test_audit_wave4.py ....                                           [ 12%]
+  | tests\test_auto_attach_containment.py ..                                 [ 12%]
+  | tests\test_boot_exposure_guard.py ..................                     [ 13%]
+  | tests\test_bus_approval_can_be_answered.py ........                      [ 13%]
+  | tests\test_certification.py ...................                          [ 15%]
+  | tests\test_chat_connector_secrets_install_scope.py ..........            [ 15%]
+  | tests\test_checkpoint.py .......                                         [ 16%]
+  | tests\test_cleanup_live_leftovers.py ....                                [ 16%]
+  | tests\test_code_index.py .......                                         [ 16%]
+  | tests\test_commitment_config.py .......                                  [ 17%]
+  | tests\test_commitment_soul.py .....                                      [ 17%]
+  | tests\test_config_loader.py ...                                          [ 17%]
+  | tests\test_config_store_tenant_resolve.py ................               [ 18%]
+  | tests\test_control_plane_stores_readonly.py ....................         [ 19%]
+  | tests\test_cultural_context.py ..................................        [ 21%]
+  | tests\test_data_paths_follow_data_dir.py ........                        [ 22%]
+  | tests\test_dedup_tool_registries.py ............                         [ 23%]
+  | tests\test_dialect_detector.py .....................                     [ 24%]
+  | tests\test_docs_anchors.py ........                                      [ 24%]
+  | tests\test_document_export_deleted_blobs.py ..                           [ 24%]
+  | tests\test_document_library_membership.py ....                           [ 25%]
+  | tests\test_document_sandbox.py .......                                   [ 25%]
+  | tests\test_docx_rtl_visual.py ...........                                [ 26%]
+  | tests\test_e2b_temporal.py ...........                                   [ 26%]
+  | tests\test_email_fail_closed.py .....................                    [ 28%]
+  | tests\test_endpoint_transport.py ........                                [ 28%]
+  | tests\test_evaluation_review.py .............                            [ 29%]
+  | tests\test_fanout_bus.py ...                                             [ 29%]
+  | tests\test_firing_ledger_report.py ......                                [ 29%]
+  | tests\test_gateway_approval_authorization.py ........................... [ 31%]
+  | ............                                                             [ 32%]
+  | tests\test_generate_metrics.py ....................                      [ 33%]
+  | tests\test_gmail_oauth_client_shape.py ..........                        [ 34%]
+  | tests\test_gw062_bugfixes.py ....                                        [ 34%]
+  | tests\test_hardening.py ..........................................       [ 36%]
+  | tests\test_hitl_gate_bridge.py ..............                            [ 37%]
+  | tests\test_hitl_reply_continuity.py ...                                  [ 37%]
+  | tests\test_hub_loader.py ...............                                 [ 38%]
+  | tests\test_ide_checkpoint_hunks.py ......                                [ 39%]
+  | tests\test_imports.py ...............                                    [ 39%]
+  | tests\test_integration.py ......................                         [ 41%]
+  | tests\test_intent_router.py .............                                [ 42%]
+  | tests\test_kb_api_routes.py .......                                      [ 42%]
+  | tests\test_knowledge_index.py ...........                                [ 43%]
+  | tests\test_lazy_package_exports.py ....                                  [ 43%]
+  | tests\test_livekit_duplex.py ........                                    [ 43%]
+  | tests\test_logging_rotation.py ...                                       [ 44%]
+  | tests\test_majlis_fast_path_guard.py ............                        [ 44%]
+  | tests\test_mcp_client_win32_shim.py ..                                   [ 44%]
+  | tests\test_mcp_servers_live.py ....................................      [ 47%]
+  | tests\test_memory_benchmark.py .....                                     [ 47%]
+  | tests\test_memory_every_turn.py .................                        [ 48%]
+  | tests\test_memory_legacy_archive.py .......                              [ 48%]
+  | tests\test_memory_relevance.py ....................                      [ 49%]
+  | tests\test_memory_v2_tenant_routes.py ..                                 [ 50%]
+  | tests\test_model_profiles.py .......................                     [ 51%]
+  | tests\test_module_stubs.py .....                                         [ 51%]
+  | tests\test_no_pypi_kazma.py ............................................ [ 54%]
+  | .......                                                                  [ 54%]
+  | tests\test_order_independence.py ............                            [ 55%]
+  | tests\test_package_namespaces.py ..                                      [ 55%]
+  | tests\test_personalities.py ..........................                   [ 57%]
+  | tests\test_pipeline_sandbox.py .........                                 [ 57%]
+  | tests\test_post_hitl_shell.py .....                                      [ 58%]
+  | tests\test_production.py ........                                        [ 58%]
+  | tests\test_provider_key_install_scope.py .............                   [ 59%]
+  | tests\test_proxy_scraping_coverage.py .........                          [ 59%]
+  | tests\test_reasoning_merge.py .........                                  [ 60%]
+  | tests\test_remaining_gaps.py .....                                       [ 60%]
+  | tests\test_required_capability_readiness.py .........                    [ 61%]
+  | tests\test_research_task_delete.py ...                                   [ 61%]
+  | tests\test_restore_drill_scheduled.py .........                          [ 61%]
+  | tests\test_router.py ....................                                [ 63%]
+  | tests\test_s4_coverage_gaps.py ..................                        [ 64%]
+  | tests\test_search_http_worker.py .............                           [ 64%]
+  | tests\test_security_report_sources.py ............                       [ 65%]
+  | tests\test_service_supervision.py ...................................... [ 67%]
+  | ....................................................                     [ 71%]
+  | tests\test_setting_writes_validated.py ....................              [ 72%]
+  | tests\test_shared_approvals.py ....                                      [ 72%]
+  | tests\test_sidebar_shows_every_destination.py .......                    [ 72%]
+  | tests\test_slack_adapter.py ......................                       [ 74%]
+  | tests\test_source_grounding.py ......                                    [ 74%]
+  | tests\test_sse_graph_coherence.py ...                                    [ 74%]
+  | tests\test_store_registry.py ...............................             [ 76%]
+  | tests\test_swarm_admission_hop.py ...                                    [ 76%]
+  | tests\test_swarm_dispatch_integration.py .......                         [ 77%]
+  | tests\test_swarm_metrics_tracing.py .................................... [ 79%]
+  | ..............                                                           [ 80%]
+  | tests\test_swarm_sse.py ..................................               [ 82%]
+  | tests\test_swarm_worker_tools.py .........                               [ 82%]
+  | tests\test_task_store_backends.py .........                              [ 83%]
+  | tests\test_telegram_slack_receive_and_test.py .......................... [ 84%]
+  | ...............                                                          [ 85%]
+  | tests\test_text_newlines.py .................                            [ 86%]
+  | tests\test_tone_adapter.py ..............................                [ 88%]
+  | tests\test_tools_quickwins.py ...................                        [ 89%]
+  | tests\test_truncation_retry.py ....                                      [ 89%]
+  | tests\test_turn_delivery_cqrs.py .......................                 [ 91%]
+  | tests\test_turn_notes.py ................                                [ 92%]
+  | tests\test_typing_keepalive.py .                                         [ 92%]
+  | tests\test_ui_six_improvements.py .........                              [ 92%]
+  | tests\test_unrestricted_unified.py .......                               [ 93%]
+  | tests\test_ux003_ui_bugs.py ................                             [ 94%]
+  | tests\test_vision_analyze.py ......................                      [ 95%]
+  | tests\test_web_acquisition_results.py ........................           [ 96%]
+  | tests\test_web_session_cache.py .....                                    [ 97%]
+  | tests\test_workspace_delete.py ....                                      [ 97%]
+  | tests\test_ws_chat_telemetry.py .
+  | RUNNER: chunk timed out
+[fast-test] chunk 04 ran out of time — re-running its 125 files as 8 parallel pieces
+[fast-test] chunk 00 timed out (exit=124) — recovering its 126 files
+[fast-test] --- chunk 00: last 400 lines ---
+  | ============================= test session starts =============================
+  | platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+  | rootdir: G:\GitHubRepos\kazma
+  | configfile: pyproject.toml
+  | plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+  | asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+  | timeout: 120.0s
+  | timeout method: thread
+  | timeout func_only: False
+  | collected 1837 items
+  | kazma-core\kazma_core_tests\integration\test_multi_platform.py ......... [  0%]
+  | ...............                                                          [  1%]
+  | kazma-core\tests\test_empty_answer_recovery.py ....                      [  1%]
+  | kazma-core\tests\test_max_iter_synthesis.py .......                      [  1%]
+  | kazma-core\tests\test_memory_priority_batch.py ........                  [  2%]
+  | kazma-core\tests\test_memory_v2_phase_a.py ....                          [  2%]
+  | kazma-core\tests\test_steer_buffers.py ...............                   [  3%]
+  | kazma-gateway\kazma_gateway_tests\adapters\test_gateway_consumer.py ..   [  3%]
+  | kazma-tui\kazma_tui_tests\test_chat.py ......................            [  4%]
+  | kazma-ui\kazma_ui_tests\test_mcp_ui.py ....                              [  4%]
+  | tests\test_acquisition_dns.py ................                           [  5%]
+  | tests\test_agent_handler_concurrency.py ................                 [  6%]
+  | tests\test_alert_install_button.py ..................                    [  7%]
+  | tests\test_approval_is_honoured_everywhere.py .....                      [  7%]
+  | tests\test_atomic_update_does_not_deadlock.py ..........                 [  8%]
+  | tests\test_audit_2026_09_04_wave4.py ............                        [  9%]
+  | tests\test_audit_b_remaining.py .......                                  [  9%]
+  | tests\test_audit_full_backlog_2026_09_30.py .......................      [ 10%]
+  | tests\test_auth_disabled_behind_proxy.py ......                          [ 11%]
+  | tests\test_backup_reports_the_real_loss.py ......                        [ 11%]
+  | tests\test_browser_driver_budget.py .........F....                       [ 12%]
+  | tests\test_calendar_connector.py ...................                     [ 13%]
+  | tests\test_chat_adapters_follow_settings.py ...................          [ 14%]
+  | tests\test_chat_session_routes_off_loop.py ..                            [ 14%]
+  | tests\test_checkpoint_timeout_deferral.py ...                            [ 14%]
+  | tests\test_cli_docs.py ....                                              [ 14%]
+  | tests\test_commitment_authorize_remind.py ......                         [ 15%]
+  | tests\test_commitment_modes.py ......                                    [ 15%]
+  | tests\test_compaction.py ........................                        [ 16%]
+  | tests\test_config_store_close_race.py ......                             [ 16%]
+  | tests\test_connector_health.py .................                         [ 17%]
+  | tests\test_cron_approval_pipeline.py ..............                      [ 18%]
+  | tests\test_dashboard_checkpoint_delete.py ..                             [ 18%]
+  | tests\test_database_read_roles_postgres.py ssss                          [ 18%]
+  | tests\test_delivery_v2_client.py ....................................... [ 21%]
+  | F.......................................................                 [ 24%]
+  | tests\test_discord_receive_and_test.py ............................      [ 25%]
+  | tests\test_doctor_command.py .....                                       [ 25%]
+  | tests\test_document_jobs.py ..............                               [ 26%]
+  | tests\test_document_parsers_phase4.py .................................. [ 28%]
+  | .                                                                        [ 28%]
+  | tests\test_documents_config.py ...                                       [ 28%]
+  | tests\test_drill_tells_loss_from_emptiness.py ..........                 [ 29%]
+  | tests\test_ego_anchor.py ...................                             [ 30%]
+  | tests\test_email_oauth_browser.py .........                              [ 30%]
+  | tests\test_env_reference.py ......                                       [ 31%]
+  | tests\test_execution_recovery_scope.py ..................                [ 32%]
+  | tests\test_file_chip.py ...                                              [ 32%]
+  | tests\test_fresh_imports.py ......                                       [ 32%]
+  | tests\test_gateway_send_backends.py ..                                   [ 32%]
+  | tests\test_github_clone_guards.py ................................       [ 34%]
+  | tests\test_guard_owns_reload.py ...............................          [ 36%]
+  | tests\test_hands_face.py ....                                            [ 36%]
+  | tests\test_hitl.py ..............                                        [ 37%]
+  | tests\test_hitl_gates.py ..........................................      [ 39%]
+  | tests\test_hitl_wiring.py .............................................. [ 41%]
+  | ...                                                                      [ 42%]
+  | tests\test_hub_versioning.py ...................                         [ 43%]
+  | tests\test_ide_send_to_swarm.py ..                                       [ 43%]
+  | tests\test_install_data_shield.py .........                              [ 43%]
+  | tests\test_intent_engine_heuristics.py ................................. [ 45%]
+  | ...................                                                      [ 46%]
+  | tests\test_js_suites.py ................................................ [ 49%]
+  | ..................                                                       [ 50%]
+  | tests\test_kept_connection_error_paths.py ........                       [ 50%]
+  | tests\test_kubernetes_runtime_contract.py .                              [ 50%]
+  | tests\test_light_version_bump.py .....                                   [ 50%]
+  | tests\test_llm_shared_ssl_context.py ......                              [ 51%]
+  | tests\test_loop_stall_second_pass.py ........                            [ 51%]
+  | tests\test_mcp_bridge.py ............................                    [ 53%]
+  | tests\test_mcp_project_root.py ........                                  [ 53%]
+  | tests\test_mcp_yaml_persist.py ........                                  [ 54%]
+  | tests\test_memory_entity_protect.py .........                            [ 54%]
+  | tests\test_memory_graph_group_move.py ....                               [ 54%]
+  | tests\test_memory_nothing_lost.py ........................               [ 56%]
+  | tests\test_memory_tenant_isolation.py ....                               [ 56%]
+  | tests\test_microsoft_mail_address.py ......                              [ 56%]
+  | tests\test_model_selection_pipeline.py ................................. [ 58%]
+  |                                                                          [ 58%]
+  | tests\test_neo4j_backup.py ...................                           [ 59%]
+  | tests\test_offsite_fallback.py ..........                                [ 60%]
+  | tests\test_output_routing.py .........................                   [ 61%]
+  | tests\test_path_rewrite.py ..                                            [ 61%]
+  | tests\test_pg_nul_safe.py ......                                         [ 61%]
+  | tests\test_platform_rbac.py ......                                       [ 62%]
+  | tests\test_process_budgets.py ..................                         [ 63%]
+  | tests\test_prompt_cache.py .......                                       [ 63%]
+  | tests\test_provider_tool_conversion.py ........                          [ 63%]
+  | tests\test_rate_limit_buckets.py ....                                    [ 64%]
+  | tests\test_refused_tool_is_not_a_success.py .......                      [ 64%]
+  | tests\test_replay_thread_titles.py ...                                   [ 64%]
+  | tests\test_research_read_url.py ........                                 [ 65%]
+  | tests\test_restic_s3_write_probe.py .............                        [ 65%]
+  | tests\test_resume_parity.py .......                                      [ 66%]
+  | tests\test_routing_unification.py .                                      [ 66%]
+  | tests\test_scheduled_api.py .........                                    [ 66%]
+  | tests\test_secrets_are_never_blanked.py ............                     [ 67%]
+  | tests\test_send_results_read.py ...........                              [ 68%]
+  | tests\test_session_spool.py ......s..                                    [ 68%]
+  | tests\test_settings_restore.py ...............................           [ 70%]
+  | tests\test_shipped_config_defaults.py ...............                    [ 71%]
+  | tests\test_skill_integrity_shown.py .......                              [ 71%]
+  | tests\test_slash_turns.py .....                                          [ 71%]
+  | tests\test_sse_bridge.py ....                                            [ 71%]
+  | tests\test_stale_settings_db_notice.py .......                           [ 72%]
+  | tests\test_summarizer.py .............                                   [ 72%]
+  | tests\test_swarm_breaker_reset.py ....                                   [ 73%]
+  | tests\test_swarm_fan_out_pattern.py .............                        [ 73%]
+  | tests\test_swarm_pipeline_pattern.py ......                              [ 74%]
+  | tests\test_swarm_task_store_api.py .........                             [ 74%]
+  | tests\test_task_control.py .....                                         [ 75%]
+  | tests\test_telegram_keyboards.py ....                                    [ 75%]
+  | tests\test_template_compile.py ...........................               [ 76%]
+  | tests\test_terminal_reply_authority.py ..........                        [ 77%]
+  | tests\test_time_travel.py ............................                   [ 78%]
+  | tests\test_tool_loop_breaker.py ....                                     [ 78%]
+  | tests\test_tracing.py ................                                   [ 79%]
+  | tests\test_tui_labels.py .........                                       [ 80%]
+  | tests\test_turn_input_continuity.py .......                              [ 80%]
+  | tests\test_turn_state_confluence.py ...........                          [ 81%]
+  | tests\test_ui_components.py ............................................ [ 83%]
+  | ........................................................................ [ 87%]
+  | ..................................                                       [ 89%]
+  | tests\test_unified_turn_a11y.py ..........                               [ 90%]
+  | tests\test_url_credentials.py ..............................s            [ 91%]
+  | tests\test_vault_tenant_scope_read.py .............                      [ 92%]
+  | tests\test_voice_tts_errors.py .....                                     [ 92%]
+  | tests\test_web_command_parity.py ......                                  [ 93%]
+  | tests\test_windows_task_registration.py ................................ [ 94%]
+  | .........                                                                [ 95%]
+  | tests\test_workspace_tab.py .............
+  | RUNNER: chunk timed out
+[fast-test] chunk 00 ran out of time — re-running its 126 files as 8 parallel pieces
+[fast-test] chunk 07 timed out (exit=124) — recovering its 125 files
+[fast-test] --- chunk 07: last 400 lines ---
+  | ============================= test session starts =============================
+  | platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+  | rootdir: G:\GitHubRepos\kazma
+  | configfile: pyproject.toml
+  | plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+  | asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+  | timeout: 120.0s
+  | timeout method: thread
+  | timeout func_only: False
+  | collected 1777 items / 1 skipped
+  | kazma-core\tests\test_embedder.py ...........                            [  0%]
+  | kazma-core\tests\test_language_lock.py ......                            [  0%]
+  | kazma-core\tests\test_memory_p2_wave.py .....                            [  1%]
+  | kazma-core\tests\test_memory_v2_phase5.py ..........                     [  1%]
+  | kazma-core\tests\test_shell_exec_cd_hint.py .                            [  1%]
+  | kazma-gateway\kazma_gateway_tests\adapters\test_documents_commands.py .. [  1%]
+  | ..                                                                       [  2%]
+  | kazma-tui\kazma_tui_tests\test_app_async.py ......................       [  3%]
+  | kazma-ui\kazma_ui_tests\test_active_turns.py ............                [  3%]
+  | tests\test_acquisition_credits.py .........                              [  4%]
+  | tests\test_admin_decision.py ..........                                  [  5%]
+  | tests\test_alert_dispatcher_upgrade.py .....                             [  5%]
+  | tests\test_approval_event_semantic.py ....                               [  5%]
+  | tests\test_async_routes_on_the_loop.py ....                              [  5%]
+  | tests\test_audit_2026_09_04_wave3.py ........                            [  6%]
+  | tests\test_audit_a_remaining.py ....                                     [  6%]
+  | tests\test_audit_followthrough.py ...............                        [  7%]
+  | tests\test_audit_wave8.py ........                                       [  7%]
+  | tests\test_backup_cadence_and_retention.py .....                         [  8%]
+  | tests\test_browser_boot_policy.py ..                                     [  8%]
+  | tests\test_calendar_card_providers.py ....                               [  8%]
+  | tests\test_chaos_routes.py ........                                      [  8%]
+  | tests\test_chat_key_resolution.py ..........                             [  9%]
+  | tests\test_checkpoint_serde.py .........                                 [  9%]
+  | tests\test_cli_commands.py ............................................. [ 12%]
+  | ........................................................................ [ 16%]
+  | .......                                                                  [ 16%]
+  | tests\test_commitment_authorize.py ......                                [ 17%]
+  | tests\test_commitment_g1_latency.py ..                                   [ 17%]
+  | tests\test_commitment_tool_worker_gate.py ...                            [ 17%]
+  | tests\test_config_store_cache_scope.py ....                              [ 17%]
+  | tests\test_config_write_race.py ....................                     [ 18%]
+  | tests\test_cron.py ................................                      [ 20%]
+  | tests\test_dashboard_capabilities.py ..                                  [ 20%]
+  | tests\test_database_read_roles_other.py ss                               [ 20%]
+  | tests\test_delivery_routing.py ....................                      [ 22%]
+  | tests\test_discord_gateway_resume.py ........                            [ 22%]
+  | tests\test_docs_sidebar.py ..                                            [ 22%]
+  | tests\test_document_ingestion_phase8.py ........                         [ 23%]
+  | tests\test_document_operations_phase9.py ............................... [ 24%]
+  | ......                                                                   [ 25%]
+  | tests\test_documents_api_phase8.py .................                     [ 26%]
+  | tests\test_drill_restic_lock_handling.py .........                       [ 26%]
+  | tests\test_effect_journal.py ....................                        [ 27%]
+  | tests\test_email_manager.py ........                                     [ 28%]
+  | tests\test_env_loading.py ..........                                     [ 28%]
+  | tests\test_execution_policy_failures.py ..........                       [ 29%]
+  | tests\test_file_checkpoints.py ....                                      [ 29%]
+  | tests\test_frames_name_their_turn.py .....                               [ 29%]
+  | tests\test_gateway_recursion_partial.py .....                            [ 30%]
+  | tests\test_github_client.py .......................                      [ 31%]
+  | tests\test_guard_integration.py .......................                  [ 32%]
+  | tests\test_handoff_guards.py ...                                         [ 32%]
+  | tests\test_history_row_fields.py ....                                    [ 33%]
+  | tests\test_hitl_gate_swarm_pipeline.py .....                             [ 33%]
+  | tests\test_hitl_supersede.py ....                                        [ 33%]
+  | tests\test_hub_validator.py .............                                [ 34%]
+  | tests\test_ide_read_raw.py ..........                                    [ 34%]
+  | tests\test_injection_live_harness.py ................................... [ 36%]
+  | ...............................                                          [ 38%]
+  | tests\test_intent_engine_entities.py ......                              [ 38%]
+  | tests\test_js_suite.py ................................................. [ 41%]
+  | ...........                                                              [ 42%]
+  | tests\test_kb_smart_reindex.py .........                                 [ 42%]
+  | tests\test_knowledge_store.py ................                           [ 43%]
+  | tests\test_lifecycle_start_card.py ..................................    [ 45%]
+  | tests\test_llm_rate_limit.py .....                                       [ 45%]
+  | tests\test_loop_breaker_live_path.py .....                               [ 46%]
+  | tests\test_mcp_binding_recovery.py ......                                [ 46%]
+  | tests\test_mcp_oauth.py .........                                        [ 46%]
+  | tests\test_mcp_tool_server.py ..............................             [ 48%]
+  | tests\test_memory_entity_counts.py .....                                 [ 48%]
+  | tests\test_memory_graph_clean.py ...............
+  | RUNNER: chunk timed out
+[fast-test] chunk 07 ran out of time — re-running its 125 files as 8 parallel pieces
+[fast-test] chunk 05 timed out (exit=124) — recovering its 125 files
+[fast-test] --- chunk 05: last 400 lines ---
+  | ============================= test session starts =============================
+  | platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+  | rootdir: G:\GitHubRepos\kazma
+  | configfile: pyproject.toml
+  | plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+  | asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+  | timeout: 120.0s
+  | timeout method: thread
+  | timeout func_only: False
+  | collected 1807 items / 1 skipped
+  | kazma-core\kazma_core_tests\unit\test_reliability_registry.py .......... [  0%]
+  | ...........                                                              [  1%]
+  | kazma-core\tests\test_ide_delete.py ....                                 [  1%]
+  | kazma-core\tests\test_memory_health.py ..                                [  1%]
+  | kazma-core\tests\test_memory_v2_phase2.py ..............                 [  2%]
+  | kazma-core\tests\test_per_turn_rag.py ........                           [  2%]
+  | kazma-core\tests\test_workspace_binding_and_mcp_rebind.py ........       [  3%]
+  | kazma-gateway\kazma_gateway_tests\test_swarm_approval_callbacks.py ..... [  3%]
+  | ........                                                                 [  3%]
+  | kazma-tui\kazma_tui_tests\test_header_footer.py .............            [  4%]
+  | tests\test_active_turns.py ..................                            [  5%]
+  | tests\test_agentdojo_bench.py ..sssss............ss.........s..sss...... [  7%]
+  | ....                                                                     [  8%]
+  | tests\test_api_route_callers.py ............................             [  9%]
+  | tests\test_arabic_single_home.py ......                                  [ 10%]
+  | tests\test_audit_2026_09_04_wave1.py .........                           [ 10%]
+  | tests\test_audit_2026_09_16_regressions.py ...................           [ 11%]
+  | tests\test_audit_f_remaining.py ...                                      [ 11%]
+  | tests\test_audit_wave6.py ..................                             [ 12%]
+  | tests\test_background_drain_bounded.py ....                              [ 12%]
+  | tests\test_branch_protection_runbook.py ...                              [ 13%]
+  | tests\test_bus_bridge.py ......................                          [ 14%]
+  | tests\test_chaos_injection.py ...................                        [ 15%]
+  | tests\test_chat_history.py .........                                     [ 15%]
+  | tests\test_checkpoint_backend_recovery_contract.py .                     [ 15%]
+  | tests\test_cli_ask.py ...............................                    [ 17%]
+  | tests\test_code_index_truncation.py ........                             [ 18%]
+  | tests\test_commitment_copilot_incident.py ...                            [ 18%]
+  | tests\test_commitment_soul_endpoint.py ....                              [ 18%]
+  | tests\test_config_reconcile_local.py ........                            [ 18%]
+  | tests\test_config_store_vault.py ..........                              [ 19%]
+  | tests\test_cost_breaker.py .......................                       [ 20%]
+  | tests\test_daily_digest.py ................................              [ 22%]
+  | tests\test_database_compose_defaults.py ..                               [ 22%]
+  | tests\test_delivery.py ......................................            [ 24%]
+  | tests\test_disclosure.py .........................                       [ 26%]
+  | tests\test_docs_file_refs.py ...                                         [ 26%]
+  | tests\test_document_generation_phase7.py .......s......                  [ 27%]
+  | tests\test_document_malware.py ........                                  [ 27%]
+  | tests\test_document_worker.py ....                                       [ 27%]
+  | tests\test_draft_discard.py ..........                                   [ 28%]
+  | tests\test_e2e.py ..............                                         [ 29%]
+  | tests\test_email_imap_pop.py .........                                   [ 29%]
+  | tests\test_english_counts.py ........F..                                 [ 30%]
+  | tests\test_event_loop_fixes.py ..................                        [ 31%]
+  | tests\test_fast_test_runner.py ......................                    [ 32%]
+  | tests\test_fleet_embed.py ....                                           [ 32%]
+  | tests\test_gateway_approval_card_retry.py ...............                [ 33%]
+  | tests\test_get_routes_off_the_loop.py ...                                [ 33%]
+  | tests\test_google_llm.py ......                                          [ 33%]
+  | tests\test_ha_workspace_boot.py ...                                      [ 34%]
+  | tests\test_harness_isolation.py .....                                    [ 34%]
+  | tests\test_hitl_gate_read_cutover.py ...............                     [ 35%]
+  | tests\test_hitl_stale_message.py ...                                     [ 35%]
+  | tests\test_hub_manifest.py ........................                      [ 36%]
+  | tests\test_ide_git_readonly.py .........................                 [ 38%]
+  | tests\test_industry_smoke_matrix.py ............                         [ 38%]
+  | tests\test_intent_audit_fixes.py ...................................     [ 40%]
+  | tests\test_interactive.py ....................................           [ 42%]
+  | tests\test_kb_jobs.py ..                                                 [ 42%]
+  | tests\test_knowledge_ingest.py .......................                   [ 44%]
+  | tests\test_leftovers_except_g.py .....                                   [ 44%]
+  | tests\test_llm_gateway.py ...............                                [ 45%]
+  | tests\test_login_throttle.py .........                                   [ 45%]
+  | tests\test_mcp_asset_cache_busting.py .                                  [ 45%]
+  | tests\test_mcp_hitl.py .....................................             [ 47%]
+  | tests\test_mcp_servers_store.py .........................                [ 49%]
+  | tests\test_memory_current_facts.py ..........                            [ 49%]
+  | tests\test_memory_forget.py ....................                         [ 50%]
+  | tests\test_memory_legacy_copies.py ......                                [ 51%]
+  | tests\test_memory_remember_and_small_talk.py ........................... [ 52%]
+  | ...                                                                      [ 52%]
+  | tests\test_metrics.py ...                                                [ 52%]
+  | tests\test_model_provider_spelling.py ..........                         [ 53%]
+  | tests\test_multi_tenant_isolation.py .                                   [ 53%]
+  | tests\test_no_repeated_dict_keys.py ...                                  [ 53%]
+  | tests\test_origin_scheduler.py .....................................     [ 55%]
+  | tests\test_package_update_on_a_guarded_install.py ...................... [ 57%]
+  | ..............                                                           [ 57%]
+  | tests\test_pg_backup.py .................                                [ 58%]
+  | tests\test_plan_fence.py ................................                [ 60%]
+  | tests\test_postgres_coverage.py ..                                       [ 60%]
+  | tests\test_production_qualification.py ................................. [ 62%]
+  | .                                                                        [ 62%]
+  | tests\test_provider_key_is_not_destroyed.py .............                [ 63%]
+  | tests\test_push_honours_the_switch.py ......                             [ 63%]
+  | tests\test_recall_fresh_install.py ....                                  [ 63%]
+  | tests\test_remind_args_first.py .........................                [ 65%]
+  | tests\test_research_planner.py ......                                    [ 65%]
+  | tests\test_resilience_manifest.py ...................................... [ 67%]
+  | ........                                                                 [ 68%]
+  | tests\test_restore_rehearsal.py .....................ss                  [ 69%]
+  | tests\test_routes_exist_when_built.py ..                                 [ 69%]
+  | tests\test_safe_xml.py .....                                             [ 69%]
+  | tests\test_search_sdk_worker.py ......                                   [ 70%]
+  | tests\test_security_scan_scope.py .....                                  [ 70%]
+  | tests\test_session_directory.py ...........                              [ 70%]
+  | tests\test_settings.py ................................................. [ 73%]
+  | ................................................                         [ 76%]
+  | tests\test_shared_store_peers.py ...................                     [ 77%]
+  | tests\test_singleton_isolation.py ................                       [ 78%]
+  | tests\test_slack_approval_disclosure.py .......                          [ 78%]
+  | tests\test_sqlite_column_migrations.py ..........                        [ 79%]
+  | tests\test_sse_segment_break.py .                                        [ 79%]
+  | tests\test_streaming_last_event_id_scope.py .                            [ 79%]
+  | tests\test_swarm_api.py ....................                             [ 80%]
+  | tests\test_swarm_dynamic_spawning.py ...........................         [ 81%]
+  | tests\test_swarm_notify.py ...............                               [ 82%]
+  | tests\test_swarm_task_model.py ........                                  [ 83%]
+  | tests\test_sync_tool_context.py .                                        [ 83%]
+  | tests\test_task_store_workspace.py .                                     [ 83%]
+  | tests\test_telegram_stt.py ..                                            [ 83%]
+  | tests\test_tenant_context_isolation.py ........                          [ 83%]
+  | tests\test_thread_ownership_routes.py .........                          [ 84%]
+  | tests\test_tool_activity_identity.py ....                                [ 84%]
+  | tests\test_topic_drift_embed_and_stub.py ........                        [ 84%]
+  | tests\test_ttl_env_parsing.py ..................                         [ 85%]
+  | tests\test_turn_document.py .........................                    [ 87%]
+  | tests\test_turn_render_boundary.py .......                               [ 87%]
+  | tests\test_ui001_quick_fixes.py .................                        [ 88%]
+  | tests\test_unbound_local_imports.py ...........                          [ 89%]
+  | tests\test_unused_locals_that_were_bugs.py ...                           [ 89%]
+  | tests\test_ux005_agents_page.py ...............................          [ 91%]
+  | tests\test_voice_audio_label.py ............                             [ 91%]
+  | tests\test_web_acquisition_safety.py .............................
+  | RUNNER: chunk timed out
+[fast-test] chunk 05 ran out of time — re-running its 125 files as 8 parallel pieces
+[fast-test] chunk 02 timed out (exit=124) — recovering its 126 files
+[fast-test] --- chunk 02: last 400 lines ---
+  | ============================= test session starts =============================
+  | platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+  | rootdir: G:\GitHubRepos\kazma
+  | configfile: pyproject.toml
+  | plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+  | asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+  | timeout: 120.0s
+  | timeout method: thread
+  | timeout func_only: False
+  | collected 1751 items
+  | kazma-core\kazma_core_tests\unit\test_path_anchoring.py ....             [  0%]
+  | kazma-core\tests\test_git_bot_commit.py ..                               [  0%]
+  | kazma-core\tests\test_mcp_stdio_limit.py ...                             [  0%]
+  | kazma-core\tests\test_memory_tenant_auth.py ......                       [  0%]
+  | kazma-core\tests\test_memory_v2_phase_c_d.py ........                    [  1%]
+  | kazma-core\tests\test_swarm_phonebook_fence.py ..                        [  1%]
+  | kazma-gateway\kazma_gateway_tests\adapters\test_slack_bus.py ...         [  1%]
+  | kazma-tui\kazma_tui_tests\test_css_and_mount.py ........                 [  2%]
+  | tests\integration\test_agent_uses_graph.py ...                           [  2%]
+  | tests\test_acquisition_postgres.py ss                                    [  2%]
+  | tests\test_agent_skill_integrity.py ..........                           [  2%]
+  | tests\test_answer_format.py ............................................ [  5%]
+  | .......................                                                  [  6%]
+  | tests\test_approval_storage_outage_route.py ...                          [  6%]
+  | tests\test_audit_2026_08_29_regressions.py ............................. [  8%]
+  | ......                                                                   [  8%]
+  | tests\test_audit_2026_09_04_wave6.py ...........                         [  9%]
+  | tests\test_audit_d_remaining.py ..                                       [  9%]
+  | tests\test_audit_logger.py ...............                               [ 10%]
+  | tests\test_authority.py ................                                 [ 11%]
+  | tests\test_backup_tmp_leak.py .................                          [ 12%]
+  | tests\test_browser_origin_policy.py ...................                  [ 13%]
+  | tests\test_callback_allowlist.py ....                                    [ 13%]
+  | tests\test_chat_attachment_security.py ..........                        [ 14%]
+  | tests\test_chat_steer_composer.py ...................................... [ 16%]
+  | ......................                                                   [ 17%]
+  | tests\test_child_env.py ....................                             [ 18%]
+  | tests\test_cloud_sync.py ..............................                  [ 20%]
+  | tests\test_commitment_cancel_job.py .............                        [ 21%]
+  | tests\test_commitment_scenarios.py .......                               [ 21%]
+  | tests\test_computer_use.py .................                             [ 22%]
+  | tests\test_config_store_raw_read_lock.py .                               [ 22%]
+  | tests\test_context_integrity.py ........................................ [ 25%]
+  | ......................                                                   [ 26%]
+  | tests\test_cron_tenant_context.py .....                                  [ 26%]
+  | tests\test_dashboard_session_table.py ....                               [ 26%]
+  | tests\test_db_backend.py .s.                                             [ 26%]
+  | tests\test_detached_reply_persist.py .............                       [ 27%]
+  | tests\test_division_sandbox.py ..........                                [ 28%]
+  | tests\test_document_certification_phase10.py ........................... [ 29%]
+  | ..                                                                       [ 29%]
+  | tests\test_document_knowledge_phase6.py ........                         [ 30%]
+  | tests\test_document_processor_security.py .......                        [ 30%]
+  | tests\test_documents_repository.py ......                                [ 31%]
+  | tests\test_durable_crawls.py .................                           [ 32%]
+  | tests\test_email_disconnect_csrf.py ..........                           [ 32%]
+  | tests\test_email_polish.py .........                                     [ 33%]
+  | tests\test_error_redaction.py .........                                  [ 33%]
+  | tests\test_f0_hitl_app_graph_spike.py .                                  [ 33%]
+  | tests\test_file_search_event_loop.py ..                                  [ 33%]
+  | tests\test_gate_view.py ...................                              [ 34%]
+  | tests\test_gateway_terminal_answer.py .........                          [ 35%]
+  | tests\test_github_oauth_redirect.py ...                                  [ 35%]
+  | tests\test_guard_probe_answers.py ....                                   [ 35%]
+  | tests\test_hands_outcome.py ..                                           [ 35%]
+  | tests\test_hitl_card_content_tools.py .............................      [ 37%]
+  | tests\test_hitl_graph_integration.py ......                              [ 37%]
+  | tests\test_http_tls.py ...                                               [ 38%]
+  | tests\test_i18n.py ..............................                        [ 39%]
+  | tests\test_image_gen.py .......................                          [ 41%]
+  | tests\test_install_yaml.py ......                                        [ 41%]
+  | tests\test_intent_engine_tier2.py .......                                [ 41%]
+  | tests\test_kazma_count.py ....                                           [ 42%]
+  | tests\test_knowledge_agent_tools.py ...                                  [ 42%]
+  | tests\test_language_lock_quoting.py ........                             [ 42%]
+  | tests\test_live_client_pairing.py ....                                   [ 43%]
+  | tests\test_llm_tool_count_limit.py .............                         [ 43%]
+  | tests\test_mail_secrets_install_scope.py ..........                      [ 44%]
+  | tests\test_mcp_classification_hardening.py ......                        [ 44%]
+  | tests\test_mcp_secrets.py ..................                             [ 45%]
+  | tests\test_memory_admin_api.py ......................................... [ 48%]
+  |                                                                          [ 48%]
+  | tests\test_memory_episode_text.py ......                                 [ 48%]
+  | tests\test_memory_graph_reach_and_hybrid.py .....                        [ 48%]
+  | tests\test_memory_predicate_names.py ......................              [ 49%]
+  | tests\test_memory_topic_summaries.py ...............................     [ 51%]
+  | tests\test_model_fallback_notice.py ...........                          [ 52%]
+  | tests\test_models_route.py .....................                         [ 53%]
+  | tests\test_no_llm_response_replay.py ....                                [ 53%]
+  | tests\test_ops_alert_delivery.py ..................                      [ 54%]
+  | tests\test_p3_features.py .....                                          [ 55%]
+  | tests\test_perf_fixes.py ...........................                     [ 56%]
+  | tests\test_pg_store_dual_backend.py ....s                                [ 56%]
+  | tests\test_portability.py ................                               [ 57%]
+  | tests\test_product_knowledge.py ............                             [ 58%]
+  | tests\test_protected_config.py ...................................       [ 60%]
+  | tests\test_providers_js_behaviour.py ...........                         [ 61%]
+  | tests\test_read_url_hardening.py ...........                             [ 61%]
+  | tests\test_release_supply_chain.py ..........                            [ 62%]
+  | tests\test_reply_sink.py .................                               [ 63%]
+  | tests\test_research_session.py ..............                            [ 64%]
+  | tests\test_restore_drill.py .........s......                             [ 64%]
+  | tests\test_rich_document_render.py .................                     [ 65%]
+  | tests\test_runtime_writer_fence.py ...s.                                 [ 66%]
+  | tests\test_scripts_have_no_english.py .................................. [ 68%]
+  | .......                                                                  [ 68%]
+  | tests\test_security_linter.py .............................              [ 70%]
+  | tests\test_serve_env.py .                                                [ 70%]
+  | tests\test_session_tenant_binding.py .......                             [ 70%]
+  | tests\test_settings_split.py .....                                       [ 70%]
+  | tests\test_side_effects.py ....................                          [ 72%]
+  | tests\test_skill_switches.py ........                                    [ 72%]
+  | tests\test_snapshot_rewind_payload.py ..                                 [ 72%]
+  | tests\test_sse_delivery_v2.py ...............                            [ 73%]
+  | tests\test_still_not_doing.py ......                                     [ 73%]
+  | tests\test_supervisor_watch.py ......                                    [ 74%]
+  | tests\test_swarm_consult_pattern.py .......                              [ 74%]
+  | tests\test_swarm_hitl_checkpoints.py ..................                  [ 75%]
+  | tests\test_swarm_reliability.py .............................            [ 77%]
+  | tests\test_swarm_timeout_validation_concurrency.py ..................... [ 78%]
+  | ..............................                                           [ 80%]
+  | tests\test_task_lifecycle.py ...                                         [ 80%]
+  | tests\test_telegram_parse.py .......                                     [ 80%]
+  | tests\test_templates_have_no_english.py ..                               [ 80%]
+  | tests\test_text_display.py ................                              [ 81%]
+  | tests\test_token_counter.py ....                                         [ 82%]
+  | tests\test_tool_schema.py ...............                                [ 82%]
+  | tests\test_transcript_recall.py ...........                              [ 83%]
+  | tests\test_tui_traces_panel.py ...                                       [ 83%]
+  | tests\test_turn_liveness_invariant.py ...........                        [ 84%]
+  | tests\test_turn_usage.py .......                                         [ 84%]
+  | tests\test_ui_hydration_cloak.py .                                       [ 84%]
+  | tests\test_unified_turn_fixtures.py ..................s.                 [ 85%]
+  | tests\test_url_utils.py ...................................              [ 87%]
+  | tests\test_vendor_codemirror.py .....                                    [ 88%]
+  | tests\test_web_acquire.py ......                                         [ 88%]
+  | tests\test_web_search_and_sql_validation.py ..                           [ 88%]
+  | tests\test_worker_factory.py ......                                      [ 89%]
+  | tests\test_ws_auth_browser_paths.py ...                                  [ 89%]
+  | tests\test_x_auto_reply.py ...
+  | RUNNER: chunk timed out
+[fast-test] chunk 02 ran out of time — re-running its 126 files as 8 parallel pieces
+[fast-test] chunk 03 timed out (exit=124) — recovering its 125 files
+[fast-test] --- chunk 03: last 400 lines ---
+  | ============================= test session starts =============================
+  | platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+  | rootdir: G:\GitHubRepos\kazma
+  | configfile: pyproject.toml
+  | plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+  | asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+  | timeout: 120.0s
+  | timeout method: thread
+  | timeout func_only: False
+  | collected 1913 items
+  | kazma-core\kazma_core_tests\unit\test_prompt_fence.py .................. [  0%]
+  | ..                                                                       [  1%]
+  | kazma-core\tests\test_git_identity.py ......                             [  1%]
+  | kazma-core\tests\test_memory_eval_golden.py ...                          [  1%]
+  | kazma-core\tests\test_memory_v2_backfill.py ......                       [  1%]
+  | kazma-core\tests\test_memory_v2_swarm_bridge.py .........                [  2%]
+  | kazma-core\tests\test_unusable_assistant_content.py .....                [  2%]
+  | kazma-gateway\kazma_gateway_tests\adapters\test_telegram_bus.py ...      [  2%]
+  | kazma-tui\kazma_tui_tests\test_dashboard.py ............................ [  4%]
+  | ...................................                                      [  6%]
+  | tests\integration\test_cron_and_adapters.py ........                     [  6%]
+  | tests\test_acquisition_resources.py .......................              [  7%]
+  | tests\test_agent_skills.py ...........................                   [  9%]
+  | tests\test_answer_quality.py ......................                      [ 10%]
+  | tests\test_approve_decides_one_gate.py ...................               [ 11%]
+  | tests\test_audit_2026_08_31_strengthen.py ..............                 [ 11%]
+  | tests\test_audit_2026_09_04_wave7.py ............                        [ 12%]
+  | tests\test_audit_deep_structure_fixes.py .....................F.....     [ 13%]
+  | tests\test_audit_systematic_followthrough.py ...........                 [ 14%]
+  | tests\test_authorization_flow.py ................                        [ 15%]
+  | tests\test_balance_exhausted.py ...........                              [ 15%]
+  | tests\test_bug_regression.py ................................            [ 17%]
+  | tests\test_capacity_commands.py ...........                              [ 18%]
+  | tests\test_chat_composer_chrome.py ....                                  [ 18%]
+  | tests\test_chat_tables.py .............                                  [ 19%]
+  | tests\test_circuit_breaker_hardening.py .............                    [ 19%]
+  | tests\test_code_exec.py ................................................ [ 22%]
+  | ..                                                                       [ 22%]
+  | tests\test_commitment_clarify_card.py ..                                 [ 22%]
+  | tests\test_commitment_scope.py .............                             [ 23%]
+  | tests\test_config_batch_revision.py ...s                                 [ 23%]
+  | tests\test_config_store_stale_shadow.py .....                            [ 23%]
+  | tests\test_control_plane_disclosure_on_card.py ........                  [ 24%]
+  | tests\test_csrf.py .........                                             [ 24%]
+  | tests\test_data_dir_does_not_isolate_postgres.py ....                    [ 24%]
+  | tests\test_debt_ratchet.py .....                                         [ 24%]
+  | tests\test_diagnostics_are_read_only.py ...........................      [ 26%]
+  | tests\test_docker_cli_discovery.py ................                      [ 27%]
+  | tests\test_document_convert_fallback.py ........                         [ 27%]
+  | tests\test_document_layout.py .....................                      [ 28%]
+  | tests\test_document_repository_pg_quota.py ss                            [ 28%]
+  | tests\test_documents_storage.py ..........                               [ 29%]
+  | tests\test_durable_gate_decisions.py ....                                [ 29%]
+  | tests\test_email_extra_accounts.py .........................             [ 30%]
+  | tests\test_embedder_rebuild_route.py ..                                  [ 30%]
+  | tests\test_eval_pack.py ................................................ [ 33%]
+  | ....................................                                     [ 35%]
+  | tests\test_failover_cache_reset.py ..                                    [ 35%]
+  | tests\test_file_tools.py .........                                       [ 35%]
+  | tests\test_gateway.py .................................................. [ 38%]
+  | ...                                                                      [ 38%]
+  | tests\test_genai_otel_spans.py ......................................... [ 40%]
+  | .                                                                        [ 40%]
+  | tests\test_github_status_cache.py .......                                [ 41%]
+  | tests\test_gw061_bugfixes.py .............                               [ 41%]
+  | tests\test_hard_page_recovery.py .....                                   [ 42%]
+  | tests\test_hitl_card_readability.py ...............................      [ 43%]
+  | tests\test_hitl_grouped_approval_disclosure.py ...                       [ 44%]
+  | tests\test_hub_cli.py ................                                   [ 44%]
+  | tests\test_i18n_keys_exist.py ...                                        [ 45%]
+  | tests\test_importer_atomicity.py ..                                      [ 45%]
+  | tests\test_instant_reply_frames.py ..                                    [ 45%]
+  | tests\test_intent_research.py ........                                   [ 45%]
+  | tests\test_kazma_guard_reload.py ..........                              [ 46%]
+  | tests\test_knowledge_chunker.py .........                                [ 46%]
+  | tests\test_language_system.py .......................................... [ 48%]
+  | ...................                                                      [ 49%]
+  | tests\test_live_llm_resolution.py ............................           [ 51%]
+  | tests\test_loadtest_routes.py .........                                  [ 51%]
+  | tests\test_majlis.py ..........................                          [ 53%]
+  | tests\test_mcp_client.py .................                               [ 53%]
+  | tests\test_mcp_server.py ..............................                  [ 55%]
+  | tests\test_memory_audit_hygiene.py ......                                [ 55%]
+  | tests\test_memory_event_time.py ....................                     [ 56%]
+  | tests\test_memory_hygiene.py .....                                       [ 57%]
+  | tests\test_memory_rehydrate.py .................                         [ 58%]
+  | tests\test_memory_v2_graph_route.py ........                             [ 58%]
+  | tests\test_model_modality.py ....                                        [ 58%]
+  | tests\test_module_attribute_refs.py ..                                   [ 58%]
+  | tests\test_no_owner_identity_in_product.py ..                            [ 58%]
+  | tests\test_ops_alerts.py ........................                        [ 60%]
+  | tests\test_pacing.py .................................                   [ 61%]
+  | tests\test_permissions.py ........................                       [ 63%]
+  | tests\test_phase2_remaining.py ....                                      [ 63%]
+  | tests\test_portability_setup.py ..............                           [ 64%]
+  | tests\test_product_version.py .....                                      [ 64%]
+  | tests\test_provider_conformance.py ..................................... [ 66%]
+  | ........................................................................ [ 70%]
+  | ..................................................                       [ 72%]
+  | tests\test_proxy_routing_safety.py ..................................... [ 74%]
+  | ...                                                                      [ 74%]
+  | tests\test_readiness_answers_in_time.py .....                            [ 75%]
+  | tests\test_reliability_sprint2.py ...........                            [ 75%]
+  | tests\test_repository_metrics.py ..........                              [ 76%]
+  | tests\test_research_session_threads.py ......                            [ 76%]
+  | tests\test_restore_drill_actually_runs.py ...........................    [ 77%]
+  | tests\test_rlimits.py ..s...ss                                           [ 78%]
+  | tests\test_s32_stream_duplication.py ...                                 [ 78%]
+  | tests\test_scripts_keep_their_translator.py ...                          [ 78%]
+  | tests\test_security_policy_file.py ..                                    [ 78%]
+  | tests\test_service_facade.py ..............................              [ 80%]
+  | tests\test_session_ttl.py ...                                            [ 80%]
+  | tests\test_setup_api.py ....                                             [ 80%]
+  | tests\test_sidebar_model_display.py .............                        [ 81%]
+  | tests\test_skill_validation.py ..............                            [ 82%]
+  | tests\test_soft_nav_page_scripts.py ..........                           [ 82%]
+  | tests\test_sse_event_contract.py ....                                    [ 82%]
+  | tests\test_storage_backend_recovery_contract.py ..                       [ 82%]
+  | tests\test_swallowed_errors_reported.py ........                         [ 83%]
+  | tests\test_swarm_cross_flows.py ..........................               [ 84%]
+  | tests\test_swarm_manager.py ...........................                  [ 86%]
+  | tests\test_swarm_safety_yolo.py .....                                    [ 86%]
+  | tests\test_swarm_ui_panel.py ........................................... [ 88%]
+  | ..............                                                           [ 89%]
+  | tests\test_task_queue_lease.py ......                                    [ 89%]
+  | tests\test_telegram_send.py .....                                        [ 89%]
+  | tests\test_temporal_execution_recovery.py ...........                    [ 90%]
+  | tests\test_text_follows_its_language.py ..........                       [ 90%]
+  | tests\test_tokenizers.py .....
+  | RUNNER: chunk timed out
+[fast-test] chunk 03 ran out of time — re-running its 125 files as 8 parallel pieces
+
+[fast-test] TOTALS in 2507s: 2 deselected, 8 failed, 14240 passed, 61 skipped
+
+[fast-test] 8 failing tests:
+  FAILED tests/test_audit_deep_structure_fixes.py::test_rdap_404_json_returns_as_is
+  FAILED tests/test_browser_driver_budget.py::test_browser_resource_failure_receipt_keeps_the_os_budget
+  FAILED tests/test_delivery_v2_client.py::TestUIAuditPhase2Fixes::test_x_cloak_pass_applied
+  FAILED tests/test_english_counts.py::test_no_english_count_is_in_one_form
+  FAILED tests/test_metrics_receipt_current.py::test_shipped_collection_receipt_matches_current_inputs
+  FAILED tests/test_orphan_modules.py::test_every_product_module_is_reached
+  FAILED tests/test_settings_restore_classes.py::test_every_key_the_code_writes_is_named_by_a_rule
+  FAILED tests/test_tools_quickwins.py::TestReadUrl::test_read_url_extracts_content
+
+[fast-test] failure tracebacks (per-chunk FAILURES sections):
+================================== FAILURES ===================================
+___________ test_shipped_collection_receipt_matches_current_inputs ____________
+tests\test_metrics_receipt_current.py:17: in test_shipped_collection_receipt_matches_current_inputs
+    assert receipt["input_sha256"] == generator.collection_fingerprint(), (
+E   AssertionError: Collection inputs changed: stage new source/test files, then run python scripts/generate_metrics.py --write --require-collected and stage its outputs.
+E   assert '530bb6b8b6f1...77f014fd39560' == 'eee4384c7503...8f6ceae09c31b'
+E     
+E     - eee4384c7503d6ce2e9c0eed3d7f268fcb7880d0bc99fc99b128f6ceae09c31b
+E     + 530bb6b8b6f1cc9727ee5810e1401c828003212d1652e9a608477f014fd39560
+---------------------------- Captured stdout setup ----------------------------
+13:25:22 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+13:25:22 INFO kazma_ui.session_manager: [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19383\test_shipped_collection_receip0\chat_sessions.db
+13:25:22 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19383\test_shipped_collection_receip0\settings.db
+13:25:22 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+13:25:22 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19383\test_shipped_collection_receip0\settings.db
+13:25:22 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+13:25:22 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19383\test_shipped_collection_receip0\test_registry.db
+13:25:22 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+13:25:22 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19383\test_shipped_collection_receip0\test_registry.db
+13:25:22 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+13:25:22 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openai
+13:25:22 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: anthropic
+13:25:22 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: groq
+13:25:22 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: deepseek
+13:25:22 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: google
+13:25:22 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: x
+
+================================== FAILURES ===================================
+______________ test_every_key_the_code_writes_is_named_by_a_rule ______________
+tests\test_settings_restore_classes.py:366: in test_every_key_the_code_writes_is_named_by_a_rule
+    assert not undeclared, (
+E   AssertionError: Settings writes whose key the scan cannot read; add each to DYNAMIC_WRITES with the keys it writes (or why it needs none):
+E       kazma-core/kazma_core/web_acquire/accounting.py::_mutate
+E       kazma-core/kazma_core/web_acquire/crawl_jobs.py::_mutate
+E   assert not ['kazma-core/kazma_core/web_acquire/accounting.py::_mutate', 'kazma-core/kazma_core/web_acquire/crawl_jobs.py::_mutate']
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+
+================================== FAILURES ===================================
+_________________ TestReadUrl.test_read_url_extracts_content __________________
+tests\test_tools_quickwins.py:186: in test_read_url_extracts_content
+    assert "Hello World" in result
+E   AssertionError: assert 'Hello World' in 'Error: Failed to read https://example.com/extract-test � DNS validation exceeded its five-second worker deadline; its process was terminated.\n[Acquisition: unknown backend; error timeout; final URL unavailable]'
+---------------------------- Captured stdout setup ----------------------------
+13:30:56 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+13:30:56 INFO kazma_ui.session_manager: [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19396\test_read_url_extracts_content0\chat_sessions.db
+13:30:56 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19396\test_read_url_extracts_content0\settings.db
+13:30:56 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+13:30:56 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19396\test_read_url_extracts_content0\settings.db
+13:30:56 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+13:30:56 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19396\test_read_url_extracts_content0\test_registry.db
+13:30:56 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+13:30:56 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19396\test_read_url_extracts_content0\test_registry.db
+13:30:56 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+13:30:56 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openai
+13:30:56 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: anthropic
+13:30:56 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: groq
+13:30:56 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: deepseek
+13:30:56 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: google
+13:30:56 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: xai
+13:30:56 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: zai
+13:30:56 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openrouter
+13:30:56 INFO
+
+================================== FAILURES ===================================
+______________ TestUIAuditPhase2Fixes.test_x_cloak_pass_applied _______________
+tests\test_delivery_v2_client.py:605: in test_x_cloak_pass_applied
+    assert "x-cloak" in tag, f"{p.name}: {tag[:100]}"
+E   AssertionError: knowledge_base.html: <span x-show="balance.observed_at" x-text="balance.observed_at ? KazmaFormat.dateTime(new Date(balan
+E   assert 'x-cloak' in '<span x-show="balance.observed_at" x-text="balance.observed_at ? KazmaFormat.dateTime(new Date(balance.observed_at * 1000)) : \'\'">'
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+
+================================== FAILURES ===================================
+__________ test_browser_resource_failure_receipt_keeps_the_os_budget __________
+tests\test_browser_driver_budget.py:211: in test_browser_resource_failure_receipt_keeps_the_os_budget
+    await run_in_browser_loop(verify())
+kazma-core\kazma_core\playwright_loop.py:89: in run_in_browser_loop
+    return await asyncio.shield(result)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_browser_driver_budget.py:203: in verify
+    rendered = await browser._render_in_job(owner, 'https://example.com/',
+E   TypeError: _render_in_job() got an unexpected keyword argument 'extract'
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+
+================================== FAILURES ===================================
+____________________ test_no_english_count_is_in_one_form _____________________
+tests\test_english_counts.py:125: in test_no_english_count_is_in_one_form
+    assert not found, (
+E   AssertionError: A count beside a plural reads wrong for 1 ("(1 msgs)"); say it with kazma_core.english_count.count_noun(n, 'message'), or declare a value that is not a count in DECLARED with why:
+E       kazma-gateway/kazma_gateway/agent_handler/commands.py: {balance['provider']} account credits
+E   assert not ["kazma-gateway/kazma_gateway/agent_handler/commands.py: {balance['provider']} account credits"]
+
+================================== FAILURES ===================================
+______________________ test_rdap_404_json_returns_as_is _______________________
+tests\test_audit_deep_structure_fixes.py:612: in test_rdap_404_json_returns_as_is
+    assert "JSON response returned as-is" in out
+E   assert 'JSON response returned as-is' in '{"errorCode":404,"title":"Object not found"}'

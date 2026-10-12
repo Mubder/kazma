@@ -110,15 +110,41 @@ function knowledgePage() {
     form: { id: "", name: "", seed_url: "" },
     activeJob: null,    // latest ProgressUpdate from /api/kb/jobs/{id}
     _pollTimer: null,
+    _pollBusy: false,
+    _pollEpoch: 0,
+    _activeJobId: null,
+    _restoreTimer: null,
+    _pollAbort: null,
+    _restoreAbort: null,
+    _resumeAbort: null,
+    _creditsAbort: null,
+    _destroyed: false,
 
     init() {
       // Register an in-flight-work predicate so the language switch warns
       // before reloading (which would orphan this crawl's polling timer).
       // Done in init() so the registry always points at *this* instance.
       if (window.__kazma_inflight_checkers) {
-        window.__kazma_inflight_checkers.push(() => !!this.activeJob && !this.jobDone());
+        this._inflightChecker = () => !!this.activeJob && !this.jobDone();
+        window.__kazma_inflight_checkers.push(this._inflightChecker);
       }
       this.load();
+      this.restoreCrawl();
+    },
+
+    destroy() {
+      this._destroyed = true;
+      ++this._pollEpoch;
+      if (this._pollTimer) clearInterval(this._pollTimer);
+      if (this._restoreTimer) clearTimeout(this._restoreTimer);
+      if (this._pollAbort) this._pollAbort.abort();
+      if (this._restoreAbort) this._restoreAbort.abort();
+      if (this._resumeAbort) this._resumeAbort.abort();
+      if (this._creditsAbort) this._creditsAbort.abort();
+      if (this._inflightChecker && window.__kazma_inflight_checkers) {
+        const index = window.__kazma_inflight_checkers.indexOf(this._inflightChecker);
+        if (index !== -1) window.__kazma_inflight_checkers.splice(index, 1);
+      }
     },
 
     async load() {
@@ -192,14 +218,93 @@ function knowledgePage() {
       }
     },
 
-    _pollJob(jobId) {
+    async restoreCrawl() {
+      if (this._destroyed || this._restoreAbort) return;
+      const controller = new AbortController();
+      this._restoreAbort = controller;
+      const deadline = setTimeout(() => controller.abort(), 10000);
+      try {
+        const response = await fetch('/api/kb/jobs', { signal: controller.signal });
+        const data = await response.json();
+        if (this._destroyed) return;
+        if (!data.ok) throw new Error(data.error || _k('knowledge.status_unavailable', 'Crawl status unavailable; retrying'));
+        const rows = data.jobs || [];
+        const pending = rows.find(row => row.status === 'running' || row.status === 'interrupted');
+        const job = pending || rows[0];  // API sorts retained outcomes newest first.
+        if (job && !this._activeJobId) this._pollJob(job.job_id, !!pending);
+        else if (!this._activeJobId && this.activeJob?.poll_error) this.activeJob = null;
+      } catch (error) {
+        if (!this._destroyed && !this._activeJobId) {
+          this.activeJob = { phase: 'error', poll_error: error.message || _k('knowledge.status_unavailable', 'Crawl status unavailable; retrying') };
+          this._restoreTimer = setTimeout(() => this.restoreCrawl(), 5000);
+        }
+      } finally {
+        clearTimeout(deadline);
+        this._restoreAbort = null;
+      }
+    },
+
+    async resumeCrawl() {
+      if (this._destroyed || !this.activeJob || !this.activeJob.resume_available) return;
+      const jobId = this.activeJob.job_id;
+      this.activeJob.resume_available = false;
+      const controller = new AbortController();
+      this._resumeAbort = controller;
+      const deadline = setTimeout(() => controller.abort(), 10000);
+      try {
+        const response = await fetch(`/api/kb/jobs/${encodeURIComponent(jobId)}/resume`, { method: 'POST', signal: controller.signal });
+        const data = await response.json();
+        if (this._destroyed) return;
+        if (!data.ok) throw new Error(data.error || _k('knowledge.resume_failed', 'Could not resume crawl'));
+        this.activeJob = { ...this.activeJob, phase: 'starting', poll_error: '' };
+        this._pollJob(data.job_id);
+      } catch (error) {
+        if (this._destroyed) return;
+        this.activeJob.resume_available = true;
+        this.activeJob.poll_error = error.message;
+      } finally {
+        clearTimeout(deadline);
+        this._resumeAbort = null;
+      }
+    },
+
+    async refreshCredits() {
+      if (this._destroyed || this._creditsAbort) return;
+      const controller = new AbortController();
+      this._creditsAbort = controller;
+      const deadline = setTimeout(() => controller.abort(), 20000);
+      try {
+        const response = await fetch('/api/kb/services/firecrawl/credits/refresh', { method: 'POST', signal: controller.signal });
+        const data = await response.json();
+        if (this._destroyed) return;
+        if (!data.ok) throw new Error(data.error || _k('knowledge.credits_unavailable', 'Credit balance unavailable'));
+        if (this.activeJob?.acquisition) this.activeJob.acquisition.provider_balances = data.balances;
+      } catch (error) {
+        if (!this._destroyed && this.activeJob) this.activeJob.poll_error = error.message;
+      } finally {
+        clearTimeout(deadline);
+        this._creditsAbort = null;
+      }
+    },
+
+    _pollJob(jobId, notify = true) {
+      if (this._destroyed) return;
+      this._activeJobId = jobId;
+      if (this._restoreTimer) clearTimeout(this._restoreTimer);
+      const epoch = ++this._pollEpoch;
       if (this._pollTimer) clearInterval(this._pollTimer);
       this._pollTimer = setInterval(async () => {
+        if (this._pollBusy || epoch !== this._pollEpoch) return;
+        this._pollBusy = true;
+        const controller = new AbortController();
+        this._pollAbort = controller;
+        const deadline = setTimeout(() => controller.abort(), 10000);
         try {
-          const r = await fetch(`/api/kb/jobs/${jobId}`);
+          const r = await fetch(`/api/kb/jobs/${encodeURIComponent(jobId)}`, { signal: controller.signal });
           const data = await r.json();
-          if (!data.ok) return;
-          this.activeJob = data.job;
+          if (epoch !== this._pollEpoch) return;
+          if (!data.ok) throw new Error(data.error || _k('knowledge.status_unavailable', 'Crawl status unavailable; retrying'));
+          this.activeJob = { ...data.job, poll_error: '' };
           if (this.jobDone()) {
             clearInterval(this._pollTimer);
             this._pollTimer = null;
@@ -208,6 +313,12 @@ function knowledgePage() {
             // message (which used to dump "done: 8/200 pages, 210 chunks
             // (+0 deduped), 113 failed — first failure: ..." into the toast).
             const j = data.job || {};
+            if (!notify) return;  // Reopening a retained receipt is not a new completion.
+            if (j.phase === 'interrupted') return;
+            if (j.phase === 'error') {
+              toast(j.message || _k('knowledge.phase_error', 'Error'), 'error');
+              return;
+            }
             const fetched = j.fetched || 0;
             const discovered = j.discovered || 0;
             const ingested = j.ingested || 0;
@@ -222,6 +333,8 @@ function knowledgePage() {
             const chunks = chunkCountLabel(ingested);
             if (ingested === 0 && fetched === 0) {
               toast(S.crawl_finished_empty || "Crawl finished but no pages were ingested.", "warning");
+            } else if (j.acquisition && j.acquisition.status === 'partial' && failed === 0) {
+              toast(_k('knowledge.discovery_incomplete', 'Crawl finished with incomplete discovery; review the retained outcomes.'), 'warning');
             } else if (failed > 0) {
               toast(
                 (S.crawl_finished_partial || "Crawl finished: {fetched}/{pages} · {chunks} · {failed} failed")
@@ -238,25 +351,34 @@ function knowledgePage() {
               );
             }
           }
-        } catch (e) { /* keep polling */ }
+        } catch (error) {
+          if (epoch === this._pollEpoch) {
+            this.activeJob = { ...(this.activeJob || {}), poll_error: error.message || _k('knowledge.status_unavailable', 'Crawl status unavailable; retrying') };
+          }
+        } finally {
+          clearTimeout(deadline);
+          this._pollAbort = null;
+          this._pollBusy = false;
+        }
       }, 2000);
     },
 
     jobTitle() {
       if (!this.activeJob) return "";
       const p = this.activeJob.phase;
-      if (p === "done") return "Done";
-      if (p === "error") return "Error";
-      return "Crawling…";
+      if (p === "done") return _k("knowledge.phase_done", "Done");
+      if (p === "error") return _k("knowledge.phase_error", "Error");
+      if (p === "interrupted") return _k("knowledge.phase_interrupted", "Interrupted");
+      return _k("knowledge.phase_running", "Crawling…");
     },
     jobIcon() {
       if (!this.activeJob) return "info";
       if (this.activeJob.phase === "done") return "check-circle";
-      if (this.activeJob.phase === "error") return "alert";
+      if (["error", "interrupted"].includes(this.activeJob.phase)) return "alert";
       return "spider";
     },
     jobDone() {
-      return this.activeJob && (this.activeJob.phase === "done" || this.activeJob.phase === "error");
+      return this.activeJob && ["done", "error", "interrupted"].includes(this.activeJob.phase);
     },
 
     resetForm() { this.form = { id: "", name: "", seed_url: "" }; },

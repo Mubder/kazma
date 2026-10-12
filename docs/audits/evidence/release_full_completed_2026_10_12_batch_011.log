@@ -1,0 +1,156 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 814 items
+
+tests\test_memory_rehydrate.py .................                         [  2%]
+tests\test_memory_relevance.py ....................                      [  4%]
+tests\test_memory_remember_and_small_talk.py ........................... [  7%]
+...                                                                      [  8%]
+tests\test_memory_routes_tenant_scope.py ............................... [ 12%]
+.............................................                            [ 17%]
+tests\test_memory_summary_recall.py ...............                      [ 19%]
+tests\test_memory_tenant_isolation.py ....                               [ 19%]
+tests\test_memory_tool_provenance.py ........                            [ 20%]
+tests\test_memory_topic_summaries.py ...............................     [ 24%]
+tests\test_memory_v2_graph_route.py ........                             [ 25%]
+tests\test_memory_v2_tenant_routes.py ..                                 [ 25%]
+tests\test_metrics.py ...                                                [ 26%]
+tests\test_metrics_receipt_current.py F                                  [ 26%]
+tests\test_micro_consolidation_off_loop.py ..                            [ 26%]
+tests\test_microsoft_mail_address.py ......                              [ 27%]
+tests\test_migration_bundle.py ........                                  [ 28%]
+tests\test_model_fallback_notice.py ...........                          [ 29%]
+tests\test_model_modality.py ....                                        [ 30%]
+tests\test_model_profiles.py .......................                     [ 33%]
+tests\test_model_provider_spelling.py ..........                         [ 34%]
+tests\test_model_registry.py ........................................... [ 39%]
+                                                                         [ 39%]
+tests\test_model_registry_store.py ........                              [ 40%]
+tests\test_model_selection_pipeline.py ................................. [ 44%]
+                                                                         [ 44%]
+tests\test_model_switch_service.py ...............                       [ 46%]
+tests\test_models_route.py .....................                         [ 49%]
+tests\test_module_attribute_refs.py ..                                   [ 49%]
+tests\test_module_stubs.py .....                                         [ 49%]
+tests\test_multi_tenant_isolation.py .                                   [ 50%]
+tests\test_narration_is_not_the_answer.py ..........                     [ 51%]
+tests\test_native_slash_commands.py .................................... [ 55%]
+..........................................................               [ 62%]
+tests\test_neo4j_backup.py ...................                           [ 65%]
+tests\test_no_cwd_data_dir_fallback.py ......                            [ 65%]
+tests\test_no_llm_response_replay.py ....                                [ 66%]
+tests\test_no_owner_identity_in_product.py ..                            [ 66%]
+tests\test_no_pypi_kazma.py ............................................ [ 71%]
+.......                                                                  [ 72%]
+tests\test_no_repeated_dict_keys.py ...                                  [ 73%]
+tests\test_no_vendor_model_is_invented.py .......                        [ 74%]
+tests\test_node_context_scope.py ..                                      [ 74%]
+tests\test_offsite_fallback.py ..........                                [ 75%]
+tests\test_oidc.py ....................                                  [ 78%]
+tests\test_ops_alert_delivery.py ..................                      [ 80%]
+tests\test_ops_alerts.py ........................                        [ 83%]
+tests\test_order_independence.py ............                            [ 84%]
+tests\test_origin_scheduler.py .....................................     [ 89%]
+tests\test_orphan_modules.py ...                                         [ 89%]
+tests\test_outbound_attachment_policy.py ........                        [ 90%]
+tests\test_output_routing.py .........................                   [ 93%]
+tests\test_p123_remaining.py ............                                [ 95%]
+tests\test_p3_features.py .....                                          [ 95%]
+tests\test_pacing.py .................................                   [ 99%]
+tests\test_package_namespaces.py ..                                      [100%]
+
+================================== FAILURES ===================================
+___________ test_shipped_collection_receipt_matches_current_inputs ____________
+tests\test_metrics_receipt_current.py:17: in test_shipped_collection_receipt_matches_current_inputs
+    assert receipt["input_sha256"] == generator.collection_fingerprint(), (
+E   AssertionError: Collection inputs changed: stage new source/test files, then run python scripts/generate_metrics.py --write --require-collected and stage its outputs.
+E   assert '6f500d98f9b4...b4674dda394e7' == '74bcdb2a4711...5d7f000013312'
+E     
+E     - 74bcdb2a47115eb449e2f14a919722664c89addb88fa27c342b5d7f000013312
+E     + 6f500d98f9b42db9b44c9e3abe238c3bc18805ceba655056ba4b4674dda394e7
+---------------------------- Captured stdout setup ----------------------------
+13:21:19 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+13:21:19 INFO kazma_ui.session_manager: [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19764\test_shipped_collection_receip0\chat_sessions.db
+13:21:19 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19764\test_shipped_collection_receip0\settings.db
+13:21:19 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+13:21:19 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19764\test_shipped_collection_receip0\settings.db
+13:21:19 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+13:21:19 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19764\test_shipped_collection_receip0\test_registry.db
+13:21:19 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+13:21:19 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19764\test_shipped_collection_receip0\test_registry.db
+13:21:19 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openai
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: anthropic
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: groq
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: deepseek
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: google
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: xai
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: zai
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openrouter
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: ollama
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: lm-studio
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: nvidia
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: mistral
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: together
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: cohere
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: fireworks
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: perplexity
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: ai21
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: azure
+13:21:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: bedrock
+13:21:19 INFO kazma_core.config_store: Setting updated: providers.list = [{'name': 'openai', 'display_name': 'OpenAI', 'base_url': 'https://api.openai... (category=providers)
+13:21:19 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19764\test_shipped_collection_receip0\test_settings.db
+13:21:19 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+13:21:19 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19764\test_shipped_collection_receip0\test_settings.db
+13:21:19 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+----------------------------- Captured log setup ------------------------------
+INFO     kazma_core.db.sqlite_columns:sqlite_columns.py:69 [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+INFO     kazma_ui.session_manager:session_manager.py:269 [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19764\test_shipped_collection_receip0\chat_sessions.db
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19764\test_shipped_collection_receip0\settings.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=100, name=initial_schema) successfully
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19764\test_shipped_collection_receip0\settings.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19764\test_shipped_collection_receip0\test_registry.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=100, name=initial_schema) successfully
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19764\test_shipped_collection_receip0\test_registry.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: openai
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: anthropic
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: groq
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: deepseek
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: google
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: xai
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: zai
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: openrouter
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: ollama
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: lm-studio
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: nvidia
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: mistral
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: together
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: cohere
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: fireworks
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: perplexity
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: ai21
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: azure
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: bedrock
+INFO     kazma_core.config_store:config_store.py:1869 Setting updated: providers.list = [{'name': 'openai', 'display_name': 'OpenAI', 'base_url': 'https://api.openai... (category=providers)
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19764\test_shipped_collection_receip0\test_settings.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=100, name=initial_schema) successfully
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19764\test_shipped_collection_receip0\test_settings.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_metrics_receipt_current.py::test_shipped_collection_receipt_matches_current_inputs
+============ 1 failed, 813 passed, 1 warning in 345.24s (0:05:45) =============

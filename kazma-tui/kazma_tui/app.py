@@ -671,6 +671,11 @@ class KazmaTUI(App[None]):
         except NoMatches:
             logger.debug("No header to relabel")
 
+        from kazma_tui.acquisition_status import AcquisitionStatus
+
+        for panel in main.query(AcquisitionStatus):
+            panel.set_language(lang)
+
 
 def _load_local_env() -> None:
     """Pick up the `.env` ladder so TUI mouths send the same KAZMA_SECRET as the server.

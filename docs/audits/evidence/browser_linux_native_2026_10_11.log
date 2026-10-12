@@ -1,0 +1,5 @@
+Get:1 http://archive.ubuntu.com/ubuntu resolute/main amd64 libnspr4 amd64 2:4.38.2-1ubuntu1 [118 kB]
+Get:2 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 libasound2t64 amd64 1.2.15.3-1ubuntu1.1 [416 kB]
+Get:3 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 libnss3 amd64 2:3.120-1ubuntu2.1 [1515 kB]
+Fetched 2049 kB in 2s (1306 kB/s)
+isolated_native_libraries_ready=true

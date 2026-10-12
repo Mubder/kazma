@@ -1,0 +1,16 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+________ test_retry_after_stops_an_independent_client_before_dispatch _________
+tests\test_origin_scheduler.py:25: in test_retry_after_stops_an_independent_client_before_dispatch
+    with pytest.raises(AcquisitionError, match='origin|Origin'):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE AcquisitionError
+____________ test_redirect_retry_after_prevents_immediate_followup ____________
+tests\test_origin_scheduler.py:43: in test_redirect_retry_after_prevents_immediate_followup
+    with pytest.raises(AcquisitionError, match='origin|Origin'):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE AcquisitionError
+=========================== short test summary info ===========================
+FAILED tests/test_origin_scheduler.py::test_retry_after_stops_an_independent_client_before_dispatch
+FAILED tests/test_origin_scheduler.py::test_redirect_retry_after_prevents_immediate_followup
+2 failed in 0.67s

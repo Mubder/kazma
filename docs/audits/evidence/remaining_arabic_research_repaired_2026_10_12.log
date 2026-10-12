@@ -1,0 +1,31 @@
+input_sha256=3aaf0b0d65ba45cb0db75ca56050653a45728cd382a1fef7b87219b78516738c
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Users\balfa\.codex\worktrees\acquisition-research-durability\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 900.0s
+timeout method: thread
+timeout func_only: False
+collected 5 items
+
+tests\e2e\test_pages_read_in_arabic.py .....                             [100%]
+
+============================== warnings summary ===============================
+tests/e2e/test_pages_read_in_arabic.py::test_every_page_reads_in_arabic
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+tests/e2e/test_pages_read_in_arabic.py::test_every_page_reads_in_arabic
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\uvicorn\protocols\websockets\websockets_impl.py:17: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+tests/e2e/test_pages_read_in_arabic.py::test_every_page_reads_in_arabic
+tests/e2e/test_pages_read_in_arabic.py::test_every_page_reads_in_arabic
+tests/e2e/test_pages_read_in_arabic.py::test_a_chat_turn_reads_in_arabic
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\websockets\legacy\server.py:1178: DeprecationWarning: remove second argument of ws_handler
+    warnings.warn("remove second argument of ws_handler", DeprecationWarning)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================== 5 passed, 5 warnings in 96.65s (0:01:36) ===================

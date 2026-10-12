@@ -1,0 +1,23 @@
+Historical intermediate-implementation qualification witness (output excerpt).
+Command: scripts.fast_test.run_pytest([...::test_real_chromium_cancel_joins_http_stream_and_owned_teardown, -vv, -s, --tb=short], 35)
+The owned stream was released; the browser task still waited for CDP detach.
+
+cancel fixture: stream started
+cancel fixture: closing stream
+cancel fixture: release signalled
+cancel fixture: stream closed
+cancel fixture task await chain:
+  kazma-core/kazma_core/web_acquire/browser.py:177
+  kazma-core/kazma_core/web_acquire/browser.py:255
+  kazma-core/kazma_core/web_acquire/browser_network.py:253
+  .venv/Lib/site-packages/playwright/async_api/_generated.py:15641
+  .venv/Lib/site-packages/playwright/_impl/_cdp_session.py:43
+  .venv/Lib/site-packages/playwright/_impl/_connection.py:69
+  .venv/Lib/site-packages/playwright/_impl/_connection.py:561
+  .venv/Lib/site-packages/playwright/_impl/_connection.py:123
+RUNNER: chunk timed out
+
+Line numbers describe that intermediate version. The remedy closes the owned
+page before detaching CDP, then joins browser/driver teardown. The regression
+remains in tests/test_browser_acquisition_broker.py. This excerpt is retained
+as historical negative evidence, not a passing acceptance result.

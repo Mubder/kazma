@@ -1,0 +1,11 @@
+The virtual environment was not created successfully because ensurepip is not
+available.  On Debian/Ubuntu systems, you need to install the python3-venv
+package using the following command.
+
+    apt install python3.14-venv
+
+You may need to use sudo with that command.  After installing the python3-venv
+package, recreate your virtual environment.
+
+Failing command: /tmp/kazma-browser-qualification-494866d8d64245159c10ebab204aec84/venv/bin/python3
+

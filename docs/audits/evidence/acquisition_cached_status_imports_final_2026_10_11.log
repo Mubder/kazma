@@ -1,0 +1,23 @@
+kazma_core.tools.research_readiness: exit=0
+
+
+kazma_core.web_acquire.operations: exit=0
+
+
+kazma_cli.acquisition: exit=0
+
+
+kazma_cli.main: exit=0
+
+
+kazma_cli.completions: exit=0
+
+
+kazma_tui.acquisition_status: exit=0
+
+
+kazma_tui.settings_panel: exit=0
+
+
+kazma_tui.app: exit=0
+

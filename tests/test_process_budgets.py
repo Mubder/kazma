@@ -62,13 +62,15 @@ def test_timeout_kills_the_descendant_not_only_the_launcher(tmp_path):
 
 def test_an_exited_parent_cannot_leave_a_background_child():
     code = "import subprocess,sys; p=subprocess.Popen([sys.executable,'-I','-c','import time; time.sleep(30)']); print(p.pid,flush=True)"
-    result = run(code, timeout=3)
+    # This checks descendant ownership after normal parent exit, rather than
+    # interpreter startup speed while the full suite loads native libraries.
+    result = run(code, timeout=15)
     assert result.returncode == 0
     ended(int(result.stdout.strip()))
 
 
 def test_memory_limit_is_enforced_by_the_operating_system():
-    result = run("data=bytearray(128*1024*1024); print('unbounded')", memory_bytes=64*1024*1024, timeout=3)
+    result = run("data=bytearray(128*1024*1024); print('unbounded')", memory_bytes=64*1024*1024, timeout=15)
     assert result.returncode != 0
     assert "unbounded" not in result.stdout
 
@@ -79,7 +81,7 @@ async def test_cancellation_tells_the_worker_to_end_its_tree(tmp_path):
     code = f"import os,time; {_pid_publication(marker)}; time.sleep(30)"
     task = asyncio.create_task(run_bounded_async([sys.executable, "-I", "-c", code], env=tool_child_env(), timeout=20))
     try:
-        async with asyncio.timeout(3):
+        async with asyncio.timeout(15):
             while not marker.exists():
                 await asyncio.sleep(0.01)
         pid = int(marker.read_text())
@@ -89,6 +91,66 @@ async def test_cancellation_tells_the_worker_to_end_its_tree(tmp_path):
         await asyncio.to_thread(ended, pid)
     finally:
         task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('original_boundary', [False, True], ids=['fixed', 'original-control'])
+async def test_repeated_cancellation_waits_for_real_worker_cleanup(monkeypatch, tmp_path, original_boundary):
+    import threading
+    from kazma_core.security import process_budget
+
+    marker = tmp_path / 'owned-worker.pid'
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    original = process_budget._start_process
+    children = []
+    def start(*args, **kwargs):
+        proc, tree = original(*args, **kwargs)
+        children.append(proc)
+        close = tree.close
+        def held_close():
+            entered.set()
+            assert release.wait(15), 'fixture did not release owned cleanup'
+            close()
+        tree.close = held_close
+        return proc, tree
+    monkeypatch.setattr(process_budget, '_start_process', start)
+    original_run = process_budget.run_bounded
+    def run_owned(*args, **kwargs):
+        try:
+            return original_run(*args, **kwargs)
+        finally:
+            finished.set()
+    monkeypatch.setattr(process_budget, 'run_bounded', run_owned)
+    async def old_boundary(*args, **kwargs):
+        cancelled = threading.Event()
+        try:
+            return await asyncio.to_thread(run_owned, *args, cancel_event=cancelled, **kwargs)
+        finally:
+            cancelled.set()
+    code = f'import os,time; {_pid_publication(marker)}; time.sleep(30)'
+    invoke = old_boundary if original_boundary else run_bounded_async
+    task = asyncio.create_task(invoke([sys.executable, '-I', '-c', code],
+        env=tool_child_env(), timeout=20))
+    try:
+        async with asyncio.timeout(15):
+            while not marker.exists():
+                await asyncio.sleep(0.01)
+        task.cancel()
+        assert await asyncio.to_thread(entered.wait, 5)
+        assert not finished.is_set(), 'Fixture must hold actual worker cleanup open'
+        assert task.done() is original_boundary, 'Cancellation acknowledged before OS cleanup'
+        task.cancel()
+        await asyncio.sleep(0)
+        assert task.done() is original_boundary, 'Repeated cancellation abandoned the worker'
+    finally:
+        release.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        assert await asyncio.to_thread(finished.wait, 5), 'Fixture worker did not finish'
+    assert task.cancelled()
+    assert len(children) == 1 and children[0].poll() is not None
+    ended(int(marker.read_text()))
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,59 @@
+{
+  "status": "qualified_supported_routes_with_limits",
+  "windows_compatibility_endurance": "failed_unqualified",
+  "qualification": "complete_serial_campaign_with_preserved_unmeasured_batch_recovery",
+  "observed_unresolved_flakes": [
+    "Isolated document parser child exceeded pytest deadline; original-order diagnostic replay passed without source or deadline changes."
+  ],
+  "prior_complete_run": "release_full_final_2026_10_12.json",
+  "prior_run_unresolved_timing_failures": [
+    "test_document_generation_phase7.py::test_generation_manifest_roundtrip_arabic_and_collision_safe_export",
+    "test_kb_api_routes.py::test_site_ingest_records_progress_off_the_loop"
+  ],
+  "input_sha256": "74bcdb2a47115eb449e2f14a919722664c89addb88fa27c342b5d7f000013312",
+  "unit": {
+    "passed": 14447,
+    "skipped": 63
+  },
+  "unit_files": 1011,
+  "e2e_passed": 84,
+  "e2e_files": 28,
+  "profiles": [
+    {
+      "platform": "linux",
+      "controlled_cleanup_deadlines": 0,
+      "profile": "bounded_browser_lifecycle",
+      "ok": true,
+      "cycles": 522,
+      "pages": 1044,
+      "elapsed_s": 1801.7,
+      "max_sampled_owned_rss_bytes": 649179136,
+      "initial_threads": 1,
+      "final_threads": 2,
+      "network_mode": "required",
+      "external_requests": 0,
+      "owner_rss_bytes": 101724160,
+      "owner_threads": 2,
+      "pool": {
+        "active": 0,
+        "waiting": 0,
+        "quarantined": 0,
+        "capacity": 2,
+        "queue_limit": 8,
+        "wait_seconds": 30
+      }
+    },
+    {
+      "platform": "windows",
+      "strict": "refused_before_child_launch",
+      "compatibility_endurance": "failed_unqualified",
+      "failure_receipt": "release_windows_soak_diagnostic_2026_10_12.log",
+      "observation": "Node process-exit wait exceeded five seconds after contained termination; capacity quarantined.",
+      "default_browser_mode": "required",
+      "local_http": "qualified_separately"
+    }
+  ],
+  "live_credit_adapter": "observed_in_isolated_store",
+  "per_request_charges": "unknown",
+  "public_http_smoke": "local_only_httpx_with_robots"
+}

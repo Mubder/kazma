@@ -1,0 +1,75 @@
+{"platform": "windows", "exit": 1, "error": null, "elapsed_s": 73.4, "memory_limit_bytes": 3221225472, "cpu_rate": 2000, "tree_closed": true}
+{"cycle": 10, "elapsed_s": 42.3, "max_sampled_owned_rss_bytes": 278745088, "owner_rss_bytes": 52342784, "owner_threads": 8, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+[browser] owned resource close failed; retain ownership until cleanup succeeds
+Traceback (most recent call last):
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\web_acquire\browser.py", line 176, in _close_playwright_objects
+    await getattr(obj, method)()
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\async_api\_generated.py", line 15209, in close
+    return mapping.from_maybe_impl(await self._impl_obj.close(reason=reason))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\_impl\_browser_context.py", line 585, in close
+    await self._channel.send("close", None, {"reason": reason})
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\_impl\_connection.py", line 69, in send
+    return await self._connection.wrap_api_call(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\_impl\_connection.py", line 563, in wrap_api_call
+    raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+kazma_core.web_acquire.browser_driver._DriverLimitError: BrowserContext.close: Local browser cleanup exceeded its five-second grace period; its process tree was terminated.
+[browser] owned resource close failed; retain ownership until cleanup succeeds
+Traceback (most recent call last):
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\web_acquire\browser.py", line 176, in _close_playwright_objects
+    await getattr(obj, method)()
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\async_api\_generated.py", line 16273, in close
+    return mapping.from_maybe_impl(await self._impl_obj.close(reason=reason))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\_impl\_browser.py", line 244, in close
+    raise e
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\_impl\_browser.py", line 241, in close
+    await self._channel.send("close", None, {"reason": reason})
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\_impl\_connection.py", line 69, in send
+    return await self._connection.wrap_api_call(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\_impl\_connection.py", line 563, in wrap_api_call
+    raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+kazma_core.web_acquire.browser_driver._DriverLimitError: Browser.close: Local browser cleanup exceeded its five-second grace period; its process tree was terminated.
+[browser] graceful close exceeded five seconds; terminating owned process tree
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "G:\GitHubRepos\kazma\.git\worktrees\kazma\release_browser_soak.py", line 113, in <module>
+    asyncio.run(main())
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "G:\GitHubRepos\kazma\.git\worktrees\kazma\release_browser_soak.py", line 42, in main
+    await owner._close_impl()
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\web_acquire\browser.py", line 212, in _close_impl
+    await self._close_owned_impl()
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\web_acquire\browser.py", line 134, in _close_owned_impl
+    await self._cleanup_owned_impl()
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\web_acquire\browser.py", line 167, in _cleanup_owned_impl
+    raise AcquisitionError(FetchErrorCode.LIMIT,
+kazma_core.web_acquire.result.AcquisitionError: Local browser graceful cleanup exceeded five seconds; its contained process tree was terminated and capacity released.

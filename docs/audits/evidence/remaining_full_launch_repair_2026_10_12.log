@@ -1,0 +1,13 @@
+........................................................................ [ 84%]
+............F                                                            [100%]
+================================== FAILURES ===================================
+_______________ test_the_danger_label_matches_the_approval_gate _______________
+tests\test_tools_catalog.py:123: in test_the_danger_label_matches_the_approval_gate
+    assert not wrong, (
+E   AssertionError: Danger labels that disagree with the approval gate � run python scripts/generate_tools_catalog.py:
+E       cancel_research_session: gate=approval, catalog=safe/read
+E       research_session_status: gate=approval, catalog=safe/read
+E   assert not ['research_session_status: gate=approval, catalog=safe/read', 'cancel_research_session: gate=approval, catalog=safe/read']
+=========================== short test summary info ===========================
+FAILED tests/test_tools_catalog.py::test_the_danger_label_matches_the_approval_gate
+1 failed, 84 passed in 53.51s

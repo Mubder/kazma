@@ -149,6 +149,32 @@ This mirrors the Research panel's archive pattern (a soft `archived` flag, not a
 
 ## Architecture notes (for contributors)
 
+The shared fetch result distinguishes coded failures, observed login screens,
+partial content and successful extracts. Content beginning `Error:` is not
+treated as a failed request. Partial shared-ladder content is refused before
+indexing. The shared knowledge profile preserves hidden panels, code and tables;
+bounded Chromium interaction captures each supported lazy tab while it exists.
+Link discovery uses that same scoped typed acquisition. Redirect destinations
+are checked before dispatch, including browser HTTP redirect hops. Hosted
+discovery is refused when the provider cannot enforce crawl scope. Query values
+retain page identity. Native deny-proxy controls are not OS network isolation.
+KB site/refresh jobs persist ownership before acceptance and retain page/BFS and
+parsed sitemap/llms metadata outcomes. Reconnect restores status; explicitly
+resume interrupted jobs to continue pending work. Uncertain acquisition/indexing
+effects are skipped, visibly reducing coverage. Completed requests are not
+replayed. This journal retains at most four active jobs, 24 total jobs and 8MiB;
+the limit fails before more acquisition. It is not an unlimited crawl archive.
+
+The page shows actual acquisition attempts, bounded remote request reservations
+and cached provider balances. Firecrawl balance refresh is explicit and metered,
+with five-minute freshness and account scope. Zero means an observed zero;
+unavailable/stale balances and per-request charges are not converted to zero.
+Request allowances are not financial spending caps. Origin scheduling persists
+through the shared settings store. Research pipelines have a separate stage
+journal with explicit recovery and refusal to replay uncertain required effects.
+See the [implementation report](https://github.com/Mubder/kazma/blob/main/docs/audits/WEB_ACQUISITION_IMPLEMENTATION_2026-10-10.md)
+for measured qualification, retained failed attempts and platform limits.
+
 | Layer | File | Purpose |
 |-------|------|---------|
 | Store | `kazma-core/kazma_core/stores/knowledge.py` | SQLite `knowledge_libraries` + `knowledge_chunks` + `knowledge_chunks_fts` (FTS5). Source of truth. |
@@ -174,12 +200,11 @@ Each library on the Knowledge page shows how much of it meaning search reaches: 
 
 ## Limits & honest caveats
 
-- **Bot-walled sites need a fetch backend.** Sites that block non-browser clients via TLS/header fingerprinting — Meta (`developers.facebook.com`), Cloudflare-protected properties, Instagram, etc. — return a 200-OK `<title>Error</title>` stub to httpx and defeat vanilla Playwright too. For those, set **one** of:
-  - `KAZMA_FIRECRAWL_API_KEY=<key>` — paid, best quality, handles JS + bot walls
-  - Jina Reader (`r.jina.ai`) — used automatically on hard-page recovery unless `KAZMA_JINA_READER=0`; set `=1` to always try first; optional `JINA_API_KEY`
-  - `pip install -e ".[web]"` then `playwright install chromium` — local headless browser, works for SPAs that aren't server-side fingerprinting
-  The job's `errors` list (visible in the progress panel + `/kb status`) names the missing backend when all tiers fail, so you know exactly which to enable.
+- **Acquisition defaults to local-only.** Install the `web` extra and Chromium for JavaScript pages. Some bot walls defeat both HTTP and local Chromium; those pages must remain visible failures. Hosted Firecrawl/Jina require `KAZMA_ACQUISITION_MODE=local_first_with_remote_fallback` and their names in `KAZMA_ACQUISITION_REMOTE_PROVIDERS`, plus credentials where required. Stored keys and legacy Jina flags alone cannot authorize hosted fetching. See [web research](./web-research) for the policy and current accounting limitations.
+- **Refreshes preserve retained pages.** Missing a URL in discovery, including sparse/capped/failed discovery, does not delete its indexed content. An ingest where every page fails ends in error and keeps the reasons.
+- **Robots checks default on.** KB discovery and ingest use bounded raw KazmaBot policies before content, redirects and browser assets. Missing 404/410 differs from failed or malformed checks, which refuse crawling. Explicit `KAZMA_CRAWL_RESPECT_ROBOTS=0` is recorded in acquisition evidence. Hosted readers cannot bypass enforcement; cross-origin control-file redirects are conservatively refused. See [web research](./web-research#robots-policy) for limits and remaining qualification.
 - **Chromium binary is separate from the Python package.** `pip install -e ".[web]"` installs the playwright Python bindings; you still need `playwright install chromium` to download the browser binary itself. The job error names this explicitly: *"Chromium binary not installed (run: playwright install chromium)"*.
+- **Linux Chromium needs delegated cgroup v2 controls.** The driver and browser share an aggregate memory/CPU/task budget. Missing memory, pids, CPU or group-kill controls cause a visible unavailable error; configure service delegation or `KAZMA_BROWSER_CGROUP_ROOT`. See [web research](./web-research) for limits, watchdog cleanup and remaining qualification.
 - A small fraction of heavily-obfuscated SPA doc sites can resist all of the above. Pages that fail are reported in the job log so you can add them manually.
 - Local embeddings (`BAAI/bge-m3`) are free but slower on CPU; remote (e.g. NVIDIA NIM `nv-embed-v1`) is faster/better but costs money. See `memory.embedding:` in `kazma.yaml` or the **Settings → Embedder** page.
 - Crawl is bounded by `KAZMA_KB_MAX_PAGES` (hard cap 1000) to prevent runaway.

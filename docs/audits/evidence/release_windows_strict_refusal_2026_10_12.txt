@@ -1,0 +1,29 @@
+"""Real Windows default strict-mode refusal before any browser child starts."""
+import asyncio,json,os,tempfile
+from pathlib import Path
+import psutil
+assert os.name=='nt'
+with tempfile.TemporaryDirectory(prefix='kazma-strict-refusal-',ignore_cleanup_errors=True) as temp:
+ os.environ.update(KAZMA_DATA_DIR=temp,KAZMA_USER_HOME=temp,KAZMA_SKILLS_HOME=temp,KAZMA_BROWSER_NETWORK_MODE='required')
+ from kazma_core.web_acquire.browser import BrowserJob
+ from kazma_core.web_acquire.resources import browser_capacity
+ from kazma_core.web_acquire.result import AcquisitionError,FetchErrorCode
+ before={p.pid for p in psutil.Process().children(recursive=True)}
+ async def verify():
+  owner=BrowserJob()
+  try:await owner._start_impl()
+  except AcquisitionError as error:
+   assert error.code==FetchErrorCode.UNAVAILABLE
+   assert 'strict' in str(error).lower() and 'launch refused' in str(error).lower()
+   reason=str(error)
+  else:raise AssertionError('Strict Windows unexpectedly launched a browser')
+  assert owner._driver is owner._capacity_lease is owner._deny_server is None
+  assert owner.context is owner.browser is owner.pw is None
+  assert browser_capacity().snapshot()['active']==browser_capacity().snapshot()['quarantined']==0
+  return reason
+ reason=asyncio.run(verify())
+ after={p.pid for p in psutil.Process().children(recursive=True)}
+ assert after==before,(before,after)
+ receipt={'platform':'windows','mode':'required','status':'refused_before_child_launch','ok':True,'error_code':'backend_unavailable','reason':reason,'new_children':0,'pool':browser_capacity().snapshot(),'compatibility_endurance':'failed_unqualified','product_limits_changed':False}
+ Path('docs/audits/evidence/release_windows_strict_refusal_2026_10_12.log').write_text(json.dumps(receipt,indent=2)+'\n',encoding='utf-8')
+ print(json.dumps(receipt),flush=True)

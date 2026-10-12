@@ -1,0 +1,41 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Users\balfa\.codex\worktrees\acquisition-research-durability\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 90.0s
+timeout method: thread
+timeout func_only: False
+collected 361 items
+
+kazma-tui\kazma_tui_tests\test_header_footer.py .............            [  3%]
+kazma-tui\kazma_tui_tests\test_integration_flows.py .................... [  9%]
+..............                                                           [ 13%]
+tests\test_api_route_callers.py ............................             [ 20%]
+tests\test_audit_2026_08_29_regressions.py ............................. [ 28%]
+......                                                                   [ 30%]
+tests\test_durable_crawls.py .................                           [ 35%]
+tests\test_orphan_modules.py ...                                         [ 36%]
+tests\test_settings_restore_classes.py .....................             [ 41%]
+tests\test_sqlite_kept_connections.py .........                          [ 44%]
+tests\test_store_registry.py ...............................             [ 52%]
+tests\test_tool_paths.py ................................                [ 61%]
+tests\test_ui_audit_fixes.py ....                                        [ 62%]
+tests\test_unbound_local_imports.py ...........                          [ 65%]
+tests\test_imports.py ...............                                    [ 70%]
+tests\test_browser_egress_every_context.py .                             [ 70%]
+tests\test_research_pipeline_recovery.py ............................... [ 78%]
+....                                                                     [ 80%]
+tests\test_browser_acquisition_broker.py ....................            [ 85%]
+tests\test_web_acquisition_scope.py ......                               [ 87%]
+tests\test_web_acquisition_safety.py ................................... [ 96%]
+...........                                                              [100%]
+
+============================== warnings summary ===============================
+G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 361 passed, 1 warning in 169.98s (0:02:49) ==================

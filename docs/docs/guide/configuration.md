@@ -415,7 +415,8 @@ Full product guide: [Document Intelligence](document-intelligence). Ops:
 | `KAZMA_SILENCE_WINDOW` | Cost breaker silence window (default `300`s). | `cost_breaker.py:44` |
 | `KAZMA_SEMANTIC_CACHE` | Retired 2026-09-30 (the semantic response cache was removed, audit AUD-001); setting it only logs a warning. | `kazma_ui/app.py` |
 | `KAZMA_FETCH_MAX_BYTES` | Streamed response byte limit for `read_url` (default `5242880` / 5 MB). | `tools/read_url.py` |
-| `KAZMA_CRAWL_RESPECT_ROBOTS` | Opt-in `robots.txt` compliance switch for `crawl_site` (`1` or `true`). | `tools/web_research.py` |
+| `KAZMA_CRAWL_RESPECT_ROBOTS` | Default `1`: enforce bounded KazmaBot checks for automated crawl/KB/research saves. Explicit `0` is visible; failed checks refuse crawling. Only `0`/`1` are valid. | `web_acquire/robots.py` |
+| `KAZMA_BROWSER_CGROUP_ROOT` | Linux only: absolute writable delegated cgroup v2 root; defaults to the service's current cgroup. Requires memory/pids/CPU/group-kill controls. Rendering refuses missing controls; host delegation is operator-managed. | `web_acquire/browser_cgroup.py` |
 | `KAZMA_OTLP_ENDPOINT` | OTLP HTTP JSON trace collector endpoint. | `swarm/tracing.py` |
 | `KAZMA_TOOL_TIMEOUT_SECONDS` | Per-tool execution timeout in seconds (default `120`). | `agent/graph_builder.py` |
 | `KAZMA_HUB_DB` | Hub SQLite registry path. | `hub/cli.py:109` |

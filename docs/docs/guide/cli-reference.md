@@ -29,6 +29,7 @@ kazma
 ├── (no args)              # banner + status + help hint
 ├── status                 # probe running server, print versions
 ├── doctor                 # which model and provider will be used, and will it work
+├── acquisition status     # cached crawler errors, usage and credit evidence
 ├── serve [port]           # launch Web UI (uvicorn)
 ├── ask [options] <prompt> # in-process agent (no uvicorn)
 ├── acp                    # ACP JSON-RPC on stdio (Zed / JetBrains)
@@ -57,6 +58,22 @@ Probes `/api/gateway/status` and `/api/swarm/status` on the running server, prin
 ```bash
 kazma status
 ```
+
+### `kazma acquisition status`
+
+Read this installation's retained crawl outcomes, request reservations, reported
+usage and cached credit freshness without contacting providers:
+
+```bash
+kazma acquisition status
+kazma acquisition status --job <retained-job-id> --json
+kazma acquisition status --language ar
+```
+
+Unknown charges and unsupported balances remain unavailable. Reservations are
+request upper bounds, not money spent. Live capacity refers to this CLI process;
+persisted job/accounting evidence belongs to the installation. The command exits
+with 1 on unavailable status or failed readiness and 0 when ready.
 
 ### 2.3 `kazma serve [port]`
 
@@ -494,3 +511,8 @@ with `hitl approve` or `hitl deny`, without the `/`. See
 - **`--help` text prints "Kazma CLI v0.2.0"** (`main.py:75`) while `pyproject.toml` is `0.3.0`. Known drift.
 - **`kazma hub` is the only Click subtree.** All other commands are hand-rolled argv parsing — flag ordering and `--help` behavior may be less uniform than a pure-Click CLI.
 - **`/undo` and `/edit` are stubs** (`slash_commands.py:257, 267`) — present in the menu but explicitly "not yet implemented."
+
+`kazma acquisition status [--job ID] [--json] [--language en|ar]` reads cached
+local evidence. `kazma acquisition credits` explicitly refreshes Firecrawl
+account credits through the permitted remote route, then displays cached status.
+Settings and TUI expose the same explicit action. Unsupported charges remain unknown.

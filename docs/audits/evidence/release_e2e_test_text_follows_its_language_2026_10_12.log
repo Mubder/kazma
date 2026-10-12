@@ -1,0 +1,37 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 900.0s
+timeout method: thread
+timeout func_only: False
+collected 6 items
+
+tests\e2e\test_text_follows_its_language.py ......                       [100%]
+
+============================== warnings summary ===============================
+tests/e2e/test_text_follows_its_language.py::test_every_paragraph_sits_by_its_own_language_in_either_ui
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\websockets\legacy\__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+tests/e2e/test_text_follows_its_language.py::test_every_paragraph_sits_by_its_own_language_in_either_ui
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\uvicorn\protocols\websockets\websockets_impl.py:17: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+tests/e2e/test_text_follows_its_language.py::test_every_paragraph_sits_by_its_own_language_in_either_ui
+tests/e2e/test_text_follows_its_language.py::test_every_paragraph_sits_by_its_own_language_in_either_ui
+tests/e2e/test_text_follows_its_language.py::test_every_paragraph_sits_by_its_own_language_in_either_ui
+tests/e2e/test_text_follows_its_language.py::test_every_paragraph_sits_by_its_own_language_in_either_ui
+tests/e2e/test_text_follows_its_language.py::test_the_old_rules_right_aligned_english_in_the_arabic_ui
+tests/e2e/test_text_follows_its_language.py::test_a_content_rule_without_the_exemption_overrode_a_decided_direction
+tests/e2e/test_text_follows_its_language.py::test_without_a_direction_per_paragraph_arabic_ran_left_to_right
+tests/e2e/test_text_follows_its_language.py::test_a_card_borrowing_the_chart_class_follows_the_page
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\websockets\legacy\server.py:1178: DeprecationWarning: remove second argument of ws_handler
+    warnings.warn("remove second argument of ws_handler", DeprecationWarning)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================== 6 passed, 10 warnings in 68.97s (0:01:08) ==================
+G:\GitHubRepos\kazma\.venv\Lib\site-packages\aiosqlite\core.py:127: DeprecationWarning: There is no current event loop
+  future = asyncio.get_event_loop().create_future()

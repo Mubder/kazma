@@ -1,0 +1,27 @@
+........................................................................ [ 30%]
+............................F.F......................................... [ 60%]
+........................................................................ [ 91%]
+.....................                                                    [100%]
+================================== FAILURES ===================================
+_____________________ test_exception_debt_only_goes_down ______________________
+tests\test_debt_ratchet.py:158: in test_exception_debt_only_goes_down
+    assert not grew, (
+E   AssertionError: New blind/silent exception handlers. Catch the exception you expect, or log it (logger.exception / exc_info=True) instead of passing:
+E       blind_except: 3501 > baseline 3500
+E   assert not {'blind_except': (3501, 3500)}
+_____________________ test_structural_debt_only_goes_down _____________________
+tests\test_debt_ratchet.py:604: in test_structural_debt_only_goes_down
+    assert not grew, (
+E   AssertionError: New structural debt (see this module's docstring for each kind and its fix):
+E       module_local_public_symbols: 553 > baseline 551; newest entries: ['kazma-ui/kazma_ui/x_reply_api.py ReplyConfigBody', 'kazma-ui/kazma_ui/x_reply_api.py SubjectBody', 'kazma-ui/kazma_ui/x_reply_api.py SummonIdBody']
+E   assert not {'module_local_public_symbols': (553, 551)}
+============================== warnings summary ===============================
+tests/test_acquisition_durable_controls.py::test_settings_status_is_local_and_credit_refresh_is_explicit
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_debt_ratchet.py::test_exception_debt_only_goes_down - Asser...
+FAILED tests/test_debt_ratchet.py::test_structural_debt_only_goes_down - Asse...
+2 failed, 235 passed, 1 warning in 60.33s (0:01:00)

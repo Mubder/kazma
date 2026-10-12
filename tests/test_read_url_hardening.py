@@ -89,3 +89,10 @@ def test_slice_window_default_max_from_env(monkeypatch) -> None:
     full = "x" * 5000
     out = ru._slice_window(full, offset=0, max_chars=None)
     assert "chars 0:2000 of 5000" in out
+
+
+def test_body_limit_has_a_finite_operator_ceiling(monkeypatch):
+    monkeypatch.setenv("KAZMA_FETCH_MAX_BYTES", "1000000000000")
+    assert ru._fetch_max_bytes() == 20_000_000
+    monkeypatch.setenv("KAZMA_FETCH_MAX_BYTES", "-1")
+    assert ru._fetch_max_bytes() == 65_536

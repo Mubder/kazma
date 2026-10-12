@@ -1,0 +1,8 @@
+kazma_core.web_acquire.robots: exit=0 OK 
+kazma_core.web_acquire.http: exit=0 OK 
+kazma_core.web_acquire.trace: exit=0 OK 
+kazma_core.web_acquire.result: exit=0 OK 
+kazma_core.tools.read_url: exit=0 OK 
+kazma_core.tools.web_research: exit=0 OK 
+kazma_core.stores.knowledge_ingest: exit=0 OK 
+kazma_core.web_acquire.browser_network: exit=0 OK 

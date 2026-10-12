@@ -1,0 +1,6 @@
+{"case": "aggregate_memory", "ok": true, "limits": {"memory.max": "134217728", "memory.swap.max": "0", "pids.max": "256", "cpu.max": "200000 100000"}, "exit": -9}
+{"case": "task_limit", "ok": true, "limits": {"memory.max": "268435456", "memory.swap.max": "0", "pids.max": "256", "cpu.max": "200000 100000"}, "exit": -9}
+{"case": "hard_lifetime", "ok": true, "limits": {"memory.max": "268435456", "memory.swap.max": "0", "pids.max": "256", "cpu.max": "200000 100000"}, "exit": -9}
+{"case": "parent_death", "ok": true, "tasks_observed": 3}
+qualification_exit=1
+qualification_cgroup_removed=true

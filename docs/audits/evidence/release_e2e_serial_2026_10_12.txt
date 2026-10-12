@@ -1,0 +1,25 @@
+"""Serial E2E qualification using owned low-priority process trees."""
+import json,os,time
+from pathlib import Path
+from scripts import fast_test as runner,generate_metrics
+from release_memory_guard import install
+install(runner)
+folder=Path('docs/audits/evidence')
+metadata=folder/'release_e2e_2026_10_12.json'
+files=sorted(Path('tests/e2e').glob('test_*.py'))
+per_test={'test_unified_turn_app_graph.py':600,'test_unified_turn_restart.py':900,'test_unified_turn_browser.py':1200,'test_chunked_stream_browser.py':600,'test_unified_turn_many_gates.py':900,'test_unified_turn_concurrency.py':900,'test_unified_turn_recovery.py':900,'test_turn_notes_route.py':600,'test_pages_load_clean.py':600,'test_pages_read_in_arabic.py':900,'test_text_follows_its_language.py':900,'test_smoke.py':180,'test_hitl_view_model.py':180}
+meta={'status':'running','owner_pid':os.getpid(),'started':time.time(),'chunks':1,'math_threads':2,'input_sha256':generate_metrics.collection_fingerprint(),'results':[]}
+metadata.write_text(json.dumps(meta,indent=2)+'\n')
+for number,file in enumerate(files):
+    print(f'E2E {number+1}/{len(files)}: {file.name}',flush=True)
+    code,log=runner.run_pytest([file.as_posix(),'--timeout='+str(per_test.get(file.name,300)),'--tb=short'],1800)
+    receipt=folder/f'release_e2e_{file.stem}_2026_10_12.log'
+    receipt.write_text(log,encoding='utf-8')
+    counts=runner._parse_summary(log)
+    row={'file':file.as_posix(),'exit':code,'counts':counts,'measured':code in (0,1) and bool(counts)}
+    meta['results'].append(row)
+    metadata.write_text(json.dumps(meta,indent=2)+'\n')
+    print(json.dumps(row),flush=True)
+meta.update(status='complete',finished=time.time(),final_input_sha256=generate_metrics.collection_fingerprint())
+metadata.write_text(json.dumps(meta,indent=2)+'\n')
+raise SystemExit(1 if any(row['exit'] not in (0,5) or row['exit']==0 and not row['measured'] for row in meta['results']) else 0)

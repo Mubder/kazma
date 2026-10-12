@@ -1,0 +1,12 @@
+exit=0
+{"case": "aggregate_memory", "ok": true, "limits": {"memory.max": "134217728", "memory.swap.max": "0", "pids.max": "256", "cpu.max": "200000 100000"}, "exit": -9}
+{"case": "task_limit", "ok": true, "limits": {"memory.max": "268435456", "memory.swap.max": "0", "pids.max": "256", "cpu.max": "200000 100000"}, "exit": -9}
+{"case": "hard_lifetime", "ok": true, "limits": {"memory.max": "268435456", "memory.swap.max": "0", "pids.max": "256", "cpu.max": "200000 100000"}, "exit": -9}
+{"case": "parent_death", "ok": true, "tasks_observed": 3}
+{"case": "chromium_sandbox", "ok": true, "budget": {"memory_bytes": 2147483648, "lifetime_seconds": 1800, "frame_bytes": 33554432, "queued_bytes": 33554432, "protocol_bytes": 536870912, "boundary": "linux_cgroup_v2", "failed": false}}
+{"case": "chromium_hung_close", "ok": true, "budget": {"memory_bytes": 2147483648, "lifetime_seconds": 1800, "frame_bytes": 33554432, "queued_bytes": 33554432, "protocol_bytes": 536870912, "boundary": "linux_cgroup_v2", "failed": false}}
+{"case": "chromium_stalled_loop", "ok": true, "descendants_ended_before_unblock": true}
+qualification_exit=0
+qualification_cgroup_removed=true
+
+[browser] graceful close exceeded five seconds; terminating owned process tree

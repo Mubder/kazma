@@ -1,0 +1,12 @@
+exit=1
+qualification_exit=1
+qualification_cgroup_removed=true
+
+Traceback (most recent call last):
+  File "/mnt/g/GitHubRepos/kazma/.git/worktrees/kazma/remaining_browser_lifecycle.py", line 105, in <module>
+    private_socket_probe()
+    ~~~~~~~~~~~~~~~~~~~~^^
+  File "/mnt/g/GitHubRepos/kazma/.git/worktrees/kazma/remaining_browser_lifecycle.py", line 87, in private_socket_probe
+    assert proc.returncode==0,(output,error)
+           ^^^^^^^^^^^^^^^^^^
+AssertionError: (b'{"family": 2, "host_loopback_refused": true, "errno": 101}\n{"family": 10, "host_loopback_refused": true, "errno": 99}\n', b'')

@@ -1,0 +1,27 @@
+"""One explicitly authorized balance GET, with isolated local accounting."""
+import asyncio,json,os,tempfile
+from pathlib import Path
+from dotenv import dotenv_values
+root=Path.cwd();live=Path(r'C:\Users\balfa\kazma')
+values=dotenv_values(live/'.env')
+key=values.get('KAZMA_FIRECRAWL_API_KEY')
+if not key: raise SystemExit('Firecrawl credential unavailable; no account request made.')
+with tempfile.TemporaryDirectory(prefix='kazma-credit-release-',ignore_cleanup_errors=True) as temporary:
+ scratch=Path(temporary)
+ os.environ.update(KAZMA_DATA_DIR=str(scratch/'data'),KAZMA_USER_HOME=str(scratch/'home'),KAZMA_SKILLS_HOME=str(scratch/'skills'),KAZMA_DB_BACKEND='sqlite',KAZMA_FIRECRAWL_API_KEY=key,PYTEST_CURRENT_TEST='isolated-live-credit-qualification')
+ for name in ('KAZMA_DATABASE_URL','DATABASE_URL'): os.environ.pop(name,None)
+ os.environ['KAZMA_FIRECRAWL_URL']=values.get('KAZMA_FIRECRAWL_URL') or 'https://api.firecrawl.dev'
+ from kazma_core.web_acquire.policy import AcquisitionPolicy,policy_scope
+ from kazma_core.web_acquire.credits import refresh_firecrawl_balance
+ from kazma_core import config_store
+ try:
+  with policy_scope(AcquisitionPolicy('local_first_with_remote_fallback',frozenset({'firecrawl'}))):
+   rows=asyncio.run(refresh_firecrawl_balance())
+  row=next(row for row in rows if row['provider']=='firecrawl')
+  # No key, account identifier, endpoint or raw response body is published.
+  output={'provider':'firecrawl','action':'credit_balance_GET','status':row['status'],'fresh':row['fresh'],'observed_at':row['observed_at'],'remaining_is_finite_number':type(row['remaining']) in (int,float),'error':row.get('error'),'live_policy_changed':False,'local_accounting':'isolated_temporary_store'}
+  receipt=root/'docs/audits/evidence/release_firecrawl_live_2026_10_12.log'
+  receipt.write_text(json.dumps(output,indent=2)+'\n',encoding='utf-8');print(json.dumps(output,indent=2))
+  code=0 if row['fresh'] and row['status']=='observed' else 1
+ finally: config_store.reset_config_store(close=True)
+raise SystemExit(code)

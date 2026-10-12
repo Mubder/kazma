@@ -1,0 +1,48 @@
+{
+  "platform": "linux",
+  "python": "3.14.4",
+  "passed": 9,
+  "receipts": [
+    {
+      "probe": "native_localhost_resolution",
+      "addresses": [
+        "127.0.0.1"
+      ],
+      "passed": true
+    },
+    {
+      "probe": "mixed_private_answer_refused",
+      "passed": true
+    },
+    {
+      "probe": "hosted_endpoint_mixed_private_refused",
+      "passed": true
+    },
+    {
+      "probe": "operator_proxy_private_endpoint_owned",
+      "passed": true
+    },
+    {
+      "probe": "real_rlimit_memory",
+      "passed": true
+    },
+    {
+      "probe": "proxy_native_dns_deadline_joins_child",
+      "passed": true
+    },
+    {
+      "probe": "repeated_cancel_joins_owned_worker",
+      "passed": true
+    },
+    {
+      "probe": "independent_kernel_wall_clock",
+      "signal": "SIGALRM",
+      "passed": true
+    },
+    {
+      "probe": "verified_linux_parent_death",
+      "child_state": "reaped",
+      "passed": true
+    }
+  ]
+}

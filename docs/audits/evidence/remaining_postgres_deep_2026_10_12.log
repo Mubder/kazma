@@ -1,0 +1,8 @@
+....                                                                     [100%]
+4 passed in 1.30s
+
+PostgreSQL deep pipeline plan process-death drill passed.
+
+PostgreSQL deep pipeline source process-death drill passed.
+
+Owned ephemeral PostgreSQL container removed.

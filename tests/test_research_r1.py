@@ -107,8 +107,14 @@ async def test_pipeline_fail_closed_deep(monkeypatch, tmp_path):
     import kazma_core.web_acquire as wa
 
     monkeypatch.setattr(rp, "_get_ws_root", lambda: tmp_path)
-    monkeypatch.setattr(rp, "_workspace_research_dir", lambda topic: tmp_path / "r")
     monkeypatch.setattr(rp, "_register_paper", lambda meta: None)
+    monkeypatch.setattr(rp, "_rel", lambda path: str(path.relative_to(tmp_path)))
+    from unittest.mock import AsyncMock
+    from kazma_core.tools import research_readiness, research_planner
+
+    monkeypatch.setattr(research_readiness, "research_readiness", lambda **kwargs: {"ready": True})
+    monkeypatch.setattr(research_planner, "plan_research_queries", AsyncMock(return_value=
+                        research_planner.ResearchPlan(search_queries=["Python GIL"])))
 
     async def _search(q, max_results=8, purpose="research"):
         from kazma_core.web_acquire.serp import SearchResult
@@ -125,11 +131,16 @@ async def test_pipeline_fail_closed_deep(monkeypatch, tmp_path):
 
     monkeypatch.setattr(wa, "search", _search)
 
-    async def fake_read_url_to_file(url, path=""):
-        return "Error: blocked"
+    async def fake_save_url_extract(url, path="", *, receipt_cb=None):
+        from kazma_core.web_acquire.result import ExtractSaveResult, FetchErrorCode, FetchResult
+
+        result = FetchResult(ok=False, url=url, error="blocked", error_code=FetchErrorCode.SECURITY)
+        if receipt_cb is not None:
+            await receipt_cb(result)
+        return ExtractSaveResult(result, error=result.error, error_code=result.error_code)
 
     ru = importlib.import_module("kazma_core.tools.read_url")
-    monkeypatch.setattr(ru, "read_url_to_file", fake_read_url_to_file)
+    monkeypatch.setattr(ru, "save_url_extract", fake_save_url_extract)
 
     out = await rp.run_research_pipeline(
         "Python GIL",
@@ -138,8 +149,12 @@ async def test_pipeline_fail_closed_deep(monkeypatch, tmp_path):
         parallel_acquire=False,
     )
     assert out.startswith("Error:")
-    assert (
-        "aborted" in out.lower()
-        or "could not acquire" in out.lower()
-        or "no urls" in out.lower()
-    )
+    assert "aborted" in out.lower()
+    import json
+
+    manifest, = tmp_path.glob("research/reports/pipeline-*/sources.json")
+    records = json.loads(manifest.read_text(encoding="utf-8"))
+    assert len(records) == 2
+    assert all(not r["ok"] and r["error_code"] == "security_blocked" for r in records)
+    assert all(r["usage"] is None and r["credits"] is None for r in records)
+    assert all(r["final_url"] is None for r in records)

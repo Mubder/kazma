@@ -43,7 +43,7 @@ Use this before exposing Kazma beyond loopback. Aligns with
 - [ ] `code_exec` Docker force where required (`KAZMA_CODE_EXEC_DOCKER=force`; host-local disabled in prod/multi-user)
 - [ ] Untrusted / multi-user code: E2B Firecracker (`E2B_API_KEY` + `pip install -e ".[sandbox]"`; `KAZMA_E2B=0` to disable)
 - [ ] Multi-hour swarm: Temporal (`KAZMA_TEMPORAL_HOST` + `pip install -e ".[durable]"`)
-- [ ] Multi-replica: unique `KAZMA_REPLICA_ID` + LB sticky on `kazma-replica` cookie
+- [ ] HA preparation: one active runtime, dedicated Postgres ownership session and complete fenced state volume; target-cluster drills passed before a recovery claim
 - [ ] Shell allowlist + env scrub active
 - [ ] Workspace root confinement in production
 - [ ] Cron concurrency / stop / stale RUNNING handled
@@ -90,13 +90,13 @@ targets a different root; the global binding does not describe that instance.
 This supplies verified facts to the model, without guaranteeing every freeform
 answer it generates.
 
-## Multi-user / multi-replica (if applicable)
+## Multi-user / active-passive recovery (if applicable)
 
 - [ ] `KAZMA_DATABASE_URL` set; migrate script run
 - [ ] Opaque sessions / RBAC admin user created
 - [ ] OIDC vars if SSO
 - [ ] `KAZMA_PUBLIC_URL` correct for redirects
-- [ ] HA compose / LB only if Postgres shared state verified
+- [ ] HA compose / LB retains one active owner; Postgres and the complete state volume are backed up and restored together
 - [ ] Memory: tenant scoping is automatic with `KAZMA_PRODUCTION=1`; set `KAZMA_MEMORY_ENFORCE_TENANT=1` for a multi-tenant install that is not flagged production
 - [ ] Before `KAZMA_MEMORY_STATE_ROLE=primary`: `python scripts/reconcile_memory_mirror.py --dry-run` is clean (no dead-in-mirror rows)
 - [ ] Document catalog tables are on `KAZMA_PG_TABLES` when metadata backend is Postgres (H-13)
@@ -104,7 +104,7 @@ answer it generates.
 ## Document Intelligence (if enabled)
 
 - [ ] `documents.enabled` intentional (default compatibility: enabled, not default-authoritative)
-- [ ] Do **not** run multi-replica against a shared document store until metadata is Postgres — check `GET /api/documents/ops/readiness`
+- [ ] Document metadata readiness verified with `GET /api/documents/ops/readiness`; Postgres metadata alone does not qualify concurrent active runtimes
 - [ ] `documents.capacity.storage_free_floor_bytes` set conservatively (default 512 MiB)
 - [ ] Document backup path known (the 6-hourly native backup: `kazma-data/backups/document-store-*` or equivalent)
 - [ ] Migration plan includes `documents.db` + content tree ([Migration](./migration))

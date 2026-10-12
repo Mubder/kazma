@@ -1,0 +1,11 @@
+{
+  "provider": "firecrawl",
+  "action": "credit_balance_GET",
+  "status": "observed",
+  "fresh": true,
+  "observed_at": 1791785793.8427505,
+  "remaining_is_finite_number": true,
+  "error": null,
+  "live_policy_changed": false,
+  "local_accounting": "isolated_temporary_store"
+}

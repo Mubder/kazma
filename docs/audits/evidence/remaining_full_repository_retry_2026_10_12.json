@@ -1,0 +1,14 @@
+{
+  "status": "complete",
+  "owner_pid": 33396,
+  "chunks": 1,
+  "math_threads": 2,
+  "lowered_priority": true,
+  "input_sha256": "e7e3dbdffa427b69afdc3f1e5552a46cb8b72d0ba1324ddbe98a8cc1a446ed28",
+  "started": 1791775967.969991,
+  "test_files": 1011,
+  "exit": 1,
+  "finished": 1791779488.1870975,
+  "final_input_sha256": "e7e3dbdffa427b69afdc3f1e5552a46cb8b72d0ba1324ddbe98a8cc1a446ed28",
+  "pytest_processes": 1
+}

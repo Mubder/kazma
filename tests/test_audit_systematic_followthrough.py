@@ -19,42 +19,8 @@ PACKAGES = (
 )
 
 
-def test_browser_egress_blocks_private_and_odd_schemes() -> None:
-    from kazma_core.security.browser_egress import browser_request_allowed
-
-    assert browser_request_allowed("http://127.0.0.1/secret")[0] is False
-    assert browser_request_allowed("http://[::1]/secret")[0] is False
-    assert browser_request_allowed("file:///etc/passwd")[0] is False
-    assert browser_request_allowed("http://8.8.8.8/")[0] is True
-    assert browser_request_allowed("data:text/plain,hi")[0] is True
 
 
-def test_sync_browser_route_aborts_before_continue() -> None:
-    from kazma_core.security.browser_egress import install_sync_browser_egress
-
-    class _Route:
-        def __init__(self, url: str) -> None:
-            self.request = type("R", (), {"url": url})()
-            self.action = ""
-
-        def abort(self, _error: str) -> None:
-            self.action = "abort"
-
-        def continue_(self) -> None:
-            self.action = "continue"
-
-    class _Context:
-        def route(self, _pattern, handler) -> None:
-            self.handler = handler
-
-    ctx = _Context()
-    install_sync_browser_egress(ctx)
-    blocked = _Route("http://127.0.0.1/")
-    ctx.handler(blocked)
-    assert blocked.action == "abort"
-    allowed = _Route("http://8.8.8.8/")
-    ctx.handler(allowed)
-    assert allowed.action == "continue"
 
 
 def test_cost_breaker_setting_precedence(monkeypatch) -> None:

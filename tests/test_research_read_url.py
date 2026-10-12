@@ -63,32 +63,32 @@ def test_file_read_uses_file_cap_not_research() -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_url_paging_uses_cache(tmp_path: Path, monkeypatch) -> None:
+async def test_read_url_paging_preserves_windows(tmp_path: Path, monkeypatch) -> None:
+    from kazma_core.web_acquire import FetchResult
     ru.clear_url_cache()
     full = "HELLO-" + ("body " * 4000)
-    with patch.object(ru, "_fetch_full_text", return_value=full) as mock_fetch:
+    with patch.object(ru, "fetch_result", return_value=FetchResult(ok=True, url="https://example.com/long", text=full)) as mock_fetch:
         # First call fetches (min window is 200 chars)
         a = await ru.read_url("https://example.com/long", offset=0, max_chars=500)
         assert "chars 0:500" in a
         assert mock_fetch.await_count == 1
-        # Put in cache manually as fetch mock bypasses cache put
-        ru._cache_put("https://example.com/long", full)
         b = await ru.read_url("https://example.com/long", offset=500, max_chars=500)
         assert "chars 500:1000" in b
 
 
 @pytest.mark.asyncio
 async def test_read_url_to_file_and_chunks(tmp_path: Path) -> None:
+    from kazma_core.web_acquire import FetchResult
     ru.clear_url_cache()
     body = ("# Title section\n\n" + ("paragraph text " * 200)) * 5
     ws = tmp_path / "workspace"
     ws.mkdir()
 
-    async def fake_fetch(url: str) -> str:
-        return body
+    async def fake_fetch(url: str, **kwargs) -> FetchResult:
+        return FetchResult(ok=True, url=url, text=body)
 
     with (
-        patch.object(ru, "_fetch_full_text", side_effect=fake_fetch),
+        patch.object(ru, "fetch_result", side_effect=fake_fetch),
         patch.object(ru, "_workspace_root", return_value=ws),
     ):
         msg = await ru.read_url_to_file("https://example.com/doc", path="sample.md")
@@ -123,11 +123,12 @@ async def test_read_url_to_file_and_chunks(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_save_anywhere_under_workspace(tmp_path: Path) -> None:
+    from kazma_core.web_acquire import FetchResult
     ru.clear_url_cache()
     ws = tmp_path / "ws"
     ws.mkdir()
     with (
-        patch.object(ru, "_fetch_full_text", return_value="hello world content"),
+        patch.object(ru, "fetch_result", return_value=FetchResult(ok=True, url="https://example.com/x", text="hello world content")),
         patch.object(ru, "_workspace_root", return_value=ws),
     ):
         msg = await ru.read_url_to_file("https://example.com/x", path="notes/out.md")
@@ -143,7 +144,7 @@ async def test_crawl_site_bounded(tmp_path: Path) -> None:
     ws.mkdir()
     html = '<html><body><a href="/b">B</a><a href="https://evil.com/x">x</a></body></html>'
 
-    async def fake_html(url: str):
+    async def fake_html(url: str, **kwargs):
         if url.endswith("/b"):
             return "<html><body>page b</body></html>", url
         return html, url
@@ -151,11 +152,19 @@ async def test_crawl_site_bounded(tmp_path: Path) -> None:
     async def fake_text(url: str) -> str:
         return f"content for {url}"
 
+    async def central_text(url: str, **kwargs):
+        from kazma_core.web_acquire.fetch import FetchResult
+
+        links = () if url.endswith("/b") else ("https://example.com/b", "https://evil.com/x")
+        return FetchResult(ok=True, url=url, final_url=url, text=await fake_text(url),
+                           links=links, links_complete=True)
+
     with (
         patch.object(wr, "_fetch_html", side_effect=fake_html),
-        patch.object(wr, "_fetch_full_text", side_effect=fake_text),
+        patch.object(wr, "_central_fetch", side_effect=central_text),
         patch.object(wr, "_workspace_root", return_value=ws),
         patch.object(ru, "_workspace_root", return_value=ws),
+        patch("kazma_core.security.ssrf.validate_url", return_value=("93.184.216.34",)),
     ):
         # SSRF validate_url will run — use example.com which is public DNS
         out = await wr.crawl_site(
@@ -168,3 +177,5 @@ async def test_crawl_site_bounded(tmp_path: Path) -> None:
         )
     assert "Crawl index" in out
     assert "Pages fetched" in out
+    assert "evil.com" not in out
+    assert len(list(ws.rglob("*.md"))) == 2

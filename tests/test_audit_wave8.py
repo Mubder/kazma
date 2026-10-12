@@ -112,6 +112,9 @@ def test_pin_transport_skipped_when_proxy(monkeypatch: pytest.MonkeyPatch) -> No
     from kazma_core.proxy.client import get_scraping_client
     from kazma_core.security.ssrf_pin import PinHostAsyncTransport
 
+    monkeypatch.setenv("KAZMA_ACQUISITION_MODE", "local_first_with_remote_fallback")
+    monkeypatch.setenv("KAZMA_ACQUISITION_REMOTE_PROVIDERS", "proxy")
+
     monkeypatch.setattr(
         "kazma_core.proxy.client.get_active_proxy_url",
         lambda: "http://127.0.0.1:9",

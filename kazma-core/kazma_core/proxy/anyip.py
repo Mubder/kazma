@@ -28,6 +28,7 @@ from typing import Any
 from urllib.parse import quote
 
 from kazma_core.proxy.base import ProxyProvider
+from kazma_core.proxy.config import proxy_config_scope, proxy_value
 
 __all__ = ["AnyIpProvider"]
 
@@ -47,14 +48,10 @@ class AnyIpProvider(ProxyProvider):
 
     @staticmethod
     def _cfg(key: str, default: Any = "") -> Any:
-        try:
-            from kazma_core.config_store import get_config_store
+        return proxy_value(key, default)
 
-            val = get_config_store().get(f"proxy.{key}")
-            return val if val is not None else default
-        except Exception:  # noqa: BLE001 — config best-effort
-            return default
 
+    @proxy_config_scope()
     def is_configured(self) -> bool:
         return bool(str(self._cfg("username", "")).strip()) and bool(
             str(self._cfg("password", "")).strip()
@@ -84,6 +81,7 @@ class AnyIpProvider(ProxyProvider):
 
         return "_".join(parts)
 
+    @proxy_config_scope()
     def get_proxy_url(self) -> str | None:
         """Return ``http://USERFLAGS:pass@portal.anyip.io:1080`` or None."""
         if not self.is_configured():

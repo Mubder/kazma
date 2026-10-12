@@ -1,0 +1,70 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 697 items
+
+tests\test_loop_stall_watchdog.py ........                               [  1%]
+tests\test_mail_secrets_install_scope.py ..........                      [  2%]
+tests\test_majlis.py ..........................                          [  6%]
+tests\test_majlis_fast_path_guard.py ............                        [  8%]
+tests\test_mcp_asset_cache_busting.py .                                  [  8%]
+tests\test_mcp_auth.py ..                                                [  8%]
+tests\test_mcp_binding_recovery.py ......                                [  9%]
+tests\test_mcp_bridge.py ............................                    [ 13%]
+tests\test_mcp_catalog.py ......                                         [ 14%]
+tests\test_mcp_classification_hardening.py ......                        [ 15%]
+tests\test_mcp_client.py .................                               [ 17%]
+tests\test_mcp_client_win32_shim.py ..                                   [ 17%]
+tests\test_mcp_hitl.py .....................................             [ 23%]
+tests\test_mcp_ide_alias_auth.py .........................               [ 26%]
+tests\test_mcp_oauth.py .........                                        [ 27%]
+tests\test_mcp_project_root.py ........                                  [ 29%]
+tests\test_mcp_reconnect.py ......................                       [ 32%]
+tests\test_mcp_secrets.py ..................                             [ 34%]
+tests\test_mcp_server.py ..............................                  [ 39%]
+tests\test_mcp_servers_live.py ....................................      [ 44%]
+tests\test_mcp_servers_store.py .........................                [ 47%]
+tests\test_mcp_spec_client.py .............                              [ 49%]
+tests\test_mcp_tool_server.py ..............................             [ 54%]
+tests\test_mcp_yaml_persist.py ........                                  [ 55%]
+tests\test_memory_about_me.py ...........                                [ 56%]
+tests\test_memory_admin_api.py ......................................... [ 62%]
+                                                                         [ 62%]
+tests\test_memory_audit_hygiene.py ......                                [ 63%]
+tests\test_memory_benchmark.py .....                                     [ 64%]
+tests\test_memory_current_facts.py ..........                            [ 65%]
+tests\test_memory_deletes.py ...                                         [ 66%]
+tests\test_memory_entity_counts.py .....                                 [ 66%]
+tests\test_memory_entity_protect.py .........                            [ 68%]
+tests\test_memory_entity_protection.py ...............                   [ 70%]
+tests\test_memory_episode_text.py ......                                 [ 71%]
+tests\test_memory_event_time.py ....................                     [ 74%]
+tests\test_memory_every_turn.py .................                        [ 76%]
+tests\test_memory_forget.py ....................                         [ 79%]
+tests\test_memory_fts_triggers.py .....                                  [ 80%]
+tests\test_memory_graph_clean.py ........................                [ 83%]
+tests\test_memory_graph_group_move.py ....                               [ 84%]
+tests\test_memory_graph_mobile.py ...                                    [ 84%]
+tests\test_memory_graph_reach_and_hybrid.py .....                        [ 85%]
+tests\test_memory_hygiene.py .....                                       [ 85%]
+tests\test_memory_legacy_archive.py .......                              [ 86%]
+tests\test_memory_legacy_copies.py ......                                [ 87%]
+tests\test_memory_mirror.py ......                                       [ 88%]
+tests\test_memory_mirror_sync.py .....................ss                 [ 91%]
+tests\test_memory_nothing_lost.py ........................               [ 95%]
+tests\test_memory_pgvector.py ..........                                 [ 96%]
+tests\test_memory_predicate_names.py ......................              [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============ 695 passed, 2 skipped, 1 warning in 125.23s (0:02:05) ============

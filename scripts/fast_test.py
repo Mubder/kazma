@@ -27,11 +27,13 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import contextlib
 import os
 import re
 import subprocess
 import sys
 import time
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -359,24 +361,34 @@ def run_pytest(args: list[str], timeout: float) -> tuple[int, str]:
     A timeout kills the run's whole tree and returns within ``_DRAIN_S`` of
     it; a run that finished has anything it left running reaped.
     """
-    cmd = pytest_command(args)
-    try:
-        proc, tree = _start(cmd, pytest_env())
-    except Exception as exc:  # noqa: BLE001 — report, never crash the runner
-        return -1, f"RUNNER error: {exc}"
-    try:
+    with contextlib.ExitStack() as owned_arguments:
+        cmd = pytest_command(args)
+        # Windows has a 32K UTF-16 command-line ceiling. One serial full-suite
+        # chunk can exceed it; pytest argument files keep the exact file set.
+        if len(subprocess.list2cmdline(cmd).encode('utf-16-le')) > 48000:
+            if any('\n' in arg or '\r' in arg for arg in args):
+                raise ValueError('Multiline pytest arguments cannot use an argument file')
+            folder = Path(owned_arguments.enter_context(tempfile.TemporaryDirectory(prefix='kazma-pytest-arguments-')))
+            arguments = folder / 'arguments.txt'
+            arguments.write_text('\n'.join(args) + '\n', encoding='utf8', newline='\n')
+            cmd = pytest_command(['@' + str(arguments)])
         try:
-            out, err = proc.communicate(timeout=timeout)
-            return proc.returncode, (out or "") + (err or "")
-        except subprocess.TimeoutExpired:
-            tree.kill()
+            proc, tree = _start(cmd, pytest_env())
+        except Exception as exc:  # noqa: BLE001 — report, never crash the runner
+            return -1, f"RUNNER error: {exc}"
+        try:
             try:
-                out, err = proc.communicate(timeout=_DRAIN_S)
+                out, err = proc.communicate(timeout=timeout)
+                return proc.returncode, (out or "") + (err or "")
             except subprocess.TimeoutExpired:
-                out, err = "", ""
-            return 124, (out or "") + (err or "") + "\nRUNNER: chunk timed out"
-    finally:
-        tree.close()
+                tree.kill()
+                try:
+                    out, err = proc.communicate(timeout=_DRAIN_S)
+                except subprocess.TimeoutExpired:
+                    out, err = "", ""
+                return 124, (out or "") + (err or "") + "\nRUNNER: chunk timed out"
+        finally:
+            tree.close()
 
 
 #: Match a pytest -q progress line, e.g. "path/to/test_x.py ....   [ 12%]".
@@ -611,8 +623,12 @@ def main() -> int:
             print(f"[fast-test] chunk {r['idx']:02d}: {status} "
                   f"{r['counts'].get('passed', 0)}p/{r['counts'].get('failed', 0)}f "
                   f"({len(r['files'])} files)")
-            for k, v in r["counts"].items():
-                totals[k] = totals.get(k, 0) + v
+            # A timed-out process can print pytest's terminal summary and then
+            # hang during interpreter shutdown. Its files are rerun below;
+            # counting both receipts inflates every aggregate category.
+            if not needs_recovery(r):
+                for k, v in r["counts"].items():
+                    totals[k] = totals.get(k, 0) + v
             all_failed.extend(r["failed"])
             if r["failed"]:
                 failure_logs.append(r["log"])
@@ -692,14 +708,14 @@ def main() -> int:
             with concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs)) as pool:
                 subs = list(pool.map(lambda job: run_chunk(*job), jobs))
             for s in subs:
+                all_failed.extend(s["failed"])
+                if s["failed"]:
+                    failure_logs.append(s["log"])
                 if needs_recovery(s):
                     pending.append(s)
                     continue
                 for k, v in s["counts"].items():
                     totals[k] = totals.get(k, 0) + v
-                all_failed.extend(s["failed"])
-                if s["failed"]:
-                    failure_logs.append(s["log"])
             continue
         # Re-run the chunk MINUS the file it died in, as ONE process, then
         # that file alone. Falling straight to per-file reruns costs ~160
@@ -724,13 +740,13 @@ def main() -> int:
                      "--timeout=120", "--continue-on-collection-errors"],
                     timeout=chunk_timeout_for(len(_rest), args.chunk_timeout),
                 )
+                _fh = [m.group(2) for m in _FAILED_RE.finditer(_log)]
+                all_failed.extend(_fh)
+                if _fh:
+                    failure_logs.append(_log)
                 if _code in _BENIGN_EXIT_CODES and _parse_summary(_log):
                     for k, v in _parse_summary(_log).items():
                         totals[k] = totals.get(k, 0) + v
-                    _fh = [m.group(2) for m in _FAILED_RE.finditer(_log)]
-                    all_failed.extend(_fh)
-                    if _fh:
-                        failure_logs.append(_log)
                     # Only the suspect still needs the slow per-file path.
                     _retry_files = [_culprit]
                 else:
@@ -745,13 +761,13 @@ def main() -> int:
                  "--continue-on-collection-errors"],
                 args.file_timeout,
             )
-            if code in _BENIGN_EXIT_CODES:
+            failed_here = [m.group(2) for m in _FAILED_RE.finditer(log)]
+            all_failed.extend(failed_here)
+            if failed_here:
+                failure_logs.append(log)
+            if code in _BENIGN_EXIT_CODES and (code == 5 or _parse_summary(log)):
                 for k, v in _parse_summary(log).items():
                     totals[k] = totals.get(k, 0) + v
-                failed_here = [m.group(2) for m in _FAILED_RE.finditer(log)]
-                all_failed.extend(failed_here)
-                if failed_here:
-                    failure_logs.append(log)
             elif code == 124:
                 # Identify WHICH test hangs: rerun verbosely with a short
                 # per-test timeout — the last line naming a test is the
@@ -779,13 +795,13 @@ def main() -> int:
                      "--continue-on-collection-errors"],
                     args.file_timeout,
                 )
-                if code2 in _BENIGN_EXIT_CODES:
+                failed2 = [m.group(2) for m in _FAILED_RE.finditer(log2)]
+                all_failed.extend(failed2)
+                if failed2:
+                    failure_logs.append(log2)
+                if code2 in _BENIGN_EXIT_CODES and (code2 == 5 or _parse_summary(log2)):
                     for k, v in _parse_summary(log2).items():
                         totals[k] = totals.get(k, 0) + v
-                    failed2 = [m.group(2) for m in _FAILED_RE.finditer(log2)]
-                    all_failed.extend(failed2)
-                    if failed2:
-                        failure_logs.append(log2)
                     print(f"[fast-test] {f.relative_to(REPO)}: crash was intermittent "
                           f"(exit={code}) — rerun {'clean' if not failed2 else 'had failures'}")
                 else:

@@ -1,0 +1,13 @@
+"""Rerun the one-case generated collection receipt gate after real regeneration."""
+import json
+from pathlib import Path
+from scripts import fast_test as runner,generate_metrics
+from release_memory_guard import install
+install(runner)
+code,output=runner.run_pytest(['tests/test_metrics_receipt_current.py','--timeout=120','--tb=short'],300)
+folder=Path('docs/audits/evidence')
+(folder/'release_metrics_receipt_recovery_2026_10_12.log').write_text(output,encoding='utf-8')
+result={'exit':code,'counts':runner._parse_summary(output),'input_sha256':generate_metrics.collection_fingerprint()}
+(folder/'release_metrics_receipt_recovery_2026_10_12.json').write_text(json.dumps(result,indent=2)+'\n')
+print(json.dumps(result),flush=True)
+raise SystemExit(code)

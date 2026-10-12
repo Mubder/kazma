@@ -1,0 +1,93 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 815 items
+
+tests\test_turn_notes.py ................                                [  1%]
+tests\test_turn_render_boundary.py .......                               [  2%]
+tests\test_turn_rollback_rehearsal.py ............                       [  4%]
+tests\test_turn_runtime.py ......                                        [  5%]
+tests\test_turn_state_confluence.py ...........                          [  6%]
+tests\test_turn_step_detail.py ......................                    [  9%]
+tests\test_turn_usage.py .......                                         [  9%]
+tests\test_turn_workspace_resume.py ...........                          [ 11%]
+tests\test_typing_keepalive.py .                                         [ 11%]
+tests\test_ui001_quick_fixes.py .................                        [ 13%]
+tests\test_ui004_ui008_gateway_misc.py ..................                [ 15%]
+tests\test_ui_audit_fixes.py ....                                        [ 16%]
+tests\test_ui_components.py ............................................ [ 21%]
+........................................................................ [ 30%]
+..................................                                       [ 34%]
+tests\test_ui_double_wiring.py ..                                        [ 34%]
+tests\test_ui_hydration_cloak.py .                                       [ 34%]
+tests\test_ui_services.py ...........                                    [ 36%]
+tests\test_ui_six_improvements.py .........                              [ 37%]
+tests\test_unbound_local_imports.py ...........                          [ 38%]
+tests\test_undo_edit.py ...                                              [ 39%]
+tests\test_unified_document_layer.py ......................              [ 41%]
+tests\test_unified_turn_a11y.py ..........                               [ 43%]
+tests\test_unified_turn_block_phase0.py ..................               [ 45%]
+tests\test_unified_turn_fixtures.py ..................s.                 [ 47%]
+tests\test_universal_backup_offsite.py ........                          [ 48%]
+tests\test_unrestricted_unified.py .......                               [ 49%]
+tests\test_unused_locals_that_were_bugs.py ...                           [ 49%]
+tests\test_update_not_from_its_launcher.py ........                      [ 50%]
+tests\test_update_preserve_extras.py ...........                         [ 52%]
+tests\test_url_credentials.py ..............................s            [ 56%]
+tests\test_url_password_round_trip.py .........                          [ 57%]
+tests\test_url_utils.py ...................................              [ 61%]
+tests\test_user_home_migration.py ..........                             [ 62%]
+tests\test_ux003_ui_bugs.py ................                             [ 64%]
+tests\test_ux005_agents_page.py ...............................          [ 68%]
+tests\test_vault_divergent_duplicates.py ........                        [ 69%]
+tests\test_vault_scoped_miss_tripwire.py .........                       [ 70%]
+tests\test_vault_tenant_scope_read.py .............                      [ 72%]
+tests\test_vector_store_probe.py ....................................... [ 76%]
+....ss                                                                   [ 77%]
+tests\test_vendor_codemirror.py .....                                    [ 78%]
+tests\test_version_sync.py .....                                         [ 78%]
+tests\test_vision_analyze.py ......................                      [ 81%]
+tests\test_voice_audio_label.py ............                             [ 83%]
+tests\test_voice_depth.py ........                                       [ 84%]
+tests\test_voice_mode.py ...                                             [ 84%]
+tests\test_voice_tts_errors.py .....                                     [ 85%]
+tests\test_voice_ws_pipeline.py ..................................       [ 89%]
+tests\test_web_acquire.py ......                                         [ 89%]
+tests\test_web_acquisition_policy.py ............                        [ 91%]
+tests\test_web_acquisition_results.py ........................           [ 94%]
+tests\test_web_acquisition_safety.py ................................... [ 98%]
+...........                                                              [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+tests/test_vision_analyze.py::TestUrlImage::test_url_download_and_analyze
+tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_content_length_too_large_raises
+tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_stream_bytes_exceed_limit_raises
+tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_no_content_length_small_file_succeeds
+tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_content_length_within_limit_succeeds
+  G:\GitHubRepos\kazma\kazma-core\kazma_core\security\ssrf.py:254: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    peer = peer_ip_from_response(response)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_vision_analyze.py::TestUrlImage::test_url_download_and_analyze
+tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_content_length_too_large_raises
+tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_stream_bytes_exceed_limit_raises
+tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_no_content_length_small_file_succeeds
+tests/test_vision_analyze.py::TestStreamDownloadSizeCap::test_content_length_within_limit_succeeds
+  G:\GitHubRepos\kazma\kazma-core\kazma_core\tools\vision_analyze.py:220: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    assert_peer_public(resp, url=fetch_url)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========== 811 passed, 4 skipped, 11 warnings in 235.44s (0:03:55) ===========

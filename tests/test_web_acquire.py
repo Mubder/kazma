@@ -51,16 +51,17 @@ async def test_fetch_text_empty_url():
 
 @pytest.mark.asyncio
 async def test_fetch_text_uses_ladder(monkeypatch):
-    async def _fake(url: str) -> str:
-        return f"# page\n\ncontent for {url}"
+    async def _fake(url: str, *, purpose: str, scope_check=None) -> FetchResult:
+        text = f"# page\n\ncontent for {url}"
+        return FetchResult(ok=True, url=url, text=text, purpose=purpose, char_count=len(text))
 
     # tools/__init__.py can shadow submodule names with functions — use importlib.
-    # Patch the PUBLIC alias — the façade's contract since the read_url
-    # public-entry refactor (the private _fetch_full_text is impl detail).
+    # Patch the public typed entry. The legacy string adapter is not a
+    # product error/provenance contract.
     import importlib
 
     ru_mod = importlib.import_module("kazma_core.tools.read_url")
-    monkeypatch.setattr(ru_mod, "fetch_full_text", _fake)
+    monkeypatch.setattr(ru_mod, "fetch_result", _fake)
     r = await fetch_text("https://example.com/x", purpose="research")
     assert r.ok is True
     assert "content for" in r.text

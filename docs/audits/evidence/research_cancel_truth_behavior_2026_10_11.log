@@ -1,0 +1,14 @@
+....F....................................                                [100%]
+================================== FAILURES ===================================
+______ test_pre_start_cancellation_retains_lease_through_terminal_commit ______
+tests\test_research_cancel_truth.py:155: in test_pre_start_cancellation_retains_lease_through_terminal_commit
+    await sessions._RUNNING[session.id]
+kazma-core\kazma_core\tools\research_session.py:701: in settle_unstarted
+    await call(_complete_cancellation, sess.id)
+kazma-core\kazma_core\web_acquire\crawl_jobs.py:39: in call
+    result, = await asyncio.shield(receipt)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   asyncio.exceptions.CancelledError
+=========================== short test summary info ===========================
+FAILED tests/test_research_cancel_truth.py::test_pre_start_cancellation_retains_lease_through_terminal_commit
+1 failed, 40 passed in 7.07s

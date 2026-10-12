@@ -133,6 +133,7 @@ async def resilient_chat(
     thread_id: str = "",
     iteration: int = 0,
     label: str = "",
+    frozen_failover: Any = None,
     **chat_kwargs: Any,
 ) -> Any:
     """Call ``client.chat`` with transient retries, then failover chain.
@@ -217,26 +218,28 @@ async def resilient_chat(
     try:
         from kazma_core.agent.nonstop import get_nonstop_config
 
-        ns = get_nonstop_config()
+        ns = get_nonstop_config() if frozen_failover is None else None
     except Exception:
         ns = None
-    if ns is not None and ns.failover.enabled and ns.failover.chain:
+    chain = tuple(name for name, _ in frozen_failover.clients) if frozen_failover is not None else tuple(ns.failover.chain) if ns and ns.failover.enabled else ()
+    cooldown_seconds = frozen_failover.cooldown_seconds if frozen_failover is not None else ns.failover.cooldown_seconds if ns else 0
+    if chain:
         try:
             from kazma_core.model_registry import get_model_registry
 
-            registry = get_model_registry()
+            registry = get_model_registry() if frozen_failover is None else None
         except Exception:
             registry = None
-        if registry is not None:
+        if registry is not None or frozen_failover is not None:
             now = time.monotonic()
-            for fb_model in ns.failover.chain:
+            for fb_model in chain:
                 if not fb_model or fb_model == model:
                     continue
                 cooled_until = _cooldowns.get(fb_model, 0.0)
                 if now < cooled_until:
                     continue
                 try:
-                    fb_client = _clients.get(fb_model)
+                    fb_client = dict(frozen_failover.clients)[fb_model] if frozen_failover is not None else _clients.get(fb_model)
                     if fb_client is None:
                         fb_client = registry.get_client(fb_model)
                         _clients[fb_model] = fb_client
@@ -272,13 +275,13 @@ async def resilient_chat(
                     )
                     return response
                 except Exception as fb_exc:
-                    _cooldowns[fb_model] = now + ns.failover.cooldown_seconds
+                    _cooldowns[fb_model] = now + cooldown_seconds
                     logger.warning(
                         "[%s] failover model '%s' failed: %s (cooldown %.0fs)",
                         label or "resilient-chat",
                         fb_model,
                         fb_exc,
-                        ns.failover.cooldown_seconds,
+                        cooldown_seconds,
                     )
 
     _record(

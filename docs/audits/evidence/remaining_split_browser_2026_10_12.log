@@ -1,0 +1,45 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0 -- G:\GitHubRepos\kazma\.venv\Scripts\python.exe
+rootdir: C:\Users\balfa\.codex\worktrees\acquisition-research-durability\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 45.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 22 items
+
+tests/test_browser_boot_policy.py::test_boot_uses_owned_facade_without_mutating_policy PASSED [  4%]
+tests/test_browser_boot_policy.py::test_boot_caches_page_and_reuses PASSED [  9%]
+tests/test_browser_acquisition_broker.py::test_actual_http_redirect_is_blocked_before_browser_contacts_destination PASSED [ 13%]
+tests/test_browser_acquisition_broker.py::test_real_chromium_cancel_joins_http_stream_and_owned_teardown PASSED [ 18%]
+tests/test_browser_acquisition_broker.py::test_real_browser_admission_caps_independent_jobs_before_driver_launch PASSED [ 22%]
+tests/test_browser_acquisition_broker.py::test_real_chromium_proxy_refusal_precedes_http_dispatch_and_cleans_owner PASSED [ 27%]
+tests/test_browser_acquisition_broker.py::test_real_chromium_honors_another_jobs_origin_cooldown_and_cleans_owner PASSED [ 31%]
+tests/test_browser_acquisition_broker.py::test_redirect_retains_final_url_relative_assets_and_repeated_cookies PASSED [ 36%]
+tests/test_browser_acquisition_broker.py::test_lazy_tabs_capture_each_replaced_panel PASSED [ 40%]
+tests/test_browser_acquisition_broker.py::test_resource_failure_is_visible_and_private_redirect_is_never_fetched PASSED [ 45%]
+tests/test_browser_acquisition_broker.py::test_read_only_browser_refuses_post_and_marks_partial PASSED [ 50%]
+tests/test_browser_acquisition_broker.py::test_native_websocket_cannot_contact_owned_origin PASSED [ 54%]
+tests/test_browser_acquisition_broker.py::test_browser_request_fanout_is_bounded_before_queued_dispatch PASSED [ 59%]
+tests/test_browser_acquisition_broker.py::test_browser_compressed_resource_cannot_exceed_byte_reservation PASSED [ 63%]
+tests/test_browser_acquisition_broker.py::test_browser_refuses_binary_document_with_typed_error PASSED [ 68%]
+tests/test_browser_acquisition_broker.py::test_browser_job_cookie_continuity_across_scoped_pages PASSED [ 72%]
+tests/test_browser_acquisition_broker.py::test_head_retains_representation_metadata_without_reading_body PASSED [ 77%]
+tests/test_browser_acquisition_broker.py::test_renderer_caps_parser_output_and_marks_partial PASSED [ 81%]
+tests/test_browser_acquisition_broker.py::test_actual_chromium_obeys_robots_before_redirects_and_assets[navigation] PASSED [ 86%]
+tests/test_browser_acquisition_broker.py::test_actual_chromium_obeys_robots_before_redirects_and_assets[script] PASSED [ 90%]
+tests/test_browser_acquisition_broker.py::test_native_automation_uses_same_broker_and_preserves_supported_form_body[form-post] FAILED [ 95%]
+
+================================== FAILURES ===================================
+_ test_native_automation_uses_same_broker_and_preserves_supported_form_body[form-post] _
+tests\test_browser_acquisition_broker.py:500: in test_native_automation_uses_same_broker_and_preserves_supported_form_body
+    install, calls = broker_transport
+    ^^^^^^^^^^^^^^
+E   TypeError: cannot unpack non-iterable function object
+----------------------------- Captured log setup ------------------------------
+WARNING  kazma_core.web_acquire.browser_isolation:browser_isolation.py:15 Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+=========================== short test summary info ===========================
+FAILED tests/test_browser_acquisition_broker.py::test_native_automation_uses_same_broker_and_preserves_supported_form_body[form-post] - TypeError: cannot unpack non-iterable function object
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+======================== 1 failed, 20 passed in 32.95s ========================

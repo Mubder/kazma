@@ -1,0 +1,159 @@
+FFFFFFFFFFF..FF                                                          [100%]
+================================== FAILURES ===================================
+_____ test_bad_selected_proxy_refuses_before_client_construction[change0] _____
+tests\test_proxy_routing_safety.py:49: in test_bad_selected_proxy_refuses_before_client_construction
+    pc.get_scraping_client()
+kazma-core\kazma_core\proxy\client.py:193: in get_scraping_client
+    return httpx.AsyncClient(**common)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   AssertionError: No direct client may be constructed
+_____ test_bad_selected_proxy_refuses_before_client_construction[change1] _____
+tests\test_proxy_routing_safety.py:49: in test_bad_selected_proxy_refuses_before_client_construction
+    pc.get_scraping_client()
+kazma-core\kazma_core\proxy\client.py:193: in get_scraping_client
+    return httpx.AsyncClient(**common)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   AssertionError: No direct client may be constructed
+_____ test_bad_selected_proxy_refuses_before_client_construction[change2] _____
+tests\test_proxy_routing_safety.py:49: in test_bad_selected_proxy_refuses_before_client_construction
+    pc.get_scraping_client()
+kazma-core\kazma_core\proxy\client.py:193: in get_scraping_client
+    return httpx.AsyncClient(**common)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   AssertionError: No direct client may be constructed
+_____ test_bad_selected_proxy_refuses_before_client_construction[change3] _____
+tests\test_proxy_routing_safety.py:49: in test_bad_selected_proxy_refuses_before_client_construction
+    pc.get_scraping_client()
+kazma-core\kazma_core\proxy\client.py:193: in get_scraping_client
+    return httpx.AsyncClient(**common)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   AssertionError: No direct client may be constructed
+_____ test_bad_selected_proxy_refuses_before_client_construction[change4] _____
+tests\test_proxy_routing_safety.py:49: in test_bad_selected_proxy_refuses_before_client_construction
+    pc.get_scraping_client()
+kazma-core\kazma_core\proxy\client.py:193: in get_scraping_client
+    return httpx.AsyncClient(**common)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   AssertionError: No direct client may be constructed
+_____ test_bad_selected_proxy_refuses_before_client_construction[change5] _____
+tests\test_proxy_routing_safety.py:49: in test_bad_selected_proxy_refuses_before_client_construction
+    pc.get_scraping_client()
+kazma-core\kazma_core\proxy\client.py:193: in get_scraping_client
+    return httpx.AsyncClient(**common)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   AssertionError: No direct client may be constructed
+_____ test_bad_selected_proxy_refuses_before_client_construction[change6] _____
+tests\test_proxy_routing_safety.py:49: in test_bad_selected_proxy_refuses_before_client_construction
+    pc.get_scraping_client()
+kazma-core\kazma_core\proxy\client.py:193: in get_scraping_client
+    return httpx.AsyncClient(**common)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   AssertionError: No direct client may be constructed
+______________ test_config_store_failure_cannot_switch_to_direct ______________
+tests\test_proxy_routing_safety.py:57: in test_config_store_failure_cannot_switch_to_direct
+    with pytest.raises(AcquisitionError, match='proxy') as failure:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE AcquisitionError
+__________ test_provider_constructor_failure_cannot_switch_to_direct __________
+tests\test_proxy_routing_safety.py:64: in test_provider_constructor_failure_cannot_switch_to_direct
+    with pytest.raises(AcquisitionError):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE AcquisitionError
+------------------------------ Captured log call ------------------------------
+WARNING  kazma_core.proxy.registry:registry.py:72 [proxy] failed to init provider anyip: fixture-password � using direct
+________ test_provider_config_failure_is_not_an_unconfigured_provider _________
+tests\test_proxy_routing_safety.py:73: in test_provider_config_failure_is_not_an_unconfigured_provider
+    with pytest.raises(AcquisitionError):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE AcquisitionError
+________________ test_one_route_uses_one_coherent_config_read _________________
+tests\test_proxy_routing_safety.py:81: in test_one_route_uses_one_coherent_config_read
+    assert reads == ['proxy']
+E   AssertionError: assert ['proxy.provi...xy.host', ...] == ['proxy']
+E     
+E     At index 0 diff: 'proxy.provider' != 'proxy'
+E     Left contains 11 more items, first extra item: 'proxy.username'
+E     Use -v to get more diff
+____ test_read_url_exposes_route_failure_before_network_or_remote_recovery ____
+tests\test_proxy_routing_safety.py:109: in test_read_url_exposes_route_failure_before_network_or_remote_recovery
+    assert not result.ok and result.error_code == 'proxy_routing_error'
+E   AssertionError: assert (not False and <FetchErrorCo...sition_error'> == 'proxy_routing_error'
+E    +  where False = FetchResult(ok=False, url='https://docs.example/proxy-failure', text='', error='Failed to read https://docs.example/pr...lse, truncation_reasons=(), quality='failed', links=(), links_complete=None, cache_hit=False, usage=None, credits=None).ok
+E     
+E     - proxy_routing_error
+E     + acquisition_error)
+__________ test_readiness_fails_visibly_for_a_broken_selected_proxy ___________
+tests\test_proxy_routing_safety.py:124: in test_readiness_fails_visibly_for_a_broken_selected_proxy
+    assert not result['ready'] and not check['ok'] and check['level'] == 'error'
+E   assert (not True)
+=========================== short test summary info ===========================
+FAILED tests/test_proxy_routing_safety.py::test_bad_selected_proxy_refuses_before_client_construction[change0]
+FAILED tests/test_proxy_routing_safety.py::test_bad_selected_proxy_refuses_before_client_construction[change1]
+FAILED tests/test_proxy_routing_safety.py::test_bad_selected_proxy_refuses_before_client_construction[change2]
+FAILED tests/test_proxy_routing_safety.py::test_bad_selected_proxy_refuses_before_client_construction[change3]
+FAILED tests/test_proxy_routing_safety.py::test_bad_selected_proxy_refuses_before_client_construction[change4]
+FAILED tests/test_proxy_routing_safety.py::test_bad_selected_proxy_refuses_before_client_construction[change5]
+FAILED tests/test_proxy_routing_safety.py::test_bad_selected_proxy_refuses_before_client_construction[change6]
+FAILED tests/test_proxy_routing_safety.py::test_config_store_failure_cannot_switch_to_direct
+FAILED tests/test_proxy_routing_safety.py::test_provider_constructor_failure_cannot_switch_to_direct
+FAILED tests/test_proxy_routing_safety.py::test_provider_config_failure_is_not_an_unconfigured_provider
+FAILED tests/test_proxy_routing_safety.py::test_one_route_uses_one_coherent_config_read
+FAILED tests/test_proxy_routing_safety.py::test_read_url_exposes_route_failure_before_network_or_remote_recovery
+FAILED tests/test_proxy_routing_safety.py::test_readiness_fails_visibly_for_a_broken_selected_proxy
+13 failed, 2 passed in 1.51s

@@ -1,0 +1,171 @@
+[fast-test] 1005 test files in 8 chunks (8 requested, timeout 1260s/chunk)
+[fast-test] chunk 05: OK 1454p/0f (125 files)
+[fast-test] chunk 07: OK 1935p/0f (125 files)
+[fast-test] chunk 01: OK 1841p/0f (126 files)
+[fast-test] chunk 06: OK 1852p/1f (125 files)
+[fast-test] chunk 04: OK 2077p/0f (126 files)
+[fast-test] chunk 02: OK 1573p/0f (126 files)
+[fast-test] chunk 03: OK 1893p/3f (126 files)
+[fast-test] chunk 00: OK 1670p/0f (126 files)
+
+[fast-test] TOTALS in 1141s: 2 deselected, 2 error, 4 failed, 14295 passed, 61 skipped
+
+[fast-test] 6 failing tests:
+  FAILED tests/test_child_env.py::test_run_unit_tests_runs_the_workspaces_tests_without_secrets
+  FAILED tests/test_child_env.py::test_the_patch_set_verify_run_has_no_secrets
+  FAILED tests/test_fast_test_runner.py::test_a_chunk_runs_below_a_normal_program
+  FAILED tests/test_hands_outcome.py::test_patch_set_verify_makes_hands_demo_green
+  FAILED tests/test_update_not_from_its_launcher.py::test_a_running_uv_launcher_cannot_be_renamed
+  FAILED tests/test_update_not_from_its_launcher.py::test_the_update_sees_a_held_launcher
+
+[fast-test] failure tracebacks (per-chunk FAILURES sections):
+================================== FAILURES ===================================
+__________________ test_a_chunk_runs_below_a_normal_program ___________________
+tests\test_fast_test_runner.py:209: in test_a_chunk_runs_below_a_normal_program
+    lowered = _priority_of(runner.pytest_command([str(probe)], background=True), tmp_path)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_fast_test_runner.py:196: in _priority_of
+    assert done.returncode == 0 and found, done.stdout + done.stderr
+E   AssertionError: Traceback (most recent call last):
+E       File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\config\__init__.py", line 913, in import_plugin
+E         mod = importlib.import_module(importspec)
+E               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\importlib\__init__.py", line 90, in import_module
+E         return _bootstrap._gcd_import(name[level:], package, level)
+E                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+E       File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+E       File "<frozen importlib._bootstrap>", line 1310, in _find_and_load_unlocked
+E       File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+E       File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+E       File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+E       File "<frozen importlib._bootstrap>", line 1310, in _find_and_load_unlocked
+E       File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+E       File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+E       File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+E       File "<frozen importlib._bootstrap>", line 1310, in _find_and_load_unlocked
+E       File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+E       File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+E       File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+E       File "<frozen importlib._bootstrap>", line 1324, in _find_and_load_unlocked
+E     ModuleNotFoundError: No module named 'docs'
+E     
+E     The above exception was the direct cause of the following exception:
+E     
+E     Traceback (most recent call last):
+E       File "<string>", line 22, in <module>
+E       File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\config\__init__.py", line 201, in main
+E         return _main(args=args, plugins=plugins, prog="pytest.main()")
+E                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\config\__init__.py", line 223, in _main
+E         config = _prepareconfig(new_args, plugins, prog=prog)
+E                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E
+
+================================== FAILURES ===================================
+________ test_run_unit_tests_runs_the_workspaces_tests_without_secrets ________
+tests\test_child_env.py:149: in test_run_unit_tests_runs_the_workspaces_tests_without_secrets
+    assert "1 passed" in out, out
+E   AssertionError: Test results (Exit code 1):
+E     Traceback (most recent call last):
+
+E       File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\config\__init__.py", line 913, in import_plugin
+
+E         mod = importlib.import_module(importspec)
+
+E               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+E       File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\importlib\__init__.py", line 90, in import_module
+
+E         return _bootstrap._gcd_import(name[level:], package, level)
+
+E                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+E       File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+
+E       File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+
+E       File "<frozen importlib._bootstrap>", line 1310, in _find_and_load_unlocked
+
+E       File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+
+E       File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+
+E       File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+
+E       File "<frozen importlib._bootstrap>", line 1310, in _find_and_load_unlocked
+
+E       File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+
+E       File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+
+E       File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+
+E       File "<frozen importlib._bootstrap>", line 1310, in _find_and_load_unlocked
+
+E       File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+
+E       File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+
+E       File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+
+E       File "<frozen importlib._bootstrap>", line 1324, in _find_and_load_unlocked
+
+E     ModuleNotFoundError: No module named 'docs'
+
+E     
+
+E     The above exception was the direct cause of the following exception:
+
+E     
+
+E     Traceback (most recent call last):
+
+E       File "<frozen runpy>", line 198, in _run_module_as_main
+
+E       File "<frozen runpy>", line 88, in _run_code
+
+E       File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\pytest\__main__.py", line 9, in <module>
+
+E         raise SystemExit(_console_main())
+
+E                          ^^^^^^^^^^^^^^^
+
+E       File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\config\__init__.py", line 253, in _console_main
+
+E         code = _main(prog=_get_prog_name(sys.argv))
+
+E                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+E       File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\config\__init__.py", line 223, in _main
+
+E         config = _prepareconfig(new_args, plugins, prog=prog)
+
+E                  ^^^^^^^
+
+=================================== ERRORS ====================================
+_______ ERROR at setup of test_a_running_uv_launcher_cannot_be_renamed ________
+tests\test_update_not_from_its_launcher.py:69: in held_launcher
+    pytest.fail("the launcher copy did not start its test")
+E   Failed: the launcher copy did not start its test
+---------------------------- Captured stdout setup ----------------------------
+17:48:31 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+17:48:31 INFO kazma_ui.session_manager: [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19528\test_a_running_uv_launcher_can0\chat_sessions.db
+17:48:31 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19528\test_a_running_uv_launcher_can0\settings.db
+17:48:31 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+17:48:31 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19528\test_a_running_uv_launcher_can0\settings.db
+17:48:31 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+17:48:31 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19528\test_a_running_uv_launcher_can0\test_registry.db
+17:48:31 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+17:48:31 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19528\test_a_running_uv_launcher_can0\test_registry.db
+17:48:31 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+17:48:31 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openai
+17:48:31 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: anthropic
+17:48:31 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: groq
+17:48:31 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: deepseek
+17:48:31 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: google
+17:48:31 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: xai
+17:48:31 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: zai
+17:48:31 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openrouter
+17:48:31 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: ollama
+17:48:31 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: lm-studio

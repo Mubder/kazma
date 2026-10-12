@@ -309,6 +309,11 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
   touches `_conn` holds `_lock` for as long as the statement is live.**
   A read after a close is fine — `_get_conn()` reopens lazily.
   Repro: `tests/test_config_store_close_race.py`.
+  `_stored_raw` holds that same RLock through its native SELECT too, including
+  dict/secret preparation before `batch_set` enters its transaction (2026-10-11).
+  A cache-only lock exposed SQLite API misuse/corrupted reads under concurrent
+  acquisition first writers. Gate: `tests/test_config_store_raw_read_lock.py`,
+  including the original lock boundary as a traced-statement negative control.
 - Background cadences do not run under pytest:
   `worker_bootstrap.background_schedulers_enabled()` is False there (override
   with `KAZMA_TEST_BACKGROUND_SCHEDULERS=1`). One switch for all eight
@@ -655,14 +660,28 @@ a failure to save it is a WARNING. `tests/test_replay_router_getters.py`.
 ### 13. Proxy Provider Addon (`kazma-core/kazma_core/proxy/`)
 
 An opt-in, pluggable scraping proxy so `read_url` / `crawl_site` / `web_search`
-route through a residential rotating proxy (anyip.io first). Bulletproofs
-scraping against IP blocks/rate limits. **Disabled by default** — non-users see
-zero change.
+can route through a configured proxy (anyip.io first). Acquisition is
+**local-only by default** (2026-10-10): `web_acquire.policy` requires
+`KAZMA_ACQUISITION_MODE=local_first_with_remote_fallback` AND `proxy` in
+`KAZMA_ACQUISITION_REMOTE_PROVIDERS`. Stored proxy settings alone cannot
+authorize that route. HTTP clients always disable ambient environment proxies.
 
-- **`get_proxy_provider()` (`registry.py`) re-reads `proxy.provider` LIVE on
-  every fetch** (mirrors HITL's `get_hitl_config`). A Settings change takes
-  effect without a restart. Default is `NullProvider` (direct, no proxy). It
-  never raises — on any error it returns `NullProvider`, so scrapers stay working.
+- **Proxy resolution is fail-closed (2026-10-11).** `proxy/config.py` reads one
+  live category snapshot per route; nested provider reads share it. Only an
+  absent/default `none` selects direct routing. Unknown providers, failed config
+  or initialization, missing credentials, unresolved vault pointers and invalid
+  routes raise typed `proxy_routing_error`; never substitute `NullProvider`.
+  An account change takes effect on the next resolution. Settings Test resolves
+  once off-loop and probes that exact URI under policy, admission, a 15-second
+  deadline and a 128-byte decoded response cap. No raw credentials in errors.
+- **The DDGS SDK runs in `web_acquire/search_sdk.py`'s isolated child**, with
+  proxy/account environment stripped, explicit route via stdin, a 30-second
+  process-tree deadline and bounded memory/output. DDGS_PROXY otherwise overrides
+  an explicit proxy. Never mutate process environment around SDK calls. Search
+  admission and cancellation retain ownership until child cleanup joins; no next
+  backend after cancellation. Other synchronous search backends still require
+  hard whole-request containment. Gates: `tests/test_proxy_routing_safety.py`,
+  `tests/test_search_sdk_worker.py` and real Chromium proxy-refusal coverage.
 - **`get_scraping_client()` (`client.py`) is the single injection point.** The
   scraper builds its `httpx.AsyncClient` via this factory, not `httpx.AsyncClient`
   directly. It injects `proxy=` when configured + rotates UA from
@@ -2048,6 +2067,11 @@ Popen fallback — mirror that.
   (`knowledge_ingest.py`, `read_url.py`) route through
   `kazma_core/playwright_loop.py` (a dedicated ProactorEventLoop daemon thread).
   Do NOT revert these to the async Playwright API on the server loop.
+- `security.process_budget.run_bounded_async` shields and joins its worker
+  receipt on cancellation, including repeated cancellation. Setting a threading
+  event alone cannot acknowledge that the native process tree/pipes have ended.
+  Keep the join; `tests/test_process_budgets.py` holds real cleanup open and runs
+  the old return-before-cleanup boundary as a negative control.
 
 **Symptom of a regression:** a tool reports `error=False` in 0 ms while doing
 nothing, and the log shows `Task exception was never retrieved …
@@ -2089,15 +2113,234 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   not import that package at module level; take annotation-only types under
   `TYPE_CHECKING` and the rest at call time. Both gates walk one list
   (the script's `iter_modules`).
-- `tools/read_url.fetch_full_text` is the PUBLIC ladder entry point
-  (alias of `_fetch_full_text`); the `web_acquire.fetch` façade and KB
-  ingest fallback use the public name — do not import the underscored one.
+- `tools/read_url.fetch_result` is the public typed ladder entry point used by
+  `web_acquire.fetch_text`. `fetch_full_text` remains a public legacy text
+  adapter (alias of `_fetch_full_text`); neither starts a second ladder.
+  Product consumers use `FetchResult.ok`/`error_code`, never an `Error:`
+  prefix in extracted text. `save_url_extract` returns a typed atomic-save
+  result to research; it is not a registered agent tool. The chat/chunk tools
+  fence remote text at the model boundary; internal typed bodies stay raw.
 
 **B. Web acquisition — ONE egress stack.**
-- SoT ladder: `tools/read_url._fetch_full_text` (SSRF-validate → Firecrawl if
-  key configured → Jina only when explicitly opted in via
-  `KAZMA_JINA_READER=1` → httpx via scraping client → hard-page recovery
-  Firecrawl→Jina→Playwright) built on `proxy.client.get_scraping_client`
+
+2026-10-12 additions (supersede older open-work descriptions below):
+- Session process owners reconcile to interrupted; explicit session resume links
+  the original durable job and restores verified terminal output without replay.
+  History is bounded to 256 rows/128MiB; archive does not release storage.
+- Origins/robots persist via shared ConfigStore CAS with finite tables and
+  fail-closed clock/storage behavior. Fixed sync search and native HTTP share
+  origin feedback. Opaque DDGS SDK fanout is skipped, not silently unmetered.
+- Durable research snapshots explicit-key/local clients and failover routes;
+  ambient AWS/Google ADC are refused. Configuration hashes include all provider
+  coordinates and relevant environment; only digests are persisted.
+- Native automation uses the contained owner/broker, joined cancellation and
+  workspace/tenant identity. Supported form bodies are bounded; uploads refused.
+  Strict OS network mode defaults required. Windows refuses strict launch;
+  Linux requires a verified isolated network namespace plus cgroup controls.
+  Explicit compatibility mode is labelled weaker and never attested as isolated.
+- Retained pipeline reports have a separate 2GiB allowance, 512MiB/active job,
+  bounded legacy inventory and no automatic deletion; not a whole-install quota.
+- Settings/CLI/TUI explicit credit actions use the same provider adapter; cached
+  reads never refresh. Jina token budget is finite; unsupported monetary caps
+  refuse dispatch. Never describe reservations/tokens as charges.
+- Gates: test_acquisition_durable_controls.py, test_browser_acquisition_broker.py,
+  test_research_pipeline_recovery.py and existing provider/origin/robots gates.
+  Full suite authorized after implementation on 2026-10-12; run conservatively.
+
+- SoT ladder: `tools/read_url.fetch_result` → `_bounded_fetch_result` →
+  `_fetch_full_text_impl` (SSRF-validate → httpx →
+  local Chromium → explicitly permitted hosted recovery), built on
+  `proxy.client.get_scraping_client`. `web_acquire.policy` defaults to
+  `local_only`; hosted Firecrawl/Jina and scraping proxies require both
+  `local_first_with_remote_fallback` and their names in the remote allowlist.
+  Keys and legacy flags never grant permission; they can narrow it. KB discovery
+  uses local sitemaps/llms.txt/BFS; hosted mapping is refused because the
+  provider cannot enforce navigation scope. Cache entries are partitioned by
+  policy AND extraction profile (generic/knowledge/discovery). The complete text ladder has a 90s deadline (operator
+  range 1–300s); HTTPX network errors reach local recovery. The raw GET layer
+  `web_acquire.http.fetch_public` bounds the full redirect chain separately.
+  `read_capped` checks the live peer BEFORE body reads, bounds raw gzip/deflate
+  expansion with zlib max_length, and refuses unsupported content encodings.
+  Hosted scrape responses use the same bounded decoder through
+  `read_response_capped`, after their policy gate; this decoder alone is NOT
+  a public-target egress gate. Bodies default to 5MB, hard-ceiling 20MB.
+  The typed result records actual final URL/status/backend/attempts/bytes,
+  clipping and quality. Unknown hosted origin provenance/usage/credits remain
+  null. A cache hit makes no new attempts. Partial bodies are not cached or
+  indexed into KB; automated research saves refuse them. Explicit chat saves
+  may publish a visibly marked partial extract. A real password input plus an
+  explicit login title fails `login_required`; authentication prose/widgets
+  alone do not. Gate: `tests/test_web_acquisition_results.py`.
+  `web_acquire.accounting` reserves finite remote job/day requests through the
+  existing ConfigStore conditional batch BEFORE HTTP/proxy effects. Failures,
+  cancellation and uncertain launch retain reservations; never refund or label
+  them provider charges. Defaults: 256/job, 1024/UTC day; zero refuses, active
+  limits may narrow only. Fixed HTTP search reserves six requests; DDGS proxy
+  search is refused because SDK request counts are opaque. HTTP hooks precede
+  transport dispatch, including redirects, hosted scrape, mapping and probes.
+  `web_acquire.credits` explicitly refreshes Firecrawl's team balance through
+  the same allowance, account scoped/fresh five minutes, 60-second cadence.
+  Status reads are local only; unsupported balances/per-request charges stay null.
+  Jina's single valid `X-Usage-Tokens` header is a provider-reported response
+  observation, captured durably before body consumption. Keep zero distinct
+  from missing/malformed metadata. Retain observations on body failure/cancellation;
+  cache reads make no new observations. Tokens never imply money or account balance.
+  Gate: `tests/test_acquisition_provider_usage.py`.
+  Allowance/crawl journals and their CAS revisions are RUNTIME in
+  `settings_restore.KEY_RULES`; backups must never rewind spent requests or
+  completed effects. Gate: `tests/test_settings_restore.py`.
+  Gates: `tests/test_acquisition_accounting.py`, `tests/test_acquisition_credits.py`,
+  `tests/test_acquisition_postgres.py` (opt-in disposable real database).
+  Unsupported monetary bounds refuse remote dispatch. Strict browser networking
+  requires the qualified Linux namespace; Windows refuses strict launch. See
+  `docs/audits/WEB_ACQUISITION_IMPLEMENTATION_2026-10-10.md` for remaining gates.
+  `web_acquire.crawl_jobs` persists KB ownership before Web acceptance, bounded
+  page/BFS frontiers and metadata effects before fetch/indexing. Four active
+  jobs, 24 retained, 8MiB; explicit resume requires identical policy and skips
+  completed/uncertain effects. Metadata keeps parsed links, never raw bodies.
+  Faithful identity preserves `.md`, slash, matrix parameters and query bytes;
+  do not infer aliases without an observed redirect. Web recovery uses the
+  journal as truth; errors/partial coverage cannot become a success toast.
+  Gates: `tests/test_durable_crawls.py`, `tests/test_kb_api_routes.py`,
+  `tests/test_kb_recovery_browser.py` (real EN/AR Alpine plus old-state controls),
+  `tests/js/test_kb_recovery.js`. `research_pipeline_job` now extends this SAME
+  CAS journal (kind `research_pipeline`), owning each stage BEFORE dispatch.
+  Never turn its stages into fake URL pages or store raw bodies in settings.
+  Completed values/files require SHA256/size verification; running stages settle
+  uncertain on interruption. Explicit `run_research_pipeline(resume_job_id=...)`
+  requires identical scope: skip uncertain sources with a partial report, refuse
+  failed/uncertain required stages, never blindly repeat paid/search/publication
+  effects. Evidence commits before source publication. Join all sibling tasks and
+  file workers before journal settlement. Stages reserve retained bytes BEFORE
+  action (512MiB/job, 128 effects, 512KiB values, 24MiB/file); no disk GC is implied.
+  Configuration digests are checked between stages; explicit-key/local LLM and
+  failover clients are snapshotted for each pipeline. Ambient AWS/Google ADC
+  routes are refused. Sessions reconcile dead owners and require explicit resume;
+  history and retained reports have independent finite allowances. Gate:
+  `tests/test_research_pipeline_recovery.py`
+  (real SQLite fresh-process crashes, original unowned planner negative control,
+  concurrent resume, file tampering, scope changes and held-worker cancellation).
+  Research crawl uses the same acquired HTTP document/Chromium snapshot for
+  text and links (no separate raw GET). Scope reaches the content fetch and top-level Chromium
+  navigation through a per-acquisition ContextVar. Scoped reads bypass the
+  cache (policy/scope enforcement must precede reuse) and refuse hosted readers
+  that cannot enforce navigation scope. Do not drop the `scope_check`
+  propagation in acquisition. Gate: `tests/test_web_acquisition_scope.py`.
+  Chromium HTTP uses `web_acquire.browser_network` CDP Request-stage pauses,
+  NOT Playwright route continuation (routes skip HTTP redirect hops). Each
+  request uses bounded HTTPX through the proxy factory, public DNS validation,
+  direct pinning and a live-peer check. Fulfill the actual response, preserving
+  redirects/relative URLs/repeated cookies. Never continue HTTP natively.
+  Public acquisition target validation uses `web_acquire.dns_worker.validate_public_url`,
+  including redirects and CDP assets. Do not replace it with
+  `to_thread(validate_url)`: cancellation cannot terminate a native resolver
+  in a Python thread. Four owned validators / 16 queued / 10s admission share
+  a separate FIFO pool; each resolver is an isolated credential-free child
+  capped at 5s, 256MiB and 16KiB output (128 unique addresses / 2048 raw records).
+  Check every returned address with the existing SSRF validator; excess is a
+  refusal, never a truncated permission. Direct HTTP connects validated pins.
+  Windows Job kill-on-close and Linux verified parent-death/kernel wall timers
+  protect the child; cancellation joins its process/pipes/per-call executor.
+  Uncertain cleanup retains handles and quarantines capacity in readiness;
+  the next validation starts one retained cleanup thread, with `_drain_cleanup`
+  for joining it. `web_acquire.endpoint_transport` uses that same owned DNS
+  for async/sync proxies and hosted async connections, preserving logical HTTP,
+  CONNECT and verified TLS SNI. Only an operator-selected proxy endpoint may
+  resolve private; content targets still require independent public validation.
+  Reject alternate transports/mounts that would bypass this boundary. Sync
+  proxy HTTP refuses execution on an event loop. Legacy synchronous validation
+  outside acquisition remains separate work; native automation now uses the
+  same owned DNS and broker. Gates: `tests/test_endpoint_transport.py`,
+  `tests/test_acquisition_dns.py`; Linux evidence in
+  `docs/audits/evidence/dns_linux_boundary_2026_10_11.py`.
+  HTML and sitemap XML extraction use `web_acquire.parser` owned children (15s, 768MiB,
+  24MiB encoded input, 4MiB output; XML refuses DTDs/entities and bounds
+  leaf/index frontiers at 4000/64); do not put hostile parsing back on shared
+  Python threads. `search_runtime` owns the complete backend chain/deadline;
+  `search_http` bounds HTTP and parsing in a fixed child. Both use the common
+  owned-worker cleanup/quarantine contract. Research crawl seed/page
+  prevalidation also uses `validate_public_url`, not native resolver threads.
+  Gates: `tests/test_acquisition_parser.py`, `tests/test_search_http_worker.py`,
+  `tests/test_search_sdk_worker.py`, `tests/test_acquisition_dns.py`.
+  `BrowserJob` owns the context and a native deny proxy; sandbox enabled, service
+  workers blocked, DNS/UDP suppression are defense in depth, NOT OS network
+  isolation. Fixed per-page limits: 128 intercepted requests, 4 concurrent,
+  5MB per response, 32MB aggregate retained decoded bytes, 5 redirects; DOM 2M
+  characters, text 100K, links 2000, supported lazy tabs 12. Refusals/failed
+  resources are typed or partial; KB never indexes partial content. KB text
+  and BFS use the same typed ladder, with explicit seed scope and query-safe
+  identity; metadata redirects stay on the seed host. Gate:
+  `tests/test_browser_acquisition_broker.py`,
+  `tests/test_knowledge_acquisition_profile.py`.
+  `web_acquire.resources` provides process-wide FIFO admission across caller
+  threads/event loops: 2 browser owners (8 queued), 6 ordinary acquisitions
+  (24 queued), and 2 reserved acquisitions for existing browser owners (8
+  queued); admission waits expire at 30s within the acquisition deadline.
+  Reserve owner slots to avoid deadlock when ordinary calls wait for browsers
+  held by a crawler that needs its next page. Cache hits need no admission;
+  saturation is a typed `resource_limit` before dispatch. The Windows bridge
+  tracks the actual task and joins asynchronous finalizers before acknowledging
+  cancellation/timeout, including repeated caller cancellation. A failed
+  browser teardown retains/quarantines its capacity and native deny endpoint;
+  readiness exposes that unhealthy capacity. The native deny endpoint admits at
+  most 16 handler tasks per owner and joins them before releasing its slot.
+  Close the owned page BEFORE CDP detach: a paused navigation can otherwise
+  leave detach waiting indefinitely, even after its HTTP stream has closed.
+  `web_acquire.browser_driver` owns Playwright's Node driver and Chromium in
+  one OS boundary before untrusted browser code starts: Windows Job Objects
+  (2GiB aggregate, 32 processes, approximately two logical CPUs) or delegated
+  Linux cgroup v2 (2GiB memory, no swap, 256 tasks, two CPUs). Linux needs
+  writable memory/pids/CPU/group-kill controls, optionally selected through
+  `KAZMA_BROWSER_CGROUP_ROOT`; missing controls refuse rendering. Never launch
+  an unrestricted browser or substitute per-process RLIMIT_AS. The driver gets
+  a minimal environment; credentials, proxy variables and NODE_OPTIONS stay out.
+  Protocol frames/queued commands are capped at 32MiB, total traffic at 512MiB.
+  An independent watchdog ends the process tree on cancellation, a 30-minute
+  owner lifetime or five-second cleanup grace; parent-process death also ends
+  descendants (Windows kill-on-close, Linux pidfd guardian). Capacity releases
+  only after OS verification of no live descendants; uncertainty quarantines it.
+  The private Playwright Connection/stdio compatibility seam is isolated here,
+  qualified against 1.61.0. Upgrades must pass the real-browser/boundary gates.
+  Gates: `tests/test_browser_driver_budget.py`,
+  `tests/test_acquisition_resources.py` and the broker suite. This boundary does
+  not constrain arbitrary Python HTTP/XML threads or all install storage,
+  and is distinct from the required Linux network namespace. Native automation
+  shares this contained owner, with bounded mutating HTTP. Report/standalone
+  publication and Knowledge SQLite have finite allowances; vector/WAL/temp and
+  arbitrary user files are outside those disk bounds. Strict Windows launch is
+  refused; compatibility mode is visibly weaker.
+  `web_acquire.origins` shares HTTP origin limits across jobs and event loops:
+  2 live origin reservations / 32 queued per origin, 512 retained origins and
+  a 30s admission/spacing deadline. Crawl/KB extraction and KB metadata request
+  starts have a 300ms floor; a crawler's larger requested delay also propagates
+  through rendering. HTTPX streams retain their lease through body closure.
+  Record Retry-After at headers (integer or HTTP-date), before body reads;
+  propagate redirect delays to the destination authority. Never clamp server
+  cooldowns downward, clear them on an older successful in-flight response or
+  evict active/cooling origin state to reset a limit. Return `origin_throttled`
+  before another request/recovery backend; do not turn it into bot recovery.
+  Hosted readers reserve source and service origins in stable deduplicated order.
+  Production origin leases, spacing and cooldowns use durable ConfigStore CAS
+  across processes, including fixed sync search and native browser HTTP. Live
+  capacity counters describe this Python process, not every concurrent process.
+  Gates: `tests/test_origin_scheduler.py`, real browser/KB compatibility suites.
+  Tests isolate the scheduler per case; production cooldowns persist across jobs.
+  `web_acquire.robots` defaults automated crawl/KB/research-save jobs to KazmaBot
+  robots enforcement. Check before cache reuse and every HTTP/browser hop,
+  including assets. Raw public metadata is bounded to 500KiB/15s/five same-origin
+  redirects, with dedicated bounded capacity to avoid nested content-slot
+  deadlock. 404/410 means missing; 401/403 denies; failed/malformed/clipped
+  checks refuse crawling. Cross-origin control redirects are conservatively
+  refused rather than widening scope. Explicit opt-out is visible; hosted
+  recovery is refused while robots enforcement requires per-request control.
+  Cache policy by origin, acquisition policy and route; separate manual/crawler
+  page caches. Freeze policy per job; never retain a ContextVar across async
+  generator progress yields. Robots metadata receipts are call-local; proxy
+  request reservations use the durable ledger, with per-request charges unknown.
+  Parsed robots policy and interrupted lookup refusals persist in a bounded CAS
+  table. Full RFC conformance and broader compatibility qualification remain open.
+  Gates: `tests/test_web_robots.py`, actual Chromium broker fixtures.
+  The factory provides
   (proxy provider + rotating UA pool); `web_acquire` is the façade
   (`fetch_text`/`search`/`rank_urls`/profiles) used by research pipeline, KB
   ingest, and readiness. Direct (no-proxy) hops pin the validated IP
@@ -2106,6 +2349,50 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
 - `crawl_site(profile=...)` accepts named cap presets (`research_brief` |
   `research_deep` | `kb_site` | `single_page`); explicit args win; hard env
   ceilings (`KAZMA_CRAWL_MAX_PAGES` etc.) still clamp.
+  Its research frontier deduplicates pending URLs and retains at most four
+  times the page cap (8192 characters per URL); exhausted coverage is visible.
+  Partial extracts are not published automatically. Saves pin the starting
+  workspace through the existing path scope. Validation errors preserve their
+  typed class. `crawl_site(resume_job_id=...)` now uses the shared bounded
+  crawl journal with `kind=research_crawl`; freeze workspace, output options,
+  acquisition/robots policy and limits. Own each page before fetch/publication,
+  persist its receipt before saving, and settle summary plus pending frontier
+  atomically. Resume only interrupted jobs with identical scope, skipping
+  completed/failed/ambiguous pages; uncertainty or capped coverage stays partial.
+  Publication and terminal commits join cancellation; a committed terminal
+  outcome must not be overwritten by interrupted cleanup. KB API filters
+  research jobs; acquisition readiness can inspect them by job ID. Research
+  pipeline/session durability remains separate required work.
+  Gates: `tests/test_research_crawl_bounds.py`,
+  `tests/test_research_crawl_recovery.py` (real SQLite child crashes before/after
+  publication, cancellation/terminal race, concurrent resume and invalid state),
+  `tests/test_acquisition_postgres.py` (real independent PostgreSQL connections).
+- Research pipeline execution uses `web_acquire.research_runtime`: four active
+  pipelines and four background sessions in this Python process, with no waiting
+  queue. Admit before planning/session creation, freeze workspace/operator and
+  robots policy, and retain a background lease until its actual task finishes.
+  Rejected Web starts return typed 503 capacity errors without creating a row or
+  task. Pipeline execution has a cooperative 30-minute deadline; this is not a
+  hard native filesystem deadline or durable pipeline recovery. Session/store/
+  scoring workers, pipeline preflight/path/registration workers and extract
+  publication join cancellation before releasing ownership. Unique per-run
+  directories prevent same-topic/same-second collisions. Standalone extract
+  saves pin their starting workspace before acquisition. Gate:
+  `tests/test_research_runtime.py` (original admission controls, real API/SQLite,
+  cross-thread dispatch, preflight/creation/publication cancellation and scope).
+  Preflight requires an explicit boolean readiness receipt and stops before
+  planning/output on failure. Source batches reserve remaining publication
+  slots before dispatch; gap fills keep monotonic filenames. Persist bounded
+  `sources.json` atomically before the first fetch and after each batch,
+  including gaps; storage failure stops further acquisition. This manifest
+  does not replace the unfinished durable pipeline effect/resume journal.
+  Cached readiness honors `probe_search=False` even under legacy live-probe
+  environment variables, opens a read-only diagnostic scope and omits search
+  URL credentials. `web_acquire.operations` is the shared cached CLI/TUI status
+  source; never add implicit balance refreshes to status reads. CLI supports
+  `kazma acquisition status`; TUI Settings reads explicitly and keeps one
+  worker until joined cleanup completes. Live capacities are process-local.
+  Gate: `tests/test_acquisition_operations.py` (real API, SQLite, CLI and TUI).
 - Deliberate direct-API exceptions (never route through the scraping proxy):
   Jina Reader, Firecrawl, loopback SearXNG. The gateway attachment URL fetch
   DOES route through `get_scraping_client_sync` (SSRF-per-redirect kept).
@@ -2125,6 +2412,17 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   `api.rate_limit.<bucket>_per_minute`; env `KAZMA_RATE_LIMIT_ENABLED=0`.
 
 **D. Research sessions.**
+- Cancellation is a request, not cleanup proof (2026-10-11). Active sessions enter
+  `cancelling`; terminal `cancelled` follows joined pipeline workers. Delete must
+  retain the row/subscribers/owner and return typed 409 while `_RUNNING` owns it.
+  `update_session` reads and writes under one SQLite writer transaction, preserving
+  cancelling/terminal states against late progress. Pre-first-step cancellation
+  transfers its lease to a joined terminal writer; never cancel that writer from
+  Delete. UI keeps/reconnects progress while cancelling. Gates:
+  `tests/test_research_cancel_truth.py`, `tests/js/test_research_cancel.js`.
+  Dead process owners reconcile to interrupted; explicit resume links the original
+  durable pipeline. Verified terminal output is restored without effects. History
+  is bounded to 256 rows/128MiB; archive does not release that allowance.
 - `suppress_chat_recording()` (ContextVar, research_session.py): the deep
   pipeline wraps BOTH its search gathers in it — sub-queries must NOT mint
   standalone `record_chat_research` rows (the panel flood: one deep run
@@ -3069,21 +3367,38 @@ Send in seconds, and threw `Cannot read properties of null (reading
 `proxy=`) uses `PinHostAsyncTransport` (`kazma_core/security/ssrf_pin.py`)
 to connect to the pin while keeping Host + SNI. After every `read_url`
 hop, `assert_peer_public` / `peer_ip_from_response` abort if the peer is
-private (fail closed).
+private. The bounded reader checks BEFORE reading, preserves httpcore
+`server_addr` evidence after closing, and requires either peer metadata or
+a successful direct pin attestation. A missing/invalid pin never falls back
+to unvalidated DNS. Targets with embedded credentials are refused.
+`tests/test_web_acquisition_safety.py` covers these runtime boundaries.
+
+**Pin sockets, never pool origins** (2026-10-10): rewriting the request URL
+to an IP makes httpcore reuse one TLS connection for different hostnames
+sharing that IP. `PinHostAsyncTransport` instead wraps the network backend's
+`connect_tcp`; URL, connection-pool origin, Host and SNI retain the hostname.
+The stream carries its connected pin through TLS/reuse, so a changed map
+cannot attest an old socket as a new address. The single HTTPX pool/backend
+compatibility seam is covered by `tests/test_ssrf_pin_authority.py` using the
+real HTTPX/httpcore pool, including same-origin keep-alive and shared-IP hosts.
 
 **Do not pin through `proxy=`.** `get_scraping_client` skips the pin
 transport when a proxy is configured — CONNECT would break scraping.
 Peer-private abort still runs. Tests: `tests/test_audit_wave8.py`.
 httpx `>=0.27`.
 
-**Every browser context Kazma drives carries the egress guard**
-(`security/browser_egress.py`: a route on the context aborts any request
-`validate_url` would refuse — redirects, subresources, script fetches).
-The "already guarded" mark lives ON the context. It was a set of
-`id(context)`: `read_url` and the Knowledge crawler close their context
-after each fetch, CPython hands the id to the next one, and that context
-was skipped (2026-09-28). `tests/test_browser_egress_every_context.py`
-(real Chromium included).
+**Browser guards are not all equivalent (2026-10-10 redirect witness).**
+Scraper rendering uses the CDP/HTTPX broker and native deny proxy described in
+§24B. Native automation now shares that broker and contained owner, with bounded
+UTF-8 form requests; crawler rendering remains read-only. Playwright routes alone
+do NOT validate subsequent redirect hops. The unused legacy browser_egress module
+was retired on 2026-10-12; all production callers use the broker. Strict production
+launch additionally requires Linux network namespace isolation; Windows refuses
+strict launch. Explicit compatibility mode never attests OS isolation. Each fresh
+context installs its own broker; no global object-id deduplication is allowed.
+Gate: `tests/test_browser_egress_every_context.py`; the real pre-fix redirect
+witness is archived in `docs/audits/evidence/browser_redirect_before_broker_2026_10_10.log`.
+
 
 
 ### 33. Ops alerting — three paths, no fourth notifier
@@ -5040,7 +5355,17 @@ sent. Gate: `tests/test_answer_quality_monitor.py`.
   2026-08-19 — they used to be captured and discarded, leaving CI-only
   failures undiagnosable) and treats pytest exit 5 ("no tests collected",
   i.e. module-level importorskip like the Playwright e2e suite on a
-  `.[test]`-only install) as a benign skip, not POISON. Do NOT use
+  `.[test]`-only install) as a benign skip, not POISON. Per-file exit 0/1
+  without a terminal tally is unmeasured: pytest-timeout exits 1 without that
+  summary. Both isolation retries require a parsed tally (exit 5 remains an
+  explicit no-tests skip), otherwise the file is POISON. A timed-out/crashed
+  chunk's parsed tally is not added before recovery: pytest may print its
+  summary and hang during shutdown. Count the recovered files once, retaining
+  observed failure identities so a clean retry never erases them. The original
+  double-count boundary is covered in `tests/test_fast_test_runner.py`.
+  Both isolation retries require a parsed tally (exit 5 remains an
+  explicit no-tests skip), otherwise the file is POISON. The original boundary
+  is a negative control in `tests/test_fast_test_runner.py`. Do NOT use
   pytest-xdist here — worker segfaults (native lib) make
   it silently drop ~half the suite. The serial monolithic run intermittently
   segfaults and takes 20+ min.

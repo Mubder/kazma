@@ -338,7 +338,7 @@ def count_collected_tests() -> tuple[int, str]:
     whatever ``python`` happens to be on PATH in the build environment.
     """
     venv_python = str(REPO_ROOT / ".venv" / "Scripts" / "python.exe")
-    py = venv_python if (REPO_ROOT / ".venv" / "Scripts" / "python.exe").exists() else "python"
+    py = venv_python if (REPO_ROOT / ".venv" / "Scripts" / "python.exe").exists() else sys.executable
     try:
         # The suite scripts/fast_test.py runs: tests/e2e (Playwright, their
         # own CI job) are left out. An environment without Playwright cannot

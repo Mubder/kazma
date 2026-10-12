@@ -1,0 +1,113 @@
+"""Four-minute bounded browser lifecycle profile; no external sites or providers."""
+import asyncio,json,os,sys,time
+from pathlib import Path
+from unittest.mock import patch
+import psutil
+sys.path.insert(0,sys.argv[1])
+from kazma_core.web_acquire.browser import BrowserJob
+from kazma_core.web_acquire.resources import browser_capacity
+from playwright.async_api import BrowserType
+scratch=Path(sys.argv[2])
+async def main():
+    started=time.monotonic()
+    cycles=0
+    peak=0
+    baseline_threads=psutil.Process().num_threads()
+    original=BrowserType.launch
+    async def launch(browser_type,**kwargs):
+        wrapper=scratch/'chromium-with-native-libraries'
+        if wrapper.exists():
+            kwargs['executable_path']=str(wrapper)
+        return await original(browser_type,**kwargs)
+    with patch.object(BrowserType,'launch',launch):
+        while time.monotonic()-started<240:
+            owner=BrowserJob()
+            group=None
+            observed=[]
+            try:
+                await owner._start_impl()
+                group=owner._driver.transport.tree
+                process=psutil.Process(owner._driver.transport.proc.pid)
+                pages=await asyncio.gather(*(owner.context.new_page() for _ in range(2)))
+                async def work(page):
+                    await page.set_content('<html><body><p>English and العربية</p><pre>'+('bounded text '*10000)+'</pre></body></html>')
+                    assert await page.text_content('p')=='English and العربية'
+                    assert await page.evaluate('() => document.querySelector("pre").textContent.length')==130000
+                    await page.close()
+                await asyncio.gather(*(work(page) for page in pages))
+                observed=[process,*process.children(recursive=True)]
+                peak=max(peak,sum(p.memory_info().rss for p in observed if p.is_running()))
+                await asyncio.sleep(3)
+            finally:
+                await owner._close_impl()
+            assert owner._driver is owner._capacity_lease is None
+            assert browser_capacity().snapshot()['active']==browser_capacity().snapshot()['quarantined']==0
+            if hasattr(group,'path'):
+                assert not group.path.exists()
+            for child in observed:
+                assert not child.is_running() or child.status()==psutil.STATUS_ZOMBIE,(child.pid,child.name())
+            remaining=[p.pid for p in psutil.Process().children(recursive=True) if p.is_running() and p.status()!=psutil.STATUS_ZOMBIE]
+            assert not remaining,remaining
+            cycles+=1
+            if cycles%10==0:
+                print(json.dumps({'cycle':cycles,'elapsed_s':round(time.monotonic()-started,1),'max_sampled_owned_rss_bytes':peak,'pool':browser_capacity().snapshot()}),flush=True)
+            assert cycles<=100
+    final_threads=psutil.Process().num_threads()
+    assert final_threads<=baseline_threads+4,(baseline_threads,final_threads)
+    print(json.dumps({'profile':'bounded_browser_lifecycle','ok':True,'cycles':cycles,'pages':cycles*2,'elapsed_s':round(time.monotonic()-started,1),'max_sampled_owned_rss_bytes':peak,'initial_threads':baseline_threads,'final_threads':final_threads,'network_mode':os.environ.get('KAZMA_BROWSER_NETWORK_MODE','required'),'external_requests':0,'pool':browser_capacity().snapshot()}),flush=True)
+
+def private_socket_probe():
+    if not sys.platform.startswith('linux'):
+        return
+    import socket,subprocess
+    from kazma_core.web_acquire import browser_cgroup as cg
+    from kazma_core.web_acquire.browser_isolation import network_command
+    listeners=[]
+    targets=[]
+    try:
+        for family,address in ((socket.AF_INET,'127.0.0.1'),(socket.AF_INET6,'::1')):
+            server=socket.socket(family,socket.SOCK_STREAM)
+            server.bind((address,0))
+            server.listen(4)
+            server.settimeout(2)
+            listeners.append(server)
+            target=server.getsockname()
+            # Positive control: listener is reachable before namespace isolation.
+            peer=socket.socket(family,socket.SOCK_STREAM)
+            peer.settimeout(2)
+            peer.connect(target)
+            accepted,_=server.accept()
+            accepted.close()
+            peer.close()
+            targets.append((int(family),address,target[1]))
+        program='import socket,json\nfor family,address,port in '+repr(targets)+':\n s=socket.socket(family,socket.SOCK_STREAM); s.settimeout(1); result=s.connect_ex((address,port)); s.close(); assert result!=0,(family,address); print(json.dumps({"family":family,"host_loopback_refused":True,"errno":result}),flush=True)'
+        proc,group=cg.start_linux_driver(network_command([sys.executable,'-I','-c',program]),env={**os.environ},memory_bytes=256*1024**2,lifetime=5)
+        try:
+            output,error=proc.communicate(timeout=8)
+            # The contained guard deliberately kills its entire cgroup when
+            # the probe child exits, including the guard itself (SIGKILL).
+            assert proc.returncode==-9,(proc.returncode,output,error)
+            rows=[json.loads(line) for line in output.decode().splitlines()]
+            assert len(rows)==2 and {row['family'] for row in rows}=={2,10}
+            assert all(row['host_loopback_refused'] and row['errno']!=0 for row in rows)
+            assert not error,error
+            print(output.decode(),flush=True)
+        finally:
+            group.close()
+            proc.wait(timeout=3)
+            for stream in (proc.stdin,proc.stdout,proc.stderr): stream.close()
+        assert not group.path.exists()
+        for server in listeners:
+            server.settimeout(.1)
+            try:
+                contact,_=server.accept()
+            except TimeoutError:
+                pass
+            else:
+                contact.close()
+                raise AssertionError('Isolated namespace contacted a host loopback listener')
+    finally:
+        for server in listeners: server.close()
+private_socket_probe()
+
+asyncio.run(main())

@@ -1,0 +1,32 @@
+[
+  {
+    "module": "kazma_core.web_acquire.research_crawl",
+    "code": 0,
+    "stderr": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.crawl_jobs",
+    "code": 0,
+    "stderr": ""
+  },
+  {
+    "module": "kazma_core.tools.web_research",
+    "code": 0,
+    "stderr": ""
+  },
+  {
+    "module": "kazma_core.tools.research_readiness",
+    "code": 0,
+    "stderr": ""
+  },
+  {
+    "module": "kazma_core.agent.tool_builtins.external",
+    "code": 0,
+    "stderr": ""
+  },
+  {
+    "module": "kazma_ui.kb_api",
+    "code": 0,
+    "stderr": ""
+  }
+]

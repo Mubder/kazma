@@ -37,6 +37,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from kazma_ui.rate_limit import rate_limit
 from kazma_ui.sse_utils import sse_frame
 from kazma_core.errors import safe_error
+from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +245,30 @@ def create_research_router() -> APIRouter:
                 status_code=500,
             )
 
+    @router.get("/api/research/acquisition", dependencies=[Depends(rate_limit("research", 10))])
+    def acquisition_status(language: str = "en") -> JSONResponse:
+        from kazma_core.web_acquire.operations import cached_status, format_cached_status
+        try:
+            report = cached_status()
+            return JSONResponse({"ok": True, "report": report, "text": format_cached_status(report, language=language)})
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=503)
+
+    @router.post("/api/research/acquisition/credits", dependencies=[Depends(rate_limit("research", 10))])
+    async def acquisition_credits(language: str = "en") -> JSONResponse:
+        from kazma_core.web_acquire.credits import refresh_firecrawl_balance
+        from kazma_core.web_acquire.operations import cached_status, format_cached_status
+        from kazma_core.web_acquire.crawl_jobs import call
+        from kazma_core.web_acquire.result import AcquisitionError
+        try:
+            await refresh_firecrawl_balance()
+            report = await call(cached_status)
+            return JSONResponse({"ok": True, "report": report, "text": format_cached_status(report, language=language)})
+        except AcquisitionError as exc:
+            return JSONResponse({"ok": False, "error": str(exc), "error_code": str(exc.code)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=503)
+
     @router.post("/api/research/sessions", dependencies=[Depends(rate_limit("research", 10))])
     async def start_research_session(body: dict[str, Any]) -> JSONResponse:
         """Start a deep research pipeline run in the background.
@@ -270,9 +295,25 @@ def create_research_router() -> APIRouter:
                 export_docx=export_docx,
             )
             return JSONResponse({"ok": True, "session": sess.to_dict()})
+        except AcquisitionError as exc:
+            return JSONResponse({'ok': False, 'error': str(exc), 'error_code': str(exc.code),
+                                 'transient': exc.transient},
+                status_code=503 if exc.code == FetchErrorCode.LIMIT else 400)
         except Exception as exc:
             logger.exception("[research] start session failed")
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
+
+    @router.post("/api/research/sessions/{session_id}/resume", dependencies=[Depends(rate_limit("research", 10))])
+    async def resume_research_session(session_id: str) -> JSONResponse:
+        from kazma_core.tools.research_session import start_deep_research, ResearchSessionBusyError
+        try:
+            session = await start_deep_research('', resume_session_id=session_id)
+            return JSONResponse({'ok': True, 'session': session.to_dict()})
+        except ResearchSessionBusyError as exc:
+            return JSONResponse({'ok': False, 'error_code': 'research_session_busy', 'error': str(exc)}, status_code=409)
+        except AcquisitionError as exc:
+            return JSONResponse({'ok': False, 'error_code': str(exc.code), 'error': str(exc)},
+                                status_code=503 if exc.code == FetchErrorCode.LIMIT else 400)
 
     @router.get("/api/research/sessions")
     def list_research_sessions(
@@ -330,14 +371,17 @@ def create_research_router() -> APIRouter:
 
     @router.delete("/api/research/sessions/{session_id}")
     def delete_research_session(session_id: str) -> JSONResponse:
-        """Delete a session row (cancels first when still running)."""
+        """Delete settled history; retain active cancellation for inspection."""
         try:
-            from kazma_core.tools.research_session import delete_session
+            from kazma_core.tools.research_session import delete_session, ResearchSessionBusyError
 
             deleted = delete_session(session_id)
             if not deleted:
                 return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
             return JSONResponse({"ok": True, "deleted": session_id})
+        except ResearchSessionBusyError as exc:
+            return JSONResponse({"ok": False, "error_code": "research_session_busy",
+                                 "error": str(exc)}, status_code=409)
         except Exception as exc:
             logger.exception("[research] delete session failed")
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
@@ -360,7 +404,7 @@ def create_research_router() -> APIRouter:
     def cancel_research_session(session_id: str) -> JSONResponse:
         """Cancel a running deep-research session (best-effort)."""
         try:
-            from kazma_core.tools.research_session import cancel_session, get_session
+            from kazma_core.tools.research_session import cancel_session, get_session, ResearchSessionBusyError
 
             if get_session(session_id) is None:
                 return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
@@ -368,6 +412,8 @@ def create_research_router() -> APIRouter:
             return JSONResponse(
                 {"ok": True, "session": sess.to_dict() if sess else None}
             )
+        except ResearchSessionBusyError as exc:
+            return JSONResponse({"ok": False, "error_code": "research_session_busy", "error": str(exc)}, status_code=409)
         except Exception as exc:
             logger.exception("[research] cancel session failed")
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
@@ -488,7 +534,7 @@ def create_research_router() -> APIRouter:
                         event = await asyncio.wait_for(q.get(), timeout=15.0)
                     except asyncio.TimeoutError:
                         cur = await asyncio.to_thread(get_session, session_id)
-                        if cur and cur.status in ("done", "error", "cancelled"):
+                        if cur and cur.status in ("done", "partial", "error", "cancelled", "interrupted"):
                             yield sse_frame(
                                 "done",
                                 {
@@ -510,8 +556,8 @@ def create_research_router() -> APIRouter:
                     if etype in ("done", "error"):
                         break
                     # Terminal via progress payload status
-                    st = str(event.get("status") or "")
-                    if st in ("done", "error", "cancelled"):
+                    st = str(event.get("status") or (event.get("session") or {}).get("status") or "")
+                    if st in ("done", "partial", "error", "cancelled", "interrupted"):
                         yield sse_frame(
                             "done",
                             {

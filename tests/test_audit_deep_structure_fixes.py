@@ -600,16 +600,19 @@ async def test_rdap_404_json_returns_as_is(monkeypatch):
     resp.text = '{"errorCode":404,"title":"Object not found"}'
     resp.status_code = 404
     resp.headers = {"content-type": "application/rdap+json"}
+    resp.extensions = {}
 
     recover = AsyncMock(return_value=None)
     monkeypatch.setattr(ru, "_fetch_via_optional_backends", AsyncMock(return_value=None))
-    monkeypatch.setattr(ru, "_get_capped", AsyncMock(return_value=(resp, resp.text, False)))
+    monkeypatch.setattr("kazma_core.web_acquire.http.read_capped", AsyncMock(return_value=(resp, resp.text, False)))
     monkeypatch.setattr(ru, "_recover_hard_page", recover)
     monkeypatch.setattr(ru, "_cache_get", lambda *a, **k: None)
 
-    out = await ru._fetch_full_text("https://rdap.identitydigital.services/rdap/domain/free.ai")
-    assert "Object not found" in out
-    assert "JSON response returned as-is" in out
+    monkeypatch.setattr("kazma_core.security.ssrf.validate_url", lambda *a, **k: ("93.184.216.34",))
+    result = await ru.fetch_result("https://rdap.identitydigital.services/rdap/domain/free.ai")
+    assert result.ok and result.quality == "json"
+    assert result.text == resp.text
+    assert result.http_status == 404
     # No hard-page recovery — the 10s Playwright fetch is gone.
     assert recover.await_count == 0
 

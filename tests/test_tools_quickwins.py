@@ -50,13 +50,6 @@ def _disable_commitment_gate(monkeypatch: pytest.MonkeyPatch):
 
 
 # ── helpers to inject mock modules for missing optional deps ──────────────
-def _make_mock_ddgs(ddgs_instance):
-    """Create a fake duckduckgo_search module with DDGS returning *ddgs_instance*."""
-    mod = ModuleType("duckduckgo_search")
-    mod.DDGS = MagicMock(return_value=ddgs_instance)
-    return mod
-
-
 # ── helpers to disable the non-DDGS search rungs ──────────────────────────
 # The web_search ladder is searxng -> duckduckgo -> bing -> wikipedia. A REAL
 # SearXNG instance on this machine returns live results before the DDGS mock
@@ -104,24 +97,18 @@ class TestWebSearch:
 
     @pytest.mark.asyncio
     async def test_web_search_returns_results(self) -> None:
-        """web_search returns formatted markdown when DDGS returns results."""
+        """web_search returns formatted markdown when a bounded HTTP backend returns results."""
         mock_results = [
             {"title": "Result 1", "href": "https://example.com/1", "body": "First result body."},
             {"title": "Result 2", "href": "https://example.com/2", "body": "Second result body."},
         ]
 
-        mock_ddgs = MagicMock()
-        mock_ddgs.__enter__ = MagicMock(return_value=mock_ddgs)
-        mock_ddgs.__exit__ = MagicMock(return_value=False)
-        mock_ddgs.text = MagicMock(return_value=mock_results)
-
-        fake_mod = _make_mock_ddgs(mock_ddgs)
         from contextlib import ExitStack
 
         with ExitStack() as stack:
             for p in _patch_backends_off():
                 stack.enter_context(p)
-            stack.enter_context(stub_modules({"duckduckgo_search": fake_mod}))
+            stack.enter_context(patch("kazma_core.tools.web_search._bing_search", return_value=(mock_results, "bing:ok")))
             from kazma_core.tools.web_search import web_search
 
             result = await web_search("test query", max_results=2)
@@ -133,19 +120,13 @@ class TestWebSearch:
 
     @pytest.mark.asyncio
     async def test_web_search_empty(self) -> None:
-        """web_search returns a 'no results' message when DDGS returns empty."""
-        mock_ddgs = MagicMock()
-        mock_ddgs.__enter__ = MagicMock(return_value=mock_ddgs)
-        mock_ddgs.__exit__ = MagicMock(return_value=False)
-        mock_ddgs.text = MagicMock(return_value=[])
-
-        fake_mod = _make_mock_ddgs(mock_ddgs)
+        """web_search returns a 'no results' message when bounded backends return empty."""
         from contextlib import ExitStack
 
         with ExitStack() as stack:
             for p in _patch_backends_off():
                 stack.enter_context(p)
-            stack.enter_context(stub_modules({"duckduckgo_search": fake_mod}))
+            stack.enter_context(patch("kazma_core.tools.web_search._bing_search", return_value=(None, "bing:empty")))
             from kazma_core.tools.web_search import web_search
 
             result = await web_search("nonexistent query xyz")
@@ -167,42 +148,32 @@ class TestReadUrl:
     """Tests for the read_url tool."""
 
     @pytest.mark.asyncio
-    async def test_read_url_extracts_content(self) -> None:
-        """read_url extracts text from HTML using trafilatura."""
-        html = "<html><body><p>Hello World</p></body></html>"
+    async def test_read_url_extracts_content(self, monkeypatch) -> None:
+        """The real isolated parser extracts a controlled HTML response."""
+        import httpx
+        from kazma_core.web_acquire import parser
+        from kazma_core.tools.read_url import read_url
 
-        mock_response = MagicMock()
-        mock_response.text = html
-        mock_response.raise_for_status = MagicMock()
-
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        fake_trafilatura = _make_mock_trafilatura("Hello World")
-        with (
-            stub_modules({"trafilatura": fake_trafilatura}),
-            patch(
-                "kazma_core.tools.read_url._fetch_via_optional_backends",
-                new=AsyncMock(return_value=None),
-            ),
-            patch(
-                "kazma_core.tools.read_url._get_capped",
-                new=AsyncMock(return_value=(mock_response, html, False)),
-            ),
-        ):
-            # Deterministic seams (deep-audit 2026-08-19 CI triage): the old
-            # test patched httpx.AsyncClient, but the fetch ladder builds
-            # its client via the scraping factory and falls through to REAL
-            # network rungs when that patch doesn't intercept — same lesson
-            # as test_read_url_http_error below. Mock the optional-backends
-            # rung and the capped GET instead.
-            from kazma_core.tools.read_url import read_url
-
-            result = await read_url("https://example.com/extract-test")
-
-        assert "Hello World" in result
+        text = "Hello World. This public documentation explains how to extract article content from a controlled HTML response without contacting external services."
+        html = "<html><body><article><h1>Fixture article</h1><p>" + text + "</p></article></body></html>"
+        response = httpx.Response(200, headers={"content-type": "text/html"}, text=html,
+            request=httpx.Request("GET", "https://example.com/extract-test"))
+        parses = []
+        actual_parse = parser.parse_document
+        async def observed_parse(*args, **kwargs):
+            result = await actual_parse(*args, **kwargs)
+            parses.append(result)
+            return result
+        monkeypatch.setattr("kazma_core.security.ssrf.validate_url", lambda *a, **k: ("93.184.216.34",))
+        monkeypatch.setattr("kazma_core.tools.read_url.parse_document", observed_parse)
+        monkeypatch.setattr("kazma_core.tools.read_url._get_capped", AsyncMock(return_value=(response, html, False)))
+        recover = AsyncMock(side_effect=AssertionError("Controlled useful HTML must not need recovery"))
+        monkeypatch.setattr("kazma_core.tools.read_url._recover_hard_page", recover)
+        monkeypatch.setattr("kazma_core.tools.read_url._fetch_via_optional_backends", AsyncMock(return_value=None))
+        result = await read_url("https://example.com/extract-test")
+        assert text in result
+        assert any(text in parsed['text'] for parsed in parses)
+        recover.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_read_url_http_error(self) -> None:
@@ -214,10 +185,12 @@ class TestReadUrl:
         just makes the ladder fall through to REAL network rungs.
         """
         from unittest.mock import patch as _patch
+        from kazma_core.web_acquire import FetchResult
 
         with _patch(
-            "kazma_core.tools.read_url._fetch_full_text",
-            new=AsyncMock(return_value="Error: HTTP 404 Not Found"),
+            "kazma_core.tools.read_url.fetch_result",
+            new=AsyncMock(return_value=FetchResult(
+                ok=False, url="https://example.com/404", error="HTTP 404 Not Found")),
         ):
             from kazma_core.tools.read_url import read_url
 
@@ -475,64 +448,75 @@ class TestReadUrlEdgeCases:
     @pytest.mark.asyncio
     async def test_read_url_connection_error(self, monkeypatch) -> None:
         """read_url returns friendly message on ConnectionError."""
+        import httpx
+        import importlib
+        ru = importlib.import_module("kazma_core.tools.read_url")
         monkeypatch.setattr(
-            "kazma_core.security.ssrf.validate_url", lambda u, **_kw: ()
+            "kazma_core.security.ssrf.validate_url", lambda u, **_kw: ("93.184.216.34",)
         )
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=ConnectionError("refused"))
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("httpx.AsyncClient", return_value=mock_client):
-            from kazma_core.tools.read_url import read_url
-
-            result = await read_url("https://down.example.com")
+        def fail(request):
+            raise httpx.ConnectError("refused", request=request)
+        monkeypatch.setattr("kazma_core.proxy.client.get_active_proxy_url", lambda: None)
+        monkeypatch.setattr("kazma_core.proxy.client.get_scraping_client", lambda **kwargs:
+                            httpx.AsyncClient(transport=httpx.MockTransport(fail)))
+        recovery = AsyncMock(return_value=None)
+        monkeypatch.setattr(ru, "_recover_hard_page", recovery)
+        result = await ru.read_url("https://down.example.com")
 
         assert "Error" in result
         assert "Could not connect" in result
+        recovery.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_read_url_timeout(self, monkeypatch) -> None:
         """read_url returns friendly message on TimeoutError."""
+        import httpx
+        import importlib
+        ru = importlib.import_module("kazma_core.tools.read_url")
         monkeypatch.setattr(
-            "kazma_core.security.ssrf.validate_url", lambda u, **_kw: ()
+            "kazma_core.security.ssrf.validate_url", lambda u, **_kw: ("93.184.216.34",)
         )
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=TimeoutError("timed out"))
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("httpx.AsyncClient", return_value=mock_client):
-            from kazma_core.tools.read_url import read_url
-
-            result = await read_url("https://slow.example.com")
+        def fail(request):
+            raise httpx.ReadTimeout("timed out", request=request)
+        monkeypatch.setattr("kazma_core.proxy.client.get_active_proxy_url", lambda: None)
+        monkeypatch.setattr("kazma_core.proxy.client.get_scraping_client", lambda **kwargs:
+                            httpx.AsyncClient(transport=httpx.MockTransport(fail)))
+        recovery = AsyncMock(return_value=None)
+        monkeypatch.setattr(ru, "_recover_hard_page", recovery)
+        result = await ru.read_url("https://slow.example.com")
 
         assert "Error" in result
         assert "timed out" in result
+        recovery.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_read_url_no_content_extracted(self) -> None:
+    async def test_read_url_no_content_extracted(self, monkeypatch) -> None:
         """read_url returns error when trafilatura extracts nothing."""
-        mock_response = MagicMock()
-        mock_response.text = "<html><body></body></html>"
-        mock_response.raise_for_status = MagicMock()
-
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        import httpx
+        import importlib
+        from types import SimpleNamespace
+        ru = importlib.import_module("kazma_core.tools.read_url")
+        monkeypatch.setattr("kazma_core.security.ssrf.validate_url", lambda *a, **k: ("93.184.216.34",))
+        monkeypatch.setattr("kazma_core.proxy.client.get_active_proxy_url", lambda: None)
+        def respond(request):
+            peer = SimpleNamespace(get_extra_info=lambda name: ("93.184.216.34", 443))
+            return httpx.Response(200, text="<html><body></body></html>",
+                                  headers={"content-type": "text/html"},
+                                  extensions={"network_stream": peer})
+        monkeypatch.setattr("kazma_core.proxy.client.get_scraping_client", lambda **kwargs:
+                            httpx.AsyncClient(transport=httpx.MockTransport(respond)))
+        recovery = AsyncMock(return_value=None)
+        monkeypatch.setattr(ru, "_recover_hard_page", recovery)
 
         fake_trafilatura = _make_mock_trafilatura(None)
         with (
-            patch("httpx.AsyncClient", return_value=mock_client),
             stub_modules({"trafilatura": fake_trafilatura}),
         ):
-            from kazma_core.tools.read_url import read_url
-
-            result = await read_url("https://empty.example.com")
+            result = await ru.read_url("https://empty.example.com")
 
         assert "Error" in result
         assert "extract" in result.lower() or "empty" in result.lower()
+        recovery.assert_awaited_once()
 
 
 class TestWebSearchEdgeCases:

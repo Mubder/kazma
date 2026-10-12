@@ -1,0 +1,17 @@
+Traceback (most recent call last):
+  File "C:\Users\balfa\.codex\worktrees\acquisition-research-durability\kazma\scripts\generate_metrics.py", line 1155, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "C:\Users\balfa\.codex\worktrees\acquisition-research-durability\kazma\scripts\generate_metrics.py", line 1070, in main
+    fingerprint = collection_fingerprint()
+                  ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\balfa\.codex\worktrees\acquisition-research-durability\kazma\scripts\generate_metrics.py", line 69, in collection_fingerprint
+    digest.update(hashlib.sha256((REPO_ROOT / name).read_bytes().replace(b"\r\n", b"\n")).digest())
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\pathlib.py", line 1019, in read_bytes
+    with self.open(mode='rb') as f:
+         ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\balfa\\.codex\\worktrees\\acquisition-research-durability\\kazma\\kazma-core\\kazma_core\\security\\browser_egress.py'

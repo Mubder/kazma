@@ -18,10 +18,12 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import warnings
 from typing import Any
+
+
+from kazma_core.web_acquire.result import AcquisitionError, FetchErrorCode
 
 __all__ = ["web_search"]
 
@@ -41,6 +43,12 @@ logger = logging.getLogger(__name__)
 
 def _friendly_error(exc: Exception) -> str:
     """Map low-level exceptions to user-friendly messages."""
+    from kazma_core.web_acquire.policy import AcquisitionPolicyError
+
+    if isinstance(exc, AcquisitionPolicyError):
+        return f"Error: policy_error — {exc}"
+    if isinstance(exc, AcquisitionError):
+        return f"Error: {exc.code} — {exc}"
     if isinstance(exc, ConnectionError):
         return (
             "Error: Could not connect to any search service. "
@@ -99,18 +107,19 @@ def _searxng_candidate_bases() -> list[str]:
 
 def _is_loopback_base(base: str) -> bool:
     """True for local SearXNG — must not hairpin through residential proxy."""
-    b = (base or "").lower()
-    return any(
-        x in b
-        for x in (
-            "127.0.0.1",
-            "localhost",
-            "0.0.0.0",
-            "[::1]",
-            "host.docker.internal",
-            "searxng:",  # docker service name on internal network
-        )
-    )
+    import ipaddress
+    from urllib.parse import urlsplit
+
+    try:
+        host = (urlsplit(base).hostname or '').lower().rstrip('.')
+    except ValueError:
+        return False
+    if host in {'localhost', 'host.docker.internal', 'searxng', '0.0.0.0'}:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _note_rank(note: str) -> int:
@@ -134,7 +143,6 @@ def _searxng_search(query: str, max_results: int) -> tuple[list[dict[str, str]] 
     """Try SearXNG across candidate bases. Returns (results|None, status_note)."""
     import time as _time
 
-    import httpx
 
     now = _time.time()
     if _searxng_cache.get("dead_until", 0) > now and not _searxng_cache.get("base"):
@@ -146,304 +154,70 @@ def _searxng_search(query: str, max_results: int) -> tuple[list[dict[str, str]] 
     if good and good in candidates:
         candidates = [good] + [c for c in candidates if c != good]
 
+    from kazma_core.web_acquire.search_http import run_http_search
+
+    if len(candidates) > 8:
+        raise AcquisitionError(FetchErrorCode.LIMIT, 'SearXNG discovery exceeds eight service endpoints.')
     last_note = "searxng:unavailable"
-    reached_any = False  # any instance ANSWERED (even 0 results / non-200)
+    reached_any = False
     for base in candidates:
-        try:
-            search_url = f"{base}/search"
-            params = {
-                "q": query,
-                "format": "json",
-                "categories": "general",
-                "language": "all",
-                "pageno": 1,
-            }
-            headers = {"Accept": "application/json", "User-Agent": "KazmaSearch/0.6"}
-            # Remote SearXNG can use Proxy Provider; loopback stays direct.
-            if _is_loopback_base(base):
-                r = httpx.get(
-                    search_url, params=params, timeout=8.0, headers=headers
-                )
-            else:
-                from kazma_core.proxy.client import get_scraping_client_sync
+        from urllib.parse import urlsplit
 
-                with get_scraping_client_sync(
-                    follow_redirects=True, timeout=8.0, headers=headers
-                ) as client:
-                    r = client.get(search_url, params=params)
-            if r.status_code != 200:
-                reached_any = True
-                last_note = _better_note(
-                    last_note, f"searxng:http_{r.status_code}@{base}"
-                )
-                continue
-            data = r.json()
-            reached_any = True
-            raw_results = data.get("results", [])
-            if not raw_results:
-                # Surface WHY the instance answered with nothing — SearXNG
-                # reports its suspended/CAPTCHA'd engines, which is the
-                # actual story behind "all backends empty" (2026-08-27:
-                # brave suspended + ddg CAPTCHA made obscure queries return
-                # 0 while common ones still worked).
-                extra = ""
-                try:
-                    unresp = data.get("unresponsive_engines") or []
-                    names = [str(u[0]) for u in unresp if isinstance(u, (list, tuple)) and u][:4]
-                    if names:
-                        extra = f" (engines suspended: {', '.join(names)})"
-                except Exception:
-                    pass
-                last_note = _better_note(
-                    last_note, f"searxng:empty@{base}{extra}"
-                )
-                # empty is still a live instance — keep base cached
-                _searxng_cache["base"] = base
-                _searxng_cache["dead_until"] = 0.0
-                continue
-
-            normalized = []
-            for res in raw_results[:max_results]:
-                normalized.append(
-                    {
-                        "title": res.get("title", "Untitled"),
-                        "href": res.get("url", ""),
-                        "body": res.get("content", ""),
-                    }
-                )
-            _searxng_cache["base"] = base
-            _searxng_cache["dead_until"] = 0.0
-            _searxng_cache["note"] = f"searxng:ok@{base}"
-            logger.info(
-                "[web_search] SearXNG %s returned %d results", base, len(normalized)
-            )
-            return normalized, f"searxng:ok@{base}"
-        except Exception as exc:
-            last_note = _better_note(
-                last_note, f"searxng:unavailable@{base} ({type(exc).__name__})"
-            )
-            logger.debug("[web_search] SearXNG %s: %s", base, exc)
-            continue
-
-    # Cool down 60s ONLY when no instance ever answered — a reachable
-    # instance returning 0 results (engines suspended) must not poison the
-    # cache and get skipped for a minute; that made a working SearXNG look
-    # dead on the very next query (2026-08-27).
+        parsed = urlsplit(base)
+        if (len(base) > 8192 or parsed.scheme not in {'http', 'https'} or not parsed.hostname
+                or parsed.username or parsed.password or parsed.query or parsed.fragment):
+            raise AcquisitionError(FetchErrorCode.INVALID_URL, 'Invalid SearXNG endpoint; configure an HTTP(S) base without credentials or query.')
+        receipt = run_http_search('searxng', query, max_results, base=base, local=_is_loopback_base(base))
+        reached_any |= receipt['reached']
+        results = receipt['results']
+        status = receipt['status']
+        if status == 'ok':
+            _searxng_cache.update(base=base, dead_until=0.0)
+            note = f"searxng:ok@{base}" if results else f"searxng:empty@{base}{receipt['detail']}"
+            if results:
+                _searxng_cache['note'] = note
+                return results, note
+        elif status == 'http':
+            note = f"searxng:http_{receipt['detail']}@{base}"
+        else:
+            note = f"searxng:unavailable@{base} ({status})"
+        last_note = _better_note(last_note, note)
     if not reached_any:
-        _searxng_cache["base"] = None
-        _searxng_cache["dead_until"] = now + 60.0
-    _searxng_cache["note"] = last_note
+        _searxng_cache.update(base=None, dead_until=now + 60.0)
+    _searxng_cache['note'] = last_note
     return None, last_note
 
 
 def _ddg_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:
     """DuckDuckGo text search (Proxy Provider when configured)."""
-    try:
-        from duckduckgo_search import DDGS
+    from kazma_core.proxy.client import get_active_proxy_url
 
-        proxy_url = None
-        try:
-            from kazma_core.proxy.client import get_active_proxy_url
+    proxy_url = get_active_proxy_url()  # fail closed before constructing DDGS
+    if proxy_url:
+        return None, 'duckduckgo:skipped_unbounded_proxy_requests'
+    return None, 'duckduckgo:skipped_opaque_origin_fanout'
 
-            proxy_url = get_active_proxy_url()
-        except Exception:
-            proxy_url = None
-        # DDGS accepts http/https/socks5 proxy URL
-        kwargs: dict = {}
-        if proxy_url:
-            kwargs["proxy"] = proxy_url
-        with DDGS(**kwargs) as ddgs:
-            results = list(ddgs.text(query, max_results=max_results))
-            if results:
-                logger.info(
-                    "[web_search] DuckDuckGo returned %d results%s",
-                    len(results),
-                    " (via proxy)" if proxy_url else "",
-                )
-                return results, "duckduckgo:ok"
-            logger.info("[web_search] DuckDuckGo returned 0 results for %r", query)
-            return None, "duckduckgo:empty"
-    except Exception as exc:
-        logger.warning("[web_search] DuckDuckGo failed: %s", exc)
-        return None, f"duckduckgo:error ({type(exc).__name__})"
+
+def _http_backend(backend, query, max_results):
+    from kazma_core.web_acquire.search_http import run_http_search
+
+    receipt = run_http_search(backend, query, max_results)
+    rows = receipt['results']
+    status = receipt['status']
+    if status == 'ok':
+        return (rows, backend + ':ok') if rows else (None, backend + ':empty')
+    suffix = 'http_' + receipt['detail'] if status == 'http' else status
+    return None, backend + ':' + suffix
 
 
 def _bing_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:
-    """Bing HTML scrape fallback (via Proxy Provider when configured)."""
-    try:
-        import base64
-        import urllib.parse
-        from html.parser import HTMLParser
-
-        from kazma_core.proxy.client import get_scraping_client_sync
-
-        headers = {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-        url = f"https://www.bing.com/search?q={urllib.parse.quote_plus(query)}"
-        with get_scraping_client_sync(
-            follow_redirects=True,
-            timeout=10.0,
-            headers=headers,
-            rotate_ua=True,
-        ) as client:
-            r = client.get(url)
-        if r.status_code != 200:
-            logger.warning("[web_search] Bing status %d", r.status_code)
-            return None, f"bing:http_{r.status_code}"
-
-        def decode_bing_url(b_url: str) -> str:
-            if not b_url.startswith("http"):
-                return b_url
-            parsed_url = urllib.parse.urlparse(b_url)
-            q_params = urllib.parse.parse_qs(parsed_url.query)
-            u_param = q_params.get("u", [None])[0]
-            if u_param:
-                b64_str = u_param[2:] if u_param.startswith("a1") else u_param
-                padding = "=" * (4 - len(b64_str) % 4)
-                try:
-                    return base64.b64decode(b64_str + padding).decode(
-                        "utf-8", errors="ignore"
-                    )
-                except Exception:
-                    pass
-            return b_url
-
-        class BingHTMLParser(HTMLParser):
-            def __init__(self):
-                super().__init__()
-                self.results: list[dict[str, str]] = []
-                self.current_result: dict[str, str] | None = None
-                self.in_algo = False
-                self.in_h2 = False
-                self.in_snippet = False
-                self.in_a = False
-                self.depth_algo = 0
-                self.current_text: list[str] = []
-
-            def handle_starttag(self, tag, attrs):
-                attrs_dict = dict(attrs)
-                class_val = attrs_dict.get("class", "")
-                if self.in_algo:
-                    self.depth_algo += 1
-                if tag == "li" and "b_algo" in class_val.split():
-                    self.in_algo = True
-                    self.depth_algo = 0
-                    self.current_result = {"title": "", "href": "", "body": ""}
-                    self.results.append(self.current_result)
-                if self.in_algo:
-                    if tag == "h2":
-                        self.in_h2 = True
-                        self.current_text = []
-                    elif tag == "a" and self.in_h2:
-                        self.in_a = True
-                        if "href" in attrs_dict and self.current_result is not None:
-                            self.current_result["href"] = attrs_dict["href"]
-                    elif tag in ("p", "div", "span") and any(
-                        x in class_val for x in ("b_caption", "b_linelimit", "tab-content")
-                    ):
-                        self.in_snippet = True
-                        self.current_text = []
-
-            def handle_data(self, data):
-                if self.in_algo and (self.in_h2 or self.in_snippet):
-                    self.current_text.append(data)
-
-            def handle_endtag(self, tag):
-                if not self.in_algo:
-                    return
-                if tag == "a" and self.in_a:
-                    self.in_a = False
-                elif tag == "h2" and self.in_h2:
-                    self.in_h2 = False
-                    if self.current_result is not None:
-                        self.current_result["title"] = "".join(self.current_text).strip()
-                    self.current_text = []
-                elif tag in ("p", "div", "span") and self.in_snippet:
-                    self.in_snippet = False
-                    if self.current_result is not None:
-                        existing = self.current_result["body"]
-                        new_text = "".join(self.current_text).strip()
-                        if new_text:
-                            self.current_result["body"] = (
-                                (existing + " " + new_text).strip() if existing else new_text
-                            )
-                    self.current_text = []
-                if tag == "li" and self.depth_algo == 0:
-                    self.in_algo = False
-                    self.current_result = None
-                elif tag == "li":
-                    self.depth_algo -= 1
-
-        parser = BingHTMLParser()
-        parser.feed(r.text)
-        processed: list[dict[str, str]] = []
-        for res in parser.results:
-            if res.get("title") or res.get("href"):
-                processed.append(
-                    {
-                        "title": res.get("title", "Untitled"),
-                        "href": decode_bing_url(res.get("href", "")),
-                        "body": res.get("body", ""),
-                    }
-                )
-        if not processed:
-            return None, "bing:empty"
-        logger.info("[web_search] Bing returned %d results", len(processed))
-        return processed[:max_results], "bing:ok"
-    except Exception as exc:
-        logger.error("[web_search] Bing failed: %s", exc)
-        return None, f"bing:error ({type(exc).__name__})"
+    """Bing fallback with bounded native HTTP, DNS and HTML parsing."""
+    return _http_backend('bing', query, max_results)
 
 
 def _wikipedia_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:
-    """Wikipedia OpenSearch — useful when brand queries are soft-blocked by DDG/Bing."""
-    try:
-        from kazma_core.proxy.client import get_scraping_client_sync
-
-        with get_scraping_client_sync(
-            follow_redirects=True,
-            timeout=10.0,
-            headers={
-                "User-Agent": "KazmaAgent/0.6 (web_search; +https://github.com/Mubder/kazma)",
-                "Accept": "application/json",
-            },
-            rotate_ua=False,
-        ) as client:
-            r = client.get(
-                "https://en.wikipedia.org/w/api.php",
-                params={
-                    "action": "opensearch",
-                    "search": query,
-                    "limit": max(1, min(max_results, 8)),
-                    "namespace": 0,
-                    "format": "json",
-                },
-            )
-        if r.status_code != 200:
-            return None, f"wikipedia:http_{r.status_code}"
-        data = r.json()
-        # [query, titles[], descriptions[], urls[]]
-        if not isinstance(data, list) or len(data) < 4:
-            return None, "wikipedia:bad_shape"
-        titles, descs, urls = data[1], data[2], data[3]
-        if not titles:
-            return None, "wikipedia:empty"
-        out: list[dict[str, str]] = []
-        for i, title in enumerate(titles):
-            out.append(
-                {
-                    "title": str(title),
-                    "href": str(urls[i]) if i < len(urls) else "",
-                    "body": str(descs[i]) if i < len(descs) else "",
-                }
-            )
-        logger.info("[web_search] Wikipedia returned %d results", len(out))
-        return out, "wikipedia:ok"
-    except Exception as exc:
-        logger.debug("[web_search] Wikipedia failed: %s", exc)
-        return None, f"wikipedia:error ({type(exc).__name__})"
+    """Wikipedia fallback with bounded native HTTP, DNS and JSON parsing."""
+    return _http_backend('wikipedia', query, max_results)
 
 
 def _run_search(query: str, max_results: int) -> tuple[list[dict[str, str]], list[str], str]:
@@ -459,8 +233,18 @@ def _run_search(query: str, max_results: int) -> tuple[list[dict[str, str]], lis
         ("bing", _bing_search),
         ("wikipedia", _wikipedia_search),
     ]
+    from kazma_core.web_acquire.search_sdk import search_cancel
+
+    from kazma_core.web_acquire.search_runtime import remaining
+
     for name, fn in backends:
+        remaining()
+        cancelled = search_cancel.get()
+        if cancelled is not None and cancelled.is_set():
+            raise InterruptedError('Search cancelled')
         results, note = fn(query, max_results)
+        if cancelled is not None and cancelled.is_set():
+            raise InterruptedError('Search cancelled')
         attempts.append(note)
         if results:
             return results, attempts, name
@@ -521,15 +305,15 @@ async def web_search(query: str, max_results: int = 8) -> str:
     q = (query or "").strip()
     if not q:
         return "Error: empty search query."
+    if len(q) > 4096:
+        return "Error: search query exceeds the 4096-character limit."
     max_results = max(1, min(int(max_results or 8), 15))
 
     try:
-        results, attempts, backend = await asyncio.to_thread(_run_search, q, max_results)
-    except ConnectionError:
-        return _friendly_error(ConnectionError())
-    except TimeoutError:
-        return _friendly_error(TimeoutError())
-    except OSError as exc:
+        from kazma_core.web_acquire.search_runtime import run_search
+
+        results, attempts, backend = await run_search(_run_search, q, max_results)
+    except (ConnectionError, TimeoutError, OSError) as exc:
         return _friendly_error(exc)
     except Exception as exc:
         return _friendly_error(exc)

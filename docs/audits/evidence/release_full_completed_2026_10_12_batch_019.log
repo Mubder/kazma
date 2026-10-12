@@ -1,0 +1,85 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 740 items
+
+tests\test_web_acquisition_scope.py ......                               [  0%]
+tests\test_web_chat_files.py .....................                       [  3%]
+tests\test_web_command_parity.py ......                                  [  4%]
+tests\test_web_robots.py ............................................... [ 10%]
+....                                                                     [ 11%]
+tests\test_web_search_and_sql_validation.py ..                           [ 11%]
+tests\test_web_search_fallback.py ....                                   [ 12%]
+tests\test_web_session_cache.py .....                                    [ 12%]
+tests\test_web_time_travel_command.py ..............                     [ 14%]
+tests\test_website_pages.py ...                                          [ 15%]
+tests\test_website_sync_plan.py .....................                    [ 17%]
+tests\test_windows_task_registration.py ................................ [ 22%]
+.........                                                                [ 23%]
+tests\test_wizard.py .............................                       [ 27%]
+tests\test_worker_factory.py ......                                      [ 28%]
+tests\test_worker_registry_store.py .........                            [ 29%]
+tests\test_workspace_delete.py ....                                      [ 30%]
+tests\test_workspace_extra_roots.py ......                               [ 30%]
+tests\test_workspace_recent.py ........                                  [ 31%]
+tests\test_workspace_switch_pins_tools.py .                              [ 32%]
+tests\test_workspace_tab.py ........................                     [ 35%]
+tests\test_workspaces_engine.py ....                                     [ 35%]
+tests\test_ws_auth_browser_paths.py ...                                  [ 36%]
+tests\test_ws_chat_is_telemetry_only.py .............                    [ 37%]
+tests\test_ws_chat_telemetry.py ....                                     [ 38%]
+tests\test_ws_chat_tenant_isolation.py ..............                    [ 40%]
+tests\test_ws_delivery_v2.py ...............                             [ 42%]
+tests\test_ws_origin_cswsh.py ...............                            [ 44%]
+tests\test_x_ai_budget.py .........                                      [ 45%]
+tests\test_x_audit.py .................                                  [ 47%]
+tests\test_x_auto_reply.py ............................................. [ 54%]
+........................................................................ [ 63%]
+.............................                                            [ 67%]
+tests\test_x_classifier_decisions.py ........                            [ 68%]
+tests\test_x_composer_restore_length.py ................                 [ 70%]
+tests\test_x_context_reads.py ...                                        [ 71%]
+tests\test_x_datasets.py .............                                   [ 73%]
+tests\test_x_health.py ....                                              [ 73%]
+tests\test_x_inventory_paging.py ....                                    [ 74%]
+tests\test_x_model_selection.py ...........................              [ 77%]
+tests\test_x_notifications.py ......                                     [ 78%]
+tests\test_x_post_drafting.py .........                                  [ 79%]
+tests\test_x_post_proposal_gate.py .....                                 [ 80%]
+tests\test_x_publication_service.py ...............                      [ 82%]
+tests\test_x_publication_store.py .............                          [ 84%]
+tests\test_x_publisher.py ...................                            [ 86%]
+tests\test_x_qualification.py ..............                             [ 88%]
+tests\test_x_queue.py .....                                              [ 89%]
+tests\test_x_quota_counts_deleted.py ...                                 [ 89%]
+tests\test_x_rate_limits.py ..........                                   [ 91%]
+tests\test_x_recovery_drill.py .                                         [ 91%]
+tests\test_x_reply_approval.py ................                          [ 93%]
+tests\test_x_reply_history.py .......                                    [ 94%]
+tests\test_x_reply_settings_api.py ..................................... [ 99%]
+....                                                                     [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+tests/test_workspace_tab.py::TestWorkspaceRouteServesPage::test_workspace_returns_200
+tests/test_workspace_tab.py::TestWorkspaceFilesEndpoint::test_files_returns_200
+tests/test_workspace_tab.py::TestWorkspaceGitEndpoint::test_git_returns_200
+tests/test_workspace_tab.py::TestWorkspaceRecentEndpoint::test_recent_returns_200
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\fixtures.py:1313: PytestRemovedIn10Warning: Class-scoped fixture defined as instance method is deprecated.
+  Instance attributes set in this fixture will NOT be visible to test methods,
+  as each test gets a new instance while the fixture runs only once per class.
+  Use @classmethod decorator and set attributes on cls instead.
+  See https://docs.pytest.org/en/stable/deprecations.html#class-scoped-fixture-as-instance-method
+    fixturefunc = resolve_fixture_function(fixturedef, request)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 740 passed, 5 warnings in 161.24s (0:02:41) =================

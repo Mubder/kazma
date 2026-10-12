@@ -319,3 +319,33 @@ def agent_config() -> AgentConfig:
 def agent(agent_config: AgentConfig) -> KazmaAgent:
     """Return a KazmaAgent instance for testing."""
     return KazmaAgent(config=agent_config)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_http_origin_scheduler(monkeypatch):
+    """Server cooldowns persist across jobs, but never across independent tests."""
+    from kazma_core.web_acquire import origins
+
+    monkeypatch.setattr(origins, '_SCHEDULER', origins._OriginScheduler())
+    # Real browser component fixtures exercise owned CDP/deny-proxy containment.
+    # They do not claim an OS network-isolation qualification.
+    monkeypatch.setenv('KAZMA_BROWSER_NETWORK_MODE', 'compatibility')
+
+
+@pytest.fixture(autouse=True)
+def _isolated_web_robots(monkeypatch):
+    """Non-robots component fixtures have a missing control file, with no network.
+
+    Robots contract tests replace this manager and exercise the actual bounded
+    HTTP loader. Default-on policy/caching still runs for all component tests.
+    """
+    import httpx
+    from kazma_core.web_acquire import robots
+    from kazma_core.web_acquire.http import HttpFetch
+
+    manager = robots._RobotsManager()
+    async def missing(url, proxy):
+        return HttpFetch(httpx.Response(404, request=httpx.Request('GET', url)), '', url, False)
+    monkeypatch.setattr(manager, '_fetch', missing)
+    monkeypatch.setattr(robots, '_MANAGER', manager)
+    monkeypatch.delenv('KAZMA_CRAWL_RESPECT_ROBOTS', raising=False)

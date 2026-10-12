@@ -250,14 +250,19 @@ async def test_shell_exec_blocks_exec_capable_arguments(command, blocked_flag):
     assert blocked_flag in result
 
 
-async def test_shell_exec_still_allows_ordinary_commands():
+async def test_shell_exec_still_allows_ordinary_commands(tmp_path):
     """F-03: the argument policy must not break normal allowlisted use."""
     from kazma_core.agent.tool_builtins import register_builtin_tools
     from kazma_core.agent.tool_registry import LocalToolRegistry
 
     registry = LocalToolRegistry()
     register_builtin_tools(registry)
-    result = await registry._tools["shell_exec"].func("git status --short", timeout=15)
+    import subprocess
+    from kazma_core.ide.workspace_scope import workspace_path_scope
+
+    subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)
+    async with workspace_path_scope(tmp_path):
+        result = await registry._tools["shell_exec"].func("git status --short", timeout=15)
     assert not result.startswith("Error:")
 
 

@@ -24,7 +24,7 @@ class OutputLimitExceeded(subprocess.SubprocessError):
     """A child exceeded the combined stdout/stderr budget."""
 
 
-def _windows_job(proc: subprocess.Popen, memory_bytes: int):
+def _windows_job(proc: subprocess.Popen, memory_bytes: int, cpu_rate: int | None = None):
     """Assign a suspended child before it can spawn, then resume it."""
     import ctypes
     from ctypes import wintypes
@@ -56,6 +56,8 @@ def _windows_job(proc: subprocess.Popen, memory_bytes: int):
     kernel.SetInformationJobObject.restype = wintypes.BOOL
     kernel.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
     kernel.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel.QueryInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p]
+    kernel.QueryInformationJobObject.restype = wintypes.BOOL
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel.CloseHandle.restype = wintypes.BOOL
     native = ctypes.WinDLL("ntdll")
@@ -72,6 +74,24 @@ def _windows_job(proc: subprocess.Popen, memory_bytes: int):
         info.JobMemoryLimit = memory_bytes
         if not kernel.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
             raise OSError("Could not set child resource limits")
+        actual = Extended()
+        if not kernel.QueryInformationJobObject(job, 9, ctypes.byref(actual), ctypes.sizeof(actual), None):
+            raise OSError("Could not verify child resource limits")
+        if (actual.JobMemoryLimit != memory_bytes or actual.BasicLimitInformation.ActiveProcessLimit != MAX_PROCESSES
+                or actual.BasicLimitInformation.LimitFlags & info.BasicLimitInformation.LimitFlags != info.BasicLimitInformation.LimitFlags):
+            raise OSError("Child resource limits did not hold")
+        if cpu_rate is not None:
+            class CpuRate(ctypes.Structure):
+                _fields_ = [('ControlFlags', wintypes.DWORD), ('CpuRate', wintypes.DWORD)]
+            if not 1 <= cpu_rate <= 10000:
+                raise ValueError('CPU rate must be between 1 and 10000')
+            cpu = CpuRate(0x1 | 0x4, cpu_rate)
+            if not kernel.SetInformationJobObject(job, 15, ctypes.byref(cpu), ctypes.sizeof(cpu)):
+                raise OSError('Could not set child CPU limits')
+            verified_cpu = CpuRate()
+            if (not kernel.QueryInformationJobObject(job, 15, ctypes.byref(verified_cpu), ctypes.sizeof(verified_cpu), None)
+                    or verified_cpu.ControlFlags != cpu.ControlFlags or verified_cpu.CpuRate != cpu.CpuRate):
+                raise OSError('Child CPU limits did not hold')
         if not kernel.AssignProcessToJobObject(job, int(proc._handle)):
             raise OSError("Could not contain the child process tree")
         if native.NtResumeProcess(int(proc._handle)) < 0:
@@ -89,9 +109,9 @@ def _windows_job(proc: subprocess.Popen, memory_bytes: int):
 class _ProcessTree:
     """Own the operating-system containment for one child and its descendants."""
 
-    def __init__(self, proc: subprocess.Popen, memory_bytes: int) -> None:
+    def __init__(self, proc: subprocess.Popen, memory_bytes: int, cpu_rate: int | None = None) -> None:
         self.proc = proc
-        self.job = _windows_job(proc, memory_bytes) if os.name == "nt" else None
+        self.job = _windows_job(proc, memory_bytes, cpu_rate) if os.name == "nt" else None
         self.closed = False
 
     def finished(self) -> bool:
@@ -114,14 +134,9 @@ class _ProcessTree:
     def close(self) -> None:
         if self.closed:
             return
-        self.closed = True
         if self.job is not None:
-            import ctypes
-            from ctypes import wintypes
-
-            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-            kernel.CloseHandle(self.job)
+            _end_windows_job(self.job)
+            self.job = None
         elif os.name != "nt":
             try:
                 os.killpg(self.proc.pid, signal.SIGKILL)
@@ -129,11 +144,44 @@ class _ProcessTree:
                 pass
         else:
             self.proc.kill()
+        self.closed = True
+
+
+def _end_windows_job(job):
+    """Keep ownership until the kernel reports zero active descendants."""
+    import ctypes
+    from ctypes import wintypes
+
+    class Accounting(ctypes.Structure):
+        _fields_ = [('Times', ctypes.c_int64 * 4), ('TotalPageFaultCount', wintypes.DWORD),
+                    ('TotalProcesses', wintypes.DWORD), ('ActiveProcesses', wintypes.DWORD),
+                    ('TotalTerminatedProcesses', wintypes.DWORD)]
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel.TerminateJobObject.restype = wintypes.BOOL
+    kernel.QueryInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p]
+    kernel.QueryInformationJobObject.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    if not kernel.TerminateJobObject(job, 1):
+        raise OSError('Could not terminate the owned child job')
+    deadline = time.monotonic() + 5
+    while True:
+        state = Accounting()
+        if not kernel.QueryInformationJobObject(job, 1, ctypes.byref(state), ctypes.sizeof(state), None):
+            raise OSError('Could not verify child job termination')
+        if state.ActiveProcesses == 0:
+            break
+        if time.monotonic() >= deadline:
+            raise TimeoutError('Owned child job did not terminate within five seconds')
+        time.sleep(0.01)
+    if not kernel.CloseHandle(job):
+        raise OSError('Could not release the terminated child job')
 
 
 def _start_process(
     command: list[str], *, env: dict[str, str], cwd: str | None = None,
-    memory_bytes: int = MEMORY_BYTES, cpu_seconds: int | None = None,
+    memory_bytes: int = MEMORY_BYTES, cpu_seconds: int | None = None, cpu_rate: int | None = None,
 ) -> tuple[subprocess.Popen, _ProcessTree]:
     """Start a binary under inherited limits; containment failures refuse it."""
     from kazma_core.security.rlimits import limited_command
@@ -168,7 +216,7 @@ def _start_process(
         argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=env, cwd=cwd, **extra,
     )
-    return proc, _ProcessTree(proc, memory_bytes)
+    return proc, _ProcessTree(proc, memory_bytes, cpu_rate)
 
 
 async def start_process_async(*args: Any, **kwargs: Any) -> tuple[subprocess.Popen, _ProcessTree]:
@@ -194,6 +242,7 @@ def run_bounded(
     errors: str = "replace", check: bool = False, shell: bool = False,
     memory_bytes: int = MEMORY_BYTES, output_bytes: int = MAX_OUTPUT_BYTES,
     cancel_event: threading.Event | None = None,
+    on_started=None,
 ) -> subprocess.CompletedProcess[Any]:
     """Drain both pipes within one byte budget; kill the entire tree on failure.
 
@@ -241,6 +290,11 @@ def run_bounded(
     threads.append(threading.Thread(target=feed, daemon=True))
     deadline = time.monotonic() + timeout
     try:
+        if on_started is not None:
+            # Ownership notifications run inside the cleanup boundary, before
+            # pipe tasks start. A caller can retain handles after uncertain OS
+            # cleanup without replacing this bounded process implementation.
+            on_started(proc, tree, tuple(threads))
         for thread in threads:
             thread.start()
         while not tree.finished():
@@ -274,11 +328,27 @@ def run_bounded(
 
 
 async def run_bounded_async(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[Any]:
-    """Run off the event loop; cancellation tells the worker to kill its tree."""
+    """Run off the event loop; acknowledge cancellation after owned cleanup."""
     import asyncio
 
     cancelled = threading.Event()
+    work = asyncio.create_task(asyncio.to_thread(run_bounded, *args, cancel_event=cancelled, **kwargs))
+    receipt = asyncio.gather(work, return_exceptions=True)
     try:
-        return await asyncio.to_thread(run_bounded, *args, cancel_event=cancelled, **kwargs)
+        result, = await asyncio.shield(receipt)
+    except asyncio.CancelledError:
+        cancelled.set()
+        # Cancelling a to_thread waiter does not end its running OS worker.
+        # Shield the receipt, observe its failure and join cleanup even when
+        # the caller repeats cancellation while handles/pipes are still live.
+        while not receipt.done():
+            try:
+                await asyncio.shield(receipt)
+            except asyncio.CancelledError:
+                continue
+        raise
     finally:
         cancelled.set()
+    if isinstance(result, BaseException):
+        raise result
+    return result

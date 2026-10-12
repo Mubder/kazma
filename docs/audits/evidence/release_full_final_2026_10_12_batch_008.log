@@ -1,0 +1,80 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 945 items
+
+tests\test_harness_isolation.py .....                                    [  0%]
+tests\test_health_deep.py ....                                           [  0%]
+tests\test_history_row_fields.py ....                                    [  1%]
+tests\test_hitl.py ..............                                        [  2%]
+tests\test_hitl_approval_ui.py ...........................               [  5%]
+tests\test_hitl_card_content_tools.py .............................      [  8%]
+tests\test_hitl_card_readability.py ...............................      [ 12%]
+tests\test_hitl_gate_bridge.py ..............                            [ 13%]
+tests\test_hitl_gate_read_cutover.py ...............                     [ 15%]
+tests\test_hitl_gate_reconciler.py ............                          [ 16%]
+tests\test_hitl_gate_swarm_pipeline.py .....                             [ 16%]
+tests\test_hitl_gates.py ..........................................      [ 21%]
+tests\test_hitl_grants.py ..........                                     [ 22%]
+tests\test_hitl_graph_integration.py ......                              [ 23%]
+tests\test_hitl_grouped_approval_disclosure.py ...                       [ 23%]
+tests\test_hitl_reply_continuity.py ...                                  [ 23%]
+tests\test_hitl_stale_message.py ...                                     [ 24%]
+tests\test_hitl_status.py ............                                   [ 25%]
+tests\test_hitl_supersede.py ....                                        [ 25%]
+tests\test_hitl_wiring.py .............................................. [ 30%]
+...                                                                      [ 30%]
+tests\test_hitl_yolo_thread_bind.py .....                                [ 31%]
+tests\test_http_tls.py ...                                               [ 31%]
+tests\test_hub_cli.py ................                                   [ 33%]
+tests\test_hub_loader.py ...............                                 [ 35%]
+tests\test_hub_manifest.py ........................                      [ 37%]
+tests\test_hub_registry.py ..................                            [ 39%]
+tests\test_hub_validator.py .............                                [ 40%]
+tests\test_hub_versioning.py ...................                         [ 42%]
+tests\test_hunks.py ..                                                   [ 43%]
+tests\test_i18n.py ..............................                        [ 46%]
+tests\test_i18n_keys_exist.py ...                                        [ 46%]
+tests\test_ide_checkpoint_hunks.py ......                                [ 47%]
+tests\test_ide_git_readonly.py .........................                 [ 49%]
+tests\test_ide_lsp.py .........                                          [ 50%]
+tests\test_ide_read_raw.py ..........                                    [ 51%]
+tests\test_ide_send_to_swarm.py ..                                       [ 52%]
+tests\test_idle_reload.py ..........                                     [ 53%]
+tests\test_image_gen.py .......................                          [ 55%]
+tests\test_importer_atomicity.py ..                                      [ 55%]
+tests\test_imports.py ...............                                    [ 57%]
+tests\test_industry_smoke_matrix.py ............                         [ 58%]
+tests\test_injection_containment.py .................................... [ 62%]
+........................................................................ [ 70%]
+........................................................................ [ 77%]
+..........................................................               [ 83%]
+tests\test_injection_live_harness.py ................................... [ 87%]
+...............................                                          [ 90%]
+tests\test_install_data_shield.py .........                              [ 91%]
+tests\test_install_requirements.py .......                               [ 92%]
+tests\test_install_yaml.py ......                                        [ 93%]
+tests\test_instant_reply_frames.py ..                                    [ 93%]
+tests\test_integration.py ......................                         [ 95%]
+tests\test_intent_audit_fixes.py ...................................     [ 99%]
+tests\test_intent_composer.py ......                                     [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+tests/test_integration.py::TestDashboardRoutes::test_dashboard_page
+tests/test_integration.py::TestLanguageDirection::test_page_has_rtl_dir
+tests/test_integration.py::TestLanguageDirection::test_page_has_arabic_lang
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:454: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return super().request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 945 passed, 4 warnings in 173.23s (0:02:53) =================

@@ -47,6 +47,13 @@ _SKIP_FILES = frozenset({
 #: ``path::function`` of a write whose key the scan cannot read -> the key
 #: patterns it writes (each must be named by a rule), or why there are none.
 DYNAMIC_WRITES: dict[str, tuple[str, ...] | str] = {
+    "kazma-core/kazma_core/web_acquire/durable_state.py::mutate": (
+        "acquisition.origins", "acquisition.origins_revision",
+        "acquisition.robots", "acquisition.robots_revision",
+        "acquisition.artifacts", "acquisition.artifacts_revision",
+        "acquisition.outputs", "acquisition.outputs_revision"),
+    "kazma-core/kazma_core/web_acquire/accounting.py::_mutate": ("acquisition.allowances", "acquisition.allowances_revision"),
+    "kazma-core/kazma_core/web_acquire/crawl_jobs.py::_mutate": ("acquisition.crawls", "acquisition.crawls_revision"),
     "kazma-core/kazma_core/x_api/ai_budget.py::reserve_daily": ("connectors.x.ai_usage", "connectors.x.read_usage"),
     "kazma-core/kazma_core/x_api/account_binding.py::record_account": ("connectors.x.",),
     "kazma-core/kazma_core/x_api/qualification.py::install_report": ("connectors.x.reply.qualification",),
@@ -446,6 +453,10 @@ def test_the_gate_sees_an_unnamed_key_and_an_unreadable_one() -> None:
     ("notifications.push.subscriptions", "credential"),
     ("task_grant.t1", "runtime"),
     ("long_task.continue.t1", "runtime"),
+    ("acquisition.allowances", "runtime"),
+    ("acquisition.allowances_revision", "runtime"),
+    ("acquisition.crawls", "runtime"),
+    ("acquisition.crawls_revision", "runtime"),
     ("memory.v2.rehydrate", "runtime"),
     ("tenant.acme.yolo.t1", "runtime"),
     ("self_improvement.agent_evolution", "learned"),

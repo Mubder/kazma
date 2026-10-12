@@ -1,0 +1,78 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 638 items
+
+tests\test_rate_feedback.py .......                                      [  1%]
+tests\test_rate_limit_buckets.py ....                                    [  1%]
+tests\test_rbac.py ......................                                [  5%]
+tests\test_read_url_hardening.py ...........                             [  6%]
+tests\test_readiness_answers_in_time.py .....                            [  7%]
+tests\test_reasoning_merge.py .........                                  [  9%]
+tests\test_recall_fresh_install.py ....                                  [  9%]
+tests\test_reconsolidation_partition.py ...                              [ 10%]
+tests\test_refreshed_grants.py ..............................            [ 14%]
+tests\test_refused_tool_is_not_a_success.py .......                      [ 15%]
+tests\test_regression_gw063.py ..                                        [ 16%]
+tests\test_release_supply_chain.py ..........                            [ 17%]
+tests\test_reliability_sprint2.py ...........                            [ 19%]
+tests\test_remaining_gaps.py .....                                       [ 20%]
+tests\test_remind_args_first.py .........................                [ 24%]
+tests\test_replay_command.py ......                                      [ 25%]
+tests\test_replay_router_getters.py ...                                  [ 25%]
+tests\test_replay_thread_titles.py ...                                   [ 26%]
+tests\test_reply_persistence_contract.py ..........                      [ 27%]
+tests\test_reply_sink.py .................                               [ 30%]
+tests\test_repository_metrics.py ..........                              [ 31%]
+tests\test_required_capability_readiness.py .........                    [ 33%]
+tests\test_research_cancel_truth.py .....                                [ 34%]
+tests\test_research_crawl_bounds.py ..........                           [ 35%]
+tests\test_research_crawl_recovery.py .................                  [ 38%]
+tests\test_research_pipeline_recovery.py ............................... [ 43%]
+....                                                                     [ 43%]
+tests\test_research_planner.py ......                                    [ 44%]
+tests\test_research_policy_and_kb_harden.py ............                 [ 46%]
+tests\test_research_r1.py .......                                        [ 47%]
+tests\test_research_read_url.py ........                                 [ 49%]
+tests\test_research_report_paths.py .........s....                       [ 51%]
+tests\test_research_runtime.py ..............................            [ 55%]
+tests\test_research_session.py ..............                            [ 58%]
+tests\test_research_session_threads.py ......                            [ 59%]
+tests\test_research_task_delete.py ...                                   [ 59%]
+tests\test_resilience_manifest.py ...................................... [ 65%]
+........                                                                 [ 66%]
+tests\test_restic_one_run_per_repo.py ....                               [ 67%]
+tests\test_restic_repo.py .............................................  [ 74%]
+tests\test_restic_s3_write_probe.py .............                        [ 76%]
+tests\test_restore.py ...........                                        [ 78%]
+tests\test_restore_drill.py .........s......                             [ 80%]
+tests\test_restore_drill_actually_runs.py ...........................    [ 84%]
+tests\test_restore_drill_scheduled.py .........                          [ 86%]
+tests\test_restore_rehearsal.py .....................ss                  [ 89%]
+tests\test_restore_verification_verdict.py ........                      [ 91%]
+tests\test_resume_chokepoint.py ..                                       [ 91%]
+tests\test_resume_parity.py .......                                      [ 92%]
+tests\test_retry_backoff.py ......................                       [ 96%]
+tests\test_rich_document_render.py .................                     [ 98%]
+tests\test_rlimits.py ..s...ss                                           [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+tests/test_regression_gw063.py::TestIterationCounterIncrement::test_iteration_increments_on_tool_calls
+tests/test_regression_gw063.py::TestIterationCounterIncrement::test_iteration_starts_from_zero
+  G:\GitHubRepos\kazma\kazma-core\kazma_core\agent\graph_supervisor.py:305: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    if authority.counter.should_compact(messages) or state.get("needs_compaction"):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========== 631 passed, 7 skipped, 3 warnings in 335.45s (0:05:35) ============

@@ -187,7 +187,7 @@ def test_llms_txt_index_harvests_markdown_and_bare_urls():
     )
     urls = _urls_from_llms_txt(text, seed)
     assert "https://docs.typesafe.ai/agent-skill" in urls
-    assert "https://docs.typesafe.ai/introduction/quickstart" in urls
+    assert "https://docs.typesafe.ai/introduction/quickstart.md" in urls
     assert "https://docs.typesafe.ai/sdk/python/api" in urls
 
 
@@ -236,22 +236,41 @@ def test_is_infra_url_filters_sitemaps_and_feeds():
     assert not _is_infra_url("https://developers.facebook.com/docs/whatsapp/get-started")
 
 
-def test_canonical_page_url_dedupes_slash_and_md():
-    """overview vs overview/ and .md source paths must collapse to one page."""
+def test_canonical_page_url_preserves_slash_and_markdown_resource_identity():
+    """Unobserved aliases must not discard or rewrite a source resource."""
     from kazma_core.stores.knowledge_ingest import _canonical_page_url, _order_urls_seed_first
 
     a = "https://developers.facebook.com/documentation/business-messaging/whatsapp/overview"
     b = "https://developers.facebook.com/documentation/business-messaging/whatsapp/overview/"
     c = "https://developers.facebook.com/documentation/business-messaging/whatsapp/access-tokens.md"
-    assert _canonical_page_url(a) == _canonical_page_url(b)
-    assert _canonical_page_url(c).endswith("/access-tokens")
-    assert not _canonical_page_url(c).endswith(".md")
+    assert _canonical_page_url(a) != _canonical_page_url(b)
+    assert _canonical_page_url(c).endswith("/access-tokens.md")
 
     ordered = _order_urls_seed_first(a, [b, c, a + "/sitemap.xml"])
-    # seed + access-tokens; sitemap filtered; slash dup removed
+    # Distinct slash/source paths remain; infrastructure is filtered.
     assert ordered[0] == _canonical_page_url(a)
-    assert len(ordered) == 2
-    assert any(u.endswith("/access-tokens") for u in ordered)
+    assert len(ordered) == 3
+    assert any(u.endswith("/access-tokens.md") for u in ordered)
+
+
+def test_canonical_identity_preserves_matrix_query_order_escapes_and_empty_query():
+    from urllib.parse import urldefrag, urljoin
+    from kazma_core.stores.knowledge_ingest import _normalize_url as kb_normalize
+    from kazma_core.tools.web_research import _normalize_url as research_normalize
+    from kazma_core.web_acquire.links import extract_document_links, resolve_document_url
+
+    base = 'https://docs.example/tree/start?previous=1'
+    expected = 'https://docs.example/tree/start?'
+    assert urldefrag(urljoin(base, '?'))[0] != expected  # original join drops the explicit marker
+    assert resolve_document_url(base, '?#section') == expected
+    assert kb_normalize(base, '?') == research_normalize(base, '?') == expected
+    links, complete = extract_document_links('<a href="?#section">empty query</a><a href="/tree/start">no query</a>', base)
+    assert complete and links == (expected, 'https://docs.example/tree/start')
+    from kazma_core.stores.knowledge_ingest import _canonical_page_url
+
+    for path in ('/a;v=1', '/a;v=2', '/a?x=1&x=2', '/a?x=2&x=1', '/a%2Fb', '/a/b', '/a?', '/A'):
+        assert _canonical_page_url('https://DOCS.example' + path + '#section') == 'https://docs.example' + path
+    assert _canonical_page_url('https://user:secret@docs.example/a') == ''
 
 
 def test_sparse_discovery_detects_leaf_map_results():
@@ -302,8 +321,8 @@ def test_extract_links_from_markdown_jina_style():
 [Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api)
 """
     links = _extract_links_from_text(md, base)
-    assert any(u.endswith("/about-the-platform") for u in links)
-    assert any(u.endswith("/pricing") for u in links)
+    assert any(u.endswith("/about-the-platform/") for u in links)
+    assert any(u.endswith("/pricing/") for u in links)
     assert any("cloud-api" in u for u in links)
 
 

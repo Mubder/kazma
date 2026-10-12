@@ -1,0 +1,42 @@
+[
+  {
+    "module": "kazma_core.tools.read_url",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_core.tools.web_research",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.accounting",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.crawl_jobs",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.provider_usage",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_core.web_acquire.result",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_gateway.agent_handler.commands",
+    "exit": 0,
+    "detail": ""
+  },
+  {
+    "module": "kazma_ui.i18n.catalog.knowledge",
+    "exit": 0,
+    "detail": ""
+  }
+]

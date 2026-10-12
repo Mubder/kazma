@@ -80,8 +80,10 @@ ask one function, `kazma_core.workspace.binding.resolve_active_root()`
 
 A relative path given to an agent tool means this folder, never the server
 process's working directory (`binding.resolve_tool_path`). Production requires
-`KAZMA_WORKSPACE_ROOT`: selecting, creating or switching a workspace refuses
-paths outside that resolved root, including symlinks. Path traversal is blocked with `normpath` +
+an explicit workspace policy: administrator-configured `security.workspace_roots`
+or `KAZMA_WORKSPACE_ROOT`. Selecting, creating or switching a workspace refuses
+paths outside the resolved roots, including symlinks. When the environment root
+is also set, a stored policy cannot expand it. Path traversal is blocked with `normpath` +
 containment checks.
 
 ### Path grants (outside-workspace access)

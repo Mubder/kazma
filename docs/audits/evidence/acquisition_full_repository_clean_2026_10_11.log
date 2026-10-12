@@ -1,0 +1,48 @@
+[fast-test] 1006 test files in 8 chunks (8 requested, timeout 1260s/chunk)
+[fast-test] chunk 06: OK 1657p/0f (125 files)
+[fast-test] chunk 01: OK 1714p/0f (126 files)
+[fast-test] chunk 05: OK 1640p/0f (126 files)
+[fast-test] chunk 03: OK 1855p/0f (126 files)
+[fast-test] chunk 02: OK 1555p/0f (126 files)
+[fast-test] chunk 07: OK 1972p/1f (125 files)
+[fast-test] chunk 04: OK 2125p/0f (126 files)
+[fast-test] chunk 00: OK 1799p/0f (126 files)
+
+[fast-test] TOTALS in 1196s: 2 deselected, 1 failed, 14317 passed, 62 skipped
+
+[fast-test] 1 failing tests:
+  FAILED tests/test_kb_recovery_browser.py::test_recovery_credit_unknowns_and_explicit_refresh_render_in_real_alpine[fixed-ar]
+
+[fast-test] failure tracebacks (per-chunk FAILURES sections):
+================================== FAILURES ===================================
+_ test_recovery_credit_unknowns_and_explicit_refresh_render_in_real_alpine[fixed-ar] _
+kazma-core\kazma_core\playwright_loop.py:89: in run_in_browser_loop
+    return await asyncio.shield(result)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+tests\test_kb_recovery_browser.py:92: in test_recovery_credit_unknowns_and_explicit_refresh_render_in_real_alpine
+    await run_in_browser_loop(verify(), timeout=20)
+kazma-core\kazma_core\playwright_loop.py:88: in run_in_browser_loop
+    async with asyncio.timeout(timeout):
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\balfa\AppData\Roaming\uv\python\cpython-3.12.9-windows-x86_64-none\Lib\asyncio\timeouts.py:115: in __aexit__
+    raise TimeoutError from exc_val
+E   TimeoutError
+---------------------------- Captured stdout setup ----------------------------
+18:04:04 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+18:04:04 INFO kazma_ui.session_manager: [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19547\test_recovery_credit_unknowns_1\chat_sessions.db
+18:04:04 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19547\test_recovery_credit_unknowns_1\settings.db
+18:04:04 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+18:04:04 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19547\test_recovery_credit_unknowns_1\settings.db
+18:04:04 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+18:04:04 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19547\test_recovery_credit_unknowns_1\test_registry.db
+18:04:04 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+18:04:04 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19547\test_recovery_credit_unknowns_1\test_registry.db
+18:04:04 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+18:04:04 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openai
+18:04:04 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: anthropic
+18:04:04 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: groq
+18:04:04 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: deepseek
+18:04:04 INFO kaz

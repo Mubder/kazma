@@ -1,0 +1,71 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 645 items
+
+tests\test_code_index_truncation.py ........                             [  1%]
+tests\test_commitment_act_resolvers.py ................................. [  6%]
+..............                                                           [  8%]
+tests\test_commitment_authorize.py ......                                [  9%]
+tests\test_commitment_authorize_remind.py ......                         [ 10%]
+tests\test_commitment_auto_store.py .......                              [ 11%]
+tests\test_commitment_cancel_job.py .............                        [ 13%]
+tests\test_commitment_clarify_card.py ..                                 [ 13%]
+tests\test_commitment_config.py .......                                  [ 14%]
+tests\test_commitment_copilot_incident.py ...                            [ 15%]
+tests\test_commitment_corpus.py ...                                      [ 15%]
+tests\test_commitment_g1_latency.py ..                                   [ 16%]
+tests\test_commitment_modes.py ......                                    [ 17%]
+tests\test_commitment_outer_gate.py ....                                 [ 17%]
+tests\test_commitment_scenarios.py .......                               [ 18%]
+tests\test_commitment_scope.py .............                             [ 20%]
+tests\test_commitment_soul.py .....                                      [ 21%]
+tests\test_commitment_soul_endpoint.py ....                              [ 22%]
+tests\test_commitment_store_gc.py ...........                            [ 23%]
+tests\test_commitment_tool_worker_gate.py ...                            [ 24%]
+tests\test_compaction.py ........................                        [ 28%]
+tests\test_completions.py ....................                           [ 31%]
+tests\test_computer_use.py .................                             [ 33%]
+tests\test_config_batch_revision.py ...s                                 [ 34%]
+tests\test_config_loader.py ...                                          [ 34%]
+tests\test_config_reconcile_local.py ........                            [ 36%]
+tests\test_config_store.py .................                             [ 38%]
+tests\test_config_store_cache_scope.py ....                              [ 39%]
+tests\test_config_store_close_race.py ......                             [ 40%]
+tests\test_config_store_first_writer.py s                                [ 40%]
+tests\test_config_store_raw_read_lock.py .                               [ 40%]
+tests\test_config_store_stale_shadow.py .....                            [ 41%]
+tests\test_config_store_tenant_resolve.py ................               [ 43%]
+tests\test_config_store_vault.py ..........                              [ 45%]
+tests\test_config_wizard.py ...................                          [ 48%]
+tests\test_config_write_race.py ....................                     [ 51%]
+tests\test_connector_health.py .................                         [ 54%]
+tests\test_context_indicator.py ......                                   [ 55%]
+tests\test_context_integrity.py ........................................ [ 61%]
+......................                                                   [ 64%]
+tests\test_control_plane_disclosure_on_card.py ........                  [ 65%]
+tests\test_control_plane_stores_readonly.py ....................         [ 68%]
+tests\test_cost_breaker.py .......................                       [ 72%]
+tests\test_count_labels.py ..........................................    [ 79%]
+tests\test_cron.py ................................                      [ 84%]
+tests\test_cron_approval_pipeline.py ..............                      [ 86%]
+tests\test_cron_store_write_lock.py ...                                  [ 86%]
+tests\test_cron_tenant_context.py .....                                  [ 87%]
+tests\test_csrf.py .........                                             [ 88%]
+tests\test_cultural_context.py ..................................        [ 94%]
+tests\test_daily_digest.py ................................              [ 99%]
+tests\test_dark_mode_dropdown_css.py ......                              [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============ 643 passed, 2 skipped, 1 warning in 76.99s (0:01:16) =============

@@ -1,0 +1,96 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 712 items
+
+tests\test_dashboard_capabilities.py ..                                  [  0%]
+tests\test_dashboard_checkpoint_delete.py ..                             [  0%]
+tests\test_dashboard_metrics.py ...                                      [  0%]
+tests\test_dashboard_session_table.py ....                               [  1%]
+tests\test_data_dir_does_not_isolate_postgres.py ....                    [  2%]
+tests\test_data_paths_follow_data_dir.py ........                        [  3%]
+tests\test_database_compose_defaults.py ..                               [  3%]
+tests\test_database_read_capabilities.py ............................... [  7%]
+............                                                             [  9%]
+tests\test_database_read_roles_other.py ss                               [  9%]
+tests\test_database_read_roles_postgres.py ssss                          [ 10%]
+tests\test_date_guard_word_match.py ..........                           [ 11%]
+tests\test_db_backend.py .s.                                             [ 12%]
+tests\test_debt_ratchet.py ..F..                                         [ 12%]
+tests\test_dedup_tool_registries.py ............                         [ 14%]
+tests\test_delivery.py ......................................            [ 19%]
+tests\test_delivery_reconciles.py ....................                   [ 22%]
+tests\test_delivery_routing.py ....................                      [ 25%]
+tests\test_delivery_v2_client.py ....................................... [ 31%]
+........................................................                 [ 38%]
+tests\test_dependency_scanner.py ..............                          [ 40%]
+tests\test_detached_reply_persist.py .............                       [ 42%]
+tests\test_diagnostics_are_read_only.py ...........................      [ 46%]
+tests\test_dialect_detector.py .....................                     [ 49%]
+tests\test_disclosure.py .........................                       [ 52%]
+tests\test_discord_adapter.py .............                              [ 54%]
+tests\test_discord_gateway_resume.py ........                            [ 55%]
+tests\test_discord_receive_and_test.py ............................      [ 59%]
+tests\test_dispatch_helpers.py .......                                   [ 60%]
+tests\test_division_sandbox.py ..........                                [ 62%]
+tests\test_docker_cli_discovery.py ................                      [ 64%]
+tests\test_docs_anchors.py ........                                      [ 65%]
+tests\test_docs_file_refs.py ...                                         [ 66%]
+tests\test_docs_mdx_safe.py ...                                          [ 66%]
+tests\test_docs_sidebar.py ..                                            [ 66%]
+tests\test_doctor_command.py .....                                       [ 67%]
+tests\test_document_actions_phase8.py ...........                        [ 68%]
+tests\test_document_certification_phase10.py ........................... [ 72%]
+..                                                                       [ 73%]
+tests\test_document_convert_fallback.py ........                         [ 74%]
+tests\test_document_export_deleted_blobs.py ..                           [ 74%]
+tests\test_document_generation_phase7.py .F.....s......                  [ 76%]
+tests\test_document_handler_execute.py .............                     [ 78%]
+tests\test_document_ingestion_phase8.py ........                         [ 79%]
+tests\test_document_jobs.py ..............                               [ 81%]
+tests\test_document_jobs_pg_idempotency.py sss                           [ 81%]
+tests\test_document_knowledge_phase6.py ........                         [ 82%]
+tests\test_document_layout.py .....................                      [ 85%]
+tests\test_document_library_membership.py ....                           [ 86%]
+tests\test_document_malware.py ........                                  [ 87%]
+tests\test_document_ocr_phase5.py .................                      [ 89%]
+tests\test_document_operations_phase9.py ............................... [ 94%]
+......                                                                   [ 95%]
+tests\test_document_parsers_phase4.py .................................. [ 99%]
+.                                                                        [100%]
+
+================================== FAILURES ===================================
+_____________________ test_structural_debt_only_goes_down _____________________
+tests\test_debt_ratchet.py:611: in test_structural_debt_only_goes_down
+    assert not shrank, (
+E   AssertionError: Structural debt went down — lock it in by lowering STRUCTURAL_BASELINE:
+E       module_local_public_symbols: set to 550 (was 551)
+E   assert not {'module_local_public_symbols': (550, 551)}
+_____ test_generation_manifest_roundtrip_arabic_and_collision_safe_export _____
+tests\test_document_generation_phase7.py:94: in test_generation_manifest_roundtrip_arabic_and_collision_safe_export
+    assert first.ok and second.ok
+E   AssertionError: assert (False)
+E    +  where False = DocumentResult(ok=False, code='parser_timeout', message='Document parser exceeded its time limit', data=None, document_id=None, version_id=None, blob_id=None, artifact_id=None, job_id=None, warnings=(), retryable=False).ok
+------------------------------ Captured log call ------------------------------
+WARNING  kazma_core.documents.service:service.py:1125 [documents.service] Parser resource limits were partially degraded for output.md: Windows Job Objects do not enforce the requested CPU-time quota
+WARNING  kazma_core.documents.service:service.py:1125 [documents.service] Parser resource limits were partially degraded for output.md: Windows Job Objects do not enforce the requested CPU-time quota
+============================== warnings summary ===============================
+tests/test_db_backend.py::test_force_sqlite_even_with_url
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\_pytest\monkeypatch.py:292: UserWarning: tests must not use a real database — KAZMA_DATABASE_URL was re-introduced into the environment and has been removed again
+    dic[name] = value  # type: ignore[index]
+
+tests/test_delivery_routing.py::TestMaskedExtrasRoundTrip::test_masked_app_token_sent_back_does_not_clobber_the_secret
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_debt_ratchet.py::test_structural_debt_only_goes_down - Asse...
+FAILED tests/test_document_generation_phase7.py::test_generation_manifest_roundtrip_arabic_and_collision_safe_export
+====== 2 failed, 699 passed, 11 skipped, 2 warnings in 407.75s (0:06:47) ======

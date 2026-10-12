@@ -26,6 +26,31 @@
     root.KazmaSettingsMixins = root.KazmaSettingsMixins || {};
     root.KazmaSettingsMixins.ops = function () {
         return {
+        acquisitionBusy: false,
+        acquisitionText: '',
+        async inspectAcquisition(refreshCredits) {
+            if (this.acquisitionBusy) return;
+            this.acquisitionBusy = true;
+            try {
+                const language = window.KAZMA_LANG === 'ar' ? 'ar' : 'en';
+                let response;
+                if (refreshCredits) {
+                    response = await fetch('/api/research/acquisition/credits?language=' + language, {
+                        method: 'POST', credentials: 'same-origin',
+                    });
+                } else {
+                    response = await fetch('/api/research/acquisition?language=' + language, {
+                        method: 'GET', credentials: 'same-origin',
+                    });
+                }
+                const data = await response.json();
+                this.acquisitionText = data.error || data.text || _t('research.ui.status_unavailable');
+            } catch (error) {
+                this.acquisitionText = _t('research.ui.status_unavailable');
+            } finally {
+                this.acquisitionBusy = false;
+            }
+        },
         async saveAppearance() {
             this.saving = true;
             try {

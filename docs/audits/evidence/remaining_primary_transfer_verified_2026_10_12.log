@@ -1,0 +1,8 @@
+{
+  "primary_source_sha256": "6f500d98f9b42db9b44c9e3abe238c3bc18805ceba655056ba4b4674dda394e7",
+  "qualified_source_sha256": "6f500d98f9b42db9b44c9e3abe238c3bc18805ceba655056ba4b4674dda394e7",
+  "selected_files_verified": 100,
+  "collection_cases": 14508,
+  "diff_check": "passed",
+  "live_install_changed": false
+}

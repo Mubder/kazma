@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "G:\GitHubRepos\kazma\.git\worktrees\kazma\release_local_http_smoke.py", line 16, in <module>
+    config_store.get_config_store().batch_set({'proxy.provider':'none'})
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\config_store.py", line 727, in wrapper
+    result = method(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\config_store.py", line 2134, in batch_set
+    for key, _value, _category in items:
+        ^^^^^^^^^^^^^^^^^^^^^^
+ValueError: too many values to unpack (expected 3)

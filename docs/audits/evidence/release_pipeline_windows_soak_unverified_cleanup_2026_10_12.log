@@ -1,0 +1,415 @@
+{"event": "controlled_cleanup_deadline", "cycle": 4, "error_code": "resource_limit", "reason": "Local browser graceful cleanup exceeded five seconds; its contained process tree was terminated and capacity released.", "cleanup_verified": true}
+
+{"cycle": 10, "elapsed_s": 46.9, "max_sampled_owned_rss_bytes": 265134080, "owner_rss_bytes": 52039680, "owner_threads": 8, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 20, "elapsed_s": 131.2, "max_sampled_owned_rss_bytes": 265134080, "owner_rss_bytes": 55066624, "owner_threads": 6, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 30, "elapsed_s": 172.7, "max_sampled_owned_rss_bytes": 269336576, "owner_rss_bytes": 58384384, "owner_threads": 4, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 40, "elapsed_s": 214.3, "max_sampled_owned_rss_bytes": 282537984, "owner_rss_bytes": 59305984, "owner_threads": 4, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 50, "elapsed_s": 257.1, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59310080, "owner_threads": 4, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 60, "elapsed_s": 299.2, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59637760, "owner_threads": 4, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 70, "elapsed_s": 341.9, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59416576, "owner_threads": 5, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 80, "elapsed_s": 384.1, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59498496, "owner_threads": 6, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"event": "controlled_cleanup_deadline", "cycle": 86, "error_code": "resource_limit", "reason": "Local browser graceful cleanup exceeded five seconds; its contained process tree was terminated and capacity released.", "cleanup_verified": true}
+
+{"cycle": 90, "elapsed_s": 454.2, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59801600, "owner_threads": 4, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 100, "elapsed_s": 531.9, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59805696, "owner_threads": 4, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 110, "elapsed_s": 573.5, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59604992, "owner_threads": 4, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 120, "elapsed_s": 615.1, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59588608, "owner_threads": 6, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 130, "elapsed_s": 657.3, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59592704, "owner_threads": 6, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"platform": "windows", "exit": 1, "error": null, "elapsed_s": 717.6, "memory_limit_bytes": 3221225472, "cpu_rate": 2000, "tree_closed": true}
+{"event": "controlled_cleanup_deadline", "cycle": 4, "error_code": "resource_limit", "reason": "Local browser graceful cleanup exceeded five seconds; its contained process tree was terminated and capacity released.", "cleanup_verified": true}
+
+{"cycle": 10, "elapsed_s": 46.9, "max_sampled_owned_rss_bytes": 265134080, "owner_rss_bytes": 52039680, "owner_threads": 8, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 20, "elapsed_s": 131.2, "max_sampled_owned_rss_bytes": 265134080, "owner_rss_bytes": 55066624, "owner_threads": 6, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 30, "elapsed_s": 172.7, "max_sampled_owned_rss_bytes": 269336576, "owner_rss_bytes": 58384384, "owner_threads": 4, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 40, "elapsed_s": 214.3, "max_sampled_owned_rss_bytes": 282537984, "owner_rss_bytes": 59305984, "owner_threads": 4, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 50, "elapsed_s": 257.1, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59310080, "owner_threads": 4, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 60, "elapsed_s": 299.2, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59637760, "owner_threads": 4, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 70, "elapsed_s": 341.9, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59416576, "owner_threads": 5, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 80, "elapsed_s": 384.1, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59498496, "owner_threads": 6, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"event": "controlled_cleanup_deadline", "cycle": 86, "error_code": "resource_limit", "reason": "Local browser graceful cleanup exceeded five seconds; its contained process tree was terminated and capacity released.", "cleanup_verified": true}
+
+{"cycle": 90, "elapsed_s": 454.2, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59801600, "owner_threads": 4, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 100, "elapsed_s": 531.9, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59805696, "owner_threads": 4, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 110, "elapsed_s": 573.5, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59604992, "owner_threads": 4, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 120, "elapsed_s": 615.1, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59588608, "owner_threads": 6, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+{"cycle": 130, "elapsed_s": 657.3, "max_sampled_owned_rss_bytes": 332492800, "owner_rss_bytes": 59592704, "owner_threads": 6, "pool": {"active": 0, "waiting": 0, "quarantined": 0, "capacity": 2, "queue_limit": 8, "wait_seconds": 30}}
+
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+[browser] graceful close exceeded five seconds; terminating owned process tree
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+[browser] graceful close exceeded five seconds; terminating owned process tree
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+Browser compatibility mode: CDP/deny-proxy defenses are active; OS network isolation is NOT established.
+
+[browser] graceful close exceeded five seconds; terminating owned process tree
+
+unhandled exception during asyncio.run() shutdown
+
+task: <Task finished name='Task-1498' coro=<Connection.run() done, defined at G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\_impl\_connection.py:305> exception=AcquisitionError('Local browser process cleanup could not be verified; capacity remains quarantined.')>
+
+Traceback (most recent call last):
+
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\web_acquire\browser_driver.py", line 194, in run
+
+    raw = await asyncio.wrap_future(self._reader.submit(copy_context().run, self._read_frame))
+
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+asyncio.exceptions.CancelledError
+
+
+
+During handling of the above exception, another exception occurred:
+
+
+
+Traceback (most recent call last):
+
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\_impl\_connection.py", line 314, in run
+
+    await self._transport.run()
+
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\web_acquire\browser_driver.py", line 208, in run
+
+    await asyncio.shield(self.stopped)
+
+kazma_core.web_acquire.result.AcquisitionError: Local browser process cleanup could not be verified; capacity remains quarantined.
+
+Traceback (most recent call last):
+
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\web_acquire\browser_driver.py", line 194, in run
+
+    raw = await asyncio.wrap_future(self._reader.submit(copy_context().run, self._read_frame))
+
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+asyncio.exceptions.CancelledError
+
+
+
+During handling of the above exception, another exception occurred:
+
+
+
+Traceback (most recent call last):
+
+  File "<string>", line 1, in <module>
+
+  File "<frozen runpy>", line 287, in run_path
+
+  File "<frozen runpy>", line 98, in _run_module_code
+
+  File "<frozen runpy>", line 88, in _run_code
+
+  File "G:\GitHubRepos\kazma\.git\worktrees\kazma\release_browser_soak.py", line 128, in <module>
+
+    asyncio.run(main())
+
+  File "G:\GitHubRepos\kazma\.venv\Lib\site-packages\playwright\_impl\_connection.py", line 314, in run
+
+    await self._transport.run()
+
+  File "G:\GitHubRepos\kazma\kazma-core\kazma_core\web_acquire\browser_driver.py", line 208, in run
+
+    await asyncio.shield(self.stopped)
+
+kazma_core.web_acquire.result.AcquisitionError: Local browser process cleanup could not be verified; capacity remains quarantined.
+
+

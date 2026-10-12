@@ -1,0 +1,2 @@
+negative_control_old_fifo_read_blocks=true
+fixed_fifo_read_refused_without_blocking=true

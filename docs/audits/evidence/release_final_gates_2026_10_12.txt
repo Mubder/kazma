@@ -1,0 +1,20 @@
+"""Final documentation, policy, debt and collection-receipt gates; one owned worker."""
+import json
+from pathlib import Path
+from scripts import fast_test as runner, generate_metrics
+from release_memory_guard import install
+install(runner)
+expected=generate_metrics.collection_fingerprint()
+files=['tests/test_docs_anchors.py','tests/test_docs_file_refs.py','tests/test_docs_sidebar.py',
+       'tests/test_docs_mdx_safe.py','tests/test_website_pages.py','tests/test_cli_docs.py',
+       'tests/test_debt_ratchet.py','tests/test_static_gates.py','tests/test_metrics_receipt_current.py']
+code,output=runner.run_pytest([*files,'--timeout=120','--tb=short'],900)
+folder=Path('docs/audits/evidence')
+(folder/'release_final_gates_2026_10_12.log').write_text(output,encoding='utf-8')
+counts=runner._parse_summary(output)
+assert generate_metrics.collection_fingerprint()==expected
+receipt={'exit':code,'counts':counts,'files':files,'input_sha256':expected}
+(folder/'release_final_gate_summary_2026_10_12.log').write_text(json.dumps(receipt,indent=2)+'\n',encoding='utf-8')
+print(json.dumps(receipt),flush=True)
+assert counts,'Final gate requires a measured terminal tally'
+raise SystemExit(code)

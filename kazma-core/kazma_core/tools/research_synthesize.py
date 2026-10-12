@@ -136,16 +136,21 @@ async def synthesize_from_digests(
     )
 
     try:
-        from kazma_core.model_registry import get_model_registry
-
-        reg = get_model_registry()
-        client = reg.get_client()  # active model+provider (not a free function)
-        model = None
-        try:
-            profile = reg.get_active_profile() or {}
-            model = profile.get("model")
-        except Exception:
-            pass
+        from kazma_core.web_acquire.research_llm import resolved_route
+        from kazma_core.web_acquire.crawl_jobs import call
+        route = await call(resolved_route)
+        if route is not None:
+            client, model, frozen_failover = route
+        else:
+            from kazma_core.model_registry import get_model_registry
+            reg = get_model_registry()
+            client = reg.get_client()
+            model = None
+            try:
+                model = (reg.get_active_profile() or {}).get('model')
+            except Exception:
+                pass
+            frozen_failover = None
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -161,6 +166,7 @@ async def synthesize_from_digests(
             max_attempts=3,
             max_tokens=min(8000, max(1024, cap_out // 3)),
             label="research-synthesize",
+            frozen_failover=frozen_failover,
         )
         text = ""
         if hasattr(result, "content"):

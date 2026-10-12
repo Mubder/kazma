@@ -1,0 +1,68 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 413 items
+
+kazma-core\kazma_core_tests\integration\test_multi_platform.py ......... [  2%]
+...............                                                          [  5%]
+kazma-core\kazma_core_tests\test_hitl_gates_wired.py ..............      [  9%]
+kazma-core\kazma_core_tests\unit\test_path_anchoring.py ....             [ 10%]
+kazma-core\kazma_core_tests\unit\test_prompt_fence.py .................. [ 14%]
+..                                                                       [ 15%]
+kazma-core\kazma_core_tests\unit\test_reliability.py ................... [ 19%]
+...                                                                      [ 20%]
+kazma-core\kazma_core_tests\unit\test_reliability_registry.py .......... [ 22%]
+...........                                                              [ 25%]
+kazma-core\tests\test_config_read_structured.py .                        [ 25%]
+kazma-core\tests\test_embedder.py ...........                            [ 28%]
+kazma-core\tests\test_empty_answer_recovery.py ....                      [ 29%]
+kazma-core\tests\test_env_context.py ......                              [ 30%]
+kazma-core\tests\test_git_bot_commit.py ..                               [ 31%]
+kazma-core\tests\test_git_identity.py ......                             [ 32%]
+kazma-core\tests\test_github_app_integration.py ..............           [ 36%]
+kazma-core\tests\test_ide_delete.py ....                                 [ 37%]
+kazma-core\tests\test_ide_service.py .........                           [ 39%]
+kazma-core\tests\test_language_lock.py ......                            [ 40%]
+kazma-core\tests\test_max_iter_synthesis.py .......                      [ 42%]
+kazma-core\tests\test_mcp_lifecycle.py ......                            [ 43%]
+kazma-core\tests\test_mcp_stdio_limit.py ...                             [ 44%]
+kazma-core\tests\test_memory_eval_golden.py ...                          [ 45%]
+kazma-core\tests\test_memory_federated_search.py ....                    [ 46%]
+kazma-core\tests\test_memory_health.py ..                                [ 46%]
+kazma-core\tests\test_memory_kb_merge.py ....                            [ 47%]
+kazma-core\tests\test_memory_p2_wave.py .....                            [ 48%]
+kazma-core\tests\test_memory_priority_batch.py ........                  [ 50%]
+kazma-core\tests\test_memory_scale_foundation.py .........               [ 53%]
+kazma-core\tests\test_memory_tenant_auth.py ......                       [ 54%]
+kazma-core\tests\test_memory_v2_backfill.py ......                       [ 55%]
+kazma-core\tests\test_memory_v2_phase1.py ...................            [ 60%]
+kazma-core\tests\test_memory_v2_phase2.py ..............                 [ 63%]
+kazma-core\tests\test_memory_v2_phase3.py ............................   [ 70%]
+kazma-core\tests\test_memory_v2_phase5.py ..........                     [ 73%]
+kazma-core\tests\test_memory_v2_phase_a.py ....                          [ 74%]
+kazma-core\tests\test_memory_v2_phase_b.py ......                        [ 75%]
+kazma-core\tests\test_memory_v2_phase_c_d.py ........                    [ 77%]
+kazma-core\tests\test_memory_v2_swarm_bridge.py .........                [ 79%]
+kazma-core\tests\test_paths_project_local.py .....                       [ 80%]
+kazma-core\tests\test_per_turn_rag.py ........                           [ 82%]
+kazma-core\tests\test_prune_tool_outputs.py ...                          [ 83%]
+kazma-core\tests\test_shell_exec_cd_hint.py .                            [ 83%]
+kazma-core\tests\test_steer_buffers.py ...............                   [ 87%]
+kazma-core\tests\test_steer_routing.py .........                         [ 89%]
+kazma-core\tests\test_swarm_phonebook_fence.py ..                        [ 90%]
+kazma-core\tests\test_unusable_assistant_content.py .....                [ 91%]
+kazma-core\tests\test_vision_and_failure_handling.py ................    [ 95%]
+kazma-core\tests\test_workspace_binding_and_mcp_rebind.py ........       [ 97%]
+kazma-gateway\kazma_gateway_tests\adapters\test_discord_bus.py ...       [ 97%]
+kazma-gateway\kazma_gateway_tests\adapters\test_documents_commands.py .. [ 98%]
+..                                                                       [ 98%]
+kazma-gateway\kazma_gateway_tests\adapters\test_gateway_consumer.py ..   [ 99%]
+kazma-gateway\kazma_gateway_tests\adapters\test_ide_commands.py ...      [100%]
+
+============================ 413 passed in 45.78s =============================

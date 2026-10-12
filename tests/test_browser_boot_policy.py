@@ -69,11 +69,17 @@ def _clean_state(monkeypatch):
     # leak a Proactor/Selector switch into later tests in the session.
     prev_policy = asyncio.get_event_loop_policy()
     yield
+    from kazma_core.web_acquire.interactive import PageFacade
+    if isinstance(bt._state.get('page'), PageFacade):
+        bt._close_sync()
     asyncio.set_event_loop_policy(prev_policy)
 
 
-def test_boot_uses_proactor_and_restores_policy(monkeypatch):
-    monkeypatch.setattr("playwright.sync_api.sync_playwright", lambda: _FakeCM())
+def test_boot_uses_owned_facade_without_mutating_policy(monkeypatch):
+    def unsafe_boot():
+        pytest.fail('Native browser must not boot an unrestricted sync driver')
+    monkeypatch.setattr("playwright.sync_api.sync_playwright", unsafe_boot)
+    monkeypatch.setattr('kazma_core.web_acquire.interactive.open_page', lambda: _FakePage())
 
     # Begin from the selector policy the server installs (Windows).
     if _IS_WINDOWS:
@@ -83,10 +89,6 @@ def test_boot_uses_proactor_and_restores_policy(monkeypatch):
     page = bt._ensure_page_sync()
 
     assert isinstance(page, _FakePage)
-    if _IS_WINDOWS:
-        assert _FakeCM.seen_policy == "WindowsProactorEventLoopPolicy", (
-            "Playwright must boot under a Proactor policy on Windows"
-        )
     # The original policy is restored after boot (loop already created).
     assert type(asyncio.get_event_loop_policy()).__name__ == before
 
@@ -99,7 +101,10 @@ def test_boot_caches_page_and_reuses(monkeypatch):
             calls["n"] += 1
             return super().start()
 
-    monkeypatch.setattr("playwright.sync_api.sync_playwright", lambda: CountingCM())
+    def open_page():
+        calls['n'] += 1
+        return _FakePage()
+    monkeypatch.setattr('kazma_core.web_acquire.interactive.open_page', open_page)
     p1 = bt._ensure_page_sync()
     p2 = bt._ensure_page_sync()
     assert p1 is p2

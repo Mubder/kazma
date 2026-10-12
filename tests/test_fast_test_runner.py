@@ -491,3 +491,128 @@ def test_a_crashed_chunk_still_goes_to_isolation(monkeypatch, capsys) -> None:
     assert runner.main() == 0
     assert isolated, "a crash must still be isolated through run_pytest"
     assert "parallel pieces" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('exit_code', [0, 1])
+@pytest.mark.parametrize('original_boundary', [False, True], ids=['fixed', 'original-control'])
+def test_file_recovery_without_a_terminal_tally_cannot_disappear(monkeypatch, capsys, exit_code, original_boundary) -> None:
+    """pytest-timeout exits 1 without a summary; that is not a passed file."""
+    runner = _runner()
+    if original_boundary:
+        source = Path(runner.__file__).read_text(encoding='utf-8')
+        for variable in ('code', 'code2'):
+            log = 'log' if variable == 'code' else 'log2'
+            fixed = f'if {variable} in _BENIGN_EXIT_CODES and ({variable} == 5 or _parse_summary({log})):'
+            assert fixed in source
+            source = source.replace(fixed, f'if {variable} in _BENIGN_EXIT_CODES:')
+        exec(compile(source, runner.__file__, 'exec'), runner.__dict__)
+    chunks = iter([0, -11])
+    _drive_main(runner, monkeypatch, lambda n: next(chunks))
+    monkeypatch.setattr(runner, 'run_pytest', lambda *a, **k:
+        (exit_code, 'tests/test_fake.py ..........\n+++ Timeout +++\n'))
+    assert runner.main() == (0 if original_boundary else 1)
+    assert ('POISON' in capsys.readouterr().out) is not original_boundary
+
+
+def test_file_recovery_accepts_no_tests_collected_as_an_explicit_skip(monkeypatch, capsys) -> None:
+    runner = _runner()
+    _drive_main(runner, monkeypatch, lambda n: -11)
+    # One measurable file plus optional importorskip files keeps the normal
+    # sanity floor meaningful, while exit 5 alone is an explicit skip.
+    calls = []
+    def recover(*args, **kwargs):
+        calls.append(args)
+        return (0, '1 passed in 0.1s') if len(calls) == 1 else (5, 'no tests collected')
+    monkeypatch.setattr(runner, 'run_pytest', recover)
+    assert runner.main() == 0
+    assert 'POISON' not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('exit_code', [124, -11], ids=['shutdown-timeout', 'post-summary-crash'])
+@pytest.mark.parametrize('original_boundary', [False, True], ids=['fixed', 'original-double-count'])
+def test_recovered_terminal_tallies_are_counted_once(monkeypatch, capsys, exit_code, original_boundary):
+    runner = _runner()
+    if original_boundary:
+        source = Path(runner.__file__).read_text(encoding='utf-8')
+        assert 'if not needs_recovery(r):' in source
+        source = source.replace('if not needs_recovery(r):', 'if True:')
+        exec(compile(source, runner.__file__, 'exec'), runner.__dict__)
+    _drive_main(runner, monkeypatch, lambda n: exit_code if n > 2 else 0)
+    def chunk(idx, files, timeout):
+        count = len(files)
+        log = f'{count} passed, {count} skipped, {count} deselected in 0.1s'
+        return dict(idx=idx, code=exit_code if count > 2 else 0,
+            counts=runner._parse_summary(log), failed=[], log=log, files=files)
+    monkeypatch.setattr(runner, 'run_chunk', chunk)
+    monkeypatch.setattr(runner, 'run_pytest', lambda *args, **kwargs:
+                        (0, '1 passed, 1 skipped, 1 deselected in 0.1s'))
+    assert runner.main() == 0
+    total = 16 if original_boundary else 8
+    assert f'{total} deselected, {total} passed, {total} skipped' in capsys.readouterr().out
+
+
+def test_recovery_never_erases_an_observed_failure_from_a_timed_out_chunk(monkeypatch, capsys):
+    runner = _runner()
+    _drive_main(runner, monkeypatch, lambda n: 0)
+    def chunk(idx, files, timeout):
+        failing = len(files) > 2 and idx == 0
+        log = f'{len(files)} passed' + (', 1 failed' if failing else '') + ' in 0.1s'
+        return dict(idx=idx, code=124 if failing else 0, counts=runner._parse_summary(log),
+            failed=['tests/test_fake_0.py::observed_failure'] if failing else [], log=log, files=files)
+    monkeypatch.setattr(runner, 'run_chunk', chunk)
+    assert runner.main() == 1
+    output = capsys.readouterr().out
+    assert '8 passed' in output and 'observed_failure' in output
+
+
+@pytest.mark.parametrize('phase', ['split-piece', 'minus-suspect', 'per-file'])
+def test_nested_recovery_keeps_observed_failures_before_a_clean_retry(monkeypatch, capsys, phase):
+    runner = _runner()
+    _drive_main(runner, monkeypatch, lambda n: 0)
+    observed = []
+    failure = 'FAILED tests/test_fake_0.py::nested_failure - fixture\n1 failed in 0.1s'
+
+    def chunk(idx, files, timeout):
+        initial = len(files) == 4 and idx == 0
+        nested = phase == 'split-piece' and idx == 0 and len(files) == 2 and not observed
+        if nested:
+            observed.append(True)
+        code = (124 if phase == 'split-piece' else -11) if initial or nested else 0
+        log = failure if nested else (f'{len(files)} passed in 0.1s' if not initial else '')
+        return dict(idx=idx, files=files, code=code, log=log, counts=runner._parse_summary(log),
+                    failed=['tests/test_fake_0.py::nested_failure'] if nested else [])
+
+    def retry(args, timeout):
+        is_rest = phase == 'minus-suspect' and len([arg for arg in args if arg.endswith('.py')]) > 1
+        if not observed and (is_rest or phase == 'per-file'):
+            observed.append(True)
+            return -11, failure
+        return 0, '1 passed in 0.1s'
+
+    monkeypatch.setattr(runner, 'run_chunk', chunk)
+    monkeypatch.setattr(runner, 'run_pytest', retry)
+    monkeypatch.setattr(runner, 'last_file_reached', lambda log:
+                        'tests/test_fake_0.py' if phase == 'minus-suspect' else None)
+    assert runner.main() == 1
+    output = capsys.readouterr().out
+    assert observed and 'nested_failure' in output and 'POISON' not in output
+
+
+def test_long_serial_suite_uses_owned_argument_file_and_runs_real_pytest(tmp_path, monkeypatch):
+    runner = _runner()
+    probe = tmp_path / 'test_serial_argument_file.py'
+    probe.write_text('def test_real_argument_file(): assert True\n', encoding='utf8')
+    monkeypatch.setattr(runner, 'REPO', tmp_path)
+    original = runner._start
+    observed = []
+    def start(cmd, env):
+        argument, = [value for value in cmd if value.startswith('@')]
+        path = Path(argument[1:])
+        assert path.is_file() and len(subprocess.list2cmdline(cmd)) < 24000
+        observed.append(path)
+        return original(cmd, env)
+    monkeypatch.setattr(runner, '_start', start)
+    args = [str(probe), *['--deselect=unselected_fixture_' + str(i) + '_' * 30 for i in range(1400)]]
+    code, log = runner.run_pytest(args, 45)
+    assert code == 0 and runner._parse_summary(log)['passed'] == 1, log
+    assert len(observed) == 1 and not observed[0].exists()
