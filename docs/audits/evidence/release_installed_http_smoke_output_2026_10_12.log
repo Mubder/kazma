@@ -1,0 +1,66 @@
+{
+  "url": "https://example.com/",
+  "ok": true,
+  "final_url": "https://example.com/",
+  "backend": "httpx",
+  "http_status": 200,
+  "error_code": null,
+  "error": null,
+  "transient": false,
+  "quality": "usable",
+  "char_count": 156,
+  "latency_ms": 1360.2,
+  "wire_bytes": 400,
+  "decoded_bytes": 577,
+  "truncated": false,
+  "truncation_reasons": [],
+  "links_count": 0,
+  "links_complete": true,
+  "cache_hit": false,
+  "attempts": [
+    {
+      "backend": "httpx",
+      "url": "https://example.com/",
+      "outcome": "response",
+      "latency_ms": 146.0,
+      "final_url": "https://example.com/",
+      "http_status": 200,
+      "error_code": null,
+      "error": null,
+      "transient": false,
+      "remote": false,
+      "wire_bytes": 400,
+      "decoded_bytes": 577,
+      "truncated": false,
+      "usage": null
+    }
+  ],
+  "usage": null,
+  "credits": null,
+  "robots": {
+    "mode": "enforced",
+    "checks": [
+      {
+        "metadata_requests": 1,
+        "origin": "https://example.com:443",
+        "status": "missing",
+        "http_status": 404,
+        "checked_at": "2026-10-12T13:42:26.991488+00:00",
+        "cached": true,
+        "backend": "httpx",
+        "proxy_used": false,
+        "usage": null,
+        "credits": null
+      }
+    ]
+  },
+  "browser_process": null,
+  "python_version": "3.11.15",
+  "installed_source_verified": true,
+  "mode": "local_only",
+  "isolated_local_store": true,
+  "hosted_attempts": 0
+}
+
+[ConfigStore] Sensitive key acquisition.robots.48c54c875b99e3e408d9a09d3dea8a0ee6f1a939ff92dff2e0315fa86b5d5a58.token stored in PLAINTEXT — no vault is configured. Set KAZMA_VAULT_KEY to encrypt secrets at rest (this warning logs once per process).
+[ConfigStore] refused to blank the stored secret at acquisition.robots.48c54c875b99e3e408d9a09d3dea8a0ee6f1a939ff92dff2e0315fa86b5d5a58.token -- the incoming value was empty.

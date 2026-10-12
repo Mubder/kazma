@@ -1,0 +1,35 @@
+{
+  "observed_at": 1791812445.5755956,
+  "published_commit": "7af257b09646d415e77327dd72309890f8069e75",
+  "live_merge_commit": "8ed376bcc630ad14b0748dd9099307c131e46402",
+  "published_is_ancestor": true,
+  "served_build": {
+    "commit": "8ed376bc",
+    "started_at": 1791812427.31617
+  },
+  "health_http": 200,
+  "ready_http": 200,
+  "activity": {
+    "active_turns": 0,
+    "pending_approvals": 0,
+    "idle": true
+  },
+  "tracked_clean": true,
+  "assets": [
+    {
+      "name": "research.js",
+      "sha256": "b7e72bb88d9827ad3a5105c2ae23f257d3e5e90f994de7352b3cbc0e4a3f191b",
+      "matches_qualified_source": true
+    },
+    {
+      "name": "kb.js",
+      "sha256": "6dd10804820ce59a0fa55f1e137bd22699455f12b81b77b1221f0a82cad8e531",
+      "matches_qualified_source": true
+    },
+    {
+      "name": "settings_ops.js",
+      "sha256": "540b20d0dbd6d3836725c3d92031c466e9d49ae130f1f581549039b31ada8fc1",
+      "matches_qualified_source": true
+    }
+  ]
+}

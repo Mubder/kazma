@@ -8,7 +8,7 @@ say against it. Every entry names the evidence, so a reader can check it rather
 than take our word â€” and so the gap stops being invisible when the person who
 found it forgets.
 
-**Web acquisition audit (2026-10-12, supported-route qualification complete; rollout pending).**
+**Web acquisition audit (2026-10-12, supported-route qualification and live rollout complete).**
 Acquisition defaults to local-only. Remote extractors and scraping proxies require
 explicit mode and provider consent. HTTP, DNS, parser, search and Chromium work
 have bounded ownership; cancellation joins cleanup and uncertain cleanup retains
@@ -44,8 +44,12 @@ quality; universal hostile-site compatibility is not claimed.
 
 Complete repository coverage and the fresh browser E2E run are qualified with
 documented recovery (14,447 unit passes/63 skips and 84 browser E2E passes).
-Strict Linux endurance and real Windows strict refusal passed; guarded live
-rollout remains pending. Earlier failed/interrupted receipts and unresolved timing
+Strict Linux endurance and real Windows strict refusal passed. The guarded live
+rollout passed health/readiness, serving-build/assets and read-only Arabic UI
+verification; installed Python 3.11 also passed isolated local HTTP extraction.
+Hosted CI did not execute: GitHub reports the account locked due to a billing
+issue (run 38257255914). The account owner must resolve that before hosted gates
+can be qualified; local results do not imply green hosted CI. Earlier failed/interrupted receipts and unresolved timing
 causes remain in the implementation report; an uninterrupted green full run is
 not claimed. See
 `audits/WEB_ACQUISITION_IMPLEMENTATION_2026-10-10.md` for measured outcomes and

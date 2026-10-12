@@ -1,0 +1,23 @@
+{
+  "observed_at": 1791812622.9740024,
+  "served_build": "8ed376bc",
+  "operator_language": "ar",
+  "settings_system_acquisition_panel_visible": true,
+  "cached_status_button_used": true,
+  "mode": "local_only",
+  "permitted_external_providers": [],
+  "unknown_usage_and_cost_visible": true,
+  "credit_statuses": {
+    "firecrawl": "disabled",
+    "jina": "dashboard_only",
+    "proxy": "not_supported"
+  },
+  "research_loaded": true,
+  "populated_research_archive_loaded": true,
+  "knowledge_loaded": true,
+  "new_jobs_started": false,
+  "credit_refresh_requested": false,
+  "policy_or_language_changed": false,
+  "private_titles_or_record_contents_saved": false,
+  "recovery_controls_with_active_jobs": "covered by isolated E2E; no live job mutation"
+}

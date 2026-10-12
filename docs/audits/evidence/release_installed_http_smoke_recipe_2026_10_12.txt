@@ -1,0 +1,30 @@
+"""One real public-page read with local extraction and an isolated settings store."""
+import asyncio,json,os,tempfile,sys
+from pathlib import Path
+
+root=Path.cwd()
+with tempfile.TemporaryDirectory(prefix='kazma-local-http-release-',ignore_cleanup_errors=True) as temporary:
+    scratch=Path(temporary)
+    os.environ.update(KAZMA_DATA_DIR=str(scratch/'data'),KAZMA_USER_HOME=str(scratch/'home'),
+                      KAZMA_SKILLS_HOME=str(scratch/'skills'),KAZMA_DB_BACKEND='sqlite',
+                      KAZMA_ACQUISITION_MODE='local_only',KAZMA_ACQUISITION_REMOTE_PROVIDERS='',
+                      KAZMA_BROWSER_NETWORK_MODE='required',PYTEST_CURRENT_TEST='isolated-public-http-smoke')
+    for name in ('KAZMA_DATABASE_URL','DATABASE_URL'):os.environ.pop(name,None)
+    from kazma_core import config_store
+    import kazma_core.web_acquire as installed_acquisition
+    assert Path(installed_acquisition.__file__).resolve().is_relative_to(Path('C:/Users/balfa/kazma'))
+    from kazma_core.web_acquire import fetch_text
+    try:
+        config_store.get_config_store().set('proxy.provider','none')
+        async def run():
+            return await asyncio.wait_for(fetch_text('https://example.com/',purpose='research',
+                scope_check=lambda url:url.startswith('https://example.com/')),30)
+        result=asyncio.run(run())
+        receipt=result.evidence()
+        receipt.update(python_version=sys.version.split()[0],installed_source_verified=True,mode='local_only',isolated_local_store=True,hosted_attempts=sum(a.remote for a in result.attempts))
+        output=json.dumps(receipt,indent=2,ensure_ascii=False)+'\n'
+        (root/'docs/audits/evidence/release_installed_http_smoke_2026_10_12.log').write_text(output,encoding='utf-8')
+        print(output,flush=True)
+        assert result.ok and result.backend=='httpx' and not result.truncated
+        assert result.text and not any(a.remote for a in result.attempts)
+    finally:config_store.reset_config_store(close=True)

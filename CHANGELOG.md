@@ -14,7 +14,10 @@ limits are in `docs/audits/WEB_ACQUISITION_IMPLEMENTATION_2026-10-10.md` and
   public HTTPX extraction with robots enforcement and zero hosted attempts.
   Windows compatibility endurance failed and remains unqualified; unknown
   third-party charges and earlier timing failures stay explicit in the report.
-  Final documentation/policy gates passed (87 checks); guarded rollout is pending.
+  Final documentation/policy gates passed (87 checks). Commit `7af257b0` was
+  deployed by clean pull and idle guard reload; live health/readiness, exact UI
+  assets, Arabic cached status and isolated installed-runtime HTTP passed.
+  Hosted CI could not start because GitHub reports an account billing lock.
 
 - Durable deep-research stages (2026-10-11): journal ownership before planning,
   search, acquisition, synthesis and publication using the shared crawl CAS store.
