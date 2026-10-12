@@ -85,7 +85,7 @@ def _collect():
     connection = research_session._conn()
     try:
         research_session._reconcile_sessions(connection)
-        sessions = connection.execute('SELECT id, depth, status, stage, sources, created_at, updated_at, report_path, meta_json, length(summary)>0 AS has_summary FROM research_sessions ORDER BY created_at DESC LIMIT 257').fetchall()
+        sessions = connection.execute("SELECT id, depth, status, stage, sources, created_at, updated_at, report_path, meta_json, length(summary)>0 AS has_summary FROM research_sessions WHERE depth != 'chat' ORDER BY created_at DESC LIMIT 257").fetchall()
     finally:
         connection.close()
     if len(sessions) > 256:

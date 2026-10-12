@@ -1,0 +1,15 @@
+{
+  "exit": 0,
+  "counts": {
+    "passed": 98
+  },
+  "files": [
+    "tests/test_acquisition_monitor.py",
+    "tests/test_ops_alert_delivery.py",
+    "tests/test_acquisition_operations.py",
+    "tests/test_web_acquisition_policy.py",
+    "tests/test_debt_ratchet.py",
+    "tests/test_metrics_receipt_current.py"
+  ],
+  "input_sha256": "2efa85164631d5630133573f849ed911165b5d1a78eb5383a5a35d9ce606465a"
+}

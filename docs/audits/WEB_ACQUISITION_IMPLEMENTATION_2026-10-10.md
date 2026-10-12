@@ -1672,3 +1672,39 @@ provider charges, hosted CI billing blocker and earlier timing-cause limits
 remain unchanged. Guarded live rollout is verified separately against the
 published revision and actual serving build; local receipts do not imply green
 hosted CI or guaranteed human receipt of a platform-accepted notification.
+
+
+### Live legacy-history correction
+
+The first follow-up rollout (`815c83e2`, served as `d5739210`) passed readiness
+and asset checks, but its new visible monitor warning exposed an installed-data
+case absent from the isolated fixtures. The database contained 349 ordinary
+chat-search rows beside 12 deep/brief research rows. The monitor applied its
+256-row research observation bound before excluding chat rows, so it stopped
+with a visible unavailable banner and ops alert. Readiness alone did not prove
+that the monitor was working; the live UI check caught it.
+
+The SQL query now excludes chat-search rows before applying the bounded
+research observation limit. The real-collector regression fixture contains
+349 legacy chat rows and still observes the linked research session correctly,
+without provider probes. No stored research/chat record was deleted or edited
+to make the monitor pass. The existing history admission limit is unchanged:
+this older installation is already above the combined 256-row session limit,
+so accepting new background sessions still requires deliberate settled-history
+cleanup through the existing UI. Standalone pipeline monitoring is independent
+of that session admission check. Cleanup is not silently performed by alerts.
+
+The corrected source passed 98 targeted checks (monitor, delivery, operations,
+local-only policy, debt and fresh collection receipt) and the two English/Arabic
+completion-to-saved-result browser flows. Installed import/static/receipt hooks
+run again for the correction commit. The 380-check receipt above remains tied
+to its earlier fingerprint. Corrected source input fingerprint: `2efa85164631d5630133573f849ed911165b5d1a78eb5383a5a35d9ce606465a`.
+Receipts: `acquisition_monitor_legacy_2026_10_12.log`,
+`acquisition_monitor_legacy_summary_2026_10_12.log`,
+`acquisition_monitor_legacy_browser_2026_10_12.log`, and
+`acquisition_monitor_live_initial_failure_2026_10_12.log`.
+
+Hosted CI for `815c83e2` did not execute (run 38266767680): its check annotation
+again reports that the account is locked due to a billing issue. Local success
+does not imply green hosted checks. The corrected live monitor must be checked
+through its updated timestamp and Settings controls after the guard reload.
