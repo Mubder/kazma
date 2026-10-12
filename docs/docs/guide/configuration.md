@@ -620,6 +620,19 @@ observations independently of external delivery. See
 [Progress and result alerts](web-research#progress-and-result-alerts) for
 outcomes, retention, delivery receipts and local-first scope.
 
+| Control | Default | Allowed value |
+|---|---|---|
+| Monitoring enabled | `true` | Boolean |
+| Completion notifications | `true` | Boolean |
+| No observed progress threshold | `180` seconds | Integer, 30–3600 |
+| Fresh low-credit threshold | `100` | Integer, 0–1000000000 |
+
+The administrator API is `GET/PUT /api/settings/acquisition/monitor`. Save the
+complete settings object; invalid fields or types return 422. The monitor
+reads local evidence every 15 seconds and never refreshes provider balances.
+Acquisition policy is configured separately through the documented environment
+variables; these alert controls do not grant hosted-service permission.
+
 ## Documentation Audit Notes
 
 - **Version drift:** `pyproject.toml` is `0.3.0`; `kazma.yaml` `agent.version` is `0.2.0`; the CLI `--help` text prints `v0.2.0`. These are independent and unsynchronized — a known wart.

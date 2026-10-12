@@ -81,7 +81,7 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 | Memory forgets / search ≠ chat recall | `recall()` empty / FTS drift / embedder down | Dashboard V2 health; `fts_health`; not a V1 adapter | §9 Memory |
 | Empty `web_search` | SearXNG URL + JSON format | Backend chain notes in tool output | §10 Research |
 | Thin `read_url` / bot wall | HTTP → local Chromium → explicitly allowed hosted recovery | Acquisition mode + allowlist; keys alone grant nothing; pin-IP when direct | §10 Research |
-| Stale KB hits after docs shrink | Smart re-index: page hash skip vs purge-on-change; gone-URL prune | `KnowledgeIndex.index` / `purge_source` / site prune | §10 Knowledge |
+| Stale KB hits after docs shrink | Smart re-index skips unchanged pages and replaces changed content; missing discovery alone preserves retained pages | `KnowledgeIndex.index` / `purge_source`; inspect discovery errors and coverage | §10 Knowledge |
 | KB inject empty / wrong tenant | `list_auto_inject_libraries` + `kb_mode=inject` federated RRF | `KAZMA_KB_AUTO_INJECT`, smart search, archive flag | §10 Knowledge |
 | Swarm task stuck “paused” | HITL C checkpoint manager | Not A or B | §4 C |
 | Agent **resumes old task** after subject change | `shift_explicit` vs `shift_inferred`; `task_status` superseded? | Only **explicit** pivot disarms recall; inferred re-ranks | §9 turn focus, AGENTS.md §29 |

@@ -201,7 +201,11 @@ gate. Steer a running task with `/steer` or stop it with `/abort`.
 **Knowledge Base and Deep Research.** Libraries of your own documents, pages
 and sites that the agent searches when a question needs them, or folds into
 every prompt for the libraries you choose. Deep Research runs a multi-source
-pipeline that ends in a full written report, not a quick search answer.
+pipeline with saved sources and a written report. Acquisition defaults to local
+HTTP/extraction and optional local Chromium; hosted services need explicit
+consent. Durable jobs expose errors, usage and available credits, with persistent
+completion links, stall warnings and recovery notices. AI planning and writing
+use your configured model; local-only acquisition alone does not make them offline.
 → [Knowledge Base](https://kazma.ai/docs/knowledge-base-and-rag/) · [Deep Research](https://kazma.ai/docs/web-research/)
 
 **X Studio.** Compose, schedule and manage X posts through the official API;

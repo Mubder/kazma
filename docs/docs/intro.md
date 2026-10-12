@@ -40,7 +40,7 @@ Dated updates are in [Release notes](guide/release-notes). For an upgrade, follo
 | Process documents (parse, OCR, index, generate, redact) | [Document Intelligence](guide/document-intelligence) · [Phase map 0–10](guide/document-phases) |
 | Run V2 memory + KB inject the recommended way | [Memory best path](guide/memory-best-path) · [Memory & RAG](guide/memory-and-rag) |
 | Web search / scrape / research | [Web research](guide/web-research) |
-| **New features tour** (research sessions, KB re-index, explain panel, proxy) | [Recent features](guide/recent-features) |
+| **New features tour** (local-first acquisition, completion alerts, durable recovery, sessions, KB) | [Recent features](guide/recent-features) |
 | Email (Gmail / Microsoft / sandbox) | [Email integration](guide/email-integration) |
 | Tweet via the official X API | **X Studio** (`/x`) · [X publisher](guide/x-publisher) · [X auto-reply](guide/x-auto-reply) |
 

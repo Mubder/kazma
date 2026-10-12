@@ -877,6 +877,21 @@ resend the write. A save is confirmed only after durable storage accepts it.
 See [Configuration](configuration#settings-durability-and-outage-recovery)
 and the [operator runbook](https://github.com/Mubder/kazma/blob/main/docs/DURABLE_SETTINGS_AND_LIVE_EVAL.md).
 
+## Research alerts, missing results and capacity
+
+| Symptom | What to inspect | Next step |
+|---|---|---|
+| Research finished but no completion alert | Settings → System → Web acquisition → Read alert settings; monitoring and completion must be enabled | Open the saved run. Old finished history is quiet on first monitor boot; ordinary chat searches keep their chat reply. |
+| No observed progress warning | Saved stage, source count and durable effects; a heartbeat alone is not progress | Inspect the run before cancelling. The warning does not fail or retry it; resumed progress clears it. |
+| Result list unavailable or live stream disconnected | Persistent page warning and saved session/job status | Restore the connection and reload status; do not infer empty results or success from a failed read. |
+| External notification requested, failed or uncertain | Notification receipt and configured ops routes | Only platform acceptance is delivered. Inspect the route; uncertain sends are not automatically replayed. |
+| Credit balance unknown/stale or provider failure | Cached status, actual response code and last balance observation | An explicit permitted refresh obtains a newer supported balance; local request allowances are not billed credits. |
+| New background session refused for history capacity | Combined session history, including older chat-search rows; 256 rows/128MiB | Review/export and deliberately delete settled history to free capacity. Archiving alone does not free it; no automatic deletion occurs. |
+| Research/crawl monitoring unavailable | Server logs, settings storage and last local monitor check | Restore storage or the monitor fault. Missed checks remain visible rather than being treated as healthy. |
+
+See [Web research](web-research#progress-and-result-alerts) for local-first
+scope, explicit recovery and browser platform limits.
+
 ## Documentation Audit Notes
 
 This file consolidates audits plus the former operator guide (`archive/docs-loose/TROUBLESHOOTING.md` — folded into §1.6–1.9 and §9–14). Gotchas:

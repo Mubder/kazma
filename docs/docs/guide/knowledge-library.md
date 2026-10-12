@@ -147,6 +147,17 @@ Libraries can be **archived** — hidden from the Active list without deleting t
 
 This mirrors the Research panel's archive pattern (a soft `archived` flag, not a separate table).
 
+## Crawl progress and completion alerts
+
+The notification bell retains a completion alert linking to the saved Knowledge
+crawl. Partial, failed, cancelled and interrupted jobs have distinct alerts.
+No observed progress produces a warning; meaningful progress clears it.
+**Settings → System → Web acquisition** controls these alerts and thresholds.
+Monitoring reads saved local evidence without provider calls or automatic
+retries. Reopening the page restores retained job status; explicitly resume an
+interrupted job after reviewing uncertain effects.
+See [Progress and result alerts](web-research#progress-and-result-alerts).
+
 ## Architecture notes (for contributors)
 
 The shared fetch result distinguishes coded failures, observed login screens,
@@ -209,4 +220,4 @@ Each library on the Knowledge page shows how much of it meaning search reaches: 
 - Local embeddings (`BAAI/bge-m3`) are free but slower on CPU; remote (e.g. NVIDIA NIM `nv-embed-v1`) is faster/better but costs money. See `memory.embedding:` in `kazma.yaml` or the **Settings → Embedder** page.
 - Crawl is bounded by `KAZMA_KB_MAX_PAGES` (hard cap 1000) to prevent runaway.
 - **Library IDs are slugged automatically** to keep them ChromaDB-safe (`"Meta WhatsApp Docs"` → `meta_whatsapp_docs`). Spaces/uppercase in the input are normalized on insert; you'll see the slug form in the UI.
-- **Job registries are per-process**: a crawl started from the web UI is visible via `/api/kb/jobs/{id}` (web) but not via `/kb status` (chat), and vice versa. Cross-process job visibility is a planned future improvement; for now, start and check from the same surface.
+- **Job evidence is durable and shared by the installation.** `/api/kb/jobs/{id}` and `/kb status` restore retained crawl observations. Live worker/capacity counters remain per-process; restored status alone does not resume interrupted execution.

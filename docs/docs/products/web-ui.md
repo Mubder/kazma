@@ -105,9 +105,30 @@ Connect real mailboxes for the agent without env-only setup:
 
 API: `/api/email/status`, OAuth start/callback, `POST /api/email/protocol/connect`. Full guide: [Email integration](../guide/email-integration).
 
+## Research progress, results and acquisition settings
+
+Research and Knowledge crawls keep saved job status across reloads. The global
+notification bell retains completion links to results and distinct partial,
+failure, cancellation and interruption alerts. No observed progress warns after
+180 seconds by default; resumed progress clears the warning. Disconnected
+streams and failed result-list loads remain visible on their pages.
+
+**Settings → System → Web acquisition** offers **Read cached status** without
+provider calls, an explicit permitted Firecrawl credit refresh, and **Read alert
+settings** for monitoring, completion notifications and stall/low-credit
+thresholds. Unsupported charges and balances remain unknown. External sends
+use configured ops routes; only platform acceptance proves delivery.
+
+Acquisition defaults to `local_only`. Hosted fallback needs explicit mode and
+provider permission through the documented environment settings; a saved key
+does not enable it. AI planning and writing still use the configured model.
+See [Web research](../guide/web-research#progress-and-result-alerts) for recovery,
+retention and platform limits.
+
 ## Proxy Provider (Settings → System)
 
-Opt-in scraping-resilience addon. When enabled, scrape/crawl paths route through
+Opt-in scraping-resilience addon. Acquisition mode and `proxy` allowlist permission
+are required in addition to Settings. When permitted, scrape/crawl paths route through
 a residential rotating proxy (httpx ladder, Playwright, KB discover, Bing/Wiki
 SERP). Local SearXNG, Jina/Firecrawl APIs, and LLM traffic stay direct.
 

@@ -504,7 +504,12 @@ reported as partial; a failed or uncertain required stage refuses replay. Review
 that job before starting a new run, which may repeat searches or paid requests.
 Dead background owners become interrupted and expose explicit Resume in the
 Research page or `start_deep_research(resume_session_id="…")`. History is capped
-at 256 rows/128MiB. Pipeline report retention has a separate 2GiB allowance
+at 256 rows/128MiB. Legacy chat-search records count toward this storage bound
+even though they are excluded from completion monitoring. An install already
+over the bound refuses new background sessions with a visible capacity error.
+Review/export saved results before deliberately deleting settled history;
+archiving alone does not release the row allowance. No automatic deletion is
+performed to admit new work. Pipeline report retention has a separate 2GiB allowance
 (512MiB reserved per active run); deleting a journal row does not reset it.
 Existing files are never automatically deleted. Explicit-key/local model and
 fallback clients are frozen; ambient AWS/Google ADC routes are refused for
