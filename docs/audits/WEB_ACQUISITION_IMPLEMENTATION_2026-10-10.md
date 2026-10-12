@@ -1557,3 +1557,56 @@ checks across nine files**, with the same frozen fingerprint
 (`release_final_gate_summary_2026_10_12.log`). Guarded deployment is recorded
 below when completed. Qualification does not enable remote providers or Windows
 compatibility mode on the installed instance.
+
+
+### Guarded live rollout and final limits
+
+Published implementation commit `7af257b09646d415e77327dd72309890f8069e75`
+with all installed metrics/import/static commit hooks passing. The standing
+push/pull/guard sequence was followed: preflight found a clean live tracked tree,
+no untracked/ignored collisions, healthy readiness and no active turns or pending
+approvals. Plain live pull created merge commit
+`8ed376bcc630ad14b0748dd9099307c131e46402`; the live guard reloaded while idle.
+Health and readiness returned 200, the serving build reported `8ed376bc`, the
+published implementation was an ancestor of that build, the live tracked tree
+was clean, and the served `research.js`, `kb.js` and `settings_ops.js` matched the
+qualified source exactly after line-ending normalization. Receipts:
+`release_rollout_preflight_2026_10_12.log`,
+`release_commit_hooks_2026_10_12.log`,
+`release_live_verification_2026_10_12.log`.
+
+Read-only live browser verification covered Arabic Settings/System cached
+acquisition status, Research including a populated archive, and Knowledge.
+The installed status showed `local_only`, no permitted remote providers,
+explicit unknown costs/response tokens, disabled Firecrawl balance and unsupported
+Jina/proxy balance states. No credit refresh, new research/crawl, language change
+or user-record mutation was requested. Active recovery behavior remains covered
+by isolated browser E2E rather than mutations of the owner's jobs.
+`release_live_ui_2026_10_12.log` records only the verification facts, not private
+record titles or contents.
+
+An additional isolated real public HTTP check imported the deployed acquisition
+source under the live virtualenv's **Python 3.11.15**. It used temporary settings
+outside the live install and disabled bytecode writes; HTTPX returned usable,
+untruncated text with robots enforcement and zero hosted attempts. The owned
+helper tree closed (`release_installed_http_smoke_2026_10_12.log` and its output
+receipt). The earlier full campaign used development Python 3.12.9; this small
+check is not a second full campaign on Python 3.11.
+
+Hosted CI is **blocked before execution**. All 20 jobs in
+[run 38257255914](https://github.com/Mubder/kazma/actions/runs/38257255914)
+failed without steps; the Tests annotation says the account is locked due to a
+billing issue. The push response reported expected required checks and a rule
+bypass on the standing-order direct main push. No account, billing or repository
+protection setting was changed. Local qualification and installed hooks passed,
+but hosted CI is not claimed green. See `release_ci_blocker_2026_10_12.log`.
+
+Supported-route implementation, local qualification and initial live rollout are
+complete. Remaining release limits are Windows compatibility browser endurance
+(failed/unqualified), hosted CI pending the account owner's billing resolution,
+unknown unsupported provider charges, and the earlier unresolved timing causes.
+The optional policy editor, private self-hosted providers, ambient-credential
+freezing and whole-volume storage quotas remain documented extensions rather
+than a hidden universal-safety claim. This documentation/evidence closeout will
+also pass through plain pull and guard reload; the verification above identifies
+the implementation rollout it actually measured.

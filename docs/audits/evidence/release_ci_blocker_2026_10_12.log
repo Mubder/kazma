@@ -1,0 +1,12 @@
+{
+  "run_url": "https://github.com/Mubder/kazma/actions/runs/38257255914",
+  "run_status": "completed",
+  "run_conclusion": "failure",
+  "jobs": 20,
+  "jobs_with_no_started_steps": 20,
+  "sample_job_annotation": "The job was not started because your account is locked due to a billing issue.",
+  "hosted_tests_executed": false,
+  "local_hooks": "metrics/imports/static passed",
+  "push_remote_notice": "20 required checks expected; remote reported rule bypass on standing-order direct main push.",
+  "account_or_billing_changed": false
+}

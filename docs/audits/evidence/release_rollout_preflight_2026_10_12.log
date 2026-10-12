@@ -1,9 +1,9 @@
 {
-  "observed_at": 1791806465.752079,
+  "observed_at": 1791812382.2994993,
   "tracked_clean": true,
   "untracked_collisions": [],
   "live_head": "b413b5d433e57188ea26b7873296ee2b26301149",
-  "candidate_head": "9796e53fbd66bb1ce827f9ccb90bf1e11f58fe53",
+  "candidate_head": "7af257b09646d415e77327dd72309890f8069e75",
   "live_http": 200,
   "ready_http": 200,
   "served_build": {
