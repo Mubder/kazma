@@ -227,6 +227,15 @@ def test_real_local_collection_links_session_and_pipeline_without_probes(fixture
     session = research_session.create_session('Private topic never in notification', meta={'durable_job_id': durable.job_id})
     research_session.update_session(session.id, status='done', sources=2, summary='Private body', archived=True)
     research_session.create_session('Ordinary chat', depth='chat')
+    # Legacy installs can hold hundreds of chat-search rows. They are outside
+    # this monitor and must not consume its research observation allowance.
+    connection = research_session._conn()
+    try:
+        connection.executemany("INSERT INTO research_sessions (id,topic,depth,status,created_at,updated_at,meta_json) VALUES (?,?,?,'done',1,1,'{}')",
+            [('legacy-chat-' + str(i), 'Private chat', 'chat') for i in range(349)])
+        connection.commit()
+    finally:
+        connection.close()
     monkeypatch.setattr(httpx, 'Client', lambda *a, **k: pytest.fail('Provider probe'))
     monkeypatch.setattr(httpx, 'AsyncClient', lambda *a, **k: pytest.fail('Provider probe'))
     # Exercise the real collector rather than the snapshot fixture.

@@ -1,0 +1,21 @@
+{
+  "initial_served_build": "d5739210",
+  "initial_published_commit": "815c83e2",
+  "legacy_counts": {
+    "brief": 4,
+    "chat": 349,
+    "deep": 8
+  },
+  "error": {
+    "timestamp": "2026-10-12T15:05:30.389369+00:00",
+    "level": "ERROR",
+    "logger": "kazma_core.web_acquire.monitor",
+    "message": "Acquisition monitoring unavailable (ValueError)",
+    "filename": "monitor.py",
+    "lineno": 381,
+    "funcName": "_loop",
+    "exception": "Traceback (most recent call last):\n  File \"C:\\Users\\balfa\\kazma\\kazma-core\\kazma_core\\web_acquire\\monitor.py\", line 378, in _loop\n    await call(tick)\n  File \"C:\\Users\\balfa\\kazma\\kazma-core\\kazma_core\\web_acquire\\crawl_jobs.py\", line 50, in call\n    raise result\n  File \"C:\\Users\\balfa\\AppData\\Roaming\\uv\\python\\cpython-3.11-windows-x86_64-none\\Lib\\asyncio\\threads.py\", line 25, in to_thread\n    return await loop.run_in_executor(None, func_call)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\balfa\\AppData\\Roaming\\uv\\python\\cpython-3.11-windows-x86_64-none\\Lib\\concurrent\\futures\\thread.py\", line 58, in run\n    result = self.fn(*self.args, **self.kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\balfa\\kazma\\kazma-core\\kazma_core\\web_acquire\\monitor.py\", line 222, in tick\n    jobs, balances, allowance = _collect()\n                                ^^^^^^^^^^\n  File \"C:\\Users\\balfa\\kazma\\kazma-core\\kazma_core\\web_acquire\\monitor.py\", line 92, in _collect\n    raise ValueError('Research session monitoring exceeds its bounded history.')\nValueError: Research session monitoring exceeds its bounded history."
+  },
+  "read_only_diagnosis": true,
+  "saved_records_deleted": 0
+}
