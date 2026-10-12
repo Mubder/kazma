@@ -1,0 +1,203 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 380 items
+
+tests\test_acquisition_monitor.py ...................................... [ 10%]
+.                                                                        [ 10%]
+tests\test_ops_alert_delivery.py ........................                [ 16%]
+tests\test_ops_alerts.py ........................                        [ 22%]
+tests\test_acquisition_operations.py .................                   [ 27%]
+tests\test_research_runtime.py ..............................            [ 35%]
+tests\test_web_acquisition_policy.py ............                        [ 38%]
+tests\test_acquisition_accounting.py ...........                         [ 41%]
+tests\test_acquisition_credits.py .............                          [ 44%]
+tests\test_background_drain_bounded.py ....                              [ 45%]
+tests\test_routes_exist_when_built.py ..                                 [ 46%]
+tests\test_alpine_templates.py ........                                  [ 48%]
+tests\test_api_route_callers.py ............................             [ 55%]
+tests\test_scripts_keep_their_translator.py ...                          [ 56%]
+tests\test_count_labels.py ..........................................    [ 67%]
+tests\test_english_counts.py ...........                                 [ 70%]
+tests\test_text_follows_its_language.py ..........                       [ 73%]
+tests\test_docs_anchors.py ........                                      [ 75%]
+tests\test_docs_file_refs.py ...                                         [ 76%]
+tests\test_docs_sidebar.py ..                                            [ 76%]
+tests\test_docs_mdx_safe.py ...                                          [ 77%]
+tests\test_website_pages.py ...                                          [ 78%]
+tests\test_cli_docs.py ....                                              [ 79%]
+tests\test_debt_ratchet.py F.F..                                         [ 80%]
+tests\test_static_gates.py ............................................. [ 92%]
+.............                                                            [ 95%]
+tests\test_metrics_receipt_current.py .                                  [ 96%]
+tests\test_imports.py ...............                                    [100%]
+
+================================== FAILURES ===================================
+_____________________ test_exception_debt_only_goes_down ______________________
+tests\test_debt_ratchet.py:158: in test_exception_debt_only_goes_down
+    assert not grew, (
+E   AssertionError: New blind/silent exception handlers. Catch the exception you expect, or log it (logger.exception / exc_info=True) instead of passing:
+E       blind_except: 3503 > baseline 3500
+E   assert not {'blind_except': (3503, 3500)}
+---------------------------- Captured stdout setup ----------------------------
+17:48:19 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+17:48:19 INFO kazma_ui.session_manager: [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_exception_debt_only_goes_0\chat_sessions.db
+17:48:19 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_exception_debt_only_goes_0\settings.db
+17:48:19 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+17:48:19 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_exception_debt_only_goes_0\settings.db
+17:48:19 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+17:48:19 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_exception_debt_only_goes_0\test_registry.db
+17:48:19 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+17:48:19 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_exception_debt_only_goes_0\test_registry.db
+17:48:19 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openai
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: anthropic
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: groq
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: deepseek
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: google
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: xai
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: zai
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openrouter
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: ollama
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: lm-studio
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: nvidia
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: mistral
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: together
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: cohere
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: fireworks
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: perplexity
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: ai21
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: azure
+17:48:19 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: bedrock
+17:48:19 INFO kazma_core.config_store: Setting updated: providers.list = [{'name': 'openai', 'display_name': 'OpenAI', 'base_url': 'https://api.openai... (category=providers)
+17:48:19 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_exception_debt_only_goes_0\test_settings.db
+17:48:19 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+17:48:19 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_exception_debt_only_goes_0\test_settings.db
+17:48:19 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+----------------------------- Captured log setup ------------------------------
+INFO     kazma_core.db.sqlite_columns:sqlite_columns.py:69 [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+INFO     kazma_ui.session_manager:session_manager.py:269 [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_exception_debt_only_goes_0\chat_sessions.db
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_exception_debt_only_goes_0\settings.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=100, name=initial_schema) successfully
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_exception_debt_only_goes_0\settings.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_exception_debt_only_goes_0\test_registry.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=100, name=initial_schema) successfully
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_exception_debt_only_goes_0\test_registry.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: openai
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: anthropic
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: groq
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: deepseek
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: google
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: xai
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: zai
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: openrouter
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: ollama
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: lm-studio
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: nvidia
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: mistral
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: together
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: cohere
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: fireworks
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: perplexity
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: ai21
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: azure
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: bedrock
+INFO     kazma_core.config_store:config_store.py:1869 Setting updated: providers.list = [{'name': 'openai', 'display_name': 'OpenAI', 'base_url': 'https://api.openai... (category=providers)
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_exception_debt_only_goes_0\test_settings.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=100, name=initial_schema) successfully
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_exception_debt_only_goes_0\test_settings.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+_____________________ test_structural_debt_only_goes_down _____________________
+tests\test_debt_ratchet.py:604: in test_structural_debt_only_goes_down
+    assert not grew, (
+E   AssertionError: New structural debt (see this module's docstring for each kind and its fix):
+E       functions_over_complexity_50: 37 > baseline 36; newest entries: ['kazma-ui/kazma_ui/sse_chat/_streaming.py:502 _stream_langgraph_events (183)', 'kazma-ui/kazma_ui/swarm_panel/routes_tasks.py:315 swarm_dispatch (58)', 'kazma-ui/kazma_ui/turn_runtime.py:270 close_turn (59)']
+E   assert not {'functions_over_complexity_50': (37, 36)}
+---------------------------- Captured stdout setup ----------------------------
+17:48:21 INFO kazma_core.db.sqlite_columns: [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+17:48:21 INFO kazma_ui.session_manager: [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_structural_debt_only_goes0\chat_sessions.db
+17:48:21 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_structural_debt_only_goes0\settings.db
+17:48:21 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+17:48:21 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_structural_debt_only_goes0\settings.db
+17:48:21 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+17:48:21 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_structural_debt_only_goes0\test_registry.db
+17:48:21 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+17:48:21 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_structural_debt_only_goes0\test_registry.db
+17:48:21 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openai
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: anthropic
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: groq
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: deepseek
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: google
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: xai
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: zai
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: openrouter
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: ollama
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: lm-studio
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: nvidia
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: mistral
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: together
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: cohere
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: fireworks
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: perplexity
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: ai21
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: azure
+17:48:21 INFO kazma_core.model_registry_store: [ModelRegistry] Seeded new preset provider: bedrock
+17:48:21 INFO kazma_core.config_store: Setting updated: providers.list = [{'name': 'openai', 'display_name': 'OpenAI', 'base_url': 'https://api.openai... (category=providers)
+17:48:21 INFO kazma_core.config_store: [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_structural_debt_only_goes0\test_settings.db
+17:48:21 INFO kazma_core.config_store: [Migration] Applied Migration(v=100, name=initial_schema) successfully
+17:48:21 INFO kazma_core.config_store: [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_structural_debt_only_goes0\test_settings.db
+17:48:21 INFO kazma_core.config_store: [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+----------------------------- Captured log setup ------------------------------
+INFO     kazma_core.db.sqlite_columns:sqlite_columns.py:69 [sqlite] added column(s) updated_at, title, archived, pinned to sessions
+INFO     kazma_ui.session_manager:session_manager.py:269 [SessionManager] Loaded 0 sessions from C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_structural_debt_only_goes0\chat_sessions.db
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_structural_debt_only_goes0\settings.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=100, name=initial_schema) successfully
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_structural_debt_only_goes0\settings.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_structural_debt_only_goes0\test_registry.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=100, name=initial_schema) successfully
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_structural_debt_only_goes0\test_registry.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: openai
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: anthropic
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: groq
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: deepseek
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: google
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: xai
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: zai
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: openrouter
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: ollama
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: lm-studio
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: nvidia
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: mistral
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: together
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: cohere
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: fireworks
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: perplexity
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: ai21
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: azure
+INFO     kazma_core.model_registry_store:model_registry_store.py:279 [ModelRegistry] Seeded new preset provider: bedrock
+INFO     kazma_core.config_store:config_store.py:1869 Setting updated: providers.list = [{'name': 'openai', 'display_name': 'OpenAI', 'base_url': 'https://api.openai... (category=providers)
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=100, name=initial_schema) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_structural_debt_only_goes0\test_settings.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=100, name=initial_schema) successfully
+INFO     kazma_core.config_store:config_store.py:639 [Migration] Applying Migration(v=101, name=add_scope_column) to C:\Users\balfa\AppData\Local\Temp\pytest-of-balfa\pytest-19788\test_structural_debt_only_goes0\test_settings.db
+INFO     kazma_core.config_store:config_store.py:649 [Migration] Applied Migration(v=101, name=add_scope_column) successfully
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_debt_ratchet.py::test_exception_debt_only_goes_down - Asser...
+FAILED tests/test_debt_ratchet.py::test_structural_debt_only_goes_down - Asse...
+============ 2 failed, 378 passed, 1 warning in 118.63s (0:01:58) =============

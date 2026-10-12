@@ -277,7 +277,10 @@ def register_misc_routes(self: Any) -> None:
         # alerts panel goes blank. A bad row must degrade to a placeholder,
         # not take down the endpoint.
         out: list[Any] = []
-        for a in AlertDispatcher.get_recent_alerts():
+        from kazma_core.web_acquire.monitor import recent_alerts
+        from kazma_ui.i18n import current_language
+
+        for a in [*AlertDispatcher.get_recent_alerts(), *recent_alerts(current_language())]:
             item = a.to_dict() if hasattr(a, "to_dict") else a
             try:
                 out.append(jsonable_encoder(item))

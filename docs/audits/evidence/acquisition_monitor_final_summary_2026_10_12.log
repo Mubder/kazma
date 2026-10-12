@@ -1,0 +1,35 @@
+{
+  "exit": 0,
+  "counts": {
+    "passed": 380
+  },
+  "files": [
+    "tests/test_acquisition_monitor.py",
+    "tests/test_ops_alert_delivery.py",
+    "tests/test_ops_alerts.py",
+    "tests/test_acquisition_operations.py",
+    "tests/test_research_runtime.py",
+    "tests/test_web_acquisition_policy.py",
+    "tests/test_acquisition_accounting.py",
+    "tests/test_acquisition_credits.py",
+    "tests/test_background_drain_bounded.py",
+    "tests/test_routes_exist_when_built.py",
+    "tests/test_alpine_templates.py",
+    "tests/test_api_route_callers.py",
+    "tests/test_scripts_keep_their_translator.py",
+    "tests/test_count_labels.py",
+    "tests/test_english_counts.py",
+    "tests/test_text_follows_its_language.py",
+    "tests/test_docs_anchors.py",
+    "tests/test_docs_file_refs.py",
+    "tests/test_docs_sidebar.py",
+    "tests/test_docs_mdx_safe.py",
+    "tests/test_website_pages.py",
+    "tests/test_cli_docs.py",
+    "tests/test_debt_ratchet.py",
+    "tests/test_static_gates.py",
+    "tests/test_metrics_receipt_current.py",
+    "tests/test_imports.py"
+  ],
+  "input_sha256": "8cb0db14c3e4fee0430472488ea87daeffa68d06bb290810e3cc5c264a632807"
+}

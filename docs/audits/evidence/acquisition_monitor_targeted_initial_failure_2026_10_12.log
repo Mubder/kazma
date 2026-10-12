@@ -1,0 +1,74 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 90.0s
+timeout method: thread
+timeout func_only: False
+collected 169 items
+
+tests\test_acquisition_monitor.py ............FFFFF................F.    [ 20%]
+tests\test_ops_alert_delivery.py ........................                [ 34%]
+tests\test_ops_alerts.py ........................                        [ 49%]
+tests\test_acquisition_operations.py .................                   [ 59%]
+tests\test_research_runtime.py ..............................            [ 76%]
+tests\test_alpine_templates.py ........                                  [ 81%]
+tests\test_api_route_callers.py ............................             [ 98%]
+tests\test_scripts_keep_their_translator.py ...                          [100%]
+
+================================== FAILURES ===================================
+_ test_actual_request_failures_not_keys_trigger_provider_alerts[402-payment_required] _
+tests\test_acquisition_monitor.py:134: in test_actual_request_failures_not_keys_trigger_provider_alerts
+    assert 'HTTP ' + str(http_status) in monitor.recent_alerts()[-1]['reason']
+E   AssertionError: assert ('HTTP ' + '402') in 'The monitor has not refreshed; check server logs.'
+E    +  where '402' = str(402)
+_ test_actual_request_failures_not_keys_trigger_provider_alerts[429-rate_limited] _
+tests\test_acquisition_monitor.py:134: in test_actual_request_failures_not_keys_trigger_provider_alerts
+    assert 'HTTP ' + str(http_status) in monitor.recent_alerts()[-1]['reason']
+E   AssertionError: assert ('HTTP ' + '429') in 'The monitor has not refreshed; check server logs.'
+E    +  where '429' = str(429)
+_ test_actual_request_failures_not_keys_trigger_provider_alerts[401-provider_failed] _
+tests\test_acquisition_monitor.py:134: in test_actual_request_failures_not_keys_trigger_provider_alerts
+    assert 'HTTP ' + str(http_status) in monitor.recent_alerts()[-1]['reason']
+E   AssertionError: assert ('HTTP ' + '401') in 'The monitor has not refreshed; check server logs.'
+E    +  where '401' = str(401)
+_ test_actual_request_failures_not_keys_trigger_provider_alerts[403-provider_failed] _
+tests\test_acquisition_monitor.py:134: in test_actual_request_failures_not_keys_trigger_provider_alerts
+    assert 'HTTP ' + str(http_status) in monitor.recent_alerts()[-1]['reason']
+E   AssertionError: assert ('HTTP ' + '403') in 'The monitor has not refreshed; check server logs.'
+E    +  where '403' = str(403)
+_ test_actual_request_failures_not_keys_trigger_provider_alerts[503-provider_failed] _
+tests\test_acquisition_monitor.py:134: in test_actual_request_failures_not_keys_trigger_provider_alerts
+    assert 'HTTP ' + str(http_status) in monitor.recent_alerts()[-1]['reason']
+E   AssertionError: assert ('HTTP ' + '503') in 'The monitor has not refreshed; check server logs.'
+E    +  where '503' = str(503)
+____ test_real_local_collection_links_session_and_pipeline_without_probes _____
+tests\test_acquisition_monitor.py:230: in test_real_local_collection_links_session_and_pipeline_without_probes
+    collected = _REAL_COLLECT()
+                ^^^^^^^^^^^^^^^
+kazma-core\kazma_core\web_acquire\monitor.py:100: in _collect
+    crawl_jobs.recover()
+kazma-core\kazma_core\web_acquire\crawl_jobs.py:371: in recover
+    _mutate(_recover)
+kazma-core\kazma_core\web_acquire\crawl_jobs.py:149: in _mutate
+    store, jobs, revision = _read()
+                            ^^^^^^^
+kazma-core\kazma_core\web_acquire\crawl_jobs.py:70: in _read
+    raise _storage_error()
+E   kazma_core.web_acquire.result.AcquisitionError: Durable crawl journal unavailable; acquisition stopped. Check storage/database readiness.
+============================== warnings summary ===============================
+tests/test_acquisition_monitor.py::test_monitor_settings_routes_are_real_and_validate
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_acquisition_monitor.py::test_actual_request_failures_not_keys_trigger_provider_alerts[402-payment_required]
+FAILED tests/test_acquisition_monitor.py::test_actual_request_failures_not_keys_trigger_provider_alerts[429-rate_limited]
+FAILED tests/test_acquisition_monitor.py::test_actual_request_failures_not_keys_trigger_provider_alerts[401-provider_failed]
+FAILED tests/test_acquisition_monitor.py::test_actual_request_failures_not_keys_trigger_provider_alerts[403-provider_failed]
+FAILED tests/test_acquisition_monitor.py::test_actual_request_failures_not_keys_trigger_provider_alerts[503-provider_failed]
+FAILED tests/test_acquisition_monitor.py::test_real_local_collection_links_session_and_pipeline_without_probes
+================== 6 failed, 163 passed, 1 warning in 32.42s ==================

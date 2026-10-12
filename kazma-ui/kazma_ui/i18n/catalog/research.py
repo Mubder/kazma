@@ -8,6 +8,9 @@ One slice of the translation catalog, extracted from the former
 from __future__ import annotations
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
+    "research.ui.results_unavailable": {"en": "Some results could not be loaded. Displayed results may be incomplete; use Refresh to retry.", "ar": "تعذر تحميل بعض النتائج. قد تكون النتائج المعروضة ناقصة؛ أعد المحاولة بزر التحديث."},
+    "research.ui.connection_interrupted": {"en": "Live progress connection interrupted; reconnecting. Displayed progress may be stale.", "ar": "انقطع اتصال التقدم المباشر؛ جارٍ إعادة الاتصال. قد يكون التقدم المعروض قديماً."},
+    "research.monitor.alerts_unavailable": {"en": "Alerts could not be refreshed; displayed notifications may be stale.", "ar": "تعذر تحديث التنبيهات؛ قد تكون الإشعارات المعروضة قديمة."},
     "research.ui.acquisition_title": {"en": "Web acquisition usage and errors", "ar": "استخدام جلب الويب وأخطاؤه"},
     "research.ui.acquisition_hint": {"en": "Status reads saved evidence locally. Refresh credits explicitly contacts Firecrawl when permitted; unavailable balances and charges stay unknown.", "ar": "تقرأ الحالة الأدلة المحفوظة محلياً. يتصل تحديث الرصيد بـ Firecrawl عند السماح؛ تبقى الأرصدة والرسوم غير المتاحة مجهولة."},
     "research.ui.read_cached_status": {"en": "Read cached status", "ar": "قراءة الحالة المحفوظة"},
@@ -502,4 +505,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "(لا مخرجات)",
         "en": "(no output)",
     },
+    "research.monitor.title": {"en": "Progress and result alerts", "ar": "تنبيهات التقدم والنتائج"},
+    "research.monitor.hint": {"en": "Alerts persist in the notification bell. Delivery uses your existing operational alert routes. This monitor only reads local evidence; it never refreshes provider balances.", "ar": "تُحفظ التنبيهات في جرس الإشعارات، ويستخدم الإرسال مسارات تنبيهات التشغيل الحالية. يقرأ المراقب الأدلة المحلية فقط ولا يحدّث رصيد الخدمات."},
+    "research.monitor.load": {"en": "Read alert settings", "ar": "قراءة إعدادات التنبيهات"},
+    "research.monitor.enabled": {"en": "Monitor research and crawls", "ar": "مراقبة الأبحاث والزحف"},
+    "research.monitor.completed": {"en": "Notify when completed", "ar": "التنبيه عند الاكتمال"},
+    "research.monitor.stall": {"en": "Warn after no observed progress (seconds)", "ar": "التنبيه بعد انقطاع التقدم المرصود (ثوانٍ)"},
+    "research.monitor.credits": {"en": "Low-credit threshold (fresh balances only)", "ar": "حد تنبيه الرصيد المنخفض (للأرصدة الحديثة فقط)"},
+    "research.monitor.save": {"en": "Save alert settings", "ar": "حفظ إعدادات التنبيهات"},
+    "research.monitor.saved": {"en": "Alert settings saved.", "ar": "حُفظت إعدادات التنبيهات."},
+    "research.monitor.save_failed": {"en": "Alert settings could not be saved; check values and retry.", "ar": "تعذّر حفظ إعدادات التنبيهات؛ راجع القيم وأعد المحاولة."},
+    "research.monitor.last_checked": {"en": "Last local monitor check", "ar": "آخر فحص محلي للمراقب"},
+    "research.monitor.not_observed": {"en": "No monitor check recorded yet.", "ar": "لم يُسجل فحص للمراقب بعد."},
 }

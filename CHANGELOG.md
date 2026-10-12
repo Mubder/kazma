@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Persistent research and crawler alerts (2026-10-12)
+
+- Add local, durable completion/result, partial/failure/interruption, stalled
+  progress/recovery, fresh low-credit and provider/allowance alerts to the
+  existing bell/banner and ops routes. Record actual platform acceptance and
+  visible delivery failure; never replay uncertain delivery or retry jobs.
+- Add Settings controls for completion, monitoring and warning thresholds;
+  show failed result loads and disconnected live progress. Alert links open
+  the correct saved run through soft navigation in English and Arabic.
+- Preserve local-only acquisition by default and make no monitoring provider
+  probes. Research AI steps still use the configured model.
+
 ## Web acquisition safety foundation (2026-10-10 through 2026-10-12)
 
 The entries below retain implementation-time findings. Later work supersedes

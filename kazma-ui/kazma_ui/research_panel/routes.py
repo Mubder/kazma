@@ -246,11 +246,24 @@ def create_research_router() -> APIRouter:
             )
 
     @router.get("/api/research/acquisition", dependencies=[Depends(rate_limit("research", 10))])
-    def acquisition_status(language: str = "en") -> JSONResponse:
+    def acquisition_status(language: str = "en", job_id: str | None = None) -> JSONResponse:
         from kazma_core.web_acquire.operations import cached_status, format_cached_status
         try:
-            report = cached_status()
-            return JSONResponse({"ok": True, "report": report, "text": format_cached_status(report, language=language)})
+            report = cached_status(job_id)
+            report_url = None
+            if job_id:
+                from kazma_core.web_acquire import crawl_jobs
+                from kazma_core.tools.research_pipeline import resolve_report_file
+                from urllib.parse import quote
+                row = crawl_jobs._read()[1].get(job_id)
+                if row and row.get('kind') == 'research_pipeline':
+                    path = row['policy']['output'].rstrip('/') + '/report.md'
+                    # Resolve a stored absolute path against its original workspace.
+                    from pathlib import Path
+                    target = resolve_report_file(str(Path(row['policy']['workspace']) / path), stored=True)
+                    if target is not None and resolve_report_file(path) == target:
+                        report_url = '/api/research/papers/file?path=' + quote(path, safe='')
+            return JSONResponse({"ok": True, "report": report, "text": format_cached_status(report, language=language), "report_url": report_url})
         except Exception as exc:
             return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=503)
 

@@ -1,0 +1,47 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.9, pytest-9.1.1, pluggy-1.6.0
+rootdir: G:\GitHubRepos\kazma
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.9.3, locust-2.45.0, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, timeout-2.4.0, xdist-3.8.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 120.0s
+timeout method: thread
+timeout func_only: False
+collected 380 items
+
+tests\test_acquisition_monitor.py ...................................... [ 10%]
+.                                                                        [ 10%]
+tests\test_ops_alert_delivery.py ........................                [ 16%]
+tests\test_ops_alerts.py ........................                        [ 22%]
+tests\test_acquisition_operations.py .................                   [ 27%]
+tests\test_research_runtime.py ..............................            [ 35%]
+tests\test_web_acquisition_policy.py ............                        [ 38%]
+tests\test_acquisition_accounting.py ...........                         [ 41%]
+tests\test_acquisition_credits.py .............                          [ 44%]
+tests\test_background_drain_bounded.py ....                              [ 45%]
+tests\test_routes_exist_when_built.py ..                                 [ 46%]
+tests\test_alpine_templates.py ........                                  [ 48%]
+tests\test_api_route_callers.py ............................             [ 55%]
+tests\test_scripts_keep_their_translator.py ...                          [ 56%]
+tests\test_count_labels.py ..........................................    [ 67%]
+tests\test_english_counts.py ...........                                 [ 70%]
+tests\test_text_follows_its_language.py ..........                       [ 73%]
+tests\test_docs_anchors.py ........                                      [ 75%]
+tests\test_docs_file_refs.py ...                                         [ 76%]
+tests\test_docs_sidebar.py ..                                            [ 76%]
+tests\test_docs_mdx_safe.py ...                                          [ 77%]
+tests\test_website_pages.py ...                                          [ 78%]
+tests\test_cli_docs.py ....                                              [ 79%]
+tests\test_debt_ratchet.py .....                                         [ 80%]
+tests\test_static_gates.py ............................................. [ 92%]
+.............                                                            [ 95%]
+tests\test_metrics_receipt_current.py .                                  [ 96%]
+tests\test_imports.py ...............                                    [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\starlette\testclient.py:53
+  G:\GitHubRepos\kazma\.venv\Lib\site-packages\starlette\testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 380 passed, 1 warning in 119.14s (0:01:59) ==================

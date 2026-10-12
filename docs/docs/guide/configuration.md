@@ -609,6 +609,17 @@ existing timeout policy. SQLite initialization makes up to four attempts.
 See [Settings save failed](troubleshooting-and-workarounds#settings-save-failed)
 and the [operator recovery and evaluation workflow](https://github.com/Mubder/kazma/blob/main/docs/DURABLE_SETTINGS_AND_LIVE_EVAL.md).
 
+## Research and crawler alerts
+
+**Settings → System → Web acquisition → Read alert settings** configures the
+local progress/result monitor. Monitoring and completion alerts default on;
+the no-progress warning defaults to 180 seconds and the fresh low-credit
+threshold to 100. Settings are persisted in the existing settings database.
+External delivery follows **Adapters & Routes**; the local bell retains
+observations independently of external delivery. See
+[Progress and result alerts](web-research#progress-and-result-alerts) for
+outcomes, retention, delivery receipts and local-first scope.
+
 ## Documentation Audit Notes
 
 - **Version drift:** `pyproject.toml` is `0.3.0`; `kazma.yaml` `agent.version` is `0.2.0`; the CLI `--help` text prints `v0.2.0`. These are independent and unsynchronized — a known wart.

@@ -107,7 +107,16 @@ def bind_server_loop(loop: asyncio.AbstractEventLoop | None) -> None:
     _server_loop = loop
 
 
-def _on_server_loop(coro_text: str) -> bool:
+def _delivery_receipt(callback: Any, result: bool | None) -> None:
+    """Optional acknowledgement; failures in its observer never break delivery."""
+    if callback is not None:
+        try:
+            callback(result)
+        except Exception:
+            logger.warning("[ops_alerts] delivery receipt could not be recorded", exc_info=True)
+
+
+def _on_server_loop(coro_text: str, on_delivery: Any = None) -> bool:
     """Schedule delivery on the bound server loop; False when there is none."""
     server = _server_loop
     if server is None or server.is_closed() or not server.is_running():
@@ -116,12 +125,14 @@ def _on_server_loop(coro_text: str) -> bool:
 
     def _report(done: Any) -> None:
         if done.cancelled():
+            _delivery_receipt(on_delivery, None)
             return
         error = done.exception()
         if error is not None:
             logger.warning("[ops_alerts] delivery raised: %s", error)
         elif done.result() is False:
             logger.warning("[ops_alerts] alert was NOT delivered anywhere")
+        _delivery_receipt(on_delivery, None if error is not None else done.result() is True)
 
     future.add_done_callback(_report)
     return True
@@ -454,7 +465,7 @@ def _has_any_sink() -> bool:
         return True
 
 
-def _dispatch(text: str) -> None:
+def _dispatch(text: str, on_delivery: Any = None) -> None:
     """Deliver without blocking or raising, from sync OR async callers."""
     if not _has_any_sink():
         # The WARNING in alert() is already the durable record; this only says
@@ -463,6 +474,7 @@ def _dispatch(text: str) -> None:
             "[ops_alerts] no bus adapter and no Telegram credentials — "
             "alert exists only in the log; not starting a delivery thread"
         )
+        _delivery_receipt(on_delivery, False)
         return
 
     try:
@@ -470,7 +482,7 @@ def _dispatch(text: str) -> None:
     except RuntimeError:
         loop = None
 
-    if loop is None and _on_server_loop(text):
+    if loop is None and _on_server_loop(text, on_delivery):
         return
 
     if loop is not None:
@@ -484,24 +496,27 @@ def _dispatch(text: str) -> None:
 
         def _report(t: asyncio.Task) -> None:
             if t.cancelled():
+                _delivery_receipt(on_delivery, None)
                 return
-            try:
-                if t.exception() is not None:
-                    return  # spawn_background already logs the exception
-                if t.result() is False:
-                    logger.warning("[ops_alerts] alert was NOT delivered anywhere")
-            except Exception:
-                logger.debug("[ops_alerts] delivery callback", exc_info=True)
+            if t.exception() is not None:
+                _delivery_receipt(on_delivery, None)
+                return  # spawn_background already logs the exception
+            if t.result() is False:
+                logger.warning("[ops_alerts] alert was NOT delivered anywhere")
+            _delivery_receipt(on_delivery, t.result() is True)
 
         task.add_done_callback(_report)
         return
 
     def _run() -> None:
         try:
-            if not asyncio.run(_deliver(text)):
+            delivered = asyncio.run(_deliver(text)) is True
+            if not delivered:
                 logger.warning("[ops_alerts] alert was NOT delivered anywhere")
+            _delivery_receipt(on_delivery, delivered)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[ops_alerts] delivery raised: %s", exc)
+            _delivery_receipt(on_delivery, None)
         finally:
             with _threads_lock:
                 _dispatch_threads.discard(threading.current_thread())
@@ -617,8 +632,12 @@ def alert(
     *,
     severity: str = "warn",
     cooldown_s: float | None = None,
+    on_delivery: Any = None,
 ) -> bool:
-    """Report an operational failure. Returns True if a message was sent.
+    """Report an operational event. True means delivery was requested.
+
+    ``on_delivery`` receives True only when a platform accepts it, False
+    when none does, and None when delivery is interrupted or uncertain.
 
     Args:
         key: Throttle identity. Occurrences sharing a key are collapsed, so
@@ -647,7 +666,11 @@ def alert(
         )
         if not send:
             return False
-        _dispatch(_format(severity, title, detail, suppressed, cooldown))
+        formatted = _format(severity, title, detail, suppressed, cooldown)
+        if on_delivery is None:
+            _dispatch(formatted)
+        else:
+            _dispatch(formatted, on_delivery)
         return True
     except Exception as exc:  # noqa: BLE001 — alerting must never propagate
         logger.debug("[ops_alerts] alert() failed for %s: %s", key, exc)

@@ -229,8 +229,12 @@ function knowledgePage() {
         if (this._destroyed) return;
         if (!data.ok) throw new Error(data.error || _k('knowledge.status_unavailable', 'Crawl status unavailable; retrying'));
         const rows = data.jobs || [];
+        const root = typeof document !== 'undefined' && document.getElementById ? document.getElementById('knowledge-root') : null;
+        const requested = root && typeof root.getAttribute === 'function' ? root.getAttribute('data-job') :
+          ((typeof URLSearchParams !== 'undefined' && window.location) ? new URLSearchParams(window.location.search).get('job') : null);
         const pending = rows.find(row => row.status === 'running' || row.status === 'interrupted');
-        const job = pending || rows[0];  // API sorts retained outcomes newest first.
+        const job = requested ? rows.find(row => row.job_id === requested) : (pending || rows[0]);
+        if (requested && !job) throw new Error(_k('knowledge.status_unavailable', 'Crawl status unavailable; retrying'));  // API sorts retained outcomes newest first.
         if (job && !this._activeJobId) this._pollJob(job.job_id, !!pending);
         else if (!this._activeJobId && this.activeJob?.poll_error) this.activeJob = null;
       } catch (error) {

@@ -38,6 +38,19 @@
   }
 
   function $(id) { return document.getElementById(id); }
+  function warning(id, visible, key) {
+    var el = $(id);
+    if (el) { el.textContent = visible ? i18n(key) : ''; el.style.display = visible ? 'block' : 'none'; }
+  }
+  function readResults(url, field) {
+    return fetch(url, { credentials: 'same-origin' }).then(function (r) {
+      if (!r.ok) throw new Error('Unavailable');
+      return r.json();
+    }).then(function (data) {
+      if (!data || !Array.isArray(data[field])) throw new Error('Invalid results');
+      return data;
+    }).catch(function () { var data = { error: true }; data[field] = []; return data; });
+  }
 
   // SVG icons (no emojis — consistent with the rest of the Kazma UI).
   var ARCHIVE_SVG = '<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><rect x="2" y="4" width="20" height="4" rx="1"/><path d="M4 8v10a2 2 0 002 2h12a2 2 0 002-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
@@ -177,6 +190,15 @@
       }, 15000);
       _bindDelegatedEvents();
       _registerSoftNavTeardown();
+      var params = (typeof URLSearchParams !== 'undefined' && window.location) ? new URLSearchParams(window.location.search) : { get: function () { return null; } };
+      // Soft navigation runs page scripts BEFORE pushing its new URL.
+      // The incoming page carries its own query, including on same-page links.
+      var root = $('research-root');
+      var incoming = root && typeof root.getAttribute === 'function';
+      var session = incoming ? root.getAttribute('data-session') : params.get('session');
+      var job = incoming ? root.getAttribute('data-job') : params.get('job');
+      if (session && session.length <= 200) this.viewDetail('session:' + session);
+      else if (job && job.length <= 200) this.viewAcquisitionJob(job);
     },
 
     destroy: function () {
@@ -307,25 +329,11 @@
 
     load: function () {
       Promise.all([
-        fetch('/api/research/tasks?page=1&page_size=50&archived=false', { credentials: 'same-origin' })
-          .then(function (r) { return r.ok ? r.json() : { tasks: [] }; })
-          .catch(function () { return { tasks: [] }; }),
-        fetch('/api/research/papers?limit=50', { credentials: 'same-origin' })
-          .then(function (r) {
-            if (!r.ok) {
-              console.warn('[research] papers API HTTP', r.status);
-              return { papers: [], error: 'HTTP ' + r.status };
-            }
-            return r.json();
-          })
-          .catch(function (err) {
-            console.warn('[research] papers fetch failed', err);
-            return { papers: [] };
-          }),
-        fetch('/api/research/sessions?limit=30', { credentials: 'same-origin' })
-          .then(function (r) { return r.ok ? r.json() : { sessions: [] }; })
-          .catch(function () { return { sessions: [] }; }),
+        readResults('/api/research/tasks?page=1&page_size=50&archived=false', 'tasks'),
+        readResults('/api/research/papers?limit=50', 'papers'),
+        readResults('/api/research/sessions?limit=30', 'sessions'),
       ]).then(function (triple) {
+        warning('research-load-error', triple.some(function (p) { return p.error; }), 'research.ui.results_unavailable');
         var data = triple[0] || {};
         var papersPayload = triple[1] || {};
         var sessionsPayload = triple[2] || {};
@@ -377,21 +385,17 @@
         allTasks = sessionTasks.concat(paperTasks).concat(data.tasks || []);
         renderList(allTasks);
         populateCompareDropdowns(data.tasks || []);
-        if (papersPayload.error) {
-          toast(i18n('research.papers_list_error', 'Papers list: {error}', { error: papersPayload.error }), 'error');
-        }
+
       });
     },
 
     loadArchived: function () {
       // Archived tab = archived swarm tasks + archived durable sessions.
       Promise.all([
-        fetch('/api/research/tasks?page=1&page_size=50&archived=true', { credentials: 'same-origin' })
-          .then(function (r) { return r.ok ? r.json() : { tasks: [], count: 0 }; }),
-        fetch('/api/research/sessions?limit=50&archived=true', { credentials: 'same-origin' })
-          .then(function (r) { return r.ok ? r.json() : { sessions: [], count: 0 }; })
-          .catch(function () { return { sessions: [] }; }),
+        readResults('/api/research/tasks?page=1&page_size=50&archived=true', 'tasks'),
+        readResults('/api/research/sessions?limit=50&archived=true', 'sessions'),
       ]).then(function (results) {
+        warning('research-archived-load-error', results.some(function (p) { return p.error; }), 'research.ui.results_unavailable');
         var tasks = results[0].tasks || [];
         var sessions = (results[1].sessions || []).map(function (s) {
           // Render archived sessions through the task-shaped card.
@@ -409,7 +413,7 @@
         });
         archivedTasks = tasks.concat(sessions);
         renderArchivedList(archivedTasks);
-      }).catch(function () { /* silent */ });
+      }).catch(function () { warning('research-archived-load-error', true, 'research.ui.results_unavailable'); });
     },
 
     searchArchived: function (e) {
@@ -428,8 +432,38 @@
       renderList(filtered);
     },
 
+    viewAcquisitionJob: function (id) {
+      currentId = null;
+      if ($('research-detail-actions')) $('research-detail-actions').style.display = 'none';
+      $('research-list').style.display = 'none';
+      $('research-detail').style.display = 'block';
+      $('research-detail-title').textContent = i18n('research.ui.acquisition_title');
+      $('research-detail-meta').textContent = id;
+      var output = $('research-detail-output');
+      output.textContent = i18n('research.ui.status_unavailable');
+      fetch('/api/research/acquisition?job_id=' + encodeURIComponent(id) + '&language=' + (window.KAZMA_LANG === 'ar' ? 'ar' : 'en'), { credentials: 'same-origin' })
+        .then(function (r) { if (!r.ok) throw new Error('Unavailable'); return r.json(); })
+        .then(function (data) {
+          output.textContent = data.text || i18n('research.ui.status_unavailable');
+          output.style.whiteSpace = 'pre-wrap';
+          if (data.report_url && data.report_url.indexOf('/api/research/papers/file?path=') === 0) {
+            var link = document.createElement('a');
+            link.href = data.report_url;
+            link.textContent = i18n('research.ui.open_md', 'Open Markdown');
+            output.appendChild(document.createElement('br')); output.appendChild(link);
+          }
+        })
+        .catch(function () { output.textContent = i18n('research.ui.status_unavailable'); });
+      ['detail-archive-btn', 'detail-restore-btn', 'detail-delete-btn'].forEach(function (name) {
+        var button = $(name); if (button) button.style.display = 'none';
+      });
+    },
+
     viewDetail: function (id) {
       currentId = id;
+      if ($('research-detail-actions')) $('research-detail-actions').style.display = 'flex';
+      $('research-detail-output').style.whiteSpace = '';
+      $('research-detail-output').textContent = i18n('research.ui.loading', 'Loading…');
       $('research-list').style.display = 'none';
       $('research-detail').style.display = 'block';
       $('research-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -441,6 +475,7 @@
           .then(function (r) { return r.ok ? r.json() : null; })
           .then(function (data) {
             if (!data || !data.session) {
+              $('research-detail-output').textContent = i18n('research.ui.status_unavailable');
               toast(i18n('research.ui.session_not_found', 'Session not found'), 'error');
               return;
             }
@@ -503,7 +538,7 @@
               openLiveStream(s.id);
             }
           })
-          .catch(function () { toast(i18n('research.ui.could_not_load_session', 'Could not load session'), 'error'); });
+          .catch(function () { $('research-detail-output').textContent = i18n('research.ui.status_unavailable'); toast(i18n('research.ui.could_not_load_session', 'Could not load session'), 'error'); });
         return;
       }
 
@@ -551,7 +586,7 @@
       fetch(researchDeleteUrl(id), { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (data) {
-          if (!data || data.error) { toast(i18n('research.ui.could_not_load', 'Could not load'), 'error'); return; }
+          if (!data || data.error) { $('research-detail-output').textContent = i18n('research.ui.status_unavailable'); toast(i18n('research.ui.could_not_load', 'Could not load'), 'error'); return; }
           var t = data.task;
           $('research-detail').style.display = 'block';
           $('research-detail-title').textContent = (t.prompt || i18n('research.ui.research', 'Research')).slice(0, 80);
@@ -578,7 +613,7 @@
           var restBtn = $('detail-restore-btn');
           if (archBtn) archBtn.style.display = isArchived ? 'none' : '';
           if (restBtn) restBtn.style.display = isArchived ? '' : 'none';
-        });
+        }).catch(function () { $('research-detail-output').textContent = i18n('research.ui.status_unavailable'); });
     },
 
     exportCurrent: function (fmt) {
@@ -909,6 +944,7 @@
       var data;
       try { data = JSON.parse(raw.data); } catch (e) { return; }
       if (!data) return;
+      warning('research-live-connection', false);
       if (data.type === 'snapshot' && data.session) {
         applyLiveSession(data.session);
         return;
@@ -959,10 +995,11 @@
       if (ev && ev.data) onPayload(ev);
       // Network drop: EventSource auto-reconnects; leave open unless terminal
     });
-    liveSource.addEventListener('heartbeat', function () { /* keep-alive */ });
-    liveSource.onerror = function () {
-      // If session already terminal, close; else let browser reconnect
+    liveSource.addEventListener('heartbeat', function () { warning('research-live-connection', false); });
+    liveSource.onerror = function (ev) {
+      if (ev && ev.data) return; // A named domain error is handled above.
       if (!liveSessionId) closeLiveStream();
+      else warning('research-live-connection', true, 'research.ui.connection_interrupted');
     };
   }
 

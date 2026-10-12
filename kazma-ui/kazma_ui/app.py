@@ -2049,6 +2049,11 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[Documents] ingestion coordinator start failed: %s", e)
 
+        # Durable research/crawl progress and result alerts; no provider probes.
+        from kazma_core.web_acquire.monitor import start as start_acquisition_monitor
+
+        start_acquisition_monitor()
+
         # ── V2 memory worker (durable task queue) ────────────────────
         # Registers the macro_sleep / entity_merge / micro_consolidation
         # handlers and starts draining memory_ops.db. Pending rows
@@ -2244,6 +2249,11 @@ class KazmaAppBuilder:
             self._stop_background_loops()
         except Exception as e:  # noqa: BLE001 — teardown must not fail here
             logger.debug("[app] background loop stop failed: %s", e)
+
+        # Join the watchdog's local statements before any stores close.
+        from kazma_core.web_acquire.monitor import stop as stop_acquisition_monitor
+
+        await stop_acquisition_monitor()
 
         # Give retained background tasks (crawls, rebuilds, promotions) a
         # bounded chance to finish before the loop closes (audit F-07).

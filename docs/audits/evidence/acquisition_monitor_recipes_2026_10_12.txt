@@ -1,0 +1,8 @@
+Qualification recipes (serial, owned low-priority trees; math threads 2):
+1. scripts.fast_test.run_pytest(final_summary.files + ['--timeout=120','--tb=short'], 900)
+2. scripts.fast_test.run_pytest(['tests/e2e/test_acquisition_alerts.py','-m','e2e','--timeout=150','--tb=short'], 600)
+3. node tests/js/<file> for each file in acquisition_monitor_js_2026_10_12.log, one owned process at a time, 90 s deadline.
+4. scripts.generate_metrics.main(['--write','--require-collected']) with collection through the same owned runner.
+The final summary records the collection fingerprint and exact test files.
+The host guard requires 8 GiB free before pytest and kills only its owned tree after three samples below 4 GiB.
+The original failure receipts are retained. Browser fixtures use temporary data and stub external alert delivery; no live platform test message was sent.
