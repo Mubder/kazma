@@ -2105,6 +2105,19 @@
             <button class="btn btn-secondary" @click="inspectAcquisition(false)" :disabled="acquisitionBusy">{{ t('research.ui.read_cached_status') }}</button>
             <button class="btn btn-secondary" @click="inspectAcquisition(true)" :disabled="acquisitionBusy">{{ t('research.ui.refresh_credits') }}</button>
             <pre x-text="acquisitionText" style="white-space:pre-wrap;overflow-wrap:anywhere;" aria-live="polite"></pre>
+            <h4>{{ t('research.monitor.title') }}</h4>
+            <p>{{ t('research.monitor.hint') }}</p>
+            <button class="btn btn-secondary" @click="loadAcquisitionMonitor()" :disabled="acquisitionMonitorBusy">{{ t('research.monitor.load') }}</button>
+            <template x-if="acquisitionMonitor">
+                <div>
+                    <label><input type="checkbox" x-model="acquisitionMonitor.enabled"> {{ t('research.monitor.enabled') }}</label>
+                    <label><input type="checkbox" x-model="acquisitionMonitor.notify_completed"> {{ t('research.monitor.completed') }}</label>
+                    <label>{{ t('research.monitor.stall') }} <input type="number" min="30" max="3600" x-model.number="acquisitionMonitor.stall_seconds"></label>
+                    <label>{{ t('research.monitor.credits') }} <input type="number" min="0" max="1000000000" x-model.number="acquisitionMonitor.low_credit_threshold"></label>
+                    <button class="btn btn-primary" @click="saveAcquisitionMonitor()" :disabled="acquisitionMonitorBusy">{{ t('research.monitor.save') }}</button>
+                </div>
+            </template>
+            <p translate="no" x-text="acquisitionMonitorMessage" aria-live="polite"></p>
         </div>
 
         <!-- Logging -->

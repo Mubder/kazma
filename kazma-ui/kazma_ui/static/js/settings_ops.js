@@ -26,6 +26,40 @@
     root.KazmaSettingsMixins = root.KazmaSettingsMixins || {};
     root.KazmaSettingsMixins.ops = function () {
         return {
+        acquisitionMonitor: null,
+        acquisitionMonitorBusy: false,
+        acquisitionMonitorMessage: '',
+        async loadAcquisitionMonitor() {
+            if (this.acquisitionMonitorBusy) return;
+            this.acquisitionMonitorBusy = true;
+            try {
+                const response = await fetch('/api/settings/acquisition/monitor', { credentials: 'same-origin' });
+                if (!response.ok) throw new Error();
+                const data = await response.json();
+                this.acquisitionMonitor = data.settings;
+                this.acquisitionMonitorMessage = data.last_checked_at
+                    ? _t('research.monitor.last_checked') + ': ' + window.KazmaFormat.dateTime(data.last_checked_at * 1000)
+                    : _t('research.monitor.not_observed');
+            } catch (_) { this.acquisitionMonitorMessage = _t('research.ui.status_unavailable'); }
+            finally { this.acquisitionMonitorBusy = false; }
+        },
+        async saveAcquisitionMonitor() {
+            if (this.acquisitionMonitorBusy || !this.acquisitionMonitor) return;
+            this.acquisitionMonitorBusy = true;
+            let saved;
+            try {
+                saved = await window.kazmaSave('/api/settings/acquisition/monitor', {
+                    method: 'PUT', body: this.acquisitionMonitor,
+                });
+            } catch (_) {
+                this.acquisitionMonitorMessage = _t('research.monitor.save_failed');
+                this.acquisitionMonitorBusy = false;
+                return;
+            }
+            this.acquisitionMonitorBusy = false;
+            this.acquisitionMonitor = saved;
+            this.acquisitionMonitorMessage = _t('research.monitor.saved');
+        },
         acquisitionBusy: false,
         acquisitionText: '',
         async inspectAcquisition(refreshCredits) {

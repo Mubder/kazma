@@ -290,3 +290,43 @@ def test_the_settings_route_sends_it_from_a_worker_thread(tmp_path, monkeypatch:
     assert resp.status_code == 200
     body = resp.json()
     assert body["sent"] == ["telegram"] and body["failed"] == ["discord"] and body["ok"] is False
+
+
+@pytest.mark.parametrize('bound', [False, True])
+@pytest.mark.parametrize('accepted', [False, True])
+def test_delivery_receipt_reports_platform_acceptance(sender, monkeypatch, bound, accepted):
+    sender.answer = accepted
+    monkeypatch.setattr(ops_alerts, '_telegram_direct', lambda *a, **k: False)
+    async def main():
+        receipts = []
+        if bound:
+            ops_alerts.bind_server_loop(asyncio.get_running_loop())
+            await asyncio.to_thread(ops_alerts.alert, 'receipt', 'Finished', on_delivery=receipts.append)
+        else:
+            ops_alerts.alert('receipt', 'Finished', on_delivery=receipts.append)
+        for _ in range(300):
+            if receipts:
+                break
+            await asyncio.sleep(.01)
+        assert receipts == [accepted]
+    asyncio.run(main())
+
+
+def test_delivery_receipt_without_a_route_is_explicitly_failed(sender, monkeypatch):
+    monkeypatch.setattr(ops_alerts, '_has_any_sink', lambda: False)
+    receipts = []
+    assert ops_alerts.alert('no-route', 'Finished', on_delivery=receipts.append) is True
+    assert receipts == [False]  # Scheduling is never proof of delivery.
+
+
+def test_delivery_observer_exception_does_not_break_delivery(sender):
+    def broken(_):
+        raise RuntimeError('observer unavailable')
+    async def main():
+        assert ops_alerts.alert('broken-observer', 'Finished', on_delivery=broken) is True
+        for _ in range(300):
+            if sender.sent:
+                break
+            await asyncio.sleep(.01)
+        assert sender.sent
+    asyncio.run(main())

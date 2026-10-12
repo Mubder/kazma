@@ -1610,3 +1610,65 @@ freezing and whole-volume storage quotas remain documented extensions rather
 than a hidden universal-safety claim. This documentation/evidence closeout will
 also pass through plain pull and guard reload; the verification above identifies
 the implementation rollout it actually measured.
+
+
+## Persistent progress, completion and delivery follow-up (2026-10-12)
+
+The operator requested proactive progress/result alerts, including successful
+completion. The local monitor now reconciles durable deep/brief sessions,
+standalone research pipelines/crawls and Knowledge crawls every 15 seconds.
+Completion, partial output, failure, cancellation and interruption remain
+distinct. Saved result links open the correct run. Stalls use meaningful stage,
+source-count or effect changes; heartbeats alone do not reset the threshold.
+Warnings never fail or retry a job. Recovery clears the active stall warning.
+
+Fresh low-credit observations, payment-required/rate-limit/auth/service responses
+and exhausted request allowances have separate alerts. Monitoring reads local
+evidence without provider probes or balance refresh. The original local-only
+acquisition default and explicit remote-consent requirement remain enforced.
+AI planning/synthesis still use the configured model; this is not a claim that
+all research computation is offline.
+
+The existing notification bell/banner reads a bounded ConfigStore CAS ledger.
+Observations commit before external delivery through the existing ops notifier.
+Delivery receipts distinguish platform acceptance, refusal and uncertainty.
+Requested delivery is not acceptance, and uncertain sends are never replayed
+automatically after a crash. Monitor/storage unavailability, failed result loads
+and disconnected streams remain visible. Settings → System → Web acquisition
+exposes monitoring and completion switches, the 180-second stall default and
+the fresh low-credit threshold of 100. First-boot old terminal history is quiet.
+
+Qualification of the final follow-up source passed **380 checks across 26
+Python files**, **2 real browser flows (English/Arabic)** and **13 JavaScript
+test files**, including **10 new visibility cases**. The browser flows click a
+completion alert, read the saved result, reload it and inspect the Settings
+controls. Real acquisition/provider attempts were prohibited or stubbed in
+these alert fixtures. No artificial live research or platform test message was
+created. The fresh collection receipt measured **14,555 collected unit cases**;
+collection is not a passing-test count. Final source input fingerprint:
+`8cb0db14c3e4fee0430472488ea87daeffa68d06bb290810e3cc5c264a632807`.
+
+The earlier full campaign remains evidence for its recorded baseline source,
+not a newly repeated full run of this follow-up. Current receipts are
+`acquisition_monitor_final_2026_10_12.log`,
+`acquisition_monitor_final_summary_2026_10_12.log`,
+`acquisition_monitor_browser_2026_10_12.log` and
+`acquisition_monitor_js_2026_10_12.log`; reproduction commands are in
+`acquisition_monitor_recipes_2026_10_12.txt` beside them.
+
+Original failures are preserved under the same evidence prefix. The initial
+unit fixture mixed a fake clock with wall time and constructed an invalid
+pipeline journal; both fixture defects were corrected. The browser found a real
+soft-navigation defect: scripts initialized before the new URL was pushed, so
+alert deep links lost their selected run. Incoming template data now carries
+the selection, and both languages pass the original alert-click flow. The
+content-direction gate found a missing protected-content attribute on the new
+Settings message. The debt gate required splitting observation reconciliation
+into focused functions and narrowing expected storage/data exceptions. No
+ratchet baseline, timeout or acceptance criterion was widened.
+
+The existing Windows compatibility endurance failure, unknown unsupported
+provider charges, hosted CI billing blocker and earlier timing-cause limits
+remain unchanged. Guarded live rollout is verified separately against the
+published revision and actual serving build; local receipts do not imply green
+hosted CI or guaranteed human receipt of a platform-accepted notification.

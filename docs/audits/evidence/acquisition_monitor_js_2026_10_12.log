@@ -1,0 +1,67 @@
+[
+  {
+    "file": "test_research_alert_visibility.js",
+    "exit": 0,
+    "output": "✔ en: http leaves a persistent result warning until successful refresh (2.8517ms)\n✔ en: network leaves a persistent result warning until successful refresh (1.0723ms)\n✔ en: invalid leaves a persistent result warning until successful refresh (0.697ms)\n✔ en: network loss warns without closing or failing the research (0.7775ms)\n✔ en: retained crawler result cannot delete or export a previous session (0.6836ms)\n✔ ar: http leaves a persistent result warning until successful refresh (0.5727ms)\n✔ ar: network leaves a persistent result warning until successful refresh (0.5461ms)\n✔ ar: invalid leaves a persistent result warning until successful refresh (0.5138ms)\n✔ ar: network loss warns without closing or failing the research (0.5006ms)\n✔ ar: retained crawler result cannot delete or export a previous session (0.5607ms)\nℹ tests 10\nℹ suites 0\nℹ pass 10\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 11.7778\n"
+  },
+  {
+    "file": "test_research_cancel.js",
+    "exit": 0,
+    "output": "✔ en: cancel waits for terminal receipt (3.0171ms)\n✔ en: original closed stream early (1.7332ms)\n✔ en: reopened cancelling session attaches to progress (0.5796ms)\n✔ ar: cancel waits for terminal receipt (0.5168ms)\n✔ ar: original closed stream early (0.5198ms)\n✔ ar: reopened cancelling session attaches to progress (0.5428ms)\n✔ en: interrupted inspection requires explicit resume (0.6428ms)\n✔ ar: interrupted inspection requires explicit resume (0.5666ms)\nℹ tests 8\nℹ suites 0\nℹ pass 8\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 10.9088\n"
+  },
+  {
+    "file": "test_research_archived.js",
+    "exit": 0,
+    "output": "✔ en: saved and interrupted archive cards render from the real loader (3.1308ms)\n✔ en: former undefined resume variables leave a populated archive blank (1.6321ms)\n✔ ar: saved and interrupted archive cards render from the real loader (0.56ms)\n✔ ar: former undefined resume variables leave a populated archive blank (0.5237ms)\nℹ tests 4\nℹ suites 0\nℹ pass 4\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 8.3895\n"
+  },
+  {
+    "file": "test_research_i18n.js",
+    "exit": 0,
+    "output": "ok   the page's i18n resolves a catalog entry, a flat string and a missing key\nok   negative control: the old one-liner fails\nall ok\n"
+  },
+  {
+    "file": "test_research_session_tag.js",
+    "exit": 0,
+    "output": "OK sessionTag is extractable\nOK a brief run is Brief\nOK a deep run is Deep\nOK a chat search is Chat\nOK an old row without depth: chat by its id\nOK an old row without depth: otherwise Deep\nOK no id is not a chat search\nOK the tag follows the page language\nOK ...for deep runs too\nOK ...and brief ones\nOK a missing translation falls back to English\nOK control: the old tag called a Brief run Deep\nall passed\n"
+  },
+  {
+    "file": "test_kb_recovery.js",
+    "exit": 0,
+    "output": "✔ reconnect selects durable interrupted work and renders Arabic status (1.4604ms)\n✔ slow status reads stay single and storage failure stays visible (1.0889ms)\n✔ reconnect restores the latest settled receipt and credits without repeating completion (0.5134ms)\n✔ resume calls the bounded endpoint and prevents a second submission (0.5305ms)\n✔ destroy aborts reconnect and cannot schedule a late retry (0.5005ms)\n✔ credit refresh is explicit and single; regular status reads do not call a provider (0.6607ms)\n✔ incomplete discovery with successful pages never emits a success toast (0.5537ms)\nℹ tests 7\nℹ suites 0\nℹ pass 7\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 8.8869\n"
+  },
+  {
+    "file": "test_alert_banner_link.js",
+    "exit": 0,
+    "output": "OK systemAlertsBanner is extractable\nOK a local path is kept\nOK a protocol-relative link is dropped\nOK an absolute URL is dropped\nOK javascript: is dropped\nOK the install button id is not a link\nOK an empty id is not a link\nOK no alert, no link\nOK a non-string id is not a link\nOK the newest alert shows\nOK a dismissed alert gives way to the next\nOK all dismissed, nothing shows\nOK a refresh goes through the store\nOK the banner never fetches by itself\nOK the banner has no poller of its own\n"
+  },
+  {
+    "file": "test_settings_saves_report_truth.js",
+    "exit": 0,
+    "output": "ok   the component has save methods (the scan works)\nok   the validating list names a real method: saveModelProfile\nok   the validating list names a real method: saveHubProvider\nok   the validating list names a real method: saveHubConnector\nok   the validating list names a real method: saveHubProfile\nok   the validating list names a real method: saveMcpServer\nok   the validating list names a real method: saveGmailProtocol\nok   the validating list names a real method: saveMsProtocol\nok   the validating list names a real method: saveGmailOAuthClient\nok   the validating list names a real method: saveGmail\nok   the validating list names a real method: saveMsClient\nok   saveModel reports what the server said\nok   saveModelDefault reports what the server said\nok   saveModelProfile refuses before calling the server (needs a profile name)\nok   saveAdapterRouting reports what the server said\nok   saveHubProvider refuses before calling the server (needs a name and a base URL)\nok   saveHubConnector refuses before calling the server (needs a connector name)\nok   saveHubProfile refuses before calling the server (needs a profile name)\nok   saveAgent reports what the server said\nok   saveSafety reports what the server said\nok   saveContext reports what the server said\nok   saveNonstop reports what the server said\nok   saveTenantMode reports what the server said\nok   saveAboutMe reports what the server said\nok   saveMemoryKbMerge reports what the server said\nok   saveMemoryBackends reports what the server said\nok   saveLogging reports what the server said\nok   saveSwarmRetention reports what the server said\nok   saveCheckpointRetention reports what the server said\nok   saveDocuments reports what the server said\nok   saveProxy reports what the server said\nok   saveEmbedder reports what the server said\nok   saveTurnNotify reports what the server said\nok   saveTimeTravel reports what the server said\nok   saveCronTimezone reports what the server said\nok   saveMcpServer refuses before calling the server (needs a server name)\nok   saveVoiceSettings reports what the server said\nok   saveGmailProtocol refuses before calling the server (needs an email and an app password)\nok   saveMsProtocol refuses before calling the server (needs an email and a password)\nok   saveGmailOAuthClient refuses before calling the server (needs a Google client id and secret)\nok   saveGmail refuses before calling the server (needs an email and an app password)\nok   saveMsClient refuses before calling the server (needs an Azure client id)\nok   saveXCredentials reports what the server said\nok   saveXReply reports what the server said\nok   saveAcquisitionMonitor reports what the server said\nok   saveAppearance reports what the server said\nok   saveShortcut reports what the server said\nok   saveBackupRetention reports what the server said\nok   saveOffsite reports what the server said\nok   negative control: a save whose success line throws is caught\nall ok\n[settings] appearance saved; applying it to this page failed: TypeError: root.style.setProperty is not a function\n    at Object._applyAccentColor (settings_ops.js:164:24)\n    at Object.saveAppearance (settings_ops.js:120:22)\n    at async runSaves (G:\\GitHubRepos\\kazma\\tests\\js\\test_settings_saves_report_truth.js:119:7)\n    at async G:\\GitHubRepos\\kazma\\tests\\js\\test_settings_saves_report_truth.js:138:19\n"
+  },
+  {
+    "file": "test_settings_mixins.js",
+    "exit": 0,
+    "output": "ok   the mixins declare getters (the scan works)\nok   cronTzCommon is still a getter on the component\nok   cronTzAll is still a getter on the component\nok   cronTzGroups is still a getter on the component\nok   filteredSkills is still a getter on the component\nok   filteredTools is still a getter on the component\nok   pkgMemoryLayerRows is still a getter on the component\nok   filteredPkgCore is still a getter on the component\nok   offsiteActiveProviderLabel is still a getter on the component\nok   filteredPkgCore lists every package with no search\nok   filteredPkgCore filters on the search\nok   init is wrapped and callable\nok   conflictLine reads the conflict\nok   negative control: Object.assign leaves no getter\n"
+  },
+  {
+    "file": "test_namespace_members.js",
+    "exit": 0,
+    "output": "ok - 400 namespace references across 22 namespaces\n"
+  },
+  {
+    "file": "test_locale_format.js",
+    "exit": 0,
+    "output": "OK English relative time\nOK epoch seconds are dates\nOK an empty value is empty\nOK a bad value is empty\nOK Arabic relative time is Arabic\nOK ...with Latin digits like the rest of the page\nOK Arabic date and time are Arabic\nOK numbers keep Latin digits\nOK the locale says so\nOK a regional tag reads as its language\nOK Arabic count 0\nOK Arabic count 1\nOK Arabic count 2\nOK Arabic count 5\nOK Arabic count 15\nOK Arabic count 100\nOK Arabic count 4539\nOK Arabic count 103\nOK English count\nOK English one\nOK missing forms fall back\nOK control: noun + number was ungrammatical\nOK control: toLocaleString ignores the page language\nall passed\n"
+  },
+  {
+    "file": "test_kazma_save.js",
+    "exit": 0,
+    "output": "test_kazma_save: all checks passed\n"
+  },
+  {
+    "file": "test_kazma_get_json.js",
+    "exit": 0,
+    "output": "ok — kazmaGetJson answers null for error pages, HTML and no network, and logs nothing\n"
+  }
+]

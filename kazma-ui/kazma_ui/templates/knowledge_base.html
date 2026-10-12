@@ -50,7 +50,7 @@
   };
 </script>
 <div
-  x-data="knowledgePage()"
+  id="knowledge-root" data-job="{{ request.query_params.get('job', '') | e }}" x-data="knowledgePage()"
   style="max-width:1000px;margin:0 auto;padding:0 1rem;box-sizing:border-box;"
 >
 

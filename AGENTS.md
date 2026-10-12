@@ -3439,6 +3439,24 @@ Model fallbacks (§38) ride the second row plus the web banner
   is delivered on, with the unbound path as the negative control; a refusing
   bus; each platform sender's answer; the test alert's routes and its route).
 
+**Research/crawl progress and results (2026-10-12).**
+`web_acquire.monitor` reconciles local session/crawl journals every 15 s, with
+ConfigStore CAS observations committed before delivery through `ops_alerts.alert`.
+The notification API merges those durable records into the existing bell; no
+fourth notifier or second poller. Completion and partial/error/cancelled/
+interrupted outcomes link to saved results. Stalls use meaningful stage/count/
+effect changes, not heartbeat timestamps, and never fail/retry the job. Fresh
+balances and actual provider HTTP failures are separate from request allowances;
+no monitor provider probes. Settings controls are admin-scoped. Initial old
+terminal history is quiet. Delivery callbacks persist platform acceptance,
+refusal or uncertainty; a requested send is never proof of delivery. Unknown
+delivery after a crash is not replayed. The loop follows the pytest scheduler
+gate and is cancelled/joined before stores close. Soft navigation initializes
+page scripts before URL history: research/KB deep links read incoming template
+data attributes, not the previous page's location. Gates:
+`tests/test_acquisition_monitor.py`, `tests/test_ops_alert_delivery.py`,
+`tests/js/test_research_alert_visibility.js`, `tests/e2e/test_acquisition_alerts.py`.
+
 **The guard's credentials come from a child process.** `Notifier` reads
 env first, then Kazma's settings — through `_NOTIFY_LOOKUP`, run with the
 server's interpreter in the install folder, which loads the install's `.env`

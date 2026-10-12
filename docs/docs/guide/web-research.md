@@ -533,6 +533,50 @@ Reported tokens do not establish charges or an account balance.
   content-type gate while free-domain checks (404) worked. Domain
   availability sweeps now work end-to-end through `read_url`.
 
+## Progress and result alerts
+
+While the server runs, a local monitor checks durable deep/brief research
+sessions, standalone research pipelines and crawls, and Knowledge crawls every
+15 seconds. Completion produces a persistent notification with a link to the
+saved run and results. Partial, failed, cancelled and interrupted outcomes have
+distinct alerts. Linked session/pipeline records describe one run and do not
+produce duplicate completion alerts. Ordinary chat-search rows keep their own
+chat reply instead. Existing finished history is seeded quietly on first boot;
+new outcomes and previously observed runs survive server restarts.
+
+After 180 seconds without a stage, source-count or durable-effect change, the
+monitor warns that no progress was observed. Heartbeats do not reset that clock.
+The warning does not fail, cancel or retry the work. Meaningful progress clears
+the warning and produces a recovery notice. Intentional long stages can therefore
+produce a warning; inspect the run before intervening. Failed result-list loads
+and disconnected live streams also show persistent page warnings.
+
+Under **Settings → System → Web acquisition**, **Read alert settings** exposes
+monitoring, completion notifications, the stall threshold (30–3600 seconds) and
+the low-credit threshold (default 100). These settings are stored locally.
+Fresh supported provider balances at or below the threshold produce an alert;
+stale or unknown balances do not establish recovery. Actual HTTP 402, 429,
+authentication and service failures have separate alerts. Exhausting a local
+remote-request allowance is distinct from spending billed credits. Monitoring
+does not contact providers, refresh balances, change acquisition policy or
+resume interrupted work. An explicit permitted credit refresh is still needed
+to obtain a newer account balance.
+
+The notification bell and global banner read the persistent local ledger.
+External messages reuse the existing ops routes in **Settings → Adapters &
+Routes**. A platform acceptance records **delivered**; **requested** and
+**uncertain** are not delivery proof. Refused delivery remains visible in the
+notification. An uncertain delivery is not automatically replayed after a
+crash. History retains the latest 128 observations for 30 days plus active stall
+warnings; the UI shows the latest 50 plus active warnings. Monitor failures or
+missed checks are visible rather than interpreted as healthy progress.
+
+Acquisition defaults to `local_only`: API keys alone never authorize hosted
+scraping. Remote fallback requires an explicit mode and provider allowlist.
+This policy covers acquisition, not all AI computation: planning, summarizing
+and report synthesis use the configured model. Choose a local model if those
+steps must also run locally.
+
 ## Related
 
 - [Tools catalog](../reference/tools-catalog)  

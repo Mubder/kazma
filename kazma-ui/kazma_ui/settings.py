@@ -800,6 +800,22 @@ class SettingsRouterBuilder:
             _get_sm().save_logging_settings(req)
             return {"status": "ok"}
 
+        @router.get("/api/settings/acquisition/monitor")
+        def api_get_acquisition_monitor() -> dict[str, Any]:
+            from kazma_core.web_acquire.monitor import monitoring_status
+
+            return monitoring_status()
+
+        @router.put("/api/settings/acquisition/monitor")
+        def api_save_acquisition_monitor(req: dict[str, Any]) -> dict[str, Any]:
+            from fastapi import HTTPException
+            from kazma_core.web_acquire.monitor import save_settings
+
+            try:
+                return save_settings(req)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
         @router.get("/api/settings/proxy")
         def api_get_proxy() -> dict[str, Any]:
             """Get proxy provider config (opt-in scraping resilience addon)."""

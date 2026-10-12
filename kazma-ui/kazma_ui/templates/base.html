@@ -94,6 +94,7 @@
                 </div>
             </div>
 
+            <div x-cloak x-show="$store.notifications.error" role="alert" style="margin:12px 24px;color:var(--danger);">{{ t('research.monitor.alerts_unavailable') }}</div>
             {# Page Body #}
             <div class="page-body">
                 {% block content %}{% endblock %}

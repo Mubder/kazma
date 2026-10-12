@@ -33,6 +33,14 @@ remain unknown; local request reservations are not billed credits. A configured
 monetary ceiling refuses routes whose cost cannot be proved. The installed
 local-only policy was not changed for that diagnostic.
 
+The follow-up adds persistent local completion/result and progress warnings,
+fresh low-credit/provider-failure alerts, delivery receipts and Settings
+thresholds. A stall is an observation, not proof that execution failed. External
+delivery depends on configured routes and platform acceptance; a crash during
+delivery remains uncertain and is not automatically replayed. Balance monitoring
+does not refresh providers. Research AI steps still use the configured model,
+so local-only acquisition alone does not establish fully offline research.
+
 Settings offers cached status and explicit credit refresh; policy editing uses
 documented environment variables. Self-hosted private Firecrawl services and
 ambient AWS/Google credential capture for durable research remain unsupported.
